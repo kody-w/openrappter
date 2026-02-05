@@ -58,23 +58,22 @@ async function chat(message: string): Promise<string> {
   }
 
   try {
-    // Use Copilot SDK
-    const { createSession } = await import('@github/copilot-sdk');
-    const session = await createSession({
-      systemMessage: `You are ${NAME} ${EMOJI}, a friendly AI assistant that runs locally. Be helpful and concise.`,
-    });
-
-    const response = await session.sendAndWait(message);
-    await session.close();
-    return response;
-  } catch (error) {
-    // Fallback to CLI
-    try {
-      const { stdout } = await execAsync(`copilot --message "${message.replace(/"/g, '\\"')}"`);
+    // Use Copilot CLI directly
+    const escapedMessage = message.replace(/'/g, "'\\''");
+    const { stdout, stderr } = await execAsync(`copilot --message '${escapedMessage}'`, { timeout: 60000 });
+    if (stdout.trim()) {
       return stdout.trim();
-    } catch {
-      return `${EMOJI} ${NAME}: I couldn't process that. Check your Copilot CLI installation.`;
     }
+    if (stderr.trim()) {
+      return stderr.trim();
+    }
+    return `${EMOJI} ${NAME}: I processed your request but got no response.`;
+  } catch (error) {
+    const err = error as Error;
+    if (err.message.includes('timeout')) {
+      return `${EMOJI} ${NAME}: Request timed out. Try a simpler question.`;
+    }
+    return `${EMOJI} ${NAME}: I couldn't process that. Error: ${err.message}`;
   }
 }
 

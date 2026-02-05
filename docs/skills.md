@@ -1,24 +1,21 @@
 ---
 layout: default
-title: Skills System - openRAPPter
+title: Skills System - openrappter
 ---
 
-# 🎯 Skills System
+# 🎯 Agents & Skills System
 
-Skills are tools that openRAPPter can use to interact with your system.
+Agents are tools that openrappter uses to interact with your system.
 
-## Built-in Skills
+## Built-in Agents
 
-| Skill | Description | Example |
+| Agent | Description | Example |
 |-------|-------------|---------|
-| `bash` | Execute shell commands | `run ls -la` |
-| `read` | Read file contents | `read README.md` |
-| `write` | Write to files | `write hello.txt "Hello"` |
-| `list` | List directory | `list .` |
-| `remember` | Store in memory | `remember I like dinosaurs` |
-| `recall` | Search memory | `recall dinosaurs` |
+| `Shell` | Execute commands, read/write files | `run ls -la`, `read README.md` |
+| `Memory` | Store and recall facts | `remember I like dinosaurs` |
+| `LearnNew` | Generate new agents (Python only) | `learn how to fetch weather` |
 
-## Using Skills
+## Using Agents
 
 ### Natural Language
 
@@ -26,100 +23,133 @@ Just describe what you want:
 
 ```
 🦖 You: run npm test
-🦖 openRAPPter: Running: npm test
+🦖 openrappter: Running: npm test
 
 ✓ All tests passed (42 tests)
 ```
 
 ### Slash Commands
 
-Use explicit commands:
-
 ```
-/skills          - List all skills
-/memory          - Show recent memories
-/forget <id>     - Remove a memory
+/agents      - List all agents
+/status      - Show status
+/help        - Show help
 ```
 
-## Custom Skills
+### CLI Options
 
-Create custom skills in `~/.openrappter/skills/`:
+```bash
+# TypeScript
+node dist/index.js --list-agents
+node dist/index.js --exec Shell "ls"
 
-### YAML Format
-
-```yaml
-# ~/.openrappter/skills/deploy.yaml
-name: deploy
-description: Deploy to production
-parameters:
-  - name: environment
-    type: string
-    default: staging
-script: |
-  echo "Deploying to $environment..."
-  ./deploy.sh $environment
+# Python
+openrappter --list-agents
+openrappter --exec Shell "ls"
 ```
 
-### Python Format
+## Creating Custom Agents
+
+Both runtimes use the same agent pattern. See `.github/copilot-instructions.md` for the full contract.
+
+### TypeScript Agent
+
+Create `typescript/src/agents/MyAgent.ts`:
+
+```typescript
+import { BasicAgent } from './BasicAgent.js';
+import type { AgentMetadata } from './types.js';
+
+export class MyAgent extends BasicAgent {
+  constructor() {
+    const metadata: AgentMetadata = {
+      name: 'MyAgent',
+      description: 'Does something cool',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'User input' }
+        },
+        required: []
+      }
+    };
+    super('MyAgent', metadata);
+  }
+
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const query = kwargs.query as string;
+    return JSON.stringify({ status: 'success', result: query });
+  }
+}
+```
+
+### Python Agent
+
+Create `python/openrappter/agents/my_agent.py`:
 
 ```python
-# ~/.openrappter/skills/analyze.py
-def execute(code: str) -> str:
-    """Analyze code quality."""
-    # Your logic here
-    return f"Analysis complete: {len(code)} chars"
+from openrappter.agents.basic_agent import BasicAgent
+import json
 
-SKILL_NAME = "analyze"
-SKILL_DESC = "Analyze code quality"
+class MyAgent(BasicAgent):
+    def __init__(self):
+        self.name = 'MyAgent'
+        self.metadata = {
+            "name": self.name,
+            "description": "Does something cool",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User input"}
+                },
+                "required": []
+            }
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+    
+    def perform(self, **kwargs):
+        query = kwargs.get('query', '')
+        return json.dumps({"status": "success", "result": query})
 ```
 
-## Skill Execution
+## Agent Execution
 
-Skills run in a sandboxed environment:
+Agents run with automatic context enrichment ("data sloshing"):
 
 - **Timeout**: 30 seconds default
-- **Output limit**: 2000 characters
-- **Working directory**: Current directory
+- **Output limit**: 2000 characters for shell commands
+- **Context**: Temporal, memory, and behavioral signals available via `self.context`
 
 ## Security
 
-⚠️ Skills can execute code on your system. Be careful with:
+⚠️ Agents can execute code on your system. Be careful with:
 
-- Custom skills from untrusted sources
+- Custom agents from untrusted sources
 - Commands that modify important files
 - Scripts with elevated privileges
 
 ## Examples
 
-### Git Status
+### Shell Operations
 
 ```
-🦖 You: run git status
-🦖 openRAPPter: Running: git status
-
-On branch main
-Your branch is up to date with 'origin/main'.
-
-nothing to commit, working tree clean
+🦖 You: ls
+🦖 openrappter: 
+  📁 src
+  📁 docs
+  📄 README.md
+  📄 package.json
 ```
 
-### Read and Summarize
+### Memory
 
 ```
-🦖 You: read package.json
-🦖 openRAPPter: 
-{
-  "name": "my-project",
-  "version": "1.0.0",
-  ...
-}
-```
+🦖 You: remember this project uses TypeScript
+🦖 openrappter: Remembered: "this project uses TypeScript"
 
-### Remember Context
-
-```
-🦖 You: remember this project uses TypeScript and Vitest
-🦖 openRAPPter: Got it! I'll remember that. (ID: a1b2c3)
+🦖 You: recall TypeScript
+🦖 openrappter: Found 1 matching memories:
+  • this project uses TypeScript
 ```
 
 ---

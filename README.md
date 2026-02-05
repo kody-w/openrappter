@@ -1,154 +1,93 @@
-# 🦖 openRAPPter
+# 🦖 openrappter
 
-> **The medium IS the message** — A single-file AI agent that runs locally with zero API keys.
+> **The medium IS the message** — A local-first AI agent that runs with zero API keys.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-brightgreen)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
 
-## What is openRAPPter?
+## What is openrappter?
 
-openRAPPter is a **local-first AI agent** that requires no API keys, no cloud accounts, and no monthly bills. It leverages the GitHub Copilot SDK to provide intelligent assistance directly in your terminal.
+openrappter is a **local-first AI agent** that requires no API keys, no cloud accounts, and no monthly bills. It leverages the GitHub Copilot SDK to provide intelligent assistance directly in your terminal.
 
-```bash
-# One command to start chatting
-npx openrappter
-```
+This is a **monorepo** with two interchangeable runtimes:
+- **TypeScript** (`typescript/`) — Node.js CLI with @clack/prompts UI
+- **Python** (`python/`) — Python CLI with agent orchestration
 
-### ✨ Key Features
-
-- 🔐 **Zero API Keys** — Uses your existing GitHub Copilot subscription
-- 🏠 **Local-First** — All data stays on your machine
-- 🧠 **Memory** — Remembers context across sessions
-- 🎯 **Skills** — Extensible tool system (bash, files, web)
-- 🔄 **Evolution** — Autonomous background processing
-- 📦 **Single File** — One Python file, no complex setup
+Both runtimes use the same agent pattern, so agents can be easily ported between languages.
 
 ## Quick Start
 
-### Prerequisites
-
-- [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli/) installed and authenticated
-- Node.js 22+ or Python 3.10+
-
-### Install
+### TypeScript
 
 ```bash
-# NPM (recommended)
-npm install -g openrappter
-
-# Or run directly
-npx openrappter
-
-# Or Python standalone
-curl -O https://raw.githubusercontent.com/kody-w/openrappter/main/RAPPagent.py
-python RAPPagent.py
+cd typescript
+npm install
+npm run build
+node dist/index.js --status
+node dist/index.js "remember that I installed openrappter"
 ```
 
-### First Run
+### Python
 
 ```bash
-# Interactive chat
-openrappter
-
-# Run a single task
-openrappter --task "explain this codebase"
-
-# Autonomous mode (evolves in background)
-openrappter --evolve 10
-
-# Daemon mode
-openrappter --daemon
+cd python
+pip install -e .
+openrappter --status
+openrappter "remember that I installed openrappter"
 ```
+
+Or run directly:
+```bash
+python -m openrappter.cli --status
+```
+
+## Repository Structure
+
+```
+openrappter/
+├── python/                    # Python runtime
+│   ├── openrappter/
+│   │   ├── cli.py            # Entry point
+│   │   └── agents/           # Python agents
+│   │       ├── basic_agent.py
+│   │       ├── shell_agent.py
+│   │       └── ...
+│   └── pyproject.toml
+├── typescript/               # TypeScript runtime
+│   ├── src/
+│   │   ├── index.ts
+│   │   └── agents/
+│   │       ├── BasicAgent.ts
+│   │       ├── ShellAgent.ts
+│   │       └── ...
+│   ├── package.json
+│   └── tsconfig.json
+├── docs/                     # Documentation
+└── .github/
+    └── copilot-instructions.md
+```
+
+## Agent Pattern
+
+Both runtimes follow the same agent contract. See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for details.
+
+### Core Agents
+
+| Agent | Description |
+|-------|-------------|
+| `Shell` | Execute bash commands, read/write files |
+| `Memory` | Store and recall facts persistently |
+| `LearnNew` | Meta-agent that generates new agents (Python only) |
 
 ## Documentation
 
 📚 Full documentation at **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)**
 
-- [Installation Guide](https://kody-w.github.io/openrappter/install)
-- [Configuration](https://kody-w.github.io/openrappter/config)
-- [Skills System](https://kody-w.github.io/openrappter/skills)
-- [Memory & Context](https://kody-w.github.io/openrappter/memory)
-- [API Reference](https://kody-w.github.io/openrappter/api)
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    openRAPPter 🦖                       │
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐    │
-│  │ Memory  │  │ Skills  │  │ Evolver │  │   LLM   │    │
-│  │ Store   │  │ System  │  │ Engine  │  │ Bridge  │    │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘    │
-│       │            │            │            │          │
-│       └────────────┴────────────┴────────────┘          │
-│                         │                               │
-│              ┌──────────▼──────────┐                    │
-│              │  GitHub Copilot SDK │                    │
-│              │   (No API Key!)     │                    │
-│              └─────────────────────┘                    │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Why openRAPPter?
-
-| Feature | openRAPPter | Cloud AI Agents |
-|---------|-------------|-----------------|
-| API Keys Required | ❌ No | ✅ Yes |
-| Monthly Cost | $0* | $20-100+ |
-| Data Privacy | 🏠 Local | ☁️ Cloud |
-| Setup Time | 1 minute | 10-30 minutes |
-| Works Offline | ✅ Yes** | ❌ No |
-
-*Requires GitHub Copilot subscription ($10/mo or free for students/OSS)  
-**With local LLM fallback
-
-## Skills
-
-openRAPPter comes with built-in skills:
-
-| Skill | Description |
-|-------|-------------|
-| `bash` | Execute shell commands |
-| `read` | Read file contents |
-| `write` | Write/create files |
-| `list` | List directory contents |
-| `remember` | Store facts in memory |
-| `recall` | Search memory |
-
-Add custom skills by creating a `skills/` directory:
-
-```yaml
-# skills/my-skill.yaml
-name: my-skill
-description: Does something cool
-parameters:
-  - name: input
-    type: string
-script: |
-  echo "Processing: $input"
-```
-
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```bash
-# Clone and setup
-git clone https://github.com/kody-w/openrappter.git
-cd openrappter
-npm install
-npm test
-```
-
 ## License
 
 MIT © [Kody W](https://github.com/kody-w)
-
----
-
-<p align="center">
-  <b>🦖 The velociRAPPter in your terminal</b><br>
-  <i>Built with the GitHub Copilot SDK</i>
-</p>

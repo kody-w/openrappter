@@ -1,9 +1,34 @@
+# Dependencies
 node_modules/
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+*.egg
+
+# Build outputs
 dist/
-*.log
-.env
-.env.local
+build/
+*.tgz
+
+# IDE and OS
 .DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test and coverage
 coverage/
 .nyc_output/
-*.tgz
+.pytest_cache/
+htmlcov/
+
+# Environment
+.env
+.env.local
+*.log
+
+# Package locks (keep package-lock.json, ignore others)
+yarn.lock
+pnpm-lock.yaml

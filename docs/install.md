@@ -1,133 +1,116 @@
 ---
 layout: default
-title: Installation Guide - openRAPPter
+title: Installation Guide - openrappter
 ---
 
 # 🦖 Installation Guide
 
-Get openRAPPter running in under 2 minutes.
+Get openrappter running in under 2 minutes.
 
 ## Prerequisites
 
-### Required: GitHub Copilot CLI
+### GitHub Copilot CLI (Optional)
 
-openRAPPter uses the GitHub Copilot SDK, which requires the Copilot CLI to be installed and authenticated.
+openrappter works best with the GitHub Copilot CLI, but functions without it using keyword-based agent matching.
 
 ```bash
-# Install Copilot CLI
+# Install Copilot CLI (optional)
 npm install -g @githubnext/github-copilot-cli
 
 # Authenticate (opens browser)
 github-copilot-cli auth
 ```
 
-### Required: Node.js 22+
+### Runtime Requirements
 
-openRAPPter requires Node.js 22 or later.
+Choose one or both runtimes:
 
-```bash
-# Check your version
-node --version
-
-# Install via nvm (recommended)
-nvm install 22
-nvm use 22
-```
+- **TypeScript**: Node.js 18+
+- **Python**: Python 3.10+
 
 ## Installation Options
 
-### Option 1: Run Directly (Recommended)
-
-No installation needed — run with npx:
+### Option 1: TypeScript Runtime
 
 ```bash
-npx openrappter
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter/typescript
+npm install
+npm run build
 ```
 
-### Option 2: Global Install
-
-For faster startup times:
-
+Run:
 ```bash
-npm install -g openrappter
+node dist/index.js --status
+node dist/index.js "hello"
 ```
 
-Then run:
+### Option 2: Python Runtime
 
 ```bash
-openrappter
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter/python
+pip install -e .
 ```
 
-### Option 3: Python Standalone
-
-For minimal dependencies, use the single-file Python version:
-
+Run:
 ```bash
-# Download
-curl -O https://raw.githubusercontent.com/kody-w/openrappter/main/RAPPagent.py
+openrappter --status
+openrappter "hello"
 
-# Run (Python 3.10+ required)
-python RAPPagent.py
+# Or without installing:
+python3 -m openrappter.cli --status
 ```
 
 ## Verify Installation
 
-Check that everything is working:
-
+### TypeScript
 ```bash
-# Check status
-openrappter --status
+cd typescript
+node dist/index.js --status
 
 # Should show:
-# 🦖 openRAPPter Status
-#   Version: 1.0.0
-#   Copilot: ✅ Available
+# 🦖 openrappter Status
+#   Version: 1.1.0
+#   Agents: 2 loaded
 ```
 
-## First Run
-
-Start your first chat:
-
+### Python
 ```bash
-openrappter
+cd python
+python3 -m openrappter.cli --status
 
-# Or run a quick task
-openrappter --task "what can you do?"
+# Should show:
+# Agents: 5 loaded
 ```
 
 ## Troubleshooting
-
-### Copilot CLI not found
-
-```bash
-# Make sure it's installed
-npm install -g @githubnext/github-copilot-cli
-
-# Authenticate if needed
-github-copilot-cli auth
-```
 
 ### Node.js version too old
 
 ```bash
 # Use nvm to upgrade
-nvm install 22
-nvm use 22
+nvm install 18
+nvm use 18
+```
+
+### Python import errors
+
+```bash
+cd python
+pip install -e .
 ```
 
 ### Permission errors
 
 ```bash
-# Use sudo for global install (not recommended)
-sudo npm install -g openrappter
-
 # Better: fix npm permissions
 # https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally
 ```
 
 ## Next Steps
 
-- [Configuration Guide](./config.md) — Customize openRAPPter
+- [Configuration Guide](./config.md) — Customize openrappter
 - [Skills System](./skills.md) — Add custom skills
 - [Memory Guide](./memory.md) — Use persistent memory
 - [API Reference](./api.md) — All commands and options

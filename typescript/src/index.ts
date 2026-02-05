@@ -6,14 +6,20 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
+import { AgentRegistry, BasicAgent } from './agents/index.js';
 
 const execAsync = promisify(exec);
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const EMOJI = '🦖';
-const NAME = 'openRAPPter';
+const NAME = 'openrappter';
 const HOME_DIR = path.join(os.homedir(), '.openrappter');
 const CONFIG_FILE = path.join(HOME_DIR, 'config.json');
+
+// Initialize agent registry
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const registry = new AgentRegistry(path.join(__dirname, 'agents'));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -51,10 +57,20 @@ async function saveConfig(config: Record<string, unknown>): Promise<void> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function chat(message: string): Promise<string> {
+  // First try to match an agent using keyword patterns (fallback mode)
+  const agents = await registry.getAllAgents();
+  const result = await matchAndExecuteAgent(message, agents);
+  if (result) return result;
+
+  // If no agent matched, use Copilot CLI if available
   const hasCopilot = await hasCopilotCLI();
 
   if (!hasCopilot) {
-    return `${EMOJI} ${NAME}: I heard "${message}". For full AI responses, install GitHub Copilot CLI.`;
+    return JSON.stringify({
+      status: 'info',
+      response: `I heard: "${message}". Use /help to see available commands.`,
+      agents: Array.from(agents.keys()),
+    });
   }
 
   try {
@@ -77,6 +93,68 @@ async function chat(message: string): Promise<string> {
   }
 }
 
+/**
+ * Match message to an agent and execute it (fallback keyword matching).
+ * Mirrors the Python _fallback_response in openrappter.py
+ */
+async function matchAndExecuteAgent(
+  message: string,
+  agents: Map<string, BasicAgent>
+): Promise<string | null> {
+  const msgLower = message.toLowerCase();
+
+  // Keyword patterns for core agents
+  const patterns: Record<string, string[]> = {
+    Memory: ['remember', 'store', 'save', 'memorize', 'recall', 'what do you know', 'memory', 'remind me', 'forget'],
+    Shell: ['run', 'execute', 'bash', 'ls', 'cat', 'read file', 'write file', 'list dir', 'command', '$'],
+  };
+
+  // Find best matching agent
+  let bestMatch: string | null = null;
+  let bestScore = 0;
+
+  // Check patterns first
+  for (const [agentName, keywords] of Object.entries(patterns)) {
+    const score = keywords.filter(kw => msgLower.includes(kw)).length;
+    if (score > bestScore && agents.has(agentName)) {
+      bestScore = score;
+      bestMatch = agentName;
+    }
+  }
+
+  // Also check dynamically loaded agents by their descriptions
+  for (const [agentName, agent] of agents) {
+    if (agentName in patterns) continue; // Already checked
+
+    const desc = agent.metadata?.description?.toLowerCase() ?? '';
+    const nameLower = agentName.toLowerCase();
+    const words = msgLower.split(/\s+/).filter(w => w.length > 2);
+    const score = words.filter(w => desc.includes(w) || nameLower.includes(w)).length;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = agentName;
+    }
+  }
+
+  // Execute matched agent
+  if (bestMatch && bestScore > 0) {
+    const agent = agents.get(bestMatch);
+    if (agent) {
+      try {
+        return await agent.execute({ query: message });
+      } catch (e) {
+        return JSON.stringify({
+          status: 'error',
+          message: `Error executing ${bestMatch}: ${(e as Error).message}`,
+        });
+      }
+    }
+  }
+
+  return null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMMANDS
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -93,11 +171,43 @@ program
   .option('-e, --evolve <n>', 'Run N evolution ticks', parseInt)
   .option('-d, --daemon', 'Run as background daemon')
   .option('-s, --status', 'Show status')
+  .option('-l, --list-agents', 'List available agents')
+  .option('--exec <agent>', 'Execute a specific agent')
   .action(async (message, options) => {
     await ensureHomeDir();
 
+    // Initialize agents
+    await registry.discoverAgents();
+
     if (options.status) {
       await statusCommand();
+      return;
+    }
+
+    if (options.listAgents) {
+      const agents = await registry.listAgents();
+      if (agents.length === 0) {
+        console.log('No agents found');
+        return;
+      }
+      console.log(`\n${EMOJI} Available Agents:\n`);
+      for (const agent of agents) {
+        console.log(`  • ${agent.name}`);
+        console.log(`    ${agent.description.slice(0, 60)}...`);
+        console.log();
+      }
+      return;
+    }
+
+    if (options.exec) {
+      const agent = await registry.getAgent(options.exec);
+      if (!agent) {
+        console.log(`Agent '${options.exec}' not found`);
+        return;
+      }
+      const query = message || '';
+      const result = await agent.execute({ query });
+      displayResult(result);
       return;
     }
 
@@ -106,7 +216,7 @@ program
       s.start('Processing...');
       const response = await chat(options.task);
       s.stop('Done');
-      console.log(`\n${EMOJI} ${NAME}: ${response}\n`);
+      displayResult(response);
       return;
     }
 
@@ -129,13 +239,50 @@ program
 
     if (message) {
       const response = await chat(message);
-      console.log(`\n${EMOJI} ${NAME}: ${response}\n`);
+      displayResult(response);
       return;
     }
 
     // Interactive mode
     await interactiveMode();
   });
+
+/**
+ * Display result, parsing JSON if needed
+ */
+function displayResult(result: string): void {
+  try {
+    const data = JSON.parse(result);
+    if (data.response) {
+      console.log(`\n${EMOJI} ${NAME}: ${data.response}\n`);
+    } else if (data.message) {
+      console.log(`\n${EMOJI} ${NAME}: ${data.message}\n`);
+    } else if (data.output) {
+      console.log(`\n${data.output}\n`);
+    } else if (data.content) {
+      console.log(`\n${data.content.slice(0, 1000)}${data.truncated ? '...' : ''}\n`);
+    } else if (data.items) {
+      // Directory listing
+      console.log(`\n${data.path}:`);
+      for (const item of data.items) {
+        const icon = item.type === 'directory' ? '📁' : '📄';
+        console.log(`  ${icon} ${item.name}`);
+      }
+      console.log();
+    } else if (data.matches) {
+      // Memory recall
+      console.log(`\n${EMOJI} ${data.message || 'Memories'}:`);
+      for (const match of data.matches) {
+        console.log(`  • ${match.message}`);
+      }
+      console.log();
+    } else {
+      console.log(`\n${JSON.stringify(data, null, 2)}\n`);
+    }
+  } catch {
+    console.log(`\n${EMOJI} ${NAME}: ${result}\n`);
+  }
+}
 
 // Onboard command
 program
@@ -170,25 +317,33 @@ program
 async function statusCommand(): Promise<void> {
   const hasCopilot = await hasCopilotCLI();
   const config = await loadConfig();
+  const agents = await registry.listAgents();
 
   console.log(`\n${EMOJI} ${NAME} Status\n`);
   console.log(`  Version: ${VERSION}`);
   console.log(`  Home: ${HOME_DIR}`);
   console.log(`  Copilot: ${hasCopilot ? chalk.green('✅ Available') : chalk.yellow('❌ Not found')}`);
   console.log(`  Setup: ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run')}`);
+  console.log(`  Agents: ${agents.length} loaded`);
+  if (agents.length > 0) {
+    console.log(`    ${agents.map(a => a.name).join(', ')}`);
+  }
   console.log('');
 }
 
 // Interactive mode
 async function interactiveMode(): Promise<void> {
   const hasCopilot = await hasCopilotCLI();
+  const agents = await registry.listAgents();
 
   if (hasCopilot) {
     console.log(chalk.dim('Using GitHub Copilot SDK...\n'));
   }
 
-  console.log(`${EMOJI} ${NAME} Chat`);
+  console.log(`${EMOJI} ${NAME} v${VERSION} Chat`);
   console.log('─'.repeat(40));
+  console.log(`Copilot: ${hasCopilot ? '✅ Available' : '❌ Not found'}`);
+  console.log(`Agents: ${agents.length} loaded`);
   console.log('Type /help for commands, /quit to exit\n');
 
   const readline = await import('readline');
@@ -218,6 +373,7 @@ ${EMOJI} ${NAME} Commands:
 
   /help    - Show this help
   /status  - Show status
+  /agents  - List available agents
   /quit    - Exit
 `);
         prompt();
@@ -230,13 +386,23 @@ ${EMOJI} ${NAME} Commands:
         return;
       }
 
+      if (trimmed === '/agents') {
+        const agentList = await registry.listAgents();
+        for (const agent of agentList) {
+          console.log(`  • ${agent.name}: ${agent.description.slice(0, 50)}...`);
+        }
+        console.log();
+        prompt();
+        return;
+      }
+
       const s = spinner();
       s.start('Thinking...');
 
       try {
         const response = await chat(trimmed);
         s.stop('');
-        console.log(`\n${EMOJI} ${NAME}: ${response}\n`);
+        displayResult(response);
       } catch (error) {
         s.stop('');
         console.log(`\n${EMOJI} ${NAME}: Sorry, I encountered an error.\n`);

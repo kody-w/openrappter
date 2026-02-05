@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Memory System - openRAPPter
+title: Memory System - openrappter
 ---
 
 # 🧠 Memory System
 
-openRAPPter has persistent memory that survives across sessions.
+openrappter has persistent memory that survives across sessions.
 
 ## How It Works
 
@@ -23,7 +23,7 @@ Memory is stored locally in `~/.openrappter/memory.json`. Each memory entry incl
 
 ```
 🦖 You: remember that this project uses PostgreSQL
-🦖 openRAPPter: Got it! I'll remember that. (ID: abc123)
+🦖 openrappter: Got it! I'll remember that. (ID: abc123)
 ```
 
 ### Alternative Phrases
@@ -38,7 +38,7 @@ Memory is stored locally in `~/.openrappter/memory.json`. Each memory entry incl
 
 ```
 🦖 You: what do you remember about databases?
-🦖 openRAPPter: Here's what I remember:
+🦖 openrappter: Here's what I remember:
 • This project uses PostgreSQL
 • Database migrations are in db/migrations/
 ```
@@ -56,14 +56,14 @@ Memory is stored locally in `~/.openrappter/memory.json`. Each memory entry incl
 
 ```
 🦖 You: /forget abc123
-🦖 openRAPPter: Forgot memory abc123
+🦖 openrappter: Forgot memory abc123
 ```
 
 ### View All Memories
 
 ```
 🦖 You: /memory
-🦖 openRAPPter: Recent memories:
+🦖 openrappter: Recent memories:
 • [abc123] This project uses PostgreSQL...
 • [def456] Deploy command is npm run deploy...
 ```
@@ -82,7 +82,7 @@ Memory is stored locally in `~/.openrappter/memory.json`. Each memory entry incl
 
 ## Auto-Learning
 
-When running in daemon mode or with evolution enabled, openRAPPter automatically:
+When running in daemon mode or with evolution enabled, openrappter automatically:
 
 1. **Learns project context** from README files
 2. **Consolidates old memories** to save space

@@ -1,6 +1,6 @@
-# Contributing to openRAPPter
+# Contributing to openrappter
 
-Thank you for your interest in contributing to openRAPPter! 🦖
+Thank you for your interest in contributing to openrappter! 🦖
 
 ## Getting Started
 
@@ -10,87 +10,98 @@ Thank you for your interest in contributing to openRAPPter! 🦖
    git clone https://github.com/YOUR_USERNAME/openrappter.git
    cd openrappter
    ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Create a branch:
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
 
-## Development
+## Repository Structure
 
-### Running Locally
-
-```bash
-# Development mode with hot reload
-npm run dev
-
-# Build
-npm run build
-
-# Run tests
-npm test
-```
-
-### Project Structure
+This is a monorepo with two runtimes:
 
 ```
 openrappter/
-├── bin/              # CLI entry point
-├── src/              # TypeScript source
-│   ├── commands/     # CLI commands
-│   ├── agents/       # Agent logic
-│   ├── memory/       # Memory system
-│   ├── skills/       # Skills system
-│   └── tui/          # Terminal UI
-├── docs/             # Documentation (GitHub Pages)
-├── tests/            # Test files
-├── RAPPagent.py      # Python standalone version
-└── package.json
+├── python/           # Python runtime
+│   ├── openrappter/  # Package source
+│   └── pyproject.toml
+├── typescript/       # TypeScript runtime
+│   ├── src/          # TypeScript source
+│   └── package.json
+└── docs/             # Documentation
 ```
 
-### Code Style
+## Development
 
-- Use TypeScript with strict mode
-- Follow existing patterns
-- Keep functions small and focused
-- Add JSDoc comments for public APIs
-
-### Testing
+### TypeScript
 
 ```bash
-# Run all tests
-npm test
+cd typescript
+npm install
+npm run dev          # Development mode with hot reload
+npm run build        # Build
+npm test             # Run tests
+```
 
-# Watch mode
-npm run test:watch
+### Python
 
-# Coverage
-npm run test:coverage
+```bash
+cd python
+pip install -e .     # Install in editable mode
+openrappter --status # Test
+```
+
+## Creating Agents
+
+Both runtimes use the same agent pattern. See `.github/copilot-instructions.md` for the full contract.
+
+### TypeScript Agent (`typescript/src/agents/MyAgent.ts`)
+
+```typescript
+import { BasicAgent } from './BasicAgent.js';
+import type { AgentMetadata } from './types.js';
+
+export class MyAgent extends BasicAgent {
+  constructor() {
+    const metadata: AgentMetadata = {
+      name: 'MyAgent',
+      description: 'What this agent does',
+      parameters: { type: 'object', properties: {}, required: [] }
+    };
+    super('MyAgent', metadata);
+  }
+
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    return JSON.stringify({ status: 'success', result: '...' });
+  }
+}
+```
+
+### Python Agent (`python/openrappter/agents/my_agent.py`)
+
+```python
+from openrappter.agents.basic_agent import BasicAgent
+import json
+
+class MyAgent(BasicAgent):
+    def __init__(self):
+        self.name = 'MyAgent'
+        self.metadata = {
+            "name": self.name,
+            "description": "What this agent does",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+    
+    def perform(self, **kwargs):
+        return json.dumps({"status": "success", "result": "..."})
 ```
 
 ## Pull Request Process
 
-1. Update documentation if needed
-2. Add tests for new features
-3. Ensure all tests pass
-4. Update CHANGELOG.md
+1. Create a feature branch
+2. Make your changes
+3. Test both runtimes if applicable
+4. Update documentation if needed
 5. Submit PR with clear description
-
-## Reporting Issues
-
-- Check existing issues first
-- Include reproduction steps
-- Provide system information (OS, Node version, etc.)
 
 ## Code of Conduct
 
 - Be respectful and inclusive
 - Focus on the code, not the person
 - Help others learn
-
-## Questions?
-
-Open an issue or discussion on GitHub!

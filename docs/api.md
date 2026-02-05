@@ -1,11 +1,11 @@
 ---
 layout: default
-title: API Reference - openRAPPter
+title: API Reference - openrappter
 ---
 
 # 📚 API Reference
 
-Complete reference for openRAPPter commands and options.
+Complete reference for openrappter commands and options.
 
 ## CLI Commands
 
@@ -71,82 +71,70 @@ Use these in interactive mode:
 
 ## Python API
 
-### RAPPagent Class
+### Orchestrator Class
 
 ```python
-from RAPPagent import RAPPagent
+from openrappter import Orchestrator
 
-agent = RAPPagent()
+orchestrator = Orchestrator()
+orchestrator.initialize()  # Load default agent
 
-# Process a message
-response = agent.process("hello")
+# Execute a query
+response = orchestrator.execute(query="hello")
 
-# Run interactive mode
-agent.run_interactive()
+# List available agents
+agents = orchestrator.list_agents()
 
-# Run a single task
-result = agent.run_task("explain this code")
-
-# Run as daemon
-agent.run_daemon(interval=60)
+# Switch to different agent
+orchestrator.switch_agent("MyCustomAgent")
 ```
 
-### Memory Class
+### BasicAgent Class
 
 ```python
-from RAPPagent import Memory
+from agents.basic_agent import BasicAgent
 
-memory = Memory()
-
-# Add memory
-entry = memory.add("important fact", tags=["work"])
-
-# Search
-results = memory.search("fact")
-
-# Recall by ID
-item = memory.recall("abc123")
-
-# Forget
-memory.forget("abc123")
-
-# List all
-all_memories = memory.list_all()
+class MyCustomAgent(BasicAgent):
+    def __init__(self):
+        self.name = "MyCustomAgent"
+        self.metadata = {
+            "name": self.name,
+            "description": "Does something cool",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User query"}
+                }
+            }
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+    
+    def perform(self, **kwargs):
+        query = kwargs.get('query', '')
+        # Access sloshed context via self.context
+        temporal = self.get_signal('temporal', {})
+        return {"status": "success", "message": f"Processed: {query}"}
 ```
 
-### Skills Class
+### Agent Context (Data Sloshing)
 
 ```python
-from RAPPagent import Skills
+# In your perform() method, access enriched context:
 
-skills = Skills()
+# Temporal awareness
+time_of_day = self.get_signal('temporal.time_of_day')
+is_weekend = self.get_signal('temporal.is_weekend')
 
-# Execute a skill
-result = skills.execute("bash", command="ls -la")
+# Query signals
+specificity = self.get_signal('query_signals.specificity')
+hints = self.get_signal('query_signals.hints', [])
 
-# Register custom skill
-@skills.register("greet", "Say hello")
-def greet(name: str) -> str:
-    return f"Hello, {name}!"
+# Behavioral patterns
+prefers_brief = self.get_signal('behavioral.prefers_brief')
 
-# List skills
-available = skills.list_skills()
-```
-
-### Evolver Class
-
-```python
-from RAPPagent import Evolver, RAPPagent
-
-agent = RAPPagent()
-evolver = Evolver(agent)
-
-# Run one tick
-result = evolver.tick()
-
-# Run multiple
-for _ in range(10):
-    evolver.tick()
+# Synthesized orientation
+confidence = self.get_signal('orientation.confidence')
+approach = self.get_signal('orientation.approach')
 ```
 
 ## Configuration
@@ -161,7 +149,7 @@ for _ in range(10):
   "copilotAvailable": true,
   "preferences": {
     "emoji": "🦖",
-    "name": "openRAPPter"
+    "name": "openrappter"
   }
 }
 ```

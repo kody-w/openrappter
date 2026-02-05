@@ -1,11 +1,11 @@
 ---
 layout: default
-title: Configuration - openRAPPter
+title: Configuration - openrappter
 ---
 
 # ⚙️ Configuration Guide
 
-openRAPPter stores configuration in `~/.openrappter/config.json`.
+openrappter stores configuration in `~/.openrappter/config.json`.
 
 ## Configuration File
 
@@ -15,7 +15,7 @@ openRAPPter stores configuration in `~/.openrappter/config.json`.
   "copilotAvailable": true,
   "preferences": {
     "emoji": "🦖",
-    "name": "openRAPPter"
+    "name": "openrappter"
   }
 }
 ```
@@ -43,7 +43,7 @@ Options:
 
 ## Onboarding
 
-Run the setup wizard to configure openRAPPter:
+Run the setup wizard to configure openrappter:
 
 ```bash
 openrappter onboard

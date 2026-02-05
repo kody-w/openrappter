@@ -1,13 +1,13 @@
-# 🦖 openRAPPter Installation Skill
+# 🦖 openrappter Installation Skill
 
-> This skill enables any AI agent to install and configure openRAPPter locally.
+> This skill enables any AI agent to install and configure openrappter locally.
 
 ## Prerequisites Check
 
 Before installing, verify:
-- [ ] Node.js 22+ is installed (`node --version`)
-- [ ] npm is available (`npm --version`)
-- [ ] GitHub Copilot CLI is installed (`copilot --version`)
+- [ ] Node.js 18+ is installed (`node --version`) — for TypeScript runtime
+- [ ] Python 3.10+ is installed (`python3 --version`) — for Python runtime
+- [ ] GitHub Copilot CLI is installed (`copilot --version`) — optional but recommended
 
 ## Installation Steps
 
@@ -18,28 +18,19 @@ git clone https://github.com/kody-w/openrappter.git
 cd openrappter
 ```
 
-### Step 2: Install Dependencies
+### Step 2a: TypeScript Runtime
 
 ```bash
+cd typescript
 npm install
-```
-
-### Step 3: Build the Project
-
-```bash
 npm run build
 ```
 
-### Step 4: Link Globally (Optional)
+### Step 2b: Python Runtime
 
 ```bash
-npm link
-```
-
-### Step 5: Run Onboarding
-
-```bash
-openrappter onboard
+cd python
+pip install -e .
 ```
 
 ## Verification
@@ -47,118 +38,90 @@ openrappter onboard
 Test the installation:
 
 ```bash
-# Check status
-openrappter --status
+# TypeScript
+cd typescript
+node dist/index.js --status
 
 # Expected output:
-# 🦖 openRAPPter Status
-#   Version: 1.0.0
-#   Copilot: ✅ Available
+# 🦖 openrappter Status
+#   Version: 1.1.0
+#   Agents: 2 loaded
 
-# Test a task
-openrappter --task "hello world"
-
-# Expected: A response from the agent
+# Python
+cd python
+python3 -m openrappter.cli --status
+# or if installed:
+openrappter --status
 ```
 
 ## Quick Test Sequence
 
+### TypeScript
+
 ```bash
-# 1. Interactive greeting
-openrappter "hello"
+cd typescript
+
+# 1. Check status
+node dist/index.js --status
 
 # 2. Memory test
-openrappter "remember that I installed openRAPPter successfully"
+node dist/index.js "remember that I installed openrappter"
 
 # 3. Recall test
-openrappter "what do you remember?"
+node dist/index.js "recall openrappter"
 
-# 4. Skill test
-openrappter "run echo 'openRAPPter works!'"
+# 4. Shell test
+node dist/index.js "ls"
+```
 
-# 5. Status check
-openrappter --status
+### Python
+
+```bash
+cd python
+
+# 1. Check status
+python3 -m openrappter.cli --status
+
+# 2. List agents
+python3 -m openrappter.cli --list-agents
+
+# 3. Memory test
+python3 -m openrappter.cli "remember that Python works"
 ```
 
 ## Troubleshooting
 
 ### Copilot CLI Not Found
 
-```bash
-# Install Copilot CLI
-npm install -g @githubnext/github-copilot-cli
+The agent works without Copilot CLI (uses keyword matching fallback):
 
-# Authenticate
+```bash
+# Optional: Install Copilot CLI for enhanced functionality
+npm install -g @githubnext/github-copilot-cli
 github-copilot-cli auth
 ```
 
-### Build Errors
+### TypeScript Build Errors
 
 ```bash
-# Clean and rebuild
+cd typescript
 rm -rf node_modules dist
 npm install
 npm run build
 ```
 
-### Permission Errors
+### Python Import Errors
 
 ```bash
-# Fix npm global permissions
-mkdir ~/.npm-global
-npm config set prefix '~/.npm-global'
-export PATH=~/.npm-global/bin:$PATH
-```
-
-## Python Standalone Alternative
-
-If Node.js isn't available, use the Python version:
-
-```bash
-# Download RAPPagent.py
-curl -O https://raw.githubusercontent.com/kody-w/openrappter/main/RAPPagent.py
-
-# Make executable
-chmod +x RAPPagent.py
-
-# Run
-python3 RAPPagent.py --status
-python3 RAPPagent.py "hello"
-```
-
-## Full End-to-End Test
-
-```bash
-#!/bin/bash
-# Complete installation and test script
-
-set -e
-
-echo "🦖 Installing openRAPPter..."
-
-# Clone
-git clone https://github.com/kody-w/openrappter.git
-cd openrappter
-
-# Install
-npm install
-npm run build
-npm link
-
-# Test
-echo "Testing installation..."
-openrappter --status
-openrappter --task "confirm installation successful"
-
-echo "✅ openRAPPter installed successfully!"
+cd python
+pip install -e .
+# or run directly:
+python3 -m openrappter.cli --status
 ```
 
 ## Uninstallation
 
 ```bash
-# Remove global link
-npm unlink openrappter
-
 # Remove config
 rm -rf ~/.openrappter
 
@@ -170,5 +133,5 @@ rm -rf /path/to/openrappter
 
 **Agent Notes:**
 - This skill should complete in under 5 minutes
-- All tests should pass before marking complete
-- If Copilot CLI is unavailable, the Python version works without it
+- Both runtimes can be installed independently
+- TypeScript and Python use the same agent pattern

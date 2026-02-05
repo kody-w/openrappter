@@ -1,93 +1,168 @@
+<div align="center">
+
 # 🦖 openrappter
 
-> **The medium IS the message** — A local-first AI agent that runs with zero API keys.
+### AI agents that run on your machine
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+**No API keys. No cloud. No monthly bills.**
 
-## What is openrappter?
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
+[![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
+[![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
-openrappter is a **local-first AI agent** that requires no API keys, no cloud accounts, and no monthly bills. It leverages the GitHub Copilot SDK to provide intelligent assistance directly in your terminal.
+[Website](https://openrappter.dev) • [Documentation](https://github.com/kody-w/openrappter/tree/main/docs) • [RappterHub](https://github.com/rappterhub/rappterhub)
 
-This is a **monorepo** with two interchangeable runtimes:
-- **TypeScript** (`typescript/`) — Node.js CLI with @clack/prompts UI
-- **Python** (`python/`) — Python CLI with agent orchestration
+---
 
-Both runtimes use the same agent pattern, so agents can be easily ported between languages.
+</div>
+
+## The Problem
+
+Every AI agent framework wants your API keys and credit card. OpenAI, Anthropic, Gemini — they all add up to $50-100+/month for power users. Your conversations go to the cloud. Your data isn't yours.
+
+## The Solution
+
+**openrappter** uses your existing GitHub Copilot subscription ($10/mo, free for students) to power a local-first AI agent. No new accounts. No API keys to manage. No data leaving your machine.
+
+```bash
+pip install openrappter
+openrappter "remember that I prefer TypeScript over JavaScript"
+# 🦖 Remembered: "prefer TypeScript over JavaScript" (preference)
+```
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| 🔐 **Zero API Keys** | Uses GitHub Copilot SDK — no separate API keys needed |
+| 🏠 **Local-First** | All data stays in `~/.openrappter` on your machine |
+| 🧠 **Persistent Memory** | Remembers facts, preferences, and context across sessions |
+| 📦 **RappterHub** | Install community agents with `rappterhub install author/agent` |
+| 🔄 **Dual Runtime** | Same agent contract in Python and TypeScript |
+| 🎯 **Data Sloshing** | Automatic context enrichment before every action |
+| 🔌 **ClawHub Compatible** | Install OpenClaw skills with `openrappter clawhub install` |
 
 ## Quick Start
+
+### Python (Recommended)
+
+```bash
+# Install
+pip install openrappter
+
+# Run interactive mode
+openrappter
+
+# Or run a single task
+openrappter "what files did I change today?"
+
+# Install agents from RappterHub
+openrappter rappterhub install kody-w/git-helper
+```
 
 ### TypeScript
 
 ```bash
 cd typescript
-npm install
-npm run build
-node dist/index.js --status
+npm install && npm run build
 node dist/index.js "remember that I installed openrappter"
 ```
 
-### Python
+## RappterHub — Agent Registry
+
+[RappterHub](https://github.com/rappterhub/rappterhub) is our open registry for sharing AI agents.
 
 ```bash
-cd python
-pip install -e .
-openrappter --status
-openrappter "remember that I installed openrappter"
+# Search for agents
+rappterhub search "git automation"
+
+# Install an agent
+rappterhub install kody-w/git-helper
+
+# Create your own
+rappterhub init my-agent
+
+# Publish to the registry
+rappterhub publish ./my-agent
 ```
 
-Or run directly:
-```bash
-python -m openrappter.cli --status
-```
-
-## Repository Structure
+## Architecture
 
 ```
-openrappter/
-├── python/                    # Python runtime
-│   ├── openrappter/
-│   │   ├── cli.py            # Entry point
-│   │   └── agents/           # Python agents
-│   │       ├── basic_agent.py
-│   │       ├── shell_agent.py
-│   │       └── ...
-│   └── pyproject.toml
-├── typescript/               # TypeScript runtime
-│   ├── src/
-│   │   ├── index.ts
-│   │   └── agents/
-│   │       ├── BasicAgent.ts
-│   │       ├── ShellAgent.ts
-│   │       └── ...
-│   ├── package.json
-│   └── tsconfig.json
-├── docs/                     # Documentation
-└── .github/
-    └── copilot-instructions.md
+~/.openrappter/
+├── config.json      # User preferences
+├── memory.json      # Persistent memory
+├── state.json       # Agent state
+├── agents/          # RappterHub agents
+└── skills/          # ClawHub skills
 ```
 
-## Agent Pattern
+### Agent Contract
 
-Both runtimes follow the same agent contract. See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for details.
+Both Python and TypeScript agents follow the same pattern:
 
-### Core Agents
+```python
+class MyAgent(BasicAgent):
+    def __init__(self):
+        metadata = {
+            "name": "MyAgent",
+            "description": "What this agent does",
+            "parameters": {...}
+        }
+        super().__init__("MyAgent", metadata)
+
+    def perform(self, **kwargs) -> str:
+        # self.context has enriched signals from data sloshing
+        return json.dumps({"status": "success", "result": "..."})
+```
+
+### Built-in Agents
 
 | Agent | Description |
 |-------|-------------|
 | `Shell` | Execute bash commands, read/write files |
 | `Memory` | Store and recall facts persistently |
-| `LearnNew` | Meta-agent that generates new agents (Python only) |
+| `LearnNew` | Meta-agent that generates new agents from descriptions |
 
-## Documentation
+## ClawHub Compatibility
 
-📚 Full documentation at **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)**
+openrappter can also use [ClawHub](https://clawhub.ai) skills:
+
+```bash
+# Search ClawHub
+openrappter clawhub search "discord"
+
+# Install a skill
+openrappter clawhub install steipete/discord
+
+# List installed skills
+openrappter clawhub list
+```
+
+## Why "openrappter"?
+
+It's a **rapp**id prototyping **agent** that's open source. Plus, who doesn't want a velociraptor in their terminal? 🦖
 
 ## Contributing
 
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+```bash
+# Development setup
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter/python
+pip install -e .
+```
 
 ## License
 
 MIT © [Kody W](https://github.com/kody-w)
+
+---
+
+<div align="center">
+
+**[⭐ Star us on GitHub](https://github.com/kody-w/openrappter)** — it helps more developers discover local-first AI agents
+
+</div>

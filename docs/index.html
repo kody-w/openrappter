@@ -1,49 +1,106 @@
----
-layout: default
-title: openrappter - Local-First AI Agent
-description: Zero API keys. Local-first. Powered by GitHub Copilot SDK.
----
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🦖 openrappter - Local-First AI Agent</title>
+  <title>openrappter - AI Agent That Runs on Your Machine</title>
+  <meta name="description" content="Open-source AI agent framework. No API keys. No cloud. No monthly bills. Just you and your terminal.">
+  <meta property="og:title" content="openrappter - AI Agent That Runs on Your Machine">
+  <meta property="og:description" content="Open-source AI agent framework. No API keys. No cloud. No monthly bills.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/kody-w/openrappter/main/docs/og-image.png">
+  <meta property="og:url" content="https://openrappter.dev">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --primary: #10b981;
-      --primary-dark: #059669;
-      --bg: #0d1117;
-      --bg-light: #161b22;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --border: #30363d;
-      --accent: #f97316;
+      --green: #22c55e;
+      --green-dark: #16a34a;
+      --orange: #f97316;
+      --purple: #a855f7;
+      --blue: #3b82f6;
+      --bg: #09090b;
+      --bg-card: #18181b;
+      --bg-elevated: #27272a;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --border: #3f3f46;
+      --gradient: linear-gradient(135deg, var(--green) 0%, var(--blue) 50%, var(--purple) 100%);
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
 
     body {
-      font-family: 'Inter', -apple-system, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
+      overflow-x: hidden;
     }
 
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 2rem;
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(9, 9, 11, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
     }
 
-    /* Hero Section */
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      text-decoration: none;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .github-stars {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .github-stars:hover {
+      border-color: var(--green);
+      transform: translateY(-2px);
+    }
+
+    /* Hero */
     .hero {
       min-height: 100vh;
       display: flex;
@@ -51,104 +108,74 @@ description: Zero API keys. Local-first. Powered by GitHub Copilot SDK.
       justify-content: center;
       align-items: center;
       text-align: center;
-      padding: 4rem 2rem;
-      background: linear-gradient(135deg, var(--bg) 0%, #1a1f2e 100%);
+      padding: 8rem 2rem 6rem;
+      position: relative;
+      overflow: hidden;
     }
 
-    .hero-emoji {
-      font-size: 6rem;
-      margin-bottom: 1rem;
-      animation: bounce 2s infinite;
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at center, rgba(34, 197, 94, 0.1) 0%, transparent 50%);
+      animation: pulse 8s ease-in-out infinite;
     }
 
-    @keyframes bounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-10px); }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.1); }
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 9999px;
+      font-size: 0.875rem;
+      color: var(--green);
+      margin-bottom: 2rem;
     }
 
     .hero h1 {
-      font-size: 4rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      font-size: clamp(3rem, 8vw, 5rem);
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero h1 span {
+      background: var(--gradient);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
-    .hero .tagline {
+    .hero-tagline {
       font-size: 1.5rem;
       color: var(--text-muted);
-      margin-bottom: 2rem;
       max-width: 600px;
+      margin: 0 auto 3rem;
     }
 
-    .hero-badges {
+    .hero-cta {
       display: flex;
       gap: 1rem;
-      margin-bottom: 3rem;
-      flex-wrap: wrap;
       justify-content: center;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 1rem;
-      background: var(--bg-light);
-      border: 1px solid var(--border);
-      border-radius: 9999px;
-      font-size: 0.875rem;
-    }
-
-    .badge-icon {
-      font-size: 1.25rem;
-    }
-
-    /* Code Block */
-    .code-block {
-      background: var(--bg-light);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem 2rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1.125rem;
-      text-align: left;
-      max-width: 500px;
-      position: relative;
-    }
-
-    .code-block::before {
-      content: '$ ';
-      color: var(--primary);
-    }
-
-    .copy-btn {
-      position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
-      background: var(--border);
-      border: none;
-      color: var(--text);
-      padding: 0.5rem;
-      border-radius: 6px;
-      cursor: pointer;
-      opacity: 0.7;
-      transition: opacity 0.2s;
-    }
-
-    .copy-btn:hover {
-      opacity: 1;
-    }
-
-    /* CTA Buttons */
-    .cta-buttons {
-      display: flex;
-      gap: 1rem;
-      margin-top: 2rem;
       flex-wrap: wrap;
-      justify-content: center;
+      margin-bottom: 4rem;
     }
 
     .btn {
@@ -156,43 +183,148 @@ description: Zero API keys. Local-first. Powered by GitHub Copilot SDK.
       align-items: center;
       gap: 0.5rem;
       padding: 1rem 2rem;
-      border-radius: 8px;
+      border-radius: 12px;
       font-weight: 600;
+      font-size: 1rem;
       text-decoration: none;
       transition: all 0.2s;
+      cursor: pointer;
+      border: none;
     }
 
     .btn-primary {
-      background: var(--primary);
-      color: white;
+      background: var(--green);
+      color: #000;
     }
 
     .btn-primary:hover {
-      background: var(--primary-dark);
+      background: var(--green-dark);
       transform: translateY(-2px);
+      box-shadow: 0 10px 40px rgba(34, 197, 94, 0.3);
     }
 
     .btn-secondary {
-      background: var(--bg-light);
+      background: var(--bg-card);
       color: var(--text);
       border: 1px solid var(--border);
     }
 
     .btn-secondary:hover {
-      border-color: var(--primary);
+      border-color: var(--green);
       transform: translateY(-2px);
     }
 
-    /* Features Section */
-    .features {
-      padding: 6rem 2rem;
-      background: var(--bg-light);
+    /* Terminal Demo */
+    .terminal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      max-width: 700px;
+      margin: 0 auto;
+      overflow: hidden;
+      text-align: left;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
 
-    .features h2 {
-      font-size: 2.5rem;
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1rem 1.5rem;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f56; }
+    .terminal-dot.yellow { background: #ffbd2e; }
+    .terminal-dot.green { background: #27c93f; }
+
+    .terminal-title {
+      flex: 1;
       text-align: center;
-      margin-bottom: 3rem;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    .terminal-body {
+      padding: 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+    }
+
+    .terminal-line {
+      display: flex;
+      margin-bottom: 0.5rem;
+    }
+
+    .terminal-prompt {
+      color: var(--green);
+      margin-right: 0.75rem;
+    }
+
+    .terminal-command { color: var(--text); }
+    .terminal-output { color: var(--text-muted); margin-left: 1.5rem; }
+    .terminal-success { color: var(--green); }
+    .terminal-highlight { color: var(--orange); }
+
+    /* Stats Bar */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 4rem;
+      padding: 4rem 2rem;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
+    .stat {
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 3rem;
+      font-weight: 800;
+      background: var(--gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .stat-label {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    /* Features */
+    .features {
+      padding: 8rem 2rem;
+    }
+
+    .section-header {
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto 4rem;
+    }
+
+    .section-header h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+
+    .section-header p {
+      color: var(--text-muted);
+      font-size: 1.125rem;
     }
 
     .features-grid {
@@ -204,25 +336,34 @@ description: Zero API keys. Local-first. Powered by GitHub Copilot SDK.
     }
 
     .feature-card {
-      background: var(--bg);
+      background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 16px;
       padding: 2rem;
-      transition: all 0.2s;
+      transition: all 0.3s;
     }
 
     .feature-card:hover {
-      border-color: var(--primary);
+      border-color: var(--green);
       transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(34, 197, 94, 0.1);
     }
 
     .feature-icon {
-      font-size: 2.5rem;
+      width: 48px;
+      height: 48px;
+      background: rgba(34, 197, 94, 0.1);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
       margin-bottom: 1rem;
     }
 
     .feature-card h3 {
       font-size: 1.25rem;
+      font-weight: 600;
       margin-bottom: 0.5rem;
     }
 
@@ -230,293 +371,428 @@ description: Zero API keys. Local-first. Powered by GitHub Copilot SDK.
       color: var(--text-muted);
     }
 
-    /* Comparison Table */
-    .comparison {
-      padding: 6rem 2rem;
+    /* RappterHub Section */
+    .rappterhub {
+      padding: 8rem 2rem;
+      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-card) 100%);
     }
 
-    .comparison h2 {
-      font-size: 2.5rem;
-      text-align: center;
-      margin-bottom: 3rem;
-    }
-
-    .comparison-table {
-      max-width: 800px;
+    .hub-container {
+      max-width: 1000px;
       margin: 0 auto;
-      border-collapse: collapse;
-      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
     }
 
-    .comparison-table th,
-    .comparison-table td {
-      padding: 1rem 1.5rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .comparison-table th {
-      background: var(--bg-light);
-    }
-
-    .comparison-table tr:hover {
-      background: var(--bg-light);
-    }
-
-    .check {
-      color: var(--primary);
-      font-size: 1.25rem;
-    }
-
-    .cross {
-      color: #ef4444;
-      font-size: 1.25rem;
-    }
-
-    /* Quick Start */
-    .quickstart {
-      padding: 6rem 2rem;
-      background: var(--bg-light);
-    }
-
-    .quickstart h2 {
+    .hub-content h2 {
       font-size: 2.5rem;
-      text-align: center;
-      margin-bottom: 3rem;
+      font-weight: 700;
+      margin-bottom: 1.5rem;
     }
 
-    .steps {
-      max-width: 700px;
-      margin: 0 auto;
+    .hub-content h2 span {
+      background: var(--gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
-    .step {
-      display: flex;
-      gap: 1.5rem;
+    .hub-content p {
+      color: var(--text-muted);
+      font-size: 1.125rem;
       margin-bottom: 2rem;
     }
 
-    .step-number {
-      width: 40px;
-      height: 40px;
-      background: var(--primary);
+    .hub-features {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .hub-feature {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .hub-feature-icon {
+      width: 24px;
+      height: 24px;
+      background: var(--green);
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 700;
-      flex-shrink: 0;
+      font-size: 0.75rem;
     }
 
-    .step-content h3 {
-      margin-bottom: 0.5rem;
-    }
-
-    .step-content p {
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-    }
-
-    .step-content code {
-      display: block;
+    .hub-demo {
       background: var(--bg);
-      padding: 0.75rem 1rem;
-      border-radius: 6px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.875rem;
+    }
+
+    .hub-demo-line {
+      margin-bottom: 0.75rem;
+    }
+
+    .hub-demo-comment { color: var(--text-muted); }
+    .hub-demo-cmd { color: var(--green); }
+    .hub-demo-output { color: var(--text-muted); font-size: 0.875rem; }
+
+    /* Code Example */
+    .code-section {
+      padding: 8rem 2rem;
+    }
+
+    .code-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      max-width: 800px;
+      margin: 0 auto 1rem;
+    }
+
+    .code-tab {
+      padding: 0.75rem 1.5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px 8px 0 0;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .code-tab.active {
+      background: var(--bg-elevated);
+      color: var(--text);
+      border-bottom-color: var(--bg-elevated);
+    }
+
+    .code-block {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 0 16px 16px 16px;
+      padding: 2rem;
+      max-width: 800px;
+      margin: 0 auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .code-keyword { color: var(--purple); }
+    .code-string { color: var(--green); }
+    .code-comment { color: var(--text-muted); }
+    .code-function { color: var(--blue); }
+
+    /* CTA Section */
+    .cta-section {
+      padding: 8rem 2rem;
+      text-align: center;
+      background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg) 100%);
+    }
+
+    .cta-section h2 {
+      font-size: 3rem;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+    }
+
+    .cta-section p {
+      color: var(--text-muted);
+      font-size: 1.25rem;
+      max-width: 500px;
+      margin: 0 auto 2rem;
     }
 
     /* Footer */
     footer {
-      padding: 3rem 2rem;
-      text-align: center;
+      padding: 4rem 2rem;
       border-top: 1px solid var(--border);
     }
 
-    footer a {
-      color: var(--primary);
-      text-decoration: none;
+    .footer-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 2rem;
     }
 
-    footer a:hover {
-      text-decoration: underline;
+    .footer-links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: var(--text); }
+
+    .footer-copy {
+      color: var(--text-muted);
+      font-size: 0.875rem;
     }
 
     /* Responsive */
     @media (max-width: 768px) {
-      .hero h1 {
-        font-size: 2.5rem;
-      }
-      .hero .tagline {
-        font-size: 1.125rem;
-      }
-      .hero-emoji {
-        font-size: 4rem;
-      }
+      .nav-links { display: none; }
+      .stats { flex-direction: column; gap: 2rem; }
+      .hub-container { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 2.5rem; }
     }
   </style>
 </head>
 <body>
+  <!-- Nav -->
+  <nav>
+    <a href="/" class="logo">🦖 openrappter</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#rappterhub">RappterHub</a>
+      <a href="https://github.com/kody-w/openrappter/tree/main/docs">Docs</a>
+      <a href="https://github.com/kody-w/openrappter" class="github-stars">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        Star
+      </a>
+    </div>
+  </nav>
+
   <!-- Hero -->
   <section class="hero">
-    <div class="hero-emoji">🦖</div>
-    <h1>openrappter</h1>
-    <p class="tagline">Local-first AI agent powered by GitHub Copilot SDK. Zero API keys. Zero monthly bills.</p>
-    
-    <div class="hero-badges">
-      <span class="badge"><span class="badge-icon">🔐</span> No API Keys</span>
-      <span class="badge"><span class="badge-icon">🏠</span> Local-First</span>
-      <span class="badge"><span class="badge-icon">🧠</span> Memory</span>
-      <span class="badge"><span class="badge-icon">🎯</span> Skills</span>
-    </div>
+    <div class="hero-content">
+      <div class="hero-badge">
+        <span>✨</span>
+        <span>100% Open Source • MIT License</span>
+      </div>
+      <h1>AI agents that run<br><span>on your machine</span></h1>
+      <p class="hero-tagline">
+        No API keys. No cloud accounts. No monthly bills.<br>
+        Just an intelligent agent in your terminal.
+      </p>
+      <div class="hero-cta">
+        <a href="#quickstart" class="btn btn-primary">Get Started Free →</a>
+        <a href="https://github.com/kody-w/openrappter" class="btn btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
 
-    <div class="code-block">
-      <span>npx openrappter</span>
-      <button class="copy-btn" onclick="navigator.clipboard.writeText('npx openrappter')">📋</button>
+      <!-- Terminal Demo -->
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span class="terminal-title">openrappter — zsh</span>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-command">pip install openrappter</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-output terminal-success">✓ Installed openrappter v1.2.0</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-command">openrappter "remember I prefer dark themes"</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-output">🦖 Remembered: "prefer dark themes" (preference)</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-command">openrappter rappterhub install kody-w/git-helper</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-output terminal-success">✓ Installed git-helper v1.0.0 from RappterHub</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-prompt">$</span>
+            <span class="terminal-command terminal-highlight">openrappter "summarize my git commits today"</span>
+          </div>
+          <div class="terminal-line">
+            <span class="terminal-output">🦖 Today you made 5 commits: refactored auth, added tests...</span>
+          </div>
+        </div>
+      </div>
     </div>
+  </section>
 
-    <div class="cta-buttons">
-      <a href="#quickstart" class="btn btn-primary">Get Started →</a>
-      <a href="https://github.com/kody-w/openrappter" class="btn btn-secondary">View on GitHub</a>
+  <!-- Stats -->
+  <section class="stats">
+    <div class="stat">
+      <div class="stat-value">0</div>
+      <div class="stat-label">API Keys Required</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">$0</div>
+      <div class="stat-label">Monthly Cost</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">2</div>
+      <div class="stat-label">Runtimes (Python + TS)</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">∞</div>
+      <div class="stat-label">Agents via RappterHub</div>
     </div>
   </section>
 
   <!-- Features -->
-  <section class="features">
-    <div class="container">
-      <h2>Why openrappter?</h2>
-      <div class="features-grid">
-        <div class="feature-card">
-          <div class="feature-icon">🔐</div>
-          <h3>Zero API Keys</h3>
-          <p>Uses your existing GitHub Copilot subscription. No separate API keys, no new accounts to create.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🏠</div>
-          <h3>Local-First</h3>
-          <p>All your data stays on your machine. Memory, conversations, and configurations never leave your system.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🧠</div>
-          <h3>Persistent Memory</h3>
-          <p>Remembers context across sessions. Build up knowledge over time that makes it smarter for your workflows.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🎯</div>
-          <h3>Extensible Skills</h3>
-          <p>Built-in skills for shell, files, and more. Add custom skills with simple YAML definitions.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔄</div>
-          <h3>Autonomous Evolution</h3>
-          <p>Background processing that consolidates memory, learns context, and improves over time.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">📦</div>
-          <h3>Single File Option</h3>
-          <p>Need extreme simplicity? Run the Python standalone version — one file, zero dependencies.</p>
-        </div>
+  <section class="features" id="features">
+    <div class="section-header">
+      <h2>Everything you need, nothing you don't</h2>
+      <p>A minimal, powerful framework for building AI agents that actually respect your privacy and wallet.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔐</div>
+        <h3>Zero API Keys</h3>
+        <p>Uses your existing GitHub Copilot subscription. No OpenAI, no Anthropic, no new accounts. Just works.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🏠</div>
+        <h3>Local-First</h3>
+        <p>Your data never leaves your machine. Memories, configs, and conversations stay in ~/.openrappter.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Persistent Memory</h3>
+        <p>Remembers facts, preferences, and context across sessions. Builds up knowledge that makes it smarter for you.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📦</div>
+        <h3>RappterHub Registry</h3>
+        <p>Install community agents with one command. Share your own. Like npm, but for AI agents.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <h3>Dual Runtime</h3>
+        <p>Same agent contract in Python and TypeScript. Write once, run in either. Pick your language.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Data Sloshing</h3>
+        <p>Automatic context enrichment. Temporal awareness, behavioral hints, and memory echoes before every action.</p>
       </div>
     </div>
   </section>
 
-  <!-- Comparison -->
-  <section class="comparison">
-    <div class="container">
-      <h2>How It Compares</h2>
-      <table class="comparison-table">
-        <thead>
-          <tr>
-            <th>Feature</th>
-            <th>openrappter</th>
-            <th>Cloud AI Agents</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>API Keys Required</td>
-            <td><span class="check">❌ No</span></td>
-            <td><span class="cross">✅ Yes</span></td>
-          </tr>
-          <tr>
-            <td>Monthly Cost</td>
-            <td><span class="check">$0*</span></td>
-            <td><span class="cross">$20-100+</span></td>
-          </tr>
-          <tr>
-            <td>Data Privacy</td>
-            <td><span class="check">🏠 Local</span></td>
-            <td><span class="cross">☁️ Cloud</span></td>
-          </tr>
-          <tr>
-            <td>Setup Time</td>
-            <td><span class="check">1 minute</span></td>
-            <td><span class="cross">10-30 minutes</span></td>
-          </tr>
-          <tr>
-            <td>Works Offline</td>
-            <td><span class="check">✅ Yes**</span></td>
-            <td><span class="cross">❌ No</span></td>
-          </tr>
-        </tbody>
-      </table>
-      <p style="text-align: center; color: var(--text-muted); margin-top: 1rem; font-size: 0.875rem;">
-        *Requires GitHub Copilot subscription ($10/mo or free for students/OSS)<br>
-        **With local LLM fallback option
-      </p>
+  <!-- RappterHub -->
+  <section class="rappterhub" id="rappterhub">
+    <div class="hub-container">
+      <div class="hub-content">
+        <h2>Meet <span>RappterHub</span></h2>
+        <p>
+          An open registry for sharing and discovering AI agents.
+          Search 100+ community agents, install with one command,
+          or publish your own.
+        </p>
+        <div class="hub-features">
+          <div class="hub-feature">
+            <div class="hub-feature-icon">✓</div>
+            <span>One-command install: <code>rappterhub install author/agent</code></span>
+          </div>
+          <div class="hub-feature">
+            <div class="hub-feature-icon">✓</div>
+            <span>Semantic search across all agents</span>
+          </div>
+          <div class="hub-feature">
+            <div class="hub-feature-icon">✓</div>
+            <span>Version control and rollback</span>
+          </div>
+          <div class="hub-feature">
+            <div class="hub-feature-icon">✓</div>
+            <span>GitHub-backed for transparency</span>
+          </div>
+        </div>
+        <a href="https://github.com/rappterhub/rappterhub" class="btn btn-primary" style="margin-top: 2rem;">
+          Explore RappterHub →
+        </a>
+      </div>
+      <div class="hub-demo">
+        <div class="hub-demo-line hub-demo-comment"># Search for agents</div>
+        <div class="hub-demo-line hub-demo-cmd">$ rappterhub search "git automation"</div>
+        <div class="hub-demo-line hub-demo-output">Found 12 agents matching "git automation"</div>
+        <div class="hub-demo-line hub-demo-output">  kody-w/git-helper — Automate commits, PRs...</div>
+        <div class="hub-demo-line hub-demo-output">  devops/changelog — Generate changelogs...</div>
+        <br>
+        <div class="hub-demo-line hub-demo-comment"># Install an agent</div>
+        <div class="hub-demo-line hub-demo-cmd">$ rappterhub install kody-w/git-helper</div>
+        <div class="hub-demo-line hub-demo-output">✓ Installed git-helper v1.2.0</div>
+        <br>
+        <div class="hub-demo-line hub-demo-comment"># Use it immediately</div>
+        <div class="hub-demo-line hub-demo-cmd">$ openrappter "create a PR for my changes"</div>
+      </div>
     </div>
   </section>
 
   <!-- Quick Start -->
-  <section class="quickstart" id="quickstart">
-    <div class="container">
-      <h2>Quick Start</h2>
-      <div class="steps">
-        <div class="step">
-          <div class="step-number">1</div>
-          <div class="step-content">
-            <h3>Clone the Repository</h3>
-            <p>Get the openrappter monorepo with both TypeScript and Python runtimes.</p>
-            <code>git clone https://github.com/kody-w/openrappter.git</code>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-number">2</div>
-          <div class="step-content">
-            <h3>TypeScript Runtime</h3>
-            <p>Build and run the TypeScript CLI.</p>
-            <code>cd openrappter/typescript && npm install && npm run build && node dist/index.js --status</code>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-number">3</div>
-          <div class="step-content">
-            <h3>Python Runtime</h3>
-            <p>Or install and run the Python CLI.</p>
-            <code>cd openrappter/python && pip install -e . && openrappter --status</code>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-number">4</div>
-          <div class="step-content">
-            <h3>Start Using!</h3>
-            <p>Run tasks, chat, or interact with agents.</p>
-            <code>openrappter "remember that openrappter is awesome"</code>
-          </div>
-        </div>
-      </div>
+  <section class="code-section" id="quickstart">
+    <div class="section-header">
+      <h2>Get started in 60 seconds</h2>
+      <p>Choose your runtime and start building.</p>
+    </div>
+    <div class="code-tabs">
+      <div class="code-tab active">Python</div>
+      <div class="code-tab">TypeScript</div>
+    </div>
+    <div class="code-block">
+      <span class="code-comment"># Install</span><br>
+      pip install openrappter<br><br>
+      <span class="code-comment"># Start chatting</span><br>
+      openrappter<br><br>
+      <span class="code-comment"># Or run a single task</span><br>
+      openrappter <span class="code-string">"what files did I change today?"</span><br><br>
+      <span class="code-comment"># Install agents from RappterHub</span><br>
+      openrappter rappterhub install kody-w/git-helper<br><br>
+      <span class="code-comment"># Create your own agent</span><br>
+      rappterhub init my-agent<br>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-section">
+    <h2>Ready to build?</h2>
+    <p>Join developers building AI agents that respect privacy and run anywhere.</p>
+    <div class="hero-cta">
+      <a href="https://github.com/kody-w/openrappter" class="btn btn-primary">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
+      <a href="https://github.com/rappterhub/rappterhub" class="btn btn-secondary">
+        Explore RappterHub
+      </a>
     </div>
   </section>
 
   <!-- Footer -->
   <footer>
-    <p>
-      <strong>🦖 openrappter</strong> — The velocirappter in your terminal<br>
-      <a href="https://github.com/kody-w/openrappter">GitHub</a> •
-      <a href="./docs/install">Docs</a> •
-      <a href="./docs/api">API</a> •
-      MIT License
-    </p>
+    <div class="footer-content">
+      <div class="footer-links">
+        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="https://github.com/rappterhub/rappterhub">RappterHub</a>
+        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Documentation</a>
+        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
+      </div>
+      <div class="footer-copy">
+        MIT License • Made with 🦖 by the openrappter community
+      </div>
+    </div>
   </footer>
 </body>
 </html>

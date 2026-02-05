@@ -37,6 +37,23 @@ from typing import Optional
 # Package root for agent discovery
 PACKAGE_ROOT = Path(__file__).parent
 
+# ClawHub integration
+try:
+    from openrappter.clawhub import ClawHubClient, clawhub_search, clawhub_install, clawhub_list
+    CLAWHUB_AVAILABLE = True
+except ImportError:
+    CLAWHUB_AVAILABLE = False
+
+# RappterHub integration
+try:
+    from openrappter.rappterhub import (
+        RappterHubClient, rappterhub_search, rappterhub_install,
+        rappterhub_list, rappterhub_uninstall
+    )
+    RAPPTERHUB_AVAILABLE = True
+except ImportError:
+    RAPPTERHUB_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
@@ -48,12 +65,14 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 class AgentRegistry:
     """
     Dynamic agent registry that discovers and loads agents from the agents/ directory.
+    Also loads ClawHub skills from ~/.openrappter/skills/.
     Follows the CommunityRAPP pattern for agent discovery.
     """
-    
+
     def __init__(self, agents_dir: Path = None):
         self.agents_dir = agents_dir or PACKAGE_ROOT / "agents"
         self._agents = {}
+        self._clawhub_agents = {}
         self._loaded = False
     
     def discover_agents(self):
@@ -117,21 +136,52 @@ class AgentRegistry:
             except Exception as e:
                 logging.warning(f"Failed to load {file_path}: {e}")
         
+        # Also load ClawHub skills
+        if CLAWHUB_AVAILABLE:
+            self._discover_clawhub_skills()
+
         self._loaded = True
-        logging.info(f"Loaded {len(self._agents)} agent(s): {list(self._agents.keys())}")
+        total = len(self._agents) + len(self._clawhub_agents)
+        logging.info(f"Loaded {len(self._agents)} agent(s), {len(self._clawhub_agents)} ClawHub skill(s)")
         return self._agents
+
+    def _discover_clawhub_skills(self):
+        """Discover and load ClawHub skills from ~/.openrappter/skills/."""
+        try:
+            client = ClawHubClient()
+            skill_agents = client.load_all_skills()
+            for agent in skill_agents:
+                # Prefix with 'skill:' to distinguish from native agents
+                skill_name = f"skill:{agent.name}"
+                self._clawhub_agents[skill_name] = {
+                    'class': type(agent),
+                    'instance': agent,
+                    'metadata': agent.metadata,
+                    'module': 'clawhub',
+                    'file': str(agent.skill.path) if agent.skill.path else 'clawhub'
+                }
+        except Exception as e:
+            logging.warning(f"Failed to load ClawHub skills: {e}")
     
     def get_agent(self, name: str):
         """Get an agent instance by name."""
         self.discover_agents()
         if name in self._agents:
             return self._agents[name]['instance']
+        # Check ClawHub skills (with or without 'skill:' prefix)
+        if name in self._clawhub_agents:
+            return self._clawhub_agents[name]['instance']
+        skill_name = f"skill:{name}"
+        if skill_name in self._clawhub_agents:
+            return self._clawhub_agents[skill_name]['instance']
         return None
-    
+
     def get_all_agents(self):
-        """Get all agent instances."""
+        """Get all agent instances (including ClawHub skills)."""
         self.discover_agents()
-        return {name: info['instance'] for name, info in self._agents.items()}
+        agents = {name: info['instance'] for name, info in self._agents.items()}
+        agents.update({name: info['instance'] for name, info in self._clawhub_agents.items()})
+        return agents
     
     def get_agent_metadata_tools(self):
         """Convert agent metadata to OpenAI tools format for function calling."""
@@ -147,18 +197,32 @@ class AgentRegistry:
         return tools
     
     def list_agents(self):
-        """List all available agents with their metadata."""
+        """List all available agents with their metadata (including ClawHub skills)."""
         self.discover_agents()
-        return [
+        agents = [
             {
                 'name': name,
                 'description': info['metadata'].get('description', 'No description'),
                 'parameters': info['metadata'].get('parameters', {}),
                 'module': info['module'],
-                'file': info['file']
+                'file': info['file'],
+                'source': 'native'
             }
             for name, info in self._agents.items()
         ]
+        # Add ClawHub skills
+        agents.extend([
+            {
+                'name': name,
+                'description': info['metadata'].get('description', 'No description'),
+                'parameters': info['metadata'].get('parameters', {}),
+                'module': info['module'],
+                'file': info['file'],
+                'source': 'clawhub'
+            }
+            for name, info in self._clawhub_agents.items()
+        ])
+        return agents
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -545,7 +609,7 @@ class Orchestrator:
     def __init__(self):
         self.registry = AgentRegistry()
         self.assistant = None
-        self.version = "1.1.0"
+        self.version = "1.2.0"
         self.emoji = "🦖"
         self.name = "openrappter"
     
@@ -606,9 +670,81 @@ Examples:
     parser.add_argument("--status", "-s", action="store_true", help="Show status")
     parser.add_argument("--list-agents", "-l", action="store_true", help="List available agents")
     parser.add_argument("--exec", "-e", nargs=2, metavar=('AGENT', 'QUERY'), help="Execute specific agent")
+
+    # ClawHub subcommands
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+
+    # clawhub search
+    clawhub_parser = subparsers.add_parser('clawhub', help='ClawHub skill management')
+    clawhub_sub = clawhub_parser.add_subparsers(dest='clawhub_command')
+
+    search_parser = clawhub_sub.add_parser('search', help='Search ClawHub for skills')
+    search_parser.add_argument('query', help='Search query')
+
+    install_parser = clawhub_sub.add_parser('install', help='Install a skill from ClawHub')
+    install_parser.add_argument('skill', help='Skill slug to install')
+
+    clawhub_sub.add_parser('list', help='List installed ClawHub skills')
+
+    # rappterhub subcommands
+    rappterhub_parser = subparsers.add_parser('rappterhub', help='RappterHub agent management')
+    rappterhub_sub = rappterhub_parser.add_subparsers(dest='rappterhub_command')
+
+    rh_search_parser = rappterhub_sub.add_parser('search', help='Search RappterHub for agents')
+    rh_search_parser.add_argument('query', help='Search query')
+
+    rh_install_parser = rappterhub_sub.add_parser('install', help='Install an agent from RappterHub')
+    rh_install_parser.add_argument('agent', help='Agent reference (author/name)')
+    rh_install_parser.add_argument('--force', '-f', action='store_true', help='Force reinstall')
+
+    rappterhub_sub.add_parser('list', help='List installed RappterHub agents')
+
+    rh_uninstall_parser = rappterhub_sub.add_parser('uninstall', help='Uninstall an agent')
+    rh_uninstall_parser.add_argument('agent', help='Agent name to uninstall')
     
     args = parser.parse_args()
-    
+
+    # Handle clawhub commands before full initialization
+    if args.command == 'clawhub':
+        if not CLAWHUB_AVAILABLE:
+            print("ClawHub integration not available. Check clawhub.py exists.")
+            return
+
+        if args.clawhub_command == 'search':
+            print(clawhub_search(args.query))
+            return
+        elif args.clawhub_command == 'install':
+            print(clawhub_install(args.skill))
+            return
+        elif args.clawhub_command == 'list':
+            print(clawhub_list())
+            return
+        else:
+            print("Usage: openrappter clawhub [search|install|list]")
+            return
+
+    # Handle rappterhub commands
+    if args.command == 'rappterhub':
+        if not RAPPTERHUB_AVAILABLE:
+            print("RappterHub integration not available. Check rappterhub.py exists.")
+            return
+
+        if args.rappterhub_command == 'search':
+            print(rappterhub_search(args.query))
+            return
+        elif args.rappterhub_command == 'install':
+            print(rappterhub_install(args.agent, getattr(args, 'force', False)))
+            return
+        elif args.rappterhub_command == 'list':
+            print(rappterhub_list())
+            return
+        elif args.rappterhub_command == 'uninstall':
+            print(rappterhub_uninstall(args.agent))
+            return
+        else:
+            print("Usage: openrappter rappterhub [search|install|list|uninstall]")
+            return
+
     # Initialize
     orchestrator.initialize()
     
@@ -619,9 +755,23 @@ Examples:
             print("No agents found in agents/ directory")
             return
         print(f"\n{orchestrator.emoji} Available Agents:\n")
-        for agent in agents:
-            print(f"  • {agent['name']}")
-            print(f"    {agent['description'][:60]}...")
+
+        # Separate native and clawhub agents
+        native = [a for a in agents if a.get('source') == 'native']
+        clawhub = [a for a in agents if a.get('source') == 'clawhub']
+
+        if native:
+            print("  Native Agents:")
+            for agent in native:
+                print(f"    • {agent['name']}")
+                print(f"      {agent['description'][:60]}...")
+            print()
+
+        if clawhub:
+            print("  ClawHub Skills:")
+            for agent in clawhub:
+                print(f"    • {agent['name']}")
+                print(f"      {agent['description'][:60]}...")
             print()
         return
     

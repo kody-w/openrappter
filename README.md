@@ -11,7 +11,7 @@
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
-[Website](https://openrappter.dev) • [Documentation](https://github.com/kody-w/openrappter/tree/main/docs) • [RappterHub](https://github.com/rappterhub/rappterhub)
+[Documentation](./docs) • [Skills Reference](./skills.md) • [RappterHub](https://github.com/rappterhub/rappterhub)
 
 ---
 

@@ -1,168 +1,272 @@
 <div align="center">
 
-# 🦖 openrappter
+# openrappter
 
-### AI agents that run on your machine
+### AI agents powered by your existing GitHub Copilot subscription
 
-**No extra API keys. No new accounts. No additional monthly bills.**
+**No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
-[Documentation](./docs) • [Skills Reference](./skills.md) • [RappterHub](https://github.com/rappterhub/rappterhub)
+[GitHub](https://github.com/kody-w/openrappter) | [Documentation](./docs) | [Skills Reference](./skills.md) | [Architecture](./docs/architecture.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 ---
 
 </div>
 
-## The Problem
+## What Is openrappter
 
-Every AI agent framework wants your API keys and credit card. OpenAI, Anthropic, Gemini — they all add up to $50-100+/month for power users. Your conversations go to the cloud. Your data isn't yours.
-
-## The Solution
-
-**openrappter** uses your existing GitHub Copilot subscription ($10/mo, free for students) to power a local-first AI agent. No new accounts. No extra API keys to manage. Your agent data stays on your machine.
+A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
 ```bash
-pip install openrappter
-openrappter "remember that I prefer TypeScript over JavaScript"
-# 🦖 Remembered: "prefer TypeScript over JavaScript" (preference)
+# Install and go
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter/python && pip install .
+
+# It remembers everything
+openrappter --task "remember that I prefer TypeScript over JavaScript"
+# Stored fact memory: "prefer TypeScript over JavaScript"
+
+# It executes commands
+openrappter --exec Shell "ls -la"
 ```
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
-| 🔐 **Zero API Keys** | Uses GitHub Copilot SDK — no separate API keys needed |
-| 🏠 **Local-First** | All data stays in `~/.openrappter` on your machine |
-| 🧠 **Persistent Memory** | Remembers facts, preferences, and context across sessions |
-| 📦 **RappterHub** | Install community agents with `rappterhub install author/agent` |
-| 🔄 **Dual Runtime** | Same agent contract in Python and TypeScript |
-| 🎯 **Data Sloshing** | Automatic context enrichment before every action |
-| 🔌 **ClawHub Compatible** | Install OpenClaw skills with `openrappter clawhub install` |
+| **Copilot-Powered** | Uses your existing GitHub Copilot subscription for AI inference — no separate API keys |
+| **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
+| **Persistent Memory** | Remembers facts, preferences, and context across sessions |
+| **Dual Runtime** | Same agent contract in Python (5 agents) and TypeScript (2 agents) |
+| **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
+| **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
+| **RappterHub** | Install community agents with `openrappter rappterhub install author/agent` |
+| **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
+| **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
 
 ## Quick Start
 
-### Python (Recommended)
+### Python
 
 ```bash
-# Install
-pip install openrappter
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter/python
+pip install .
 
-# Run interactive mode
-openrappter
+# Check status
+python3 -m openrappter.cli --status
 
-# Or run a single task
-openrappter "what files did I change today?"
+# List all agents
+python3 -m openrappter.cli --list-agents
 
-# Install agents from RappterHub
-openrappter rappterhub install kody-w/git-helper
+# Store a memory
+python3 -m openrappter.cli --task "remember the deploy command is npm run deploy"
+
+# Run a shell command
+python3 -m openrappter.cli --exec Shell "ls"
 ```
 
 ### TypeScript
 
 ```bash
-cd typescript
+cd openrappter/typescript
 npm install && npm run build
+
+# Check status
+node dist/index.js --status
+
+# Store and recall memory
 node dist/index.js "remember that I installed openrappter"
+node dist/index.js "recall openrappter"
+
+# Shell command
+node dist/index.js "ls"
 ```
 
-## RappterHub — Agent Registry
+## Built-in Agents
 
-[RappterHub](https://github.com/rappterhub/rappterhub) is our open registry for sharing AI agents.
+### Python Runtime
 
-```bash
-# Search for agents
-rappterhub search "git automation"
+| Agent | Description |
+|-------|-------------|
+| `Shell` | Execute bash commands, read/write files, list directories |
+| `ManageMemory` | Store important information with content, importance, tags |
+| `ContextMemory` | Recall and provide context from stored memories |
+| `LearnNew` | Generate new agents from natural language — writes code, hot-loads, installs deps |
+| `FetchesLatest` | Fetch latest Hacker News stories |
 
-# Install an agent
-rappterhub install kody-w/git-helper
+### TypeScript Runtime
 
-# Create your own
-rappterhub init my-agent
+| Agent | Description |
+|-------|-------------|
+| `Shell` | Execute bash commands, read/write files, list directories |
+| `Memory` | Store and recall facts — remember, recall, list, forget |
 
-# Publish to the registry
-rappterhub publish ./my-agent
+## Creating Custom Agents
+
+Agents are auto-discovered by file naming convention. No registration needed.
+
+### Python — `python/openrappter/agents/my_agent.py`
+
+```python
+from openrappter.agents.basic_agent import BasicAgent
+import json
+
+class MyAgent(BasicAgent):
+    def __init__(self):
+        self.name = 'MyAgent'
+        self.metadata = {
+            "name": self.name,
+            "description": "What this agent does",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User input"}
+                },
+                "required": []
+            }
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+
+    def perform(self, **kwargs):
+        query = kwargs.get('query', '')
+        # self.context has enriched signals from data sloshing
+        return json.dumps({"status": "success", "result": query})
+```
+
+### TypeScript — `typescript/src/agents/MyAgent.ts`
+
+```typescript
+import { BasicAgent } from './BasicAgent.js';
+import type { AgentMetadata } from './types.js';
+
+export class MyAgent extends BasicAgent {
+  constructor() {
+    const metadata: AgentMetadata = {
+      name: 'MyAgent',
+      description: 'What this agent does',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'User input' }
+        },
+        required: []
+      }
+    };
+    super('MyAgent', metadata);
+  }
+
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const query = kwargs.query as string;
+    // this.context has enriched signals from data sloshing
+    return JSON.stringify({ status: 'success', result: query });
+  }
+}
+```
+
+> Python agents hot-load automatically. TypeScript agents require `npm run build` after creation.
+
+## Data Sloshing
+
+Every agent call is automatically enriched with contextual signals before `perform()` runs:
+
+| Signal | Keys | Description |
+|--------|------|-------------|
+| **Temporal** | `time_of_day`, `day_of_week`, `is_weekend`, `quarter`, `fiscal` | Time awareness |
+| **Query** | `specificity`, `hints`, `word_count`, `is_question` | What the user is asking |
+| **Memory** | `message`, `theme`, `relevance` | Relevant past interactions |
+| **Behavioral** | `prefers_brief`, `technical_level` | User patterns |
+| **Orientation** | `confidence`, `approach`, `response_style` | Synthesized action guidance |
+
+```python
+# Access in perform()
+time = self.get_signal('temporal.time_of_day')
+confidence = self.get_signal('orientation.confidence')
 ```
 
 ## Architecture
 
 ```
-~/.openrappter/
-├── config.json      # User preferences
-├── memory.json      # Persistent memory
-├── state.json       # Agent state
-├── agents/          # RappterHub agents
-└── skills/          # ClawHub skills
+User Input → Agent Registry → Keyword Matching / Copilot Routing
+                                        ↓
+                               Data Sloshing (context enrichment)
+                                        ↓
+                               Agent.perform() executes
+                                   ↓           ↓
+                            GitHub Copilot   ~/.openrappter/
+                            (cloud AI)       (local data)
 ```
 
-### Agent Contract
-
-Both Python and TypeScript agents follow the same pattern:
-
-```python
-class MyAgent(BasicAgent):
-    def __init__(self):
-        metadata = {
-            "name": "MyAgent",
-            "description": "What this agent does",
-            "parameters": {...}
-        }
-        super().__init__("MyAgent", metadata)
-
-    def perform(self, **kwargs) -> str:
-        # self.context has enriched signals from data sloshing
-        return json.dumps({"status": "success", "result": "..."})
+```
+openrappter/
+├── python/
+│   ├── openrappter/
+│   │   ├── cli.py                  # Entry point & orchestrator
+│   │   ├── clawhub.py              # ClawHub compatibility
+│   │   ├── rappterhub.py           # RappterHub client
+│   │   └── agents/                 # Python agents (*_agent.py)
+│   └── pyproject.toml
+├── typescript/
+│   ├── src/
+│   │   ├── index.ts                # Entry point
+│   │   └── agents/                 # TypeScript agents (*Agent.ts)
+│   ├── package.json
+│   └── tsconfig.json
+├── docs/                           # GitHub Pages site
+└── skills.md                       # Complete agent-teachable reference
 ```
 
-### Built-in Agents
-
-| Agent | Description |
-|-------|-------------|
-| `Shell` | Execute bash commands, read/write files |
-| `Memory` | Store and recall facts persistently |
-| `LearnNew` | Meta-agent that generates new agents from descriptions |
-
-## ClawHub Compatibility
-
-openrappter can also use [ClawHub](https://clawhub.ai) skills:
+## RappterHub & ClawHub
 
 ```bash
-# Search ClawHub
-openrappter clawhub search "discord"
+# RappterHub — native agent registry
+openrappter rappterhub search "git automation"
+openrappter rappterhub install kody-w/git-helper
+openrappter rappterhub list
 
-# Install a skill
-openrappter clawhub install steipete/discord
-
-# List installed skills
+# ClawHub — OpenClaw compatibility
+openrappter clawhub search "productivity"
+openrappter clawhub install author/skill-name
 openrappter clawhub list
 ```
 
+## Teach Your AI Agent
+
+Share the [skills.md](./skills.md) with any AI agent and it learns how to install, configure, and use openrappter:
+
+```
+Read https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md
+and set up openrappter for me.
+```
+
+Works with Copilot, Claude, ChatGPT, and any agent that can read URLs.
+
 ## Why "openrappter"?
 
-It's a **rapp**id prototyping **agent** that's open source. Plus, who doesn't want a velociraptor in their terminal? 🦖
+It's a **rapp**id prototyping **agent** that's open source. Plus, who doesn't want a velociraptor in their terminal?
 
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-# Development setup
 git clone https://github.com/kody-w/openrappter.git
-cd openrappter/python
-pip install -e .
+cd openrappter/python && pip install -e .
+cd ../typescript && npm install && npm run build
 ```
 
 ## License
 
-MIT © [Kody W](https://github.com/kody-w)
+MIT - [Kody W](https://github.com/kody-w)
 
 ---
 
 <div align="center">
 
-**[⭐ Star us on GitHub](https://github.com/kody-w/openrappter)** — it helps more developers discover local-first AI agents
+**[Star on GitHub](https://github.com/kody-w/openrappter)** | **[Documentation](./docs)** | **[Skills Reference](./skills.md)**
 
 </div>

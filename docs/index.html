@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>openrappter - The Open Source AI Agent Framework</title>
-  <meta name="description" content="Open source alternative to OpenClaw. AI agents that run locally with zero API keys. No cloud. No monthly bills. Just you and your terminal.">
+  <meta name="description" content="Open source alternative to OpenClaw. AI agents powered by your existing GitHub Copilot subscription. No extra API keys. No monthly bills. Just you and your terminal.">
   <meta property="og:title" content="openrappter - The Open Source AI Agent Framework">
-  <meta property="og:description" content="Open source alternative to OpenClaw. No API keys. No cloud. No monthly bills.">
+  <meta property="og:description" content="Open source alternative to OpenClaw. No extra API keys. No monthly bills. Powered by GitHub Copilot.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://openrappter.dev">
   <meta name="twitter:card" content="summary_large_image">
@@ -674,8 +674,9 @@
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#comparison">Compare</a>
-        <a href="#rappterhub">RappterHub</a>
-        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Docs</a>
+        <a href="./docs.html">Docs</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./teach.html">Teach Your Agent</a>
       </div>
       <div class="nav-cta">
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
@@ -697,7 +698,7 @@
       </div>
       <h1>AI agents that run <span class="highlight">entirely on your machine</span></h1>
       <p class="hero-subtitle">
-        No API keys. No cloud accounts. No monthly bills. No data leaving your machine.
+        No extra API keys. No new accounts. No additional monthly bills.
         Just powerful AI agents in your terminal, powered by your existing GitHub Copilot subscription.
       </p>
       <div class="hero-cta">
@@ -717,11 +718,11 @@
         </div>
         <div class="stat">
           <span class="stat-value">0</span>
-          <span class="stat-label">API Keys Required</span>
+          <span class="stat-label">Extra API Keys</span>
         </div>
         <div class="stat">
-          <span class="stat-value">100%</span>
-          <span class="stat-label">Local & Private</span>
+          <span class="stat-value">Local-First</span>
+          <span class="stat-label">Data & Memory</span>
         </div>
       </div>
     </div>
@@ -804,7 +805,7 @@
           </tr>
           <tr>
             <td class="feature">Data Privacy</td>
-            <td class="highlight-col"><span class="check">100% Local</span></td>
+            <td class="highlight-col"><span class="check">Local-First</span></td>
             <td><span class="partial">Cloud</span></td>
             <td><span class="partial">Cloud</span></td>
           </tr>
@@ -863,7 +864,7 @@
         <div class="feature-card">
           <div class="feature-icon">🏠</div>
           <h3>Local-First</h3>
-          <p>All your data lives in ~/.openrappter on your machine. Memories, configs, conversations—none of it touches the cloud.</p>
+          <p>Your memories, configs, and conversations live in ~/.openrappter on your machine. Agent data stays local even though Copilot powers the AI.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">🧠</div>
@@ -885,6 +886,55 @@
           <h3>Dual Runtime</h3>
           <p>Same agent contract in Python and TypeScript. Write once, run in either. Your choice.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Teach Your Agent -->
+  <section class="rappterhub" id="teach-agent" style="border-bottom: 1px solid var(--border);">
+    <div class="rappterhub-container">
+      <div class="rappterhub-content">
+        <div class="section-label">Agent Skill</div>
+        <h2>Teach your agent to use <span class="highlight" style="background: linear-gradient(135deg, var(--purple) 0%, var(--green-bright) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">openrappter</span></h2>
+        <p>
+          Share one link with any AI agent and it instantly learns how to install, configure, and use openrappter. Works with Copilot, ChatGPT, Claude, and any agent that can read URLs.
+        </p>
+        <div class="rappterhub-features">
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Prerequisites checking built in</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Step-by-step install for both runtimes</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Verification & troubleshooting included</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Works with any AI agent that reads URLs</span>
+          </div>
+        </div>
+        <a href="./teach.html" class="btn btn-primary">
+          Get the Shareable Link
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
+      <div class="rappterhub-demo">
+        <div class="demo-comment"># Share this link with your AI agent:</div>
+        <div class="demo-cmd" style="word-break: break-all;">https://kody-w.github.io/openrappter/agent-install.md</div>
+        <br>
+        <div class="demo-comment"># Then tell it:</div>
+        <div class="demo-cmd">Read that link and set up openrappter for me.</div>
+        <br>
+        <div class="demo-output" style="color: var(--green);">✅ Node.js 22.1.0 detected</div>
+        <div class="demo-output" style="color: var(--green);">✅ Python 3.12 detected</div>
+        <div class="demo-output" style="color: var(--green);">✅ TypeScript runtime — 2 agents loaded</div>
+        <div class="demo-output" style="color: var(--green);">✅ Python runtime — 5 agents loaded</div>
+        <br>
+        <div class="demo-output">🦖 openrappter is ready!</div>
       </div>
     </div>
   </section>
@@ -964,8 +1014,10 @@
     <div class="footer-container">
       <div class="footer-links">
         <a href="https://github.com/kody-w/openrappter">GitHub</a>
-        <a href="https://github.com/kody-w/rappterhub">RappterHub</a>
-        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Documentation</a>
+        <a href="./docs.html">Docs</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./teach.html">Teach Your Agent</a>
+        <a href="./changelog.html">Changelog</a>
         <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
       </div>
       <div class="footer-copy">

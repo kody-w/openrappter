@@ -96,10 +96,10 @@ When running in daemon mode or with evolution enabled, openrappter automatically
 
 ## Privacy
 
-All memories are stored **locally only**:
+All memories are stored **locally**:
 
-- Never sent to cloud services
-- Never included in API calls
+- Stored in `~/.openrappter/memory.json` on your machine
+- Not shared with third-party services
 - You control your data
 
 ## Exporting Memory

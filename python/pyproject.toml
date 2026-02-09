@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "openrappter"
 version = "1.2.0"
 description = "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required"
-readme = "../README.md"
+readme = {text = "openrappter - Local-first AI agent powered by GitHub Copilot SDK", content-type = "text/plain"}
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [

@@ -4,7 +4,7 @@
 
 ### AI agents that run on your machine
 
-**No API keys. No cloud. No monthly bills.**
+**No extra API keys. No new accounts. No additional monthly bills.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
@@ -23,7 +23,7 @@ Every AI agent framework wants your API keys and credit card. OpenAI, Anthropic,
 
 ## The Solution
 
-**openrappter** uses your existing GitHub Copilot subscription ($10/mo, free for students) to power a local-first AI agent. No new accounts. No API keys to manage. No data leaving your machine.
+**openrappter** uses your existing GitHub Copilot subscription ($10/mo, free for students) to power a local-first AI agent. No new accounts. No extra API keys to manage. Your agent data stays on your machine.
 
 ```bash
 pip install openrappter

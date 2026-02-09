@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documentation — openrappter</title>
+  <meta name="description" content="Complete documentation for openrappter: installation, configuration, agents, memory system, and API reference.">
+  <meta property="og:title" content="Documentation — openrappter">
+  <meta property="og:description" content="Complete documentation for the open source AI agent framework.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #10b981;
+      --green-bright: #34d399;
+      --green-dark: #059669;
+      --purple: #8b5cf6;
+      --blue: #3b82f6;
+      --orange: #f97316;
+      --red: #ef4444;
+      --bg: #000000;
+      --bg-card: #0a0a0a;
+      --bg-elevated: #141414;
+      --bg-hover: #1a1a1a;
+      --text: #ffffff;
+      --text-secondary: #e5e5e5;
+      --text-muted: #737373;
+      --border: #262626;
+      --border-light: #404040;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Navbar */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      padding: 1rem 2rem;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo-badge {
+      font-size: 0.65rem;
+      padding: 0.2rem 0.5rem;
+      background: var(--green);
+      color: black;
+      border-radius: 4px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-cta {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--green);
+      color: black;
+    }
+
+    .btn-primary:hover {
+      background: var(--green-bright);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-light);
+    }
+
+    /* Layout */
+    .docs-layout {
+      display: flex;
+      margin-top: 73px;
+      min-height: calc(100vh - 73px);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 250px;
+      min-width: 250px;
+      position: fixed;
+      top: 73px;
+      left: 0;
+      bottom: 0;
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      padding: 2rem 0;
+      background: var(--bg);
+      z-index: 100;
+    }
+
+    .sidebar-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      padding: 0 1.5rem;
+      margin-bottom: 1rem;
+      font-weight: 700;
+    }
+
+    .sidebar-nav {
+      list-style: none;
+    }
+
+    .sidebar-nav li a {
+      display: block;
+      padding: 0.6rem 1.5rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-left: 3px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .sidebar-nav li a:hover {
+      color: var(--text);
+      background: var(--bg-hover);
+    }
+
+    .sidebar-nav li a.active {
+      color: var(--green);
+      border-left-color: var(--green);
+      background: rgba(16, 185, 129, 0.05);
+    }
+
+    /* Main content */
+    .docs-content {
+      margin-left: 250px;
+      flex: 1;
+      padding: 3rem 4rem 6rem;
+      max-width: 1050px;
+    }
+
+    .docs-main {
+      max-width: 800px;
+    }
+
+    /* Typography */
+    .docs-main h1 {
+      font-size: 2.5rem;
+      font-weight: 900;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .docs-main .section-subtitle {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      margin-bottom: 3rem;
+    }
+
+    .doc-section {
+      margin-bottom: 4rem;
+      scroll-margin-top: 100px;
+    }
+
+    .doc-section h2 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      letter-spacing: -0.01em;
+    }
+
+    .doc-section h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--green-bright);
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .doc-section h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .doc-section p {
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      line-height: 1.7;
+    }
+
+    .doc-section ul, .doc-section ol {
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+      padding-left: 1.5rem;
+    }
+
+    .doc-section li {
+      margin-bottom: 0.4rem;
+    }
+
+    .doc-section li strong {
+      color: var(--text);
+    }
+
+    /* Code blocks */
+    pre {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+    }
+
+    pre code {
+      color: var(--text-secondary);
+    }
+
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85em;
+    }
+
+    /* Inline code */
+    p code, li code, td code {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      font-size: 0.8em;
+      color: var(--green-bright);
+    }
+
+    .cmd { color: var(--green); }
+    .comment { color: var(--text-muted); }
+    .highlight { color: var(--purple); }
+    .str { color: var(--green-bright); }
+    .kw { color: var(--purple); }
+    .fn { color: var(--blue); }
+    .val { color: var(--orange); }
+
+    /* Tables */
+    .doc-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    .doc-table th {
+      text-align: left;
+      padding: 0.75rem 1rem;
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-weight: 600;
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .doc-table td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .doc-table tr:hover td {
+      background: var(--bg-hover);
+    }
+
+    .doc-table td:first-child {
+      color: var(--green-bright);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+    }
+
+    /* Warning box */
+    .warning-box {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    .warning-box strong {
+      color: var(--red);
+    }
+
+    /* Info box */
+    .info-box {
+      background: rgba(16, 185, 129, 0.06);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
+
+    .info-box strong {
+      color: var(--green);
+    }
+
+    /* Tabs for TS/Python */
+    .code-tabs {
+      margin-bottom: 1.25rem;
+    }
+
+    .code-tabs-header {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 0;
+    }
+
+    .code-tab-btn {
+      padding: 0.5rem 1.25rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .code-tab-btn:hover { color: var(--text); }
+
+    .code-tab-btn.active {
+      color: var(--green);
+      border-bottom-color: var(--green);
+    }
+
+    .code-tab-content {
+      display: none;
+    }
+
+    .code-tab-content.active {
+      display: block;
+    }
+
+    .code-tab-content pre {
+      border-radius: 0 0 8px 8px;
+      border-top: none;
+      margin-bottom: 0;
+    }
+
+    /* Mobile sidebar toggle */
+    .sidebar-toggle {
+      display: none;
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 200;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--green);
+      color: black;
+      border: none;
+      font-size: 1.25rem;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Mobile top nav for sidebar items */
+    .mobile-doc-nav {
+      display: none;
+    }
+
+    /* Footer */
+    footer {
+      padding: 3rem 2rem;
+      border-top: 1px solid var(--border);
+      margin-left: 250px;
+    }
+
+    .footer-container {
+      max-width: 800px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: var(--text); }
+
+    .footer-copy {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        min-width: 100%;
+        z-index: 500;
+        padding-top: 5rem;
+        background: rgba(0, 0, 0, 0.97);
+      }
+
+      .sidebar.open {
+        display: block;
+      }
+
+      .sidebar-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .docs-content {
+        margin-left: 0;
+        padding: 2rem 1.5rem 4rem;
+      }
+
+      .mobile-doc-nav {
+        display: flex;
+        gap: 0.5rem;
+        overflow-x: auto;
+        padding: 0.75rem 1.5rem;
+        margin-top: 73px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        position: sticky;
+        top: 73px;
+        z-index: 50;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .mobile-doc-nav a {
+        white-space: nowrap;
+        padding: 0.4rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-decoration: none;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        transition: all 0.2s;
+      }
+
+      .mobile-doc-nav a:hover,
+      .mobile-doc-nav a.active {
+        color: var(--green);
+        border-color: var(--green);
+      }
+
+      footer {
+        margin-left: 0;
+      }
+
+      .docs-main h1 {
+        font-size: 2rem;
+      }
+
+      .footer-container {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
+      }
+
+      .footer-links {
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+
+      .docs-content {
+        padding: 1.5rem 1rem 3rem;
+      }
+
+      .doc-table {
+        font-size: 0.8rem;
+      }
+
+      .doc-table th, .doc-table td {
+        padding: 0.6rem 0.5rem;
+      }
+
+      pre {
+        font-size: 0.78rem;
+        padding: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Nav -->
+  <nav>
+    <div class="nav-container">
+      <a href="./" class="logo">
+        🦖 openrappter
+        <span class="logo-badge">v1.2</span>
+      </a>
+      <div class="nav-links">
+        <a href="./">Home</a>
+        <a href="./teach.html">Teach Your Agent</a>
+        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+      </div>
+      <div class="nav-cta">
+        <a href="./" class="btn btn-ghost">← Back to Home</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Mobile horizontal doc nav -->
+  <div class="mobile-doc-nav">
+    <a href="#getting-started">Getting Started</a>
+    <a href="#configuration">Configuration</a>
+    <a href="#agents-skills">Agents &amp; Skills</a>
+    <a href="#memory-system">Memory System</a>
+    <a href="#api-reference">API Reference</a>
+  </div>
+
+  <div class="docs-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-title">Documentation</div>
+      <ul class="sidebar-nav" id="sidebar-nav">
+        <li><a href="#getting-started" data-section="getting-started">🚀 Getting Started</a></li>
+        <li><a href="#configuration" data-section="configuration">⚙️ Configuration</a></li>
+        <li><a href="#agents-skills" data-section="agents-skills">🎯 Agents &amp; Skills</a></li>
+        <li><a href="#memory-system" data-section="memory-system">🧠 Memory System</a></li>
+        <li><a href="#api-reference" data-section="api-reference">📚 API Reference</a></li>
+      </ul>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="docs-content">
+      <div class="docs-main">
+        <h1>📖 Documentation</h1>
+        <p class="section-subtitle">Everything you need to install, configure, and use openrappter.</p>
+
+        <!-- ========== GETTING STARTED ========== -->
+        <section class="doc-section" id="getting-started">
+          <h2>🚀 Getting Started</h2>
+          <p>Get openrappter running in under 2 minutes.</p>
+
+          <h3>Prerequisites</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Requirement</th><th>Details</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Node.js 18+</td><td>Required for the TypeScript runtime</td></tr>
+              <tr><td>Python 3.10+</td><td>Required for the Python runtime</td></tr>
+              <tr><td>GitHub Copilot CLI</td><td>Optional — enables AI-powered agent routing. Works without it using keyword matching.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Install — TypeScript Runtime</h3>
+<pre><code><span class="comment"># Clone the repository</span>
+<span class="cmd">git clone</span> https://github.com/kody-w/openrappter.git
+<span class="cmd">cd</span> openrappter/typescript
+
+<span class="comment"># Install dependencies and build</span>
+<span class="cmd">npm install</span>
+<span class="cmd">npm run build</span></code></pre>
+
+          <h3>Install — Python Runtime</h3>
+<pre><code><span class="comment"># Clone the repository</span>
+<span class="cmd">git clone</span> https://github.com/kody-w/openrappter.git
+<span class="cmd">cd</span> openrappter/python
+
+<span class="comment"># Install in editable mode</span>
+<span class="cmd">pip install -e .</span></code></pre>
+
+          <h3>Verify Installation</h3>
+          <div class="code-tabs">
+            <div class="code-tabs-header">
+              <button class="code-tab-btn active" onclick="switchTab(this, 'verify-ts')">TypeScript</button>
+              <button class="code-tab-btn" onclick="switchTab(this, 'verify-py')">Python</button>
+            </div>
+            <div class="code-tab-content active" id="verify-ts">
+<pre><code><span class="cmd">node dist/index.js --status</span>
+
+<span class="comment"># Expected output:</span>
+<span class="comment"># 🦖 openrappter Status</span>
+<span class="comment">#   Version: 1.2.0</span>
+<span class="comment">#   Agents: 2 loaded</span></code></pre>
+            </div>
+            <div class="code-tab-content" id="verify-py">
+<pre><code><span class="cmd">openrappter --status</span>
+
+<span class="comment"># Expected output:</span>
+<span class="comment"># Agents: 5 loaded</span>
+
+<span class="comment"># Or without installing:</span>
+<span class="cmd">python3 -m openrappter.cli --status</span></code></pre>
+            </div>
+          </div>
+
+          <div class="info-box">
+            <strong>💡 Tip:</strong> If you get a Node.js version error, use <code>nvm install 18 && nvm use 18</code> to upgrade. For Python import errors, ensure you ran <code>pip install -e .</code> from the <code>python/</code> directory.
+          </div>
+        </section>
+
+        <!-- ========== CONFIGURATION ========== -->
+        <section class="doc-section" id="configuration">
+          <h2>⚙️ Configuration</h2>
+          <p>openrappter stores configuration in <code>~/.openrappter/config.json</code>.</p>
+
+          <h3>Configuration File</h3>
+<pre><code><span class="comment">// ~/.openrappter/config.json</span>
+{
+  <span class="str">"setupComplete"</span>: <span class="val">true</span>,
+  <span class="str">"copilotAvailable"</span>: <span class="val">true</span>,
+  <span class="str">"preferences"</span>: {
+    <span class="str">"emoji"</span>: <span class="str">"🦖"</span>,
+    <span class="str">"name"</span>: <span class="str">"openrappter"</span>
+  }
+}</code></pre>
+
+          <h3>Environment Variables</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>OPENRAPPTER_HOME</td><td>Config directory path</td><td><code>~/.openrappter</code></td></tr>
+              <tr><td>OPENRAPPTER_DEBUG</td><td>Enable debug logging</td><td><code>false</code></td></tr>
+            </tbody>
+          </table>
+
+          <h3>CLI Options</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Option</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>[message]</td><td>Send a single message to openrappter</td></tr>
+              <tr><td>-t, --task &lt;task&gt;</td><td>Run a task and exit</td></tr>
+              <tr><td>-e, --evolve &lt;n&gt;</td><td>Run N evolution ticks</td></tr>
+              <tr><td>-d, --daemon</td><td>Run as background daemon</td></tr>
+              <tr><td>-s, --status</td><td>Show agent status</td></tr>
+              <tr><td>-v, --version</td><td>Show version</td></tr>
+              <tr><td>-h, --help</td><td>Show help text</td></tr>
+              <tr><td>--list-agents</td><td>List all discovered agents</td></tr>
+              <tr><td>--exec &lt;agent&gt; &lt;args&gt;</td><td>Execute a specific agent directly</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Onboarding</h3>
+          <p>Run the setup wizard to configure openrappter for the first time:</p>
+<pre><code><span class="cmd">openrappter onboard</span>
+
+<span class="comment"># This will:</span>
+<span class="comment"># 1. Check for GitHub Copilot CLI</span>
+<span class="comment"># 2. Create configuration directory</span>
+<span class="comment"># 3. Set up initial preferences</span></code></pre>
+
+          <h3>Data Locations</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>File</th><th>Purpose</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>~/.openrappter/config.json</td><td>Configuration settings</td></tr>
+              <tr><td>~/.openrappter/memory.json</td><td>Persistent memory store</td></tr>
+              <tr><td>~/.openrappter/state.json</td><td>Agent state data</td></tr>
+              <tr><td>~/.openrappter/skills/</td><td>Custom skill files</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- ========== AGENTS & SKILLS ========== -->
+        <section class="doc-section" id="agents-skills">
+          <h2>🎯 Agents &amp; Skills</h2>
+          <p>Agents are tools that openrappter uses to interact with your system. They follow a unified contract across both runtimes.</p>
+
+          <h3>Built-in Agents</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Agent</th><th>Description</th><th>Example</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Shell</td><td>Execute commands, read/write files, directory listing</td><td><code>run ls -la</code>, <code>read README.md</code></td></tr>
+              <tr><td>Memory</td><td>Store and recall facts across sessions</td><td><code>remember I like dinosaurs</code></td></tr>
+              <tr><td>LearnNew</td><td>Generate new agents at runtime (Python only)</td><td><code>learn how to fetch weather</code></td></tr>
+            </tbody>
+          </table>
+
+          <h3>Using Agents</h3>
+          <h4>Natural Language</h4>
+          <p>Just describe what you want in plain English:</p>
+<pre><code><span class="highlight">🦖 You:</span> run npm test
+<span class="highlight">🦖 openrappter:</span> Running: npm test
+
+<span class="cmd">✓ All tests passed (42 tests)</span></code></pre>
+
+          <h4>Slash Commands</h4>
+<pre><code><span class="cmd">/agents</span>      <span class="comment"># List all available agents</span>
+<span class="cmd">/status</span>      <span class="comment"># Show agent status</span>
+<span class="cmd">/help</span>        <span class="comment"># Show help</span></code></pre>
+
+          <h4>CLI Options</h4>
+          <div class="code-tabs">
+            <div class="code-tabs-header">
+              <button class="code-tab-btn active" onclick="switchTab(this, 'agents-cli-ts')">TypeScript</button>
+              <button class="code-tab-btn" onclick="switchTab(this, 'agents-cli-py')">Python</button>
+            </div>
+            <div class="code-tab-content active" id="agents-cli-ts">
+<pre><code><span class="cmd">node dist/index.js --list-agents</span>
+<span class="cmd">node dist/index.js --exec Shell "ls"</span></code></pre>
+            </div>
+            <div class="code-tab-content" id="agents-cli-py">
+<pre><code><span class="cmd">openrappter --list-agents</span>
+<span class="cmd">openrappter --exec Shell "ls"</span></code></pre>
+            </div>
+          </div>
+
+          <h3>Creating Custom Agents</h3>
+          <p>Both runtimes use the same agent pattern. Agents are auto-discovered by file naming convention.</p>
+
+          <div class="code-tabs">
+            <div class="code-tabs-header">
+              <button class="code-tab-btn active" onclick="switchTab(this, 'custom-ts')">TypeScript (*Agent.ts)</button>
+              <button class="code-tab-btn" onclick="switchTab(this, 'custom-py')">Python (*_agent.py)</button>
+            </div>
+            <div class="code-tab-content active" id="custom-ts">
+<pre><code><span class="comment">// typescript/src/agents/MyAgent.ts</span>
+<span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
+<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
+
+<span class="kw">export class</span> <span class="fn">MyAgent</span> <span class="kw">extends</span> BasicAgent {
+  <span class="fn">constructor</span>() {
+    <span class="kw">const</span> metadata: AgentMetadata = {
+      name: <span class="str">'MyAgent'</span>,
+      description: <span class="str">'Does something cool'</span>,
+      parameters: {
+        type: <span class="str">'object'</span>,
+        properties: {
+          query: { type: <span class="str">'string'</span>, description: <span class="str">'User input'</span> }
+        },
+        required: []
+      }
+    };
+    <span class="kw">super</span>(<span class="str">'MyAgent'</span>, metadata);
+  }
+
+  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: Record&lt;<span class="kw">string</span>, unknown&gt;): Promise&lt;<span class="kw">string</span>&gt; {
+    <span class="kw">const</span> query = kwargs.query <span class="kw">as string</span>;
+    <span class="kw">return</span> JSON.<span class="fn">stringify</span>({ status: <span class="str">'success'</span>, result: query });
+  }
+}</code></pre>
+            </div>
+            <div class="code-tab-content" id="custom-py">
+<pre><code><span class="comment"># python/openrappter/agents/my_agent.py</span>
+<span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
+<span class="kw">import</span> json
+
+<span class="kw">class</span> <span class="fn">MyAgent</span>(BasicAgent):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self):
+        self.name = <span class="str">'MyAgent'</span>
+        self.metadata = {
+            <span class="str">"name"</span>: self.name,
+            <span class="str">"description"</span>: <span class="str">"Does something cool"</span>,
+            <span class="str">"parameters"</span>: {
+                <span class="str">"type"</span>: <span class="str">"object"</span>,
+                <span class="str">"properties"</span>: {
+                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User input"</span>}
+                },
+                <span class="str">"required"</span>: []
+            }
+        }
+        <span class="kw">super</span>().__init__(name=self.name, metadata=self.metadata)
+
+    <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+        query = kwargs.<span class="fn">get</span>(<span class="str">'query'</span>, <span class="str">''</span>)
+        <span class="kw">return</span> json.<span class="fn">dumps</span>({<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"result"</span>: query})</code></pre>
+            </div>
+          </div>
+
+          <h3>Agent Execution</h3>
+          <ul>
+            <li><strong>Timeout:</strong> 30 seconds default per execution</li>
+            <li><strong>Output limit:</strong> 2000 characters for shell commands</li>
+            <li><strong>Context:</strong> Temporal, memory, and behavioral signals available via <code>self.context</code> (Python) or <code>this.context</code> (TypeScript)</li>
+            <li><strong>Entry point:</strong> <code>execute()</code> is called by the orchestrator (handles sloshing), which calls <code>perform()</code></li>
+            <li><strong>Return format:</strong> JSON string with <code>{"status": "success|error", ...}</code></li>
+          </ul>
+
+          <div class="warning-box">
+            <strong>⚠️ Security Warning:</strong> Agents can execute code on your system. Be careful with custom agents from untrusted sources, commands that modify important files, and scripts with elevated privileges. Always review agent code before installing.
+          </div>
+        </section>
+
+        <!-- ========== MEMORY SYSTEM ========== -->
+        <section class="doc-section" id="memory-system">
+          <h2>🧠 Memory System</h2>
+          <p>openrappter has persistent memory that survives across sessions, stored locally on your machine.</p>
+
+          <h3>How It Works</h3>
+          <p>Memory is stored locally in <code>~/.openrappter/memory.json</code>. Each memory entry includes:</p>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Field</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>ID</td><td>Unique identifier for the memory entry</td></tr>
+              <tr><td>Content</td><td>The actual stored memory text</td></tr>
+              <tr><td>Tags</td><td>Optional categorization labels</td></tr>
+              <tr><td>Created</td><td>Timestamp when the memory was created</td></tr>
+              <tr><td>Accessed</td><td>Number of times the memory has been accessed</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Adding Memories</h3>
+          <h4>Natural Language</h4>
+<pre><code><span class="highlight">🦖 You:</span> remember that this project uses PostgreSQL
+<span class="highlight">🦖 openrappter:</span> <span class="cmd">Got it! I'll remember that. (ID: abc123)</span></code></pre>
+          <p>Alternative phrases: <code>remember that...</code>, <code>save that...</code>, <code>store this: ...</code></p>
+
+          <h4>Slash Commands</h4>
+<pre><code><span class="cmd">/memory</span>          <span class="comment"># Show recent memories</span>
+<span class="cmd">/memory search</span>   <span class="comment"># Search all memories</span></code></pre>
+
+          <h3>Searching Memory</h3>
+<pre><code><span class="highlight">🦖 You:</span> what do you remember about databases?
+<span class="highlight">🦖 openrappter:</span> Here's what I remember:
+  <span class="cmd">•</span> This project uses PostgreSQL
+  <span class="cmd">•</span> Database migrations are in db/migrations/</code></pre>
+
+          <h3>Managing Memories</h3>
+<pre><code><span class="comment"># Forget a specific memory</span>
+<span class="cmd">/forget abc123</span>
+<span class="comment"># → Forgot memory abc123</span>
+
+<span class="comment"># View all memories</span>
+<span class="cmd">/memory</span>
+<span class="comment"># → [abc123] This project uses PostgreSQL...</span>
+<span class="comment"># → [def456] Deploy command is npm run deploy...</span></code></pre>
+
+          <h3>Memory Structure</h3>
+<pre><code>{
+  <span class="str">"id"</span>: <span class="str">"abc123"</span>,
+  <span class="str">"content"</span>: <span class="str">"This project uses PostgreSQL for the database"</span>,
+  <span class="str">"tags"</span>: [<span class="str">"tech"</span>, <span class="str">"database"</span>],
+  <span class="str">"created"</span>: <span class="str">"2025-02-05T00:00:00.000Z"</span>,
+  <span class="str">"accessed"</span>: <span class="val">3</span>
+}</code></pre>
+
+          <h3>Auto-Learning</h3>
+          <p>When running in daemon mode or with evolution enabled, openrappter automatically:</p>
+          <ol>
+            <li><strong>Learns project context</strong> from README files</li>
+            <li><strong>Consolidates old memories</strong> to save space</li>
+            <li><strong>Prioritizes frequently accessed</strong> memories</li>
+          </ol>
+
+          <h3>Memory Limits</h3>
+          <ul>
+            <li>Default limit: <strong>100 memories</strong></li>
+            <li>When exceeded, least-accessed memories are removed</li>
+            <li>Override with <code>OPENRAPPTER_MEMORY_LIMIT</code> environment variable</li>
+          </ul>
+
+          <h3>Privacy</h3>
+          <div class="info-box">
+            <strong>🔒 Local-first:</strong> All memories are stored in <code>~/.openrappter/memory.json</code> on your machine. They are not shared with third-party services. You control your data.
+          </div>
+
+          <h3>Export &amp; Backup</h3>
+<pre><code><span class="comment"># View raw memory file</span>
+<span class="cmd">cat</span> ~/.openrappter/memory.json
+
+<span class="comment"># Backup memories</span>
+<span class="cmd">cp</span> ~/.openrappter/memory.json ~/backup/
+
+<span class="comment"># Clear all memories</span>
+<span class="cmd">rm</span> ~/.openrappter/memory.json</code></pre>
+        </section>
+
+        <!-- ========== API REFERENCE ========== -->
+        <section class="doc-section" id="api-reference">
+          <h2>📚 API Reference</h2>
+          <p>Complete reference for all openrappter commands, options, and programmatic APIs.</p>
+
+          <h3>CLI Commands</h3>
+<pre><code><span class="cmd">openrappter</span> [options] [message]</code></pre>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Option</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>[message]</td><td>Send a single message</td></tr>
+              <tr><td>-t, --task &lt;task&gt;</td><td>Run a task and exit</td></tr>
+              <tr><td>-e, --evolve &lt;n&gt;</td><td>Run N evolution ticks</td></tr>
+              <tr><td>-d, --daemon</td><td>Run as background daemon</td></tr>
+              <tr><td>-s, --status</td><td>Show agent status</td></tr>
+              <tr><td>-v, --version</td><td>Show version</td></tr>
+              <tr><td>-h, --help</td><td>Show help text</td></tr>
+              <tr><td>--list-agents</td><td>List all discovered agents</td></tr>
+              <tr><td>--exec &lt;agent&gt; &lt;args&gt;</td><td>Execute a specific agent directly</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Examples</h3>
+<pre><code><span class="comment"># Interactive mode</span>
+<span class="cmd">openrappter</span>
+
+<span class="comment"># Single message</span>
+<span class="cmd">openrappter</span> <span class="str">"hello there"</span>
+
+<span class="comment"># Run a task</span>
+<span class="cmd">openrappter --task</span> <span class="str">"list all TypeScript files"</span>
+
+<span class="comment"># Evolve 10 times</span>
+<span class="cmd">openrappter --evolve</span> <span class="val">10</span>
+
+<span class="comment"># Background daemon</span>
+<span class="cmd">openrappter --daemon</span>
+
+<span class="comment"># Check status</span>
+<span class="cmd">openrappter --status</span></code></pre>
+
+          <h3>Slash Commands</h3>
+          <p>Use these in interactive mode:</p>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Command</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>/help</td><td>Show help</td></tr>
+              <tr><td>/skills</td><td>List available skills</td></tr>
+              <tr><td>/agents</td><td>List available agents</td></tr>
+              <tr><td>/memory</td><td>Show recent memories</td></tr>
+              <tr><td>/forget &lt;id&gt;</td><td>Remove a memory by ID</td></tr>
+              <tr><td>/evolve [n]</td><td>Run evolution ticks</td></tr>
+              <tr><td>/status</td><td>Show agent status</td></tr>
+              <tr><td>/quit</td><td>Exit openrappter</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Python API</h3>
+          <h4>Orchestrator Class</h4>
+<pre><code><span class="kw">from</span> openrappter <span class="kw">import</span> Orchestrator
+
+orchestrator = <span class="fn">Orchestrator</span>()
+orchestrator.<span class="fn">initialize</span>()  <span class="comment"># Load default agent</span>
+
+<span class="comment"># Execute a query</span>
+response = orchestrator.<span class="fn">execute</span>(query=<span class="str">"hello"</span>)
+
+<span class="comment"># List available agents</span>
+agents = orchestrator.<span class="fn">list_agents</span>()
+
+<span class="comment"># Switch to different agent</span>
+orchestrator.<span class="fn">switch_agent</span>(<span class="str">"MyCustomAgent"</span>)</code></pre>
+
+          <h4>BasicAgent Class</h4>
+<pre><code><span class="kw">from</span> agents.basic_agent <span class="kw">import</span> BasicAgent
+
+<span class="kw">class</span> <span class="fn">MyCustomAgent</span>(BasicAgent):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self):
+        self.name = <span class="str">"MyCustomAgent"</span>
+        self.metadata = {
+            <span class="str">"name"</span>: self.name,
+            <span class="str">"description"</span>: <span class="str">"Does something cool"</span>,
+            <span class="str">"parameters"</span>: {
+                <span class="str">"type"</span>: <span class="str">"object"</span>,
+                <span class="str">"properties"</span>: {
+                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User query"</span>}
+                }
+            }
+        }
+        <span class="kw">super</span>().__init__(name=self.name, metadata=self.metadata)
+
+    <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+        query = kwargs.<span class="fn">get</span>(<span class="str">'query'</span>, <span class="str">''</span>)
+        <span class="comment"># Access sloshed context via self.context</span>
+        temporal = self.<span class="fn">get_signal</span>(<span class="str">'temporal'</span>, {})
+        <span class="kw">return</span> {<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"message"</span>: <span class="kw">f</span><span class="str">"Processed: {query}"</span>}</code></pre>
+
+          <h4>Agent Context (Data Sloshing)</h4>
+          <p>In your <code>perform()</code> method, access enriched context signals:</p>
+<pre><code><span class="comment"># Temporal awareness</span>
+time_of_day = self.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>)
+is_weekend  = self.<span class="fn">get_signal</span>(<span class="str">'temporal.is_weekend'</span>)
+
+<span class="comment"># Query signals</span>
+specificity = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.specificity'</span>)
+hints       = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.hints'</span>, [])
+
+<span class="comment"># Behavioral patterns</span>
+prefers_brief = self.<span class="fn">get_signal</span>(<span class="str">'behavioral.prefers_brief'</span>)
+
+<span class="comment"># Synthesized orientation</span>
+confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
+approach   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)</code></pre>
+
+          <h3>Environment Variables</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>OPENRAPPTER_HOME</td><td>Config directory path</td><td><code>~/.openrappter</code></td></tr>
+              <tr><td>OPENRAPPTER_DEBUG</td><td>Enable debug mode</td><td><code>false</code></td></tr>
+              <tr><td>OPENRAPPTER_MEMORY_LIMIT</td><td>Maximum number of memories</td><td><code>100</code></td></tr>
+            </tbody>
+          </table>
+
+          <h3>Exit Codes</h3>
+          <table class="doc-table">
+            <thead>
+              <tr><th>Code</th><th>Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>0</td><td>Success</td></tr>
+              <tr><td>1</td><td>General error</td></tr>
+              <tr><td>2</td><td>Configuration error</td></tr>
+              <tr><td>3</td><td>Copilot CLI not found</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Sidebar toggle (mobile) -->
+  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle documentation menu">☰</button>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-links">
+        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="https://github.com/kody-w/rappterhub">RappterHub</a>
+        <a href="./teach.html">Teach Your Agent</a>
+        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
+      </div>
+      <div class="footer-copy">
+        MIT License • Made with 🦖
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Tab switching
+    function switchTab(btn, tabId) {
+      const container = btn.closest('.code-tabs');
+      container.querySelectorAll('.code-tab-btn').forEach(b => b.classList.remove('active'));
+      container.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+
+    // IntersectionObserver for sidebar highlighting
+    const sections = document.querySelectorAll('.doc-section');
+    const sidebarLinks = document.querySelectorAll('.sidebar-nav a');
+    const mobileLinks = document.querySelectorAll('.mobile-doc-nav a');
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          sidebarLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('data-section') === id);
+          });
+          mobileLinks.forEach(link => {
+            link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+          });
+        }
+      });
+    }, {
+      rootMargin: '-100px 0px -60% 0px',
+      threshold: 0
+    });
+
+    sections.forEach(section => observer.observe(section));
+
+    // Mobile sidebar toggle
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+
+    toggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+      toggle.textContent = sidebar.classList.contains('open') ? '✕' : '☰';
+    });
+
+    // Close sidebar when a link is clicked (mobile)
+    sidebarLinks.forEach(link => {
+      link.addEventListener('click', () => {
+        if (window.innerWidth <= 1024) {
+          sidebar.classList.remove('open');
+          toggle.textContent = '☰';
+        }
+      });
+    });
+  </script>
+</body>
+</html>

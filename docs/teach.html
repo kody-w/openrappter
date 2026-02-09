@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teach Your Agent — openrappter</title>
+  <meta name="description" content="Share this link with your AI agent so it can learn how to install and use openrappter.">
+  <meta property="og:title" content="Teach Your Agent — openrappter">
+  <meta property="og:description" content="Give your AI agent this link to learn how to install, configure, and use openrappter.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --green: #10b981;
+      --green-bright: #34d399;
+      --green-dark: #059669;
+      --purple: #8b5cf6;
+      --blue: #3b82f6;
+      --orange: #f97316;
+      --bg: #000000;
+      --bg-card: #0a0a0a;
+      --bg-elevated: #141414;
+      --bg-hover: #1a1a1a;
+      --text: #ffffff;
+      --text-secondary: #e5e5e5;
+      --text-muted: #737373;
+      --border: #262626;
+      --border-light: #404040;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Navbar */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      padding: 1rem 2rem;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .logo-badge {
+      font-size: 0.65rem;
+      padding: 0.2rem 0.5rem;
+      background: var(--green);
+      color: black;
+      border-radius: 4px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--green);
+      color: black;
+    }
+
+    .btn-primary:hover {
+      background: var(--green-bright);
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-light);
+    }
+
+    .btn-large {
+      padding: 1rem 2rem;
+      font-size: 1rem;
+      border-radius: 10px;
+    }
+
+    /* Hero */
+    .hero {
+      min-height: 60vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 10rem 2rem 4rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 60%, rgba(16, 185, 129, 0.1), transparent);
+      pointer-events: none;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      max-width: 750px;
+    }
+
+    .hero-emoji {
+      font-size: 4rem;
+      margin-bottom: 1.5rem;
+      display: block;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 5vw, 3.5rem);
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero h1 .highlight {
+      background: linear-gradient(135deg, var(--purple) 0%, var(--green-bright) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-subtitle {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+
+    /* Copy Link Box */
+    .copy-link-section {
+      padding: 0 2rem 5rem;
+    }
+
+    .copy-link-container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .copy-link-box {
+      background: var(--bg-card);
+      border: 2px solid var(--purple);
+      border-radius: 16px;
+      padding: 2.5rem;
+      text-align: center;
+      box-shadow:
+        0 0 0 1px rgba(139, 92, 246, 0.1),
+        0 20px 60px -15px rgba(139, 92, 246, 0.2);
+    }
+
+    .copy-link-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--purple);
+      margin-bottom: 1rem;
+    }
+
+    .copy-link-description {
+      font-size: 1rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.6;
+    }
+
+    .copy-link-url-wrapper {
+      display: flex;
+      gap: 0;
+      margin-bottom: 1rem;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .copy-link-url {
+      flex: 1;
+      padding: 1rem 1.25rem;
+      background: var(--bg);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: var(--green-bright);
+      text-align: left;
+      white-space: nowrap;
+      overflow-x: auto;
+      border: none;
+      outline: none;
+    }
+
+    .copy-btn {
+      padding: 1rem 1.5rem;
+      background: var(--purple);
+      color: white;
+      border: none;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+    }
+
+    .copy-btn:hover {
+      background: #7c3aed;
+    }
+
+    .copy-btn.copied {
+      background: var(--green);
+    }
+
+    .copy-link-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.75rem;
+    }
+
+    /* How It Works */
+    .how-it-works {
+      padding: 5rem 2rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .how-container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .how-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .how-header h2 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .how-header p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+    }
+
+    .step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      transition: all 0.3s;
+    }
+
+    .step:hover {
+      border-color: var(--green);
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px -20px rgba(16, 185, 129, 0.2);
+    }
+
+    .step-number {
+      width: 40px;
+      height: 40px;
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--purple);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .step h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .step p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    /* Terminal Preview */
+    .preview-section {
+      padding: 5rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
+    .preview-container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .preview-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .preview-header h2 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .preview-header p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+
+    .terminal {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 20px 50px -10px rgba(0,0,0,0.5);
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 1rem 1.25rem;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .terminal-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .terminal-body {
+      padding: 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.9;
+    }
+
+    .t-comment { color: var(--text-muted); font-style: italic; }
+    .t-prompt { color: var(--green); user-select: none; }
+    .t-cmd { color: var(--text); }
+    .t-url { color: var(--purple); }
+    .t-output { color: var(--text-muted); padding-left: 0; }
+    .t-success { color: var(--green); }
+
+    /* Skill Content Preview */
+    .skill-preview {
+      padding: 5rem 2rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .skill-preview-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .skill-preview-header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+
+    .skill-preview-header h2 {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+    }
+
+    .skill-preview-header p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+
+    .skill-content {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.5rem;
+    }
+
+    .skill-content h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin: 2rem 0 0.75rem;
+      color: var(--green-bright);
+    }
+
+    .skill-content h3:first-child {
+      margin-top: 0;
+    }
+
+    .skill-content p, .skill-content li {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    .skill-content ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .skill-content ul li {
+      padding: 0.35rem 0;
+      padding-left: 1.5rem;
+      position: relative;
+    }
+
+    .skill-content ul li::before {
+      content: '→';
+      position: absolute;
+      left: 0;
+      color: var(--green);
+    }
+
+    .skill-content code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      background: rgba(139, 92, 246, 0.1);
+      color: var(--purple);
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+    }
+
+    .skill-content .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 0.75rem 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--green-bright);
+      overflow-x: auto;
+    }
+
+    .view-raw-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+      color: var(--purple);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+
+    .view-raw-link:hover { color: var(--green-bright); }
+
+    /* CTA */
+    .cta {
+      padding: 6rem 2rem;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      position: relative;
+    }
+
+    .cta-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: radial-gradient(ellipse 60% 40% at 50% 100%, rgba(139, 92, 246, 0.12), transparent);
+      pointer-events: none;
+    }
+
+    .cta-container {
+      max-width: 600px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .cta h2 {
+      font-size: 2.5rem;
+      font-weight: 900;
+      margin-bottom: 1rem;
+    }
+
+    .cta p {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+
+    .cta-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* Footer */
+    footer {
+      padding: 3rem 2rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 2rem;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: var(--text); }
+
+    .footer-copy {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .steps { grid-template-columns: 1fr; }
+      .copy-link-url-wrapper { flex-direction: column; }
+      .copy-link-url { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Nav -->
+  <nav>
+    <div class="nav-container">
+      <a href="./" class="logo">
+        🦖 openrappter
+        <span class="logo-badge">v1.2</span>
+      </a>
+      <div class="nav-links">
+        <a href="./">Home</a>
+        <a href="./#features">Features</a>
+        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Docs</a>
+      </div>
+      <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-content">
+      <span class="hero-emoji">🤖🦖</span>
+      <h1>Teach your agent to use <span class="highlight">openrappter</span></h1>
+      <p class="hero-subtitle">
+        Share one link with any AI agent — Copilot, ChatGPT, Claude, or your own — and it instantly learns how to install, configure, and use openrappter.
+      </p>
+    </div>
+  </section>
+
+  <!-- Copy Link -->
+  <section class="copy-link-section">
+    <div class="copy-link-container">
+      <div class="copy-link-box">
+        <div class="copy-link-label">📋 Shareable Agent Skill Link</div>
+        <p class="copy-link-description">
+          Copy this URL and paste it into any AI agent chat. The agent will read the skill file and learn how to set up openrappter for you.
+        </p>
+        <div class="copy-link-url-wrapper">
+          <input class="copy-link-url" id="skillUrl" type="text" value="https://kody-w.github.io/openrappter/agent-install.md" readonly>
+          <button class="copy-btn" id="copyBtn" onclick="copyLink()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy Link
+          </button>
+        </div>
+        <p class="copy-link-hint">Works with GitHub Copilot, ChatGPT, Claude, Gemini, and any agent that can read URLs</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section class="how-it-works">
+    <div class="how-container">
+      <div class="how-header">
+        <h2>How it works</h2>
+        <p>Three steps to a fully-configured openrappter environment</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <h3>Copy the link</h3>
+          <p>Grab the shareable skill URL above. It points to a structured markdown file that any AI agent can parse.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <h3>Paste into your agent</h3>
+          <p>Send the link to your AI assistant with a message like <em>"Read this and set up openrappter for me."</em></p>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <h3>Agent handles the rest</h3>
+          <p>Your agent reads the skill, checks prerequisites, installs dependencies, and verifies the setup — all automatically.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Terminal Preview -->
+  <section class="preview-section">
+    <div class="preview-container">
+      <div class="preview-header">
+        <h2>What your agent sees</h2>
+        <p>Here's an example of pasting the link into an AI agent</p>
+      </div>
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span class="terminal-title">AI Agent Chat</span>
+        </div>
+        <div class="terminal-body">
+          <div class="t-comment"># You paste the link and ask:</div>
+          <br>
+          <div><span class="t-prompt">You: </span><span class="t-cmd">Read </span><span class="t-url">https://kody-w.github.io/openrappter/agent-install.md</span></div>
+          <div style="padding-left: 3.2rem;"><span class="t-cmd">and set up openrappter on my machine.</span></div>
+          <br>
+          <div><span class="t-prompt">Agent: </span><span class="t-output">I'll set up openrappter for you. Let me check prerequisites first...</span></div>
+          <br>
+          <div class="t-output">  ✅ Node.js v22.1.0 detected</div>
+          <div class="t-output">  ✅ Python 3.12.0 detected</div>
+          <div class="t-success">  ✅ TypeScript runtime built — 2 agents loaded</div>
+          <div class="t-success">  ✅ Python runtime installed — 5 agents loaded</div>
+          <br>
+          <div><span class="t-prompt">Agent: </span><span class="t-success">openrappter is ready! Both runtimes are installed and verified. 🦖</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Skill Content Preview -->
+  <section class="skill-preview">
+    <div class="skill-preview-container">
+      <div class="skill-preview-header">
+        <h2>What's in the skill file</h2>
+        <p>The agent-install.md file teaches your agent everything it needs</p>
+      </div>
+      <div class="skill-content">
+        <h3>🔍 Prerequisites Check</h3>
+        <ul>
+          <li>Node.js 18+ for the TypeScript runtime</li>
+          <li>Python 3.10+ for the Python runtime</li>
+          <li>GitHub Copilot CLI (optional, for enhanced functionality)</li>
+        </ul>
+
+        <h3>📦 Installation Steps</h3>
+        <p>Step-by-step instructions for both runtimes:</p>
+        <div class="code-block">
+cd typescript && npm install && npm run build
+cd python && pip install -e .
+        </div>
+
+        <h3>✅ Verification</h3>
+        <p>Commands to confirm everything is working:</p>
+        <div class="code-block">
+node dist/index.js --status    # TypeScript
+openrappter --status            # Python
+        </div>
+
+        <h3>🧪 Quick Test Sequence</h3>
+        <ul>
+          <li>Status check — verify agents are loaded</li>
+          <li>Memory test — store and recall a fact</li>
+          <li>Shell test — run a basic command</li>
+        </ul>
+
+        <h3>🛠 Troubleshooting</h3>
+        <ul>
+          <li>Build error recovery for TypeScript</li>
+          <li>Import error fixes for Python</li>
+          <li>Copilot CLI fallback behavior</li>
+        </ul>
+
+        <a href="./agent-install.md" class="view-raw-link">
+          View raw skill file →
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="cta-bg"></div>
+    <div class="cta-container">
+      <h2>Let your agent do the work 🦖</h2>
+      <p>One link. Any agent. Fully configured in minutes.</p>
+      <div class="cta-buttons">
+        <a href="https://github.com/kody-w/openrappter" class="btn btn-primary btn-large">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+        <a href="./" class="btn btn-ghost btn-large">
+          ← Back to Home
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-links">
+        <a href="./">Home</a>
+        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Documentation</a>
+        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
+      </div>
+      <div class="footer-copy">
+        MIT License • Made with 🦖
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function copyLink() {
+      const url = document.getElementById('skillUrl');
+      navigator.clipboard.writeText(url.value).then(() => {
+        const btn = document.getElementById('copyBtn');
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy Link';
+        }, 2500);
+      });
+    }
+  </script>
+</body>
+</html>

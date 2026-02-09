@@ -8,6 +8,7 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 import { AgentRegistry, BasicAgent } from './agents/index.js';
+import type { AgentInfo } from './agents/types.js';
 
 const execAsync = promisify(exec);
 
@@ -326,7 +327,7 @@ async function statusCommand(): Promise<void> {
   console.log(`  Setup: ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run')}`);
   console.log(`  Agents: ${agents.length} loaded`);
   if (agents.length > 0) {
-    console.log(`    ${agents.map(a => a.name).join(', ')}`);
+    console.log(`    ${agents.map((a: AgentInfo) => a.name).join(', ')}`);
   }
   console.log('');
 }

@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenRappter Dashboard</title>
+  <meta name="description" content="OpenRappter — local-first AI agent dashboard. Chat, manage channels, skills, and more.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f0f;
+      --bg2: #1a1a1a;
+      --bg3: #252525;
+      --text: #ffffff;
+      --muted: #a0a0a0;
+      --accent: #10b981;
+      --accent-hover: #059669;
+      --err: #ef4444;
+      --warn: #f59e0b;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --border: #333;
+      --sidebar-w: 220px;
+      --mono: 'SF Mono', Monaco, 'Cascadia Code', 'Courier New', monospace;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; }
+
+    /* ── Sidebar ── */
+    #sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; width: var(--sidebar-w);
+      background: var(--bg2); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; z-index: 10;
+    }
+    .sb-logo { padding: 1.25rem; display: flex; align-items: center; gap: 0.6rem; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 1.05rem; }
+    .sb-nav { flex: 1; padding: 0.75rem 0; overflow-y: auto; }
+    .sb-section { padding: 0 0.6rem; margin-bottom: 0.75rem; }
+    .sb-label { font-size: 0.65rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 0.4rem 0.6rem; }
+    .sb-item {
+      display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border-radius: 6px;
+      cursor: pointer; color: var(--muted); font-size: 0.85rem; font-weight: 500; transition: all 0.12s;
+    }
+    .sb-item:hover { background: var(--bg3); color: var(--text); }
+    .sb-item.active { background: var(--accent); color: #fff; }
+    .sb-icon { width: 1.25rem; text-align: center; font-size: 1rem; }
+    .sb-footer { padding: 0.75rem 1rem; border-top: 1px solid var(--border); font-size: 0.7rem; color: var(--muted); }
+    .sb-footer a { color: var(--accent); text-decoration: none; }
+
+    /* ── Main ── */
+    #main { flex: 1; margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-height: 100vh; }
+    #topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1.25rem; background: var(--bg2); border-bottom: 1px solid var(--border);
+    }
+    #topbar h1 { font-size: 1.1rem; font-weight: 600; }
+    .conn-status { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+    .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--err); }
+    .conn-dot.ok { background: var(--accent); }
+    #view { flex: 1; overflow: auto; }
+    .view-panel { display: none; height: 100%; }
+    .view-panel.active { display: flex; flex-direction: column; }
+
+    /* ── Shared ── */
+    .v-pad { padding: 1.25rem; }
+    .v-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+    .v-header h2 { font-size: 1.05rem; font-weight: 600; }
+    .btn { padding: 0.45rem 0.9rem; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: background 0.12s; }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-s { background: var(--bg3); color: var(--text); }
+    .btn-s:hover { background: var(--border); }
+    .btn-d { background: var(--err); }
+    .btn-group { display: flex; gap: 0.4rem; }
+    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+    .grid { display: grid; gap: 0.75rem; }
+    .grid-2 { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    .empty { text-align: center; padding: 3rem; color: var(--muted); }
+    .badge { font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 4px; font-weight: 600; }
+    .badge-ok { background: rgba(16,185,129,0.2); color: var(--accent); }
+    .badge-err { background: rgba(239,68,68,0.2); color: var(--err); }
+    .badge-warn { background: rgba(245,158,11,0.2); color: var(--warn); }
+    .mono { font-family: var(--mono); font-size: 0.8rem; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 2rem auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    table { width: 100%; border-collapse: collapse; background: var(--bg2); border-radius: 8px; overflow: hidden; }
+    th, td { padding: 0.65rem 0.85rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: var(--bg3); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: var(--bg3); }
+
+    /* ── Chat ── */
+    #v-chat { display: none; flex-direction: column; }
+    #v-chat.active { display: flex; }
+    .chat-msgs { flex: 1; overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--muted); gap: 0.75rem; text-align: center; }
+    .chat-empty-icon { font-size: 3rem; }
+    .msg { max-width: 78%; padding: 0.7rem 0.9rem; border-radius: 10px; line-height: 1.5; font-size: 0.9rem; }
+    .msg-user { align-self: flex-end; background: var(--accent); color: #fff; }
+    .msg-assistant { align-self: flex-start; background: var(--bg3); }
+    .msg-content { white-space: pre-wrap; word-break: break-word; }
+    .msg-content code { background: rgba(0,0,0,0.2); padding: 0.1rem 0.25rem; border-radius: 3px; font-family: var(--mono); font-size: 0.85em; }
+    .msg-content pre { background: rgba(0,0,0,0.3); padding: 0.6rem; border-radius: 6px; overflow-x: auto; margin: 0.4rem 0; }
+    .msg-content pre code { background: transparent; padding: 0; }
+    .msg-time { font-size: 0.65rem; color: var(--muted); margin-top: 0.2rem; }
+    .msg-user .msg-time { color: rgba(255,255,255,0.65); }
+    .streaming-dot { display: inline-block; width: 7px; height: 7px; background: var(--accent); border-radius: 50%; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+    .chat-input { padding: 0.85rem 1.25rem; background: var(--bg2); border-top: 1px solid var(--border); display: flex; gap: 0.6rem; align-items: flex-end; }
+    .chat-input textarea {
+      flex: 1; padding: 0.6rem 0.85rem; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 0.875rem; font-family: inherit; resize: none; min-height: 40px; max-height: 180px; line-height: 1.5;
+    }
+    .chat-input textarea:focus { outline: none; border-color: var(--accent); }
+    .chat-input textarea::placeholder { color: var(--muted); }
+
+    /* ── Logs ── */
+    .logs-wrap { flex: 1; overflow: auto; background: #0d0d0d; font-family: var(--mono); font-size: 0.78rem; line-height: 1.5; padding: 0.5rem; }
+    .log-line { display: flex; padding: 0.15rem 0.4rem; border-radius: 3px; gap: 0.5rem; }
+    .log-line:hover { background: rgba(255,255,255,0.04); }
+    .log-ts { color: #555; min-width: 70px; flex-shrink: 0; }
+    .log-lvl { min-width: 42px; flex-shrink: 0; font-weight: 700; }
+    .log-lvl.debug { color: #666; } .log-lvl.info { color: var(--blue); } .log-lvl.warn { color: var(--warn); } .log-lvl.error { color: var(--err); }
+    .log-src { color: var(--purple); min-width: 80px; flex-shrink: 0; }
+    .log-msg { color: #ddd; flex: 1; word-break: break-word; }
+    .filter-bar { display: flex; gap: 0.2rem; }
+    .fbtn { padding: 0.3rem 0.6rem; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 0.7rem; cursor: pointer; }
+    .fbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* ── Health cards ── */
+    .health-overall { font-size: 1.5rem; font-weight: 800; text-transform: uppercase; margin-bottom: 1rem; }
+    .health-overall.ok { color: var(--accent); }
+    .health-overall.degraded { color: var(--warn); }
+    .health-overall.error { color: var(--err); }
+    .stat-row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { color: var(--muted); }
+    .stat-val { font-weight: 600; font-family: var(--mono); }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.4rem; }
+    .health-dot.ok { background: var(--accent); }
+    .health-dot.bad { background: var(--err); }
+    .health-dot.unk { background: var(--muted); }
+
+    /* ── Toggle ── */
+    .toggle { width: 40px; height: 22px; background: var(--bg3); border-radius: 11px; position: relative; cursor: pointer; transition: background 0.2s; flex-shrink: 0; }
+    .toggle.on { background: var(--accent); }
+    .toggle::after { content: ''; position: absolute; width: 18px; height: 18px; background: #fff; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.2s; }
+    .toggle.on::after { transform: translateX(18px); }
+
+    /* ── Config editor ── */
+    .config-editor { width: 100%; min-height: 400px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: var(--mono); font-size: 0.85rem; padding: 1rem; resize: vertical; }
+    .config-editor:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      #sidebar { display: none; }
+      #main { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ Sidebar ═══ -->
+<div id="sidebar">
+  <div class="sb-logo"><span>🦖</span> OpenRappter</div>
+  <div class="sb-nav">
+    <div class="sb-section">
+      <div class="sb-label">Main</div>
+      <div class="sb-item active" data-view="chat"><span class="sb-icon">💬</span> Chat</div>
+      <div class="sb-item" data-view="channels"><span class="sb-icon">📡</span> Channels</div>
+      <div class="sb-item" data-view="sessions"><span class="sb-icon">📋</span> Sessions</div>
+      <div class="sb-item" data-view="agents"><span class="sb-icon">🤖</span> Agents</div>
+      <div class="sb-item" data-view="skills"><span class="sb-icon">🧩</span> Skills</div>
+      <div class="sb-item" data-view="cron"><span class="sb-icon">⏰</span> Cron Jobs</div>
+    </div>
+    <div class="sb-section">
+      <div class="sb-label">System</div>
+      <div class="sb-item" data-view="config"><span class="sb-icon">⚙️</span> Config</div>
+      <div class="sb-item" data-view="devices"><span class="sb-icon">💻</span> Devices</div>
+      <div class="sb-item" data-view="health"><span class="sb-icon">🏥</span> Health</div>
+      <div class="sb-item" data-view="logs"><span class="sb-icon">📜</span> Logs</div>
+    </div>
+  </div>
+  <div class="sb-footer"><a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a> · v1.2.0</div>
+</div>
+
+<!-- ═══ Main ═══ -->
+<div id="main">
+  <div id="topbar">
+    <h1 id="viewTitle">Chat</h1>
+    <div class="conn-status">
+      <span class="conn-dot" id="connDot"></span>
+      <span id="connLabel">Disconnected</span>
+      <span id="connUptime"></span>
+    </div>
+  </div>
+
+  <div id="view">
+    <!-- ─── Chat ─── -->
+    <div class="view-panel active" id="v-chat">
+      <div class="chat-msgs" id="chatMsgs">
+        <div class="chat-empty">
+          <div class="chat-empty-icon">🦖</div>
+          <div>Start a conversation with OpenRappter.<br>Ask questions, run commands, or just chat!</div>
+        </div>
+      </div>
+      <div class="chat-input">
+        <textarea id="chatInput" placeholder="Type a message…" rows="1"></textarea>
+        <button class="btn" id="chatSend">Send</button>
+      </div>
+    </div>
+
+    <!-- ─── Channels ─── -->
+    <div class="view-panel" id="v-channels">
+      <div class="v-pad">
+        <div class="v-header"><h2>Connected Channels</h2><button class="btn" onclick="loadChannels()">Refresh</button></div>
+        <div id="channelsList" class="grid grid-2"></div>
+      </div>
+    </div>
+
+    <!-- ─── Sessions ─── -->
+    <div class="view-panel" id="v-sessions">
+      <div class="v-pad">
+        <div class="v-header"><h2>Chat Sessions</h2><button class="btn" onclick="loadSessions()">Refresh</button></div>
+        <div id="sessionsList"></div>
+      </div>
+    </div>
+
+    <!-- ─── Agents ─── -->
+    <div class="view-panel" id="v-agents">
+      <div class="v-pad">
+        <div class="v-header"><h2>Agents</h2><button class="btn" onclick="loadAgents()">Refresh</button></div>
+        <div id="agentsList" class="grid grid-2"></div>
+      </div>
+    </div>
+
+    <!-- ─── Skills ─── -->
+    <div class="view-panel" id="v-skills">
+      <div class="v-pad">
+        <div class="v-header"><h2>Skills</h2><button class="btn" onclick="loadSkills()">Refresh</button></div>
+        <div id="skillsList"></div>
+      </div>
+    </div>
+
+    <!-- ─── Cron ─── -->
+    <div class="view-panel" id="v-cron">
+      <div class="v-pad">
+        <div class="v-header"><h2>Cron Jobs</h2><button class="btn" onclick="loadCron()">Refresh</button></div>
+        <div id="cronList"></div>
+      </div>
+    </div>
+
+    <!-- ─── Config ─── -->
+    <div class="view-panel" id="v-config">
+      <div class="v-pad">
+        <div class="v-header">
+          <h2>Configuration</h2>
+          <div class="btn-group">
+            <button class="btn btn-s" onclick="loadConfig()">Reset</button>
+            <button class="btn" onclick="saveConfig()">Save Changes</button>
+          </div>
+        </div>
+        <textarea class="config-editor" id="configEditor" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <!-- ─── Devices ─── -->
+    <div class="view-panel" id="v-devices">
+      <div class="v-pad">
+        <div class="v-header"><h2>Connected Devices</h2><button class="btn" onclick="loadDevices()">Refresh</button></div>
+        <div id="devicesList"></div>
+      </div>
+    </div>
+
+    <!-- ─── Health ─── -->
+    <div class="view-panel" id="v-health">
+      <div class="v-pad">
+        <div class="v-header"><h2>System Health</h2><button class="btn" onclick="loadHealth()">Refresh</button></div>
+        <div id="healthContent"></div>
+      </div>
+    </div>
+
+    <!-- ─── Logs ─── -->
+    <div class="view-panel" id="v-logs">
+      <div style="padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="font-size: 1.05rem; font-weight: 600;">System Logs</h2>
+        <div style="display: flex; gap: 0.6rem; align-items: center;">
+          <div class="filter-bar" id="logFilters">
+            <button class="fbtn on" data-lvl="debug">Debug</button>
+            <button class="fbtn on" data-lvl="info">Info</button>
+            <button class="fbtn on" data-lvl="warn">Warn</button>
+            <button class="fbtn on" data-lvl="error">Error</button>
+          </div>
+          <button class="btn btn-s" onclick="clearLogs()">Clear</button>
+        </div>
+      </div>
+      <div class="logs-wrap" id="logsWrap"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+// Gateway WebSocket Client (OpenClaw protocol v3)
+// ════════════════════════════════════════════════
+const GW = {
+  ws: null,
+  url: `ws://${location.hostname || 'localhost'}:18789`,
+  pending: new Map(),
+  streams: new Map(),
+  listeners: new Map(),
+  rid: 0,
+  reconnectAttempts: 0,
+  maxReconnect: 15,
+  stopped: false,
+  authToken: new URLSearchParams(location.search).get('token') || '',
+
+  connect() {
+    this.stopped = false;
+    return new Promise((resolve, reject) => {
+      try { this.ws = new WebSocket(this.url); } catch(e) { reject(e); return; }
+      this.ws.onopen = () => {
+        // Send connect handshake required by openclaw gateway
+        const connectId = `r_${++this.rid}_${Date.now()}`;
+        const connectParams = {
+          minProtocol: 3, maxProtocol: 3,
+          client: { id: 'webchat-ui', displayName: 'OpenRappter Dashboard', version: '1.2.0', platform: 'web', mode: 'webchat' },
+          caps: [],
+        };
+        if (this.authToken) connectParams.auth = { token: this.authToken };
+        this.pending.set(connectId, {
+          resolve: () => { this.reconnectAttempts = 0; setConnected(true); resolve(); },
+          reject: (e) => { reject(e); },
+        });
+        this.ws.send(JSON.stringify({ type: 'req', id: connectId, method: 'connect', params: connectParams }));
+      };
+      this.ws.onclose = () => {
+        setConnected(false);
+        this._flush(new Error('Connection closed'));
+        if (!this.stopped) this._reconnect();
+      };
+      this.ws.onerror = () => reject(new Error('WebSocket error'));
+      this.ws.onmessage = (e) => this._handle(e.data);
+    });
+  },
+
+  disconnect() { this.stopped = true; this.ws?.close(); this.ws = null; },
+
+  get connected() { return this.ws?.readyState === WebSocket.OPEN; },
+
+  call(method, params) {
+    if (!this.connected) return Promise.reject(new Error('Not connected'));
+    const id = `r_${++this.rid}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.ws.send(JSON.stringify({ type: 'req', id, method, params }));
+    });
+  },
+
+  callStream(method, params, onChunk) {
+    if (!this.connected) return Promise.reject(new Error('Not connected'));
+    const id = `r_${++this.rid}_${Date.now()}`;
+    return new Promise((resolve, reject) => {
+      if (onChunk) {
+        this.streams.set(id, (r) => {
+          onChunk(r);
+          if (r.done) resolve(r);
+          else if (r.error) reject(new Error(r.error.message));
+        });
+      }
+      this.pending.set(id, {
+        resolve: (v) => { this.streams.delete(id); resolve(v); },
+        reject: (e) => { this.streams.delete(id); reject(e); },
+      });
+      this.ws.send(JSON.stringify({ type: 'req', id, method, params: { ...params, stream: true } }));
+    });
+  },
+
+  on(event, cb) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event).add(cb);
+  },
+
+  off(event, cb) { this.listeners.get(event)?.delete(cb); },
+
+  _handle(raw) {
+    let msg; try { msg = JSON.parse(raw); } catch { return; }
+    // Handle openclaw protocol frames
+    if (msg.type === 'event') {
+      const evt = msg.event;
+      const data = msg.payload;
+      for (const cb of (this.listeners.get(evt) || [])) try { cb(data); } catch {}
+      for (const cb of (this.listeners.get('*') || [])) try { cb(msg); } catch {}
+      return;
+    }
+    if (msg.type === 'res') {
+      // Streaming intermediate frame
+      if (msg.streaming || (msg.ok && msg.payload?.streaming)) {
+        const cb = this.streams.get(msg.id);
+        if (cb) { cb(msg.payload || msg); if (msg.payload?.done || msg.done) this.streams.delete(msg.id); }
+        return;
+      }
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+      this.pending.delete(msg.id);
+      if (msg.ok === false && msg.error) p.reject(new Error(msg.error.message));
+      else p.resolve(msg.payload);
+      return;
+    }
+    // Fallback: legacy-style frames
+    if ('event' in msg && msg.type !== 'res') {
+      for (const cb of (this.listeners.get(msg.event) || [])) try { cb(msg.data || msg.payload); } catch {}
+      for (const cb of (this.listeners.get('*') || [])) try { cb(msg); } catch {}
+      return;
+    }
+    if (msg.streaming) {
+      const cb = this.streams.get(msg.id);
+      if (cb) { cb(msg); if (msg.done || msg.error) this.streams.delete(msg.id); }
+      return;
+    }
+    const p = this.pending.get(msg.id);
+    if (!p) return;
+    this.pending.delete(msg.id);
+    msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result || msg.payload);
+  },
+
+  _flush(err) {
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear(); this.streams.clear();
+  },
+
+  _reconnect() {
+    if (this.reconnectAttempts >= this.maxReconnect) return;
+    this.reconnectAttempts++;
+    const delay = Math.min(800 * Math.pow(1.7, this.reconnectAttempts - 1), 15000);
+    setTimeout(() => { if (!this.stopped) this.connect().catch(() => {}); }, delay);
+  },
+};
+
+// ═══════════════
+// Connection UI
+// ═══════════════
+function setConnected(ok) {
+  document.getElementById('connDot').classList.toggle('ok', ok);
+  document.getElementById('connLabel').textContent = ok ? 'Connected' : 'Disconnected';
+}
+
+// ════════════════
+// Navigation
+// ════════════════
+const viewTitles = {
+  chat: 'Chat', channels: 'Channels', sessions: 'Sessions', agents: 'Agents',
+  skills: 'Skills', cron: 'Cron Jobs', config: 'Configuration', devices: 'Devices',
+  health: 'System Health', logs: 'Logs',
+};
+let currentView = 'chat';
+
+document.querySelectorAll('.sb-item[data-view]').forEach(el => {
+  el.addEventListener('click', () => switchView(el.dataset.view));
+});
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.sb-item').forEach(i => i.classList.toggle('active', i.dataset.view === view));
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.toggle('active', p.id === `v-${view}`));
+  document.getElementById('viewTitle').textContent = viewTitles[view] || view;
+  // Lazy-load data for the view
+  const loaders = { channels: loadChannels, sessions: loadSessions, agents: loadAgents, skills: loadSkills, cron: loadCron, config: loadConfig, devices: loadDevices, health: loadHealth };
+  if (loaders[view]) loaders[view]();
+}
+
+// ═════════
+// Chat
+// ═════════
+let chatMessages = [];
+let chatSessionId = null;
+let chatSending = false;
+
+const chatMsgs = document.getElementById('chatMsgs');
+const chatInput = document.getElementById('chatInput');
+const chatSendBtn = document.getElementById('chatSend');
+
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 180) + 'px';
+  chatSendBtn.disabled = chatSending || !chatInput.value.trim();
+});
+chatSendBtn.addEventListener('click', sendChat);
+
+function renderChat() {
+  if (chatMessages.length === 0) {
+    chatMsgs.innerHTML = '<div class="chat-empty"><div class="chat-empty-icon">🦖</div><div>Start a conversation with OpenRappter.<br>Ask questions, run commands, or just chat!</div></div>';
+    return;
+  }
+  chatMsgs.innerHTML = chatMessages.map(m => `
+    <div class="msg msg-${m.role}">
+      <div class="msg-content">${escHtml(m.content)}${m.streaming ? ' <span class="streaming-dot"></span>' : ''}</div>
+      <div class="msg-time">${fmtTime(m.ts)}</div>
+    </div>
+  `).join('');
+  chatMsgs.scrollTop = chatMsgs.scrollHeight;
+}
+
+async function sendChat() {
+  const text = chatInput.value.trim();
+  if (!text || chatSending) return;
+  chatSending = true;
+  chatSendBtn.disabled = true;
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+
+  chatMessages.push({ role: 'user', content: text, ts: new Date().toISOString() });
+  const aIdx = chatMessages.length;
+  chatMessages.push({ role: 'assistant', content: '', ts: new Date().toISOString(), streaming: true });
+  renderChat();
+
+  try {
+    // Send agent request — response comes via broadcast 'chat' events
+    const res = await GW.call('chat.send', {
+      sessionKey: chatSessionId || 'web-default',
+      message: text,
+      idempotencyKey: `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    });
+    if (res?.sessionKey) chatSessionId = res.sessionKey;
+    // Agent accepted; streaming deltas arrive via 'chat' event listener below
+  } catch (err) {
+    chatMessages[aIdx].content = `Error: ${err.message}`;
+    chatMessages[aIdx].streaming = false;
+    renderChat();
+    chatSending = false;
+    chatSendBtn.disabled = !chatInput.value.trim();
+  }
+}
+
+// ═══════════
+// Channels
+// ═══════════
+async function loadChannels() {
+  const el = document.getElementById('channelsList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('channels.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No channels configured.</div>'; return; }
+    const icons = { discord:'🎮', slack:'💼', telegram:'✈️', whatsapp:'📱', signal:'🔐', imessage:'💬', matrix:'🔷', teams:'👥', cli:'⌨️' };
+    el.innerHTML = list.map(ch => `
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem;">
+          <span style="font-size:1.4rem;">${icons[ch.type]||'📡'}</span>
+          <div style="flex:1"><div style="font-weight:600;">${esc(ch.id)}</div><div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">${esc(ch.type)}</div></div>
+          <span class="badge ${ch.connected?'badge-ok':'badge-err'}">${ch.connected?'Connected':'Offline'}</span>
+        </div>
+        <div style="font-size:0.8rem;color:var(--muted);">Last activity: ${ch.lastActivity ? new Date(ch.lastActivity).toLocaleString() : 'Never'}</div>
+      </div>
+    `).join('');
+  } catch { el.innerHTML = '<div class="empty">Could not load channels.</div>'; }
+}
+
+// ═══════════
+// Sessions
+// ═══════════
+async function loadSessions() {
+  const el = document.getElementById('sessionsList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('chat.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No active sessions.</div>'; return; }
+    el.innerHTML = `<table><thead><tr><th>Session ID</th><th>Agent</th><th>Messages</th><th>Created</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
+      ${list.map(s => `<tr>
+        <td class="mono">${esc(s.id)}</td>
+        <td><span class="badge badge-ok">${esc(s.agentId)}</span></td>
+        <td style="font-weight:600;">${s.messageCount}</td>
+        <td>${fmtDate(s.createdAt)}</td>
+        <td>${fmtDate(s.updatedAt)}</td>
+        <td><button class="btn btn-d" style="padding:0.3rem 0.6rem;font-size:0.75rem;" onclick="deleteSession('${esc(s.id)}')">Delete</button></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+  } catch { el.innerHTML = '<div class="empty">Could not load sessions.</div>'; }
+}
+
+async function deleteSession(id) {
+  if (!confirm('Delete this session?')) return;
+  try { await GW.call('chat.delete', { sessionId: id }); loadSessions(); } catch {}
+}
+
+// ═══════════
+// Agents
+// ═══════════
+async function loadAgents() {
+  const el = document.getElementById('agentsList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('agents.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No agents registered.</div>'; return; }
+    const icons = { basic:'🤖', shell:'⌨️', memory:'🧠', router:'🔀', broadcast:'📡' };
+    el.innerHTML = list.map(a => `
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;">
+          <span style="font-size:1.3rem;">${icons[a.type]||'🤖'}</span>
+          <div><div style="font-weight:600;">${esc(a.id)}</div><div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">${esc(a.type)}</div></div>
+        </div>
+        ${a.description ? `<div style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem;">${esc(a.description)}</div>` : ''}
+        ${a.capabilities?.length ? `<div style="display:flex;flex-wrap:wrap;gap:0.3rem;">${a.capabilities.map(c => `<span class="badge" style="background:var(--bg3);color:var(--muted);">${esc(c)}</span>`).join('')}</div>` : ''}
+      </div>
+    `).join('');
+  } catch { el.innerHTML = '<div class="empty">Could not load agents.</div>'; }
+}
+
+// ═══════════
+// Skills
+// ═══════════
+async function loadSkills() {
+  const el = document.getElementById('skillsList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('skills.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No skills installed.</div>'; return; }
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.6rem;">${list.map(s => `
+      <div class="card" style="display:flex;align-items:center;gap:0.85rem;">
+        <span style="font-size:1.3rem;">🧩</span>
+        <div style="flex:1"><div style="font-weight:600;">${esc(s.name)}</div>${s.description ? `<div style="font-size:0.85rem;color:var(--muted);margin-top:0.2rem;">${esc(s.description)}</div>` : ''}</div>
+        ${s.version ? `<span class="mono" style="color:var(--muted);">v${esc(s.version)}</span>` : ''}
+        <span class="badge ${s.enabled?'badge-ok':'badge-err'}">${s.enabled?'Enabled':'Disabled'}</span>
+      </div>
+    `).join('')}</div>`;
+  } catch { el.innerHTML = '<div class="empty">Could not load skills.</div>'; }
+}
+
+// ═══════════
+// Cron
+// ═══════════
+async function loadCron() {
+  const el = document.getElementById('cronList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('cron.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No cron jobs configured.</div>'; return; }
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.6rem;">${list.map(j => `
+      <div class="card" style="display:flex;align-items:center;gap:0.85rem;">
+        <div class="toggle ${j.enabled?'on':''}" onclick="toggleCron('${esc(j.id)}',${!j.enabled})"></div>
+        <div style="flex:1"><div style="font-weight:600;">${esc(j.name)}</div><div class="mono" style="color:var(--muted);">${esc(j.schedule)}</div></div>
+        <span class="badge ${j.enabled?'badge-ok':'badge-err'}">${j.enabled?'Active':'Disabled'}</span>
+        <button class="btn btn-s" style="padding:0.3rem 0.6rem;font-size:0.75rem;" onclick="runCron('${esc(j.id)}')">Run Now</button>
+      </div>
+    `).join('')}</div>`;
+  } catch { el.innerHTML = '<div class="empty">Could not load cron jobs.</div>'; }
+}
+
+async function toggleCron(id, enabled) {
+  try { await GW.call('cron.enable', { jobId: id, enabled }); loadCron(); } catch {}
+}
+async function runCron(id) {
+  try { await GW.call('cron.run', { jobId: id }); alert('Job triggered.'); } catch(e) { alert('Failed: ' + e.message); }
+}
+
+// ═══════════
+// Config
+// ═══════════
+let configHash = '';
+async function loadConfig() {
+  const ed = document.getElementById('configEditor');
+  try {
+    const snap = await GW.call('config.get', {});
+    ed.value = snap.raw || '';
+    configHash = snap.hash || '';
+  } catch { ed.value = '# Could not load config'; }
+}
+async function saveConfig() {
+  try {
+    await GW.call('config.set', { raw: document.getElementById('configEditor').value, baseHash: configHash });
+    await loadConfig();
+    alert('Config saved.');
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+// ═══════════
+// Devices
+// ═══════════
+async function loadDevices() {
+  const el = document.getElementById('devicesList');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('connections.list');
+    if (!list?.length) { el.innerHTML = '<div class="empty">No devices connected.</div>'; return; }
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.6rem;">${list.map(d => `
+      <div class="card" style="display:flex;align-items:center;gap:0.85rem;">
+        <span style="font-size:1.3rem;">💻</span>
+        <div style="flex:1"><div style="font-weight:600;">${esc(d.deviceId||d.id)}</div><div style="font-size:0.8rem;color:var(--muted);">${esc(d.deviceType||'Unknown')} · Connected ${fmtDate(d.connectedAt)}</div></div>
+        <span class="badge ${d.authenticated?'badge-ok':'badge-err'}">${d.authenticated?'Auth':'Unauth'}</span>
+      </div>
+    `).join('')}</div>`;
+  } catch { el.innerHTML = '<div class="empty">Could not load devices.</div>'; }
+}
+
+// ═══════════
+// Health
+// ═══════════
+async function loadHealth() {
+  const el = document.getElementById('healthContent');
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const [statusRes, healthRes] = await Promise.allSettled([GW.call('status'), GW.call('health')]);
+    const status = statusRes.status === 'fulfilled' ? statusRes.value : null;
+    const health = healthRes.status === 'fulfilled' ? healthRes.value : null;
+    let h = '';
+    if (health) h += `<div class="health-overall ${health.status}">${health.status}</div>`;
+    h += '<div class="grid grid-2">';
+    if (status) {
+      h += `<div class="card"><div style="font-weight:600;margin-bottom:0.6rem;">📊 Gateway Status</div>
+        <div class="stat-row"><span class="stat-label">Port</span><span class="stat-val">${status.port}</span></div>
+        <div class="stat-row"><span class="stat-label">Connections</span><span class="stat-val">${status.connections}</span></div>
+        <div class="stat-row"><span class="stat-label">Uptime</span><span class="stat-val">${fmtUptime(status.uptime)}</span></div>
+        <div class="stat-row"><span class="stat-label">Version</span><span class="stat-val">${esc(status.version)}</span></div>
+        <div class="stat-row"><span class="stat-label">Started</span><span class="stat-val">${fmtDate(status.startedAt)}</span></div>
+      </div>`;
+    }
+    if (health) {
+      h += `<div class="card"><div style="font-weight:600;margin-bottom:0.6rem;">🏥 Health Checks</div>
+        ${Object.entries(health.checks).map(([k,v]) => `<div style="padding:0.35rem 0;display:flex;align-items:center;"><span class="health-dot ${v===true?'ok':v===false?'bad':'unk'}"></span>${esc(k)}</div>`).join('')}
+      </div>`;
+    }
+    h += '</div>';
+    el.innerHTML = h || '<div class="empty">Could not load health data.</div>';
+  } catch { el.innerHTML = '<div class="empty">Could not load health data.</div>'; }
+}
+
+// ═══════════
+// Logs
+// ═══════════
+let logEntries = [];
+let logLevels = new Set(['debug','info','warn','error']);
+
+document.querySelectorAll('#logFilters .fbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const lvl = btn.dataset.lvl;
+    logLevels.has(lvl) ? logLevels.delete(lvl) : logLevels.add(lvl);
+    btn.classList.toggle('on', logLevels.has(lvl));
+    renderLogs();
+  });
+});
+
+function clearLogs() { logEntries = []; renderLogs(); }
+
+function addLog(entry) {
+  logEntries.push(entry);
+  if (logEntries.length > 2000) logEntries = logEntries.slice(-1500);
+  if (currentView === 'logs') renderLogs();
+}
+
+function renderLogs() {
+  const wrap = document.getElementById('logsWrap');
+  const filtered = logEntries.filter(l => logLevels.has(l.level));
+  if (!filtered.length) { wrap.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--muted);">No logs to display</div>'; return; }
+  wrap.innerHTML = filtered.map(l => `
+    <div class="log-line">
+      <span class="log-ts">${fmtTimeShort(l.timestamp)}</span>
+      <span class="log-lvl ${l.level}">${l.level.toUpperCase()}</span>
+      <span class="log-src">[${esc(l.source)}]</span>
+      <span class="log-msg">${esc(l.message)}</span>
+    </div>
+  `).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+// ═══════════
+// Helpers
+// ═══════════
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+const escHtml = esc;
+function fmtTime(ts) { return new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }
+function fmtTimeShort(ts) { return new Date(ts).toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+function fmtDate(ts) { return ts ? new Date(ts).toLocaleString() : '—'; }
+function fmtUptime(s) {
+  const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// ════════════
+// Boot
+// ════════════
+(async function init() {
+  try {
+    await GW.connect();
+
+    // Update uptime on heartbeat
+    GW.on('heartbeat', (data) => {
+      const el = document.getElementById('connUptime');
+      if (data?.connections != null) el.textContent = ` · ${data.connections} conn`;
+    });
+
+    // Stream logs from gateway
+    GW.on('log', (data) => { if (data) addLog(data); });
+
+    // Handle chat streaming deltas and final responses from the agent
+    GW.on('chat', (data) => {
+      if (!data) return;
+      const assistantMsg = chatMessages.findLast(m => m.role === 'assistant' && m.streaming);
+      if (!assistantMsg) return;
+      if (data.state === 'delta' && data.message?.content) {
+        const textPart = data.message.content.find(c => c.type === 'text');
+        if (textPart) { assistantMsg.content = textPart.text; renderChat(); }
+      } else if (data.state === 'final') {
+        if (data.message?.content) {
+          const textPart = data.message.content.find(c => c.type === 'text');
+          if (textPart) assistantMsg.content = textPart.text;
+        }
+        assistantMsg.streaming = false;
+        renderChat();
+        chatSending = false;
+        chatSendBtn.disabled = !chatInput.value.trim();
+      } else if (data.state === 'error') {
+        assistantMsg.content = `Error: ${data.errorMessage || 'Agent error'}`;
+        assistantMsg.streaming = false;
+        renderChat();
+        chatSending = false;
+        chatSendBtn.disabled = !chatInput.value.trim();
+      }
+    });
+
+    // Refresh current view on agent events
+    GW.on('agent', () => { if (currentView === 'sessions') loadSessions(); });
+    GW.on('channel.status', () => { if (currentView === 'channels') loadChannels(); });
+    GW.on('cron.complete', () => { if (currentView === 'cron') loadCron(); });
+    GW.on('presence', () => { if (currentView === 'devices') loadDevices(); });
+
+  } catch {
+    // Gateway not running — UI still usable, will reconnect
+  }
+})();
+</script>
+</body>
+</html>

@@ -230,11 +230,31 @@ program
     }
 
     if (options.daemon) {
-      console.log(`${EMOJI} ${NAME} daemon started`);
+      const { GatewayServer } = await import('./gateway/server.js');
+      const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18789', 10);
+      const token = process.env.OPENRAPPTER_TOKEN || undefined;
+      const server = new GatewayServer({
+        port,
+        bind: 'loopback',
+        auth: token ? { mode: 'token', tokens: [token] } : { mode: 'none' },
+      });
+
+      server.setAgentHandler(async (req) => {
+        const agent = await registry.getAgent(req.agentId || 'Shell');
+        if (!agent) {
+          return { sessionId: req.sessionId ?? 'default', content: `Agent '${req.agentId}' not found`, finishReason: 'error' as const };
+        }
+        const result = await agent.execute({ query: req.message });
+        return {
+          sessionId: req.sessionId ?? 'default',
+          content: typeof result === 'string' ? result : JSON.stringify(result),
+          finishReason: 'stop' as const,
+        };
+      });
+
+      await server.start();
+      console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
       console.log('Press Ctrl+C to stop\n');
-      setInterval(() => {
-        console.log(`[${new Date().toISOString()}] Daemon tick`);
-      }, 60000);
       return;
     }
 

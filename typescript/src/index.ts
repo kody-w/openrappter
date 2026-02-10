@@ -231,6 +231,7 @@ program
 
     if (options.daemon) {
       const { GatewayServer } = await import('./gateway/server.js');
+      const { Assistant } = await import('./agents/Assistant.js');
       const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18789', 10);
       const token = process.env.OPENRAPPTER_TOKEN || undefined;
       const server = new GatewayServer({
@@ -239,21 +240,48 @@ program
         auth: token ? { mode: 'token', tokens: [token] } : { mode: 'none' },
       });
 
-      server.setAgentHandler(async (req) => {
-        const agent = await registry.getAgent(req.agentId || 'Shell');
-        if (!agent) {
-          return { sessionId: req.sessionId ?? 'default', content: `Agent '${req.agentId}' not found`, finishReason: 'error' as const };
+      // Create the Assistant powered by Copilot SDK
+      const agents = await registry.getAllAgents();
+      const assistant = new Assistant(agents, {
+        name: NAME,
+        description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
+        model: process.env.OPENRAPPTER_MODEL,
+      });
+
+      server.setAgentHandler(async (req, stream) => {
+        try {
+          const result = await assistant.getResponse(
+            req.message,
+            // Forward streaming deltas
+            stream ? (delta) => stream({ chunk: delta, done: false }) : undefined,
+          );
+          return {
+            sessionId: req.sessionId ?? 'default',
+            content: result.content,
+            finishReason: 'stop' as const,
+          };
+        } catch (err) {
+          // Fallback to keyword-matching chat() if Copilot SDK fails
+          console.warn(`${EMOJI} Assistant error, falling back to keyword chat: ${(err as Error).message}`);
+          const response = await chat(req.message);
+          return {
+            sessionId: req.sessionId ?? 'default',
+            content: response,
+            finishReason: 'stop' as const,
+          };
         }
-        const result = await agent.execute({ query: req.message });
-        return {
-          sessionId: req.sessionId ?? 'default',
-          content: typeof result === 'string' ? result : JSON.stringify(result),
-          finishReason: 'stop' as const,
-        };
+      });
+
+      // Clean shutdown
+      process.on('SIGINT', async () => {
+        await assistant.stop();
+        await server.stop();
+        process.exit(0);
       });
 
       await server.start();
       console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
+      console.log(`${EMOJI} Assistant: Copilot SDK with ${agents.size} agents as tools`);
       console.log('Press Ctrl+C to stop\n');
       return;
     }

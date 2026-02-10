@@ -249,27 +249,16 @@ program
       });
 
       server.setAgentHandler(async (req, stream) => {
-        try {
-          const result = await assistant.getResponse(
-            req.message,
-            // Forward streaming deltas
-            stream ? (delta) => stream({ chunk: delta, done: false }) : undefined,
-          );
-          return {
-            sessionId: req.sessionId ?? 'default',
-            content: result.content,
-            finishReason: 'stop' as const,
-          };
-        } catch (err) {
-          // Fallback to keyword-matching chat() if Copilot SDK fails
-          console.warn(`${EMOJI} Assistant error, falling back to keyword chat: ${(err as Error).message}`);
-          const response = await chat(req.message);
-          return {
-            sessionId: req.sessionId ?? 'default',
-            content: response,
-            finishReason: 'stop' as const,
-          };
-        }
+        const result = await assistant.getResponse(
+          req.message,
+          // Forward streaming deltas
+          stream ? (delta) => stream({ chunk: delta, done: false }) : undefined,
+        );
+        return {
+          sessionId: req.sessionId ?? 'default',
+          content: result.content,
+          finishReason: 'stop' as const,
+        };
       });
 
       // Clean shutdown

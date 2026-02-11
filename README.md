@@ -11,7 +11,9 @@
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
-[GitHub](https://github.com/kody-w/openrappter) | [Documentation](./docs) | [Skills Reference](./skills.md) | [Architecture](./docs/architecture.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+🌐 **[openrappter.dev](https://kody-w.github.io/openrappter)** — Website & live docs
+
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 ---
 

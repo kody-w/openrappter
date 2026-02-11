@@ -672,18 +672,18 @@
         <span class="logo-badge">v1.2</span>
       </a>
       <div class="nav-links">
+        <a href="#teach-agent">Teach Your Agent</a>
         <a href="#features">Features</a>
         <a href="#comparison">Compare</a>
         <a href="./docs.html">Docs</a>
         <a href="./architecture.html">Architecture</a>
-        <a href="./teach.html">Teach Your Agent</a>
       </div>
       <div class="nav-cta">
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
         </a>
-        <a href="#quickstart" class="btn btn-primary">Get Started</a>
+        <a href="#teach-agent" class="btn btn-primary">Get Started</a>
       </div>
     </div>
   </nav>
@@ -702,8 +702,8 @@
         Just powerful AI agents in your terminal, powered by your existing GitHub Copilot subscription.
       </p>
       <div class="hero-cta">
-        <a href="#quickstart" class="btn btn-primary btn-large">
-          Get Started — It's Free
+        <a href="#teach-agent" class="btn btn-primary btn-large">
+          Get Started — Let Your AI Do It
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
         </a>
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost btn-large">
@@ -724,6 +724,54 @@
           <span class="stat-value">Local-First</span>
           <span class="stat-label">Data & Memory</span>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Teach Your Agent — Primary Getting Started -->
+  <section class="rappterhub" id="teach-agent" style="border-bottom: 1px solid var(--border);">
+    <div class="rappterhub-container">
+      <div class="rappterhub-content">
+        <div class="section-label">Recommended</div>
+        <h2>Let your AI agent <span class="highlight" style="background: linear-gradient(135deg, var(--purple) 0%, var(--green-bright) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">set it up for you</span></h2>
+        <p>
+          Paste one link into any AI agent and it handles everything — cloning, installing, starting the gateway and UI, and verifying it all works. No manual steps required.
+        </p>
+        <div class="rappterhub-features">
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Full install for both Python and TypeScript runtimes</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Starts the gateway, CLI, and Web UI</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Configuration, troubleshooting, and agent creation included</span>
+          </div>
+          <div class="rappterhub-feature">
+            <div class="rappterhub-feature-check">✓</div>
+            <span>Works with Copilot, Claude, ChatGPT, and any AI assistant</span>
+          </div>
+        </div>
+        <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md" class="btn btn-primary">
+          Open skills.md
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+        </a>
+      </div>
+      <div class="rappterhub-demo">
+        <div class="demo-comment"># Paste this into any AI agent:</div>
+        <div class="demo-cmd" style="word-break: break-all;">Read https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md and set up openrappter for me.</div>
+        <br>
+        <div class="demo-output" style="color: var(--green);">✅ Node.js 22.1.0 detected</div>
+        <div class="demo-output" style="color: var(--green);">✅ Python 3.12 detected</div>
+        <div class="demo-output" style="color: var(--green);">✅ TypeScript runtime — 3 agents loaded</div>
+        <div class="demo-output" style="color: var(--green);">✅ Python runtime — 7 agents loaded</div>
+        <div class="demo-output" style="color: var(--green);">✅ Gateway running on ws://127.0.0.1:18789</div>
+        <div class="demo-output" style="color: var(--green);">✅ Web UI at http://localhost:3000</div>
+        <br>
+        <div class="demo-output">🦖 openrappter is ready!</div>
       </div>
     </div>
   </section>
@@ -890,55 +938,6 @@
     </div>
   </section>
 
-  <!-- Teach Your Agent -->
-  <section class="rappterhub" id="teach-agent" style="border-bottom: 1px solid var(--border);">
-    <div class="rappterhub-container">
-      <div class="rappterhub-content">
-        <div class="section-label">Agent Skill</div>
-        <h2>Teach your agent to use <span class="highlight" style="background: linear-gradient(135deg, var(--purple) 0%, var(--green-bright) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">openrappter</span></h2>
-        <p>
-          Share one link with any AI agent and it instantly learns how to install, configure, and use openrappter. Works with Copilot, ChatGPT, Claude, and any agent that can read URLs.
-        </p>
-        <div class="rappterhub-features">
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Prerequisites checking built in</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Step-by-step install for both runtimes</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Verification & troubleshooting included</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Works with any AI agent that reads URLs</span>
-          </div>
-        </div>
-        <a href="./teach.html" class="btn btn-primary">
-          Get the Shareable Link
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </a>
-      </div>
-      <div class="rappterhub-demo">
-        <div class="demo-comment"># Share this link with your AI agent:</div>
-        <div class="demo-cmd" style="word-break: break-all;">https://kody-w.github.io/openrappter/agent-install.md</div>
-        <br>
-        <div class="demo-comment"># Then tell it:</div>
-        <div class="demo-cmd">Read that link and set up openrappter for me.</div>
-        <br>
-        <div class="demo-output" style="color: var(--green);">✅ Node.js 22.1.0 detected</div>
-        <div class="demo-output" style="color: var(--green);">✅ Python 3.12 detected</div>
-        <div class="demo-output" style="color: var(--green);">✅ TypeScript runtime — 2 agents loaded</div>
-        <div class="demo-output" style="color: var(--green);">✅ Python runtime — 5 agents loaded</div>
-        <br>
-        <div class="demo-output">🦖 openrappter is ready!</div>
-      </div>
-    </div>
-  </section>
-
   <!-- RappterHub -->
   <section class="rappterhub" id="rappterhub">
     <div class="rappterhub-container">
@@ -1014,9 +1013,9 @@
     <div class="footer-container">
       <div class="footer-links">
         <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md">skills.md</a>
         <a href="./docs.html">Docs</a>
         <a href="./tutorial.html">Tutorial</a>
-        <a href="./teach.html">Teach Your Agent</a>
         <a href="./changelog.html">Changelog</a>
         <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
       </div>

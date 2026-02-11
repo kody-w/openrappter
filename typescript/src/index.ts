@@ -232,7 +232,9 @@ program
     if (options.daemon) {
       const { GatewayServer } = await import('./gateway/server.js');
       const { Assistant } = await import('./agents/Assistant.js');
-      const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18789', 10);
+      const { ChannelRegistry } = await import('./channels/registry.js');
+      const { TelegramChannel } = await import('./channels/telegram.js');
+      const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
       const token = process.env.OPENRAPPTER_TOKEN || undefined;
       const server = new GatewayServer({
         port,
@@ -247,6 +249,19 @@ program
         description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
         model: process.env.OPENRAPPTER_MODEL,
       });
+
+      // Set up channel registry
+      const channelRegistry = new ChannelRegistry();
+
+      // Register Telegram if token is set
+      const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+      if (telegramToken) {
+        const telegram = new TelegramChannel({ token: telegramToken });
+        channelRegistry.register(telegram);
+        console.log(`${EMOJI} Telegram channel registered (t.me/rappterbot)`);
+      }
+
+      server.setChannelRegistry(channelRegistry);
 
       server.setAgentHandler(async (req, stream) => {
         const result = await assistant.getResponse(
@@ -263,6 +278,7 @@ program
 
       // Clean shutdown
       process.on('SIGINT', async () => {
+        await channelRegistry.disconnectAll();
         await assistant.stop();
         await server.stop();
         process.exit(0);

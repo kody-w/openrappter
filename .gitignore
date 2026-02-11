@@ -34,3 +34,4 @@ yarn.lock
 pnpm-lock.yaml
 openclaw/
 docs/OPENCLAW_FEATURE_ANALYSIS.md
+.env

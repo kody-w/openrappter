@@ -26,7 +26,7 @@ import type {
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
 
-const DEFAULT_PORT = 18789;
+const DEFAULT_PORT = 18790;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const RATE_LIMIT_WINDOW_MS = 60000;
@@ -66,8 +66,11 @@ export class GatewayServer {
   ) => Promise<AgentResponse>;
   private sessionStore = new Map<string, ChatSession>();
   private channelRegistry?: {
-    getStatus(): Promise<ChannelStatus[]>;
+    getStatusList(): { id: string; type: string; connected: boolean; configured: boolean; running: boolean; lastActivity?: string; lastConnectedAt?: string; messageCount: number }[];
     sendMessage(request: SendMessageRequest): Promise<void>;
+    connectChannel(type: string): Promise<void>;
+    disconnectChannel(type: string): Promise<void>;
+    probeChannel(type: string): Promise<{ ok: boolean; error?: string }>;
   };
   private cronService?: {
     list(): { id: string; name: string; schedule: string; enabled: boolean }[];
@@ -93,8 +96,11 @@ export class GatewayServer {
   }
 
   setChannelRegistry(registry: {
-    getStatus(): Promise<ChannelStatus[]>;
+    getStatusList(): { id: string; type: string; connected: boolean; configured: boolean; running: boolean; lastActivity?: string; lastConnectedAt?: string; messageCount: number }[];
     sendMessage(request: SendMessageRequest): Promise<void>;
+    connectChannel(type: string): Promise<void>;
+    disconnectChannel(type: string): Promise<void>;
+    probeChannel(type: string): Promise<{ ok: boolean; error?: string }>;
   }): void {
     this.channelRegistry = registry;
   }
@@ -547,12 +553,26 @@ export class GatewayServer {
     }, { requiresAuth: true });
 
     // Channel methods
-    this.registerMethod('channels.list', async () => this.channelRegistry ? this.channelRegistry.getStatus() : []);
+    this.registerMethod('channels.list', async () => this.channelRegistry ? this.channelRegistry.getStatusList() : []);
     this.registerMethod('channels.send', async (params: SendMessageRequest) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       await this.channelRegistry.sendMessage(params);
       return { sent: true };
     }, { requiresAuth: true });
+    this.registerMethod('channels.connect', async (params: { type: string }) => {
+      if (!this.channelRegistry) throw new Error('Channel registry not configured');
+      await this.channelRegistry.connectChannel(params.type);
+      return { connected: true };
+    }, { requiresAuth: true });
+    this.registerMethod('channels.disconnect', async (params: { type: string }) => {
+      if (!this.channelRegistry) throw new Error('Channel registry not configured');
+      await this.channelRegistry.disconnectChannel(params.type);
+      return { disconnected: true };
+    }, { requiresAuth: true });
+    this.registerMethod('channels.probe', async (params: { type: string }) => {
+      if (!this.channelRegistry) throw new Error('Channel registry not configured');
+      return this.channelRegistry.probeChannel(params.type);
+    });
 
     // Cron methods
     this.registerMethod('cron.list', async () => this.cronService ? this.cronService.list() : []);

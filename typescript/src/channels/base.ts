@@ -12,14 +12,27 @@ export abstract class BaseChannel {
   protected messageCount = 0;
   protected handlers: MessageHandler[] = [];
 
-  constructor(name: string, type: string) {
-    this.name = name;
-    this.type = type;
+  constructor(name?: string, type?: string) {
+    this.name = name ?? '';
+    this.type = type ?? '';
+  }
+
+  get connected(): boolean {
+    return this.status === 'connected';
+  }
+
+  set connected(value: boolean) {
+    this.status = value ? 'connected' : 'disconnected';
+    if (value && !this.connectedAt) {
+      this.connectedAt = new Date().toISOString();
+    }
   }
 
   abstract connect(): Promise<void>;
   abstract disconnect(): Promise<void>;
   abstract send(message: OutgoingMessage): Promise<void>;
+  abstract send(conversationId: string, message: OutgoingMessage): Promise<void>;
+  abstract send(messageOrId: OutgoingMessage | string, message?: OutgoingMessage): Promise<void>;
 
   onMessage(handler: MessageHandler): () => void {
     this.handlers.push(handler);

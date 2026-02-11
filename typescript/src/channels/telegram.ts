@@ -1,5 +1,5 @@
 /**
- * Telegram channel implementation
+ * Telegram channel implementation using Bot API
  */
 
 import { BaseChannel } from './base.js';
@@ -12,9 +12,12 @@ export interface TelegramConfig {
   pollingInterval?: number;
 }
 
+const TELEGRAM_API = 'https://api.telegram.org';
+
 export class TelegramChannel extends BaseChannel {
   private config: TelegramConfig;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private offset = 0;
 
   constructor(config: TelegramConfig) {
     super('telegram', 'telegram');
@@ -25,16 +28,20 @@ export class TelegramChannel extends BaseChannel {
     this.status = 'connecting';
 
     try {
+      // Verify token by calling getMe
+      const me = await this.callApi('getMe');
+      if (!me.ok) throw new Error('Invalid Telegram bot token');
+
       if (this.config.webhookUrl) {
-        // Webhook mode - register webhook URL with Telegram
-        this.status = 'connected';
-        this.connectedAt = new Date().toISOString();
+        await this.callApi('setWebhook', { url: this.config.webhookUrl });
       } else {
-        // Polling mode
+        // Clear any existing webhook before polling
+        await this.callApi('deleteWebhook');
         this.startPolling();
-        this.status = 'connected';
-        this.connectedAt = new Date().toISOString();
       }
+
+      this.status = 'connected';
+      this.connectedAt = new Date().toISOString();
     } catch (err) {
       this.status = 'error';
       throw err;
@@ -46,19 +53,25 @@ export class TelegramChannel extends BaseChannel {
     this.status = 'disconnected';
   }
 
-  async send(message: OutgoingMessage): Promise<void> {
+  async send(messageOrId: OutgoingMessage | string, message?: OutgoingMessage): Promise<void> {
+    const msg = typeof messageOrId === 'string' ? message! : messageOrId;
+    const chatId = typeof messageOrId === 'string' ? messageOrId : msg.recipient;
+
     if (this.status !== 'connected') {
       throw new Error('Telegram channel not connected');
     }
 
-    // In production, this would call the Telegram Bot API
-    // POST https://api.telegram.org/bot{token}/sendMessage
-    const _payload = {
-      chat_id: message.recipient,
-      text: message.content,
-      reply_to_message_id: message.replyTo,
+    const payload: Record<string, unknown> = {
+      chat_id: chatId,
+      text: msg.content,
+      parse_mode: 'HTML',
     };
 
+    if (msg.replyTo) {
+      payload.reply_to_message_id = msg.replyTo;
+    }
+
+    await this.callApi('sendMessage', payload);
     this.messageCount++;
   }
 
@@ -69,24 +82,24 @@ export class TelegramChannel extends BaseChannel {
     const chat = msg.chat as Record<string, unknown>;
     const from = msg.from as Record<string, unknown>;
 
+    if (this.config.allowedChatIds?.length) {
+      const chatId = String(chat?.id);
+      if (!this.config.allowedChatIds.includes(chatId)) return;
+    }
+
     const incoming: IncomingMessage = {
       id: String(msg.message_id),
       channel: 'telegram',
-      sender: String(from?.username ?? from?.id ?? 'unknown'),
+      sender: String(from?.id ?? 'unknown'),
+      senderName: String(from?.username ?? from?.first_name ?? 'unknown'),
       content: String(msg.text ?? ''),
       timestamp: new Date((msg.date as number) * 1000).toISOString(),
+      conversationId: String(chat?.id),
       metadata: {
         chatId: String(chat?.id),
         chatType: chat?.type,
       },
     };
-
-    if (this.config.allowedChatIds?.length) {
-      const chatId = String(chat?.id);
-      if (!this.config.allowedChatIds.includes(chatId)) {
-        return;
-      }
-    }
 
     this.emitMessage(incoming);
   }
@@ -106,6 +119,35 @@ export class TelegramChannel extends BaseChannel {
   }
 
   private async pollUpdates(): Promise<void> {
-    // In production, this would call getUpdates from Telegram Bot API
+    try {
+      const result = await this.callApi('getUpdates', {
+        offset: this.offset,
+        timeout: 10,
+        allowed_updates: ['message'],
+      });
+
+      if (result.ok && Array.isArray(result.result)) {
+        for (const update of result.result) {
+          this.offset = (update.update_id as number) + 1;
+          this.handleWebhookUpdate(update);
+        }
+      }
+    } catch {
+      // Polling errors are non-fatal
+    }
+  }
+
+  private async callApi(method: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const response = await fetch(`${TELEGRAM_API}/bot${this.config.token}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram API error: ${response.status}`);
+    }
+
+    return response.json() as Promise<Record<string, unknown>>;
   }
 }

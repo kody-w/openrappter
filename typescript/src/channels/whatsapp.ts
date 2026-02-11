@@ -3,7 +3,7 @@
  * Uses @whiskeysockets/baileys for WhatsApp Web API
  */
 
-import { EventEmitter } from 'events';
+import { BaseChannel } from './base.js';
 import type {
   IncomingMessage,
   OutgoingMessage,
@@ -14,7 +14,7 @@ import type {
 
 // Types for Baileys (dynamically imported)
 interface WASocket {
-  ev: EventEmitter;
+  ev: { on(event: string, handler: (...args: unknown[]) => void): void };
   user?: { id: string; name?: string };
   sendMessage(jid: string, content: WAMessageContent): Promise<unknown>;
   logout(): Promise<void>;
@@ -57,43 +57,24 @@ export interface WhatsAppConfig extends ChannelConfig {
   browser?: [string, string, string];
 }
 
-export class WhatsAppChannel extends EventEmitter {
+export class WhatsAppChannel extends BaseChannel {
   private sock: WASocket | null = null;
   private config: WhatsAppConfig;
-  private messageHandler?: (message: IncomingMessage) => void | Promise<void>;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private isConnecting = false;
 
   constructor(config: WhatsAppConfig) {
-    super();
-    this.config = {
-      enabled: true,
-      ...config,
-    };
+    super('whatsapp', 'whatsapp');
+    this.config = { enabled: true, ...config };
   }
 
-  get id(): string {
-    return 'whatsapp';
-  }
-
-  get type(): string {
-    return 'whatsapp';
-  }
-
-  get connected(): boolean {
-    return !!this.sock?.user;
-  }
-
-  /**
-   * Connect to WhatsApp
-   */
   async connect(): Promise<void> {
     if (this.isConnecting) return;
     this.isConnecting = true;
+    this.status = 'connecting';
 
     try {
-      // Dynamic import of baileys
       const {
         default: makeWASocket,
         useMultiFileAuthState,
@@ -114,16 +95,11 @@ export class WhatsAppChannel extends EventEmitter {
         browser: this.config.browser ?? ['OpenRappter', 'Chrome', '120.0'],
       }) as unknown as WASocket;
 
-      // Handle credentials update
-      this.sock.ev.on('creds.update', saveCreds);
+      this.sock.ev.on('creds.update', saveCreds as () => void);
 
-      // Handle connection state
-      this.sock.ev.on('connection.update', (update: Partial<WAConnectionState>) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-          this.emit('qr', qr);
-        }
+      this.sock.ev.on('connection.update', (...args: unknown[]) => {
+        const update = args[0] as Partial<WAConnectionState>;
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'close') {
           const shouldReconnect =
@@ -132,23 +108,20 @@ export class WhatsAppChannel extends EventEmitter {
 
           if (shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++;
-            console.log(
-              `WhatsApp connection closed, reconnecting (attempt ${this.reconnectAttempts})...`
-            );
-            setTimeout(() => this.connect(), 5000);
+            this.status = 'connecting';
+            setTimeout(() => this.connect().catch(() => {}), 5000);
           } else {
-            console.log('WhatsApp connection closed permanently');
-            this.emit('disconnected');
+            this.status = 'disconnected';
           }
         } else if (connection === 'open') {
           this.reconnectAttempts = 0;
-          console.log(`WhatsApp connected as ${this.sock?.user?.name ?? this.sock?.user?.id}`);
-          this.emit('connected');
+          this.status = 'connected';
+          this.connectedAt = new Date().toISOString();
         }
       });
 
-      // Handle incoming messages
-      this.sock.ev.on('messages.upsert', (upsert: { messages: WAMessage[]; type: string }) => {
+      this.sock.ev.on('messages.upsert', (...args: unknown[]) => {
+        const upsert = args[0] as { messages: WAMessage[]; type: string };
         if (upsert.type !== 'notify') return;
 
         for (const msg of upsert.messages) {
@@ -158,6 +131,7 @@ export class WhatsAppChannel extends EventEmitter {
       });
     } catch (error) {
       this.isConnecting = false;
+      this.status = 'error';
       throw new Error(
         `Failed to connect to WhatsApp: ${(error as Error).message}. ` +
           `Make sure @whiskeysockets/baileys is installed: npm install @whiskeysockets/baileys`
@@ -167,87 +141,70 @@ export class WhatsAppChannel extends EventEmitter {
     this.isConnecting = false;
   }
 
-  /**
-   * Disconnect from WhatsApp
-   */
   async disconnect(): Promise<void> {
     if (this.sock) {
       await this.sock.logout();
       this.sock = null;
     }
+    this.status = 'disconnected';
   }
 
-  /**
-   * Send a message
-   */
-  async send(conversationId: string, message: OutgoingMessage): Promise<void> {
-    if (!this.sock) {
-      throw new Error('WhatsApp not connected');
-    }
+  async send(messageOrId: OutgoingMessage | string, message?: OutgoingMessage): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
 
-    const jid = conversationId.includes('@') ? conversationId : `${conversationId}@s.whatsapp.net`;
+    const msg = typeof messageOrId === 'string' ? message! : messageOrId;
+    const recipient = typeof messageOrId === 'string' ? messageOrId : msg.recipient ?? '';
+    const jid = recipient.includes('@') ? recipient : `${recipient}@s.whatsapp.net`;
 
-    // Handle attachments
-    if (message.attachments && message.attachments.length > 0) {
-      for (const attachment of message.attachments) {
-        await this.sendAttachment(jid, attachment, message.content);
+    if (msg.attachments && msg.attachments.length > 0) {
+      for (const attachment of msg.attachments) {
+        await this.sendAttachment(jid, attachment, msg.content);
       }
       return;
     }
 
-    // Send text message
-    await this.sock.sendMessage(jid, { text: message.content });
+    await this.sock.sendMessage(jid, { text: msg.content });
+    this.messageCount++;
   }
 
-  /**
-   * Send an attachment
-   */
-  private async sendAttachment(
-    jid: string,
-    attachment: Attachment,
-    caption?: string
-  ): Promise<void> {
+  async getConversation(conversationId: string): Promise<Conversation | null> {
+    const isGroup = conversationId.endsWith('@g.us');
+    return {
+      id: conversationId,
+      name: conversationId.split('@')[0],
+      type: isGroup ? 'group' : 'dm',
+      participants: [],
+    };
+  }
+
+  private async sendAttachment(jid: string, attachment: Attachment, caption?: string): Promise<void> {
     if (!this.sock) return;
 
     const content: WAMessageContent = {};
+    const source = attachment.url ? { url: attachment.url } : Buffer.from(attachment.data ?? '', 'base64');
 
     switch (attachment.type) {
       case 'image':
-        content.image = attachment.url ? { url: attachment.url } : Buffer.from(attachment.data!, 'base64');
+        content.image = source;
         content.caption = caption;
         break;
       case 'audio':
-        content.audio = attachment.url ? { url: attachment.url } : Buffer.from(attachment.data!, 'base64');
+        content.audio = source;
         content.mimetype = attachment.mimeType;
         break;
       case 'document':
-        content.document = attachment.url ? { url: attachment.url } : Buffer.from(attachment.data!, 'base64');
+      default:
+        content.document = source;
         content.mimetype = attachment.mimeType;
         content.fileName = attachment.filename;
         break;
-      default:
-        // Default to document for unknown types
-        content.document = attachment.url ? { url: attachment.url } : Buffer.from(attachment.data!, 'base64');
-        content.mimetype = attachment.mimeType;
-        content.fileName = attachment.filename;
     }
 
     await this.sock.sendMessage(jid, content);
+    this.messageCount++;
   }
 
-  /**
-   * Set message handler
-   */
-  onMessage(handler: (message: IncomingMessage) => void | Promise<void>): void {
-    this.messageHandler = handler;
-  }
-
-  /**
-   * Handle incoming message
-   */
   private handleIncomingMessage(msg: WAMessage): void {
-    if (!this.messageHandler) return;
-
     const content = this.extractContent(msg);
     if (!content) return;
 
@@ -257,39 +214,23 @@ export class WhatsAppChannel extends EventEmitter {
     const incoming: IncomingMessage = {
       id: msg.key.id!,
       channel: 'whatsapp',
-      conversationId: jid,
-      senderId: isGroup ? jid.split('@')[0] : msg.pushName ?? jid.split('@')[0],
+      sender: isGroup ? jid.split('@')[0] : msg.pushName ?? jid.split('@')[0],
       content,
       timestamp: new Date((msg.messageTimestamp ?? Date.now() / 1000) * 1000).toISOString(),
+      conversationId: jid,
       attachments: this.extractAttachments(msg),
-      metadata: {
-        isGroup,
-        pushName: msg.pushName,
-      },
+      metadata: { isGroup, pushName: msg.pushName },
     };
 
-    this.messageHandler(incoming);
+    this.emitMessage(incoming);
   }
 
-  /**
-   * Extract text content from message
-   */
   private extractContent(msg: WAMessage): string | null {
     const m = msg.message;
     if (!m) return null;
-
-    return (
-      m.conversation ||
-      m.extendedTextMessage?.text ||
-      m.imageMessage?.caption ||
-      m.videoMessage?.caption ||
-      null
-    );
+    return m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || null;
   }
 
-  /**
-   * Extract attachments from message
-   */
   private extractAttachments(msg: WAMessage): Attachment[] {
     const m = msg.message;
     if (!m) return [];
@@ -297,53 +238,23 @@ export class WhatsAppChannel extends EventEmitter {
     const attachments: Attachment[] = [];
 
     if (m.imageMessage) {
-      attachments.push({
-        type: 'image',
-        url: m.imageMessage.url,
-        mimeType: m.imageMessage.mimetype ?? 'image/jpeg',
-      });
+      attachments.push({ type: 'image', url: m.imageMessage.url, mimeType: m.imageMessage.mimetype ?? 'image/jpeg' });
     }
-
     if (m.audioMessage) {
-      attachments.push({
-        type: 'audio',
-        url: m.audioMessage.url,
-        mimeType: m.audioMessage.mimetype ?? 'audio/ogg',
-      });
+      attachments.push({ type: 'audio', url: m.audioMessage.url, mimeType: m.audioMessage.mimetype ?? 'audio/ogg' });
     }
-
     if (m.videoMessage) {
-      attachments.push({
-        type: 'image', // Treat video as image for now
-        url: m.videoMessage.url,
-        mimeType: m.videoMessage.mimetype ?? 'video/mp4',
-      });
+      attachments.push({ type: 'video', url: m.videoMessage.url, mimeType: m.videoMessage.mimetype ?? 'video/mp4' });
     }
-
     if (m.documentMessage) {
       attachments.push({
-        type: 'document',
-        url: m.documentMessage.url,
+        type: 'document', url: m.documentMessage.url,
         mimeType: m.documentMessage.mimetype ?? 'application/octet-stream',
         filename: m.documentMessage.fileName,
       });
     }
 
     return attachments;
-  }
-
-  /**
-   * Get conversation info
-   */
-  async getConversation(conversationId: string): Promise<Conversation | null> {
-    const isGroup = conversationId.endsWith('@g.us');
-
-    return {
-      id: conversationId,
-      name: conversationId.split('@')[0],
-      type: isGroup ? 'group' : 'dm',
-      participants: [],
-    };
   }
 }
 

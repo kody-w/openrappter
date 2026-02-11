@@ -1,9 +1,9 @@
 /**
  * Configuration View Component
- * View and edit configuration
+ * Raw config editor with save/reload — loads actual config from gateway.
  */
 
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
@@ -13,315 +13,308 @@ export class OpenRappterConfig extends LitElement {
   static styles = css`
     :host {
       display: block;
-      padding: 1.5rem;
-    }
-
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 1.5rem;
-    }
-
-    .header h2 {
-      font-size: 1.125rem;
-      font-weight: 600;
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    button {
-      padding: 0.5rem 1rem;
-      background: var(--accent);
-      color: white;
-      border: none;
-      border-radius: 0.375rem;
-      font-size: 0.875rem;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: var(--accent-hover);
-    }
-
-    button.secondary {
-      background: var(--bg-tertiary);
-      color: var(--text-primary);
-    }
-
-    .config-sections {
+      padding: 1.5rem 2rem;
+      height: 100%;
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
     }
 
-    .config-section {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border);
-      border-radius: 0.5rem;
-      overflow: hidden;
+    .page-header {
+      margin-bottom: 1rem;
     }
 
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1rem 1.25rem;
-      background: var(--bg-tertiary);
-      cursor: pointer;
-    }
-
-    .section-title {
+    .page-header h2 {
+      font-size: 1.25rem;
       font-weight: 600;
+      margin-bottom: 0.25rem;
     }
 
-    .section-toggle {
+    .page-header p {
+      font-size: 0.875rem;
       color: var(--text-secondary);
-      transition: transform 0.2s ease;
     }
 
-    .section-toggle.expanded {
-      transform: rotate(180deg);
-    }
-
-    .section-content {
-      padding: 1.25rem;
-      display: none;
-    }
-
-    .section-content.expanded {
-      display: block;
-    }
-
-    .config-item {
+    .toolbar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding: 0.75rem 0;
-      border-bottom: 1px solid var(--border);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
     }
 
-    .config-item:last-child {
-      border-bottom: none;
+    .toolbar-left {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex: 1;
     }
 
-    .config-label {
+    .btn {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn:hover { background: var(--border); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .btn.primary:hover { background: var(--accent-hover); }
+
+    .btn.danger {
+      border-color: var(--error);
+      color: var(--error);
+    }
+
+    .dirty-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--warning);
       font-weight: 500;
     }
 
-    .config-description {
-      font-size: 0.875rem;
-      color: var(--text-secondary);
-      margin-top: 0.25rem;
-    }
-
-    .config-value {
-      font-family: monospace;
-      font-size: 0.875rem;
-      padding: 0.375rem 0.75rem;
-      background: var(--bg-tertiary);
+    .format-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
       border-radius: 0.25rem;
-    }
-
-    input[type='text'],
-    input[type='number'],
-    select {
-      padding: 0.5rem 0.75rem;
       background: var(--bg-tertiary);
-      border: 1px solid var(--border);
-      border-radius: 0.375rem;
-      color: var(--text-primary);
-      font-size: 0.875rem;
-      min-width: 200px;
+      color: var(--text-secondary);
+      font-family: monospace;
     }
 
-    input:focus,
-    select:focus {
+    .editor-wrap {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    textarea.config-editor {
+      flex: 1;
+      width: 100%;
+      min-height: 400px;
+      padding: 1rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      color: var(--text-primary);
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      resize: vertical;
+      tab-size: 2;
+    }
+
+    textarea.config-editor:focus {
       outline: none;
       border-color: var(--accent);
     }
 
-    .toggle-switch {
-      width: 44px;
-      height: 24px;
-      background: var(--bg-tertiary);
-      border-radius: 12px;
-      position: relative;
-      cursor: pointer;
+    .callout {
+      padding: 0.625rem 0.75rem;
+      border-radius: 0.375rem;
+      font-size: 0.8125rem;
+      margin-bottom: 1rem;
     }
 
-    .toggle-switch.enabled {
-      background: var(--accent);
+    .callout.danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
     }
 
-    .toggle-switch::after {
-      content: '';
-      position: absolute;
-      width: 20px;
-      height: 20px;
-      background: white;
-      border-radius: 50%;
-      top: 2px;
-      left: 2px;
-      transition: transform 0.2s ease;
+    .callout.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
     }
 
-    .toggle-switch.enabled::after {
-      transform: translateX(20px);
+    .callout.info {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+    }
+
+    .env-section {
+      margin-top: 1.5rem;
+    }
+
+    .env-section h3 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    .env-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+    }
+
+    .env-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      font-size: 0.8125rem;
+    }
+
+    .env-key {
+      font-family: monospace;
+      color: var(--accent);
+    }
+
+    .env-value {
+      color: var(--text-secondary);
+    }
+
+    .loading {
+      display: flex;
+      justify-content: center;
+      padding: 2rem;
+      color: var(--text-secondary);
     }
   `;
 
-  @state()
-  private expandedSections = new Set<string>(['gateway', 'models']);
-
-  @state()
-  private configState: ConfigState = createConfigState();
-
-  @state()
-  private mode: 'form' | 'raw' = 'form';
-
-  @state()
-  private originalRaw = '';
+  @state() private configState: ConfigState = createConfigState();
+  @state() private originalRaw = '';
+  @state() private saveMessage: string | null = null;
 
   connectedCallback() {
     super.connectedCallback();
     this.configState.client = gateway;
-    this.doLoadConfig();
+    this.doLoad();
   }
 
-  private async doLoadConfig() {
+  private async doLoad() {
     await loadConfig(this.configState);
     this.originalRaw = this.configState.raw;
     this.requestUpdate();
   }
 
   private async handleSave() {
-    await saveConfig(this.configState);
-    this.originalRaw = this.configState.raw;
+    const ok = await saveConfig(this.configState);
+    if (ok) {
+      this.originalRaw = this.configState.raw;
+      this.saveMessage = 'Configuration saved successfully.';
+    } else {
+      this.saveMessage = null;
+    }
     this.requestUpdate();
+    if (ok) setTimeout(() => { this.saveMessage = null; this.requestUpdate(); }, 3000);
   }
 
   private handleReset() {
-    this.configState.raw = this.originalRaw;
+    updateConfigRaw(this.configState, this.originalRaw);
     this.configState.dirty = false;
+    this.configState.error = null;
     this.requestUpdate();
   }
 
-  private toggleSection(section: string) {
-    if (this.expandedSections.has(section)) {
-      this.expandedSections.delete(section);
-    } else {
-      this.expandedSections.add(section);
-    }
+  private handleInput(e: Event) {
+    const val = (e.target as HTMLTextAreaElement).value;
+    updateConfigRaw(this.configState, val);
     this.requestUpdate();
+  }
+
+  private handleKeyDown(e: KeyboardEvent) {
+    // Cmd/Ctrl+S to save
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      e.preventDefault();
+      this.handleSave();
+    }
+    // Tab inserts spaces
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ta = e.target as HTMLTextAreaElement;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const val = ta.value;
+      ta.value = val.substring(0, start) + '  ' + val.substring(end);
+      ta.selectionStart = ta.selectionEnd = start + 2;
+      updateConfigRaw(this.configState, ta.value);
+      this.requestUpdate();
+    }
   }
 
   render() {
+    if (this.configState.loading) {
+      return html`<div class="loading">Loading configuration…</div>`;
+    }
+
     return html`
-      <div class="header">
+      <div class="page-header">
         <h2>Configuration</h2>
-        <div class="header-actions">
-          <button class="secondary" @click=${this.handleReset}>Reset</button>
-          <button @click=${this.handleSave}>Save Changes</button>
-        </div>
+        <p>Edit your OpenRappter configuration. Press Cmd+S to save.</p>
       </div>
 
-      <div class="config-sections">
-        <!-- Gateway Section -->
-        <div class="config-section">
-          <div class="section-header" @click=${() => this.toggleSection('gateway')}>
-            <span class="section-title">Gateway</span>
-            <span class="section-toggle ${this.expandedSections.has('gateway') ? 'expanded' : ''}">
-              ▼
-            </span>
-          </div>
-          <div class="section-content ${this.expandedSections.has('gateway') ? 'expanded' : ''}">
-            <div class="config-item">
-              <div>
-                <div class="config-label">Port</div>
-                <div class="config-description">WebSocket server port</div>
-              </div>
-              <input type="number" value="18789" />
-            </div>
-            <div class="config-item">
-              <div>
-                <div class="config-label">Bind Address</div>
-                <div class="config-description">Network interface to bind to</div>
-              </div>
-              <select>
-                <option value="loopback">Loopback (127.0.0.1)</option>
-                <option value="all">All Interfaces (0.0.0.0)</option>
-              </select>
-            </div>
-            <div class="config-item">
-              <div>
-                <div class="config-label">Authentication</div>
-                <div class="config-description">Require password for connections</div>
-              </div>
-              <div class="toggle-switch"></div>
-            </div>
-          </div>
-        </div>
+      ${this.configState.error
+        ? html`<div class="callout danger">${this.configState.error}</div>`
+        : nothing}
 
-        <!-- Models Section -->
-        <div class="config-section">
-          <div class="section-header" @click=${() => this.toggleSection('models')}>
-            <span class="section-title">Models</span>
-            <span class="section-toggle ${this.expandedSections.has('models') ? 'expanded' : ''}">
-              ▼
-            </span>
-          </div>
-          <div class="section-content ${this.expandedSections.has('models') ? 'expanded' : ''}">
-            <div class="config-item">
-              <div>
-                <div class="config-label">Primary Provider</div>
-                <div class="config-description">Default LLM provider</div>
-              </div>
-              <select>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="ollama">Ollama</option>
-              </select>
-            </div>
-            <div class="config-item">
-              <div>
-                <div class="config-label">Default Model</div>
-                <div class="config-description">Model to use for chat</div>
-              </div>
-              <input type="text" value="gpt-4o-mini" />
-            </div>
-          </div>
-        </div>
+      ${this.saveMessage
+        ? html`<div class="callout success">${this.saveMessage}</div>`
+        : nothing}
 
-        <!-- Memory Section -->
-        <div class="config-section">
-          <div class="section-header" @click=${() => this.toggleSection('memory')}>
-            <span class="section-title">Memory</span>
-            <span class="section-toggle ${this.expandedSections.has('memory') ? 'expanded' : ''}">
-              ▼
-            </span>
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span class="format-badge">${this.configState.format.toUpperCase()}</span>
+          ${this.configState.dirty
+            ? html`<span class="dirty-badge">Unsaved changes</span>`
+            : nothing}
+        </div>
+        <button class="btn" @click=${this.doLoad}
+          ?disabled=${this.configState.saving}>Reload</button>
+        <button class="btn" @click=${this.handleReset}
+          ?disabled=${!this.configState.dirty || this.configState.saving}>Reset</button>
+        <button class="btn primary" @click=${this.handleSave}
+          ?disabled=${!this.configState.dirty || this.configState.saving}>
+          ${this.configState.saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      <div class="editor-wrap">
+        <textarea
+          class="config-editor"
+          .value=${this.configState.raw}
+          @input=${this.handleInput}
+          @keydown=${this.handleKeyDown}
+          ?disabled=${this.configState.saving}
+          spellcheck="false"
+          placeholder="No configuration loaded. Click Reload or check gateway connection."
+        ></textarea>
+      </div>
+
+      <div class="env-section">
+        <h3>Environment Variables</h3>
+        <div class="callout info">These are set in your shell or .env file and cannot be edited here.</div>
+        <div class="env-grid">
+          <div class="env-item">
+            <span class="env-key">OPENRAPPTER_PORT</span>
+            <span class="env-value">18790</span>
           </div>
-          <div class="section-content ${this.expandedSections.has('memory') ? 'expanded' : ''}">
-            <div class="config-item">
-              <div>
-                <div class="config-label">Embedding Provider</div>
-                <div class="config-description">Provider for text embeddings</div>
-              </div>
-              <select>
-                <option value="openai">OpenAI</option>
-                <option value="ollama">Ollama</option>
-              </select>
-            </div>
-            <div class="config-item">
-              <div>
-                <div class="config-label">Chunk Size</div>
-                <div class="config-description">Tokens per memory chunk</div>
-              </div>
-              <input type="number" value="512" />
-            </div>
+          <div class="env-item">
+            <span class="env-key">TELEGRAM_BOT_TOKEN</span>
+            <span class="env-value">••••••••</span>
+          </div>
+          <div class="env-item">
+            <span class="env-key">DISCORD_TOKEN</span>
+            <span class="env-value">not set</span>
+          </div>
+          <div class="env-item">
+            <span class="env-key">OPENRAPPTER_MODEL</span>
+            <span class="env-value">default</span>
           </div>
         </div>
       </div>

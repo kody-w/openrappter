@@ -5,7 +5,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence';
+type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug';
 
 interface NavItem {
   id: View;
@@ -128,6 +128,7 @@ export class OpenRappterSidebar extends LitElement {
     { id: 'devices', label: 'Devices', icon: '💻' },
     { id: 'presence', label: 'Health', icon: '🏥' },
     { id: 'logs', label: 'Logs', icon: '📜' },
+    { id: 'debug', label: 'Debug', icon: '🔧' },
   ];
 
   private handleClick(view: View) {

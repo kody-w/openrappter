@@ -17,6 +17,23 @@
 
 </div>
 
+## Get Started — Let Your AI Agent Do It
+
+The fastest way to install and use openrappter is to hand [`skills.md`](./skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.
+
+**Paste this into Copilot, Claude, ChatGPT, or any AI assistant:**
+
+```
+Read https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md
+and set up openrappter for me.
+```
+
+Your agent will clone the repo, install dependencies, start the gateway and UI, and verify everything works. No manual steps required.
+
+> **Why this works:** `skills.md` is a 15-section complete reference designed for AI agents to read and execute. It covers installation, all CLI commands, every built-in agent, configuration, the Web UI, and troubleshooting — so the agent never gets stuck.
+
+---
+
 ## What Is openrappter
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
@@ -48,7 +65,9 @@ openrappter --exec Shell "ls -la"
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
 | **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
 
-## Quick Start
+## Manual Setup
+
+If you prefer to set things up yourself:
 
 ### Python
 
@@ -235,17 +254,6 @@ openrappter clawhub search "productivity"
 openrappter clawhub install author/skill-name
 openrappter clawhub list
 ```
-
-## Teach Your AI Agent
-
-Share the [skills.md](./skills.md) with any AI agent and it learns how to install, configure, and use openrappter:
-
-```
-Read https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md
-and set up openrappter for me.
-```
-
-Works with Copilot, Claude, ChatGPT, and any agent that can read URLs.
 
 ## Why "openrappter"?
 

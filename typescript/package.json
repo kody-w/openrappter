@@ -1,6 +1,6 @@
 {
   "name": "openrappter",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
   "type": "module",
   "main": "dist/index.js",

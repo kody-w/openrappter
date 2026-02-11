@@ -8,7 +8,7 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: MIT
-- **TypeScript Version**: 1.1.0
+- **TypeScript Version**: 1.2.0
 - **Python Version**: 1.2.0
 
 ---

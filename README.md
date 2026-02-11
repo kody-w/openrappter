@@ -41,7 +41,7 @@ openrappter --exec Shell "ls -la"
 | **Copilot-Powered** | Uses your existing GitHub Copilot subscription for AI inference — no separate API keys |
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |
-| **Dual Runtime** | Same agent contract in Python (5 agents) and TypeScript (2 agents) |
+| **Dual Runtime** | Same agent contract in Python (7 agents) and TypeScript (3 agents) |
 | **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
 | **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
 | **RappterHub** | Install community agents with `openrappter rappterhub install author/agent` |
@@ -98,11 +98,13 @@ node dist/index.js "ls"
 | `ContextMemory` | Recall and provide context from stored memories |
 | `LearnNew` | Generate new agents from natural language — writes code, hot-loads, installs deps |
 | `FetchesLatest` | Fetch latest Hacker News stories |
+| `RAPPverseNPC` | Autonomous NPC conversationalist for RAPPterverse game |
 
 ### TypeScript Runtime
 
 | Agent | Description |
 |-------|-------------|
+| `Assistant` | Copilot SDK-powered orchestrator — routes queries to agents via tool calling |
 | `Shell` | Execute bash commands, read/write files, list directories |
 | `Memory` | Store and recall facts — remember, recall, list, forget |
 
@@ -191,7 +193,7 @@ confidence = self.get_signal('orientation.confidence')
 ## Architecture
 
 ```
-User Input → Agent Registry → Keyword Matching / Copilot Routing
+User Input → Agent Registry → Copilot SDK Routing (tool calling)
                                         ↓
                                Data Sloshing (context enrichment)
                                         ↓

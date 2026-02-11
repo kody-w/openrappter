@@ -232,9 +232,15 @@ export class OpenRappterDebug extends LitElement {
   @state() private rpcError = '';
   @state() private rpcLoading = false;
   @state() private eventLog: EventLogEntry[] = [];
+  @state() private modelsJson = '';
+  @state() private modelsLoading = false;
+  @state() private heartbeatJson = '';
 
   private eventHandler: EventCallback = (data) => {
     const d = data as { event?: string; payload?: unknown };
+    if (d.event === 'heartbeat') {
+      this.heartbeatJson = JSON.stringify(d.payload ?? {}, null, 2);
+    }
     const entry: EventLogEntry = {
       timestamp: new Date().toLocaleTimeString('en-US', {
         hour12: false,
@@ -252,6 +258,7 @@ export class OpenRappterDebug extends LitElement {
     super.connectedCallback();
     this.fetchStatus();
     this.fetchHealth();
+    this.fetchModels();
     gateway.on('*', this.eventHandler);
   }
 
@@ -290,6 +297,17 @@ export class OpenRappterDebug extends LitElement {
       this.healthResults = [{ name: 'health', pass: false, detail: (e as Error).message }];
     }
     this.healthLoading = false;
+  }
+
+  private async fetchModels() {
+    this.modelsLoading = true;
+    try {
+      const result = await gateway.call('models.list');
+      this.modelsJson = JSON.stringify(result, null, 2);
+    } catch {
+      this.modelsJson = '[]';
+    }
+    this.modelsLoading = false;
   }
 
   private async handleRpcCall() {
@@ -426,6 +444,29 @@ export class OpenRappterDebug extends LitElement {
                   )}
                 </div>
               `}
+        </div>
+      </div>
+
+      <div class="cards-row">
+        <div class="card">
+          <div class="card-header">
+            <span>🧊 Models</span>
+            <button class="secondary" @click=${this.fetchModels}>Refresh</button>
+          </div>
+          <div class="card-body">
+            ${this.modelsLoading
+              ? html`<div class="loading">Loading…</div>`
+              : html`<pre>${this.modelsJson || '[]'}</pre>`}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span>💓 Last Heartbeat</span></div>
+          <div class="card-body">
+            ${this.heartbeatJson
+              ? html`<pre>${this.heartbeatJson}</pre>`
+              : html`<div class="loading">Waiting for heartbeat…</div>`}
+          </div>
         </div>
       </div>
     `;

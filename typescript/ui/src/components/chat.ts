@@ -743,6 +743,97 @@ export class OpenRappterChat extends LitElement {
     .hidden-input {
       display: none;
     }
+
+    /* ── Message Queue ── */
+
+    .chat-queue {
+      background: var(--bg-tertiary);
+      border-top: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      font-size: 0.8125rem;
+    }
+
+    .chat-queue-title {
+      color: var(--text-secondary);
+      font-weight: 600;
+      margin-bottom: 0.375rem;
+    }
+
+    .chat-queue-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.25rem 0;
+    }
+
+    .chat-queue-text {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-secondary);
+    }
+
+    .chat-queue-remove {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+    }
+
+    .chat-queue-remove:hover {
+      color: var(--error);
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    /* ── New Messages Button ── */
+
+    .new-messages-btn {
+      position: absolute;
+      bottom: 120px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 1rem;
+      padding: 0.375rem 1rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .new-messages-btn:hover {
+      background: var(--accent-hover);
+    }
+
+    /* ── Abort Button ── */
+
+    .abort-btn {
+      background: var(--error);
+      color: white;
+      border: none;
+      border-radius: 0.375rem;
+      padding: 0.375rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+    }
+
+    .abort-btn:hover {
+      opacity: 0.85;
+    }
+
+    .btn-kbd {
+      font-size: 0.6875rem;
+      opacity: 0.6;
+      margin-left: 0.25rem;
+    }
   `;
 
   // ── State ──
@@ -761,6 +852,9 @@ export class OpenRappterChat extends LitElement {
   @state() private toolExpandedIds = new Set<string>();
   @state() private attachments: AttachmentPreview[] = [];
   @state() private draggingOver = false;
+  @state() private messageQueue: Array<{ id: string; text: string; createdAt: number }> = [];
+  @state() private showNewMessages = false;
+  @state() private userAtBottom = true;
 
   private toolSidebarWidth = 320;
   private resizing = false;
@@ -939,11 +1033,79 @@ export class OpenRappterChat extends LitElement {
     }
   };
 
+  // ── Abort / Stop ──
+
+  private async handleAbort() {
+    if (!this.activeRunId) return;
+    try {
+      await gateway.request('chat.abort', { runId: this.activeRunId });
+    } catch { /* best effort */ }
+    this.finishStreaming(this.activeRunId);
+  }
+
+  // ── Message Queue ──
+
+  private enqueueMessage(text: string) {
+    this.messageQueue = [
+      ...this.messageQueue,
+      { id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() },
+    ];
+  }
+
+  private removeQueuedMessage(id: string) {
+    this.messageQueue = this.messageQueue.filter((m) => m.id !== id);
+  }
+
+  private async flushQueue() {
+    if (this.sending || this.messageQueue.length === 0) return;
+    const [next, ...rest] = this.messageQueue;
+    this.messageQueue = rest;
+    this.inputValue = next.text;
+    await this.handleSend();
+  }
+
+  // ── Paste to attach ──
+
+  private handlePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const images: DataTransferItem[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) images.push(items[i]);
+    }
+    if (images.length === 0) return;
+    e.preventDefault();
+    for (const item of images) {
+      const file = item.getAsFile();
+      if (file) this.addFiles([file]);
+    }
+  }
+
+  // ── Scroll tracking ──
+
+  private handleChatScroll(e: Event) {
+    const el = e.target as HTMLElement;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+    this.userAtBottom = atBottom;
+    if (atBottom) this.showNewMessages = false;
+  }
+
+  private scrollToBottomClicked() {
+    this.showNewMessages = false;
+    this.scrollToBottom();
+  }
+
   // ── Sending Messages ──
 
   private async handleSend() {
     const content = this.inputValue.trim();
-    if (!content || this.sending) return;
+    // Allow queueing if busy
+    if (this.sending && content) {
+      this.enqueueMessage(content);
+      this.inputValue = '';
+      return;
+    }
+    if (!content) return;
 
     this.sending = true;
     this.inputValue = '';
@@ -1034,6 +1196,10 @@ export class OpenRappterChat extends LitElement {
     this.messages = messages;
     this.sending = false;
     this.activeRunId = null;
+    // Flush queued messages
+    if (this.messageQueue.length > 0) {
+      setTimeout(() => this.flushQueue(), 100);
+    }
   }
 
   private handleStreamError(runId: string, errorMessage: string) {
@@ -1181,7 +1347,11 @@ export class OpenRappterChat extends LitElement {
   private scrollToBottom() {
     requestAnimationFrame(() => {
       if (this.messagesContainer) {
-        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        if (this.userAtBottom) {
+          this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        } else {
+          this.showNewMessages = true;
+        }
       }
     });
   }
@@ -1411,8 +1581,8 @@ export class OpenRappterChat extends LitElement {
 
       <!-- Body: messages + tool sidebar -->
       <div class="chat-body">
-        <div class="chat-main">
-          <div class="messages">
+        <div class="chat-main" style="position: relative;">
+          <div class="messages" @scroll=${this.handleChatScroll}>
             ${groups.length === 0
               ? html`
                   <div class="empty-state">
@@ -1425,6 +1595,31 @@ export class OpenRappterChat extends LitElement {
                 `
               : groups.map((g) => this.renderMessageGroup(g))}
           </div>
+
+          ${this.showNewMessages
+            ? html`<button class="new-messages-btn" @click=${this.scrollToBottomClicked}>
+                New messages ↓
+              </button>`
+            : nothing}
+
+          ${this.messageQueue.length > 0
+            ? html`
+                <div class="chat-queue">
+                  <div class="chat-queue-title">Queued (${this.messageQueue.length})</div>
+                  ${this.messageQueue.map(
+                    (item) => html`
+                      <div class="chat-queue-item">
+                        <div class="chat-queue-text">${item.text}</div>
+                        <button
+                          class="chat-queue-remove"
+                          @click=${() => this.removeQueuedMessage(item.id)}
+                        >✕</button>
+                      </div>
+                    `,
+                  )}
+                </div>
+              `
+            : nothing}
 
           <div class="input-area">
             ${this.renderAttachmentStrip()}
@@ -1442,22 +1637,25 @@ export class OpenRappterChat extends LitElement {
               />
               <textarea
                 class="${this.draggingOver ? 'drag-over' : ''}"
-                placeholder=${this.sending ? 'Waiting for response...' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
+                placeholder=${this.sending ? 'Type to queue a message...' : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
                 .value=${this.inputValue}
                 @input=${this.handleInput}
                 @keydown=${this.handleKeyDown}
+                @paste=${this.handlePaste}
                 @dragover=${this.handleDragOver}
                 @dragleave=${this.handleDragLeave}
                 @drop=${this.handleDrop}
-                ?disabled=${this.sending}
                 rows="1"
               ></textarea>
+              ${this.sending && this.activeRunId
+                ? html`<button class="abort-btn" @click=${this.handleAbort}>Stop</button>`
+                : nothing}
               <button
                 class="send-btn"
                 @click=${this.handleSend}
-                ?disabled=${this.sending || !this.inputValue.trim()}
+                ?disabled=${!this.inputValue.trim() && !this.sending}
               >
-                ${this.sending ? 'Sending…' : 'Send'}
+                ${this.sending ? 'Queue' : 'Send'}<span class="btn-kbd">↵</span>
               </button>
             </div>
           </div>

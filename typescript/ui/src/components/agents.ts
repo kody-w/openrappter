@@ -41,7 +41,26 @@ interface ToolInfo {
   description?: string;
 }
 
-type DetailTab = 'overview' | 'skills' | 'channels' | 'tools';
+interface AgentFileEntry {
+  name: string;
+  path: string;
+  size?: number;
+  modified?: string;
+}
+
+interface CronJob {
+  id: string;
+  name?: string;
+  description?: string;
+  schedule: string;
+  agentId?: string;
+  enabled: boolean;
+  lastRun?: string;
+  nextRun?: string;
+  status?: string;
+}
+
+type DetailTab = 'overview' | 'skills' | 'channels' | 'tools' | 'files' | 'cron';
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
@@ -61,6 +80,17 @@ export class OpenRappterAgents extends LitElement {
   @state() private skills: SkillInfo[] = [];
   @state() private skillsLoading = false;
   @state() private skillsError = '';
+
+  @state() private filesList: AgentFileEntry[] = [];
+  @state() private filesLoading = false;
+  @state() private filesError = '';
+  @state() private activeFile: string | null = null;
+  @state() private fileContents: Record<string, string> = {};
+  @state() private fileDrafts: Record<string, string> = {};
+  @state() private fileSaving = false;
+
+  @state() private cronJobs: CronJob[] = [];
+  @state() private cronLoading = false;
 
   /* ---- styles ---- */
 
@@ -517,6 +547,193 @@ export class OpenRappterAgents extends LitElement {
     }
 
     .btn:hover { background: var(--border); }
+
+    /* ===== files tab ===== */
+    .files-layout {
+      display: flex;
+      gap: 1rem;
+      height: calc(100vh - 220px);
+      min-height: 300px;
+    }
+
+    .files-sidebar {
+      width: 220px;
+      min-width: 180px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+
+    .files-sidebar-header {
+      padding: 0.625rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .files-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .file-item {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8125rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: background 0.12s;
+      border-left: 2px solid transparent;
+    }
+
+    .file-item:hover { background: var(--bg-tertiary); }
+    .file-item.active { background: var(--bg-tertiary); border-left-color: var(--accent); }
+
+    .file-item .file-icon { font-size: 0.875rem; opacity: 0.6; }
+
+    .file-item .file-name {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.75rem;
+    }
+
+    .file-item .dirty-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--warning, #f59e0b);
+      flex-shrink: 0;
+    }
+
+    .file-editor {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      overflow: hidden;
+    }
+
+    .file-editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+
+    .file-editor-header .filename {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .file-editor-actions {
+      display: flex;
+      gap: 0.375rem;
+    }
+
+    .file-editor textarea {
+      flex: 1;
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border: none;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      resize: none;
+      box-sizing: border-box;
+    }
+
+    .file-editor textarea:focus { outline: none; }
+
+    .file-no-selection {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+
+    .btn-sm {
+      padding: 0.25rem 0.625rem;
+      font-size: 0.75rem;
+      border-radius: 0.25rem;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover { opacity: 0.9; }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: var(--error);
+      color: var(--error);
+    }
+
+    /* ===== cron tab ===== */
+    .cron-job-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .cron-job-card .cron-info { flex: 1; min-width: 0; }
+
+    .cron-job-card .cron-name {
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .cron-job-card .cron-schedule {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      margin-top: 0.125rem;
+    }
+
+    .cron-job-card .cron-meta {
+      font-size: 0.6875rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+    }
+
+    .chip {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      padding: 0.125rem 0.5rem;
+      border-radius: 999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .chip-ok { background: rgba(16, 185, 129, 0.2); color: var(--accent); }
+    .chip-warn { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+    .chip-muted { background: var(--bg-tertiary); color: var(--text-secondary); }
   `;
 
   /* ---- lifecycle ---- */
@@ -550,6 +767,69 @@ export class OpenRappterAgents extends LitElement {
       this.skills = [];
     }
     this.skillsLoading = false;
+  }
+
+  private async loadFiles() {
+    if (!this.selectedId) return;
+    this.filesLoading = true;
+    this.filesError = '';
+    try {
+      const result = await gateway.call<{ files: AgentFileEntry[] }>('agents.files.list', { agentId: this.selectedId });
+      this.filesList = result?.files ?? (Array.isArray(result) ? result as unknown as AgentFileEntry[] : []);
+    } catch (e) {
+      this.filesError = e instanceof Error ? e.message : 'Failed to load files';
+      this.filesList = [];
+    }
+    this.filesLoading = false;
+  }
+
+  private async loadFileContent(path: string) {
+    this.activeFile = path;
+    if (this.fileContents[path] != null) return;
+    try {
+      const result = await gateway.call<{ content: string }>('agents.files.read', { agentId: this.selectedId, path });
+      const content = typeof result === 'string' ? result : result?.content ?? '';
+      this.fileContents = { ...this.fileContents, [path]: content };
+      this.fileDrafts = { ...this.fileDrafts, [path]: content };
+    } catch {
+      this.fileContents = { ...this.fileContents, [path]: '// Failed to load file' };
+      this.fileDrafts = { ...this.fileDrafts, [path]: '// Failed to load file' };
+    }
+  }
+
+  private async saveFile(path: string) {
+    const content = this.fileDrafts[path];
+    if (content == null) return;
+    this.fileSaving = true;
+    try {
+      await gateway.call('agents.files.write', { agentId: this.selectedId, path, content });
+      this.fileContents = { ...this.fileContents, [path]: content };
+    } catch (e) {
+      console.error('Failed to save file:', e);
+    }
+    this.fileSaving = false;
+  }
+
+  private resetFile(path: string) {
+    const original = this.fileContents[path];
+    if (original != null) {
+      this.fileDrafts = { ...this.fileDrafts, [path]: original };
+    }
+  }
+
+  private isFileDirty(path: string): boolean {
+    return this.fileDrafts[path] != null && this.fileDrafts[path] !== this.fileContents[path];
+  }
+
+  private async loadCronJobs() {
+    this.cronLoading = true;
+    try {
+      const result = await gateway.call<CronJob[]>('cron.list');
+      this.cronJobs = Array.isArray(result) ? result : [];
+    } catch {
+      this.cronJobs = [];
+    }
+    this.cronLoading = false;
   }
 
   /* ---- helpers ---- */
@@ -607,12 +887,24 @@ export class OpenRappterAgents extends LitElement {
     this.activeTab = 'overview';
     this.skills = [];
     this.skillsError = '';
+    this.filesList = [];
+    this.filesError = '';
+    this.activeFile = null;
+    this.fileContents = {};
+    this.fileDrafts = {};
+    this.cronJobs = [];
   }
 
   private switchTab(tab: DetailTab) {
     this.activeTab = tab;
     if (tab === 'skills' && this.skills.length === 0 && !this.skillsLoading) {
       this.loadSkills();
+    }
+    if (tab === 'files' && this.filesList.length === 0 && !this.filesLoading) {
+      this.loadFiles();
+    }
+    if (tab === 'cron' && this.cronJobs.length === 0 && !this.cronLoading) {
+      this.loadCronJobs();
     }
   }
 
@@ -710,9 +1002,11 @@ export class OpenRappterAgents extends LitElement {
 
     const tabs: { id: DetailTab; label: string }[] = [
       { id: 'overview', label: 'Overview' },
+      { id: 'files', label: 'Files' },
+      { id: 'tools', label: 'Tools' },
       { id: 'skills', label: 'Skills' },
       { id: 'channels', label: 'Channels' },
-      { id: 'tools', label: 'Tools' },
+      { id: 'cron', label: 'Cron' },
     ];
 
     return html`
@@ -736,9 +1030,11 @@ export class OpenRappterAgents extends LitElement {
 
         <div class="tab-content">
           ${this.activeTab === 'overview' ? this.renderOverview(agent) : nothing}
+          ${this.activeTab === 'files' ? this.renderFiles() : nothing}
           ${this.activeTab === 'skills' ? this.renderSkills(agent) : nothing}
           ${this.activeTab === 'channels' ? this.renderChannels(agent) : nothing}
           ${this.activeTab === 'tools' ? this.renderTools(agent) : nothing}
+          ${this.activeTab === 'cron' ? this.renderCron(agent) : nothing}
         </div>
       </div>
     `;
@@ -901,6 +1197,126 @@ export class OpenRappterAgents extends LitElement {
             ${t.description
               ? html`<div class="tool-desc">${t.description}</div>`
               : nothing}
+          </div>
+        `,
+      )}
+    `;
+  }
+
+  /* ---- render: files tab ---- */
+
+  private renderFiles() {
+    if (this.filesLoading) {
+      return html`<div class="loading-state">Loading files…</div>`;
+    }
+
+    if (this.filesError) {
+      return html`
+        <div class="error-banner">
+          ${this.filesError}
+          <button @click=${() => this.loadFiles()}>Retry</button>
+        </div>
+      `;
+    }
+
+    if (this.filesList.length === 0) {
+      return html`<div class="empty-tab">No workspace files for this agent.</div>`;
+    }
+
+    return html`
+      <div class="files-layout">
+        <div class="files-sidebar">
+          <div class="files-sidebar-header">Files (${this.filesList.length})</div>
+          <div class="files-list">
+            ${this.filesList.map(
+              (f) => html`
+                <div
+                  class="file-item ${this.activeFile === f.path ? 'active' : ''}"
+                  @click=${() => this.loadFileContent(f.path)}
+                >
+                  <span class="file-icon">📄</span>
+                  <span class="file-name" title=${f.path}>${f.name}</span>
+                  ${this.isFileDirty(f.path)
+                    ? html`<span class="dirty-dot" title="Unsaved changes"></span>`
+                    : nothing}
+                </div>
+              `,
+            )}
+          </div>
+        </div>
+
+        ${this.activeFile
+          ? this.renderFileEditor()
+          : html`<div class="file-no-selection">Select a file to view</div>`}
+      </div>
+    `;
+  }
+
+  private renderFileEditor() {
+    const path = this.activeFile!;
+    const draft = this.fileDrafts[path] ?? '';
+    const dirty = this.isFileDirty(path);
+
+    return html`
+      <div class="file-editor">
+        <div class="file-editor-header">
+          <span class="filename">${path}</span>
+          <div class="file-editor-actions">
+            ${dirty
+              ? html`
+                  <button class="btn btn-sm" @click=${() => this.resetFile(path)} ?disabled=${this.fileSaving}>Reset</button>
+                  <button class="btn btn-sm btn-primary" @click=${() => this.saveFile(path)} ?disabled=${this.fileSaving}>
+                    ${this.fileSaving ? 'Saving…' : 'Save'}
+                  </button>
+                `
+              : nothing}
+          </div>
+        </div>
+        <textarea
+          .value=${draft}
+          @input=${(e: Event) => {
+            const val = (e.target as HTMLTextAreaElement).value;
+            this.fileDrafts = { ...this.fileDrafts, [path]: val };
+          }}
+          spellcheck="false"
+        ></textarea>
+      </div>
+    `;
+  }
+
+  /* ---- render: cron tab ---- */
+
+  private renderCron(agent: AgentInfo) {
+    if (this.cronLoading) {
+      return html`<div class="loading-state">Loading cron jobs…</div>`;
+    }
+
+    const agentJobs = this.cronJobs.filter(
+      (j) => !j.agentId || j.agentId === agent.id,
+    );
+
+    if (agentJobs.length === 0) {
+      return html`<div class="empty-tab">No cron jobs associated with this agent.</div>`;
+    }
+
+    return html`
+      ${agentJobs.map(
+        (j) => html`
+          <div class="cron-job-card">
+            <span style="font-size:1.25rem;">⏰</span>
+            <div class="cron-info">
+              <div class="cron-name">${j.name ?? j.id}</div>
+              <div class="cron-schedule">${j.schedule}</div>
+              ${j.description
+                ? html`<div class="cron-meta">${j.description}</div>`
+                : nothing}
+              ${j.lastRun
+                ? html`<div class="cron-meta">Last run: ${j.lastRun}</div>`
+                : nothing}
+            </div>
+            <span class="chip ${j.enabled ? 'chip-ok' : 'chip-muted'}">
+              ${j.enabled ? 'Active' : 'Paused'}
+            </span>
           </div>
         `,
       )}

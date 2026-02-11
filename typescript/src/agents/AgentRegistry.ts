@@ -25,7 +25,7 @@ export class AgentRegistry {
     try {
       const files = await fs.readdir(this.agentsDir);
       const agentFiles = files.filter(
-        f => f.endsWith('Agent.js') && f !== 'BasicAgent.js' && !f.startsWith('_')
+        f => (f.endsWith('Agent.js') || f.endsWith('Agent.ts')) && !f.startsWith('Basic') && !f.startsWith('_')
       );
 
       for (const file of agentFiles) {

@@ -52,7 +52,59 @@ python3 -m openrappter.cli --status
 
 ---
 
-## 3. Verification
+## 3. Running the Web UI
+
+openrappter includes a web-based chat dashboard built with Lit + Vite that connects to the gateway via WebSocket.
+
+### Start the Gateway
+
+The gateway is the WebSocket backend that the UI connects to. Start it first:
+
+```bash
+cd typescript
+npm run build                           # Build first (if not done)
+node dist/index.js --daemon             # Start gateway on ws://127.0.0.1:18789
+
+# Or in development mode:
+npx tsx src/index.ts --daemon
+```
+
+The gateway runs on port `18789` by default. Set `OPENRAPPTER_PORT` to change it.
+
+### Start the UI Dev Server
+
+In a second terminal:
+
+```bash
+cd typescript/ui
+npm install                             # First time only
+npm run dev                             # Starts Vite on http://localhost:3000
+```
+
+Open **http://localhost:3000** in your browser. The UI auto-connects to the gateway and supports:
+- Chat with streaming responses
+- Markdown rendering in assistant messages
+- Sidebar navigation (Chat, Channels, Sessions, Agents, Skills, Cron, Config, Devices, Health, Logs)
+- Auto-reconnect if the gateway restarts
+
+### Build for Production
+
+```bash
+cd typescript/ui
+npm run build                           # Outputs to typescript/dist/ui/
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPENRAPPTER_PORT` | `18789` | Gateway WebSocket port |
+| `OPENRAPPTER_TOKEN` | _(none)_ | Auth token for gateway connections |
+| `OPENRAPPTER_MODEL` | _(default)_ | AI model override |
+
+---
+
+## 4. Verification
 
 Run these commands after install. All must succeed before proceeding.
 
@@ -91,7 +143,7 @@ python3 -m openrappter.cli --task "remember that Python works"
 
 ---
 
-## 4. CLI Reference
+## 5. CLI Reference
 
 ### TypeScript
 
@@ -132,7 +184,7 @@ python3 -m openrappter.cli [options]  # Direct
 
 ---
 
-## 5. Built-in Agents
+## 6. Built-in Agents
 
 ### Python Runtime (5 agents)
 
@@ -175,7 +227,7 @@ node dist/index.js --exec Shell "ls"
 
 ---
 
-## 6. Creating Custom Agents
+## 7. Creating Custom Agents
 
 Agents are auto-discovered by file naming convention. Drop a file in the `agents/` directory and the registry finds it — no manual registration needed.
 
@@ -262,7 +314,7 @@ openrappter --exec LearnNew "create an agent that fetches weather data"
 
 ---
 
-## 7. Memory System
+## 8. Memory System
 
 Memory persists across sessions in `~/.openrappter/memory.json`.
 
@@ -312,7 +364,7 @@ node dist/index.js "forget database"
 
 ---
 
-## 8. Data Sloshing (Context Enrichment)
+## 9. Data Sloshing (Context Enrichment)
 
 Every agent call is automatically enriched with contextual signals before `perform()` runs. Agents never execute "blind." Access via `self.context` (Python) or `this.context` (TypeScript).
 
@@ -350,7 +402,7 @@ User Input → execute() → slosh() enriches context → perform() runs with se
 
 ---
 
-## 9. RappterHub & ClawHub
+## 10. RappterHub & ClawHub
 
 ### RappterHub (native registry)
 
@@ -382,7 +434,7 @@ Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `ski
 
 ---
 
-## 10. Architecture Overview
+## 11. Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -435,12 +487,20 @@ openrappter/
 ├── typescript/
 │   ├── src/
 │   │   ├── index.ts            # Entry point
+│   │   ├── gateway/            # WebSocket gateway server
 │   │   └── agents/
 │   │       ├── BasicAgent.ts   # Base class (extend this)
 │   │       ├── AgentRegistry.ts # Auto-discovery
 │   │       ├── ShellAgent.ts   # Shell commands
 │   │       ├── MemoryAgent.ts  # Memory store/recall
 │   │       └── types.ts        # Shared type definitions
+│   ├── ui/                     # Web dashboard (Lit + Vite)
+│   │   ├── src/
+│   │   │   ├── main.ts         # UI entry point
+│   │   │   ├── components/     # Lit web components (app, chat, sidebar, etc.)
+│   │   │   └── services/       # Gateway client, markdown renderer
+│   │   ├── package.json
+│   │   └── vite.config.ts
 │   ├── package.json
 │   └── tsconfig.json
 ├── docs/                       # GitHub Pages site
@@ -449,7 +509,7 @@ openrappter/
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### TypeScript Build Errors
 
@@ -506,13 +566,17 @@ rm -rf ~/.openrappter
 
 ---
 
-## 12. Quick Reference Card
+## 13. Quick Reference Card
 
 ```bash
 # Install
 git clone https://github.com/kody-w/openrappter.git && cd openrappter
 cd typescript && npm install && npm run build     # TypeScript
 cd ../python && pip install .                      # Python
+
+# Start Web UI (two terminals)
+cd typescript && node dist/index.js --daemon      # Terminal 1: gateway
+cd typescript/ui && npm install && npm run dev    # Terminal 2: UI → http://localhost:3000
 
 # Status
 node dist/index.js --status                       # TypeScript

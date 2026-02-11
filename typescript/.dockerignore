@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output (we rebuild in Docker)
+dist/
+
+# Development files
+*.log
+*.local
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+coverage/
+.nyc_output/
+*.test.ts
+__tests__/
+tests/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Config files (mounted as volumes)
+config/
+*.yaml
+*.yml
+!package.json
+
+# Data files
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Logs
+logs/
+
+# Temporary files
+tmp/
+temp/
+.cache/

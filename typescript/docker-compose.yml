@@ -1,0 +1,84 @@
+# OpenRappter Docker Compose Configuration
+# Provides gateway server with persistent storage
+
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openrappter-gateway
+    restart: unless-stopped
+    ports:
+      - "18789:18789"
+    volumes:
+      # Persistent data storage
+      - openrappter-data:/app/data
+      # Configuration files
+      - ./config:/app/config:ro
+      # Logs
+      - openrappter-logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - OPENRAPPTER_GATEWAY_BIND=all
+      - OPENRAPPTER_GATEWAY_PORT=18789
+      # Provider API keys (set in .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:18789/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - openrappter-net
+
+  # Optional: CLI service for interactive use
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openrappter-cli
+    profiles:
+      - cli
+    volumes:
+      - openrappter-data:/app/data
+      - ./config:/app/config:ro
+    environment:
+      - NODE_ENV=production
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    networks:
+      - openrappter-net
+    stdin_open: true
+    tty: true
+    command: ["node", "dist/index.js", "chat"]
+
+  # Optional: Ollama for local LLM
+  ollama:
+    image: ollama/ollama:latest
+    container_name: openrappter-ollama
+    profiles:
+      - local-llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - openrappter-net
+
+volumes:
+  openrappter-data:
+    driver: local
+  openrappter-logs:
+    driver: local
+  ollama-models:
+    driver: local
+
+networks:
+  openrappter-net:
+    driver: bridge

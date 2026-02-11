@@ -32,3 +32,5 @@ htmlcov/
 # Package locks (keep package-lock.json, ignore others)
 yarn.lock
 pnpm-lock.yaml
+openclaw/
+docs/OPENCLAW_FEATURE_ANALYSIS.md

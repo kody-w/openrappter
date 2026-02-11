@@ -258,7 +258,31 @@ program
       if (telegramToken) {
         const telegram = new TelegramChannel({ token: telegramToken });
         channelRegistry.register(telegram);
-        console.log(`${EMOJI} Telegram channel registered (t.me/rappterbot)`);
+
+        // Wire incoming messages → Assistant → reply
+        telegram.onMessage(async (incoming) => {
+          try {
+            console.log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
+            const result = await assistant.getResponse(incoming.content);
+            const reply = result.content;
+            await telegram.send(incoming.conversationId!, {
+              channel: 'telegram',
+              content: reply,
+              replyTo: incoming.id,
+            });
+            console.log(`${EMOJI} Telegram → ${incoming.senderName}: ${reply.slice(0, 80)}...`);
+          } catch (err) {
+            console.error(`${EMOJI} Telegram reply error:`, err);
+          }
+        });
+
+        // Auto-connect on startup
+        try {
+          await telegram.connect();
+          console.log(`${EMOJI} Telegram connected & polling (t.me/rappterbot)`);
+        } catch (err) {
+          console.error(`${EMOJI} Telegram connect failed:`, err);
+        }
       }
 
       server.setChannelRegistry(channelRegistry);

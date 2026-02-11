@@ -8,7 +8,8 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: MIT
-- **Version**: 1.2.0
+- **TypeScript Version**: 1.1.0
+- **Python Version**: 1.2.0
 
 ---
 
@@ -18,7 +19,7 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 |---|---|---|
 | Node.js 18+ | `node --version` | TypeScript runtime |
 | Python 3.10+ | `python3 --version` | Python runtime |
-| GitHub Copilot CLI | `copilot --version` | Optional — enables AI-powered routing. Without it, keyword matching fallback is used. |
+| GitHub Copilot CLI | `copilot --version` | Required — provides AI-powered routing via the Copilot SDK. |
 
 ---
 
@@ -52,7 +53,29 @@ python3 -m openrappter.cli --status
 
 ---
 
-## 3. Running the Web UI
+## 3. Starting openrappter (All Components)
+
+To run openrappter fully, start all three components:
+
+```bash
+# Terminal 1: Interactive CLI (chat mode)
+cd typescript
+npm run dev
+
+# Terminal 2: Gateway (WebSocket backend for UI)
+cd typescript
+npx tsx src/index.ts --daemon          # ws://127.0.0.1:18789
+
+# Terminal 3: Web UI
+cd typescript/ui
+npm run dev                            # http://localhost:3000
+```
+
+The gateway must be running before the UI can connect. The CLI can run independently.
+
+---
+
+## 4. Running the Web UI
 
 openrappter includes a web-based chat dashboard built with Lit + Vite that connects to the gateway via WebSocket.
 
@@ -101,10 +124,15 @@ npm run build                           # Outputs to typescript/dist/ui/
 | `OPENRAPPTER_PORT` | `18789` | Gateway WebSocket port |
 | `OPENRAPPTER_TOKEN` | _(none)_ | Auth token for gateway connections |
 | `OPENRAPPTER_MODEL` | _(default)_ | AI model override |
+| `OPENRAPPTER_HOME` | `~/.openrappter` | Data directory for config, memory, skills |
+| `OPENAI_API_KEY` | _(none)_ | OpenAI provider API key (optional) |
+| `ANTHROPIC_API_KEY` | _(none)_ | Anthropic provider API key (optional) |
+| `OLLAMA_URL` | _(none)_ | Ollama server URL (optional) |
+| `LOG_LEVEL` | _(default)_ | Logging verbosity |
 
 ---
 
-## 4. Verification
+## 5. Verification
 
 Run these commands after install. All must succeed before proceeding.
 
@@ -113,7 +141,7 @@ Run these commands after install. All must succeed before proceeding.
 ```bash
 cd typescript
 
-# Status check — expect "Agents: 2 loaded"
+# Status check — expect "Agents: 2 loaded" (Shell + Memory; Assistant is the orchestrator)
 node dist/index.js --status
 
 # Memory store
@@ -131,7 +159,7 @@ node dist/index.js "ls"
 ```bash
 cd python
 
-# Status check — expect "agents_loaded: 5"
+# Status check — expect agents_loaded: 7
 python3 -m openrappter.cli --status
 
 # List agents
@@ -143,7 +171,7 @@ python3 -m openrappter.cli --task "remember that Python works"
 
 ---
 
-## 5. CLI Reference
+## 6. CLI Reference
 
 ### TypeScript
 
@@ -184,9 +212,9 @@ python3 -m openrappter.cli [options]  # Direct
 
 ---
 
-## 6. Built-in Agents
+## 7. Built-in Agents
 
-### Python Runtime (5 agents)
+### Python Runtime (7 agents)
 
 | Agent | Name | Description |
 |---|---|---|
@@ -195,17 +223,19 @@ python3 -m openrappter.cli [options]  # Direct
 | **Shell** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
 | **LearnNew** | `LearnNew` | Creates new agents from natural language descriptions. Generates code, writes to `agents/`, and hot-loads. |
 | **FetchesLatest** | `FetchesLatest` | Fetches the latest Hacker News stories. Returns titles, URLs, and scores. |
+| **RAPPverseNPC** | `RAPPverseNPC` | Autonomous NPC conversationalist for RAPPterverse game; monitors state/chat.json, generates in-character responses. |
 
-### TypeScript Runtime (2 agents)
+### TypeScript Runtime (3 agents)
 
 | Agent | Name | Description |
 |---|---|---|
+| **Assistant** | `Assistant` | Copilot SDK-powered orchestrator that routes user queries to agents via tool calling. |
 | **MemoryAgent** | `Memory` | Stores and recalls facts in persistent memory. Actions: `remember`, `recall`, `list`, `forget`. |
 | **ShellAgent** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
 
 ### Using Agents
 
-Agents are matched via keyword patterns in natural language:
+Agents are routed via the Copilot SDK using tool calling — the Assistant agent determines the best agent for each query:
 
 ```bash
 # Memory keywords: remember, store, save, recall, memory, forget
@@ -227,7 +257,7 @@ node dist/index.js --exec Shell "ls"
 
 ---
 
-## 7. Creating Custom Agents
+## 8. Creating Custom Agents
 
 Agents are auto-discovered by file naming convention. Drop a file in the `agents/` directory and the registry finds it — no manual registration needed.
 
@@ -257,7 +287,7 @@ class MyAgent(BasicAgent):
 
     def perform(self, **kwargs):
         query = kwargs.get('query', '')
-        # self.context has enriched signals from data sloshing (see Section 8)
+        # self.context has enriched signals from data sloshing (see Section 10)
         return json.dumps({"status": "success", "result": query})
 ```
 
@@ -287,7 +317,7 @@ export class MyAgent extends BasicAgent {
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
     const query = kwargs.query as string;
-    // this.context has enriched signals from data sloshing (see Section 8)
+    // this.context has enriched signals from data sloshing (see Section 10)
     return JSON.stringify({ status: 'success', result: query });
   }
 }
@@ -314,9 +344,9 @@ openrappter --exec LearnNew "create an agent that fetches weather data"
 
 ---
 
-## 8. Memory System
+## 9. Memory System
 
-Memory persists across sessions in `~/.openrappter/memory.json`.
+Memory persists across sessions. Python stores memory in `~/.openrappter/memory.json`. TypeScript uses SQLite at `~/.openrappter/memory.db`.
 
 ### Store
 
@@ -357,14 +387,17 @@ node dist/index.js "forget database"
 
 | File | Purpose |
 |---|---|
-| `~/.openrappter/config.json` | Configuration settings |
-| `~/.openrappter/memory.json` | Persistent memory store |
+| `~/.openrappter/config.json` | Configuration settings (also supports `config.json5`, `config.yaml`) |
+| `~/.openrappter/memory.json` | Persistent memory store (Python) |
+| `~/.openrappter/memory.db` | Persistent memory store (TypeScript, SQLite) |
 | `~/.openrappter/state.json` | Agent state data |
 | `~/.openrappter/skills/` | Installed ClawHub/RappterHub skills |
+| `~/.openrappter/sessions/` | Session transcripts (JSONL) |
+| `~/.openrappter/workspace/` | Per-agent workspaces |
 
 ---
 
-## 9. Data Sloshing (Context Enrichment)
+## 10. Data Sloshing (Context Enrichment)
 
 Every agent call is automatically enriched with contextual signals before `perform()` runs. Agents never execute "blind." Access via `self.context` (Python) or `this.context` (TypeScript).
 
@@ -402,7 +435,7 @@ User Input → execute() → slosh() enriches context → perform() runs with se
 
 ---
 
-## 10. RappterHub & ClawHub
+## 11. RappterHub & ClawHub
 
 ### RappterHub (native registry)
 
@@ -434,21 +467,21 @@ Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `ski
 
 ---
 
-## 11. Architecture Overview
+## 12. Architecture Overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  User Input (CLI / Interactive)                          │
+│  User Input (CLI / Web UI / Channels)                    │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│  Assistant (Copilot SDK tool-calling orchestrator)        │
+│  Routes queries to agents via @github/copilot-sdk        │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Agent Registry (auto-discovery from agents/ directory)  │
 │  Python: *_agent.py    TypeScript: *Agent.ts             │
-└────────────────────────┬─────────────────────────────────┘
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│  Keyword Matching / Copilot Routing                      │
-│  Selects best agent based on user intent                 │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -461,8 +494,8 @@ Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `ski
 └────────────────────────┬─────────────────────────────────┘
                          ▼
 ┌─────────────────────┐  ┌────────────────────────────────┐
-│  GitHub Copilot     │  │  ~/.openrappter/               │
-│  (cloud AI backbone)│  │  config.json | memory.json     │
+│  GitHub Copilot SDK │  │  ~/.openrappter/               │
+│  (cloud AI backbone)│  │  config | memory | sessions    │
 │  Inference layer    │  │  Local-first data storage      │
 └─────────────────────┘  └────────────────────────────────┘
 ```
@@ -482,17 +515,27 @@ openrappter/
 │   │       ├── manage_memory_agent.py  # Store memories
 │   │       ├── context_memory_agent.py # Recall memories
 │   │       ├── learn_new_agent.py      # Generate new agents
-│   │       └── fetches_latest_agent.py # Hacker News fetcher
+│   │       ├── fetches_latest_agent.py # Hacker News fetcher
+│   │       └── rappverse_npc_agent.py  # RAPPterverse NPC agent
 │   └── pyproject.toml
 ├── typescript/
 │   ├── src/
 │   │   ├── index.ts            # Entry point
+│   │   ├── config/             # YAML/JSON/JSON5 config with Zod validation
 │   │   ├── gateway/            # WebSocket gateway server
+│   │   ├── memory/             # Content chunker, embeddings, hybrid search
+│   │   ├── channels/           # CLI, Slack, Discord, Telegram, Signal, iMessage, etc.
+│   │   ├── providers/          # Model integrations (Anthropic, OpenAI, Ollama, Copilot)
+│   │   ├── storage/            # SQLite & in-memory storage adapters
 │   │   └── agents/
 │   │       ├── BasicAgent.ts   # Base class (extend this)
+│   │       ├── Assistant.ts    # Copilot SDK orchestrator
 │   │       ├── AgentRegistry.ts # Auto-discovery
 │   │       ├── ShellAgent.ts   # Shell commands
 │   │       ├── MemoryAgent.ts  # Memory store/recall
+│   │       ├── broadcast.ts    # Multi-agent broadcast (all/race/fallback)
+│   │       ├── router.ts       # Rule-based agent routing
+│   │       ├── subagent.ts     # Nested agent invocation
 │   │       └── types.ts        # Shared type definitions
 │   ├── ui/                     # Web dashboard (Lit + Vite)
 │   │   ├── src/
@@ -509,7 +552,7 @@ openrappter/
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### TypeScript Build Errors
 
@@ -547,7 +590,7 @@ pyenv local 3.11
 
 ### Copilot CLI Not Found
 
-openrappter works without Copilot CLI using keyword matching fallback. For full AI routing:
+openrappter requires the Copilot SDK for AI-powered agent routing:
 
 ```bash
 npm install -g @githubnext/github-copilot-cli
@@ -566,7 +609,33 @@ rm -rf ~/.openrappter
 
 ---
 
-## 13. Quick Reference Card
+## 14. Configuration
+
+openrappter supports multiple config file formats, loaded from `~/.openrappter/`:
+
+| Format | File | Notes |
+|---|---|---|
+| JSON5 | `config.json5` | Primary — supports comments and trailing commas |
+| YAML | `config.yaml` | Alternative |
+| JSON | `config.json` | Fallback |
+| Profile | `config.{profile}.json5` | Per-profile overrides |
+
+Config files support `${VAR_NAME}` environment variable substitution. All schemas are validated with Zod.
+
+### Key Config Sections
+
+| Section | Purpose |
+|---|---|
+| `models` | AI model provider configuration (copilot, anthropic, openai, ollama, gemini, bedrock) |
+| `agents` | Agent-specific settings, workspaces, sandbox options |
+| `channels` | Enable/configure messaging channels (iMessage, Slack, Discord, Telegram, etc.) |
+| `gateway` | WebSocket server settings (port, bind, auth) |
+| `memory` | Memory provider and chunking settings |
+| `cron` | Scheduled task configuration |
+
+---
+
+## 15. Quick Reference Card
 
 ```bash
 # Install
@@ -574,9 +643,10 @@ git clone https://github.com/kody-w/openrappter.git && cd openrappter
 cd typescript && npm install && npm run build     # TypeScript
 cd ../python && pip install .                      # Python
 
-# Start Web UI (two terminals)
-cd typescript && node dist/index.js --daemon      # Terminal 1: gateway
-cd typescript/ui && npm install && npm run dev    # Terminal 2: UI → http://localhost:3000
+# Start everything (three terminals)
+cd typescript && npm run dev                      # Terminal 1: CLI chat
+cd typescript && npx tsx src/index.ts --daemon    # Terminal 2: gateway → ws://127.0.0.1:18789
+cd typescript/ui && npm install && npm run dev    # Terminal 3: UI → http://localhost:3000
 
 # Status
 node dist/index.js --status                       # TypeScript

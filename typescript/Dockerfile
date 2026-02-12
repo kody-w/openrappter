@@ -64,11 +64,11 @@ ENV OPENRAPPTER_CONFIG_DIR=/app/config
 ENV OPENRAPPTER_LOG_DIR=/app/logs
 
 # Expose gateway port
-EXPOSE 18789
+EXPOSE 18790
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD node -e "fetch('http://localhost:18789/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+    CMD node -e "fetch('http://localhost:18790/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 # Default command - start gateway
 CMD ["node", "dist/index.js", "gateway", "--bind", "all"]

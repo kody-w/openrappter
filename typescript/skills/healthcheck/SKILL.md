@@ -18,7 +18,7 @@ node --version
 npm ls --depth=0
 
 # Verify gateway connectivity
-curl -s http://localhost:18789/health
+curl -s http://localhost:18790/health
 ```
 
 ## Service Checks

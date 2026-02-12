@@ -1,6 +1,10 @@
 /**
  * Shared types for the agent system.
  * These types mirror the Python agent metadata format (OpenAI tools format).
+ *
+ * Single File Agent Pattern:
+ *   One file = one agent. Metadata, docs, and code all in a single .ts file.
+ *   Use the native constructor: super('Name', { name, description, parameters })
  */
 
 export interface AgentParameter {
@@ -29,6 +33,7 @@ export interface AgentContext {
   behavioral: BehavioralHints;
   priors: Record<string, Prior>;
   orientation: Orientation;
+  upstream_slush?: Record<string, unknown>;
 }
 
 export interface TemporalContext {

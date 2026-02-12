@@ -50,18 +50,55 @@ pnpm test            # vitest
 
 Both TypeScript and Python share the same agent architecture. The key abstraction is `BasicAgent`:
 
-**Execution flow**: `execute(kwargs)` → `slosh(query)` → `perform(kwargs)`
+### Single File Agent Pattern
 
-- `execute()` is the entry point — it runs data sloshing, then calls `perform()`
+One file = one agent. The metadata contract, documentation, and deterministic code all live in a single file using native language constructs:
+
+```python
+# Python: native dict in __init__
+class MyAgent(BasicAgent):
+    def __init__(self):
+        self.name = 'MyAgent'
+        self.metadata = {
+            "name": self.name,
+            "description": "What this agent does",
+            "parameters": { "type": "object", "properties": {...}, "required": [] }
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+    
+    def perform(self, **kwargs):
+        ...
+```
+
+```typescript
+// TypeScript: native object in constructor
+export class MyAgent extends BasicAgent {
+  constructor() {
+    const metadata: AgentMetadata = { name: 'MyAgent', description: '...', parameters: {...} };
+    super('MyAgent', metadata);
+  }
+  async perform(kwargs) { ... }
+}
+```
+
+No YAML. No config files. No magic parsing. The code IS the contract.
+
+### Execution Flow
+
+`execute(kwargs)` → `slosh(query)` → merge `upstream_slush` → `perform(kwargs)` → extract `data_slush`
+
+- `execute()` is the entry point — it runs data sloshing, merges any `upstream_slush` from a previous agent, then calls `perform()`
 - `perform()` is the abstract method subclasses implement
 - `slosh()` gathers implicit context before action (temporal, query signals, memory echoes, behavioral hints, priors) and synthesizes an `Orientation` (confidence, approach, hints)
+- After `perform()`, if the result JSON contains a `data_slush` key, it is extracted to `last_data_slush` (Python) / `lastDataSlush` (TypeScript) for downstream chaining
 - Access enriched signals via `getSignal(key)` with dot-notation (e.g., `getSignal('temporal.time_of_day')`)
+- Access upstream agent signals via `self.context['upstream_slush']` / `this.context.upstream_slush`
 
-**Built-in agents**:
+**Built-in agents** (all single file agents):
 - `BasicAgent` — Abstract base with data sloshing
 - `ShellAgent` — Shell commands, file read/write/list (actions: `bash`, `read`, `write`, `list`; natural language query parsing)
 - `MemoryAgent` — Memory storage and retrieval (Python has `ContextMemoryAgent` and `ManageMemoryAgent`)
-- `LearnNewAgent` (Python only) — Meta-agent that generates new agent classes at runtime with hot-loading
+- `LearnNewAgent` (Python only) — Meta-agent that generates new single file agents at runtime with hot-loading
 
 **Multi-agent patterns** (TypeScript `src/agents/`):
 - `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first wins), `fallback` (try until success)
@@ -70,7 +107,7 @@ Both TypeScript and Python share the same agent architecture. The key abstractio
 
 ## Architecture: Skills (ClawHub)
 
-Skills are `SKILL.md` files with optional YAML frontmatter, stored in `~/.openrappter/skills/`. Skills get wrapped as `ClawHubSkillAgent` instances (extending `BasicAgent`).
+Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapped as `ClawHubSkillAgent` instances (extending `BasicAgent`).
 
 - `ClawHubClient` handles search/install/load via `npx clawhub@latest`
 - Skills can include executable `scripts/` directories (Python or shell)

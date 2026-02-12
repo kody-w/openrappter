@@ -581,7 +581,7 @@
     <div class="nav-container">
       <a href="./" class="logo">
         🦖 openrappter
-        <span class="logo-badge">v1.2</span>
+        <span class="logo-badge">v1.4</span>
       </a>
       <div class="nav-links">
         <a href="./">Home</a>
@@ -954,7 +954,11 @@
         </div>
 
         <div class="callout callout-blue">
-          📡 <strong>All available signals:</strong> <code>temporal.*</code>, <code>memory_echoes</code>, <code>query_signals.*</code>, <code>behavioral_hints.*</code>, <code>orientation.*</code> — see the <a href="./architecture.html" style="color: var(--blue);">Architecture</a> page for the full reference.
+          📡 <strong>All available signals:</strong> <code>temporal.*</code>, <code>memory_echoes</code>, <code>query_signals.*</code>, <code>behavioral_hints.*</code>, <code>orientation.*</code>, <code>upstream_slush.*</code> — see the <a href="./architecture.html" style="color: var(--blue);">Architecture</a> page for the full reference.
+        </div>
+
+        <div class="callout callout-blue" style="margin-top: 1rem;">
+          🧊 <strong>Data Slush:</strong> Agents can return a <code>data_slush</code> dict in their output — curated signals from live results. The framework extracts it to <code>last_data_slush</code> / <code>lastDataSlush</code>, which can be passed as <code>upstream_slush</code> to the next agent's <code>execute()</code>. This enables LLM-free agent-to-agent pipelines.
         </div>
       </section>
 

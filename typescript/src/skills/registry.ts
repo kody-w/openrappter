@@ -75,7 +75,9 @@ export interface SkillSearchResult {
   rating?: number;
 }
 
-const CLAWHUB_API = 'https://clawhub.dev/api';
+// Skills are public GitHub repos with skill.json + skill.md at their root
+const GITHUB_RAW = 'https://raw.githubusercontent.com';
+const GITHUB_API = 'https://api.github.com';
 const DEFAULT_SKILLS_DIR = join(homedir(), '.openrappter', 'skills');
 
 export class SkillsRegistry {
@@ -99,52 +101,83 @@ export class SkillsRegistry {
   }
 
   /**
-   * Search for skills on ClawHub
+   * Search for skills on GitHub
+   * Searches public repos that contain a skill.json file
    */
   async search(query: string): Promise<SkillSearchResult[]> {
     try {
       const response = await fetch(
-        `${CLAWHUB_API}/skills/search?q=${encodeURIComponent(query)}`
+        `${GITHUB_API}/search/repositories?q=${encodeURIComponent(query)}+topic:openrappter-skill&sort=stars&order=desc`,
+        { headers: { Accept: 'application/vnd.github.v3+json' } }
       );
 
       if (!response.ok) {
         throw new Error(`Search failed: ${response.statusText}`);
       }
 
-      const data = (await response.json()) as { skills: SkillSearchResult[] };
-      return data.skills;
+      const data = (await response.json()) as {
+        items: Array<{
+          full_name: string;
+          name: string;
+          description: string;
+          owner: { login: string };
+          stargazers_count: number;
+        }>;
+      };
+
+      return data.items.map((repo) => ({
+        id: repo.full_name,
+        name: repo.name,
+        version: 'latest',
+        description: repo.description ?? '',
+        author: repo.owner.login,
+        rating: repo.stargazers_count,
+      }));
     } catch (error) {
-      console.error('Failed to search ClawHub:', error);
+      console.error('Failed to search GitHub:', error);
       return [];
     }
   }
 
   /**
-   * Install a skill from ClawHub
+   * Install a skill from a public GitHub repo
+   * @param skillId - GitHub repo in "owner/repo" format (e.g., "kody-w/rappterverse")
    */
   async install(skillId: string, version?: string): Promise<InstalledSkill | null> {
     try {
-      // Fetch skill info
-      const infoUrl = version
-        ? `${CLAWHUB_API}/skills/${skillId}/${version}`
-        : `${CLAWHUB_API}/skills/${skillId}/latest`;
+      const branch = version ?? 'main';
 
-      const infoResponse = await fetch(infoUrl);
+      // Fetch skill.json from the repo
+      const skillJsonUrl = `${GITHUB_RAW}/${skillId}/${branch}/skill.json`;
+      const infoResponse = await fetch(skillJsonUrl);
       if (!infoResponse.ok) {
-        throw new Error(`Skill not found: ${skillId}`);
+        throw new Error(`Skill not found: ${skillId} (no skill.json at ${skillJsonUrl})`);
       }
 
-      const manifest = (await infoResponse.json()) as SkillManifest;
+      const skillJson = (await infoResponse.json()) as {
+        name: string;
+        version?: string;
+        description: string;
+        author?: string;
+        tags?: string[];
+        homepage?: string;
+        repository?: string;
+      };
 
-      // Download skill files
-      const downloadUrl = `${CLAWHUB_API}/skills/${skillId}/${manifest.version}/download`;
-      const downloadResponse = await fetch(downloadUrl);
-      if (!downloadResponse.ok) {
-        throw new Error('Failed to download skill');
-      }
+      const manifest: SkillManifest = {
+        id: skillId,
+        name: skillJson.name,
+        version: skillJson.version ?? '1.0.0',
+        description: skillJson.description,
+        author: skillJson.author,
+        tags: skillJson.tags,
+        homepage: skillJson.homepage,
+        repository: skillJson.repository ?? skillId,
+      };
 
-      // Extract to skills directory
-      const skillPath = join(this.skillsDir, skillId);
+      // Create skill directory (flatten owner/repo to owner--repo for filesystem)
+      const safeDirName = skillId.replace('/', '--');
+      const skillPath = join(this.skillsDir, safeDirName);
       await mkdir(skillPath, { recursive: true });
 
       // Save manifest
@@ -153,12 +186,22 @@ export class SkillsRegistry {
         JSON.stringify(manifest, null, 2)
       );
 
-      // Save skill content (assuming JSON response with files)
-      const content = await downloadResponse.json();
-      if (content.files) {
-        for (const [filename, data] of Object.entries(content.files)) {
-          await writeFile(join(skillPath, filename), data as string);
+      // Save the full skill.json
+      await writeFile(
+        join(skillPath, 'skill.json'),
+        JSON.stringify(skillJson, null, 2)
+      );
+
+      // Fetch and save skill.md if it exists
+      try {
+        const skillMdUrl = `${GITHUB_RAW}/${skillId}/${branch}/skill.md`;
+        const mdResponse = await fetch(skillMdUrl);
+        if (mdResponse.ok) {
+          const mdContent = await mdResponse.text();
+          await writeFile(join(skillPath, 'SKILL.md'), mdContent);
         }
+      } catch {
+        // skill.md is optional
       }
 
       // Register installed skill
@@ -172,7 +215,7 @@ export class SkillsRegistry {
       this.installed.set(skillId, installed);
       await this.saveLockFile();
 
-      console.log(`Installed skill: ${manifest.name} v${manifest.version}`);
+      console.log(`Installed skill: ${manifest.name} v${manifest.version} from ${skillId}`);
       return installed;
     } catch (error) {
       console.error(`Failed to install skill ${skillId}:`, error);

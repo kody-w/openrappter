@@ -11,6 +11,18 @@
  *
  * Subclasses just implement `perform()` - the context is already enriched.
  *
+ * Single File Agent Pattern:
+ *   One file = one agent. The metadata contract, documentation, and
+ *   deterministic code all live in a single .ts file. No config files,
+ *   no YAML, no separate manifests. Just native TypeScript:
+ *
+ *     export class MyAgent extends BasicAgent {
+ *       constructor() {
+ *         super('MyAgent', { name: 'MyAgent', description: '...', parameters: {...} });
+ *       }
+ *       async perform(kwargs) { ... }
+ *     }
+ *
  * This mirrors the Python BasicAgent in agents/basic_agent.py
  */
 
@@ -30,6 +42,12 @@ export abstract class BasicAgent {
   metadata: AgentMetadata;
   context: AgentContext | null = null;
 
+  /**
+   * The data_slush output from the most recent execute() call.
+   * Feed this into the next agent's upstream_slush for chaining.
+   */
+  lastDataSlush: Record<string, unknown> | null = null;
+
   constructor(name: string, metadata: AgentMetadata) {
     this.name = name;
     this.metadata = metadata;
@@ -38,14 +56,74 @@ export abstract class BasicAgent {
   /**
    * Main entry point - sloshes context then calls perform().
    * Called by the orchestrator instead of perform() directly.
+   *
+   * Accepts optional 'upstream_slush' kwarg — a dict of signals from
+   * a previous agent's data_slush output. These get merged into context
+   * so downstream agents are aware of upstream results without an LLM
+   * interpreting between calls.
    */
   async execute(kwargs: Record<string, unknown> = {}): Promise<string> {
     const query = (kwargs.query ?? kwargs.request ?? kwargs.user_input ?? '') as string;
     
     this.context = this.slosh(query);
+    
+    // Merge upstream data_slush into context if provided
+    const upstream = kwargs.upstream_slush as Record<string, unknown> | undefined;
+    if (upstream && typeof upstream === 'object') {
+      this.context.upstream_slush = upstream;
+      delete kwargs.upstream_slush;
+    }
+    
     kwargs._context = this.context;
     
-    return this.perform(kwargs);
+    const result = await this.perform(kwargs);
+    
+    // Extract data_slush from result for downstream chaining
+    try {
+      const parsed = JSON.parse(result);
+      this.lastDataSlush = parsed?.data_slush ?? null;
+    } catch {
+      this.lastDataSlush = null;
+    }
+    
+    return result;
+  }
+
+  /**
+   * Build a data_slush dict for downstream chaining.
+   * Convenience method so agents don't manually construct the dict.
+   */
+  slushOut(options: {
+    agentName?: string;
+    confidence?: string;
+    signals?: Record<string, unknown>;
+    [key: string]: unknown;
+  } = {}): Record<string, unknown> {
+    const { agentName, confidence, signals, ...extra } = options;
+    const slush: Record<string, unknown> = {
+      source_agent: agentName ?? this.name,
+      timestamp: new Date().toISOString(),
+    };
+    if (this.context) {
+      const orientation = this.context.orientation;
+      if (orientation) {
+        slush.orientation = {
+          confidence: orientation.confidence,
+          approach: orientation.approach,
+        };
+      }
+      const temporal = this.context.temporal;
+      if (temporal) {
+        slush.temporal_snapshot = {
+          time_of_day: temporal.time_of_day,
+          fiscal: temporal.fiscal,
+        };
+      }
+    }
+    if (confidence !== undefined) slush.confidence = confidence;
+    if (signals) slush.signals = signals;
+    Object.assign(slush, extra);
+    return slush;
   }
 
   /**

@@ -49,7 +49,7 @@ describe('Config System Parity', () => {
 
     it('should validate gateway config', () => {
       const gatewayConfig = {
-        port: 18789,
+        port: 18790,
         bind: 'loopback' as const,
         auth: {
           mode: 'token' as const,
@@ -62,7 +62,7 @@ describe('Config System Parity', () => {
         },
       };
 
-      expect(gatewayConfig.port).toBe(18789);
+      expect(gatewayConfig.port).toBe(18790);
       expect(['loopback', 'all', 'lan', 'tailscale']).toContain(gatewayConfig.bind);
       expect(['none', 'password', 'token']).toContain(gatewayConfig.auth.mode);
     });
@@ -159,7 +159,7 @@ describe('Config System Parity', () => {
           temperature: 0.7,
         },
         gateway: {
-          port: 18789,
+          port: 18790,
         },
       }`;
 
@@ -174,7 +174,7 @@ agent:
   temperature: 0.7
 
 gateway:
-  port: 18789
+  port: 18790
   bind: loopback
 `;
 
@@ -199,7 +199,7 @@ gateway:
 
     it('should merge default config with user config', () => {
       const defaults = {
-        gateway: { port: 18789, bind: 'loopback' },
+        gateway: { port: 18790, bind: 'loopback' },
         agent: { temperature: 0.7 },
       };
 

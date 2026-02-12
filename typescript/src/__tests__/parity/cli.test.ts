@@ -116,12 +116,12 @@ describe('CLI Parity', () => {
 
     it('should support gateway run with port option', () => {
       const runOptions = {
-        port: 18789,
+        port: 18790,
         bind: 'loopback' as const,
         auth: 'token' as const,
       };
 
-      expect(runOptions.port).toBe(18789);
+      expect(runOptions.port).toBe(18790);
     });
   });
 

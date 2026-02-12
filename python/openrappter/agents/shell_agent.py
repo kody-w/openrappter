@@ -1,8 +1,19 @@
 """
 ShellAgent - Shell command and file operations agent.
 
-Provides bash command execution, file reading/writing, and directory listing.
 The core "hands" of the assistant for interacting with the system.
+Provides bash command execution, file reading/writing, and directory listing.
+
+Actions:
+  bash  - Execute a shell command
+  read  - Read a file's contents
+  write - Write content to a file
+  list  - List directory contents
+
+If no explicit action is provided, the agent infers intent from the query:
+  "run ls -la" → bash
+  "read /etc/hosts" → read
+  "list ~/projects" → list
 """
 
 import json
@@ -13,16 +24,6 @@ from openrappter.agents.basic_agent import BasicAgent
 
 
 class ShellAgent(BasicAgent):
-    """
-    Agent for shell commands and file operations.
-    
-    Capabilities:
-    - Execute bash commands
-    - Read file contents
-    - Write/create files
-    - List directory contents
-    """
-    
     def __init__(self):
         self.name = 'Shell'
         self.metadata = {

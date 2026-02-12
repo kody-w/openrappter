@@ -594,7 +594,7 @@
     <div class="nav-container">
       <a href="./" class="logo">
         🦖 openrappter
-        <span class="logo-badge">v1.2</span>
+        <span class="logo-badge">v1.4</span>
       </a>
       <div class="nav-links">
         <a href="./">Home</a>
@@ -1091,7 +1091,25 @@ prefers_brief = self.<span class="fn">get_signal</span>(<span class="str">'behav
 
 <span class="comment"># Synthesized orientation</span>
 confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
-approach   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)</code></pre>
+approach   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)
+
+<span class="comment"># Upstream slush (live signals from a previous agent)</span>
+upstream = self.context.<span class="fn">get</span>(<span class="str">'upstream_slush'</span>, {})</code></pre>
+
+          <h4>Data Slush (Agent-to-Agent Pipeline)</h4>
+          <p>Return a <code>data_slush</code> dict in your output to curate signals for downstream agents:</p>
+<pre><code><span class="comment"># Return curated signals for downstream agents</span>
+<span class="kw">return</span> json.<span class="fn">dumps</span>({
+    <span class="str">"status"</span>: <span class="str">"success"</span>,
+    <span class="str">"result"</span>: result,
+    <span class="str">"data_slush"</span>: {
+        <span class="str">"source_agent"</span>: self.name,
+        <span class="str">"key_signal"</span>: <span class="str">"extracted value"</span>,
+    }
+})
+
+<span class="comment"># Chain: feed A's slush into B</span>
+agent_b.<span class="fn">execute</span>(query=<span class="str">"..."</span>, upstream_slush=agent_a.last_data_slush)</code></pre>
 
           <h3>Environment Variables</h3>
           <table class="doc-table">

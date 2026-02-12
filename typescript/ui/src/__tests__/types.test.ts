@@ -135,7 +135,7 @@ describe('Gateway Types', () => {
   it('validates GatewayStatus shape', () => {
     const st: GatewayStatus = {
       running: true,
-      port: 18789,
+      port: 18790,
       connections: 2,
       uptime: 3600,
       version: '1.2.0',

@@ -77,7 +77,7 @@ channels:
     enabled: false
 
 gateway:
-  port: 18789
+  port: 18790
   bind: all
   auth:
     mode: none
@@ -182,7 +182,7 @@ health_check() {
     local retry=0
 
     while [[ $retry -lt $max_retries ]]; do
-        if curl -sf http://localhost:18789/health > /dev/null 2>&1; then
+        if curl -sf http://localhost:18790/health > /dev/null 2>&1; then
             log_success "Gateway is healthy"
             return 0
         fi
@@ -235,7 +235,7 @@ main() {
             start_services
             sleep 3
             health_check
-            log_success "OpenRappter is ready! Gateway running at http://localhost:18789"
+            log_success "OpenRappter is ready! Gateway running at http://localhost:18790"
             ;;
         build)
             build_image

@@ -21,7 +21,7 @@ export interface BroadcastResult {
   anySucceeded: boolean;
 }
 
-type AgentExecutor = (agentId: string, message: string) => Promise<AgentResult>;
+type AgentExecutor = (agentId: string, message: string, upstreamSlush?: Record<string, unknown>) => Promise<AgentResult>;
 
 export class BroadcastManager {
   private groups = new Map<string, BroadcastGroup>();
@@ -176,7 +176,8 @@ export class BroadcastManager {
   }
 
   /**
-   * Try agents in order until one succeeds
+   * Try agents in order until one succeeds.
+   * In fallback mode, data_slush from each failed agent is passed to the next.
    */
   private async broadcastFallback(
     group: BroadcastGroup,
@@ -185,15 +186,21 @@ export class BroadcastManager {
   ): Promise<BroadcastResult> {
     const results = new Map<string, AgentResult | Error>();
     let firstResponse: { agentId: string; result: AgentResult } | undefined;
+    let lastSlush: Record<string, unknown> | undefined;
 
     for (const agentId of group.agentIds) {
       try {
-        const result = await this.executeWithTimeout(executor, agentId, message, group.timeout);
+        const result = await this.executeWithTimeout(executor, agentId, message, group.timeout, lastSlush);
         results.set(agentId, result);
         firstResponse = { agentId, result };
         break; // Success, stop trying
       } catch (error) {
         results.set(agentId, error as Error);
+        // Extract data_slush from failed agent for downstream chaining
+        const err = error as Error & { result?: AgentResult };
+        if (err.result && typeof err.result === 'object' && 'data_slush' in err.result) {
+          lastSlush = err.result.data_slush as Record<string, unknown>;
+        }
         // Continue to next agent
       }
     }
@@ -218,14 +225,15 @@ export class BroadcastManager {
     executor: AgentExecutor,
     agentId: string,
     message: string,
-    timeout?: number
+    timeout?: number,
+    upstreamSlush?: Record<string, unknown>
   ): Promise<AgentResult> {
     if (!timeout) {
-      return executor(agentId, message);
+      return executor(agentId, message, upstreamSlush);
     }
 
     return Promise.race([
-      executor(agentId, message),
+      executor(agentId, message, upstreamSlush),
       new Promise<AgentResult>((_, reject) =>
         setTimeout(() => reject(new Error(`Agent ${agentId} timeout after ${timeout}ms`)), timeout)
       ),

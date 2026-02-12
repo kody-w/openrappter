@@ -167,13 +167,13 @@ describe('Config Controller', () => {
   });
 
   it('loadConfig populates state from gateway', async () => {
-    const snap = { raw: 'port: 18789', hash: 'abc', format: 'yaml' };
+    const snap = { raw: 'port: 18790', hash: 'abc', format: 'yaml' };
     const client = createMockClient({ 'config.get': snap });
     const state = createConfigState();
     state.client = client;
 
     await loadConfig(state);
-    expect(state.raw).toBe('port: 18789');
+    expect(state.raw).toBe('port: 18790');
     expect(state.hash).toBe('abc');
     expect(state.format).toBe('yaml');
     expect(state.dirty).toBe(false);
@@ -413,7 +413,7 @@ describe('Presence Controller', () => {
   it('loadStatus populates from gateway', async () => {
     const status = {
       running: true,
-      port: 18789,
+      port: 18790,
       connections: 2,
       uptime: 3600,
       version: '1.2.0',

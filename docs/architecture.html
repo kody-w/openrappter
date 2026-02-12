@@ -701,12 +701,13 @@
   <div class="nav-container">
     <a href="./" class="logo">
       🦖 openrappter
-      <span class="logo-badge">v1.2</span>
+      <span class="logo-badge">v1.4</span>
     </a>
     <div class="nav-links">
       <a href="./">Home</a>
       <a href="./docs.html">Docs</a>
       <a href="./teach.html">Teach Your Agent</a>
+      <a href="./single-file-agents.html">Manifesto</a>
       <a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a>
     </div>
     <div>
@@ -816,9 +817,9 @@
 
 <!-- ── Agent Contract ── -->
 <section class="section" id="contract">
-  <div class="section-label">The Agent Contract</div>
-  <h2 class="section-title">One pattern, two languages</h2>
-  <p class="section-subtitle">Both runtimes share an identical contract. Every agent extends <code style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--green-bright);background:var(--bg-elevated);padding:0.15rem 0.5rem;border-radius:4px;">BasicAgent</code> and implements <code style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--green-bright);background:var(--bg-elevated);padding:0.15rem 0.5rem;border-radius:4px;">perform()</code>.</p>
+  <div class="section-label">The Single File Agent</div>
+  <h2 class="section-title">Documentation + Contract + Code = One File</h2>
+  <p class="section-subtitle">Every agent defines its metadata using native code — Python dicts or TypeScript objects. No YAML, no config files, no magic. Just code. <a href="./single-file-agents.html" style="color:var(--green);">Read the manifesto →</a></p>
 
   <div class="code-tabs">
     <div class="tab-buttons">
@@ -826,7 +827,11 @@
       <button class="tab-btn" data-tab="ts-tab" onclick="switchTab(event, 'ts-tab')">TypeScript</button>
     </div>
     <div class="tab-panel active" id="python-tab">
-      <pre class="code-block"><span class="kw">from</span> agents.basic_agent <span class="kw">import</span> BasicAgent
+      <pre class="code-block"><span class="str">"""
+MyAgent — What this agent does.
+"""</span>
+<span class="kw">import</span> json
+<span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
 
 <span class="kw">class</span> <span class="typ">MyAgent</span>(BasicAgent):
     <span class="kw">def</span> <span class="fn">__init__</span>(self):
@@ -837,7 +842,7 @@
             <span class="str">"parameters"</span>: {
                 <span class="str">"type"</span>: <span class="str">"object"</span>,
                 <span class="str">"properties"</span>: {
-                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>}
+                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User input"</span>}
                 },
                 <span class="str">"required"</span>: []
             }
@@ -846,12 +851,12 @@
 
     <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
         query = kwargs.get(<span class="str">'query'</span>, <span class="str">''</span>)
-        <span class="cm"># self.context has enriched signals from data sloshing</span>
+        <span class="cm"># self.context → enriched by data sloshing</span>
         <span class="kw">return</span> json.dumps({<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"result"</span>: <span class="str">"..."</span>})</pre>
     </div>
     <div class="tab-panel" id="ts-tab">
       <pre class="code-block"><span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
-<span class="kw">import</span> <span class="kw">type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
+<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
 
 <span class="kw">export class</span> <span class="typ">MyAgent</span> <span class="kw">extends</span> BasicAgent {
   <span class="fn">constructor</span>() {
@@ -861,7 +866,7 @@
       parameters: {
         type: <span class="str">'object'</span>,
         properties: {
-          query: { type: <span class="str">'string'</span> }
+          query: { type: <span class="str">'string'</span>, description: <span class="str">'User input'</span> }
         },
         required: []
       }
@@ -871,7 +876,7 @@
 
   <span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;): <span class="typ">Promise</span>&lt;<span class="typ">string</span>&gt; {
     <span class="kw">const</span> query = kwargs.query <span class="kw">as</span> <span class="typ">string</span>;
-    <span class="cm">// this.context has enriched signals from data sloshing</span>
+    <span class="cm">// this.context → enriched by data sloshing</span>
     <span class="kw">return</span> JSON.stringify({ status: <span class="str">'success'</span>, result: <span class="str">'...'</span> });
   }
 }</pre>
@@ -880,19 +885,19 @@
 
   <div class="rules-grid">
     <div class="rule-card">
-      <div class="rule-icon">📛</div>
-      <h4>File Naming</h4>
-      <p><code>*_agent.py</code> for Python, <code>*Agent.ts</code> for TypeScript. Auto-discovered by the registry.</p>
+      <div class="rule-icon">📄</div>
+      <h4>Single File</h4>
+      <p>Native code contract + docs + logic. The file IS the agent IS the contract. No YAML, no config files.</p>
     </div>
     <div class="rule-card">
-      <div class="rule-icon">📋</div>
-      <h4>Metadata Format</h4>
-      <p>OpenAI tools format with <code>name</code>, <code>description</code>, and <code>parameters</code>.</p>
+      <div class="rule-icon">🎯</div>
+      <h4>Deterministic</h4>
+      <p><code>perform()</code> does the same thing every time. The AI decides <em>when</em> — the agent decides <em>how</em>.</p>
     </div>
     <div class="rule-card">
       <div class="rule-icon">🔁</div>
       <h4>JSON Return</h4>
-      <p>Always return a JSON string: <code>{"status": "success"}</code> or <code>"error"</code>.</p>
+      <p>Always return JSON: <code>{"status": "success"}</code>. Include <code>data_slush</code> for chaining.</p>
     </div>
     <div class="rule-card">
       <div class="rule-icon">🔍</div>
@@ -952,6 +957,14 @@
         <span class="signal-key">response_style</span>
       </div>
     </div>
+    <div class="signal-card">
+      <h4>🧊 Upstream Slush</h4>
+      <div class="signal-keys">
+        <span class="signal-key">source_agent</span>
+        <span class="signal-key">agent-declared signals</span>
+        <span class="signal-key">live data from prior agent</span>
+      </div>
+    </div>
   </div>
 
   <div class="code-tabs" style="margin-top: 2.5rem;">
@@ -965,7 +978,11 @@ time = self.context[<span class="str">'temporal'</span>][<span class="str">'time
 
 <span class="cm"># Or use the convenience helper</span>
 confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
-is_brief    = self.<span class="fn">get_signal</span>(<span class="str">'behavioral.prefers_brief'</span>)</pre>
+is_brief    = self.<span class="fn">get_signal</span>(<span class="str">'behavioral.prefers_brief'</span>)
+
+<span class="cm"># Access upstream data_slush from a chained agent</span>
+upstream = self.context.get(<span class="str">'upstream_slush'</span>, {})
+prev_temp = upstream.get(<span class="str">'temp_f'</span>)  <span class="cm"># live data from Agent A</span></pre>
     </div>
     <div class="tab-panel" id="slosh-ts">
       <pre class="code-block"><span class="cm">// Access the full context object</span>
@@ -973,7 +990,93 @@ is_brief    = self.<span class="fn">get_signal</span>(<span class="str">'behavio
 
 <span class="cm">// Or use the convenience helper</span>
 <span class="kw">const</span> confidence = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'orientation.confidence'</span>);
-<span class="kw">const</span> isBrief    = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'behavioral.prefers_brief'</span>);</pre>
+<span class="kw">const</span> isBrief    = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'behavioral.prefers_brief'</span>);
+
+<span class="cm">// Access upstream data_slush from a chained agent</span>
+<span class="kw">const</span> upstream = <span class="kw">this</span>.context?.upstream_slush;
+<span class="kw">const</span> prevTemp = upstream?.temp_f;  <span class="cm">// live data from Agent A</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── Data Slush ── -->
+<section class="section" id="slush">
+  <div class="section-label">Data Slush</div>
+  <h2 class="section-title">Agent-to-agent signal pipeline</h2>
+  <p class="section-subtitle">Agents return a <code style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--green-bright);background:var(--bg-elevated);padding:0.15rem 0.5rem;border-radius:4px;">data_slush</code> field — curated signals from live results — that the framework extracts and feeds into the next agent's context. No LLM needed between calls.</p>
+
+  <div class="code-tabs">
+    <div class="tab-buttons">
+      <button class="tab-btn active" data-tab="slush-py" onclick="switchTab(event, 'slush-py')">Python</button>
+      <button class="tab-btn" data-tab="slush-ts" onclick="switchTab(event, 'slush-ts')">TypeScript</button>
+    </div>
+    <div class="tab-panel active" id="slush-py">
+      <pre class="code-block"><span class="cm"># Agent A — return data_slush with curated signals</span>
+<span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+    weather = fetch_weather(kwargs.get(<span class="str">'query'</span>))
+    <span class="kw">return</span> json.dumps({
+        <span class="str">"status"</span>: <span class="str">"success"</span>,
+        <span class="str">"result"</span>: weather,
+        <span class="str">"data_slush"</span>: {
+            <span class="str">"source_agent"</span>: self.name,
+            <span class="str">"temp_f"</span>: <span class="num">65</span>,
+            <span class="str">"condition"</span>: <span class="str">"cloudy"</span>,
+        }
+    })
+
+<span class="cm"># Chain: A's data_slush feeds into B's context</span>
+result_a = agent_a.execute(query=<span class="str">"Smyrna GA"</span>)
+result_b = agent_b.execute(
+    query=<span class="str">"..."</span>,
+    upstream_slush=agent_a.last_data_slush
+)
+<span class="cm"># B's self.context['upstream_slush'] has A's signals</span></pre>
+    </div>
+    <div class="tab-panel" id="slush-ts">
+      <pre class="code-block"><span class="cm">// Agent A — return data_slush with curated signals</span>
+<span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;): <span class="typ">Promise</span>&lt;<span class="typ">string</span>&gt; {
+  <span class="kw">const</span> weather = <span class="kw">await</span> fetchWeather(kwargs.query);
+  <span class="kw">return</span> JSON.stringify({
+    status: <span class="str">'success'</span>,
+    result: weather,
+    data_slush: {
+      source_agent: <span class="kw">this</span>.name,
+      temp_f: <span class="num">65</span>,
+      condition: <span class="str">'cloudy'</span>,
+    }
+  });
+}
+
+<span class="cm">// Chain: A's data_slush feeds into B's context</span>
+<span class="kw">const</span> resultA = <span class="kw">await</span> agentA.execute({ query: <span class="str">'Smyrna GA'</span> });
+<span class="kw">const</span> resultB = <span class="kw">await</span> agentB.execute({
+  query: <span class="str">'...'</span>,
+  upstream_slush: agentA.lastDataSlush,
+});
+<span class="cm">// B's this.context.upstream_slush has A's signals</span></pre>
+    </div>
+  </div>
+
+  <div class="rules-grid">
+    <div class="rule-card">
+      <div class="rule-icon">🧊</div>
+      <h4>Curated, Not Raw</h4>
+      <p>Agents declare which signals matter — not a data dump, but a focused handoff for downstream context.</p>
+    </div>
+    <div class="rule-card">
+      <div class="rule-icon">🔗</div>
+      <h4>LLM-Free Chaining</h4>
+      <p>Sub-agent pipelines, cron jobs, and broadcasts can pass live data between agents without an LLM interpreting.</p>
+    </div>
+    <div class="rule-card">
+      <div class="rule-icon">⚡</div>
+      <h4>Zero Boilerplate</h4>
+      <p>Return <code>data_slush</code> in your JSON — the framework handles extraction and injection automatically.</p>
+    </div>
+    <div class="rule-card">
+      <div class="rule-icon">🔄</div>
+      <h4>Self-Loop Ready</h4>
+      <p>Same agent can feed its own <code>last_data_slush</code> back — each invocation gets richer.</p>
     </div>
   </div>
 </section>

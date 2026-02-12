@@ -11,12 +11,12 @@ import { describe, it, expect } from 'vitest';
 describe('Network Parity', () => {
   describe('Bind Modes', () => {
     it('should support loopback binding', () => {
-      const config = { bind: 'loopback', address: '127.0.0.1', port: 18789 };
+      const config = { bind: 'loopback', address: '127.0.0.1', port: 18790 };
       expect(config.address).toBe('127.0.0.1');
     });
 
     it('should support LAN binding', () => {
-      const config = { bind: 'lan', address: '0.0.0.0', port: 18789 };
+      const config = { bind: 'lan', address: '0.0.0.0', port: 18790 };
       expect(config.address).toBe('0.0.0.0');
     });
 
@@ -24,7 +24,7 @@ describe('Network Parity', () => {
       const config = {
         bind: 'tailscale',
         tailscaleAddress: '100.x.x.x',
-        port: 18789,
+        port: 18790,
       };
 
       expect(config.bind).toBe('tailscale');
@@ -74,7 +74,7 @@ describe('Network Parity', () => {
       const service = {
         type: '_openrappter._tcp',
         name: 'OpenRappter Gateway',
-        port: 18789,
+        port: 18790,
         txt: {
           version: '1.2.0',
           auth: 'token',
@@ -82,13 +82,13 @@ describe('Network Parity', () => {
       };
 
       expect(service.type).toContain('_openrappter');
-      expect(service.port).toBe(18789);
+      expect(service.port).toBe(18790);
     });
 
     it('should discover other gateways on network', () => {
       const discovered = [
-        { name: 'Gateway 1', host: '192.168.1.100', port: 18789 },
-        { name: 'Gateway 2', host: '192.168.1.101', port: 18789 },
+        { name: 'Gateway 1', host: '192.168.1.100', port: 18790 },
+        { name: 'Gateway 2', host: '192.168.1.101', port: 18790 },
       ];
 
       expect(discovered.length).toBeGreaterThan(0);
@@ -124,7 +124,7 @@ describe('Network Parity', () => {
       const resolution = {
         hostname: 'openrappter.local',
         address: '192.168.1.100',
-        port: 18789,
+        port: 18790,
       };
 
       expect(resolution.hostname).toBeDefined();

@@ -119,6 +119,7 @@ Agents run with automatic context enrichment ("data sloshing"):
 - **Timeout**: 30 seconds default
 - **Output limit**: 2000 characters for shell commands
 - **Context**: Temporal, memory, and behavioral signals available via `self.context`
+- **Data Slush**: Agents can return a `data_slush` dict in their output with curated signals. The framework extracts this to `last_data_slush` / `lastDataSlush` and it can be passed as `upstream_slush` to the next agent's `execute()` for LLM-free chaining.
 
 ## Security
 

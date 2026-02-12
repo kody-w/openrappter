@@ -1,8 +1,10 @@
 """
-ManageMemoryAgent - Memory management agent for storing memories.
+ManageMemoryAgent - Memory storage agent for persisting facts and preferences.
 
-Allows storing facts, preferences, insights, and tasks to persistent memory.
-Uses local JSON file storage (no external dependencies).
+Stores important information to memory for future reference including
+facts, preferences, insights, and tasks. Uses ~/.openrappter/memory.json
+for persistence. Stored memories are automatically surfaced during data
+sloshing when their content overlaps with the current query.
 """
 
 import json
@@ -14,13 +16,6 @@ from openrappter.agents.basic_agent import BasicAgent
 
 
 class ManageMemoryAgent(BasicAgent):
-    """
-    Agent for storing and managing memories.
-    
-    Stores memories with metadata like type, importance, and tags.
-    Uses ~/.openrappter/memory.json for persistence.
-    """
-    
     def __init__(self):
         self.name = 'ManageMemory'
         self.metadata = {
@@ -40,13 +35,10 @@ class ManageMemoryAgent(BasicAgent):
                     },
                     "importance": {
                         "type": "integer",
-                        "description": "Importance rating from 1-5, where 5 is most important.",
-                        "minimum": 1,
-                        "maximum": 5
+                        "description": "Importance rating from 1-5, where 5 is most important."
                     },
                     "tags": {
                         "type": "array",
-                        "items": {"type": "string"},
                         "description": "Optional list of tags to categorize this memory."
                     }
                 },

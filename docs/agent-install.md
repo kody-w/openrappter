@@ -325,6 +325,7 @@ Every agent call is automatically enriched with contextual signals before `perfo
 | **Memory Echoes** | `message`, `theme`, `relevance` | Relevant past interactions |
 | **Behavioral** | `prefers_brief`, `technical_level`, `frequent_entities` | User patterns |
 | **Orientation** | `confidence`, `approach`, `hints`, `response_style` | Synthesized action guidance |
+| **Upstream Slush** | `source_agent`, plus agent-declared signals | Live data from the previous agent in a chain |
 
 ### Accessing Signals
 
@@ -333,6 +334,9 @@ Every agent call is automatically enriched with contextual signals before `perfo
 time = self.get_signal('temporal.time_of_day')
 confidence = self.get_signal('orientation.confidence')
 is_brief = self.get_signal('behavioral.prefers_brief', False)
+
+# Access upstream agent signals (when chained)
+upstream = self.context.get('upstream_slush', {})
 ```
 
 ```typescript
@@ -340,12 +344,32 @@ is_brief = self.get_signal('behavioral.prefers_brief', False)
 const time = this.getSignal('temporal.time_of_day');
 const confidence = this.getSignal('orientation.confidence');
 const isBrief = this.getSignal('behavioral.prefers_brief', false);
+
+// Access upstream agent signals (when chained)
+const upstream = this.context?.upstream_slush;
+```
+
+### Data Slush (Agent-to-Agent Signal Pipeline)
+
+Agents can return a `data_slush` field in their JSON output — curated signals extracted from live results. The framework extracts this after `perform()` and stores it on `last_data_slush` (Python) / `lastDataSlush` (TypeScript). To chain agents, pass it as `upstream_slush` to the next `execute()` call.
+
+```python
+# Agent A returns curated signals
+return json.dumps({
+    "status": "success",
+    "result": "...",
+    "data_slush": {"source_agent": self.name, "temp_f": 65, "mood": "calm"}
+})
+
+# Chain: feed A's output into B
+result_b = agent_b.execute(query="...", upstream_slush=agent_a.last_data_slush)
+# B's self.context['upstream_slush'] == {"source_agent": "...", "temp_f": 65, ...}
 ```
 
 ### Execution Flow
 
 ```
-User Input → execute() → slosh() enriches context → perform() runs with self.context populated
+User Input → execute() → slosh() enriches context → merge upstream_slush → perform() → extract data_slush
 ```
 
 ---
@@ -402,6 +426,7 @@ Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `ski
 ┌──────────────────────────────────────────────────────────┐
 │  Data Sloshing (context enrichment layer)                │
 │  Temporal + Memory + Behavioral + Query signals          │
+│  + upstream data_slush from previous agent               │
 └────────────────────────┬─────────────────────────────────┘
                          ▼
 ┌──────────────────────────────────────────────────────────┐

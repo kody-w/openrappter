@@ -1,8 +1,8 @@
 /**
  * ShellAgent - Shell command and file operations agent.
  *
- * Provides bash command execution, file reading/writing, and directory listing.
  * The core "hands" of the assistant for interacting with the system.
+ * Provides bash command execution, file reading/writing, and directory listing.
  *
  * Mirrors Python agents/shell_agent.py
  */

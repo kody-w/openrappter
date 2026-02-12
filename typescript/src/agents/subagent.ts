@@ -33,9 +33,11 @@ export interface SubAgentContext {
   parentAgentId: string;
   depth: number;
   history: SubAgentCall[];
+  /** data_slush from the most recent sub-agent call, auto-chained downstream */
+  lastSlush?: Record<string, unknown>;
 }
 
-type AgentExecutor = (agentId: string, message: string, context?: SubAgentContext) => Promise<AgentResult>;
+type AgentExecutor = (agentId: string, message: string, context?: SubAgentContext, upstreamSlush?: Record<string, unknown>) => Promise<AgentResult>;
 
 export class SubAgentManager {
   private config: SubAgentConfig;
@@ -134,18 +136,24 @@ export class SubAgentManager {
     };
 
     try {
-      // Execute with timeout
+      // Execute with timeout, passing upstream slush for chaining
       const result = await this.executeWithTimeout(
         targetAgentId,
         message,
         childContext,
-        this.config.timeout
+        this.config.timeout,
+        context.lastSlush
       );
 
       // Update call record
       call.status = 'success';
       call.completedAt = new Date().toISOString();
       call.result = result;
+
+      // Extract data_slush from result for downstream chaining
+      if (result && typeof result === 'object' && 'data_slush' in result) {
+        context.lastSlush = result.data_slush as Record<string, unknown>;
+      }
 
       this.activeCalls.delete(call.id);
       this.callHistory.push(call);
@@ -238,9 +246,10 @@ export class SubAgentManager {
     agentId: string,
     message: string,
     context: SubAgentContext,
-    timeout?: number
+    timeout?: number,
+    upstreamSlush?: Record<string, unknown>
   ): Promise<AgentResult> {
-    const promise = this.executor!(agentId, message, context);
+    const promise = this.executor!(agentId, message, context, upstreamSlush);
 
     if (!timeout) {
       return promise;

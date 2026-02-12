@@ -59,9 +59,11 @@ openrappter --exec Shell "ls -la"
 |---------|-------------|
 | **Copilot-Powered** | Uses your existing GitHub Copilot subscription for AI inference — no separate API keys |
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
+| **Single File Agents** | One file = one agent — metadata defined in native code constructors, deterministic, portable |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |
 | **Dual Runtime** | Same agent contract in Python (7 agents) and TypeScript (3 agents) |
 | **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
+| **Data Slush** | Agent-to-agent signal pipeline — agents return curated `data_slush` that feeds into the next agent's context |
 | **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
 | **RappterHub** | Install community agents with `openrappter rappterhub install author/agent` |
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
@@ -129,15 +131,22 @@ node dist/index.js "ls"
 | `Shell` | Execute bash commands, read/write files, list directories |
 | `Memory` | Store and recall facts — remember, recall, list, forget |
 
-## Creating Custom Agents
+## Creating Custom Agents — The Single File Agent Pattern
 
-Agents are auto-discovered by file naming convention. No registration needed.
+Every agent is a **single file** with metadata defined in native code constructors:
+
+1. **Native metadata** — deterministic contract defined in code (Python dicts / TypeScript objects)
+2. **Python/TypeScript code** — deterministic `perform()` implementation
+
+One file = one agent. No YAML, no config files. Metadata lives in the constructor using the language's native data structures.
+
+> 📄 **[Read the Single File Agent Manifesto →](https://kody-w.github.io/rappterhub/single-file-agents.html)**
 
 ### Python — `python/openrappter/agents/my_agent.py`
 
 ```python
-from openrappter.agents.basic_agent import BasicAgent
 import json
+from openrappter.agents.basic_agent import BasicAgent
 
 class MyAgent(BasicAgent):
     def __init__(self):
@@ -157,7 +166,6 @@ class MyAgent(BasicAgent):
 
     def perform(self, **kwargs):
         query = kwargs.get('query', '')
-        # self.context has enriched signals from data sloshing
         return json.dumps({"status": "success", "result": query})
 ```
 
@@ -172,20 +180,13 @@ export class MyAgent extends BasicAgent {
     const metadata: AgentMetadata = {
       name: 'MyAgent',
       description: 'What this agent does',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'User input' }
-        },
-        required: []
-      }
+      parameters: { type: 'object', properties: { query: { type: 'string', description: 'User input' } }, required: [] }
     };
     super('MyAgent', metadata);
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
     const query = kwargs.query as string;
-    // this.context has enriched signals from data sloshing
     return JSON.stringify({ status: 'success', result: query });
   }
 }
@@ -204,12 +205,52 @@ Every agent call is automatically enriched with contextual signals before `perfo
 | **Memory** | `message`, `theme`, `relevance` | Relevant past interactions |
 | **Behavioral** | `prefers_brief`, `technical_level` | User patterns |
 | **Orientation** | `confidence`, `approach`, `response_style` | Synthesized action guidance |
+| **Upstream Slush** | `source_agent`, plus agent-declared signals | Live data from the previous agent in a chain |
 
 ```python
 # Access in perform()
 time = self.get_signal('temporal.time_of_day')
 confidence = self.get_signal('orientation.confidence')
 ```
+
+### Data Slush (Agent-to-Agent Signal Pipeline)
+
+Agents can return a `data_slush` field in their output — curated signals extracted from live results. The framework automatically extracts this and makes it available to feed into the next agent's context via `upstream_slush`.
+
+```python
+# Agent A returns data_slush in its response
+def perform(self, **kwargs):
+    weather = fetch_weather("Smyrna GA")
+    return json.dumps({
+        "status": "success",
+        "result": weather,
+        "data_slush": {                    # ← curated signal package
+            "source_agent": self.name,
+            "temp_f": 65,
+            "condition": "cloudy",
+            "mood": "calm",
+        }
+    })
+
+# Agent B receives it automatically via upstream_slush
+result_b = agent_b.execute(
+    query="...",
+    upstream_slush=agent_a.last_data_slush  # ← chained in
+)
+# Inside B's perform(): self.context['upstream_slush'] has A's signals
+```
+
+```typescript
+// TypeScript — same pattern
+const resultA = await agentA.execute({ query: 'Smyrna GA' });
+const resultB = await agentB.execute({
+  query: '...',
+  upstream_slush: agentA.lastDataSlush,  // chained in
+});
+// Inside B: this.context.upstream_slush has A's signals
+```
+
+This enables **LLM-free agent pipelines** — sub-agent chains, cron jobs, and broadcast fallbacks where live context flows between agents without an orchestrator interpreting in between.
 
 ## Architecture
 
@@ -219,9 +260,9 @@ User Input → Agent Registry → Copilot SDK Routing (tool calling)
                                Data Sloshing (context enrichment)
                                         ↓
                                Agent.perform() executes
-                                   ↓           ↓
-                            GitHub Copilot   ~/.openrappter/
-                            (cloud AI)       (local data)
+                                   ↓           ↓           ↓
+                            GitHub Copilot   ~/.openrappter/  data_slush →
+                            (cloud AI)       (local data)     next agent
 ```
 
 ```

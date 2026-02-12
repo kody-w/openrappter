@@ -135,6 +135,34 @@ prefers_brief = self.get_signal('behavioral.prefers_brief')
 # Synthesized orientation
 confidence = self.get_signal('orientation.confidence')
 approach = self.get_signal('orientation.approach')
+
+# Upstream slush (signals from a previous agent in the chain)
+upstream = self.context.get('upstream_slush', {})
+prev_agent = upstream.get('source_agent')
+```
+
+### Data Slush (Agent-to-Agent Pipeline)
+
+Return a `data_slush` dict in your agent's output to curate signals for downstream agents:
+
+```python
+def perform(self, **kwargs):
+    result = do_work(kwargs.get('query'))
+    return json.dumps({
+        "status": "success",
+        "result": result,
+        "data_slush": {
+            "source_agent": self.name,
+            "key_signal": "extracted value",
+        }
+    })
+```
+
+Chain agents by feeding `last_data_slush` into the next call:
+
+```python
+agent_b.execute(query="...", upstream_slush=agent_a.last_data_slush)
+# B's self.context['upstream_slush'] has A's curated signals
 ```
 
 ## Configuration

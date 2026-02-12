@@ -48,7 +48,7 @@ export class GatewayClient {
   connId: string | null = null;
 
   constructor(opts?: GatewayClientOptions) {
-    this.url = opts?.url ?? `ws://${globalThis.location?.hostname ?? 'localhost'}:18789`;
+    this.url = opts?.url ?? `ws://${globalThis.location?.hostname ?? 'localhost'}:18790`;
     this.token = opts?.token ?? null;
     this.password = opts?.password ?? null;
     this.maxReconnectAttempts = opts?.maxReconnectAttempts ?? 10;

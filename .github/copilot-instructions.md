@@ -58,12 +58,43 @@ All agents automatically receive enriched context before `perform()` is called. 
 - Query signals (specificity, ownership hints)
 - Behavioral hints (user preferences)
 - Orientation (confidence level, suggested approach)
+- Upstream slush (live signals from a previous agent in a chain)
 
 Access via `self.context` (Python) or `this.context` (TypeScript), or use `get_signal('key.subkey')` / `getSignal('key.subkey')`.
 
+### Data Slush (Agent-to-Agent Pipeline)
+
+Agents can return a `data_slush` dict in their JSON output — curated signals from live results. The framework extracts this after `perform()` and stores it on `last_data_slush` (Python) / `lastDataSlush` (TypeScript). To chain agents, pass it as `upstream_slush` to the next `execute()` call. The downstream agent receives it in `self.context['upstream_slush']` / `this.context.upstream_slush`.
+
 ## Unified Agent Contract
 
-Both TypeScript and Python agents MUST follow this pattern:
+Both TypeScript and Python agents MUST follow this pattern — one file, one agent, metadata defined in native code constructors:
+
+### Python (`python/openrappter/agents/*_agent.py`)
+
+```python
+from openrappter.agents.basic_agent import BasicAgent
+
+class MyAgent(BasicAgent):
+    def __init__(self):
+        self.name = 'MyAgent'
+        self.metadata = {
+            "name": self.name,
+            "description": "What this agent does",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "User input"}
+                },
+                "required": []
+            }
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+    
+    def perform(self, **kwargs):
+        query = kwargs.get('query', '')
+        return json.dumps({"status": "success", "result": "..."})
+```
 
 ### TypeScript (`typescript/src/agents/*Agent.ts`)
 
@@ -89,43 +120,15 @@ export class MyAgent extends BasicAgent {
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
     const query = kwargs.query as string;
-    // this.context has enriched signals from data sloshing
     return JSON.stringify({ status: 'success', result: '...' });
   }
 }
 ```
 
-### Python (`python/openrappter/agents/*_agent.py`)
-
-```python
-from agents.basic_agent import BasicAgent
-
-class MyAgent(BasicAgent):
-    def __init__(self):
-        self.name = 'MyAgent'
-        self.metadata = {
-            "name": self.name,
-            "description": "What this agent does",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "User input"}
-                },
-                "required": []
-            }
-        }
-        super().__init__(name=self.name, metadata=self.metadata)
-    
-    def perform(self, **kwargs):
-        query = kwargs.get('query', '')
-        # self.context has enriched signals from data sloshing
-        return json.dumps({"status": "success", "result": "..."})
-```
-
 ### Key Rules
 
 1. **File naming**: `*Agent.ts` for TypeScript, `*_agent.py` for Python (auto-discovered)
-2. **Metadata**: OpenAI tools format with `name`, `description`, `parameters`
+2. **Metadata**: OpenAI tools format with `name`, `description`, `parameters` — defined in native code
 3. **Entry point**: `execute()` is called by orchestrator (handles sloshing), which calls `perform()`
 4. **Return format**: JSON string with `{"status": "success|error", ...}`
 5. **Context access**: `self.context` / `this.context` after sloshing

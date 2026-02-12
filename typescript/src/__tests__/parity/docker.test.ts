@@ -42,13 +42,13 @@ describe('Docker Parity', () => {
     });
 
     it('should expose gateway port', async () => {
-      const exposedPort = 18789;
-      expect(exposedPort).toBe(18789);
+      const exposedPort = 18790;
+      expect(exposedPort).toBe(18790);
     });
 
     it('should have HEALTHCHECK instruction', async () => {
       const healthcheck = {
-        test: ['CMD', 'curl', '-f', 'http://localhost:18789/health'],
+        test: ['CMD', 'curl', '-f', 'http://localhost:18790/health'],
         interval: '30s',
         timeout: '10s',
         retries: 3,
@@ -61,7 +61,7 @@ describe('Docker Parity', () => {
     it('should set appropriate ENV variables', async () => {
       const envVars = {
         NODE_ENV: 'production',
-        GATEWAY_PORT: '18789',
+        GATEWAY_PORT: '18790',
       };
 
       expect(envVars.NODE_ENV).toBe('production');
@@ -78,14 +78,14 @@ describe('Docker Parity', () => {
       const services = {
         gateway: {
           build: '.',
-          ports: ['18789:18789'],
+          ports: ['18790:18790'],
           volumes: ['./config:/app/config', './data:/app/data'],
           restart: 'unless-stopped',
         },
       };
 
       expect(services.gateway).toBeDefined();
-      expect(services.gateway.ports).toContain('18789:18789');
+      expect(services.gateway.ports).toContain('18790:18790');
     });
 
     it('should define volumes for persistence', async () => {
@@ -283,7 +283,7 @@ describe('Docker Parity', () => {
           'Starting OpenRappter...',
           'Running migrations...',
           'Loading config...',
-          'Gateway listening on port 18789',
+          'Gateway listening on port 18790',
         ];
 
         expect(startupLogs[startupLogs.length - 1]).toContain('listening');
@@ -338,17 +338,17 @@ describe('Docker Parity', () => {
 
     it('should have default values', async () => {
       const defaults = {
-        GATEWAY_PORT: '18789',
+        GATEWAY_PORT: '18790',
         NODE_ENV: 'production',
         LOG_LEVEL: 'info',
       };
 
-      expect(defaults.GATEWAY_PORT).toBe('18789');
+      expect(defaults.GATEWAY_PORT).toBe('18790');
     });
 
     it('should override with environment variables', async () => {
       const envOverride = {
-        GATEWAY_PORT: process.env.GATEWAY_PORT ?? '18789',
+        GATEWAY_PORT: process.env.GATEWAY_PORT ?? '18790',
       };
 
       expect(envOverride.GATEWAY_PORT).toBeDefined();

@@ -199,7 +199,7 @@ describe('Configuration Schema', () => {
           discord: { enabled: false },
         },
         gateway: {
-          port: 18789,
+          port: 18790,
           bind: 'loopback',
           auth: { mode: 'password', password: 'secret' },
         },
@@ -213,7 +213,7 @@ describe('Configuration Schema', () => {
 
       expect(config.models).toHaveLength(1);
       expect(config.agents?.list).toHaveLength(1);
-      expect(config.gateway?.port).toBe(18789);
+      expect(config.gateway?.port).toBe(18790);
     });
 
     it('should use defaults for missing optional fields', async () => {
@@ -222,7 +222,7 @@ describe('Configuration Schema', () => {
       };
 
       // Defaults should be applied
-      expect(config.gateway?.port ?? 18789).toBe(18789);
+      expect(config.gateway?.port ?? 18790).toBe(18790);
       expect(config.gateway?.bind ?? 'loopback').toBe('loopback');
       expect(config.cron?.enabled ?? false).toBe(false);
     });

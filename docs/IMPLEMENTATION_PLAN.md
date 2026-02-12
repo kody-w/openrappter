@@ -66,7 +66,7 @@ export const OpenRappterConfigSchema = z.object({
   }).optional(),
   channels: z.record(ChannelConfigSchema).optional(),
   gateway: z.object({
-    port: z.number().default(18789),
+    port: z.number().default(18790),
     bind: z.enum(['loopback', 'all']).default('loopback'),
     auth: z.object({
       mode: z.enum(['none', 'password']).default('none'),

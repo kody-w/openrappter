@@ -10,8 +10,27 @@ before performing its action. This provides:
 - Disambiguation priors
 
 Subclasses just implement `perform()` - the context is already enriched.
+
+Single File Agent Pattern:
+    One file = one agent. The metadata contract, documentation, and
+    deterministic code all live in a single .py file. No config files,
+    no YAML, no separate manifests. Just native Python:
+
+        class MyAgent(BasicAgent):
+            def __init__(self):
+                self.name = 'MyAgent'
+                self.metadata = {
+                    "name": self.name,
+                    "description": "What this agent does",
+                    "parameters": { ... }
+                }
+                super().__init__(name=self.name, metadata=self.metadata)
+
+            def perform(self, **kwargs):
+                ...
 """
 
+import json
 import logging
 import re
 from datetime import datetime
@@ -50,14 +69,82 @@ class BasicAgent:
         """
         Main entry point - sloshes context then calls perform().
         Called by the orchestrator instead of perform() directly.
+        
+        Accepts optional 'upstream_slush' kwarg — a dict of signals from
+        a previous agent's data_slush output. These get merged into context
+        so downstream agents are aware of upstream results without an LLM
+        interpreting between calls.
         """
         self._user_guid = kwargs.get('user_guid')
         query = kwargs.get('query', kwargs.get('request', kwargs.get('user_input', '')))
         
         self.context = self.slosh(query, self._user_guid)
+        
+        # Merge upstream data_slush into context if provided
+        upstream = kwargs.pop('upstream_slush', None)
+        if upstream and isinstance(upstream, dict):
+            self.context['upstream_slush'] = upstream
+        
         kwargs['_context'] = self.context
         
-        return self.perform(**kwargs)
+        result = self.perform(**kwargs)
+        
+        # Extract data_slush from result for downstream chaining
+        try:
+            parsed = json.loads(result) if isinstance(result, str) else result
+            if isinstance(parsed, dict) and 'data_slush' in parsed:
+                self._last_data_slush = parsed['data_slush']
+            else:
+                self._last_data_slush = None
+        except (json.JSONDecodeError, TypeError):
+            self._last_data_slush = None
+        
+        return result
+    
+    @property
+    def last_data_slush(self):
+        """The data_slush output from the most recent execute() call.
+        Use this to feed into the next agent's upstream_slush parameter."""
+        return getattr(self, '_last_data_slush', None)
+    
+    def slush_out(self, *, agent_name=None, confidence=None, signals=None, **extra):
+        """Build a data_slush dict for downstream chaining.
+        
+        Convenience method so agents don't manually construct the dict.
+        Automatically includes agent name, timestamp, and context summary.
+        
+        Usage in perform():
+            return json.dumps({
+                "status": "success",
+                "result": "...",
+                "data_slush": self.slush_out(signals={"key": "value"})
+            })
+        """
+        slush = {
+            'source_agent': agent_name or self.name,
+            'timestamp': datetime.now().isoformat(),
+        }
+        # Pull orientation from context if available
+        if self.context and isinstance(self.context, dict):
+            orientation = self.context.get('orientation', {})
+            if orientation:
+                slush['orientation'] = {
+                    'confidence': orientation.get('confidence', 'low'),
+                    'approach': orientation.get('approach', 'direct'),
+                }
+            temporal = self.context.get('temporal', {})
+            if temporal:
+                slush['temporal_snapshot'] = {
+                    'time_of_day': temporal.get('time_of_day', ''),
+                    'fiscal': temporal.get('fiscal', ''),
+                }
+        if confidence is not None:
+            slush['confidence'] = confidence
+        if signals:
+            slush['signals'] = signals
+        if extra:
+            slush.update(extra)
+        return slush
     
     def perform(self, **kwargs):
         """Override this in subclasses. Context is available via self.context"""

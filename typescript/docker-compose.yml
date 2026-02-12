@@ -11,7 +11,7 @@ services:
     container_name: openrappter-gateway
     restart: unless-stopped
     ports:
-      - "18789:18789"
+      - "18790:18790"
     volumes:
       # Persistent data storage
       - openrappter-data:/app/data
@@ -22,13 +22,13 @@ services:
     environment:
       - NODE_ENV=production
       - OPENRAPPTER_GATEWAY_BIND=all
-      - OPENRAPPTER_GATEWAY_PORT=18789
+      - OPENRAPPTER_GATEWAY_PORT=18790
       # Provider API keys (set in .env file)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:18789/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:18790/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3

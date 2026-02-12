@@ -158,17 +158,17 @@ describe('Config Integration', () => {
 
     it('should accept valid full config', () => {
       const result = validateConfig({
-        gateway: { port: 18789, bind: 'loopback' },
+        gateway: { port: 18790, bind: 'loopback' },
         memory: { provider: 'openai', chunkTokens: 512, chunkOverlap: 64 },
         cron: { enabled: true },
       });
       expect(result.success).toBe(true);
-      expect(result.data?.gateway?.port).toBe(18789);
+      expect(result.data?.gateway?.port).toBe(18790);
     });
 
     it('should reject invalid gateway bind mode', () => {
       const result = validateConfig({
-        gateway: { port: 18789, bind: 'invalid-mode' },
+        gateway: { port: 18790, bind: 'invalid-mode' },
       });
       expect(result.success).toBe(false);
     });
@@ -183,7 +183,7 @@ describe('Config Integration', () => {
     it('should apply defaults for optional fields', () => {
       const result = validateConfig({ gateway: {} });
       expect(result.success).toBe(true);
-      expect(result.data?.gateway?.port).toBe(18789);
+      expect(result.data?.gateway?.port).toBe(18790);
       expect(result.data?.gateway?.bind).toBe('loopback');
     });
   });
@@ -193,7 +193,7 @@ describe('Config Integration', () => {
   describe('mergeConfigs', () => {
     it('should merge gateway configs with override', () => {
       const base: Partial<OpenRappterConfig> = {
-        gateway: { port: 18789, bind: 'loopback' },
+        gateway: { port: 18790, bind: 'loopback' },
       };
       const override: Partial<OpenRappterConfig> = {
         gateway: { port: 9999, bind: 'all' },

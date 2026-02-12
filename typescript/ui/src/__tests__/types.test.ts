@@ -138,7 +138,7 @@ describe('Gateway Types', () => {
       port: 18790,
       connections: 2,
       uptime: 3600,
-      version: '1.2.0',
+      version: '1.4.0',
       startedAt: '2025-01-01',
     };
     expect(st.running).toBe(true);
@@ -147,7 +147,7 @@ describe('Gateway Types', () => {
   it('validates HealthResponse shape', () => {
     const h: HealthResponse = {
       status: 'ok',
-      version: '1.2.0',
+      version: '1.4.0',
       uptime: 3600,
       timestamp: '2025-01-01',
       checks: { gateway: true, storage: true, channels: false },

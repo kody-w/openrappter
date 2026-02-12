@@ -213,7 +213,7 @@ class {class_name}(BasicAgent):
         
         # Try to get intelligent implementation from Copilot
         perform_body = self._generate_perform_body(description)
-        extra_params_yaml = self._generate_extra_params_yaml(description)
+        extra_params_yaml = self._generate_extra_params(description)
         extra_imports = self._generate_extra_imports(description)
         
         # Escape quotes in description for string literals

@@ -8,8 +8,8 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: MIT
-- **TypeScript Version**: 1.2.0
-- **Python Version**: 1.2.0
+- **TypeScript Version**: 1.4.0
+- **Python Version**: 1.4.0
 
 ---
 
@@ -214,7 +214,7 @@ python3 -m openrappter.cli [options]  # Direct
 
 ## 7. Built-in Agents
 
-### Python Runtime (7 agents)
+### Python Runtime (4 agents)
 
 | Agent | Name | Description |
 |---|---|---|
@@ -222,8 +222,6 @@ python3 -m openrappter.cli [options]  # Direct
 | **ContextMemory** | `ContextMemory` | Recalls and provides context based on stored memories of past interactions. |
 | **Shell** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
 | **LearnNew** | `LearnNew` | Creates new agents from natural language descriptions. Generates code, writes to `agents/`, and hot-loads. |
-| **FetchesLatest** | `FetchesLatest` | Fetches the latest Hacker News stories. Returns titles, URLs, and scores. |
-| **RAPPverseNPC** | `RAPPverseNPC` | Autonomous NPC conversationalist for RAPPterverse game; monitors state/chat.json, generates in-character responses. |
 
 ### TypeScript Runtime (3 agents)
 
@@ -554,8 +552,7 @@ openrappter/
 │   │       ├── manage_memory_agent.py  # Store memories
 │   │       ├── context_memory_agent.py # Recall memories
 │   │       ├── learn_new_agent.py      # Generate new agents
-│   │       ├── fetches_latest_agent.py # Hacker News fetcher
-│   │       └── rappverse_npc_agent.py  # RAPPterverse NPC agent
+│   │       └── learn_new_agent.py      # Generate new agents
 │   └── pyproject.toml
 ├── typescript/
 │   ├── src/

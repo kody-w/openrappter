@@ -416,7 +416,7 @@ describe('Presence Controller', () => {
       port: 18790,
       connections: 2,
       uptime: 3600,
-      version: '1.2.0',
+      version: '1.4.0',
       startedAt: '2025-01-01',
     };
     const client = createMockClient({ status });
@@ -431,7 +431,7 @@ describe('Presence Controller', () => {
   it('loadHealth populates from gateway', async () => {
     const health = {
       status: 'ok',
-      version: '1.2.0',
+      version: '1.4.0',
       uptime: 3600,
       timestamp: '2025-01-01',
       checks: { gateway: true },

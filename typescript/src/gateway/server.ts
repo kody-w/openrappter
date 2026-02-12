@@ -34,7 +34,7 @@ const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
-const VERSION = '1.2.0';
+const VERSION = '1.4.0';
 const PROTOCOL_VERSION = 3;
 
 interface RateLimitEntry {
@@ -675,9 +675,23 @@ export class GatewayServer {
       return { removed: true };
     }, { requiresAuth: true });
     this.registerMethod('cron.run', async (params: { jobId: string }) => {
-      if (!this.cronService) throw new Error('Cron service not configured');
-      await this.cronService.run(params.jobId);
-      return { triggered: true };
+      if (this.cronService) {
+        await this.cronService.run(params.jobId);
+        return { triggered: true };
+      }
+      // Fallback: trigger via agent handler if available
+      const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId) as Record<string, unknown> | undefined;
+      if (!job) throw new Error('Job not found');
+      if (this.agentHandler) {
+        const payload = job.payload as { message?: string } | undefined;
+        const message = payload?.message || `Run cron job: ${(job as { name?: string }).name || params.jobId}`;
+        // Fire-and-forget so the RPC call returns immediately
+        this.agentHandler({ message, agentId: (job.agentId as string) || undefined }).catch((err) => {
+          console.error(`Cron job ${params.jobId} failed:`, err);
+        });
+        return { triggered: true };
+      }
+      throw new Error('No cron service or agent handler configured');
     }, { requiresAuth: true });
     this.registerMethod('cron.enable', async (params: { jobId: string; enabled: boolean }) => {
       // Update in built-in store

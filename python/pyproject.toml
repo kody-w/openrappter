@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openrappter"
-version = "1.2.0"
+version = "1.4.0"
 description = "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required"
 readme = {text = "openrappter - Local-first AI agent powered by GitHub Copilot SDK", content-type = "text/plain"}
 license = "MIT"
@@ -29,6 +29,12 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
 [project.scripts]
 openrappter = "openrappter.cli:main"
 
@@ -40,3 +46,7 @@ Issues = "https://github.com/kody-w/openrappter/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openrappter"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

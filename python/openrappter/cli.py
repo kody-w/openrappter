@@ -609,7 +609,7 @@ class Orchestrator:
     def __init__(self):
         self.registry = AgentRegistry()
         self.assistant = None
-        self.version = "1.2.0"
+        self.version = "1.4.0"
         self.emoji = "🦖"
         self.name = "openrappter"
     

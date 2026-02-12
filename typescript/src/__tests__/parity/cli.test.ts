@@ -32,7 +32,7 @@ describe('CLI Parity', () => {
     it('should have a commander-based CLI entry point', () => {
       const cliStructure = {
         name: 'openrappter',
-        version: '1.2.0',
+        version: '1.4.0',
         description: 'Local-first AI agent framework',
         commands: requiredCommands,
       };

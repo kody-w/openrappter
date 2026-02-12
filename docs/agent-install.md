@@ -8,7 +8,7 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: MIT
-- **Version**: 1.2.0
+- **Version**: 1.4.0
 
 ---
 
@@ -142,7 +142,6 @@ python3 -m openrappter.cli [options]  # Direct
 | **ContextMemory** | `ContextMemory` | Recalls and provides context based on stored memories of past interactions. |
 | **Shell** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
 | **LearnNew** | `LearnNew` | Creates new agents from natural language descriptions. Generates code, writes to `agents/`, and hot-loads. |
-| **FetchesLatest** | `FetchesLatest` | Fetches the latest Hacker News stories. Returns titles, URLs, and scores. |
 
 ### TypeScript Runtime (2 agents)
 
@@ -454,8 +453,7 @@ openrappter/
 │   │       ├── shell_agent.py          # Shell commands
 │   │       ├── manage_memory_agent.py  # Store memories
 │   │       ├── context_memory_agent.py # Recall memories
-│   │       ├── learn_new_agent.py      # Generate new agents
-│   │       └── fetches_latest_agent.py # Hacker News fetcher
+│   │       └── learn_new_agent.py      # Generate new agents
 │   └── pyproject.toml
 ├── typescript/
 │   ├── src/

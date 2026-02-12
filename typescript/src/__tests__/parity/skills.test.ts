@@ -20,7 +20,7 @@ describe('Skills Ecosystem Parity', () => {
       const response = {
         results: [
           { name: 'apple-notes', description: 'Access Apple Notes', version: '1.0.0' },
-          { name: 'obsidian', description: 'Obsidian vault integration', version: '1.2.0' },
+          { name: 'obsidian', description: 'Obsidian vault integration', version: '1.4.0' },
         ],
       };
 

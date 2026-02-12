@@ -244,7 +244,7 @@ export class OpenRappterPresence extends LitElement {
                   </div>
                   <div class="stat-item">
                     <div class="stat-label">Version</div>
-                    <div class="stat-value">${this.status.version ?? '1.2.0'}</div>
+                    <div class="stat-value">${this.status.version ?? '1.4.0'}</div>
                   </div>
                 </div>
               </div>

@@ -71,6 +71,8 @@
     .btn-d { background: var(--err); }
     .btn-group { display: flex; gap: 0.4rem; }
     .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+    .card-click { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+    .card-click:hover { border-color: var(--accent); background: var(--bg3); }
     .grid { display: grid; gap: 0.75rem; }
     .grid-2 { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
     .grid-3 { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
@@ -180,7 +182,7 @@
       <div class="sb-item" data-view="logs"><span class="sb-icon">📜</span> Logs</div>
     </div>
   </div>
-  <div class="sb-footer"><a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a> · v1.2.0</div>
+  <div class="sb-footer"><a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a> · v1.4.0</div>
 </div>
 
 <!-- ═══ Main ═══ -->
@@ -323,7 +325,7 @@ const GW = {
         const connectId = `r_${++this.rid}_${Date.now()}`;
         const connectParams = {
           minProtocol: 3, maxProtocol: 3,
-          client: { id: 'webchat-ui', displayName: 'OpenRappter Dashboard', version: '1.2.0', platform: 'web', mode: 'webchat' },
+          client: { id: 'webchat-ui', displayName: 'OpenRappter Dashboard', version: '1.4.0', platform: 'web', mode: 'webchat' },
           caps: [],
         };
         if (this.authToken) connectParams.auth = { token: this.authToken };
@@ -543,9 +545,9 @@ async function loadChannels() {
   try {
     const list = await GW.call('channels.list');
     if (!list?.length) { el.innerHTML = '<div class="empty">No channels configured.</div>'; return; }
-    const icons = { discord:'🎮', slack:'💼', telegram:'✈️', whatsapp:'📱', signal:'🔐', imessage:'💬', matrix:'🔷', teams:'👥', cli:'⌨️' };
+    const icons = { discord:'🎮', slack:'💼', telegram:'✈️', whatsapp:'📱', signal:'🔐', imessage:'💬', matrix:'🔷', teams:'👥', cli:'⌨️', googlechat:'💬' };
     el.innerHTML = list.map(ch => `
-      <div class="card">
+      <div class="card card-click" onclick="showChannelDetail('${esc(ch.type)}')">
         <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.6rem;">
           <span style="font-size:1.4rem;">${icons[ch.type]||'📡'}</span>
           <div style="flex:1"><div style="font-weight:600;">${esc(ch.id)}</div><div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">${esc(ch.type)}</div></div>
@@ -555,6 +557,54 @@ async function loadChannels() {
       </div>
     `).join('');
   } catch { el.innerHTML = '<div class="empty">Could not load channels.</div>'; }
+}
+
+async function showChannelDetail(type) {
+  const el = document.getElementById('channelsList');
+  const icons = { discord:'🎮', slack:'💼', telegram:'✈️', whatsapp:'📱', signal:'🔐', imessage:'💬', matrix:'🔷', teams:'👥', cli:'⌨️', googlechat:'💬' };
+  el.innerHTML = '<div class="spinner"></div>';
+  try {
+    const list = await GW.call('channels.list');
+    const ch = list?.find(c => c.type === type);
+    if (!ch) { el.innerHTML = '<div class="empty">Channel not found.</div>'; return; }
+    const probe = await GW.call('channels.probe', { type }).catch(() => null);
+    el.innerHTML = `
+      <div>
+        <button class="btn btn-s" onclick="loadChannels()" style="margin-bottom:1rem;">← Back to Channels</button>
+        <div class="card" style="max-width:480px;">
+          <div style="display:flex;align-items:center;gap:0.8rem;margin-bottom:1rem;">
+            <span style="font-size:2rem;">${icons[type]||'📡'}</span>
+            <div>
+              <div style="font-size:1.1rem;font-weight:700;">${esc(ch.id)}</div>
+              <div style="font-size:0.8rem;color:var(--muted);text-transform:uppercase;">${esc(ch.type)}</div>
+            </div>
+            <span class="badge ${ch.connected?'badge-ok':'badge-err'}" style="margin-left:auto;">${ch.connected?'Connected':'Offline'}</span>
+          </div>
+          <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val">${ch.connected?'Connected':'Offline'}</span></div>
+          <div class="stat-row"><span class="stat-label">Configured</span><span class="stat-val">${ch.configured?'Yes':'No'}</span></div>
+          <div class="stat-row"><span class="stat-label">Running</span><span class="stat-val">${ch.running?'Yes':'No'}</span></div>
+          <div class="stat-row"><span class="stat-label">Messages</span><span class="stat-val">${ch.messageCount??0}</span></div>
+          <div class="stat-row"><span class="stat-label">Last Activity</span><span class="stat-val">${ch.lastActivity ? new Date(ch.lastActivity).toLocaleString() : 'Never'}</span></div>
+          ${probe ? `<div class="stat-row"><span class="stat-label">Probe</span><span class="stat-val">${probe.ok?'✅ OK':'❌ '+(probe.error||'Failed')}</span></div>` : ''}
+          <div style="margin-top:1.2rem;display:flex;gap:0.5rem;">
+            ${ch.connected
+              ? `<button class="btn btn-d" onclick="channelAction('disconnect','${esc(type)}')">Disconnect</button>`
+              : `<button class="btn" onclick="channelAction('connect','${esc(type)}')">Connect</button>`
+            }
+            <button class="btn btn-s" onclick="channelAction('probe','${esc(type)}')">Probe</button>
+          </div>
+        </div>
+      </div>`;
+  } catch(e) { el.innerHTML = `<div class="empty">Error loading channel: ${esc(e.message)}</div>`; }
+}
+
+async function channelAction(action, type) {
+  try {
+    await GW.call(`channels.${action}`, { type });
+  } catch(e) {
+    console.error(`Channel ${action} failed:`, e);
+  }
+  showChannelDetail(type);
 }
 
 // ═══════════
@@ -636,14 +686,16 @@ async function loadCron() {
   try {
     const list = await GW.call('cron.list');
     if (!list?.length) { el.innerHTML = '<div class="empty">No cron jobs configured.</div>'; return; }
-    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.6rem;">${list.map(j => `
+    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:0.6rem;">${list.map(j => {
+      const sched = typeof j.schedule === 'object' && j.schedule ? (j.schedule.expr || j.schedule.expression || JSON.stringify(j.schedule)) : (j.schedule || '—');
+      return `
       <div class="card" style="display:flex;align-items:center;gap:0.85rem;">
         <div class="toggle ${j.enabled?'on':''}" onclick="toggleCron('${esc(j.id)}',${!j.enabled})"></div>
-        <div style="flex:1"><div style="font-weight:600;">${esc(j.name)}</div><div class="mono" style="color:var(--muted);">${esc(j.schedule)}</div></div>
+        <div style="flex:1"><div style="font-weight:600;">${esc(j.name)}</div><div class="mono" style="color:var(--muted);">${esc(sched)}</div></div>
         <span class="badge ${j.enabled?'badge-ok':'badge-err'}">${j.enabled?'Active':'Disabled'}</span>
         <button class="btn btn-s" style="padding:0.3rem 0.6rem;font-size:0.75rem;" onclick="runCron('${esc(j.id)}')">Run Now</button>
-      </div>
-    `).join('')}</div>`;
+      </div>`;
+    }).join('')}</div>`;
   } catch { el.innerHTML = '<div class="empty">Could not load cron jobs.</div>'; }
 }
 
@@ -651,7 +703,12 @@ async function toggleCron(id, enabled) {
   try { await GW.call('cron.enable', { jobId: id, enabled }); loadCron(); } catch {}
 }
 async function runCron(id) {
-  try { await GW.call('cron.run', { jobId: id }); alert('Job triggered.'); } catch(e) { alert('Failed: ' + e.message); }
+  const btn = event.target;
+  const orig = btn.textContent;
+  btn.textContent = 'Running...';
+  btn.disabled = true;
+  try { await GW.call('cron.run', { jobId: id }); btn.textContent = '✓ Triggered'; btn.style.color = 'var(--accent)'; } catch(e) { btn.textContent = '✗ Failed'; btn.style.color = 'var(--err)'; }
+  setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.style.color = ''; }, 2000);
 }
 
 // ═══════════

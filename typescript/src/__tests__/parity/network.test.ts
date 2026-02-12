@@ -76,7 +76,7 @@ describe('Network Parity', () => {
         name: 'OpenRappter Gateway',
         port: 18790,
         txt: {
-          version: '1.2.0',
+          version: '1.4.0',
           auth: 'token',
         },
       };

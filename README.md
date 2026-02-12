@@ -61,7 +61,7 @@ openrappter --exec Shell "ls -la"
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
 | **Single File Agents** | One file = one agent — metadata defined in native code constructors, deterministic, portable |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |
-| **Dual Runtime** | Same agent contract in Python (7 agents) and TypeScript (3 agents) |
+| **Dual Runtime** | Same agent contract in Python (4 agents) and TypeScript (3 agents) |
 | **Data Sloshing** | Automatic context enrichment (temporal, memory, behavioral signals) before every action |
 | **Data Slush** | Agent-to-agent signal pipeline — agents return curated `data_slush` that feeds into the next agent's context |
 | **Auto-Discovery** | Drop a `*_agent.py` or `*Agent.ts` file in `agents/` — no registration needed |
@@ -120,8 +120,6 @@ node dist/index.js "ls"
 | `ManageMemory` | Store important information with content, importance, tags |
 | `ContextMemory` | Recall and provide context from stored memories |
 | `LearnNew` | Generate new agents from natural language — writes code, hot-loads, installs deps |
-| `FetchesLatest` | Fetch latest Hacker News stories |
-| `RAPPverseNPC` | Autonomous NPC conversationalist for RAPPterverse game |
 
 ### TypeScript Runtime
 

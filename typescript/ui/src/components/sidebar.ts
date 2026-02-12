@@ -182,7 +182,7 @@ export class OpenRappterSidebar extends LitElement {
 
       <div class="footer">
         <a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a>
-        • v1.2.0
+        • v1.4.0
       </div>
     `;
   }

@@ -269,9 +269,12 @@ program
       // Wire incoming messages → Assistant → reply for all message channels
       telegram.onMessage(async (incoming) => {
         try {
+          const chatId = `telegram_${incoming.conversationId || 'default'}`;
           console.log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
-          const result = await assistant.getResponse(incoming.content);
+
+          const result = await assistant.getResponse(incoming.content, undefined, undefined, chatId);
           const reply = result.content;
+
           await telegram.send(incoming.conversationId!, {
             channel: 'telegram',
             content: reply,
@@ -310,10 +313,13 @@ program
       });
 
       server.setAgentHandler(async (req, stream) => {
+        const conversationKey = req.sessionId || req.conversationId || 'default';
         const result = await assistant.getResponse(
           req.message,
           // Forward streaming deltas
           stream ? (delta) => stream({ id: '', streaming: true, chunk: delta, done: false }) : undefined,
+          undefined,
+          conversationKey,
         );
         return {
           sessionId: req.sessionId ?? 'default',

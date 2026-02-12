@@ -45,6 +45,8 @@ export class Assistant {
   private config: AssistantConfig;
   private client: CopilotClient | null = null;
   private agentLogs: string[] = [];
+  /** Maps conversation keys to Copilot SDK session IDs for multi-turn continuity */
+  private sessionIds: Map<string, string> = new Map();
 
   constructor(
     agents: Map<string, BasicAgent>,
@@ -68,17 +70,20 @@ export class Assistant {
   /**
    * Main entry point — send a message and get a response.
    *
-   * Creates a Copilot SDK session with all agents exposed as tools,
-   * sends the message, and collects the final response.
+   * Uses Copilot SDK session resumption for multi-turn conversations.
+   * When a conversationKey is provided, the same SDK session is reused
+   * so the LLM sees the full conversation transcript.
    *
-   * @param message      Current user message
-   * @param onDelta      Optional callback for streaming text deltas
-   * @param memoryContext Extra context to inject into the system prompt
+   * @param message         Current user message
+   * @param onDelta         Optional callback for streaming text deltas
+   * @param memoryContext   Extra context to inject into the system prompt
+   * @param conversationKey Optional key to maintain conversation continuity (e.g., chat ID)
    */
   async getResponse(
     message: string,
     onDelta?: (text: string) => void,
     memoryContext?: string,
+    conversationKey?: string,
   ): Promise<AssistantResponse> {
     this.agentLogs = [];
 
@@ -93,7 +98,6 @@ export class Assistant {
       this.client = new CopilotClient(this.config.clientOptions);
     }
 
-    // Create a session with tools and system message
     const sessionConfig: SessionConfig = {
       model: this.config.model,
       streaming: this.config.streaming,
@@ -104,7 +108,22 @@ export class Assistant {
       },
     };
 
-    const session = await this.client.createSession(sessionConfig);
+    // Try to resume an existing session for this conversation
+    let session: Awaited<ReturnType<CopilotClient['createSession']>>;
+    const existingSessionId = conversationKey ? this.sessionIds.get(conversationKey) : undefined;
+
+    if (existingSessionId) {
+      try {
+        session = await this.client.resumeSession(existingSessionId, sessionConfig);
+      } catch {
+        // Session expired or invalid — create a new one
+        session = await this.client.createSession(sessionConfig);
+        if (conversationKey) this.sessionIds.set(conversationKey, session.sessionId);
+      }
+    } else {
+      session = await this.client.createSession(sessionConfig);
+      if (conversationKey) this.sessionIds.set(conversationKey, session.sessionId);
+    }
 
     // Collect the full response text
     let fullContent = '';

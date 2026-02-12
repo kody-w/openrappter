@@ -242,6 +242,8 @@ export class OpenRappterChat extends LitElement {
       color: white;
       white-space: pre-wrap;
       word-break: break-word;
+      width: fit-content;
+      max-width: 100%;
     }
 
     .message.assistant {

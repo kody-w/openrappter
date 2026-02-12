@@ -202,6 +202,7 @@ export class OpenRappterApp extends LitElement {
   }
 
   private formatUptime(seconds: number): string {
+    if (!seconds || !Number.isFinite(seconds)) return '0m';
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     if (hours > 0) {

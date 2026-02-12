@@ -287,6 +287,19 @@ program
 
       server.setChannelRegistry(channelRegistry);
 
+      // Expose agents to UI
+      server.setAgentList(() => {
+        const list: { id: string; type: string; description?: string }[] = [];
+        for (const [id, agent] of agents) {
+          list.push({
+            id,
+            type: agent.constructor?.name?.replace(/Agent$/, '').toLowerCase() ?? 'basic',
+            description: agent.metadata?.description,
+          });
+        }
+        return list;
+      });
+
       server.setAgentHandler(async (req, stream) => {
         const result = await assistant.getResponse(
           req.message,

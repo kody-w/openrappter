@@ -78,6 +78,7 @@ export class GatewayServer {
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
   };
+  private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
 
   constructor(config?: Partial<GatewayConfig>) {
     this.config = {
@@ -112,6 +113,10 @@ export class GatewayServer {
     disable(id: string): Promise<void>;
   }): void {
     this.cronService = service;
+  }
+
+  setAgentList(listFn: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[]): void {
+    this.agentList = listFn;
   }
 
   registerMethod<P = unknown, R = unknown>(
@@ -465,6 +470,9 @@ export class GatewayServer {
     this.registerMethod('health', async () => this.getHealthResponse());
     this.registerMethod('ping', async () => ({ pong: Date.now() }));
     this.registerMethod('methods', async () => Array.from(this.methods.keys()));
+
+    // Agents
+    this.registerMethod('agents.list', async () => this.agentList ? this.agentList() : []);
 
     // Subscribe/unsubscribe
     this.registerMethod('subscribe', async (params: { events: string[] }, conn) => {

@@ -177,6 +177,7 @@ export class OpenRappterChat extends LitElement {
     .message-group.user {
       align-self: flex-end;
       align-items: flex-end;
+      width: fit-content;
     }
 
     .message-group.assistant {

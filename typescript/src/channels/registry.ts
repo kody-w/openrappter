@@ -71,6 +71,18 @@ export class ChannelRegistry {
     return { ok: ch.connected, error: ch.connected ? undefined : 'Not connected' };
   }
 
+  configureChannel(type: string, config: Record<string, unknown>): void {
+    const ch = this.findByType(type);
+    if (!ch) throw new Error(`Channel ${type} not registered`);
+    ch.setConfig(config);
+  }
+
+  getChannelConfig(type: string): { config: Record<string, unknown>; fields: { key: string; label: string; type: string; required: boolean }[] } {
+    const ch = this.findByType(type);
+    if (!ch) throw new Error(`Channel ${type} not registered`);
+    return { config: ch.getConfig(), fields: ch.getConfigFields() };
+  }
+
   async sendMessage(request: { channelId: string; conversationId: string; content: string }): Promise<void> {
     const ch = this.findByType(request.channelId) ?? this.get(request.channelId);
     if (!ch) throw new Error(`Channel ${request.channelId} not found`);

@@ -23,7 +23,7 @@ export function registerSkillsCommand(program: Command): void {
         console.log('\nUser-Installed Skills:');
         try {
           const hub = new ClawHubClient();
-          const userSkills = await hub.listInstalledSkills();
+          const userSkills = await hub.listInstalled();
           if (userSkills.length === 0) {
             console.log('  (none)');
           } else {
@@ -42,7 +42,7 @@ export function registerSkillsCommand(program: Command): void {
     .description('Search for skills in ClawHub')
     .action(async (query: string) => {
       const hub = new ClawHubClient();
-      const results = await hub.searchSkills(query);
+      const results = await hub.search(query);
       console.log(`\nFound ${results.length} skill(s):\n`);
       for (const skill of results) {
         console.log(`  ${skill.name}${skill.author ? ` by ${skill.author}` : ''}`);
@@ -57,7 +57,7 @@ export function registerSkillsCommand(program: Command): void {
     .action(async (name: string) => {
       const hub = new ClawHubClient();
       console.log(`Installing skill: ${name}...`);
-      await hub.installSkill(name);
+      await hub.install(name);
       console.log(`Successfully installed: ${name}`);
     });
 }

@@ -565,7 +565,7 @@ describe('Gateway Parity', () => {
         },
       };
 
-      expect(notification.id).toBeUndefined();
+      expect((notification as Record<string, unknown>).id).toBeUndefined();
       expect(notification.method).toBe('event');
     });
   });

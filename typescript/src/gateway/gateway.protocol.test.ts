@@ -335,14 +335,14 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
     it('should serve /health', async () => {
       const res = await fetch(`http://127.0.0.1:${TEST_PORT}/health`);
       expect(res.ok).toBe(true);
-      const body = await res.json();
+      const body = (await res.json()) as Record<string, unknown>;
       expect(body.status).toBe('ok');
     });
 
     it('should serve /status', async () => {
       const res = await fetch(`http://127.0.0.1:${TEST_PORT}/status`);
       expect(res.ok).toBe(true);
-      const body = await res.json();
+      const body = (await res.json()) as Record<string, unknown>;
       expect(body.running).toBe(true);
       expect(body.version).toBeDefined();
     });

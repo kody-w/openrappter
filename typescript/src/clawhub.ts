@@ -76,7 +76,7 @@ export class ClawHubClient {
   skillsDir: string;
   constructor() { this.skillsDir = ''; }
 
-  async search(query: string): Promise<Array<{ id: string; name: string; description: string }>> {
+  async search(query: string): Promise<Array<{ id: string; name: string; description: string; author?: string }>> {
     try {
       const response = await fetch(
         `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}+topic:openrappter-skill&sort=stars`,
@@ -84,7 +84,7 @@ export class ClawHubClient {
       );
       if (!response.ok) return [];
       const data = (await response.json()) as { items: Array<{ full_name: string; name: string; description: string }> };
-      return data.items.map((r) => ({ id: r.full_name, name: r.name, description: r.description ?? '' }));
+      return data.items.map((r) => ({ id: r.full_name, name: r.name, description: r.description ?? '', author: r.full_name.split('/')[0] }));
     } catch {
       return [];
     }
@@ -100,7 +100,7 @@ export class ClawHubClient {
     }
   }
 
-  async listInstalled(): Promise<[]> { return []; }
+  async listInstalled(): Promise<Array<{ name: string; description?: string }>> { return []; }
 
   async loadAllSkills(): Promise<ClawHubSkillAgent[]> { return []; }
 }

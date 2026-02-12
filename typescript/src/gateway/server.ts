@@ -74,6 +74,8 @@ export class GatewayServer {
     connectChannel(type: string): Promise<void>;
     disconnectChannel(type: string): Promise<void>;
     probeChannel(type: string): Promise<{ ok: boolean; error?: string }>;
+    configureChannel(type: string, config: Record<string, unknown>): void;
+    getChannelConfig(type: string): { config: Record<string, unknown>; fields: { key: string; label: string; type: string; required: boolean }[] };
   };
   private cronService?: {
     list(): { id: string; name: string; schedule: string; enabled: boolean }[];
@@ -175,6 +177,8 @@ export class GatewayServer {
     connectChannel(type: string): Promise<void>;
     disconnectChannel(type: string): Promise<void>;
     probeChannel(type: string): Promise<{ ok: boolean; error?: string }>;
+    configureChannel(type: string, config: Record<string, unknown>): void;
+    getChannelConfig(type: string): { config: Record<string, unknown>; fields: { key: string; label: string; type: string; required: boolean }[] };
   }): void {
     this.channelRegistry = registry;
   }
@@ -656,6 +660,15 @@ export class GatewayServer {
     this.registerMethod('channels.probe', async (params: { type: string }) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       return this.channelRegistry.probeChannel(params.type);
+    });
+    this.registerMethod('channels.configure', async (params: { type: string; config: Record<string, unknown> }) => {
+      if (!this.channelRegistry) throw new Error('Channel registry not configured');
+      this.channelRegistry.configureChannel(params.type, params.config);
+      return { configured: true };
+    }, { requiresAuth: true });
+    this.registerMethod('channels.getConfig', async (params: { type: string }) => {
+      if (!this.channelRegistry) throw new Error('Channel registry not configured');
+      return this.channelRegistry.getChannelConfig(params.type);
     });
 
     // Cron methods — uses cronService if available, falls back to built-in store

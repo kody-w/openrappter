@@ -74,7 +74,7 @@ describe('Gateway Integration', () => {
       const res = await fetch(`http://127.0.0.1:${port}/health`);
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = (await res.json()) as Record<string, unknown>;
       expect(body.status).toBe('ok');
       expect(body.version).toBeDefined();
       expect(body.uptime).toBeGreaterThanOrEqual(0);
@@ -86,7 +86,7 @@ describe('Gateway Integration', () => {
       await server.start();
 
       const res = await fetch(`http://127.0.0.1:${port}/status`);
-      const body = await res.json();
+      const body = (await res.json()) as Record<string, unknown>;
       expect(body.running).toBe(true);
       expect(body.port).toBe(port);
     });

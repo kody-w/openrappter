@@ -288,9 +288,9 @@ export class SkillsRegistry {
       if (skillContent) {
         // Parse YAML frontmatter
         const frontmatter = this.parseFrontmatter(skillContent);
-        if (frontmatter.tools) skill.tools = frontmatter.tools;
-        if (frontmatter.prompts) skill.prompts = frontmatter.prompts;
-        if (frontmatter.examples) skill.examples = frontmatter.examples;
+        if (frontmatter.tools) skill.tools = frontmatter.tools as SkillTool[];
+        if (frontmatter.prompts) skill.prompts = frontmatter.prompts as SkillPrompt[];
+        if (frontmatter.examples) skill.examples = frontmatter.examples as SkillExample[];
       }
 
       this.loaded.set(skillId, skill);

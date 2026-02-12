@@ -57,7 +57,6 @@ export class IMessageChannel extends EventEmitter {
     super();
     this.config = {
       enabled: true,
-      mode: 'applescript',
       pollInterval: 5000,
       ...config,
     };
@@ -254,7 +253,7 @@ export class IMessageChannel extends EventEmitter {
           id: msg.guid,
           channel: 'imessage',
           conversationId: msg.chat_identifier,
-          senderId: msg.sender,
+          sender: msg.sender,
           content: msg.text || '',
           timestamp: new Date(msg.timestamp * 1000).toISOString(),
           attachments: [],
@@ -312,7 +311,7 @@ export class IMessageChannel extends EventEmitter {
           id: msg.guid,
           channel: 'imessage',
           conversationId: chatGuid,
-          senderId: msg.handle?.address ?? '',
+          sender: msg.handle?.address ?? '',
           content: msg.text || '',
           timestamp: new Date(msg.dateCreated).toISOString(),
           attachments: this.extractBlueBubblesAttachments(msg.attachments),

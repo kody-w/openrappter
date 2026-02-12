@@ -266,27 +266,26 @@ program
       channelRegistry.register(new WhatsAppChannel({}));
       channelRegistry.register(new CLIChannel());
 
+      // Wire incoming messages → Assistant → reply for all message channels
+      telegram.onMessage(async (incoming) => {
+        try {
+          console.log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
+          const result = await assistant.getResponse(incoming.content);
+          const reply = result.content;
+          await telegram.send(incoming.conversationId!, {
+            channel: 'telegram',
+            content: reply,
+            replyTo: incoming.id,
+          });
+          console.log(`${EMOJI} Telegram → ${incoming.senderName}: ${reply.slice(0, 80)}...`);
+        } catch (err) {
+          console.error(`${EMOJI} Telegram reply error:`, err);
+        }
+      });
+
       // Auto-connect Telegram if token is set
       const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
       if (telegramToken) {
-        // Wire incoming messages → Assistant → reply
-        telegram.onMessage(async (incoming) => {
-          try {
-            console.log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
-            const result = await assistant.getResponse(incoming.content);
-            const reply = result.content;
-            await telegram.send(incoming.conversationId!, {
-              channel: 'telegram',
-              content: reply,
-              replyTo: incoming.id,
-            });
-            console.log(`${EMOJI} Telegram → ${incoming.senderName}: ${reply.slice(0, 80)}...`);
-          } catch (err) {
-            console.error(`${EMOJI} Telegram reply error:`, err);
-          }
-        });
-
-        // Auto-connect on startup
         try {
           await telegram.connect();
           console.log(`${EMOJI} Telegram connected & polling (t.me/rappterbot)`);
@@ -314,7 +313,7 @@ program
         const result = await assistant.getResponse(
           req.message,
           // Forward streaming deltas
-          stream ? (delta) => stream({ chunk: delta, done: false }) : undefined,
+          stream ? (delta) => stream({ id: '', streaming: true, chunk: delta, done: false }) : undefined,
         );
         return {
           sessionId: req.sessionId ?? 'default',

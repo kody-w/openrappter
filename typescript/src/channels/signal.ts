@@ -206,7 +206,7 @@ export class SignalChannel extends EventEmitter {
       conversationId: isGroup
         ? `group:${dataMessage.groupInfo!.groupId}`
         : envelope.sourceNumber ?? envelope.source ?? '',
-      senderId: envelope.sourceNumber ?? envelope.source ?? '',
+      sender: envelope.sourceNumber ?? envelope.source ?? '',
       content: dataMessage.message!,
       timestamp: new Date((envelope.timestamp ?? Date.now()) / 1000).toISOString(),
       attachments: this.extractAttachments(dataMessage.attachments),

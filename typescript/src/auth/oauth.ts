@@ -332,3 +332,76 @@ export function createOAuthClient(providerName: string, config: OAuthConfig): OA
 export function createOAuthTokenStore(): OAuthTokenStore {
   return new OAuthTokenStore();
 }
+
+/**
+ * Initiate a full OAuth flow with a local callback server.
+ */
+export async function initiateOAuthFlow(
+  provider: string,
+  options?: { port?: number; clientId?: string; clientSecret?: string }
+): Promise<OAuthToken> {
+  const { createServer } = await import('http');
+  const port = options?.port ?? 18791;
+  const redirectUri = `http://localhost:${port}/callback`;
+
+  const client = new OAuthClient(provider, {
+    clientId: options?.clientId ?? process.env[`${provider.toUpperCase()}_CLIENT_ID`] ?? '',
+    clientSecret: options?.clientSecret ?? process.env[`${provider.toUpperCase()}_CLIENT_SECRET`] ?? '',
+    redirectUri,
+  });
+
+  const { url, state } = client.getAuthorizationUrl();
+
+  // Open browser
+  const open = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  const { exec } = await import('child_process');
+  exec(`${open} "${url}"`);
+
+  console.log(`\nOpen this URL if the browser did not open:\n${url}\n`);
+
+  // Wait for callback
+  return new Promise<OAuthToken>((resolve, reject) => {
+    const server = createServer(async (req, res) => {
+      const reqUrl = new URL(req.url ?? '/', `http://localhost:${port}`);
+      if (reqUrl.pathname !== '/callback') {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+
+      const code = reqUrl.searchParams.get('code');
+      const returnedState = reqUrl.searchParams.get('state');
+
+      if (!code || returnedState !== state) {
+        res.writeHead(400);
+        res.end('Invalid callback');
+        server.close();
+        reject(new Error('Invalid OAuth callback'));
+        return;
+      }
+
+      try {
+        const token = await client.exchangeCode(code, state);
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body><h2>Authentication successful!</h2><p>You can close this window.</p></body></html>');
+        server.close();
+        resolve(token);
+      } catch (err) {
+        res.writeHead(500);
+        res.end('Token exchange failed');
+        server.close();
+        reject(err);
+      }
+    });
+
+    server.listen(port, () => {
+      console.log(`Waiting for OAuth callback on port ${port}...`);
+    });
+
+    // Timeout after 5 minutes
+    setTimeout(() => {
+      server.close();
+      reject(new Error('OAuth flow timed out'));
+    }, 300000);
+  });
+}

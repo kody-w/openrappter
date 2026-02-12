@@ -225,7 +225,7 @@ export class TeamsChannel extends EventEmitter {
       id: activity.id ?? `teams_${Date.now()}`,
       channel: 'teams',
       conversationId: activity.conversation?.id ?? '',
-      senderId: activity.from?.id ?? '',
+      sender: activity.from?.id ?? '',
       content: text,
       timestamp: activity.timestamp ?? new Date().toISOString(),
       attachments: this.extractAttachments(activity.attachments),
@@ -367,7 +367,7 @@ export class TeamsChannel extends EventEmitter {
       // Add attachments
       if (message.attachments && message.attachments.length > 0) {
         activity.attachments = message.attachments.map((att) => ({
-          contentType: att.mimeType,
+          contentType: att.mimeType ?? 'application/octet-stream',
           contentUrl: att.url,
           name: att.filename,
         }));

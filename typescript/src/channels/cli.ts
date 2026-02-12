@@ -52,6 +52,7 @@ export class CLIChannel extends BaseChannel {
         id: CLI_CONVERSATION_ID,
         name: 'CLI Session',
         type: 'dm',
+        participants: [CLI_USER_ID],
       },
     ];
   }
@@ -79,7 +80,7 @@ export class CLIChannel extends BaseChannel {
           id: `msg_${randomUUID().slice(0, 8)}`,
           channel: this.id,
           conversationId: CLI_CONVERSATION_ID,
-          senderId: CLI_USER_ID,
+          sender: CLI_USER_ID,
           senderName: 'User',
           content: trimmed,
           timestamp: new Date().toISOString(),

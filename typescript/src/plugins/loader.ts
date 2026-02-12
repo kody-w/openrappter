@@ -7,6 +7,10 @@ import { readdir, readFile, stat } from 'fs/promises';
 import { join } from 'path';
 import type {
   Plugin,
+  PluginAgent,
+  PluginTool,
+  PluginCommand,
+  PluginGatewayMethod,
   PluginManifest,
   PluginState,
   PluginHook,
@@ -288,8 +292,8 @@ export class PluginLoader {
   /**
    * Get all agents from plugins
    */
-  getAgents(): Array<Plugin['agents']>[number][] {
-    const agents: Array<Plugin['agents']>[number][] = [];
+  getAgents(): PluginAgent[] {
+    const agents: PluginAgent[] = [];
     for (const plugin of this.getEnabledPlugins()) {
       if (plugin.agents) {
         agents.push(...plugin.agents);
@@ -301,8 +305,8 @@ export class PluginLoader {
   /**
    * Get all tools from plugins
    */
-  getTools(): Array<Plugin['tools']>[number][] {
-    const tools: Array<Plugin['tools']>[number][] = [];
+  getTools(): PluginTool[] {
+    const tools: PluginTool[] = [];
     for (const plugin of this.getEnabledPlugins()) {
       if (plugin.tools) {
         tools.push(...plugin.tools);
@@ -314,8 +318,8 @@ export class PluginLoader {
   /**
    * Get all commands from plugins
    */
-  getCommands(): Array<Plugin['commands']>[number][] {
-    const commands: Array<Plugin['commands']>[number][] = [];
+  getCommands(): PluginCommand[] {
+    const commands: PluginCommand[] = [];
     for (const plugin of this.getEnabledPlugins()) {
       if (plugin.commands) {
         commands.push(...plugin.commands);
@@ -327,8 +331,8 @@ export class PluginLoader {
   /**
    * Get all gateway methods from plugins
    */
-  getGatewayMethods(): Array<Plugin['gatewayMethods']>[number][] {
-    const methods: Array<Plugin['gatewayMethods']>[number][] = [];
+  getGatewayMethods(): PluginGatewayMethod[] {
+    const methods: PluginGatewayMethod[] = [];
     for (const plugin of this.getEnabledPlugins()) {
       if (plugin.gatewayMethods) {
         methods.push(...plugin.gatewayMethods);

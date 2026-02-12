@@ -28,6 +28,14 @@ export class TelegramChannel extends BaseChannel {
     this.config = config;
   }
 
+  override getConfigFields() {
+    return [
+      { key: 'token', label: 'Bot Token', type: 'password' as const, required: true },
+      { key: 'webhookUrl', label: 'Webhook URL', type: 'text' as const, required: false },
+      { key: 'pollingInterval', label: 'Polling Interval (ms)', type: 'text' as const, required: false },
+    ];
+  }
+
   async connect(): Promise<void> {
     this.status = 'connecting';
 

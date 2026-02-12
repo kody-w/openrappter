@@ -77,6 +77,23 @@ export class SlackChannel extends BaseChannel {
     this.allowedChannelIds = new Set(config.allowedChannelIds ?? []);
   }
 
+  override getConfigFields() {
+    return [
+      { key: 'botToken', label: 'Bot Token (xoxb-...)', type: 'password' as const, required: true },
+      { key: 'appToken', label: 'App Token (xapp-...)', type: 'password' as const, required: true },
+    ];
+  }
+
+  override setConfig(config: Record<string, unknown>): void {
+    if (config.botToken !== undefined) this.botToken = config.botToken as string;
+    if (config.appToken !== undefined) this.appToken = config.appToken as string;
+  }
+
+  override getConfig(): Record<string, unknown> {
+    const redact = (s: string) => s.length > 4 ? s.slice(0, 4) + '•'.repeat(Math.min(s.length - 4, 20)) : s;
+    return { botToken: redact(this.botToken), appToken: redact(this.appToken) };
+  }
+
   async connect(): Promise<void> {
     // Get bot user ID
     const auth = await this.callApi('auth.test') as SlackApiResponse;
@@ -212,7 +229,7 @@ export class SlackChannel extends BaseChannel {
       id: msg.ts,
       channel: this.id,
       conversationId: msg.channel,
-      senderId: msg.user,
+      sender: msg.user,
       senderName,
       content: msg.text,
       timestamp: new Date(parseFloat(msg.ts) * 1000).toISOString(),

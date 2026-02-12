@@ -5,6 +5,13 @@
 
 import { EventEmitter } from 'events';
 
+// Ambient declaration for browser-context code executed via page.evaluate()
+declare const document: {
+  querySelectorAll(selector: string): Array<{ remove(): void }> & { forEach(fn: (el: { remove(): void }) => void): void };
+  querySelector(selector: string): { innerText?: string } | null;
+  body: { innerText: string };
+};
+
 // Playwright types (dynamically imported)
 interface Browser {
   newContext(options?: BrowserContextOptions): Promise<BrowserContext>;
@@ -146,9 +153,9 @@ export class BrowserService extends EventEmitter {
       this.browser = await playwright.chromium.launch({
         headless: this.config.headless,
         slowMo: this.config.slowMo,
-      });
+      }) as unknown as Browser;
 
-      this.context = await this.browser.newContext({
+      this.context = await this.browser!.newContext({
         viewport: this.config.viewport,
         userAgent: this.config.userAgent,
       });
@@ -427,7 +434,7 @@ export class BrowserService extends EventEmitter {
         ];
 
         for (const selector of removeSelectors) {
-          document.querySelectorAll(selector).forEach((el) => el.remove());
+          document.querySelectorAll(selector).forEach((el: { remove(): void }) => el.remove());
         }
 
         // Get main content or body

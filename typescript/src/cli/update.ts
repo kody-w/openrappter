@@ -1,5 +1,7 @@
 import type { Command } from 'commander';
-import { checkForUpdates } from '../infra/update-check.js';
+import { checkForUpdate } from '../infra/update-check.js';
+
+const CURRENT_VERSION = '1.4.0';
 
 export function registerUpdateCommand(program: Command): void {
   program
@@ -13,12 +15,12 @@ export function registerUpdateCommand(program: Command): void {
       }
 
       console.log('Checking for updates...\n');
-      const result = await checkForUpdates();
+      const result = await checkForUpdate(CURRENT_VERSION);
 
-      console.log(`Current version: ${result.current}`);
-      console.log(`Latest version:  ${result.latest}`);
+      console.log(`Current version: ${result.currentVersion}`);
+      console.log(`Latest version:  ${result.latestVersion}`);
 
-      if (result.updateAvailable) {
+      if (result.hasUpdate) {
         console.log('\n\x1b[33mA new version is available!\x1b[0m');
         console.log('\nTo update, run:');
         console.log('  npm install -g openrappter@latest');

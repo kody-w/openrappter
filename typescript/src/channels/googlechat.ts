@@ -291,7 +291,7 @@ export class GoogleChatChannel extends EventEmitter {
       id: message.name,
       channel: 'googlechat',
       conversationId: space?.name ?? '',
-      senderId: message.sender?.name ?? '',
+      sender: message.sender?.name ?? '',
       content,
       timestamp: message.createTime ?? new Date().toISOString(),
       attachments: this.extractAttachments(message.attachment),

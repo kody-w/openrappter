@@ -568,6 +568,30 @@ async function showChannelDetail(type) {
     const ch = list?.find(c => c.type === type);
     if (!ch) { el.innerHTML = '<div class="empty">Channel not found.</div>'; return; }
     const probe = await GW.call('channels.probe', { type }).catch(() => null);
+    const cfgData = await GW.call('channels.getConfig', { type }).catch(() => ({ config: {}, fields: [] }));
+    const fields = cfgData.fields || [];
+    const currentCfg = cfgData.config || {};
+
+    const configFormHtml = fields.length ? `
+      <div style="margin-top:1.2rem;border-top:1px solid var(--border);padding-top:1rem;">
+        <div style="font-weight:600;margin-bottom:0.8rem;">⚙️ Configuration</div>
+        ${fields.map(f => `
+          <div style="margin-bottom:0.7rem;">
+            <label style="display:block;font-size:0.78rem;color:var(--muted);margin-bottom:0.25rem;">${esc(f.label)}${f.required?' *':''}</label>
+            <input id="chcfg_${esc(f.key)}" type="${f.type === 'password' ? 'password' : 'text'}"
+              placeholder="${esc(f.label)}" value=""
+              data-current="${esc(String(currentCfg[f.key]||''))}"
+              style="width:100%;padding:0.45rem 0.6rem;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:0.82rem;box-sizing:border-box;" />
+            ${currentCfg[f.key] ? `<div style="font-size:0.7rem;color:var(--muted);margin-top:0.2rem;">Current: ${esc(String(currentCfg[f.key]))}</div>` : ''}
+          </div>
+        `).join('')}
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+          <button class="btn" onclick="saveChannelConfig('${esc(type)}')">Save & Connect</button>
+          <button class="btn btn-s" onclick="saveChannelConfig('${esc(type)}', true)">Save</button>
+        </div>
+        <div id="chcfg_status" style="margin-top:0.5rem;font-size:0.8rem;"></div>
+      </div>` : '';
+
     el.innerHTML = `
       <div>
         <button class="btn btn-s" onclick="loadChannels()" style="margin-bottom:1rem;">← Back to Channels</button>
@@ -581,8 +605,6 @@ async function showChannelDetail(type) {
             <span class="badge ${ch.connected?'badge-ok':'badge-err'}" style="margin-left:auto;">${ch.connected?'Connected':'Offline'}</span>
           </div>
           <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val">${ch.connected?'Connected':'Offline'}</span></div>
-          <div class="stat-row"><span class="stat-label">Configured</span><span class="stat-val">${ch.configured?'Yes':'No'}</span></div>
-          <div class="stat-row"><span class="stat-label">Running</span><span class="stat-val">${ch.running?'Yes':'No'}</span></div>
           <div class="stat-row"><span class="stat-label">Messages</span><span class="stat-val">${ch.messageCount??0}</span></div>
           <div class="stat-row"><span class="stat-label">Last Activity</span><span class="stat-val">${ch.lastActivity ? new Date(ch.lastActivity).toLocaleString() : 'Never'}</span></div>
           ${probe ? `<div class="stat-row"><span class="stat-label">Probe</span><span class="stat-val">${probe.ok?'✅ OK':'❌ '+(probe.error||'Failed')}</span></div>` : ''}
@@ -593,16 +615,57 @@ async function showChannelDetail(type) {
             }
             <button class="btn btn-s" onclick="channelAction('probe','${esc(type)}')">Probe</button>
           </div>
+          ${configFormHtml}
         </div>
       </div>`;
   } catch(e) { el.innerHTML = `<div class="empty">Error loading channel: ${esc(e.message)}</div>`; }
 }
 
+async function saveChannelConfig(type, saveOnly) {
+  const statusEl = document.getElementById('chcfg_status');
+  const inputs = document.querySelectorAll('[id^="chcfg_"]');
+  const config = {};
+  let hasValue = false;
+  inputs.forEach(inp => {
+    if (inp.id === 'chcfg_status') return;
+    const key = inp.id.replace('chcfg_', '');
+    if (inp.value.trim()) { config[key] = inp.value.trim(); hasValue = true; }
+  });
+  if (!hasValue) { statusEl.innerHTML = '<span style="color:var(--err);">Enter at least one field.</span>'; return; }
+  statusEl.innerHTML = '<span style="color:var(--muted);">Saving...</span>';
+  try {
+    await GW.call('channels.configure', { type, config });
+    if (!saveOnly) {
+      statusEl.innerHTML = '<span style="color:var(--muted);">Connecting...</span>';
+      await GW.call('channels.connect', { type });
+    }
+    statusEl.innerHTML = '<span style="color:var(--accent);">✓ ' + (saveOnly ? 'Saved' : 'Connected') + '</span>';
+    setTimeout(() => showChannelDetail(type), 1500);
+  } catch(e) {
+    statusEl.innerHTML = '<span style="color:var(--err);">✗ ' + esc(e.message) + '</span>';
+  }
+}
+
 async function channelAction(action, type) {
+  const el = document.getElementById('channelsList');
   try {
     await GW.call(`channels.${action}`, { type });
   } catch(e) {
     console.error(`Channel ${action} failed:`, e);
+    const msg = e.message || 'Unknown error';
+    const hint = /token|401|403|404/.test(msg) ? `<div style="margin-top:0.8rem;padding:0.8rem;background:var(--bg3);border-radius:6px;font-size:0.82rem;">
+      <strong>💡 Tip:</strong> Set the channel's API token as an environment variable before starting the gateway.<br>
+      <span class="mono" style="color:var(--accent);">export ${type.toUpperCase()}_BOT_TOKEN=your-token-here</span>
+    </div>` : '';
+    el.innerHTML = `<div>
+      <button class="btn btn-s" onclick="showChannelDetail('${esc(type)}')" style="margin-bottom:1rem;">← Back</button>
+      <div class="card" style="max-width:480px;">
+        <div style="color:var(--err);font-weight:600;margin-bottom:0.6rem;">⚠️ ${esc(action)} failed</div>
+        <div style="font-size:0.85rem;color:var(--muted);">${esc(msg)}</div>
+        ${hint}
+      </div>
+    </div>`;
+    return;
   }
   showChannelDetail(type);
 }

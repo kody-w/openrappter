@@ -30,9 +30,35 @@ export abstract class BaseChannel {
 
   abstract connect(): Promise<void>;
   abstract disconnect(): Promise<void>;
-  abstract send(message: OutgoingMessage): Promise<void>;
+
+  /** Update channel config at runtime (e.g., setting API tokens from the UI) */
+  setConfig(config: Record<string, unknown>): void {
+    const self = this as unknown as { config: Record<string, unknown> };
+    if (self.config && typeof self.config === 'object') {
+      Object.assign(self.config, config);
+    }
+  }
+
+  /** Return current config (redacts tokens for display) */
+  getConfig(): Record<string, unknown> {
+    const self = this as unknown as { config?: Record<string, unknown> };
+    if (!self.config) return {};
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(self.config)) {
+      if (typeof v === 'string' && /token|secret|key|password/i.test(k) && v.length > 4) {
+        out[k] = v.slice(0, 4) + '•'.repeat(Math.min(v.length - 4, 20));
+      } else {
+        out[k] = v;
+      }
+    }
+    return out;
+  }
+
+  /** Return config field definitions for UI rendering */
+  getConfigFields(): { key: string; label: string; type: 'text' | 'password'; required: boolean }[] {
+    return [];
+  }
   abstract send(conversationId: string, message: OutgoingMessage): Promise<void>;
-  abstract send(messageOrId: OutgoingMessage | string, message?: OutgoingMessage): Promise<void>;
 
   onMessage(handler: MessageHandler): () => void {
     this.handlers.push(handler);
@@ -75,6 +101,6 @@ export abstract class BaseChannel {
   }
 
   async replyInThread(_threadId: string, message: OutgoingMessage): Promise<void> {
-    return this.send(message);
+    return this.send(_threadId, message);
   }
 }

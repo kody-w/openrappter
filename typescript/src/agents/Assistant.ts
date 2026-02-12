@@ -156,7 +156,7 @@ export class Assistant {
       tools.push(
         defineTool(agentName, {
           description: agent.metadata.description,
-          parameters: agent.metadata.parameters as Record<string, unknown>,
+          parameters: agent.metadata.parameters as unknown as Record<string, unknown>,
           handler: async (args: unknown) => {
             const params = (args && typeof args === 'object') ? args as Record<string, unknown> : {};
             try {

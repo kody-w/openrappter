@@ -16,9 +16,9 @@ import type {
 interface MatrixClient {
   startClient(opts?: { initialSyncLimit?: number }): Promise<void>;
   stopClient(): void;
-  on(event: string, callback: (...args: unknown[]) => void): void;
-  off(event: string, callback: (...args: unknown[]) => void): void;
-  once(event: string, callback: (...args: unknown[]) => void): void;
+  on(event: string, callback: (...args: any[]) => void): void;
+  off(event: string, callback: (...args: any[]) => void): void;
+  once(event: string, callback: (...args: any[]) => void): void;
   getUserId(): string | null;
   joinRoom(roomIdOrAlias: string): Promise<{ roomId: string }>;
   sendMessage(roomId: string, content: MatrixMessageContent): Promise<{ event_id: string }>;
@@ -192,7 +192,7 @@ export class MatrixChannel extends EventEmitter {
           resolve();
         }
       };
-      this.client.on('sync', onSync);
+      this.client!.on('sync', onSync);
     });
   }
 
@@ -293,7 +293,7 @@ export class MatrixChannel extends EventEmitter {
       const buffer = Buffer.from(attachment.data, 'base64');
       const result = await this.client.uploadContent(buffer, {
         name: attachment.filename ?? 'attachment',
-        type: attachment.mimeType,
+        type: attachment.mimeType ?? 'application/octet-stream',
       });
       contentUri = result.content_uri;
     } else if (attachment.url) {
@@ -353,7 +353,7 @@ export class MatrixChannel extends EventEmitter {
       id: event.getId(),
       channel: 'matrix',
       conversationId: room.roomId,
-      senderId: sender,
+      sender,
       content: content.body || '',
       timestamp: event.getDate()?.toISOString() ?? new Date().toISOString(),
       attachments: this.extractAttachments(content),

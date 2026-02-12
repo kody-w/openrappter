@@ -29,7 +29,7 @@ export function registerDoctorCommand(program: Command): void {
         if (result.message) {
           console.log(`  ${result.message}`);
         }
-        if (result.status === 'fail' || result.status === 'warn') {
+        if (result.status === 'error' || result.status === 'warn') {
           hasIssues = true;
         }
       }

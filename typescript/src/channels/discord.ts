@@ -72,6 +72,21 @@ export class DiscordChannel extends BaseChannel {
     }
   }
 
+  override getConfigFields() {
+    return [
+      { key: 'botToken', label: 'Bot Token', type: 'password' as const, required: true },
+    ];
+  }
+
+  override setConfig(config: Record<string, unknown>): void {
+    if (config.botToken !== undefined) this.botToken = config.botToken as string;
+  }
+
+  override getConfig(): Record<string, unknown> {
+    const t = this.botToken;
+    return { botToken: t.length > 4 ? t.slice(0, 4) + '•'.repeat(Math.min(t.length - 4, 20)) : t };
+  }
+
   async connect(): Promise<void> {
     this.status = 'connecting';
 

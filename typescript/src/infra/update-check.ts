@@ -28,8 +28,8 @@ export async function checkForUpdate(
       throw new Error(`Failed to fetch latest version: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    const latestVersion = data.version as string;
+    const data = (await response.json()) as { version: string };
+    const latestVersion = data.version;
 
     const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
 

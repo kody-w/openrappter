@@ -7,6 +7,9 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type {
   RpcRequest,
   RpcResponse,
@@ -88,6 +91,56 @@ export class GatewayServer {
       heartbeatInterval: config?.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL,
       connectionTimeout: config?.connectionTimeout ?? DEFAULT_CONNECTION_TIMEOUT,
     };
+    this.loadSessions();
+  }
+
+  /* ---- persistence ---- */
+
+  private get dataDir(): string {
+    const dir = path.join(os.homedir(), '.openrappter');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  private get sessionsPath(): string {
+    return path.join(this.dataDir, 'sessions.json');
+  }
+
+  private get configPath(): string {
+    return path.join(this.dataDir, 'config.yaml');
+  }
+
+  private loadSessions() {
+    try {
+      if (fs.existsSync(this.sessionsPath)) {
+        const data = JSON.parse(fs.readFileSync(this.sessionsPath, 'utf-8'));
+        if (Array.isArray(data)) {
+          for (const s of data) {
+            this.sessionStore.set(s.id, s);
+          }
+        }
+      }
+    } catch { /* ignore corrupt file */ }
+  }
+
+  private saveSessions() {
+    try {
+      const data = Array.from(this.sessionStore.values());
+      fs.writeFileSync(this.sessionsPath, JSON.stringify(data, null, 2));
+    } catch { /* ignore write errors */ }
+  }
+
+  private loadConfig(): string {
+    try {
+      if (fs.existsSync(this.configPath)) {
+        return fs.readFileSync(this.configPath, 'utf-8');
+      }
+    } catch { /* ignore */ }
+    return '';
+  }
+
+  private saveConfig(content: string) {
+    fs.writeFileSync(this.configPath, content, 'utf-8');
   }
 
   setAgentHandler(
@@ -505,6 +558,7 @@ export class GatewayServer {
         };
         session.messages.push(userMsg);
         session.updatedAt = new Date().toISOString();
+        this.saveSessions();
 
         // Respond immediately with acceptance
         const accepted = { runId, sessionKey, status: 'accepted' as const, acceptedAt: Date.now() };
@@ -557,7 +611,9 @@ export class GatewayServer {
     });
 
     this.registerMethod('chat.delete', async (params: { sessionId: string }) => {
-      return { deleted: this.sessionStore.delete(params.sessionId) };
+      const result = { deleted: this.sessionStore.delete(params.sessionId) };
+      this.saveSessions();
+      return result;
     }, { requiresAuth: true });
 
     // Channel methods
@@ -609,6 +665,15 @@ export class GatewayServer {
       conn.metadata = { ...conn.metadata, ...params.metadata };
       return { identified: true };
     });
+
+    // Config methods
+    this.registerMethod('config.get', async () => {
+      return { content: this.loadConfig() };
+    });
+    this.registerMethod('config.set', async (params: { content: string }) => {
+      this.saveConfig(params.content);
+      return { saved: true };
+    }, { requiresAuth: true });
   }
 
   // ── Agent Execution with Chat Events ─────────────────────────────────
@@ -652,6 +717,7 @@ export class GatewayServer {
           timestamp: new Date().toISOString(),
         });
         session.updatedAt = new Date().toISOString();
+        this.saveSessions();
       }
     } catch (error) {
       this.broadcastEvent(GatewayEvents.CHAT, {
@@ -674,6 +740,7 @@ export class GatewayServer {
         updatedAt: new Date().toISOString(),
       };
       this.sessionStore.set(sessionId, session);
+      this.saveSessions();
     }
     return session;
   }

@@ -143,6 +143,124 @@ function formatCronState(job: CronJob): string {
   return `${status} · next ${next} · last ${last}`;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Preset cron job templates                                          */
+/* ------------------------------------------------------------------ */
+
+interface PresetJob {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  schedule: CronSchedule;
+  payload: CronPayload;
+  sessionTarget: CronSessionTarget;
+  wakeMode: CronWakeMode;
+}
+
+const PRESET_JOBS: PresetJob[] = [
+  {
+    id: 'daily-standup',
+    name: 'Daily Standup Digest',
+    emoji: '📋',
+    description: 'Every morning, scan recent git commits, open PRs, and changed files — then generate a concise standup summary of what happened overnight.',
+    schedule: { kind: 'cron', expr: '0 9 * * 1-5' },
+    payload: { kind: 'agentTurn', message: 'Run `git log --oneline --since="yesterday"` and `git diff --stat HEAD~5`, then summarize what changed as a brief standup report. List key changes, who contributed, and any open questions.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'security-audit',
+    name: 'Dependency Vulnerability Scan',
+    emoji: '🛡️',
+    description: 'Periodically audit project dependencies for known security vulnerabilities and outdated packages.',
+    schedule: { kind: 'every', everyMs: 86_400_000 },
+    payload: { kind: 'agentTurn', message: 'Run `npm audit` (or `pip audit` if Python). Parse the output and create a prioritized list of vulnerabilities by severity. For critical/high issues, suggest specific fix commands.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'dead-code-hunter',
+    name: 'Dead Code Hunter',
+    emoji: '💀',
+    description: 'Scan the codebase for unused exports, unreachable functions, and orphaned files that can be safely removed.',
+    schedule: { kind: 'cron', expr: '0 3 * * 0' },
+    payload: { kind: 'agentTurn', message: 'Search the codebase for: 1) exported functions/classes that are never imported elsewhere, 2) files that are not imported by any other file, 3) TODO/FIXME comments older than 30 days. Report findings with file paths and line numbers.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'changelog-gen',
+    name: 'Auto Changelog Generator',
+    emoji: '📝',
+    description: 'Weekly, analyze all commits since last tag and generate a human-readable changelog grouped by type (features, fixes, refactors).',
+    schedule: { kind: 'cron', expr: '0 17 * * 5' },
+    payload: { kind: 'agentTurn', message: 'Run `git log --oneline $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD~50)..HEAD`. Categorize each commit as Feature, Fix, Refactor, Docs, or Chore. Generate a markdown changelog with sections, bullet points, and a summary paragraph at the top.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'system-health',
+    name: 'System Health Probe',
+    emoji: '🏥',
+    description: 'Check disk space, memory usage, CPU load, running services, and open ports. Alert if anything looks concerning.',
+    schedule: { kind: 'every', everyMs: 3_600_000 },
+    payload: { kind: 'agentTurn', message: 'Run these commands and analyze the results: `df -h`, `free -m` (or `vm_stat` on macOS), `uptime`, `ps aux --sort=-%mem | head -10`. Flag any disk partitions over 85% full, memory usage over 90%, or load average above CPU count. Give a one-paragraph health summary.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'git-branch-cleanup',
+    name: 'Stale Branch Cleanup',
+    emoji: '🧹',
+    description: 'Find merged or stale git branches that can be safely deleted and suggest cleanup commands.',
+    schedule: { kind: 'cron', expr: '0 10 * * 1' },
+    payload: { kind: 'agentTurn', message: 'Run `git branch --merged main` and `git for-each-ref --sort=-committerdate refs/heads/ --format="%(refname:short) %(committerdate:relative)"`. List branches that are: 1) already merged into main, 2) not updated in over 30 days. For each, provide the `git branch -d` command to delete it. Do NOT delete main or the current branch.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'readme-freshness',
+    name: 'README Freshness Check',
+    emoji: '📖',
+    description: 'Compare README documentation against actual code — find outdated instructions, missing features, and broken examples.',
+    schedule: { kind: 'cron', expr: '0 14 * * 3' },
+    payload: { kind: 'agentTurn', message: 'Read the README.md file. Then check: 1) Are the install commands still valid? Try running them. 2) Do referenced files/paths still exist? 3) Are listed features actually implemented? Search the codebase for each. 4) Are there new features not mentioned? Report a freshness score (1-10) and specific items to update.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'project-insight',
+    name: 'Weekly Project Insight Report',
+    emoji: '📊',
+    description: 'Generate a comprehensive project dashboard — lines of code, language breakdown, test coverage trends, complexity hotspots.',
+    schedule: { kind: 'cron', expr: '0 9 * * 1' },
+    payload: { kind: 'agentTurn', message: 'Analyze the project: 1) Count lines of code by language using `find . -name "*.ts" -o -name "*.py" | xargs wc -l`. 2) List the 10 largest files. 3) Count total tests. 4) Find the most-changed files this month with `git log --since="1 month ago" --name-only --format="" | sort | uniq -c | sort -rn | head 10`. 5) Identify complexity hotspots (files with deep nesting). Present as a formatted dashboard.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'idea-spark',
+    name: 'Daily Creative Spark',
+    emoji: '💡',
+    description: 'Analyze your codebase and suggest one creative improvement, optimization, or new feature idea you haven\'t thought of.',
+    schedule: { kind: 'cron', expr: '0 10 * * 1-5' },
+    payload: { kind: 'agentTurn', message: 'Look at the codebase structure and recent git history. Think about: 1) What patterns repeat that could be abstracted? 2) What performance bottlenecks might exist? 3) What user-facing feature would be surprisingly easy to add? 4) What modern technique could replace an older pattern? Pick the SINGLE most impactful idea and present it as: Problem → Proposed Solution → Estimated Effort → Expected Impact. Be creative and specific.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+  {
+    id: 'env-drift-detector',
+    name: 'Environment Drift Detector',
+    emoji: '🔍',
+    description: 'Compare .env.example with actual environment, check for missing vars, expired tokens, and config inconsistencies.',
+    schedule: { kind: 'cron', expr: '0 8 * * 1-5' },
+    payload: { kind: 'agentTurn', message: 'Check for environment drift: 1) Compare .env.example (or similar template) against the actual .env file — list any missing or extra variables. 2) Check if package.json engines match actual `node --version`. 3) Verify lockfile is in sync (`npm ls --all 2>&1 | grep "missing"`). 4) Check if Dockerfile base image has known updates. Report any drift found and suggest fixes.' },
+    sessionTarget: 'isolated',
+    wakeMode: 'now',
+  },
+];
+
 function everyMsFromForm(amount: string, unit: string): number {
   const n = parseInt(amount, 10) || 1;
   const multipliers: Record<string, number> = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
@@ -264,6 +382,108 @@ export class OpenRappterCron extends LitElement {
     }
 
     .empty-state { text-align: center; padding: 3rem; color: var(--text-secondary); }
+
+    /* ---- presets ---- */
+    .presets-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+
+    .presets-header h3 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .presets-sub {
+      font-size: 0.8125rem;
+      color: var(--text-secondary);
+      margin-bottom: 1rem;
+    }
+
+    .presets-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .preset-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      transition: border-color 0.15s;
+    }
+
+    .preset-card:hover { border-color: var(--accent); }
+
+    .preset-card.added {
+      opacity: 0.5;
+      pointer-events: none;
+      border-color: var(--accent);
+    }
+
+    .preset-card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .preset-emoji { font-size: 1.5rem; flex-shrink: 0; }
+
+    .preset-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .preset-desc {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      flex: 1;
+    }
+
+    .preset-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      margin-top: auto;
+      padding-top: 0.375rem;
+    }
+
+    .preset-schedule {
+      font-size: 0.6875rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text-secondary);
+      background: var(--bg-primary);
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+      border: 1px solid var(--border);
+    }
+
+    .btn-enable {
+      padding: 0.3rem 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border: 1px solid var(--accent);
+      border-radius: 0.25rem;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-enable:hover {
+      background: var(--accent);
+      color: white;
+    }
   `;
 
   /* ---- scheduler state ---- */
@@ -296,6 +516,9 @@ export class OpenRappterCron extends LitElement {
   /* ---- run history ---- */
   @state() private runsJobId: string | null = null;
   @state() private runs: CronRunLogEntry[] = [];
+
+  /* ---- presets ---- */
+  @state() private addedPresets = new Set<string>();
 
   /* ---- channels for delivery ---- */
   @state() private channels: string[] = [];
@@ -456,6 +679,7 @@ export class OpenRappterCron extends LitElement {
       </section>
 
       ${this.renderJobsList()}
+      ${this.renderPresets()}
       ${this.renderRunHistory()}
     `;
   }
@@ -737,6 +961,72 @@ export class OpenRappterCron extends LitElement {
             `}
       </section>
     `;
+  }
+
+  /* -- presets gallery -- */
+
+  private renderPresets() {
+    const jobIds = new Set(this.jobs.map(j => j.name?.toLowerCase().replace(/\s+/g, '-') ?? j.id));
+
+    return html`
+      <section style="margin-top: 2rem;">
+        <div class="presets-header">
+          <h3>⚡ Preset Automations</h3>
+        </div>
+        <div class="presets-sub">Ready-to-use cron jobs that showcase what OpenRappter can automate. Click to add — they start disabled so you can review first.</div>
+
+        <div class="presets-grid">
+          ${PRESET_JOBS.map(preset => {
+            const alreadyAdded = this.addedPresets.has(preset.id) || jobIds.has(preset.id);
+            return html`
+              <div class="preset-card ${alreadyAdded ? 'added' : ''}">
+                <div class="preset-card-header">
+                  <span class="preset-emoji">${preset.emoji}</span>
+                  <span class="preset-name">${preset.name}</span>
+                </div>
+                <div class="preset-desc">${preset.description}</div>
+                <div class="preset-meta">
+                  <span class="preset-schedule">${this.formatPresetSchedule(preset.schedule)}</span>
+                  ${alreadyAdded
+                    ? html`<span style="font-size:0.75rem;color:var(--accent);">✓ Added</span>`
+                    : html`<button class="btn-enable" @click=${() => this.addPreset(preset)}>+ Add Job</button>`}
+                </div>
+              </div>
+            `;
+          })}
+        </div>
+      </section>
+    `;
+  }
+
+  private formatPresetSchedule(schedule: CronSchedule): string {
+    if (schedule.kind === 'cron') return schedule.expr;
+    if (schedule.kind === 'every') {
+      const ms = schedule.everyMs;
+      if (ms >= 86_400_000) return `Every ${ms / 86_400_000}d`;
+      if (ms >= 3_600_000) return `Every ${ms / 3_600_000}h`;
+      return `Every ${ms / 60_000}m`;
+    }
+    return schedule.at;
+  }
+
+  private async addPreset(preset: PresetJob) {
+    try {
+      await gateway.call('cron.add', {
+        name: preset.name,
+        description: preset.description,
+        agentId: 'default',
+        enabled: false,
+        schedule: preset.schedule,
+        sessionTarget: preset.sessionTarget,
+        wakeMode: preset.wakeMode,
+        payload: preset.payload,
+      });
+      this.addedPresets = new Set([...this.addedPresets, preset.id]);
+      await this.refresh();
+    } catch (e) {
+      console.error('Failed to add preset:', e);
+    }
   }
 }
 

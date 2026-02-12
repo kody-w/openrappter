@@ -171,18 +171,18 @@ export class OpenRappterChat extends LitElement {
       display: flex;
       flex-direction: column;
       gap: 0.25rem;
-      max-width: 80%;
     }
 
     .message-group.user {
       align-self: flex-end;
       align-items: flex-end;
-      width: fit-content;
+      max-width: 80%;
     }
 
     .message-group.assistant {
       align-self: flex-start;
       align-items: flex-start;
+      max-width: 80%;
     }
 
     .message-group.system {
@@ -243,8 +243,6 @@ export class OpenRappterChat extends LitElement {
       color: white;
       white-space: pre-wrap;
       word-break: break-word;
-      width: fit-content;
-      max-width: 100%;
     }
 
     .message.assistant {

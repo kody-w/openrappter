@@ -69,7 +69,7 @@ export class SlackChannel extends BaseChannel {
   private botUserId: string | null = null;
 
   constructor(id: string, name: string, config: SlackConfig) {
-    super();
+    super(name, 'slack');
     this.id = id;
     this.name = name;
     this.botToken = config.botToken;

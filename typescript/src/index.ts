@@ -234,6 +234,11 @@ program
       const { Assistant } = await import('./agents/Assistant.js');
       const { ChannelRegistry } = await import('./channels/registry.js');
       const { TelegramChannel } = await import('./channels/telegram.js');
+      const { DiscordChannel } = await import('./channels/discord.js');
+      const { WhatsAppChannel } = await import('./channels/whatsapp.js');
+      const { SlackChannel } = await import('./channels/slack.js');
+      const { CLIChannel } = await import('./channels/cli.js');
+      const { listBundledSkills } = await import('./skills/bundled.js');
       const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
       const token = process.env.OPENRAPPTER_TOKEN || undefined;
       const server = new GatewayServer({
@@ -250,15 +255,20 @@ program
         model: process.env.OPENRAPPTER_MODEL,
       });
 
-      // Set up channel registry
+      // Set up channel registry — register all channels so they appear in the UI
       const channelRegistry = new ChannelRegistry();
 
-      // Register Telegram if token is set
+      // Register all supported channels (they show as Offline until configured/connected)
+      const telegram = new TelegramChannel({ token: process.env.TELEGRAM_BOT_TOKEN || '' });
+      channelRegistry.register(telegram);
+      channelRegistry.register(new DiscordChannel({ botToken: process.env.DISCORD_BOT_TOKEN || '' }));
+      channelRegistry.register(new SlackChannel('slack', 'slack', { botToken: process.env.SLACK_BOT_TOKEN || '', appToken: process.env.SLACK_APP_TOKEN || '' }));
+      channelRegistry.register(new WhatsAppChannel({}));
+      channelRegistry.register(new CLIChannel());
+
+      // Auto-connect Telegram if token is set
       const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
       if (telegramToken) {
-        const telegram = new TelegramChannel({ token: telegramToken });
-        channelRegistry.register(telegram);
-
         // Wire incoming messages → Assistant → reply
         telegram.onMessage(async (incoming) => {
           try {
@@ -322,6 +332,36 @@ program
       });
 
       await server.start();
+
+      // Override channels.list to include EventEmitter-based channels not in registry
+      const extraChannels = [
+        { id: 'signal', type: 'signal' },
+        { id: 'imessage', type: 'imessage' },
+        { id: 'matrix', type: 'matrix' },
+        { id: 'teams', type: 'teams' },
+        { id: 'googlechat', type: 'googlechat' },
+      ];
+      server.registerMethod('channels.list', async () => {
+        const live = channelRegistry.getStatusList();
+        const extras = extraChannels.map(ch => ({
+          id: ch.id, type: ch.type, connected: false, configured: false,
+          running: false, messageCount: 0,
+        }));
+        return [...live, ...extras];
+      });
+
+      // Register skills.list RPC method
+      server.registerMethod('skills.list', async () => {
+        const skills = await listBundledSkills();
+        return skills.map(s => ({
+          name: s.name,
+          description: s.description,
+          category: s.category,
+          enabled: s.eligibility.eligible === 'eligible',
+          version: '1.0.0',
+        }));
+      });
+
       console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
       console.log(`${EMOJI} Assistant: Copilot SDK with ${agents.size} agents as tools`);
       console.log('Press Ctrl+C to stop\n');

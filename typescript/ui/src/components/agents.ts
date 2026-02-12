@@ -1043,12 +1043,22 @@ export class OpenRappterAgents extends LitElement {
   /* ---- render: overview tab ---- */
 
   private renderOverview(agent: AgentInfo) {
+    const toolCount = agent.tools?.length ?? 0;
+    const capCount = agent.capabilities?.length ?? 0;
+    const channelCount = agent.channels?.length ?? 0;
+    const connectedChannels = agent.channels?.filter(c => c.connected).length ?? 0;
+
     return html`
       <div class="overview-header">
         <span class="icon">${this.getAgentIcon(agent.type)}</span>
         <div>
           <div class="title">${agent.id}</div>
-          <span class="type">${agent.type}</span>
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.25rem;">
+            <span class="type">${agent.type}</span>
+            ${agent.type === 'skill'
+              ? html`<span class="chip chip-muted">Skill Agent</span>`
+              : nothing}
+          </div>
         </div>
       </div>
 
@@ -1056,43 +1066,65 @@ export class OpenRappterAgents extends LitElement {
         ? html`<div class="overview-desc">${agent.description}</div>`
         : html`<div class="overview-desc" style="font-style:italic;">No description available.</div>`}
 
-      ${agent.messageCount != null
-        ? html`
-            <div class="stat-row">
+      <div class="stat-row">
+        ${agent.messageCount != null
+          ? html`
               <div class="stat-card">
                 <div class="label">Messages</div>
                 <div class="value">${agent.messageCount.toLocaleString()}</div>
               </div>
-              <div class="stat-card">
-                <div class="label">Capabilities</div>
-                <div class="value">${agent.capabilities?.length ?? 0}</div>
-              </div>
-              <div class="stat-card">
-                <div class="label">Tools</div>
-                <div class="value">${agent.tools?.length ?? 0}</div>
-              </div>
-            </div>
-          `
-        : html`
-            <div class="stat-row">
-              <div class="stat-card">
-                <div class="label">Capabilities</div>
-                <div class="value">${agent.capabilities?.length ?? 0}</div>
-              </div>
-              <div class="stat-card">
-                <div class="label">Tools</div>
-                <div class="value">${agent.tools?.length ?? 0}</div>
-              </div>
-            </div>
-          `}
+            `
+          : nothing}
+        <div class="stat-card">
+          <div class="label">Tools</div>
+          <div class="value">${toolCount}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Capabilities</div>
+          <div class="value">${capCount}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Channels</div>
+          <div class="value">${connectedChannels}/${channelCount}</div>
+        </div>
+      </div>
 
-      ${(agent.capabilities?.length ?? 0) > 0
+      ${capCount > 0
         ? html`
             <div class="section-title">Capabilities</div>
             <div class="cap-list">
               ${agent.capabilities!.map(
                 (c) => html`<span class="cap-badge">${c}</span>`,
               )}
+            </div>
+          `
+        : nothing}
+
+      ${channelCount > 0
+        ? html`
+            <div class="section-title">Connected Channels</div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.375rem;">
+              ${agent.channels!.map(
+                (ch) => html`
+                  <span class="chip ${ch.connected ? 'chip-ok' : 'chip-muted'}">
+                    ${this.getChannelIcon(ch.type)} ${ch.type}
+                  </span>
+                `,
+              )}
+            </div>
+          `
+        : nothing}
+
+      ${toolCount > 0
+        ? html`
+            <div class="section-title">Available Tools (${toolCount})</div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.375rem;">
+              ${agent.tools!.slice(0, 20).map(
+                (t) => html`<span class="cap-badge" style="font-family:'SF Mono','Fira Code',monospace;font-size:0.6875rem;">${t.name}</span>`,
+              )}
+              ${toolCount > 20
+                ? html`<span class="cap-badge" style="opacity:0.6;">+${toolCount - 20} more</span>`
+                : nothing}
             </div>
           `
         : nothing}
@@ -1130,28 +1162,80 @@ export class OpenRappterAgents extends LitElement {
       return html`<div class="empty-tab">No skills associated with this agent.</div>`;
     }
 
+    const groups = new Map<string, SkillInfo[]>();
+    for (const s of agentSkills) {
+      const source = (s as unknown as { source?: string }).source ?? 'installed';
+      if (!groups.has(source)) groups.set(source, []);
+      groups.get(source)!.push(s);
+    }
+
+    const sourceLabels: Record<string, { label: string; icon: string }> = {
+      workspace: { label: 'Workspace', icon: '📁' },
+      'built-in': { label: 'Built-in', icon: '📦' },
+      installed: { label: 'Installed', icon: '⬇️' },
+      extra: { label: 'Extra', icon: '✨' },
+    };
+
+    const enabledCount = agentSkills.filter(s => s.enabled).length;
+
     return html`
-      ${agentSkills.map(
-        (s) => html`
-          <div class="skill-row">
-            <span style="font-size:1.25rem;">🧩</span>
-            <div class="skill-info">
-              <div class="skill-name">${s.name}</div>
-              ${s.description
-                ? html`<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.125rem;">${s.description}</div>`
-                : nothing}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <div>
+          <span style="font-size:0.875rem;font-weight:600;">Skills</span>
+          <span class="chip chip-muted" style="margin-left:0.5rem;">
+            ${enabledCount}/${agentSkills.length} enabled
+          </span>
+        </div>
+        <button class="btn btn-sm" @click=${() => this.loadSkills()}>Refresh</button>
+      </div>
+
+      ${[...groups.entries()].map(([source, skills]) => {
+        const meta = sourceLabels[source] ?? { label: source, icon: '📄' };
+        return html`
+          <div style="margin-bottom:1rem;">
+            <div class="section-title" style="display:flex;align-items:center;gap:0.375rem;">
+              <span>${meta.icon}</span>
+              ${meta.label}
+              <span class="chip chip-muted" style="font-size:0.5625rem;">${skills.length}</span>
             </div>
-            ${s.version
-              ? html`<span class="skill-version">v${s.version}</span>`
-              : nothing}
-            <label class="toggle" title="${s.enabled ? 'Enabled' : 'Disabled'}">
-              <input type="checkbox" .checked=${s.enabled} disabled />
-              <span class="slider"></span>
-            </label>
+            ${skills.map(
+              (s) => html`
+                <div class="skill-row">
+                  <span style="font-size:1.25rem;">🧩</span>
+                  <div class="skill-info">
+                    <div class="skill-name">${s.name}</div>
+                    ${s.description
+                      ? html`<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.125rem;">${s.description}</div>`
+                      : nothing}
+                  </div>
+                  ${s.version
+                    ? html`<span class="skill-version">v${s.version}</span>`
+                    : nothing}
+                  <label class="toggle" title="${s.enabled ? 'Enabled' : 'Disabled'}">
+                    <input
+                      type="checkbox"
+                      .checked=${s.enabled}
+                      @change=${() => this.toggleSkill(s)}
+                    />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              `,
+            )}
           </div>
-        `,
-      )}
+        `;
+      })}
     `;
+  }
+
+  private async toggleSkill(skill: SkillInfo) {
+    try {
+      await gateway.call('skills.toggle', { id: skill.id, enabled: !skill.enabled });
+      skill.enabled = !skill.enabled;
+      this.requestUpdate();
+    } catch (e) {
+      console.error('Failed to toggle skill:', e);
+    }
   }
 
   /* ---- render: channels tab ---- */
@@ -1189,17 +1273,88 @@ export class OpenRappterAgents extends LitElement {
       return html`<div class="empty-tab">No tools available for this agent.</div>`;
     }
 
+    const toolSections: { label: string; icon: string; prefix: string[] }[] = [
+      { label: 'Files', icon: '📁', prefix: ['read', 'write', 'edit', 'apply_patch', 'list'] },
+      { label: 'Runtime', icon: '⚡', prefix: ['exec', 'process', 'bash', 'shell'] },
+      { label: 'Web', icon: '🌐', prefix: ['web_search', 'web_fetch', 'http'] },
+      { label: 'Memory', icon: '🧠', prefix: ['memory', 'remember', 'recall', 'store'] },
+      { label: 'Sessions', icon: '💬', prefix: ['session', 'chat'] },
+      { label: 'Messaging', icon: '📨', prefix: ['message', 'send', 'broadcast'] },
+      { label: 'Automation', icon: '⏰', prefix: ['cron', 'schedule', 'gateway'] },
+      { label: 'Agents', icon: '🤖', prefix: ['agent'] },
+    ];
+
+    const categorized = new Map<string, ToolInfo[]>();
+    const uncategorized: ToolInfo[] = [];
+
+    for (const tool of tools) {
+      let found = false;
+      for (const section of toolSections) {
+        if (section.prefix.some(p => tool.name.toLowerCase().startsWith(p))) {
+          if (!categorized.has(section.label)) categorized.set(section.label, []);
+          categorized.get(section.label)!.push(tool);
+          found = true;
+          break;
+        }
+      }
+      if (!found) uncategorized.push(tool);
+    }
+
     return html`
-      ${tools.map(
-        (t) => html`
-          <div class="tool-row">
-            <div class="tool-name">${t.name}</div>
-            ${t.description
-              ? html`<div class="tool-desc">${t.description}</div>`
-              : nothing}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+        <div>
+          <span style="font-size:0.875rem;font-weight:600;">Tools</span>
+          <span class="chip chip-muted" style="margin-left:0.5rem;">${tools.length} available</span>
+        </div>
+      </div>
+
+      ${toolSections
+        .filter(s => categorized.has(s.label))
+        .map(s => html`
+          <div style="margin-bottom:1.25rem;">
+            <div class="section-title" style="display:flex;align-items:center;gap:0.375rem;">
+              <span>${s.icon}</span>
+              ${s.label}
+              <span class="chip chip-muted" style="font-size:0.5625rem;">${categorized.get(s.label)!.length}</span>
+            </div>
+            ${categorized.get(s.label)!.map(
+              (t) => html`
+                <div class="tool-row" style="display:flex;align-items:flex-start;gap:0.75rem;">
+                  <div style="flex:1;min-width:0;">
+                    <div class="tool-name">${t.name}</div>
+                    ${t.description
+                      ? html`<div class="tool-desc">${t.description}</div>`
+                      : nothing}
+                  </div>
+                </div>
+              `,
+            )}
           </div>
-        `,
-      )}
+        `)}
+
+      ${uncategorized.length > 0
+        ? html`
+            <div style="margin-bottom:1.25rem;">
+              <div class="section-title" style="display:flex;align-items:center;gap:0.375rem;">
+                <span>🔧</span>
+                Other
+                <span class="chip chip-muted" style="font-size:0.5625rem;">${uncategorized.length}</span>
+              </div>
+              ${uncategorized.map(
+                (t) => html`
+                  <div class="tool-row" style="display:flex;align-items:flex-start;gap:0.75rem;">
+                    <div style="flex:1;min-width:0;">
+                      <div class="tool-name">${t.name}</div>
+                      ${t.description
+                        ? html`<div class="tool-desc">${t.description}</div>`
+                        : nothing}
+                    </div>
+                  </div>
+                `,
+              )}
+            </div>
+          `
+        : nothing}
     `;
   }
 

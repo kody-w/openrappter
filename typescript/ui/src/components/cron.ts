@@ -113,6 +113,8 @@ function formatNextRun(ms: number | null | undefined): string {
 
 function formatCronSchedule(job: CronJob): string {
   const s = job.schedule;
+  if (!s) return 'No schedule';
+  if (typeof s === 'string') return s;
   if (s.kind === 'at') {
     const atMs = Date.parse(s.at);
     return Number.isFinite(atMs) ? `At ${formatMs(atMs)}` : `At ${s.at}`;
@@ -123,6 +125,7 @@ function formatCronSchedule(job: CronJob): string {
 
 function formatCronPayload(job: CronJob): string {
   const p = job.payload;
+  if (!p) return '';
   if (p.kind === 'systemEvent') return `System: ${p.text}`;
   const base = `Agent: ${p.message}`;
   const d = job.delivery;
@@ -535,9 +538,14 @@ export class OpenRappterCron extends LitElement {
     this.loading = true;
     this.error = null;
     try {
-      const res = await gateway.call<CronListResponse>('cron.list');
-      this.status = res.status;
-      this.jobs = res.jobs;
+      const res = await gateway.call<CronListResponse | CronJob[]>('cron.list');
+      if (Array.isArray(res)) {
+        this.jobs = res;
+        this.status = { enabled: true, jobs: res.length, nextWakeAtMs: null };
+      } else {
+        this.status = res.status;
+        this.jobs = res.jobs;
+      }
     } catch (e) {
       this.error = String(e);
       this.status = null;
@@ -548,8 +556,12 @@ export class OpenRappterCron extends LitElement {
 
   private async loadChannels() {
     try {
-      const res = await gateway.call<{ channels: string[] }>('channels.list');
-      this.channels = res.channels ?? [];
+      const res = await gateway.call<{ channels: string[] } | unknown[]>('channels.list');
+      if (Array.isArray(res)) {
+        this.channels = res.map((c: unknown) => typeof c === 'string' ? c : (c as { type?: string }).type ?? '').filter(Boolean);
+      } else {
+        this.channels = res.channels ?? [];
+      }
     } catch { /* ignore */ }
   }
 
@@ -903,8 +915,8 @@ export class OpenRappterCron extends LitElement {
           ${job.agentId ? html`<div class="muted">Agent: ${job.agentId}</div>` : nothing}
           <div class="chip-row" style="margin-top: 6px;">
             <span class="chip">${job.enabled ? 'enabled' : 'disabled'}</span>
-            <span class="chip">${job.sessionTarget}</span>
-            <span class="chip">${job.wakeMode}</span>
+            ${job.sessionTarget ? html`<span class="chip">${job.sessionTarget}</span>` : nothing}
+            ${job.wakeMode ? html`<span class="chip">${job.wakeMode}</span>` : nothing}
           </div>
         </div>
         <div class="list-meta">

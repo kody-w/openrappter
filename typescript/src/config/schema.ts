@@ -3,6 +3,21 @@
  */
 
 import { z } from 'zod';
+import {
+  envConfigSchema,
+  authConfigSchema,
+  toolsConfigSchema,
+  pluginsConfigSchema,
+  browserConfigSchema,
+  voiceConfigSchema,
+  mediaConfigSchema,
+  networkConfigSchema,
+  securityConfigSchema,
+  loggingConfigSchema,
+  sessionConfigSchema,
+  hooksConfigSchema,
+  uiConfigSchema,
+} from './sections/index.js';
 
 export const modelProviderSchema = z.enum([
   'anthropic', 'openai', 'gemini', 'bedrock', 'ollama', 'copilot',
@@ -60,6 +75,7 @@ export const memoryConfigSchema = z.object({
 });
 
 export const openRappterConfigSchema = z.object({
+  configVersion: z.number().optional(),
   models: z.array(modelConfigSchema).optional(),
   agents: z.object({
     list: z.array(agentConfigSchema).optional(),
@@ -69,6 +85,19 @@ export const openRappterConfigSchema = z.object({
   gateway: gatewayConfigSchema.optional(),
   cron: z.object({ enabled: z.boolean().default(false) }).optional(),
   memory: memoryConfigSchema.optional(),
+  env: envConfigSchema.optional(),
+  auth: authConfigSchema.optional(),
+  tools: toolsConfigSchema.optional(),
+  plugins: pluginsConfigSchema.optional(),
+  browser: browserConfigSchema.optional(),
+  voice: voiceConfigSchema.optional(),
+  media: mediaConfigSchema.optional(),
+  network: networkConfigSchema.optional(),
+  security: securityConfigSchema.optional(),
+  logging: loggingConfigSchema.optional(),
+  session: sessionConfigSchema.optional(),
+  hooks: hooksConfigSchema.optional(),
+  ui: uiConfigSchema.optional(),
 });
 
 export type ValidatedConfig = z.infer<typeof openRappterConfigSchema>;
@@ -79,4 +108,16 @@ export function validateConfig(data: unknown): { success: boolean; data?: Valida
     return { success: true, data: result.data };
   }
   return { success: false, error: result.error.message };
+}
+
+export function getConfigJsonSchema(): Record<string, unknown> {
+  const shape = openRappterConfigSchema.shape;
+  const properties: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(shape)) {
+    properties[key] = { type: 'object', description: `${key} configuration section` };
+  }
+  return {
+    type: 'object',
+    properties,
+  };
 }

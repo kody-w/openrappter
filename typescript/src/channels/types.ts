@@ -2,6 +2,8 @@
  * Channel system types
  */
 
+import type { ThreadContext } from './thread.js';
+
 export interface ChannelConfig {
   enabled?: boolean;
   allowFrom?: string[];
@@ -20,6 +22,7 @@ export interface IncomingMessage {
   attachments?: Attachment[];
   metadata?: Record<string, unknown>;
   raw?: unknown;
+  thread?: ThreadContext;
 }
 
 export interface OutgoingMessage {
@@ -27,6 +30,7 @@ export interface OutgoingMessage {
   recipient?: string;
   content: string;
   replyTo?: string;
+  threadId?: string;
   attachments?: Attachment[];
   metadata?: Record<string, unknown>;
 }

@@ -17,6 +17,9 @@ export interface Plugin {
   onEnable?: () => Promise<void>;
   onDisable?: () => Promise<void>;
 
+  // Lifecycle
+  initialize?: (api: unknown) => Promise<void>;
+
   // Extension points
   agents?: PluginAgent[];
   channels?: PluginChannel[];
@@ -24,6 +27,9 @@ export interface Plugin {
   commands?: PluginCommand[];
   gatewayMethods?: PluginGatewayMethod[];
   hooks?: PluginHook[];
+  httpHandlers?: PluginHttpHandler[];
+  providers?: PluginProvider[];
+  services?: PluginService[];
 
   // Configuration
   config?: PluginConfigSchema;
@@ -110,6 +116,24 @@ export interface PluginManifest {
     minVersion?: string;
     maxVersion?: string;
   };
+}
+
+export interface PluginHttpHandler {
+  route: string;
+  method: string;
+  handler: (req: unknown, res: unknown) => Promise<void>;
+}
+
+export interface PluginProvider {
+  id: string;
+  name: string;
+  authenticate: (config: unknown) => Promise<unknown>;
+}
+
+export interface PluginService {
+  id: string;
+  name: string;
+  factory: (config: unknown) => unknown;
 }
 
 export interface PluginState {

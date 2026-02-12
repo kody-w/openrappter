@@ -20,3 +20,12 @@ export * from './imessage.js';
 export * from './matrix.js';
 export * from './teams.js';
 export * from './googlechat.js';
+
+// New channel stubs
+export * from './bluebubbles.js';
+export * from './nostr.js';
+export * from './twitch.js';
+export * from './mattermost.js';
+export * from './line.js';
+export * from './feishu.js';
+export * from './thread.js';

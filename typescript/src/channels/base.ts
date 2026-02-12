@@ -61,4 +61,20 @@ export abstract class BaseChannel {
       messageCount: this.messageCount,
     };
   }
+
+  async sendTyping(_conversationId: string): Promise<void> {
+    // No-op default — channels override if supported
+  }
+
+  async react(_conversationId: string, _messageId: string, _emoji: string): Promise<void> {
+    // No-op default
+  }
+
+  async removeReaction(_conversationId: string, _messageId: string, _emoji: string): Promise<void> {
+    // No-op default
+  }
+
+  async replyInThread(_threadId: string, message: OutgoingMessage): Promise<void> {
+    return this.send(message);
+  }
 }

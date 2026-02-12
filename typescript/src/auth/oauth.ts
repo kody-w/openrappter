@@ -64,6 +64,19 @@ const PROVIDERS: Record<string, OAuthProvider> = {
     userInfoUrl: 'https://slack.com/api/users.identity',
     scopes: ['identity.basic', 'identity.email'],
   },
+  copilot: {
+    name: 'GitHub Copilot',
+    authorizationUrl: 'https://github.com/login/oauth/authorize',
+    tokenUrl: 'https://github.com/login/oauth/access_token',
+    userInfoUrl: 'https://api.github.com/user',
+    scopes: ['read:user'],
+  },
+  qwen: {
+    name: 'Qwen',
+    authorizationUrl: 'https://auth.aliyun.com/authorize',
+    tokenUrl: 'https://auth.aliyun.com/token',
+    scopes: ['openid'],
+  },
 };
 
 export class OAuthClient {

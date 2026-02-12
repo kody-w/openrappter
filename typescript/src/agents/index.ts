@@ -9,3 +9,12 @@ export { MemoryAgent } from './MemoryAgent.js';
 export { Assistant } from './Assistant.js';
 export type { AssistantConfig, AssistantResponse } from './Assistant.js';
 export * from './types.js';
+
+// Tool agents
+export { BrowserAgent } from './BrowserAgent.js';
+export { WebAgent } from './WebAgent.js';
+export { MessageAgent } from './MessageAgent.js';
+export { TTSAgent } from './TTSAgent.js';
+export { SessionsAgent } from './SessionsAgent.js';
+export { CronAgent } from './CronAgent.js';
+export { ImageAgent } from './ImageAgent.js';

@@ -21,20 +21,29 @@ let capturedSessionConfig: Record<string, unknown> = {};
 let capturedPrompt = '';
 let sessionEventHandlers: Map<string, (event: unknown) => void> = new Map();
 let mockSendResponse: unknown = null;
+let unsubscribeCalls = 0;
 
 const mockSession = {
   on: vi.fn((eventType: string, handler: (event: unknown) => void) => {
     sessionEventHandlers.set(eventType, handler);
-    return () => sessionEventHandlers.delete(eventType);
+    return () => {
+      unsubscribeCalls++;
+      sessionEventHandlers.delete(eventType);
+    };
   }),
   sendAndWait: vi.fn(async (opts: { prompt: string }) => {
     capturedPrompt = opts.prompt;
     return mockSendResponse;
   }),
+  sessionId: 'mock-session-123',
 };
 
 const mockClient = {
   createSession: vi.fn(async (config: Record<string, unknown>) => {
+    capturedSessionConfig = config;
+    return mockSession;
+  }),
+  resumeSession: vi.fn(async (sessionId: string, config: Record<string, unknown>) => {
     capturedSessionConfig = config;
     return mockSession;
   }),
@@ -90,6 +99,7 @@ describe('Assistant (Copilot SDK)', () => {
     capturedPrompt = '';
     sessionEventHandlers.clear();
     mockSendResponse = { data: { content: 'Hello!' } };
+    unsubscribeCalls = 0;
   });
 
   it('creates a CopilotClient and session with tools', async () => {
@@ -247,5 +257,76 @@ describe('Assistant (Copilot SDK)', () => {
     await assistant.getResponse('hi'); // creates client
     await assistant.stop();
     expect(mockClient.stop).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Listener cleanup & multi-turn tests ──────────────────────────────────
+
+  it('unsubscribes delta listener after getResponse completes', async () => {
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('hi');
+
+    expect(unsubscribeCalls).toBe(1);
+    // Listener should be removed — no leftover handler
+    expect(sessionEventHandlers.has('assistant.message_delta')).toBe(false);
+  });
+
+  it('multi-turn conversations do not accumulate duplicate listeners', async () => {
+    const assistant = new Assistant(makeAgents());
+
+    // Simulate 3 turns in the same conversation
+    const allDeltas: string[] = [];
+    for (let turn = 0; turn < 3; turn++) {
+      mockSession.sendAndWait.mockImplementationOnce(async () => {
+        const handler = sessionEventHandlers.get('assistant.message_delta');
+        if (handler) {
+          handler({ data: { deltaContent: `turn${turn}` } });
+        }
+        return { data: { content: `turn${turn}` } };
+      });
+
+      const result = await assistant.getResponse(
+        `message ${turn}`,
+        (delta) => allDeltas.push(delta),
+        undefined,
+        'conv-1',
+      );
+
+      // Each turn should produce exactly its own content — no duplication
+      expect(result.content).toBe(`turn${turn}`);
+    }
+
+    // Each turn should have unsubscribed its listener
+    expect(unsubscribeCalls).toBe(3);
+    // Each delta should appear exactly once
+    expect(allDeltas).toEqual(['turn0', 'turn1', 'turn2']);
+  });
+
+  it('unsubscribes even when sendAndWait throws', async () => {
+    const assistant = new Assistant(makeAgents());
+    mockSession.sendAndWait.mockRejectedValueOnce(new Error('network failure'));
+
+    await expect(assistant.getResponse('hi')).rejects.toThrow('network failure');
+
+    // Listener should still have been cleaned up
+    expect(unsubscribeCalls).toBe(1);
+    expect(sessionEventHandlers.has('assistant.message_delta')).toBe(false);
+  });
+
+  it('resumes existing session for same conversationKey', async () => {
+    const assistant = new Assistant(makeAgents());
+
+    // First turn — creates a new session
+    await assistant.getResponse('hi', undefined, undefined, 'chat-42');
+    expect(mockClient.createSession).toHaveBeenCalledTimes(1);
+    expect(mockClient.resumeSession).not.toHaveBeenCalled();
+
+    // Second turn — should resume the existing session
+    await assistant.getResponse('follow up', undefined, undefined, 'chat-42');
+    expect(mockClient.createSession).toHaveBeenCalledTimes(1); // still 1
+    expect(mockClient.resumeSession).toHaveBeenCalledTimes(1);
+    expect(mockClient.resumeSession).toHaveBeenCalledWith(
+      'mock-session-123',
+      expect.objectContaining({ streaming: true }),
+    );
   });
 });

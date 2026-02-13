@@ -127,28 +127,33 @@ export class Assistant {
 
     // Collect the full response text
     let fullContent = '';
+    let unsubscribe: (() => void) | undefined;
 
-    if (this.config.streaming) {
-      session.on('assistant.message_delta', (event) => {
-        const delta = (event as { data?: { deltaContent?: string } }).data?.deltaContent ?? '';
-        fullContent += delta;
-        onDelta?.(delta);
-      });
+    try {
+      if (this.config.streaming) {
+        unsubscribe = session.on('assistant.message_delta', (event) => {
+          const delta = (event as { data?: { deltaContent?: string } }).data?.deltaContent ?? '';
+          fullContent += delta;
+          onDelta?.(delta);
+        });
+      }
+
+      // Send the message and wait for the full response (SDK handles tool-call loop)
+      const response = await session.sendAndWait({ prompt: message });
+
+      // If not streaming, get content from the final response
+      if (!this.config.streaming && response) {
+        const data = response.data as { content?: string } | undefined;
+        fullContent = data?.content ?? '';
+      }
+
+      return {
+        content: fullContent,
+        agentLogs: [...this.agentLogs],
+      };
+    } finally {
+      unsubscribe?.();
     }
-
-    // Send the message and wait for the full response (SDK handles tool-call loop)
-    const response = await session.sendAndWait({ prompt: message });
-
-    // If not streaming, get content from the final response
-    if (!this.config.streaming && response) {
-      const data = response.data as { content?: string } | undefined;
-      fullContent = data?.content ?? '';
-    }
-
-    return {
-      content: fullContent,
-      agentLogs: [...this.agentLogs],
-    };
   }
 
   /** Gracefully shut down the Copilot CLI process */

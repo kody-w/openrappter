@@ -19,6 +19,20 @@
 
 </div>
 
+## Try It Now
+
+See data sloshing, shell commands, persistent memory, and agent chaining — all running locally with zero API keys:
+
+```bash
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter
+./quickstart.sh
+```
+
+Or if you already have the repo: `cd typescript && npm run demo`
+
+---
+
 ## Get Started — Let Your AI Agent Do It
 
 The fastest way to install and use openrappter is to hand [`skills.md`](./skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.

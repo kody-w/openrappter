@@ -32,6 +32,16 @@ git clone https://github.com/kody-w/openrappter.git
 cd openrappter
 ```
 
+### Quickstart Demo (recommended first step)
+
+See data sloshing, agents, and chaining in action — no build step, no API keys:
+
+```bash
+./quickstart.sh
+```
+
+This installs TypeScript dependencies (if needed) and runs a guided 5-step tour showing data sloshing, ShellAgent, MemoryAgent, and agent-to-agent chaining. Takes ~5 seconds. After the demo, continue below for the full setup.
+
 ### TypeScript Runtime
 
 ```bash
@@ -674,9 +684,10 @@ Config files support `${VAR_NAME}` environment variable substitution. All schema
 ## 15. Quick Reference Card
 
 ```bash
-# Install
+# Install & demo
 git clone https://github.com/kody-w/openrappter.git && cd openrappter
-cd typescript && npm install && npm run build     # TypeScript
+./quickstart.sh                                   # Guided demo (no build needed)
+cd typescript && npm install && npm run build     # Full TypeScript build
 cd ../python && pip install .                      # Python
 
 # Start everything (three terminals)

@@ -48,6 +48,10 @@ class HackerNewsAgent(BasicAgent):
                         "type": "string",
                         "description": "Natural language query.",
                     },
+                    "dryRun": {
+                        "type": "boolean",
+                        "description": "When true (the default), fetches stories and shows what WOULD be posted without actually creating discussions. Set to false to post for real.",
+                    },
                 },
                 "required": [],
             },
@@ -58,12 +62,18 @@ class HackerNewsAgent(BasicAgent):
         action = kwargs.get("action", "run")
         count = min(max(kwargs.get("count", 5), 1), 10)
         channel = kwargs.get("channel", "general")
+        # Default to dry-run — must explicitly pass dryRun=False to post for real
+        dry_run = kwargs.get("dryRun", True) is not False
 
         try:
             if action == "fetch":
                 return self._fetch_stories(count)
-            else:
+            elif action in ("post", "run"):
+                if dry_run:
+                    return self._fetch_and_preview(count, channel)
                 return self._fetch_and_post(count, channel)
+            else:
+                return self._fetch_stories(count)
         except Exception as e:
             return json.dumps({"status": "error", "message": str(e)})
 
@@ -163,6 +173,27 @@ class HackerNewsAgent(BasicAgent):
 
         disc = data["data"]["createDiscussion"]["discussion"]
         return {"number": disc["number"], "url": disc["url"]}
+
+    def _fetch_and_preview(self, count: int, default_channel: str) -> str:
+        ids = self._fetch_top_story_ids(count)
+        stories = [self._fetch_story_details(sid) for sid in ids]
+
+        previews = []
+        for story in stories:
+            channel = self._categorize_story(story) if default_channel == "auto" else default_channel
+            previews.append({
+                "title": f"[HN] {story.get('title', 'Untitled')}",
+                "channel": channel,
+                "body_preview": self._build_discussion_body(story)[:200] + "...",
+                "hn_url": f"https://news.ycombinator.com/item?id={story['id']}",
+                "score": story.get("score", 0),
+            })
+
+        return json.dumps({
+            "status": "dry_run",
+            "message": f"[DRY RUN] Would post {len(stories)} stories to Rappterbook. Pass dryRun=False to post for real.",
+            "previews": previews,
+        })
 
     def _fetch_and_post(self, count: int, default_channel: str) -> str:
         ids = self._fetch_top_story_ids(count)

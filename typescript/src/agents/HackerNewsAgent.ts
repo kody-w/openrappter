@@ -57,6 +57,11 @@ export class HackerNewsAgent extends BasicAgent {
             type: 'string',
             description: 'Natural language query.',
           },
+          dryRun: {
+            type: 'boolean',
+            description:
+              'When true (the default), fetches stories and shows what WOULD be posted without actually creating discussions. Set to false to post for real.',
+          },
         },
         required: [],
       },
@@ -68,15 +73,19 @@ export class HackerNewsAgent extends BasicAgent {
     const action = (kwargs.action as string) || (kwargs.query ? 'run' : 'run');
     const count = Math.min(Math.max((kwargs.count as number) || 5, 1), 10);
     const channel = (kwargs.channel as string) || 'general';
+    // Default to dry-run — must explicitly pass dryRun: false to post for real
+    const dryRun = kwargs.dryRun !== false;
 
     try {
       if (action === 'fetch') {
         return await this.fetchStories(count);
-      } else if (action === 'post') {
+      } else if (action === 'post' || action === 'run') {
+        if (dryRun) {
+          return await this.fetchAndPreview(count, channel);
+        }
         return await this.fetchAndPost(count, channel);
       } else {
-        // 'run' — fetch and post
-        return await this.fetchAndPost(count, channel);
+        return await this.fetchStories(count);
       }
     } catch (error) {
       return JSON.stringify({
@@ -211,6 +220,28 @@ export class HackerNewsAgent extends BasicAgent {
 
     const disc = result.data.createDiscussion.discussion;
     return { number: disc.number, url: disc.url };
+  }
+
+  private async fetchAndPreview(count: number, defaultChannel: string): Promise<string> {
+    const ids = await this.fetchTopStoryIds(count);
+    const stories = await Promise.all(ids.map((id) => this.fetchStoryDetails(id)));
+
+    const previews = stories.map((story) => {
+      const channel = defaultChannel === 'auto' ? this.categorizeStory(story) : defaultChannel;
+      return {
+        title: `[HN] ${story.title}`,
+        channel,
+        body_preview: this.buildDiscussionBody(story).slice(0, 200) + '...',
+        hn_url: `https://news.ycombinator.com/item?id=${story.id}`,
+        score: story.score,
+      };
+    });
+
+    return JSON.stringify({
+      status: 'dry_run',
+      message: `[DRY RUN] Would post ${stories.length} stories to Rappterbook. Pass dryRun: false to post for real.`,
+      previews,
+    });
   }
 
   private async fetchAndPost(count: number, defaultChannel: string): Promise<string> {

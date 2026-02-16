@@ -27,6 +27,20 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+  macos-menu-bar:
+    name: macOS Menu Bar App
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0'
+      - run: swift build -c release --product OpenRappterBar
+      - run: swift build --product RunTests && .build/debug/RunTests
+
   python:
     name: Python (${{ matrix.python-version }})
     runs-on: ubuntu-latest

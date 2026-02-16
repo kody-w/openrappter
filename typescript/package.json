@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "lint": "eslint src/",
     "demo": "tsx examples/quickstart.ts",
+    "demo:ouroboros": "tsx examples/ouroboros.ts",
     "format": "prettier --write .",
     "prepare": "npm run build"
   },

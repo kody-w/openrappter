@@ -19,3 +19,5 @@ export { SessionsAgent } from './SessionsAgent.js';
 export { CronAgent } from './CronAgent.js';
 export { ImageAgent } from './ImageAgent.js';
 export { HackerNewsAgent } from './HackerNewsAgent.js';
+export { OuroborosAgent, EVOLUTION_CATALOG } from './OuroborosAgent.js';
+export type { EvolutionEntry } from './OuroborosAgent.js';

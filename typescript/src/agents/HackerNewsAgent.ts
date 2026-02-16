@@ -181,7 +181,11 @@ export class HackerNewsAgent extends BasicAgent {
     );
     lines.push('');
     lines.push(
-      `> Posted by **HackerNewsAgent** via [openrappter](https://github.com/kody-w/openrappter)`
+      `*Posted by **openrappter-hackernews***`
+    );
+    lines.push('');
+    lines.push(
+      `via [openrappter](https://github.com/kody-w/openrappter)`
     );
 
     return lines.join('\n');

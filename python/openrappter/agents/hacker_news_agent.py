@@ -133,6 +133,8 @@ class HackerNewsAgent(BasicAgent):
         comments = story.get("descendants", 0)
 
         return "\n".join([
+            f"*Posted by **openrappter-hackernews***",
+            "",
             f"🔗 **[{story['title']}]({url})**",
             "",
             f"Spotted on Hacker News — {score} points by **{by}**, {comments} comments.",
@@ -143,7 +145,7 @@ class HackerNewsAgent(BasicAgent):
             "",
             "*What do the agents of Rappterbook think? Drop your take below.*",
             "",
-            "> Posted by **HackerNewsAgent** via [openrappter](https://github.com/kody-w/openrappter)",
+            "via [openrappter](https://github.com/kody-w/openrappter)",
         ])
 
     def _create_discussion(self, title: str, body: str, category_id: str) -> dict:

@@ -1078,10 +1078,56 @@ main() {
         has_python=true
         ui_success "Python $($python_cmd --version 2>&1 | sed 's/Python //') found"
 
-        cd "$INSTALL_DIR/python"
-        if [[ -f pyproject.toml ]]; then
-            run_quiet_step "Installing Python package" "$python_cmd" -m pip install -e . --quiet
-            ui_success "Python runtime installed"
+        # Ensure pip is available (some Linux distros ship python3 without pip)
+        if ! "$python_cmd" -m pip --version &>/dev/null; then
+            ui_info "pip not found, attempting to install"
+            if [[ "$OS" == "linux" ]]; then
+                if command -v apt-get &>/dev/null; then
+                    if is_root; then
+                        run_quiet_step "Installing python3-pip" apt-get install -y -qq python3-pip python3-venv 2>/dev/null || true
+                    else
+                        run_quiet_step "Installing python3-pip" sudo apt-get install -y -qq python3-pip python3-venv 2>/dev/null || true
+                    fi
+                elif command -v dnf &>/dev/null; then
+                    if is_root; then
+                        run_quiet_step "Installing python3-pip" dnf install -y -q python3-pip 2>/dev/null || true
+                    else
+                        run_quiet_step "Installing python3-pip" sudo dnf install -y -q python3-pip 2>/dev/null || true
+                    fi
+                elif command -v yum &>/dev/null; then
+                    if is_root; then
+                        run_quiet_step "Installing python3-pip" yum install -y -q python3-pip 2>/dev/null || true
+                    else
+                        run_quiet_step "Installing python3-pip" sudo yum install -y -q python3-pip 2>/dev/null || true
+                    fi
+                elif command -v apk &>/dev/null; then
+                    if is_root; then
+                        run_quiet_step "Installing py3-pip" apk add --no-cache py3-pip 2>/dev/null || true
+                    else
+                        run_quiet_step "Installing py3-pip" sudo apk add --no-cache py3-pip 2>/dev/null || true
+                    fi
+                fi
+            fi
+            # Fallback: try ensurepip
+            if ! "$python_cmd" -m pip --version &>/dev/null; then
+                "$python_cmd" -m ensurepip --default-pip 2>/dev/null || true
+            fi
+        fi
+
+        # Install Python package if pip is now available
+        if "$python_cmd" -m pip --version &>/dev/null; then
+            cd "$INSTALL_DIR/python"
+            if [[ -f pyproject.toml ]]; then
+                if run_quiet_step "Installing Python package" "$python_cmd" -m pip install -e . --quiet; then
+                    ui_success "Python runtime installed"
+                else
+                    ui_warn "Python package install failed — TypeScript runtime still works"
+                    has_python=false
+                fi
+            fi
+        else
+            ui_warn "pip unavailable — skipping Python runtime (TypeScript works fine alone)"
+            has_python=false
         fi
     else
         ui_info "Python 3.${MIN_PYTHON_MINOR}+ not found — skipping (TypeScript works fine alone)"

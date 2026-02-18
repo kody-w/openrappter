@@ -130,21 +130,27 @@ export class Assistant {
     let unsubscribe: (() => void) | undefined;
 
     try {
-      if (this.config.streaming) {
+      if (this.config.streaming && onDelta) {
+        // Only wire up streaming deltas when a callback is provided (e.g., gateway UI).
+        // For channels like Telegram that just need the final text, skip delta accumulation
+        // to avoid duplicated text from multi-turn tool-call loops.
         unsubscribe = session.on('assistant.message_delta', (event) => {
           const delta = (event as { data?: { deltaContent?: string } }).data?.deltaContent ?? '';
-          fullContent += delta;
-          onDelta?.(delta);
+          onDelta(delta);
         });
       }
 
       // Send the message and wait for the full response (SDK handles tool-call loop)
       const response = await session.sendAndWait({ prompt: message });
 
-      // If not streaming, get content from the final response
-      if (!this.config.streaming && response) {
+      // Always prefer the final response content from sendAndWait — it contains the
+      // complete, deduplicated text. Accumulated streaming deltas can contain duplicated
+      // text when the SDK runs multiple tool-call rounds.
+      if (response) {
         const data = response.data as { content?: string } | undefined;
-        fullContent = data?.content ?? '';
+        if (data?.content) {
+          fullContent = data.content;
+        }
       }
 
       return {

@@ -19,17 +19,16 @@
 
 </div>
 
-## Try It Now
-
-See data sloshing, shell commands, persistent memory, and agent chaining — all running locally with zero API keys:
+## Install in One Line
 
 ```bash
-git clone https://github.com/kody-w/openrappter.git
-cd openrappter
-./quickstart.sh
+# Works everywhere. Installs everything. You're welcome. 🦖
+curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
 ```
 
-Or if you already have the repo: `cd typescript && npm run demo`
+Works on macOS, Linux & WSL. Installs Node.js (if needed), clones the repo, builds both runtimes, and creates the `openrappter` command. Done.
+
+Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git && cd openrappter && ./quickstart.sh`
 
 ---
 
@@ -56,8 +55,7 @@ A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copil
 
 ```bash
 # Install and go
-git clone https://github.com/kody-w/openrappter.git
-cd openrappter/python && pip install .
+curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
 
 # It remembers everything
 openrappter --task "remember that I prefer TypeScript over JavaScript"

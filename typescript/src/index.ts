@@ -1,5 +1,5 @@
 import { program } from 'commander';
-import { intro, outro, text, select, note, spinner } from '@clack/prompts';
+import { intro, outro, text, select, note, spinner, confirm, password, isCancel, log } from '@clack/prompts';
 import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -51,6 +51,86 @@ async function loadConfig(): Promise<Record<string, unknown>> {
 async function saveConfig(config: Record<string, unknown>): Promise<void> {
   await ensureHomeDir();
   await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ONBOARDING HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const ENV_FILE = path.join(HOME_DIR, '.env');
+
+async function loadEnv(): Promise<Record<string, string>> {
+  try {
+    const data = await fs.readFile(ENV_FILE, 'utf-8');
+    const env: Record<string, string> = {};
+    for (const line of data.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx > 0) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        let val = trimmed.slice(eqIdx + 1).trim();
+        // Strip surrounding quotes
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        env[key] = val;
+      }
+    }
+    return env;
+  } catch {
+    return {};
+  }
+}
+
+async function saveEnv(env: Record<string, string>): Promise<void> {
+  await ensureHomeDir();
+  const lines = ['# openrappter environment — managed by `openrappter onboard`', ''];
+  for (const [key, val] of Object.entries(env)) {
+    lines.push(`${key}="${val}"`);
+  }
+  lines.push('');
+  await fs.writeFile(ENV_FILE, lines.join('\n'));
+}
+
+async function hasGhCLI(): Promise<boolean> {
+  try {
+    await execAsync('gh --version');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isGhAuthenticated(): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync('gh auth status 2>&1');
+    return stdout.includes('Logged in');
+  } catch {
+    return false;
+  }
+}
+
+async function getGhToken(): Promise<string | null> {
+  try {
+    const { stdout } = await execAsync('gh auth token');
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function validateTelegramToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  try {
+    const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const data = await resp.json() as { ok: boolean; result?: { username?: string }; description?: string };
+    if (data.ok && data.result) {
+      return { valid: true, username: data.result.username };
+    }
+    return { valid: false, error: data.description || 'Invalid token' };
+  } catch (err) {
+    return { valid: false, error: err instanceof Error ? err.message : 'Network error' };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -230,6 +310,12 @@ program
     }
 
     if (options.daemon) {
+      // Load env vars from ~/.openrappter/.env (saved by onboard wizard)
+      const envVars = await loadEnv();
+      for (const [key, val] of Object.entries(envVars)) {
+        if (!process.env[key]) process.env[key] = val;
+      }
+
       const { GatewayServer } = await import('./gateway/server.js');
       const { Assistant } = await import('./agents/Assistant.js');
       const { ChannelRegistry } = await import('./channels/registry.js');
@@ -426,27 +512,161 @@ program
   .description('Interactive setup wizard')
   .action(async () => {
     intro(`${EMOJI} Welcome to ${NAME}!`);
+    log.info("Let's get you connected. This takes about 2 minutes.");
 
-    const hasCopilot = await hasCopilotCLI();
+    const env = await loadEnv();
+    const config = await loadConfig();
 
-    if (hasCopilot) {
-      note(
-        'GitHub Copilot CLI detected!\nNo API key configuration needed.',
-        '✅ Ready to go'
-      );
+    // ── Step 1: GitHub Copilot ──────────────────────────────────────────────
+    log.step('Step 1 of 3 — GitHub Copilot');
+
+    const hasGh = await hasGhCLI();
+    let copilotReady = false;
+
+    if (hasGh) {
+      const authenticated = await isGhAuthenticated();
+      if (authenticated) {
+        const token = await getGhToken();
+        if (token) {
+          env.GITHUB_TOKEN = token;
+          copilotReady = true;
+          log.success('GitHub CLI authenticated — Copilot is ready!');
+        }
+      } else {
+        log.warn('GitHub CLI found but not authenticated.');
+        const shouldLogin = await confirm({
+          message: 'Open GitHub login now?',
+          initialValue: true,
+        });
+        if (isCancel(shouldLogin)) { outro('Setup cancelled.'); process.exit(0); }
+
+        if (shouldLogin) {
+          const s = spinner();
+          s.start('Opening GitHub login…');
+          try {
+            await execAsync('gh auth login --web --scopes read:org,repo');
+            s.stop('Authenticated!');
+            const token = await getGhToken();
+            if (token) {
+              env.GITHUB_TOKEN = token;
+              copilotReady = true;
+            }
+          } catch {
+            s.stop('Login failed — you can retry later with `gh auth login`');
+          }
+        }
+      }
     } else {
+      // No gh CLI — ask for a manual GITHUB_TOKEN
+      log.warn('GitHub CLI (gh) not found.');
       note(
-        'GitHub Copilot CLI not found.\nInstall it for the best experience:\n\n  npm install -g @githubnext/github-copilot-cli\n  github-copilot-cli auth',
-        '⚠️ Setup recommended'
+        'Install it for the best experience:\n' +
+        '  brew install gh          (macOS)\n' +
+        '  sudo apt install gh      (Linux)\n' +
+        '  https://cli.github.com   (other)\n\n' +
+        'Or paste a GitHub personal access token below.',
+        'GitHub CLI'
       );
+
+      const manualToken = await text({
+        message: 'GitHub token (or press Enter to skip):',
+        placeholder: 'ghp_xxxxxxxxxxxx',
+        validate: (val) => {
+          if (!val) return undefined; // allow skip
+          if (val.length < 10) return 'Token looks too short';
+          return undefined;
+        },
+      });
+      if (isCancel(manualToken)) { outro('Setup cancelled.'); process.exit(0); }
+
+      if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
+        env.GITHUB_TOKEN = manualToken;
+        copilotReady = true;
+        log.success('Token saved.');
+      } else {
+        log.info('Skipped — you can set GITHUB_TOKEN later.');
+      }
     }
 
-    const config = await loadConfig();
-    config.setupComplete = true;
-    config.copilotAvailable = hasCopilot;
-    await saveConfig(config);
+    // ── Step 2: Telegram ────────────────────────────────────────────────────
+    log.step('Step 2 of 3 — Telegram');
 
-    outro(`${EMOJI} Setup complete! Run 'openrappter' to start chatting.`);
+    const connectTelegram = await confirm({
+      message: 'Connect a Telegram bot?',
+      initialValue: true,
+    });
+    if (isCancel(connectTelegram)) { outro('Setup cancelled.'); process.exit(0); }
+
+    let telegramReady = false;
+    if (connectTelegram) {
+      note(
+        'To connect Telegram you need a bot token from @BotFather:\n' +
+        '  1. Open Telegram → search @BotFather\n' +
+        '  2. Send /newbot and follow the prompts\n' +
+        '  3. Copy the token (looks like 123456:ABC-DEF…)',
+        'Telegram Bot'
+      );
+
+      const botToken = await password({
+        message: 'Paste your Telegram bot token:',
+        validate: (val) => {
+          if (!val) return 'Token is required';
+          if (!val.match(/^\d+:.+$/)) return 'Token should look like 123456:ABC-DEF…';
+          return undefined;
+        },
+      });
+      if (isCancel(botToken)) { outro('Setup cancelled.'); process.exit(0); }
+
+      if (botToken && typeof botToken === 'string') {
+        const s = spinner();
+        s.start('Validating token…');
+        const result = await validateTelegramToken(botToken);
+        if (result.valid) {
+          env.TELEGRAM_BOT_TOKEN = botToken;
+          telegramReady = true;
+          s.stop(`Connected! Bot: @${result.username}`);
+        } else {
+          s.stop(`Validation failed: ${result.error}`);
+          log.warn('Token saved anyway — you can fix it later in ~/.openrappter/.env');
+          env.TELEGRAM_BOT_TOKEN = botToken;
+        }
+      }
+    } else {
+      log.info('Skipped — run `openrappter onboard` anytime to add Telegram.');
+    }
+
+    // ── Step 3: Save & Verify ───────────────────────────────────────────────
+    log.step('Step 3 of 3 — Saving configuration');
+
+    await saveEnv(env);
+    log.success(`Saved ${ENV_FILE}`);
+
+    config.setupComplete = true;
+    config.copilotAvailable = copilotReady;
+    config.telegramConnected = telegramReady;
+    config.onboardedAt = new Date().toISOString();
+    await saveConfig(config);
+    log.success(`Saved ${CONFIG_FILE}`);
+
+    // ── Summary ─────────────────────────────────────────────────────────────
+    const summaryLines = [
+      `Copilot:  ${copilotReady ? '✅ Connected' : '❌ Not configured'}`,
+      `Telegram: ${telegramReady ? '✅ Connected' : '⬚  Not configured'}`,
+      '',
+      `Config:   ${CONFIG_FILE}`,
+      `Env:      ${ENV_FILE}`,
+    ];
+    note(summaryLines.join('\n'), '📋 Setup Summary');
+
+    note(
+      `Start the daemon:    openrappter --daemon\n` +
+      `Check status:        openrappter --status\n` +
+      `Chat:                openrappter "hello"\n` +
+      `Re-run setup:        openrappter onboard`,
+      "What's next"
+    );
+
+    outro(`${EMOJI} You're all set! Happy hacking.`);
   });
 
 // Status command
@@ -454,13 +674,18 @@ async function statusCommand(): Promise<void> {
   const hasCopilot = await hasCopilotCLI();
   const config = await loadConfig();
   const agents = await registry.listAgents();
+  const env = await loadEnv();
+
+  const hasTelegram = !!(env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
+  const hasToken = !!(env.GITHUB_TOKEN || process.env.GITHUB_TOKEN);
 
   console.log(`\n${EMOJI} ${NAME} Status\n`);
-  console.log(`  Version: ${VERSION}`);
-  console.log(`  Home: ${HOME_DIR}`);
-  console.log(`  Copilot: ${hasCopilot ? chalk.green('✅ Available') : chalk.yellow('❌ Not found')}`);
-  console.log(`  Setup: ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run')}`);
-  console.log(`  Agents: ${agents.length} loaded`);
+  console.log(`  Version:  ${VERSION}`);
+  console.log(`  Home:     ${HOME_DIR}`);
+  console.log(`  Copilot:  ${(hasCopilot || hasToken) ? chalk.green('✅ Available') : chalk.yellow('❌ Not found')}`);
+  console.log(`  Telegram: ${hasTelegram ? chalk.green('✅ Connected') : chalk.dim('⬚  Not configured')}`);
+  console.log(`  Setup:    ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run — try: openrappter onboard')}`);
+  console.log(`  Agents:   ${agents.length} loaded`);
   if (agents.length > 0) {
     console.log(`    ${agents.map((a: AgentInfo) => a.name).join(', ')}`);
   }

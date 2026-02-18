@@ -585,6 +585,10 @@ parse_args() {
                 OPENRAPPTER_USE_GUM=0
                 shift
                 ;;
+            --no-onboard)
+                OPT_NO_ONBOARD=true
+                shift
+                ;;
             --dir)
                 INSTALL_DIR="$2"
                 shift 2
@@ -1206,6 +1210,7 @@ main() {
     echo ""
 
     ui_section "What's next"
+    ui_kv "Setup wizard" "openrappter onboard"
     ui_kv "Check status" "openrappter --status"
     ui_kv "List agents" "openrappter --list-agents"
     ui_kv "Chat" "openrappter \"hello\""
@@ -1215,6 +1220,28 @@ main() {
         ui_kv "Python runtime" "also installed"
     fi
     echo ""
+
+    # Offer to run onboard wizard
+    if [[ "${OPT_NO_ONBOARD:-false}" != "true" ]] && [[ -n "$OPENRAPPTER_BIN" ]]; then
+        echo ""
+        if has_gum; then
+            if gum confirm "Run the setup wizard now? (connects Copilot & Telegram)"; then
+                echo ""
+                "$OPENRAPPTER_BIN" onboard
+            else
+                ui_info "Skipped — run 'openrappter onboard' anytime."
+            fi
+        else
+            printf "Run the setup wizard now? [Y/n] "
+            read -r answer
+            if [[ "$answer" != "n" && "$answer" != "N" ]]; then
+                echo ""
+                "$OPENRAPPTER_BIN" onboard
+            else
+                ui_info "Skipped — run 'openrappter onboard' anytime."
+            fi
+        fi
+    fi
 
     show_footer_links
 }

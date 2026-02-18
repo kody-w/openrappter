@@ -261,12 +261,12 @@ describe('Assistant (Copilot SDK)', () => {
 
   // ── Listener cleanup & multi-turn tests ──────────────────────────────────
 
-  it('unsubscribes delta listener after getResponse completes', async () => {
+  it('does not subscribe delta listener when no onDelta callback', async () => {
     const assistant = new Assistant(makeAgents());
     await assistant.getResponse('hi');
 
-    expect(unsubscribeCalls).toBe(1);
-    // Listener should be removed — no leftover handler
+    // No listener should be registered when onDelta is not provided
+    expect(unsubscribeCalls).toBe(0);
     expect(sessionEventHandlers.has('assistant.message_delta')).toBe(false);
   });
 
@@ -301,11 +301,11 @@ describe('Assistant (Copilot SDK)', () => {
     expect(allDeltas).toEqual(['turn0', 'turn1', 'turn2']);
   });
 
-  it('unsubscribes even when sendAndWait throws', async () => {
+  it('unsubscribes even when sendAndWait throws (with onDelta)', async () => {
     const assistant = new Assistant(makeAgents());
     mockSession.sendAndWait.mockRejectedValueOnce(new Error('network failure'));
 
-    await expect(assistant.getResponse('hi')).rejects.toThrow('network failure');
+    await expect(assistant.getResponse('hi', (d) => {})).rejects.toThrow('network failure');
 
     // Listener should still have been cleaned up
     expect(unsubscribeCalls).toBe(1);

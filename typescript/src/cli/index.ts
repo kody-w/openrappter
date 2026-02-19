@@ -10,3 +10,4 @@ export { registerModelsCommand } from './models.js';
 export { registerDoctorCommand } from './doctor.js';
 export { registerUpdateCommand } from './update.js';
 export { registerLoginCommand } from './login.js';
+export { registerMemoryCommand } from './memory.js';

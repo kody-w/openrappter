@@ -1,384 +1,256 @@
 /**
  * Plugin Loader
- * Dynamically loads and manages plugins
+ *
+ * Discovers and loads plugins from the ~/.openrappter/plugins/ directory
+ * (or a custom directory specified in config).
+ *
+ * Security model:
+ *   - Path containment: every plugin path is resolved and verified to be
+ *     inside the configured pluginDir before any file is read or imported.
+ *   - Symlink rejection: symlinks to directories outside the plugin dir are
+ *     detected and refused to prevent escape attacks.
+ *   - Error isolation: a broken plugin throws an error only for itself; the
+ *     loader catches and records the error, leaving other plugins unaffected.
+ *
+ * Loading flow per plugin directory:
+ *   1. Resolve real path and verify containment + no symlinks
+ *   2. Read package.json — check for "openrappter" metadata key
+ *   3. If found, validate with PluginManifestSchema
+ *   4. Dynamic import(entry) with error isolation
+ *
+ * npm install:
+ *   If a plugin has dependencies, `npm install --omit=dev` is run inside its
+ *   directory before import. This is intentionally skipped in test environments
+ *   (NODE_ENV=test) to keep tests fast.
  */
 
-import { readdir, readFile, stat } from 'fs/promises';
-import { join } from 'path';
-import type {
-  Plugin,
-  PluginAgent,
-  PluginTool,
-  PluginCommand,
-  PluginGatewayMethod,
-  PluginManifest,
-  PluginState,
-  PluginHook,
-  PluginHookEvent,
-} from './types.js';
+import { readdir, readFile, lstat } from 'fs/promises';
+import { resolve, join } from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { extractManifestFromPackageJson } from './manifest.js';
+import type { PluginManifest } from './manifest.js';
 
-export interface PluginLoaderConfig {
-  pluginDirs: string[];
-  autoEnable?: boolean;
+const execAsync = promisify(exec);
+
+// ---------------------------------------------------------------------------
+// Exports: path security helpers (exported for testability)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when `target` is inside (or exactly equal to) `base`.
+ * Both paths are resolved to absolute before comparison.
+ */
+export function isContainedPath(base: string, target: string): boolean {
+  const resolvedBase = resolve(base);
+  const resolvedTarget = resolve(target);
+  // Must start with base + separator, or be exactly equal
+  return (
+    resolvedTarget === resolvedBase ||
+    resolvedTarget.startsWith(resolvedBase + '/')
+  );
 }
 
-export class PluginLoader {
-  private config: PluginLoaderConfig;
-  private plugins = new Map<string, Plugin>();
-  private states = new Map<string, PluginState>();
-  private hooks = new Map<PluginHookEvent, Array<{ pluginId: string; hook: PluginHook }>>();
+/**
+ * Returns true when `path` is a symlink.
+ * Non-existent paths return false (not a symlink).
+ */
+export async function isSymlink(path: string): Promise<boolean> {
+  try {
+    const stats = await lstat(path);
+    return stats.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
 
-  constructor(config: PluginLoaderConfig) {
-    this.config = {
-      autoEnable: true,
-      ...config,
-    };
+// ---------------------------------------------------------------------------
+// Loaded plugin record
+// ---------------------------------------------------------------------------
+
+export interface LoadedPlugin {
+  /** Validated plugin manifest */
+  manifest: PluginManifest;
+  /** Absolute path to the plugin directory */
+  pluginDir: string;
+  /** The imported ES module */
+  module: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// SecurePluginLoader config
+// ---------------------------------------------------------------------------
+
+export interface SecurePluginLoaderConfig {
+  /** Root directory where plugins are stored (each plugin is a sub-directory) */
+  pluginDir: string;
+  /**
+   * Run `npm install --omit=dev` for plugins that declare dependencies.
+   * Defaults to true, automatically disabled when NODE_ENV=test.
+   */
+  autoInstall?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// SecurePluginLoader
+// ---------------------------------------------------------------------------
+
+export class SecurePluginLoader {
+  private readonly pluginDir: string;
+  private readonly autoInstall: boolean;
+
+  constructor(config: SecurePluginLoaderConfig) {
+    this.pluginDir = resolve(config.pluginDir);
+    this.autoInstall =
+      config.autoInstall !== undefined
+        ? config.autoInstall
+        : process.env['NODE_ENV'] !== 'test';
   }
 
-  /**
-   * Discover and load all plugins
-   */
-  async loadAll(): Promise<void> {
-    for (const dir of this.config.pluginDirs) {
-      await this.loadFromDirectory(dir);
-    }
-  }
+  // ---- Public API ----------------------------------------------------------
 
   /**
-   * Load plugins from a directory
+   * Scan the plugin directory and return manifests for all valid plugins.
+   * Does not import the modules; use loadPluginFromPath() for that.
    */
-  async loadFromDirectory(dir: string): Promise<void> {
+  async discoverPlugins(): Promise<PluginManifest[]> {
+    const manifests: PluginManifest[] = [];
+
+    let entries: string[];
     try {
-      const entries = await readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const pluginPath = join(dir, entry.name);
-          await this.loadPlugin(pluginPath);
-        }
+      entries = await readdir(this.pluginDir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
       }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.error(`Failed to load plugins from ${dir}:`, error);
+      throw err;
+    }
+
+    for (const entryName of entries) {
+      const pluginPath = join(this.pluginDir, entryName);
+      // Only process directories
+      try {
+        const st = await lstat(pluginPath);
+        if (!st.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      try {
+        const manifest = await this.readManifest(pluginPath);
+        if (manifest) manifests.push(manifest);
+      } catch {
+        // Broken plugin directory — skip
       }
     }
+
+    return manifests;
   }
 
   /**
-   * Load a single plugin
+   * Load a single plugin from `pluginPath`.
+   *
+   * Security checks run first:
+   *   1. Path must be contained within pluginDir
+   *   2. Path must not be a symlink
+   *
+   * Returns null when the path does not exist or has no openrappter manifest.
+   * Throws for security violations.
    */
-  async loadPlugin(path: string): Promise<Plugin | null> {
+  async loadPluginFromPath(pluginPath: string): Promise<LoadedPlugin | null> {
+    this.assertContained(pluginPath);
+    await this.assertNotSymlink(pluginPath);
+
+    const manifest = await this.readManifest(pluginPath);
+    if (!manifest) return null;
+
+    if (this.autoInstall && manifest.dependencies && Object.keys(manifest.dependencies).length > 0) {
+      await this.npmInstall(pluginPath);
+    }
+
+    const entryPath = resolve(pluginPath, manifest.entry);
+    this.assertContained(entryPath); // Entry must also be inside plugin dir
+
+    let module: Record<string, unknown>;
     try {
-      // Read manifest
-      const manifestPath = join(path, 'manifest.json');
-      const manifestData = await readFile(manifestPath, 'utf8');
-      const manifest = JSON.parse(manifestData) as PluginManifest;
+      module = (await import(entryPath)) as Record<string, unknown>;
+    } catch (err) {
+      throw new Error(
+        `Failed to import plugin "${manifest.name}" from "${entryPath}": ${(err as Error).message}`
+      );
+    }
 
-      // Check version compatibility
-      if (!this.isCompatible(manifest)) {
-        console.warn(`Plugin ${manifest.id} is not compatible with this version`);
-        return null;
-      }
+    return { manifest, pluginDir: resolve(pluginPath), module };
+  }
 
-      // Load plugin module
-      const modulePath = join(path, manifest.main);
-      const module = await import(modulePath);
-      const plugin: Plugin = module.default ?? module;
+  // ---- Private helpers -----------------------------------------------------
 
-      // Merge manifest into plugin
-      const fullPlugin: Plugin = {
-        ...plugin,
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        description: manifest.description,
-        author: manifest.author,
-        homepage: manifest.homepage,
-        license: manifest.license,
-        config: manifest.config,
-      };
-
-      // Initialize state
-      const state: PluginState = {
-        id: manifest.id,
-        enabled: false,
-        loaded: true,
-        config: this.getDefaultConfig(manifest.config),
-      };
-
-      this.plugins.set(manifest.id, fullPlugin);
-      this.states.set(manifest.id, state);
-
-      // Call onLoad hook
-      if (fullPlugin.onLoad) {
-        await fullPlugin.onLoad();
-      }
-
-      // Auto-enable if configured
-      if (this.config.autoEnable) {
-        await this.enablePlugin(manifest.id);
-      }
-
-      console.log(`Loaded plugin: ${manifest.name} v${manifest.version}`);
-      return fullPlugin;
-    } catch (error) {
-      console.error(`Failed to load plugin from ${path}:`, error);
+  /**
+   * Read and validate the manifest for a plugin directory.
+   * Looks for package.json with "openrappter" key.
+   * Returns null if the directory has no recognizable manifest.
+   */
+  private async readManifest(pluginPath: string): Promise<PluginManifest | null> {
+    const pkgPath = join(pluginPath, 'package.json');
+    let pkgRaw: string;
+    try {
+      pkgRaw = await readFile(pkgPath, 'utf8');
+    } catch {
       return null;
     }
-  }
 
-  /**
-   * Enable a plugin
-   */
-  async enablePlugin(id: string): Promise<boolean> {
-    const plugin = this.plugins.get(id);
-    const state = this.states.get(id);
-
-    if (!plugin || !state) {
-      throw new Error(`Plugin not found: ${id}`);
-    }
-
-    if (state.enabled) {
-      return true;
-    }
-
+    let pkg: Record<string, unknown>;
     try {
-      // Register hooks
-      if (plugin.hooks) {
-        for (const hook of plugin.hooks) {
-          this.registerHook(id, hook);
-        }
-      }
+      pkg = JSON.parse(pkgRaw) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
 
-      // Call onEnable hook
-      if (plugin.onEnable) {
-        await plugin.onEnable();
-      }
+    return extractManifestFromPackageJson(pkg);
+  }
 
-      state.enabled = true;
-      state.error = undefined;
-      return true;
-    } catch (error) {
-      state.error = (error as Error).message;
-      return false;
+  /**
+   * Throw a security error when target is not contained within pluginDir.
+   */
+  private assertContained(target: string): void {
+    if (!isContainedPath(this.pluginDir, target)) {
+      throw new Error(
+        `Security violation: path "${target}" is outside the plugin directory "${this.pluginDir}"`
+      );
     }
   }
 
   /**
-   * Disable a plugin
+   * Throw a security error when path is a symlink.
    */
-  async disablePlugin(id: string): Promise<boolean> {
-    const plugin = this.plugins.get(id);
-    const state = this.states.get(id);
-
-    if (!plugin || !state) {
-      throw new Error(`Plugin not found: ${id}`);
+  private async assertNotSymlink(path: string): Promise<void> {
+    if (await isSymlink(path)) {
+      throw new Error(
+        `Security violation: plugin path "${path}" is a symlink, which is not allowed`
+      );
     }
+  }
 
-    if (!state.enabled) {
-      return true;
-    }
-
+  /**
+   * Run `npm install --omit=dev` inside the plugin directory.
+   * Errors are wrapped with a descriptive message but re-thrown.
+   */
+  private async npmInstall(pluginPath: string): Promise<void> {
     try {
-      // Unregister hooks
-      this.unregisterHooks(id);
-
-      // Call onDisable hook
-      if (plugin.onDisable) {
-        await plugin.onDisable();
-      }
-
-      state.enabled = false;
-      return true;
-    } catch (error) {
-      state.error = (error as Error).message;
-      return false;
-    }
-  }
-
-  /**
-   * Unload a plugin
-   */
-  async unloadPlugin(id: string): Promise<boolean> {
-    const plugin = this.plugins.get(id);
-    const state = this.states.get(id);
-
-    if (!plugin || !state) {
-      return false;
-    }
-
-    // Disable first
-    if (state.enabled) {
-      await this.disablePlugin(id);
-    }
-
-    // Call onUnload hook
-    if (plugin.onUnload) {
-      await plugin.onUnload();
-    }
-
-    this.plugins.delete(id);
-    this.states.delete(id);
-    return true;
-  }
-
-  /**
-   * Get a plugin
-   */
-  getPlugin(id: string): Plugin | undefined {
-    return this.plugins.get(id);
-  }
-
-  /**
-   * Get plugin state
-   */
-  getState(id: string): PluginState | undefined {
-    return this.states.get(id);
-  }
-
-  /**
-   * Get all plugins
-   */
-  getPlugins(): Plugin[] {
-    return Array.from(this.plugins.values());
-  }
-
-  /**
-   * Get all enabled plugins
-   */
-  getEnabledPlugins(): Plugin[] {
-    return this.getPlugins().filter((p) => this.states.get(p.id)?.enabled);
-  }
-
-  /**
-   * Update plugin config
-   */
-  setConfig(id: string, config: Record<string, unknown>): void {
-    const state = this.states.get(id);
-    if (!state) {
-      throw new Error(`Plugin not found: ${id}`);
-    }
-    state.config = { ...state.config, ...config };
-  }
-
-  /**
-   * Execute hooks for an event
-   */
-  async executeHooks(event: PluginHookEvent, context: unknown): Promise<unknown> {
-    const hooks = this.hooks.get(event) ?? [];
-
-    // Sort by priority
-    const sorted = [...hooks].sort((a, b) => {
-      const pa = a.hook.priority ?? 0;
-      const pb = b.hook.priority ?? 0;
-      return pb - pa;
-    });
-
-    let result = context;
-    for (const { pluginId, hook } of sorted) {
-      const state = this.states.get(pluginId);
-      if (!state?.enabled) continue;
-
-      try {
-        result = await hook.handler(result);
-      } catch (error) {
-        console.error(`Hook error in plugin ${pluginId}:`, error);
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * Get all agents from plugins
-   */
-  getAgents(): PluginAgent[] {
-    const agents: PluginAgent[] = [];
-    for (const plugin of this.getEnabledPlugins()) {
-      if (plugin.agents) {
-        agents.push(...plugin.agents);
-      }
-    }
-    return agents;
-  }
-
-  /**
-   * Get all tools from plugins
-   */
-  getTools(): PluginTool[] {
-    const tools: PluginTool[] = [];
-    for (const plugin of this.getEnabledPlugins()) {
-      if (plugin.tools) {
-        tools.push(...plugin.tools);
-      }
-    }
-    return tools;
-  }
-
-  /**
-   * Get all commands from plugins
-   */
-  getCommands(): PluginCommand[] {
-    const commands: PluginCommand[] = [];
-    for (const plugin of this.getEnabledPlugins()) {
-      if (plugin.commands) {
-        commands.push(...plugin.commands);
-      }
-    }
-    return commands;
-  }
-
-  /**
-   * Get all gateway methods from plugins
-   */
-  getGatewayMethods(): PluginGatewayMethod[] {
-    const methods: PluginGatewayMethod[] = [];
-    for (const plugin of this.getEnabledPlugins()) {
-      if (plugin.gatewayMethods) {
-        methods.push(...plugin.gatewayMethods);
-      }
-    }
-    return methods;
-  }
-
-  // Private methods
-
-  private isCompatible(manifest: PluginManifest): boolean {
-    // TODO: Implement version checking
-    return true;
-  }
-
-  private getDefaultConfig(schema?: Plugin['config']): Record<string, unknown> {
-    if (!schema?.properties) return {};
-
-    const defaults: Record<string, unknown> = {};
-    for (const [key, prop] of Object.entries(schema.properties)) {
-      if (prop.default !== undefined) {
-        defaults[key] = prop.default;
-      }
-    }
-    return defaults;
-  }
-
-  private registerHook(pluginId: string, hook: PluginHook): void {
-    let hooks = this.hooks.get(hook.event);
-    if (!hooks) {
-      hooks = [];
-      this.hooks.set(hook.event, hooks);
-    }
-    hooks.push({ pluginId, hook });
-  }
-
-  private unregisterHooks(pluginId: string): void {
-    for (const [event, hooks] of this.hooks) {
-      this.hooks.set(
-        event,
-        hooks.filter((h) => h.pluginId !== pluginId)
+      await execAsync('npm install --omit=dev', { cwd: pluginPath });
+    } catch (err) {
+      throw new Error(
+        `npm install failed for plugin at "${pluginPath}": ${(err as Error).message}`
       );
     }
   }
 }
 
-export function createPluginLoader(config: PluginLoaderConfig): PluginLoader {
-  return new PluginLoader(config);
+// ---------------------------------------------------------------------------
+// Factory function
+// ---------------------------------------------------------------------------
+
+export function createSecurePluginLoader(
+  config: SecurePluginLoaderConfig
+): SecurePluginLoader {
+  return new SecurePluginLoader(config);
 }

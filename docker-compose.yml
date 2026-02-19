@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  openrappter:
+    build: .
+    ports:
+      - "18790:18790"
+    volumes:
+      - openrappter-data:/app/data
+      - openrappter-config:/root/.openrappter
+    environment:
+      - NODE_ENV=production
+      - OPENRAPPTER_HOST=0.0.0.0
+    restart: unless-stopped
+
+  openrappter-dev:
+    build:
+      context: .
+      target: builder
+    ports:
+      - "18790:18790"
+    volumes:
+      - ./typescript/src:/app/typescript/src
+      - openrappter-data:/app/data
+    environment:
+      - NODE_ENV=development
+    command: npx tsx watch src/index.ts
+
+volumes:
+  openrappter-data:
+  openrappter-config:

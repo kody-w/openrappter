@@ -749,26 +749,13 @@ export class GatewayServer {
   private async executeAgentWithEvents(sessionKey: string, runId: string, message: string, connId: string): Promise<void> {
     if (!this.agentHandler) return;
 
-    let fullText = '';
-
     try {
       const result = await this.agentHandler(
         { message, sessionId: sessionKey },
-        // Stream callback: emit delta events
-        (streamResponse: StreamingResponse) => {
-          if (streamResponse.chunk) {
-            fullText += streamResponse.chunk;
-            this.broadcastEvent(GatewayEvents.CHAT, {
-              runId, sessionKey,
-              state: 'delta',
-              message: { role: 'assistant', content: [{ type: 'text', text: fullText }], timestamp: Date.now() },
-            });
-          }
-        }
       );
 
-      // Final event
-      const finalText = result.content || fullText;
+      // Send final response only (no streaming deltas — avoids duplication from multi-turn tool-call loops)
+      const finalText = result.content || '';
       this.broadcastEvent(GatewayEvents.CHAT, {
         runId, sessionKey,
         state: 'final',

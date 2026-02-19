@@ -498,7 +498,7 @@ program
 
     const connectTelegram = await confirm({
       message: 'Connect a Telegram bot?',
-      initialValue: true,
+      initialValue: false,
     });
     if (isCancel(connectTelegram)) { outro('Setup cancelled.'); process.exit(0); }
 
@@ -583,6 +583,56 @@ program
     );
 
     outro(`${EMOJI} You're all set! Happy hacking.`);
+  });
+
+// Reset command
+program
+  .command('reset')
+  .description('Clear all credentials, config, and cached tokens for a fresh start')
+  .option('-y, --yes', 'Skip confirmation')
+  .action(async (options) => {
+    const filesToDelete = [
+      { path: ENV_FILE, label: '.env (credentials)' },
+      { path: CONFIG_FILE, label: 'config.json' },
+      { path: path.join(HOME_DIR, 'credentials', 'copilot-token.json'), label: 'cached Copilot token' },
+      { path: path.join(HOME_DIR, 'memory.json'), label: 'memory store' },
+      { path: path.join(HOME_DIR, 'sessions.json'), label: 'sessions' },
+    ];
+
+    console.log(`\n${EMOJI} This will delete:\n`);
+    for (const f of filesToDelete) {
+      const exists = fs.existsSync(f.path);
+      console.log(`  ${exists ? '•' : chalk.dim('○')} ${f.label} ${exists ? '' : chalk.dim('(not found)')}`);
+    }
+    console.log('');
+
+    if (!options.yes) {
+      if (!process.stdin.isTTY) {
+        console.log('Use --yes to confirm in non-interactive mode.');
+        process.exit(1);
+      }
+      const ok = await confirm({ message: 'Proceed with reset?' });
+      if (isCancel(ok) || !ok) {
+        console.log('Cancelled.');
+        process.exit(0);
+      }
+    }
+
+    let deleted = 0;
+    for (const f of filesToDelete) {
+      try {
+        if (fs.existsSync(f.path)) {
+          fs.unlinkSync(f.path);
+          console.log(chalk.green(`  ✓ Deleted ${f.label}`));
+          deleted++;
+        }
+      } catch (err) {
+        console.error(chalk.red(`  ✗ Failed to delete ${f.label}: ${(err as Error).message}`));
+      }
+    }
+
+    console.log(`\n${EMOJI} Reset complete (${deleted} files removed).`);
+    console.log(`  Run ${chalk.bold('openrappter onboard')} to set up again.\n`);
   });
 
 // Status command

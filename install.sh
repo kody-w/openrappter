@@ -1275,12 +1275,27 @@ setup_copilot_sdk() {
     # 5. Validate token against Copilot API
     if copilot_validate_token "$github_token"; then
         ui_success "Copilot token validated"
-    else
-        ui_warn "Token could not be validated against Copilot API (may still work)"
+        save_github_token_to_env "$github_token" "$token_source"
+        return 0
     fi
 
-    # 6. Save to .env
-    save_github_token_to_env "$github_token" "$token_source"
+    # Token failed validation — if it came from gh CLI or env, try device code instead
+    ui_warn "Token from ${token_source} does not have Copilot API access"
+    if gum_is_tty; then
+        ui_info "Starting Copilot device code login to get a valid token..."
+        local dc_token
+        dc_token="$(copilot_device_code_login)" || true
+        if [[ -n "$dc_token" ]]; then
+            if copilot_validate_token "$dc_token"; then
+                ui_success "Copilot token validated"
+                save_github_token_to_env "$dc_token" "device code OAuth"
+                return 0
+            fi
+        fi
+        ui_warn "Could not obtain a valid Copilot token — run 'openrappter onboard' to retry"
+    else
+        ui_warn "Non-interactive shell — run 'openrappter onboard' to authenticate for Copilot"
+    fi
 }
 
 # ── Main ────────────────────────────────────────────────────
@@ -1425,6 +1440,12 @@ main() {
     fi
 
     # ── Stage 2b: GitHub Copilot SDK ──
+    # Start with a fresh .env so stale tokens don't persist across installs
+    local env_file="$INSTALL_DIR/.env"
+    if [[ -f "$env_file" ]]; then
+        ui_info "Clearing old .env for fresh setup"
+        rm -f "$env_file"
+    fi
     setup_copilot_sdk
 
     # ── Stage 3: Finalizing setup ──

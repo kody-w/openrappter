@@ -149,10 +149,9 @@ export class CopilotProvider implements LLMProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json',
-        // Copilot API expects these headers for compatibility
-        'Editor-Version': 'openrappter/1.4.0',
-        'Editor-Plugin-Version': 'copilot/1.0.0',
-        'User-Agent': 'openrappter/1.4.0',
+        // Copilot API requires recognized editor headers
+        'Editor-Version': 'vscode/1.96.2',
+        'User-Agent': 'GitHubCopilotChat/0.26.7',
       },
       body: JSON.stringify(body),
     });

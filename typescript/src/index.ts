@@ -74,6 +74,21 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   // Create the Assistant powered by direct Copilot API (no CLI needed)
   const agents = await registry.getAllAgents();
   const githubToken = await resolveGithubToken();
+
+  // Validate token at startup so we fail early with a clear message
+  if (githubToken) {
+    try {
+      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+      await resolveCopilotApiToken({ githubToken });
+      log(`${EMOJI} Copilot token validated`);
+    } catch (err) {
+      console.warn(`${EMOJI} Warning: ${(err as Error).message}`);
+      console.warn(`${EMOJI} Chat will not work until you re-authenticate.`);
+    }
+  } else {
+    console.warn(`${EMOJI} No GitHub token found. Run 'openrappter onboard' to set up Copilot.`);
+  }
+
   const assistant = new Assistant(agents, {
     name: NAME,
     description: 'a helpful local-first AI assistant with shell, memory, and skill agents',

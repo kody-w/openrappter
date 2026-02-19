@@ -1222,12 +1222,14 @@ main() {
     echo ""
 
     # Auto-run onboard wizard (skip with --no-onboard; requires TTY for interactive prompts)
+    # Note: `curl | bash` redirects stdin from the pipe, so -t 0 is false even in a terminal.
+    # We check /dev/tty instead and redirect stdin from it so the wizard can prompt the user.
     if [[ "${OPT_NO_ONBOARD:-false}" != "true" ]] && [[ -n "$OPENRAPPTER_BIN" ]]; then
-        if [[ -t 0 ]]; then
+        if [[ -e /dev/tty ]]; then
             echo ""
             ui_info "Running setup wizard..."
             echo ""
-            "$OPENRAPPTER_BIN" onboard
+            "$OPENRAPPTER_BIN" onboard </dev/tty
         else
             echo ""
             ui_info "Non-interactive shell detected — skipping setup wizard."

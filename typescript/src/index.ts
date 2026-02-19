@@ -3,6 +3,7 @@ import { intro, outro, text, select, note, spinner, confirm, password, isCancel,
 import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
@@ -47,7 +48,7 @@ async function getGhToken(): Promise<string | null> {
 // GATEWAY IN-PROCESS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function startGatewayInProcess(opts?: { silent?: boolean }): Promise<{ port: number; cleanup: () => Promise<void> }> {
+async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string }): Promise<{ port: number; cleanup: () => Promise<void> }> {
   const { GatewayServer } = await import('./gateway/server.js');
   const { Assistant } = await import('./agents/Assistant.js');
   const { ChannelRegistry } = await import('./channels/registry.js');
@@ -67,6 +68,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean }): Promise<{ por
     port,
     bind: 'loopback',
     auth: token ? { mode: 'token', tokens: [token] } : { mode: 'none' },
+    webRoot: opts?.webRoot,
   });
 
   // Create the Assistant powered by direct Copilot API (no CLI needed)
@@ -219,6 +221,7 @@ program
   .option('-l, --list-agents', 'List available agents')
   .option('--exec <agent>', 'Execute a specific agent')
   .option('--repl', 'Use simple readline chat instead of TUI')
+  .option('--web', 'Open web UI in browser')
   .action(async (message, options) => {
     await ensureHomeDir();
 
@@ -277,6 +280,21 @@ program
       for (let i = 1; i <= options.evolve; i++) {
         console.log(`  [${i}] Tick completed`);
       }
+      return;
+    }
+
+    if (options.web) {
+      const webRoot = path.resolve(__dirname, '../../ui/dist');
+      if (!fs.existsSync(path.join(webRoot, 'index.html'))) {
+        console.error('Web UI not built. Run: cd ui && npm run build');
+        process.exit(1);
+      }
+      const { port } = await startGatewayInProcess({ webRoot });
+      const url = `http://127.0.0.1:${port}`;
+      console.log(`${EMOJI} Web UI: ${url}`);
+      console.log('Press Ctrl+C to stop\n');
+      const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      execAsync(`${openCmd} ${url}`).catch(() => {});
       return;
     }
 

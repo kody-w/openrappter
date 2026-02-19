@@ -46,6 +46,7 @@ export interface GatewayConfig {
   };
   heartbeatInterval?: number;
   connectionTimeout?: number;
+  webRoot?: string;
 }
 
 export interface GatewayStatus {

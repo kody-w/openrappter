@@ -93,6 +93,7 @@ export class GatewayServer {
       auth: config?.auth ?? { mode: 'none' },
       heartbeatInterval: config?.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL,
       connectionTimeout: config?.connectionTimeout ?? DEFAULT_CONNECTION_TIMEOUT,
+      webRoot: config?.webRoot,
     };
     this.loadSessions();
     this.loadCronStore();
@@ -295,6 +296,20 @@ export class GatewayServer {
 
   // ── Private: HTTP ────────────────────────────────────────────────────
 
+  private static readonly MIME_TYPES: Record<string, string> = {
+    '.html': 'text/html',
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.ico': 'image/x-icon',
+    '.woff2': 'font/woff2',
+    '.woff': 'font/woff',
+    '.ttf': 'font/ttf',
+    '.map': 'application/json',
+  };
+
   private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
     if (req.url === '/health' && req.method === 'GET') {
       const health = this.getHealthResponse();
@@ -307,8 +322,73 @@ export class GatewayServer {
       res.end(JSON.stringify(this.getStatus()));
       return;
     }
+
+    // Static file serving when webRoot is configured
+    if (this.config.webRoot) {
+      this.serveStaticFile(req, res);
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
+  }
+
+  private serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
+    const webRoot = this.config.webRoot!;
+    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    let filePath = decodeURIComponent(url.pathname);
+
+    // Guard against path traversal
+    const resolved = path.resolve(webRoot, '.' + filePath);
+    if (!resolved.startsWith(path.resolve(webRoot))) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden' }));
+      return;
+    }
+
+    // Try to serve the file; fall back to index.html for SPA routing
+    const tryServe = (target: string, fallback: boolean) => {
+      fs.stat(target, (err, stats) => {
+        if (err || !stats.isFile()) {
+          if (fallback) {
+            // SPA fallback: serve index.html
+            const indexPath = path.join(webRoot, 'index.html');
+            fs.readFile(indexPath, (indexErr, data) => {
+              if (indexErr) {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Not found' }));
+                return;
+              }
+              res.writeHead(200, { 'Content-Type': 'text/html' });
+              res.end(data);
+            });
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not found' }));
+          }
+          return;
+        }
+
+        const ext = path.extname(target).toLowerCase();
+        const mime = GatewayServer.MIME_TYPES[ext] ?? 'application/octet-stream';
+        fs.readFile(target, (readErr, data) => {
+          if (readErr) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Internal error' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': mime });
+          res.end(data);
+        });
+      });
+    };
+
+    // If path is / or has no extension, try index.html directly then SPA fallback
+    if (filePath === '/') {
+      tryServe(path.join(webRoot, 'index.html'), false);
+    } else {
+      tryServe(resolved, true);
+    }
   }
 
   private getHealthResponse(): HealthResponse {

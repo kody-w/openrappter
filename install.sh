@@ -416,6 +416,9 @@ show_install_plan() {
     ui_kv "Install directory" "$INSTALL_DIR"
     ui_kv "Node.js minimum" "v${MIN_NODE}+"
     ui_kv "Python" "optional (3.${MIN_PYTHON_MINOR}+)"
+    if [[ "${OPT_NO_COPILOT:-false}" == "true" ]]; then
+        ui_kv "Copilot" "skipped (--no-copilot)"
+    fi
     if [[ "$DRY_RUN" == "1" ]]; then
         ui_kv "Dry run" "yes"
     fi
@@ -551,6 +554,7 @@ Options:
   --verbose                          Print debug output
   --gum                              Force gum UI if possible
   --no-gum                           Disable gum UI
+  --no-copilot                       Skip Copilot setup entirely
   --help, -h                         Show this help
 
 Environment variables:
@@ -587,6 +591,10 @@ parse_args() {
                 ;;
             --no-onboard)
                 OPT_NO_ONBOARD=true
+                shift
+                ;;
+            --no-copilot)
+                OPT_NO_COPILOT=true
                 shift
                 ;;
             --dir)
@@ -1075,24 +1083,169 @@ install_gh_cli() {
     return 1
 }
 
-# ── GitHub Copilot setup (direct token exchange — no CLI binary needed) ──
+# ── GitHub Copilot setup (device code OAuth — no gh CLI required) ──────────
+
+# Minimal JSON field extractor (no jq needed)
+parse_json_field() {
+    local json="$1" field="$2"
+    # Handle both quoted string and numeric values
+    echo "$json" | sed 's/,/\n/g' | grep "\"${field}\"" | sed 's/.*"'"${field}"'"\s*:\s*//' | sed 's/^"//' | sed 's/".*$//' | sed 's/[[:space:]]*$//' | head -1
+}
+
+copilot_device_code_login() {
+    # 1. Request device code
+    local response
+    response="$(curl -sS -X POST "https://github.com/login/device/code" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "client_id=Iv1.b507a08c87ecfe98&scope=read:user")"
+
+    local user_code device_code verification_uri interval expires_in
+    user_code="$(parse_json_field "$response" "user_code")"
+    device_code="$(parse_json_field "$response" "device_code")"
+    verification_uri="$(parse_json_field "$response" "verification_uri")"
+    interval="$(parse_json_field "$response" "interval")"
+    expires_in="$(parse_json_field "$response" "expires_in")"
+
+    if [[ -z "$user_code" || -z "$device_code" ]]; then
+        ui_error "Failed to get device code from GitHub"
+        return 1
+    fi
+
+    # Default interval/expiry if parsing failed
+    interval="${interval:-5}"
+    expires_in="${expires_in:-900}"
+
+    # 2. Display code to user
+    echo ""
+    if [[ -n "$GUM" ]]; then
+        local code_display
+        code_display="$(printf 'Enter code: %s\nURL: %s' "$user_code" "$verification_uri")"
+        "$GUM" style --border rounded --border-foreground "#10b981" --padding "1 2" --foreground "#00e5cc" --bold "$code_display"
+    else
+        echo -e "${SUCCESS}${BOLD}  Enter this code:  ${user_code}${NC}"
+        echo -e "${INFO}  Open: ${verification_uri}${NC}"
+    fi
+    echo ""
+
+    # 3. Try to open browser
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        open "$verification_uri" 2>/dev/null || true
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "$verification_uri" 2>/dev/null || true
+    fi
+
+    ui_info "Waiting for GitHub authorization..."
+
+    # 4. Poll for token
+    local deadline=$((SECONDS + expires_in))
+    local wait_secs="$interval"
+
+    while [[ $SECONDS -lt $deadline ]]; do
+        sleep "$wait_secs"
+
+        local token_response
+        token_response="$(curl -sS -X POST "https://github.com/login/oauth/access_token" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=Iv1.b507a08c87ecfe98&device_code=${device_code}&grant_type=urn:ietf:params:oauth:grant-type:device_code")"
+
+        local access_token error_field
+        access_token="$(parse_json_field "$token_response" "access_token")"
+        error_field="$(parse_json_field "$token_response" "error")"
+
+        if [[ -n "$access_token" && "$access_token" != "null" ]]; then
+            echo "$access_token"
+            return 0
+        fi
+
+        case "$error_field" in
+            authorization_pending)
+                # Still waiting — continue polling
+                ;;
+            slow_down)
+                wait_secs=$((wait_secs + 2))
+                ;;
+            access_denied)
+                ui_error "GitHub login was cancelled"
+                return 1
+                ;;
+            expired_token)
+                ui_error "Device code expired — please try again"
+                return 1
+                ;;
+            *)
+                if [[ -n "$error_field" ]]; then
+                    ui_error "GitHub device flow error: $error_field"
+                    return 1
+                fi
+                ;;
+        esac
+    done
+
+    ui_error "Device code expired — please try again"
+    return 1
+}
+
+copilot_validate_token() {
+    local token="$1"
+    local response http_code body
+    response="$(curl -sS -w "\n%{http_code}" \
+        "https://api.github.com/copilot_internal/v2/token" \
+        -H "Accept: application/json" \
+        -H "Authorization: Bearer $token")"
+    http_code="${response##*$'\n'}"
+    [[ "$http_code" == "200" ]]
+}
+
+save_github_token_to_env() {
+    local github_token="$1"
+    local token_source="$2"
+    local env_file="$INSTALL_DIR/.env"
+    mkdir -p "$INSTALL_DIR"
+
+    # Update or create .env
+    if [[ -f "$env_file" ]]; then
+        # Remove old GITHUB_TOKEN line if present
+        if grep -q "^GITHUB_TOKEN=" "$env_file" 2>/dev/null; then
+            local tmp_env
+            tmp_env="$(mktempfile)"
+            grep -v "^GITHUB_TOKEN=" "$env_file" > "$tmp_env"
+            mv "$tmp_env" "$env_file"
+        fi
+    else
+        echo "# openrappter environment — managed by installer" > "$env_file"
+        echo "" >> "$env_file"
+    fi
+    echo "GITHUB_TOKEN=\"${github_token}\"" >> "$env_file"
+    ui_success "GitHub token saved (from $token_source)"
+}
+
 setup_copilot_sdk() {
+    # Skip if --no-copilot flag set
+    if [[ "${OPT_NO_COPILOT:-false}" == "true" ]]; then
+        ui_info "Copilot setup skipped (--no-copilot)"
+        return 0
+    fi
+
     ui_info "Setting up GitHub Copilot (direct API integration)"
 
-    # Install gh CLI if not present (used for token discovery)
-    install_gh_cli || true
-
-    # 3. Auto-detect GitHub token
     local github_token=""
     local token_source=""
 
-    # Check existing env
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    # 1. Check env vars
+    if [[ -n "${COPILOT_GITHUB_TOKEN:-}" ]]; then
+        github_token="$COPILOT_GITHUB_TOKEN"
+        token_source="COPILOT_GITHUB_TOKEN env"
+    elif [[ -n "${GH_TOKEN:-}" ]]; then
+        github_token="$GH_TOKEN"
+        token_source="GH_TOKEN env"
+    elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
         github_token="$GITHUB_TOKEN"
-        token_source="environment"
+        token_source="GITHUB_TOKEN env"
     fi
 
-    # Try gh auth token
+    # 2. Try gh auth token (if gh available — nice-to-have, not required)
     if [[ -z "$github_token" ]] && command -v gh &>/dev/null; then
         local gh_token
         gh_token="$(gh auth token 2>/dev/null || true)"
@@ -1102,35 +1255,32 @@ setup_copilot_sdk() {
         fi
     fi
 
-    # Save token to .env if found
-    if [[ -n "$github_token" ]]; then
-        local env_file="$INSTALL_DIR/.env"
-        mkdir -p "$INSTALL_DIR"
-
-        # Update or create .env
-        if [[ -f "$env_file" ]]; then
-            # Remove old GITHUB_TOKEN line if present
-            if grep -q "^GITHUB_TOKEN=" "$env_file" 2>/dev/null; then
-                local tmp_env
-                tmp_env="$(mktempfile)"
-                grep -v "^GITHUB_TOKEN=" "$env_file" > "$tmp_env"
-                mv "$tmp_env" "$env_file"
-            fi
-        else
-            echo "# openrappter environment — managed by installer" > "$env_file"
-            echo "" >> "$env_file"
-        fi
-        echo "GITHUB_TOKEN=\"${github_token}\"" >> "$env_file"
-        ui_success "GitHub token detected (from $token_source) and saved"
-    else
-        if command -v gh &>/dev/null; then
-            # gh is installed but not authenticated
-            ui_warn "GitHub CLI installed but not authenticated"
-            ui_info "Run 'gh auth login' to authenticate, then 'openrappter onboard'"
-        else
-            ui_info "No GitHub token found — run 'openrappter onboard' to configure"
+    # 3. If still no token and interactive TTY — run device code OAuth
+    if [[ -z "$github_token" ]] && gum_is_tty; then
+        ui_info "No GitHub token found — starting device code login"
+        local dc_token
+        dc_token="$(copilot_device_code_login)" || true
+        if [[ -n "$dc_token" ]]; then
+            github_token="$dc_token"
+            token_source="device code OAuth"
         fi
     fi
+
+    # 4. Non-interactive with no token — print instructions
+    if [[ -z "$github_token" ]]; then
+        ui_info "No GitHub token found — run 'openrappter onboard' to configure"
+        return 0
+    fi
+
+    # 5. Validate token against Copilot API
+    if copilot_validate_token "$github_token"; then
+        ui_success "Copilot token validated"
+    else
+        ui_warn "Token could not be validated against Copilot API (may still work)"
+    fi
+
+    # 6. Save to .env
+    save_github_token_to_env "$github_token" "$token_source"
 }
 
 # ── Main ────────────────────────────────────────────────────

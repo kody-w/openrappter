@@ -1,102 +1,12 @@
 import Foundation
 @testable import OpenRappterBarLib
 
-// MARK: - Mock WebSocket Transport
-
-final class MockWebSocket: WebSocketTransport, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _sentMessages: [Data] = []
-    private var _receiveQueue: [Result<Data, Error>] = []
-    private var _receiveContinuation: CheckedContinuation<Data, Error>?
-    private var _cancelled = false
-
-    var sentMessages: [Data] {
-        lock.lock()
-        defer { lock.unlock() }
-        return _sentMessages
-    }
-
-    var cancelled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _cancelled
-    }
-
-    func send(_ data: Data) async throws {
-        lock.lock()
-        _sentMessages.append(data)
-        lock.unlock()
-    }
-
-    func receive() async throws -> Data {
-        lock.lock()
-        if !_receiveQueue.isEmpty {
-            let item = _receiveQueue.removeFirst()
-            lock.unlock()
-            return try item.get()
-        }
-        lock.unlock()
-
-        return try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            _receiveContinuation = continuation
-            lock.unlock()
-        }
-    }
-
-    func cancel() {
-        lock.lock()
-        _cancelled = true
-        let cont = _receiveContinuation
-        _receiveContinuation = nil
-        lock.unlock()
-        cont?.resume(throwing: CancellationError())
-    }
-
-    func enqueueReceive(_ data: Data) {
-        lock.lock()
-        if let cont = _receiveContinuation {
-            _receiveContinuation = nil
-            lock.unlock()
-            cont.resume(returning: data)
-        } else {
-            _receiveQueue.append(.success(data))
-            lock.unlock()
-        }
-    }
-
-    func lastSentJSON() -> [String: Any]? {
-        guard let data = sentMessages.last else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    }
-}
-
-// MARK: - Helper
-
-private func makeHelloOk(connId: String = "conn_test123") throws -> Data {
-    let helloOk: [String: Any] = [
-        "type": "res",
-        "id": "rpc-1",
-        "ok": true,
-        "payload": [
-            "type": "hello-ok",
-            "protocol": 3,
-            "server": ["version": "1.4.0", "host": "localhost", "connId": connId],
-            "features": ["methods": ["ping", "status"], "events": ["chat"]],
-            "policy": ["maxPayload": 5000000, "tickIntervalMs": 30000],
-        ] as [String: Any],
-    ]
-    return try JSONSerialization.data(withJSONObject: helloOk)
-}
-
 // MARK: - Tests
 
 func runGatewayConnectionTests() async throws {
     suite("Gateway Connection") {
         test("initial state is disconnected") {
-            let conn = GatewayConnection()
-            try expectEqual(conn.state, .disconnected)
-            try expectNil(conn.connectionId)
+            // Can't access actor state synchronously anymore — tested in async suite
         }
 
         test("backoff delay base is ~1s") {
@@ -120,15 +30,24 @@ func runGatewayConnectionTests() async throws {
             let delay = GatewayConnection.backoffDelay(attempt: 100)
             try expect(delay <= 37.5, "Delay \(delay) should be <= 37.5")
         }
-
-        test("disconnect sets state to disconnected") {
-            let conn = GatewayConnection()
-            conn.disconnect()
-            try expectEqual(conn.state, .disconnected)
-        }
     }
 
-    await suite("Gateway Connection (async)") {
+    await suite("Gateway Connection (actor)") {
+        await test("initial state is disconnected") {
+            let conn = GatewayConnection()
+            let state = await conn.state
+            try expectEqual(state, .disconnected)
+            let connId = await conn.connectionId
+            try expectNil(connId)
+        }
+
+        await test("disconnect sets state to disconnected") {
+            let conn = GatewayConnection()
+            await conn.disconnect()
+            let state = await conn.state
+            try expectEqual(state, .disconnected)
+        }
+
         await test("handshake sends correct connect message") {
             let mock = MockWebSocket()
             let conn = GatewayConnection(transportFactory: { _ in mock })
@@ -136,8 +55,10 @@ func runGatewayConnectionTests() async throws {
 
             try await conn.connect()
 
-            try expectEqual(conn.state, .connected)
-            try expectEqual(conn.connectionId, "conn_test123")
+            let state = await conn.state
+            try expectEqual(state, .connected)
+            let connId = await conn.connectionId
+            try expectEqual(connId, "conn_test123")
 
             let sent = mock.lastSentJSON()
             try expectEqual(sent?["type"] as? String, "req")
@@ -149,7 +70,7 @@ func runGatewayConnectionTests() async throws {
             try expectEqual(client?["platform"] as? String, "macos")
             try expectEqual(client?["mode"] as? String, "menubar")
 
-            conn.disconnect()
+            await conn.disconnect()
         }
 
         await test("events dispatch to handler") {
@@ -159,7 +80,7 @@ func runGatewayConnectionTests() async throws {
 
             var receivedEvent: String?
             let lock = NSLock()
-            conn.onEvent = { event, _ in
+            await conn.setEventHandler { event, _ in
                 lock.lock()
                 receivedEvent = event
                 lock.unlock()
@@ -181,7 +102,7 @@ func runGatewayConnectionTests() async throws {
             lock.unlock()
             try expectEqual(value, "heartbeat")
 
-            conn.disconnect()
+            await conn.disconnect()
         }
 
         await test("state change callback fires during connect") {
@@ -190,7 +111,7 @@ func runGatewayConnectionTests() async throws {
 
             var states: [ConnectionState] = []
             let lock = NSLock()
-            conn.onStateChange = { state in
+            await conn.setStateHandler { state in
                 lock.lock()
                 states.append(state)
                 lock.unlock()
@@ -207,7 +128,7 @@ func runGatewayConnectionTests() async throws {
             try expect(captured.contains(.handshaking), "Should have handshaking state")
             try expect(captured.contains(.connected), "Should have connected state")
 
-            conn.disconnect()
+            await conn.disconnect()
         }
     }
 }

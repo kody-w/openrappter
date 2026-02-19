@@ -120,15 +120,6 @@ async function hasGhCLI(): Promise<boolean> {
   }
 }
 
-async function isGhAuthenticated(): Promise<boolean> {
-  try {
-    const { stdout } = await execAsync('gh auth status 2>&1');
-    return stdout.includes('Logged in');
-  } catch {
-    return false;
-  }
-}
-
 async function getGhToken(): Promise<string | null> {
   try {
     const { stdout } = await execAsync('gh auth token');
@@ -545,101 +536,100 @@ program
     const env = await loadEnv();
     const config = await loadConfig();
 
-    // ── Step 1: GitHub Copilot ──────────────────────────────────────────────
+    // ── Step 1: GitHub Copilot (device code OAuth — no gh CLI required) ────
     log.step('Step 1 of 3 — GitHub Copilot');
 
-    const hasGh = await hasGhCLI();
     let copilotReady = false;
 
-    if (hasGh) {
-      const authenticated = await isGhAuthenticated();
-      if (authenticated) {
-        const token = await getGhToken();
-        if (token) {
+    // 1a. Check for existing token: env vars → gh CLI
+    let existingToken: string | null = env.GITHUB_TOKEN
+      ?? process.env.COPILOT_GITHUB_TOKEN
+      ?? process.env.GH_TOKEN
+      ?? process.env.GITHUB_TOKEN
+      ?? null;
+
+    if (!existingToken) {
+      const ghToken = await getGhToken();
+      if (ghToken) existingToken = ghToken;
+    }
+
+    if (existingToken) {
+      // Validate the existing token
+      const s = spinner();
+      s.start('Validating existing GitHub token…');
+      try {
+        const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+        await resolveCopilotApiToken({ githubToken: existingToken });
+        env.GITHUB_TOKEN = existingToken;
+        copilotReady = true;
+        s.stop('Existing GitHub token validated — Copilot is ready!');
+      } catch {
+        s.stop('Existing token could not access Copilot API');
+        existingToken = null; // Fall through to device code flow
+      }
+    }
+
+    if (!copilotReady) {
+      // 1b. Offer device code login as the primary path
+      const action = await select({
+        message: 'How would you like to connect GitHub Copilot?',
+        options: [
+          { value: 'device', label: 'Log in with GitHub (recommended)', hint: 'opens browser, no gh CLI needed' },
+          { value: 'token', label: 'Paste a GitHub token manually' },
+          { value: 'skip', label: 'Skip for now' },
+        ],
+      });
+      if (isCancel(action)) { outro('Setup cancelled.'); process.exit(0); }
+
+      if (action === 'device') {
+        try {
+          const { deviceCodeLogin } = await import('./providers/copilot-auth.js');
+
+          const s = spinner();
+          s.start('Requesting device code from GitHub…');
+
+          const token = await deviceCodeLogin(
+            (code, url) => {
+              s.stop('Device code received');
+              note(
+                `Code:  ${code}\nURL:   ${url}\n\nEnter the code on GitHub to authorize.`,
+                'GitHub Device Login'
+              );
+              // Try to open browser
+              const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+              execAsync(`${openCmd} ${url}`).catch(() => {});
+            },
+          );
+
+          // Token received — validate it
           env.GITHUB_TOKEN = token;
           copilotReady = true;
-          log.success('GitHub CLI authenticated — Copilot is ready!');
-        }
-      } else {
-        log.warn('GitHub CLI found but not authenticated.');
-        const shouldLogin = await confirm({
-          message: 'Open GitHub login now?',
-          initialValue: true,
-        });
-        if (isCancel(shouldLogin)) { outro('Setup cancelled.'); process.exit(0); }
+          log.success('GitHub authorized — Copilot is ready!');
+        } catch (err) {
+          log.warn(`Device code login failed: ${(err as Error).message}`);
+          log.info('You can try pasting a token manually or skip for now.');
 
-        if (shouldLogin) {
-          const s = spinner();
-          s.start('Opening GitHub login…');
-          try {
-            await execAsync('gh auth login --web --scopes read:org,repo');
-            s.stop('Authenticated!');
-            const token = await getGhToken();
-            if (token) {
-              env.GITHUB_TOKEN = token;
-              copilotReady = true;
-            }
-          } catch {
-            s.stop('Login failed — you can retry later with `gh auth login`');
-          }
-        }
-      }
-    } else {
-      // No gh CLI — try to auto-install it
-      log.warn('GitHub CLI (gh) not found.');
-
-      const shouldInstallGh = await confirm({
-        message: 'Install GitHub CLI (gh) now? (recommended for Copilot)',
-        initialValue: true,
-      });
-      if (isCancel(shouldInstallGh)) { outro('Setup cancelled.'); process.exit(0); }
-
-      if (shouldInstallGh) {
-        const s = spinner();
-        s.start('Installing GitHub CLI…');
-        try {
-          const platform = process.platform;
-          if (platform === 'darwin') {
-            await execAsync('brew install gh', { timeout: 120000 });
-          } else if (platform === 'linux') {
-            // Try apt first, then snap
-            try {
-              await execAsync('sudo apt-get install -y -qq gh 2>/dev/null || sudo snap install gh 2>/dev/null', { timeout: 120000 });
-            } catch {
-              await execAsync('curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt-get update -qq && sudo apt-get install -y -qq gh', { timeout: 120000 });
-            }
-          }
-          s.stop('GitHub CLI installed!');
-
-          // Now try to authenticate
-          const shouldLogin = await confirm({
-            message: 'Log in to GitHub now?',
-            initialValue: true,
+          // Fallback: offer manual token paste
+          const manualToken = await text({
+            message: 'GitHub token (or press Enter to skip):',
+            placeholder: 'ghp_xxxxxxxxxxxx',
+            validate: (val) => {
+              if (!val) return undefined;
+              if (val.length < 10) return 'Token looks too short';
+              return undefined;
+            },
           });
-          if (!isCancel(shouldLogin) && shouldLogin) {
-            const s2 = spinner();
-            s2.start('Opening GitHub login…');
-            try {
-              await execAsync('gh auth login --web --scopes read:org,repo');
-              s2.stop('Authenticated!');
-              const token = await getGhToken();
-              if (token) {
-                env.GITHUB_TOKEN = token;
-                copilotReady = true;
-              }
-            } catch {
-              s2.stop('Login failed — you can retry later with `gh auth login`');
-            }
-          }
-        } catch {
-          s.stop('Auto-install failed');
-          log.info('Install manually: https://cli.github.com');
-        }
-      }
+          if (isCancel(manualToken)) { outro('Setup cancelled.'); process.exit(0); }
 
-      if (!copilotReady) {
+          if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
+            env.GITHUB_TOKEN = manualToken;
+            copilotReady = true;
+            log.success('Token saved.');
+          }
+        }
+      } else if (action === 'token') {
         note(
-          'You can still paste a GitHub personal access token below.\n' +
+          'Paste a GitHub personal access token (classic or fine-grained).\n' +
           'Get one at: https://github.com/settings/tokens',
           'Manual Token'
         );
@@ -648,7 +638,7 @@ program
           message: 'GitHub token (or press Enter to skip):',
           placeholder: 'ghp_xxxxxxxxxxxx',
           validate: (val) => {
-            if (!val) return undefined; // allow skip
+            if (!val) return undefined;
             if (val.length < 10) return 'Token looks too short';
             return undefined;
           },
@@ -662,6 +652,8 @@ program
         } else {
           log.info('Skipped — you can set GITHUB_TOKEN later.');
         }
+      } else {
+        log.info('Skipped — run `openrappter onboard` anytime to connect Copilot.');
       }
     }
 

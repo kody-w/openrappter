@@ -69,11 +69,11 @@ public enum GatewayConnectionError: Error, LocalizedError {
     }
 }
 
-// MARK: - Gateway Connection
+// MARK: - Gateway Connection (Actor)
 
 /// Manages a WebSocket connection to the OpenRappter gateway.
-/// Handles connect handshake, request/response correlation, event dispatch, and reconnection.
-public final class GatewayConnection: Sendable {
+/// Uses Swift actor isolation for thread safety — no locks or unsafe pointers needed.
+public actor GatewayConnection: GatewayConnectionProtocol {
     public typealias EventHandler = @Sendable (String, Any) -> Void
     public typealias StateHandler = @Sendable (ConnectionState) -> Void
     public typealias TransportFactory = @Sendable (URL) -> WebSocketTransport
@@ -81,92 +81,61 @@ public final class GatewayConnection: Sendable {
     private let url: URL
     private let transportFactory: TransportFactory
 
-    // Nonisolated mutable state protected by locks
-    private let stateLock = NSLock()
-    private let _state = UnsafeMutablePointer<ConnectionState>.allocate(capacity: 1)
-    private let _transport = UnsafeMutablePointer<WebSocketTransport?>.allocate(capacity: 1)
-    private let _requestId = UnsafeMutablePointer<Int>.allocate(capacity: 1)
-    private let _connId = UnsafeMutablePointer<String?>.allocate(capacity: 1)
-    private let _reconnectAttempt = UnsafeMutablePointer<Int>.allocate(capacity: 1)
-    private let _shouldReconnect = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-
-    // Continuations for pending requests
-    private let continuationsLock = NSLock()
-    private let _continuations = UnsafeMutablePointer<[String: CheckedContinuation<RpcResponseFrame, Error>]>.allocate(capacity: 1)
+    // Actor-isolated mutable state — safe by construction
+    private var _state: ConnectionState = .disconnected
+    private var transport: WebSocketTransport?
+    private var nextRequestId: Int = 0
+    private var _connectionId: String?
+    private var reconnectAttempt: Int = 0
+    private var shouldReconnect: Bool = true
+    private var pendingRequests: [String: CheckedContinuation<RpcResponseFrame, Error>] = [:]
+    private var receiveTask: Task<Void, Never>?
 
     // Callbacks
-    private let _onEvent = UnsafeMutablePointer<EventHandler?>.allocate(capacity: 1)
-    private let _onStateChange = UnsafeMutablePointer<StateHandler?>.allocate(capacity: 1)
+    private var _onEvent: EventHandler?
+    private var _onStateChange: StateHandler?
 
     public init(
-        host: String = "127.0.0.1",
-        port: Int = 18790,
+        host: String = AppConstants.defaultHost,
+        port: Int = AppConstants.defaultPort,
         transportFactory: TransportFactory? = nil
     ) {
         self.url = URL(string: "ws://\(host):\(port)")!
         self.transportFactory = transportFactory ?? { url in URLSessionWebSocket(url: url) }
-
-        _state.initialize(to: .disconnected)
-        _transport.initialize(to: nil)
-        _requestId.initialize(to: 0)
-        _connId.initialize(to: nil)
-        _reconnectAttempt.initialize(to: 0)
-        _shouldReconnect.initialize(to: true)
-        _continuations.initialize(to: [:])
-        _onEvent.initialize(to: nil)
-        _onStateChange.initialize(to: nil)
     }
 
     deinit {
-        _state.deallocate()
-        _transport.deallocate()
-        _requestId.deallocate()
-        _connId.deallocate()
-        _reconnectAttempt.deallocate()
-        _shouldReconnect.deallocate()
-        _continuations.deallocate()
-        _onEvent.deallocate()
-        _onStateChange.deallocate()
+        receiveTask?.cancel()
     }
 
     // MARK: - Public State
 
+    public func getState() -> ConnectionState {
+        _state
+    }
+
+    public func getConnectionId() -> String? {
+        _connectionId
+    }
+
+    /// Access state directly (within actor isolation).
     public var state: ConnectionState {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return _state.pointee
+        _state
     }
 
+    /// Access connectionId directly (within actor isolation).
     public var connectionId: String? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return _connId.pointee
+        _connectionId
     }
 
-    public var onEvent: EventHandler? {
-        get {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            return _onEvent.pointee
-        }
-        set {
-            stateLock.lock()
-            _onEvent.pointee = newValue
-            stateLock.unlock()
-        }
+    // MARK: - Callbacks
+
+    public func setEventHandler(_ handler: @escaping @Sendable (String, Any) -> Void) {
+        _onEvent = handler
     }
 
-    public var onStateChange: StateHandler? {
-        get {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            return _onStateChange.pointee
-        }
-        set {
-            stateLock.lock()
-            _onStateChange.pointee = newValue
-            stateLock.unlock()
-        }
+    public func setStateHandler(_ handler: @escaping @Sendable (ConnectionState) -> Void) {
+        _onStateChange = handler
     }
 
     // MARK: - Connect / Disconnect
@@ -174,119 +143,99 @@ public final class GatewayConnection: Sendable {
     public func connect() async throws {
         setState(.connecting)
 
-        let transport = transportFactory(url)
-        stateLock.lock()
-        _transport.pointee = transport
-        stateLock.unlock()
+        let newTransport = transportFactory(url)
+        self.transport = newTransport
 
         // Start receive loop
-        Task { [weak self] in
-            await self?.receiveLoop(transport: transport)
+        receiveTask?.cancel()
+        receiveTask = Task { [weak self] in
+            await self?.receiveLoop(transport: newTransport)
         }
 
         // Perform handshake
         setState(.handshaking)
-        try await performHandshake(transport: transport)
+        try await performHandshake(transport: newTransport)
 
-        stateLock.lock()
-        _reconnectAttempt.pointee = 0
-        stateLock.unlock()
-
+        reconnectAttempt = 0
         setState(.connected)
+        Log.connection.info("Connected to gateway, connId: \(self._connectionId ?? "unknown")")
     }
 
     public func disconnect() {
-        stateLock.lock()
-        _shouldReconnect.pointee = false
-        let transport = _transport.pointee
-        _transport.pointee = nil
-        stateLock.unlock()
+        shouldReconnect = false
+        let currentTransport = transport
+        transport = nil
+        receiveTask?.cancel()
+        receiveTask = nil
 
-        transport?.cancel()
+        currentTransport?.cancel()
         cancelAllPending()
         setState(.disconnected)
+        Log.connection.info("Disconnected from gateway")
     }
 
     // MARK: - Send Request
 
-    public func sendRequest(method: String, params: [String: AnyCodable]? = nil, timeout: TimeInterval = 15) async throws -> RpcResponseFrame {
-        let transport: WebSocketTransport? = {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            return _transport.pointee
-        }()
-
-        guard let transport else {
+    public func sendRequest(
+        method: String,
+        params: [String: AnyCodable]? = nil,
+        timeout: TimeInterval = AppConstants.requestTimeout
+    ) async throws -> RpcResponseFrame {
+        guard let currentTransport = transport else {
             throw GatewayConnectionError.notConnected
         }
 
-        let id = nextRequestId()
+        let id = generateRequestId()
         let frame = RpcRequestFrame(id: id, method: method, params: params)
         let data = try frame.toData()
 
-        return try await withCheckedThrowingContinuation { continuation in
-            continuationsLock.lock()
-            _continuations.pointee[id] = continuation
-            continuationsLock.unlock()
+        Log.rpc.debug("Request \(id): \(method)")
 
-            Task {
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingRequests[id] = continuation
+
+            Task { [weak self] in
                 do {
-                    try await transport.send(data)
+                    try await currentTransport.send(data)
                 } catch {
-                    self.continuationsLock.lock()
-                    let cont = self._continuations.pointee.removeValue(forKey: id)
-                    self.continuationsLock.unlock()
-                    cont?.resume(throwing: error)
+                    await self?.removePendingAndResume(id: id, with: .failure(error))
                 }
             }
 
             // Timeout
-            Task {
+            Task { [weak self] in
                 try? await Task.sleep(for: .seconds(timeout))
-                self.continuationsLock.lock()
-                let cont = self._continuations.pointee.removeValue(forKey: id)
-                self.continuationsLock.unlock()
-                cont?.resume(throwing: GatewayConnectionError.requestTimeout)
+                await self?.removePendingAndResume(id: id, with: .failure(GatewayConnectionError.requestTimeout))
             }
         }
     }
 
     // MARK: - Reconnection
 
-    /// Calculate backoff delay with jitter: base * 2^attempt, capped at 30s, ±25% jitter.
+    /// Calculate backoff delay with jitter: base * 2^attempt, capped at 30s, +/-25% jitter.
     public static func backoffDelay(attempt: Int) -> TimeInterval {
-        let base = 1.0
-        let delay = min(base * pow(2.0, Double(attempt)), 30.0)
-        let jitter = delay * 0.25 * (Double.random(in: -1...1))
+        let base = AppConstants.reconnectBaseDelay
+        let delay = min(base * pow(2.0, Double(attempt)), AppConstants.reconnectMaxDelay)
+        let jitter = delay * AppConstants.reconnectJitterFactor * Double.random(in: -1...1)
         return max(0.5, delay + jitter)
     }
 
     func scheduleReconnect() {
-        let shouldReconnect: Bool = {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            return _shouldReconnect.pointee
-        }()
-
         guard shouldReconnect else { return }
 
-        let attempt: Int = {
-            stateLock.lock()
-            defer { stateLock.unlock() }
-            let a = _reconnectAttempt.pointee
-            _reconnectAttempt.pointee = a + 1
-            return a
-        }()
+        let attempt = reconnectAttempt
+        reconnectAttempt += 1
 
         let delay = Self.backoffDelay(attempt: attempt)
         setState(.reconnecting)
+        Log.connection.info("Reconnecting in \(String(format: "%.1f", delay))s (attempt \(attempt + 1))")
 
-        Task {
+        Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             do {
-                try await self.connect()
+                try await self?.connect()
             } catch {
-                self.scheduleReconnect()
+                await self?.scheduleReconnect()
             }
         }
     }
@@ -294,13 +243,13 @@ public final class GatewayConnection: Sendable {
     // MARK: - Private
 
     private func performHandshake(transport: WebSocketTransport) async throws {
-        let id = nextRequestId()
+        let id = generateRequestId()
         let params: [String: AnyCodable] = [
             "client": AnyCodable([
-                "id": "openrappter-bar",
-                "version": "1.0.0",
-                "platform": "macos",
-                "mode": "menubar",
+                "id": AppConstants.clientId,
+                "version": AppConstants.version,
+                "platform": AppConstants.platform,
+                "mode": AppConstants.mode,
             ] as [String: Any])
         ]
 
@@ -308,28 +257,20 @@ public final class GatewayConnection: Sendable {
         let data = try frame.toData()
 
         let response: RpcResponseFrame = try await withCheckedThrowingContinuation { continuation in
-            continuationsLock.lock()
-            _continuations.pointee[id] = continuation
-            continuationsLock.unlock()
+            pendingRequests[id] = continuation
 
             Task {
                 do {
                     try await transport.send(data)
                 } catch {
-                    self.continuationsLock.lock()
-                    let cont = self._continuations.pointee.removeValue(forKey: id)
-                    self.continuationsLock.unlock()
-                    cont?.resume(throwing: error)
+                    await self.removePendingAndResume(id: id, with: .failure(error))
                 }
             }
 
             // Handshake timeout
             Task {
-                try? await Task.sleep(for: .seconds(10))
-                self.continuationsLock.lock()
-                let cont = self._continuations.pointee.removeValue(forKey: id)
-                self.continuationsLock.unlock()
-                cont?.resume(throwing: GatewayConnectionError.requestTimeout)
+                try? await Task.sleep(for: .seconds(AppConstants.handshakeTimeout))
+                await self.removePendingAndResume(id: id, with: .failure(GatewayConnectionError.requestTimeout))
             }
         }
 
@@ -342,20 +283,19 @@ public final class GatewayConnection: Sendable {
         if let payloadDict = response.payload?.value as? [String: Any],
            let server = payloadDict["server"] as? [String: Any],
            let connId = server["connId"] as? String {
-            stateLock.lock()
-            _connId.pointee = connId
-            stateLock.unlock()
+            _connectionId = connId
         }
     }
 
     private func receiveLoop(transport: WebSocketTransport) async {
-        while true {
+        while !Task.isCancelled {
             do {
                 let data = try await transport.receive()
                 handleIncoming(data: data)
             } catch {
+                if Task.isCancelled { return }
                 // Connection closed or failed
-                let currentState = state
+                let currentState = _state
                 if currentState != .disconnected {
                     cancelAllPending()
                     scheduleReconnect()
@@ -370,51 +310,44 @@ public final class GatewayConnection: Sendable {
 
         switch frame {
         case .response(let response):
-            continuationsLock.lock()
-            let continuation = _continuations.pointee.removeValue(forKey: response.id)
-            continuationsLock.unlock()
-            continuation?.resume(returning: response)
+            if let continuation = pendingRequests.removeValue(forKey: response.id) {
+                continuation.resume(returning: response)
+            }
 
         case .event(let event):
-            let handler: EventHandler? = {
-                stateLock.lock()
-                defer { stateLock.unlock() }
-                return _onEvent.pointee
-            }()
-            handler?(event.event, event.payload?.value ?? NSNull())
+            _onEvent?(event.event, event.payload?.value ?? NSNull())
 
         case .unknown:
             break
         }
     }
 
-    private func nextRequestId() -> String {
-        stateLock.lock()
-        _requestId.pointee += 1
-        let id = _requestId.pointee
-        stateLock.unlock()
-        return "rpc-\(id)"
+    private func generateRequestId() -> String {
+        nextRequestId += 1
+        return "rpc-\(nextRequestId)"
     }
 
     private func setState(_ newState: ConnectionState) {
-        let handler: StateHandler? = {
-            stateLock.lock()
-            _state.pointee = newState
-            let h = _onStateChange.pointee
-            stateLock.unlock()
-            return h
-        }()
-        handler?(newState)
+        _state = newState
+        _onStateChange?(newState)
     }
 
     private func cancelAllPending() {
-        continuationsLock.lock()
-        let pending = _continuations.pointee
-        _continuations.pointee = [:]
-        continuationsLock.unlock()
-
+        let pending = pendingRequests
+        pendingRequests = [:]
         for (_, continuation) in pending {
             continuation.resume(throwing: GatewayConnectionError.notConnected)
+        }
+    }
+
+    /// Remove a pending request and resume its continuation if it still exists.
+    private func removePendingAndResume(id: String, with result: Result<RpcResponseFrame, Error>) {
+        guard let continuation = pendingRequests.removeValue(forKey: id) else { return }
+        switch result {
+        case .success(let response):
+            continuation.resume(returning: response)
+        case .failure(let error):
+            continuation.resume(throwing: error)
         }
     }
 }

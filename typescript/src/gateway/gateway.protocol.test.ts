@@ -232,7 +232,7 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
       await connectHandshake(ws, { token: TEST_TOKEN });
 
       // Start listening for events BEFORE sending (agent executes async)
-      const eventsPromise = collectEvents(ws, 'chat', 4); // 3 deltas + 1 final for "Echo: Hello agent"
+      const eventsPromise = collectEvents(ws, 'chat', 1); // 1 final event (no streaming deltas)
 
       const res = await rpc(ws, {
         type: 'req',
@@ -275,12 +275,12 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
       }
     });
 
-    it('should include delta events for streaming agents', async () => {
+    it('should send only final event (no streaming deltas)', async () => {
       const ws = await connectWs();
       await connectHandshake(ws, { token: TEST_TOKEN });
 
-      // Collect multiple events (deltas + final)
-      const eventsPromise = collectEvents(ws, 'chat', 2);
+      // Collect final event only (no streaming deltas)
+      const eventsPromise = collectEvents(ws, 'chat', 1);
 
       try {
         await rpc(ws, {
@@ -295,10 +295,8 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
         });
 
         const events = await eventsPromise;
-        const deltas = events.filter((e) => (e as Record<string, unknown>).state === 'delta');
         const finals = events.filter((e) => (e as Record<string, unknown>).state === 'final');
-        // Should have at least one delta and one final
-        expect(deltas.length + finals.length).toBeGreaterThanOrEqual(2);
+        expect(finals.length).toBe(1);
       } finally {
         ws.close();
       }

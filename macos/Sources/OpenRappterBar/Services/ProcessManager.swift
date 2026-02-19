@@ -42,9 +42,33 @@ public final class ProcessManager: Observable {
         return projectRoot.appendingPathComponent("typescript").path
     }
 
+    /// The launch agent manager for auto-start on login.
+    public let launchAgent = LaunchAgentManager()
+
+    /// Check if the gateway port is already in use (another instance may be running).
+    public func isPortInUse() async -> Bool {
+        await NetworkDiscovery.isPortInUse(port)
+    }
+
+    /// Detect and connect to an already-running gateway instance.
+    public func detectRunningGateway() async -> Bool {
+        // First check if port is in use
+        guard await isPortInUse() else { return false }
+        // Then verify it's actually a gateway via health check
+        return await checkHealth()
+    }
+
     /// Start the gateway process.
     public func start() async throws {
         guard state == .stopped else { return }
+
+        // Check if gateway is already running on this port
+        if await detectRunningGateway() {
+            state = .running
+            Log.process.info("Detected already-running gateway on port \(self.port)")
+            return
+        }
+
         state = .starting
 
         let tsPath = projectPath

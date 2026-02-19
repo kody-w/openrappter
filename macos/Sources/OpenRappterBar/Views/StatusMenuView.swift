@@ -18,15 +18,45 @@ public struct StatusMenuView: View {
                 .padding(12)
             Divider()
 
-            // Activity list
-            ActivityListView(viewModel: viewModel)
+            // Chat messages or activity list
+            if viewModel.chatViewModel.hasMessages {
+                ChatMessageList(
+                    messages: viewModel.chatViewModel.messages,
+                    streamingText: viewModel.streamingText,
+                    isStreaming: {
+                        if case .streaming = viewModel.chatState { return true }
+                        return false
+                    }()
+                )
                 .frame(minHeight: 120, maxHeight: 200)
+            } else {
+                ActivityListView(viewModel: viewModel)
+                    .frame(minHeight: 120, maxHeight: 200)
+            }
             Divider()
+
+            // Sessions section
+            if !viewModel.sessionsViewModel.sessions.isEmpty || viewModel.connectionState == .connected {
+                MenuSessionsSection(
+                    sessions: viewModel.sessionsViewModel.sessions,
+                    currentSessionKey: viewModel.currentSessionKey,
+                    onSelect: { session in
+                        viewModel.chatViewModel.switchToSession(sessionKey: session.sessionKey)
+                    },
+                    onDelete: { session in
+                        viewModel.sessionsViewModel.deleteSession(session)
+                    },
+                    onNew: {
+                        viewModel.chatViewModel.newSession()
+                    }
+                )
+                Divider()
+            }
 
             // Footer buttons
             footerButtons
         }
-        .frame(width: 320)
+        .frame(width: AppConstants.menuWidth)
     }
 
     private var statusHeader: some View {
@@ -36,7 +66,7 @@ public struct StatusMenuView: View {
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("OpenRappter")
+                Text(AppConstants.appName)
                     .font(.headline)
                 Text(viewModel.statusText)
                     .font(.caption)
@@ -80,6 +110,14 @@ public struct StatusMenuView: View {
             }
 
             Spacer()
+
+            Button {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } label: {
+                Image(systemName: "gear")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)

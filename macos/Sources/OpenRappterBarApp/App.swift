@@ -3,14 +3,11 @@ import OpenRappterBarLib
 
 @main
 struct OpenRappterBarApp: App {
-    @State private var viewModel = AppViewModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            StatusMenuView(viewModel: viewModel)
-        } label: {
-            Image(systemName: viewModel.statusIcon)
+        Settings {
+            SettingsWindow(viewModel: appDelegate.settingsViewModel)
         }
-        .menuBarExtraStyle(.window)
     }
 }

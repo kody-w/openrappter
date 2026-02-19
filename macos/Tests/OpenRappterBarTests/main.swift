@@ -7,6 +7,8 @@ try runRpcTypesTests()
 try await runGatewayConnectionTests()
 await runProcessManagerTests()
 await runAppViewModelTests()
+await runHeartbeatMonitorTests()
+await runSessionStoreTests()
 
 printResults()
 exitWithCode()

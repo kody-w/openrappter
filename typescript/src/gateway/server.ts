@@ -664,6 +664,8 @@ export class GatewayServer {
     this.registerMethod('channels.configure', async (params: { type: string; config: Record<string, unknown> }) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       this.channelRegistry.configureChannel(params.type, params.config);
+      // Persist channel tokens to ~/.openrappter/.env so they survive restarts
+      await this.persistChannelConfig(params.type, params.config);
       return { configured: true };
     }, { requiresAuth: true });
     this.registerMethod('channels.getConfig', async (params: { type: string }) => {
@@ -781,6 +783,63 @@ export class GatewayServer {
         errorMessage: (error as Error).message,
       });
     }
+  }
+
+  /** Map channel config keys to env var names */
+  private static readonly CHANNEL_ENV_MAP: Record<string, Record<string, string>> = {
+    telegram: { token: 'TELEGRAM_BOT_TOKEN' },
+    discord: { botToken: 'DISCORD_BOT_TOKEN' },
+    slack: { botToken: 'SLACK_BOT_TOKEN', appToken: 'SLACK_APP_TOKEN' },
+    whatsapp: { token: 'WHATSAPP_TOKEN' },
+  };
+
+  /** Persist channel config values to ~/.openrappter/.env */
+  private async persistChannelConfig(channelType: string, config: Record<string, unknown>): Promise<void> {
+    const mapping = GatewayServer.CHANNEL_ENV_MAP[channelType];
+    if (!mapping) return;
+
+    const envFile = path.join(os.homedir(), '.openrappter', '.env');
+    let existing: Record<string, string> = {};
+
+    // Read existing env file
+    try {
+      const data = await fs.promises.readFile(envFile, 'utf-8');
+      for (const line of data.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          existing[key] = val;
+        }
+      }
+    } catch { /* file doesn't exist yet */ }
+
+    // Update with new values
+    let changed = false;
+    for (const [configKey, envKey] of Object.entries(mapping)) {
+      const val = config[configKey];
+      if (typeof val === 'string' && val) {
+        existing[envKey] = val;
+        process.env[envKey] = val;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+
+    // Write back
+    await fs.promises.mkdir(path.dirname(envFile), { recursive: true });
+    const lines = ['# openrappter environment — managed by openrappter', ''];
+    for (const [key, val] of Object.entries(existing)) {
+      lines.push(`${key}="${val}"`);
+    }
+    lines.push('');
+    await fs.promises.writeFile(envFile, lines.join('\n'));
   }
 
   private getOrCreateSession(sessionId: string, agentId?: string): ChatSession {

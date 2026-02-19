@@ -53,23 +53,52 @@ public final class AppViewModel {
     public var connectionState: ConnectionState = .disconnected
     public var gatewayStatus: GatewayStatusResponse?
 
-    // Chat
-    public var chatInput: String = ""
-    public var chatState: ChatState = .idle
-    public var streamingText: String = ""
-    public var currentSessionKey: String?
+    // Chat (delegated to ChatViewModel)
+    public let chatViewModel = ChatViewModel()
 
-    // Activity
+    // Sessions (delegated to SessionsViewModel)
+    public let sessionsViewModel = SessionsViewModel()
+
+    // Channels, Cron, Approvals
+    public let channelsViewModel = ChannelsViewModel()
+    public let cronViewModel = CronViewModel()
+    public let approvalViewModel = ApprovalViewModel()
+
+    // Activity (legacy — kept for backwards compat with ActivityListView)
     public var activities: [ActivityItem] = []
-    private static let maxActivities = 20
 
     // Process
     public var processState: ProcessManager.ProcessState = .stopped
 
-    // Services (internal for testing)
+    // Heartbeat
+    public var heartbeatHealth: HeartbeatHealth = .healthy
+    public var heartbeatLatency: TimeInterval?
+
+    // Callbacks
+    public var onRpcClientReady: ((RpcClient) -> Void)?
+
+    // Services
     var connection: GatewayConnection?
     var rpcClient: RpcClient?
-    let processManager = ProcessManager()
+    let processManager: ProcessManager
+    var heartbeatMonitor: HeartbeatMonitor?
+    let eventBus: EventBus
+    let sessionStore: SessionStore
+
+    // Legacy chat state (forwarded from ChatViewModel for existing views)
+    public var chatInput: String {
+        get { chatViewModel.chatInput }
+        set { chatViewModel.chatInput = newValue }
+    }
+    public var chatState: ChatState {
+        chatViewModel.chatState
+    }
+    public var streamingText: String {
+        chatViewModel.streamingText
+    }
+    public var currentSessionKey: String? {
+        chatViewModel.currentSessionKey
+    }
 
     // MARK: - Computed
 
@@ -105,70 +134,104 @@ public final class AppViewModel {
     }
 
     public var canSend: Bool {
-        connectionState == .connected && !chatInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        connectionState == .connected && chatViewModel.canSend
     }
 
     // MARK: - Init
 
-    public init() {}
+    /// Default initializer — creates its own services.
+    public init() {
+        let bus = EventBus()
+        self.eventBus = bus
+        self.processManager = ProcessManager()
+        self.sessionStore = SessionStore()
+        Task { await sessionStore.load() }
+    }
+
+    /// Detect a running gateway and connect to it automatically.
+    public func detectAndConnect(host: String = AppConstants.defaultHost, port: Int = AppConstants.defaultPort) {
+        Task {
+            if await processManager.detectRunningGateway() {
+                processState = .running
+                addActivity(type: .system, text: "Detected running gateway")
+                connectToGateway(host: host, port: port)
+            }
+        }
+    }
+
+    /// DI initializer — accepts pre-built services for testing.
+    public init(
+        processManager: ProcessManager,
+        eventBus: EventBus,
+        sessionStore: SessionStore? = nil
+    ) {
+        self.processManager = processManager
+        self.eventBus = eventBus
+        self.sessionStore = sessionStore ?? SessionStore()
+    }
 
     // MARK: - Actions
 
-    public func connectToGateway() {
-        let conn = GatewayConnection()
+    public func connectToGateway(host: String = AppConstants.defaultHost, port: Int = AppConstants.defaultPort) {
+        let conn = GatewayConnection(host: host, port: port)
         self.connection = conn
-        self.rpcClient = RpcClient(connection: conn)
+        let rpc = RpcClient(connection: conn)
+        self.rpcClient = rpc
 
-        conn.onStateChange = { [weak self] state in
-            Task { @MainActor in
-                self?.connectionState = state
-                if state == .connected {
-                    await self?.fetchStatus()
-                }
-            }
-        }
+        // Configure sub-ViewModels
+        chatViewModel.configure(rpcClient: rpc, sessionStore: sessionStore)
+        sessionsViewModel.configure(rpcClient: rpc, sessionStore: sessionStore)
+        channelsViewModel.configure(rpcClient: rpc)
+        cronViewModel.configure(rpcClient: rpc)
+        approvalViewModel.configure(rpcClient: rpc)
+        onRpcClientReady?(rpc)
 
-        conn.onEvent = { [weak self] event, payload in
-            Task { @MainActor in
-                self?.handleEvent(event: event, payload: payload)
-            }
-        }
+        let hb = HeartbeatMonitor(rpcClient: rpc, eventBus: eventBus)
+        self.heartbeatMonitor = hb
 
         Task {
+            await conn.setStateHandler { [weak self] state in
+                Task { @MainActor in
+                    self?.connectionState = state
+                    if state == .connected {
+                        await self?.fetchStatus()
+                        await self?.heartbeatMonitor?.start()
+                        self?.sessionsViewModel.syncFromGateway()
+                    } else if state == .disconnected {
+                        await self?.heartbeatMonitor?.stop()
+                    }
+                }
+            }
+
+            await conn.setEventHandler { [weak self] event, payload in
+                Task { @MainActor in
+                    self?.handleEvent(event: event, payload: payload)
+                }
+            }
+
             do {
                 try await conn.connect()
             } catch {
-                addActivity(type: .error, text: "Connection failed: \(error.localizedDescription)")
+                self.addActivity(type: .error, text: "Connection failed: \(error.localizedDescription)")
             }
         }
     }
 
     public func disconnectFromGateway() {
-        connection?.disconnect()
+        Task {
+            await heartbeatMonitor?.stop()
+            await connection?.disconnect()
+        }
+        heartbeatMonitor = nil
         connection = nil
         rpcClient = nil
         gatewayStatus = nil
     }
 
     public func sendMessage() {
-        let message = chatInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, let rpc = rpcClient else { return }
-
-        chatInput = ""
-        chatState = .sending
-        streamingText = ""
-        addActivity(type: .userMessage, text: message)
-
-        Task {
-            do {
-                let accepted = try await rpc.sendChat(message: message, sessionKey: currentSessionKey)
-                currentSessionKey = accepted.sessionKey
-                chatState = .streaming
-            } catch {
-                chatState = .error(error.localizedDescription)
-                addActivity(type: .error, text: "Send failed: \(error.localizedDescription)")
-            }
-        }
+        guard canSend else { return }
+        addActivity(type: .userMessage, text: chatViewModel.chatInput.trimmingCharacters(in: .whitespacesAndNewlines))
+        chatViewModel.sendMessage()
     }
 
     public func startGateway() {
@@ -211,33 +274,32 @@ public final class AppViewModel {
         switch event {
         case "chat":
             guard let chatPayload = ChatEventPayload.parse(from: payload) else { return }
-            handleChatEvent(chatPayload)
+            chatViewModel.handleChatEvent(chatPayload)
+            // Also update legacy activity list
+            handleChatEventActivity(chatPayload)
+        case "approval":
+            if let dict = payload as? [String: Any] {
+                approvalViewModel.handleApprovalEvent(dict)
+            }
         case "heartbeat":
-            break  // Silent
+            break  // Handled by HeartbeatMonitor
         default:
             addActivity(type: .system, text: "Event: \(event)")
         }
     }
 
-    private func handleChatEvent(_ payload: ChatEventPayload) {
+    private func handleChatEventActivity(_ payload: ChatEventPayload) {
         switch payload.state {
         case .delta:
-            streamingText = payload.messageText ?? streamingText
-            chatState = .streaming
-
+            break // Don't add deltas to activity log
         case .final_:
-            let finalText = payload.messageText ?? streamingText
+            let finalText = payload.messageText ?? ""
             if !finalText.isEmpty {
                 addActivity(type: .assistantMessage, text: finalText)
             }
-            streamingText = ""
-            chatState = .idle
-
         case .error:
             let errorMsg = payload.errorMessage ?? "Unknown error"
-            chatState = .error(errorMsg)
             addActivity(type: .error, text: "Agent error: \(errorMsg)")
-            streamingText = ""
         }
     }
 
@@ -251,8 +313,8 @@ public final class AppViewModel {
             text: text
         )
         activities.insert(item, at: 0)
-        if activities.count > Self.maxActivities {
-            activities = Array(activities.prefix(Self.maxActivities))
+        if activities.count > AppConstants.maxActivities {
+            activities = Array(activities.prefix(AppConstants.maxActivities))
         }
     }
 

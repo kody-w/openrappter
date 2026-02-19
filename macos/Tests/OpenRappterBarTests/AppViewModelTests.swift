@@ -61,7 +61,7 @@ func runAppViewModelTests() async {
             try expectEqual(vm.activities[0].text, "Item 24")
         }
 
-        test("chat delta updates streaming text") {
+        test("chat delta updates streaming text via ChatViewModel") {
             let vm = AppViewModel()
             let dict: [String: Any] = [
                 "runId": "run_1",
@@ -74,15 +74,15 @@ func runAppViewModelTests() async {
                 ] as [String: Any],
             ]
             vm.handleEvent(event: "chat", payload: dict)
-            try expectEqual(vm.streamingText, "Hello world")
-            if case .streaming = vm.chatState {} else {
+            try expectEqual(vm.chatViewModel.streamingText, "Hello world")
+            if case .streaming = vm.chatViewModel.chatState {} else {
                 try expect(false, "Expected streaming state")
             }
         }
 
-        test("chat final adds to activity and clears streaming") {
+        test("chat final adds message and clears streaming") {
             let vm = AppViewModel()
-            vm.streamingText = "partial"
+            vm.chatViewModel.streamingText = "partial"
 
             let dict: [String: Any] = [
                 "runId": "run_1",
@@ -95,18 +95,22 @@ func runAppViewModelTests() async {
                 ] as [String: Any],
             ]
             vm.handleEvent(event: "chat", payload: dict)
-            try expectEqual(vm.streamingText, "")
-            if case .idle = vm.chatState {} else {
+            try expectEqual(vm.chatViewModel.streamingText, "")
+            if case .idle = vm.chatViewModel.chatState {} else {
                 try expect(false, "Expected idle state after final")
             }
+            // Check activity log
             try expectEqual(vm.activities.count, 1)
             try expectEqual(vm.activities[0].text, "Complete response")
             try expectEqual(vm.activities[0].type, .assistantMessage)
+            // Check ChatViewModel messages
+            try expectEqual(vm.chatViewModel.messages.count, 1)
+            try expectEqual(vm.chatViewModel.messages[0].content, "Complete response")
         }
 
         test("chat error sets error state") {
             let vm = AppViewModel()
-            vm.streamingText = "partial"
+            vm.chatViewModel.streamingText = "partial"
 
             let dict: [String: Any] = [
                 "runId": "run_1",
@@ -115,14 +119,33 @@ func runAppViewModelTests() async {
                 "errorMessage": "Something went wrong",
             ]
             vm.handleEvent(event: "chat", payload: dict)
-            try expectEqual(vm.streamingText, "")
-            if case .error(let msg) = vm.chatState {
+            try expectEqual(vm.chatViewModel.streamingText, "")
+            if case .error(let msg) = vm.chatViewModel.chatState {
                 try expectEqual(msg, "Something went wrong")
             } else {
                 try expect(false, "Expected error state")
             }
             try expectEqual(vm.activities.count, 1)
             try expectEqual(vm.activities[0].type, .error)
+        }
+
+        test("heartbeat health initial state") {
+            let vm = AppViewModel()
+            try expectEqual(vm.heartbeatHealth, .healthy)
+            try expectNil(vm.heartbeatLatency)
+        }
+
+        test("ChatViewModel initial state") {
+            let vm = AppViewModel()
+            try expect(vm.chatViewModel.messages.isEmpty, "Messages should be empty")
+            try expectEqual(vm.chatViewModel.streamingText, "")
+            try expectNil(vm.chatViewModel.currentSessionKey)
+        }
+
+        test("SessionsViewModel initial state") {
+            let vm = AppViewModel()
+            try expect(vm.sessionsViewModel.sessions.isEmpty, "Sessions should be empty")
+            try expect(!vm.sessionsViewModel.isLoading, "Should not be loading")
         }
     }
 }

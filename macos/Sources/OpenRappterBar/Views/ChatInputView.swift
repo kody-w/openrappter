@@ -5,34 +5,61 @@ public struct ChatInputView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Input field + send button
-            HStack(spacing: 8) {
-                TextField("Send a message...", text: $viewModel.chatInput)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit {
-                        if viewModel.canSend {
+            // Multi-line input + send/abort buttons
+            HStack(alignment: .bottom, spacing: 8) {
+                TextEditor(text: $viewModel.chatInput)
+                    .font(.body)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.background)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .frame(minHeight: 36, maxHeight: 120)
+                    .onKeyPress(keys: [.return], phases: .down) { keyPress in
+                        if keyPress.modifiers.contains(.command) && viewModel.canSend {
                             viewModel.sendMessage()
+                            return .handled
                         }
+                        return .ignored
                     }
 
-                Button {
-                    viewModel.sendMessage()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
+                VStack(spacing: 4) {
+                    if case .streaming = viewModel.chatState {
+                        // Abort button during streaming
+                        Button {
+                            viewModel.chatViewModel.abortChat()
+                        } label: {
+                            Image(systemName: "stop.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Stop generation")
+                    } else {
+                        // Send button
+                        Button {
+                            viewModel.sendMessage()
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title2)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!viewModel.canSend)
+                        .help("Send (Cmd+Return)")
+                    }
                 }
-                .buttonStyle(.borderless)
-                .disabled(!viewModel.canSend)
-            }
-
-            // Streaming display
-            if case .streaming = viewModel.chatState, !viewModel.streamingText.isEmpty {
-                streamingDisplay
             }
 
             // Error display
             if case .error(let message) = viewModel.chatState {
-                errorDisplay(message: message)
+                ErrorBanner(message: message) {
+                    viewModel.chatViewModel.chatState = .idle
+                }
             }
 
             // Sending indicator
@@ -45,39 +72,6 @@ public struct ChatInputView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-    }
-
-    private var streamingDisplay: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                ProgressView()
-                    .controlSize(.mini)
-                Text("Assistant")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.green)
-            }
-
-            Text(viewModel.streamingText)
-                .font(.caption)
-                .lineLimit(6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-                .background(.fill.tertiary)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
-    }
-
-    private func errorDisplay(message: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.red)
-                .font(.caption)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .lineLimit(2)
         }
     }
 }

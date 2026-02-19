@@ -974,11 +974,10 @@ export class OpenRappterChat extends LitElement {
         .map((c) => c.text ?? '')
         .join('') ?? '';
 
-      if (text) {
-        this.updateStreamingMessage(data.runId, text);
-      }
-
       if (data.state === 'final') {
+        if (text) {
+          this.updateStreamingMessage(data.runId, text);
+        }
         this.finishStreaming(data.runId);
       }
     }

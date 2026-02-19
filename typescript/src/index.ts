@@ -3,113 +3,27 @@ import { intro, outro, text, select, note, spinner, confirm, password, isCancel,
 import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
-import { AgentRegistry, BasicAgent } from './agents/index.js';
+import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
+import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
+import { hasCopilotAvailable, resolveGithubToken, validateTelegramToken } from './copilot-check.js';
+import { chat, displayResult } from './chat.js';
 
 const execAsync = promisify(exec);
 
 const VERSION = '1.1.0';
 const EMOJI = '🦖';
 const NAME = 'openrappter';
-const HOME_DIR = path.join(os.homedir(), '.openrappter');
-const CONFIG_FILE = path.join(HOME_DIR, 'config.json');
 
 // Initialize agent registry
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new AgentRegistry(path.join(__dirname, 'agents'));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// UTILITIES
-// ═══════════════════════════════════════════════════════════════════════════════
-
-async function ensureHomeDir(): Promise<void> {
-  await fs.mkdir(HOME_DIR, { recursive: true });
-}
-
-/** Check if Copilot is available via direct token exchange (no CLI needed) */
-async function hasCopilotAvailable(): Promise<boolean> {
-  const token = process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (token) return true;
-
-  // Try gh CLI token as fallback
-  try {
-    const { stdout } = await execAsync('gh auth token 2>/dev/null');
-    if (stdout.trim()) return true;
-  } catch { /* gh not available */ }
-
-  return false;
-}
-
-/** Resolve a GitHub token from env or gh CLI */
-async function resolveGithubToken(): Promise<string | null> {
-  const envToken = process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (envToken) return envToken;
-
-  try {
-    const { stdout } = await execAsync('gh auth token 2>/dev/null');
-    if (stdout.trim()) return stdout.trim();
-  } catch { /* gh not available */ }
-
-  return null;
-}
-
-async function loadConfig(): Promise<Record<string, unknown>> {
-  try {
-    const data = await fs.readFile(CONFIG_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return {};
-  }
-}
-
-async function saveConfig(config: Record<string, unknown>): Promise<void> {
-  await ensureHomeDir();
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // ONBOARDING HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
-
-const ENV_FILE = path.join(HOME_DIR, '.env');
-
-async function loadEnv(): Promise<Record<string, string>> {
-  try {
-    const data = await fs.readFile(ENV_FILE, 'utf-8');
-    const env: Record<string, string> = {};
-    for (const line of data.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        // Strip surrounding quotes
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
-        }
-        env[key] = val;
-      }
-    }
-    return env;
-  } catch {
-    return {};
-  }
-}
-
-async function saveEnv(env: Record<string, string>): Promise<void> {
-  await ensureHomeDir();
-  const lines = ['# openrappter environment — managed by `openrappter onboard`', ''];
-  for (const [key, val] of Object.entries(env)) {
-    lines.push(`${key}="${val}"`);
-  }
-  lines.push('');
-  await fs.writeFile(ENV_FILE, lines.join('\n'));
-}
 
 async function hasGhCLI(): Promise<boolean> {
   try {
@@ -127,130 +41,6 @@ async function getGhToken(): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-async function validateTelegramToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {
-  try {
-    const resp = await fetch(`https://api.telegram.org/bot${token}/getMe`);
-    const data = await resp.json() as { ok: boolean; result?: { username?: string }; description?: string };
-    if (data.ok && data.result) {
-      return { valid: true, username: data.result.username };
-    }
-    return { valid: false, error: data.description || 'Invalid token' };
-  } catch (err) {
-    return { valid: false, error: err instanceof Error ? err.message : 'Network error' };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// COPILOT DIRECT API INTEGRATION
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** Singleton CopilotProvider for quick chat (non-daemon mode) */
-let _chatProvider: import('./providers/copilot.js').CopilotProvider | null = null;
-
-async function getChatProvider(): Promise<import('./providers/copilot.js').CopilotProvider> {
-  if (!_chatProvider) {
-    const { CopilotProvider } = await import('./providers/copilot.js');
-    const token = await resolveGithubToken();
-    _chatProvider = new CopilotProvider(token ? { githubToken: token } : undefined);
-  }
-  return _chatProvider;
-}
-
-async function chat(message: string): Promise<string> {
-  // First try to match an agent using keyword patterns (fallback mode)
-  const agents = await registry.getAllAgents();
-  const result = await matchAndExecuteAgent(message, agents);
-  if (result) return result;
-
-  // If no agent matched, use Copilot API if available
-  const hasCopilot = await hasCopilotAvailable();
-
-  if (!hasCopilot) {
-    return JSON.stringify({
-      status: 'info',
-      response: `I heard: "${message}". Use /help to see available commands.`,
-      agents: Array.from(agents.keys()),
-    });
-  }
-
-  try {
-    const provider = await getChatProvider();
-    const response = await provider.chat([
-      { role: 'system', content: `You are ${NAME}, a helpful local-first AI assistant.` },
-      { role: 'user', content: message },
-    ]);
-    return response.content ?? `${EMOJI} ${NAME}: I processed your request but got no response.`;
-  } catch (error) {
-    const err = error as Error;
-    if (err.message.includes('timeout')) {
-      return `${EMOJI} ${NAME}: Request timed out. Try a simpler question.`;
-    }
-    return `${EMOJI} ${NAME}: I couldn't process that. Error: ${err.message}`;
-  }
-}
-
-/**
- * Match message to an agent and execute it (fallback keyword matching).
- * Mirrors the Python _fallback_response in openrappter.py
- */
-async function matchAndExecuteAgent(
-  message: string,
-  agents: Map<string, BasicAgent>
-): Promise<string | null> {
-  const msgLower = message.toLowerCase();
-
-  // Keyword patterns for core agents
-  const patterns: Record<string, string[]> = {
-    Memory: ['remember', 'store', 'save', 'memorize', 'recall', 'what do you know', 'memory', 'remind me', 'forget'],
-    Shell: ['run', 'execute', 'bash', 'ls', 'cat', 'read file', 'write file', 'list dir', 'command', '$'],
-  };
-
-  // Find best matching agent
-  let bestMatch: string | null = null;
-  let bestScore = 0;
-
-  // Check patterns first
-  for (const [agentName, keywords] of Object.entries(patterns)) {
-    const score = keywords.filter(kw => msgLower.includes(kw)).length;
-    if (score > bestScore && agents.has(agentName)) {
-      bestScore = score;
-      bestMatch = agentName;
-    }
-  }
-
-  // Also check dynamically loaded agents by their descriptions
-  for (const [agentName, agent] of agents) {
-    if (agentName in patterns) continue; // Already checked
-
-    const desc = agent.metadata?.description?.toLowerCase() ?? '';
-    const nameLower = agentName.toLowerCase();
-    const words = msgLower.split(/\s+/).filter(w => w.length > 2);
-    const score = words.filter(w => desc.includes(w) || nameLower.includes(w)).length;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = agentName;
-    }
-  }
-
-  // Execute matched agent
-  if (bestMatch && bestScore > 0) {
-    const agent = agents.get(bestMatch);
-    if (agent) {
-      try {
-        return await agent.execute({ query: message });
-      } catch (e) {
-        return JSON.stringify({
-          status: 'error',
-          message: `Error executing ${bestMatch}: ${(e as Error).message}`,
-        });
-      }
-    }
-  }
-
-  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -476,7 +266,7 @@ program
     if (options.task) {
       const s = spinner();
       s.start('Processing...');
-      const response = await chat(options.task);
+      const response = await chat(options.task, registry);
       s.stop('Done');
       displayResult(response);
       return;
@@ -498,7 +288,7 @@ program
     }
 
     if (message) {
-      const response = await chat(message);
+      const response = await chat(message, registry);
       displayResult(response);
       return;
     }
@@ -514,50 +304,22 @@ program
     try {
       const gw = await startGatewayInProcess({ silent: true });
       port = gw.port;
-    } catch (err) {
-      // Port likely in use — connect TUI to existing gateway
+    } catch {
+      // Port likely in use — try connecting to existing gateway with health check
       port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+      try {
+        const healthResp = await fetch(`http://127.0.0.1:${port}/health`);
+        if (!healthResp.ok) throw new Error(`Health check returned ${healthResp.status}`);
+      } catch {
+        console.error(`Could not start or connect to gateway on port ${port}`);
+        console.error(`  Try: openrappter --daemon  (to start the gateway manually)`);
+        console.error(`  Or:  openrappter --repl    (for simple chat without gateway)`);
+        process.exit(1);
+      }
     }
     const { startTUI } = await import('./tui/index.js');
     await startTUI({ port, token: process.env.OPENRAPPTER_TOKEN });
   });
-
-/**
- * Display result, parsing JSON if needed
- */
-function displayResult(result: string): void {
-  try {
-    const data = JSON.parse(result);
-    if (data.response) {
-      console.log(`\n${EMOJI} ${NAME}: ${data.response}\n`);
-    } else if (data.message) {
-      console.log(`\n${EMOJI} ${NAME}: ${data.message}\n`);
-    } else if (data.output) {
-      console.log(`\n${data.output}\n`);
-    } else if (data.content) {
-      console.log(`\n${data.content.slice(0, 1000)}${data.truncated ? '...' : ''}\n`);
-    } else if (data.items) {
-      // Directory listing
-      console.log(`\n${data.path}:`);
-      for (const item of data.items) {
-        const icon = item.type === 'directory' ? '📁' : '📄';
-        console.log(`  ${icon} ${item.name}`);
-      }
-      console.log();
-    } else if (data.matches) {
-      // Memory recall
-      console.log(`\n${EMOJI} ${data.message || 'Memories'}:`);
-      for (const match of data.matches) {
-        console.log(`  • ${match.message}`);
-      }
-      console.log();
-    } else {
-      console.log(`\n${JSON.stringify(data, null, 2)}\n`);
-    }
-  } catch {
-    console.log(`\n${EMOJI} ${NAME}: ${result}\n`);
-  }
-}
 
 // Onboard command
 program
@@ -748,15 +510,26 @@ program
     // ── Step 3: Save & Verify ───────────────────────────────────────────────
     log.step('Step 3 of 3 — Saving configuration');
 
-    await saveEnv(env);
-    log.success(`Saved ${ENV_FILE}`);
+    // Bug 2 fix: wrap saves in try/catch with specific error messages
+    const savedKeys = Object.keys(env);
+    try {
+      await saveEnv(env);
+      log.success(`Saved ${ENV_FILE} (${savedKeys.join(', ')})`);
+    } catch (err) {
+      log.error(`Failed to save env file: ${(err as Error).message}`);
+      log.warn(`Keys that were not saved: ${savedKeys.join(', ')}`);
+    }
 
     config.setupComplete = true;
     config.copilotAvailable = copilotReady;
     config.telegramConnected = telegramReady;
     config.onboardedAt = new Date().toISOString();
-    await saveConfig(config);
-    log.success(`Saved ${CONFIG_FILE}`);
+    try {
+      await saveConfig(config);
+      log.success(`Saved ${CONFIG_FILE}`);
+    } catch (err) {
+      log.error(`Failed to save config file: ${(err as Error).message}`);
+    }
 
     // ── Summary ─────────────────────────────────────────────────────────────
     const summaryLines = [
@@ -870,7 +643,7 @@ ${EMOJI} ${NAME} Commands:
       s.start('Thinking...');
 
       try {
-        const response = await chat(trimmed);
+        const response = await chat(trimmed, registry);
         s.stop('');
         displayResult(response);
       } catch (error) {

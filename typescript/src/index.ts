@@ -274,6 +274,12 @@ program
   .action(async (message, options) => {
     await ensureHomeDir();
 
+    // Load env vars from ~/.openrappter/.env (saved by onboard wizard)
+    const envVars = await loadEnv();
+    for (const [key, val] of Object.entries(envVars)) {
+      if (!process.env[key]) process.env[key] = val;
+    }
+
     // Initialize agents
     await registry.discoverAgents();
 
@@ -327,12 +333,6 @@ program
     }
 
     if (options.daemon) {
-      // Load env vars from ~/.openrappter/.env (saved by onboard wizard)
-      const envVars = await loadEnv();
-      for (const [key, val] of Object.entries(envVars)) {
-        if (!process.env[key]) process.env[key] = val;
-      }
-
       const { GatewayServer } = await import('./gateway/server.js');
       const { Assistant } = await import('./agents/Assistant.js');
       const { ChannelRegistry } = await import('./channels/registry.js');

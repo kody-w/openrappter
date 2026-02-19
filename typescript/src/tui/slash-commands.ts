@@ -29,6 +29,69 @@ export const commands: SlashCommand[] = [
   { name: 'new', description: 'New session', execute: async () => 'New session created' },
   { name: 'reset', description: 'Reset session', execute: async () => 'Session reset' },
   { name: 'abort', description: 'Abort current request', execute: async () => 'Aborted' },
+  { name: 'channels', description: 'List and configure channels', execute: async (_args, client) => {
+    try {
+      const channels = await client.call('channels.list') as Array<{
+        id: string; type: string; connected: boolean; configured: boolean; running: boolean; messageCount: number;
+      }>;
+      if (!channels || channels.length === 0) return 'No channels available.';
+      const lines = ['Channels:\n'];
+      for (const ch of channels) {
+        const status = ch.connected ? '✓ connected' : ch.configured ? '○ configured' : '✗ not configured';
+        lines.push(`  ${ch.type.padEnd(12)} ${status}  (${ch.messageCount} msgs)`);
+      }
+      const unconfigured = channels.filter(ch => !ch.configured);
+      if (unconfigured.length > 0) {
+        lines.push('');
+        lines.push(`To configure: /channel-setup <type>  (e.g. /channel-setup telegram)`);
+      }
+      return lines.join('\n');
+    } catch (err) {
+      return `Failed to list channels: ${(err as Error).message}`;
+    }
+  }},
+  { name: 'channel-setup', description: 'Configure a channel inline', execute: async (args, client) => {
+    const channelType = args.trim().toLowerCase();
+    if (!channelType) return 'Usage: /channel-setup <type>  (e.g. /channel-setup telegram)';
+    try {
+      const fields = await client.call('channels.getConfig', { type: channelType }) as Array<{
+        key: string; label: string; type: string; required: boolean;
+      }>;
+      if (!fields || fields.length === 0) return `No configuration needed for ${channelType}, or channel type not found.`;
+      // For now, show the required fields — interactive prompt happens in the TUI input loop
+      const lines = [`Configure ${channelType}:\n`];
+      for (const f of fields) {
+        lines.push(`  ${f.label}${f.required ? ' (required)' : ''}: /channel-set ${channelType} ${f.key} <value>`);
+      }
+      lines.push('');
+      lines.push('Set each value, then run: /channel-connect ' + channelType);
+      return lines.join('\n');
+    } catch (err) {
+      return `Failed to get config for ${channelType}: ${(err as Error).message}`;
+    }
+  }},
+  { name: 'channel-set', description: 'Set a channel config value', execute: async (args, client) => {
+    const parts = args.trim().split(/\s+/);
+    if (parts.length < 3) return 'Usage: /channel-set <type> <key> <value>';
+    const [channelType, key, ...valueParts] = parts;
+    const value = valueParts.join(' ');
+    try {
+      await client.call('channels.configure', { type: channelType, config: { [key]: value } });
+      return `Set ${channelType}.${key} — saved.`;
+    } catch (err) {
+      return `Failed to configure ${channelType}: ${(err as Error).message}`;
+    }
+  }},
+  { name: 'channel-connect', description: 'Connect a configured channel', execute: async (args, client) => {
+    const channelType = args.trim().toLowerCase();
+    if (!channelType) return 'Usage: /channel-connect <type>';
+    try {
+      await client.call('channels.connect', { type: channelType });
+      return `${channelType} connected successfully!`;
+    } catch (err) {
+      return `Failed to connect ${channelType}: ${(err as Error).message}`;
+    }
+  }},
   { name: 'quit', description: 'Exit TUI', execute: async () => null },
 ];
 

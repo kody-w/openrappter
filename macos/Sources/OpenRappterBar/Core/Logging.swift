@@ -21,4 +21,7 @@ public enum Log {
 
     /// General app lifecycle
     public static let app = Logger(subsystem: subsystem, category: "app")
+
+    /// Authentication events
+    public static let auth = Logger(subsystem: subsystem, category: "auth")
 }

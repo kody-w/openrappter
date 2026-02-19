@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 public final class SettingsViewModel {
     public let settingsStore: SettingsStore
+    public let accountViewModel = AccountViewModel()
     public let channelsViewModel = ChannelsViewModel()
     public let cronViewModel = CronViewModel()
     public let skillsViewModel = SkillsViewModel()
@@ -32,6 +33,10 @@ public final class SettingsViewModel {
         cronViewModel.configure(rpcClient: rpcClient)
         skillsViewModel.configure(rpcClient: rpcClient)
         approvalViewModel.configure(rpcClient: rpcClient)
+    }
+
+    public func configureAccount(processManager: ProcessManager, onGatewayRestarted: @escaping () -> Void) {
+        accountViewModel.configure(processManager: processManager, onGatewayRestarted: onGatewayRestarted)
     }
 
     // MARK: - Config Editor

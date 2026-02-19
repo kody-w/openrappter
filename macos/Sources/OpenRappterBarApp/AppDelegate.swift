@@ -39,6 +39,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.onRpcClientReady = { [weak self] rpc in
             self?.settingsViewModel.configure(rpcClient: rpc)
         }
+
+        // Configure account auth with gateway restart capability
+        settingsViewModel.configureAccount(
+            processManager: viewModel.processManager,
+            onGatewayRestarted: { [weak self] in
+                guard let self else { return }
+                self.viewModel.connectToGateway(
+                    host: self.settingsViewModel.settingsStore.host,
+                    port: self.settingsViewModel.settingsStore.port
+                )
+            }
+        )
     }
 
     // MARK: - Status Item Setup

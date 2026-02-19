@@ -132,3 +132,7 @@ TypeScript and Python implementations are designed to mirror each other. When mo
 - `typescript/src/clawhub.ts` ↔ `python/openrappter/clawhub.py`
 
 Parity tests live at `typescript/src/__tests__/parity/`.
+
+## UX Principles
+
+**Inline resolution over error messages.** If a feature requires setup (auth, tokens, config), trigger that setup flow inline when the user first needs it. Never respond with "run X command" — just run it. If interactive setup isn't possible (no TTY), provide the most minimal, actionable guidance possible.

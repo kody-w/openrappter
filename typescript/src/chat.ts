@@ -1,12 +1,19 @@
 import chalk from 'chalk';
 import { AgentRegistry, BasicAgent } from './agents/index.js';
 import { hasCopilotAvailable, resolveGithubToken } from './copilot-check.js';
+import { deviceCodeLogin } from './providers/copilot-auth.js';
+import { saveEnv, loadEnv } from './env.js';
 
 const NAME = 'openrappter';
 const EMOJI = '🦖';
 
 /** Singleton CopilotProvider for quick chat (non-daemon mode) */
 let _chatProvider: import('./providers/copilot.js').CopilotProvider | null = null;
+
+/** Reset the cached chat provider (e.g. after re-auth) */
+export function resetChatProvider(): void {
+  _chatProvider = null;
+}
 
 export async function getChatProvider(): Promise<import('./providers/copilot.js').CopilotProvider> {
   if (!_chatProvider) {
@@ -15,6 +22,35 @@ export async function getChatProvider(): Promise<import('./providers/copilot.js'
     _chatProvider = new CopilotProvider(token ? { githubToken: token } : undefined);
   }
   return _chatProvider;
+}
+
+/**
+ * Run inline device code auth flow. Returns the new token on success, null on failure.
+ */
+async function inlineAuth(): Promise<string | null> {
+  try {
+    console.log(chalk.yellow('\nNo GitHub token found. Let\'s fix that now...\n'));
+    const token = await deviceCodeLogin((code, url) => {
+      console.log(chalk.bold(`  Open: ${url}`));
+      console.log(chalk.bold(`  Code: ${code}\n`));
+      // Try to open browser
+      import('child_process').then(cp => {
+        const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+        cp.exec(`${cmd} ${url}`);
+      }).catch(() => {});
+    });
+    // Persist the token
+    const env = await loadEnv();
+    env.GITHUB_TOKEN = token;
+    await saveEnv(env);
+    process.env.GITHUB_TOKEN = token;
+    resetChatProvider();
+    console.log(chalk.green('  Authenticated successfully!\n'));
+    return token;
+  } catch (err) {
+    console.error(chalk.red(`  Authentication failed: ${(err as Error).message}\n`));
+    return null;
+  }
 }
 
 export async function chat(message: string, registry: AgentRegistry): Promise<string> {
@@ -27,14 +63,31 @@ export async function chat(message: string, registry: AgentRegistry): Promise<st
   const hasCopilot = await hasCopilotAvailable();
 
   if (!hasCopilot) {
+    // Inline auth: if we have a TTY, run device code flow right now
+    if (process.stdin.isTTY) {
+      const token = await inlineAuth();
+      if (token) {
+        // Retry the chat with the new token
+        return chatWithProvider(message);
+      }
+      // Auth failed — fall back to agents-only response
+      return JSON.stringify({
+        status: 'info',
+        response: 'Authentication was cancelled or failed.',
+        agents: Array.from(agents.keys()),
+      });
+    }
+    // No TTY — can't do interactive auth
     return JSON.stringify({
       status: 'info',
-      response: 'No AI provider configured. Run \'openrappter onboard\' to connect GitHub Copilot.',
-      hint: 'You can also set GITHUB_TOKEN in your environment.',
-      agents: Array.from(agents.keys()),
+      response: 'No GitHub token. Run: openrappter onboard',
     });
   }
 
+  return chatWithProvider(message);
+}
+
+async function chatWithProvider(message: string): Promise<string> {
   try {
     const provider = await getChatProvider();
     const response = await provider.chat([
@@ -48,10 +101,16 @@ export async function chat(message: string, registry: AgentRegistry): Promise<st
       return `${EMOJI} ${NAME}: Request timed out. Try a simpler question.`;
     }
     if (err.message.includes('404') || err.message.includes('401') || err.message.includes('403')) {
+      // Auth error — try inline re-auth if TTY available
+      if (process.stdin.isTTY) {
+        const token = await inlineAuth();
+        if (token) {
+          return chatWithProvider(message);
+        }
+      }
       return JSON.stringify({
         status: 'error',
-        response: 'GitHub token found but Copilot access failed. Run \'openrappter onboard\' to re-authenticate.',
-        hint: 'Your token may lack Copilot scopes. Device code login grants the correct permissions.',
+        response: 'GitHub token expired or invalid. Run: openrappter onboard',
       });
     }
     return `${EMOJI} ${NAME}: I couldn't process that. Error: ${err.message}`;

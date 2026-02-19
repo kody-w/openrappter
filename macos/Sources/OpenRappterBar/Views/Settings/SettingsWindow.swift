@@ -11,6 +11,11 @@ public struct SettingsWindow: View {
 
     public var body: some View {
         TabView {
+            AccountSettingsView(viewModel: viewModel.accountViewModel)
+                .tabItem {
+                    Label("Account", systemImage: "person.circle")
+                }
+
             GeneralSettingsView(settingsStore: viewModel.settingsStore)
                 .tabItem {
                     Label("General", systemImage: "gear")

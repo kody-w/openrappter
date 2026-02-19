@@ -80,7 +80,7 @@ public final class AppViewModel {
     // Services
     var connection: GatewayConnection?
     var rpcClient: RpcClient?
-    let processManager: ProcessManager
+    public let processManager: ProcessManager
     var heartbeatMonitor: HeartbeatMonitor?
     let eventBus: EventBus
     let sessionStore: SessionStore

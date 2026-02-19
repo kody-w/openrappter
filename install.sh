@@ -1511,25 +1511,17 @@ main() {
     fi
     echo ""
 
-    # Offer to run onboard wizard
+    # Auto-run onboard wizard (skip with --no-onboard; requires TTY for interactive prompts)
     if [[ "${OPT_NO_ONBOARD:-false}" != "true" ]] && [[ -n "$OPENRAPPTER_BIN" ]]; then
-        echo ""
-        if has_gum; then
-            if gum confirm "Run the setup wizard now? (connects Copilot & Telegram)"; then
-                echo ""
-                "$OPENRAPPTER_BIN" onboard
-            else
-                ui_info "Skipped — run 'openrappter onboard' anytime."
-            fi
+        if [[ -t 0 ]]; then
+            echo ""
+            ui_info "Running setup wizard..."
+            echo ""
+            "$OPENRAPPTER_BIN" onboard
         else
-            printf "Run the setup wizard now? [Y/n] "
-            read -r answer
-            if [[ "$answer" != "n" && "$answer" != "N" ]]; then
-                echo ""
-                "$OPENRAPPTER_BIN" onboard
-            else
-                ui_info "Skipped — run 'openrappter onboard' anytime."
-            fi
+            echo ""
+            ui_info "Non-interactive shell detected — skipping setup wizard."
+            ui_info "Run 'openrappter onboard' in your terminal to complete setup."
         fi
     fi
 

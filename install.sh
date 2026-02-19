@@ -945,6 +945,15 @@ fi
 # TypeScript runtime (primary)
 TS_DIR="$OPENRAPPTER_HOME/typescript"
 if [[ -f "$TS_DIR/dist/index.js" ]]; then
+    # Ensure copilot SDK binary is on PATH
+    export PATH="$TS_DIR/node_modules/.bin:$PATH"
+    # Load env vars (GITHUB_TOKEN etc.)
+    if [[ -f "$OPENRAPPTER_HOME/.env" ]]; then
+        set -a
+        # shellcheck disable=SC1091
+        . "$OPENRAPPTER_HOME/.env" 2>/dev/null || true
+        set +a
+    fi
     exec node "$TS_DIR/dist/index.js" "$@"
 fi
 
@@ -994,6 +1003,151 @@ resolve_openrappter_version() {
         version="$(node -e "console.log(require('${ts_pkg}').version)" 2>/dev/null || true)"
     fi
     echo "$version"
+}
+
+# ── GitHub CLI (gh) ────────────────────────────────────────
+install_gh_cli() {
+    if command -v gh &>/dev/null; then
+        ui_success "GitHub CLI (gh) already installed"
+        return 0
+    fi
+
+    ui_info "Installing GitHub CLI (gh) for Copilot authentication"
+
+    if [[ "$OS" == "macos" ]]; then
+        if command -v brew &>/dev/null; then
+            run_quiet_step "Installing gh" brew install gh
+        else
+            ui_warn "Homebrew not available — install gh manually: https://cli.github.com"
+            return 1
+        fi
+    elif [[ "$OS" == "linux" ]]; then
+        require_sudo
+        if command -v apt-get &>/dev/null; then
+            # Official GitHub APT repo
+            local keyring="/usr/share/keyrings/githubcli-archive-keyring.gpg"
+            if [[ ! -f "$keyring" ]]; then
+                local tmp_key
+                tmp_key="$(mktempfile)"
+                download_file "https://cli.github.com/packages/githubcli-archive-keyring.gpg" "$tmp_key"
+                if is_root; then
+                    install -m 0644 "$tmp_key" "$keyring" 2>/dev/null || cp "$tmp_key" "$keyring"
+                else
+                    sudo install -m 0644 "$tmp_key" "$keyring" 2>/dev/null || sudo cp "$tmp_key" "$keyring"
+                fi
+            fi
+            local list_file="/etc/apt/sources.list.d/github-cli.list"
+            local arch
+            arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+            local entry="deb [arch=${arch} signed-by=${keyring}] https://cli.github.com/packages stable main"
+            if is_root; then
+                echo "$entry" > "$list_file"
+                run_quiet_step "Updating package index" apt-get update -qq
+                run_quiet_step "Installing gh" apt-get install -y -qq gh
+            else
+                echo "$entry" | sudo tee "$list_file" >/dev/null
+                run_quiet_step "Updating package index" sudo apt-get update -qq
+                run_quiet_step "Installing gh" sudo apt-get install -y -qq gh
+            fi
+        elif command -v dnf &>/dev/null; then
+            if is_root; then
+                run_quiet_step "Installing gh" dnf install -y -q 'dnf-command(config-manager)' && dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && dnf install -y -q gh
+            else
+                run_quiet_step "Installing gh" sudo dnf install -y -q 'dnf-command(config-manager)' && sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && sudo dnf install -y -q gh
+            fi
+        elif command -v yum &>/dev/null; then
+            if is_root; then
+                run_quiet_step "Installing gh" yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && yum install -y -q gh
+            else
+                run_quiet_step "Installing gh" sudo yum-config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && sudo yum install -y -q gh
+            fi
+        else
+            ui_warn "Could not auto-install gh — install manually: https://cli.github.com"
+            return 1
+        fi
+    fi
+
+    refresh_shell_command_cache
+    if command -v gh &>/dev/null; then
+        ui_success "GitHub CLI installed ($(gh --version | head -1))"
+        return 0
+    fi
+
+    ui_warn "gh installation may need a new shell — continuing anyway"
+    return 1
+}
+
+# ── GitHub Copilot SDK setup ──────────────────────────────
+setup_copilot_sdk() {
+    ui_info "Setting up GitHub Copilot SDK"
+
+    # 1. Symlink the copilot binary from node_modules to user bin dir
+    local copilot_bin="$INSTALL_DIR/typescript/node_modules/.bin/copilot"
+    local bin_dir
+    bin_dir="$(get_bin_dir)"
+
+    if [[ -f "$copilot_bin" || -L "$copilot_bin" ]]; then
+        # Create symlink so `copilot` is on PATH
+        ln -sf "$copilot_bin" "$bin_dir/copilot" 2>/dev/null || true
+        if [[ -x "$bin_dir/copilot" ]]; then
+            ui_success "Copilot SDK binary linked to $bin_dir/copilot"
+        fi
+    else
+        ui_warn "Copilot binary not found in node_modules — SDK may not be installed"
+    fi
+
+    # 2. Install gh CLI if not present
+    install_gh_cli || true
+
+    # 3. Auto-detect GitHub token
+    local github_token=""
+    local token_source=""
+
+    # Check existing env
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        github_token="$GITHUB_TOKEN"
+        token_source="environment"
+    fi
+
+    # Try gh auth token
+    if [[ -z "$github_token" ]] && command -v gh &>/dev/null; then
+        local gh_token
+        gh_token="$(gh auth token 2>/dev/null || true)"
+        if [[ -n "$gh_token" ]]; then
+            github_token="$gh_token"
+            token_source="gh CLI"
+        fi
+    fi
+
+    # Save token to .env if found
+    if [[ -n "$github_token" ]]; then
+        local env_file="$INSTALL_DIR/.env"
+        mkdir -p "$INSTALL_DIR"
+
+        # Update or create .env
+        if [[ -f "$env_file" ]]; then
+            # Remove old GITHUB_TOKEN line if present
+            if grep -q "^GITHUB_TOKEN=" "$env_file" 2>/dev/null; then
+                local tmp_env
+                tmp_env="$(mktempfile)"
+                grep -v "^GITHUB_TOKEN=" "$env_file" > "$tmp_env"
+                mv "$tmp_env" "$env_file"
+            fi
+        else
+            echo "# openrappter environment — managed by installer" > "$env_file"
+            echo "" >> "$env_file"
+        fi
+        echo "GITHUB_TOKEN=\"${github_token}\"" >> "$env_file"
+        ui_success "GitHub token detected (from $token_source) and saved"
+    else
+        if command -v gh &>/dev/null; then
+            # gh is installed but not authenticated
+            ui_warn "GitHub CLI installed but not authenticated"
+            ui_info "Run 'gh auth login' to authenticate, then 'openrappter onboard'"
+        else
+            ui_info "No GitHub token found — run 'openrappter onboard' to configure"
+        fi
+    fi
 }
 
 # ── Main ────────────────────────────────────────────────────
@@ -1136,6 +1290,9 @@ main() {
     else
         ui_info "Python 3.${MIN_PYTHON_MINOR}+ not found — skipping (TypeScript works fine alone)"
     fi
+
+    # ── Stage 2b: GitHub Copilot SDK ──
+    setup_copilot_sdk
 
     # ── Stage 3: Finalizing setup ──
     ui_stage "Finalizing setup"

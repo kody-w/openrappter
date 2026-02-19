@@ -31,12 +31,52 @@ async function ensureHomeDir(): Promise<void> {
 }
 
 async function hasCopilotCLI(): Promise<boolean> {
+  // 1. Check system PATH
   try {
     await execAsync('copilot --version');
     return true;
-  } catch {
-    return false;
-  }
+  } catch { /* not on PATH */ }
+
+  // 2. Check local node_modules/.bin/copilot (installed via @github/copilot-sdk)
+  const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'copilot');
+  try {
+    await fs.access(localBin);
+    return true;
+  } catch { /* not in local node_modules */ }
+
+  // 3. Check install-dir node_modules/.bin/copilot
+  const installBin = path.join(HOME_DIR, 'typescript', 'node_modules', '.bin', 'copilot');
+  try {
+    await fs.access(installBin);
+    return true;
+  } catch { /* not in install dir */ }
+
+  return false;
+}
+
+/** Resolve the copilot binary path — checks system PATH, then local node_modules */
+async function resolveCopilotPath(): Promise<string | null> {
+  // 1. System PATH
+  try {
+    const { stdout } = await execAsync('which copilot');
+    if (stdout.trim()) return stdout.trim();
+  } catch { /* not on PATH */ }
+
+  // 2. Local node_modules/.bin/copilot
+  const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'copilot');
+  try {
+    await fs.access(localBin);
+    return localBin;
+  } catch { /* not here */ }
+
+  // 3. Install-dir node_modules/.bin/copilot
+  const installBin = path.join(HOME_DIR, 'typescript', 'node_modules', '.bin', 'copilot');
+  try {
+    await fs.access(installBin);
+    return installBin;
+  } catch { /* not here */ }
+
+  return null;
 }
 
 async function loadConfig(): Promise<Record<string, unknown>> {
@@ -155,9 +195,10 @@ async function chat(message: string): Promise<string> {
   }
 
   try {
-    // Use Copilot CLI directly
+    // Use Copilot CLI directly (resolve path to handle non-PATH installs)
+    const copilotBin = await resolveCopilotPath() ?? 'copilot';
     const escapedMessage = message.replace(/'/g, "'\\''");
-    const { stdout, stderr } = await execAsync(`copilot --message '${escapedMessage}'`, { timeout: 60000 });
+    const { stdout, stderr } = await execAsync(`'${copilotBin}' --message '${escapedMessage}'`, { timeout: 60000 });
     if (stdout.trim()) {
       return stdout.trim();
     }
@@ -335,10 +376,12 @@ program
 
       // Create the Assistant powered by Copilot SDK
       const agents = await registry.getAllAgents();
+      const copilotPath = await resolveCopilotPath();
       const assistant = new Assistant(agents, {
         name: NAME,
         description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
         model: process.env.OPENRAPPTER_MODEL,
+        clientOptions: copilotPath ? { cliPath: copilotPath } : undefined,
       });
 
       // Set up channel registry — register all channels so they appear in the UI
@@ -557,34 +600,83 @@ program
         }
       }
     } else {
-      // No gh CLI — ask for a manual GITHUB_TOKEN
+      // No gh CLI — try to auto-install it
       log.warn('GitHub CLI (gh) not found.');
-      note(
-        'Install it for the best experience:\n' +
-        '  brew install gh          (macOS)\n' +
-        '  sudo apt install gh      (Linux)\n' +
-        '  https://cli.github.com   (other)\n\n' +
-        'Or paste a GitHub personal access token below.',
-        'GitHub CLI'
-      );
 
-      const manualToken = await text({
-        message: 'GitHub token (or press Enter to skip):',
-        placeholder: 'ghp_xxxxxxxxxxxx',
-        validate: (val) => {
-          if (!val) return undefined; // allow skip
-          if (val.length < 10) return 'Token looks too short';
-          return undefined;
-        },
+      const shouldInstallGh = await confirm({
+        message: 'Install GitHub CLI (gh) now? (recommended for Copilot)',
+        initialValue: true,
       });
-      if (isCancel(manualToken)) { outro('Setup cancelled.'); process.exit(0); }
+      if (isCancel(shouldInstallGh)) { outro('Setup cancelled.'); process.exit(0); }
 
-      if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
-        env.GITHUB_TOKEN = manualToken;
-        copilotReady = true;
-        log.success('Token saved.');
-      } else {
-        log.info('Skipped — you can set GITHUB_TOKEN later.');
+      if (shouldInstallGh) {
+        const s = spinner();
+        s.start('Installing GitHub CLI…');
+        try {
+          const platform = process.platform;
+          if (platform === 'darwin') {
+            await execAsync('brew install gh', { timeout: 120000 });
+          } else if (platform === 'linux') {
+            // Try apt first, then snap
+            try {
+              await execAsync('sudo apt-get install -y -qq gh 2>/dev/null || sudo snap install gh 2>/dev/null', { timeout: 120000 });
+            } catch {
+              await execAsync('curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null && sudo apt-get update -qq && sudo apt-get install -y -qq gh', { timeout: 120000 });
+            }
+          }
+          s.stop('GitHub CLI installed!');
+
+          // Now try to authenticate
+          const shouldLogin = await confirm({
+            message: 'Log in to GitHub now?',
+            initialValue: true,
+          });
+          if (!isCancel(shouldLogin) && shouldLogin) {
+            const s2 = spinner();
+            s2.start('Opening GitHub login…');
+            try {
+              await execAsync('gh auth login --web --scopes read:org,repo');
+              s2.stop('Authenticated!');
+              const token = await getGhToken();
+              if (token) {
+                env.GITHUB_TOKEN = token;
+                copilotReady = true;
+              }
+            } catch {
+              s2.stop('Login failed — you can retry later with `gh auth login`');
+            }
+          }
+        } catch {
+          s.stop('Auto-install failed');
+          log.info('Install manually: https://cli.github.com');
+        }
+      }
+
+      if (!copilotReady) {
+        note(
+          'You can still paste a GitHub personal access token below.\n' +
+          'Get one at: https://github.com/settings/tokens',
+          'Manual Token'
+        );
+
+        const manualToken = await text({
+          message: 'GitHub token (or press Enter to skip):',
+          placeholder: 'ghp_xxxxxxxxxxxx',
+          validate: (val) => {
+            if (!val) return undefined; // allow skip
+            if (val.length < 10) return 'Token looks too short';
+            return undefined;
+          },
+        });
+        if (isCancel(manualToken)) { outro('Setup cancelled.'); process.exit(0); }
+
+        if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
+          env.GITHUB_TOKEN = manualToken;
+          copilotReady = true;
+          log.success('Token saved.');
+        } else {
+          log.info('Skipped — you can set GITHUB_TOKEN later.');
+        }
       }
     }
 
@@ -682,7 +774,9 @@ async function statusCommand(): Promise<void> {
   console.log(`\n${EMOJI} ${NAME} Status\n`);
   console.log(`  Version:  ${VERSION}`);
   console.log(`  Home:     ${HOME_DIR}`);
-  console.log(`  Copilot:  ${(hasCopilot || hasToken) ? chalk.green('✅ Available') : chalk.yellow('❌ Not found')}`);
+  const copilotPath = await resolveCopilotPath();
+  const copilotOk = hasCopilot || hasToken || !!copilotPath;
+  console.log(`  Copilot:  ${copilotOk ? chalk.green('✅ Available') : chalk.yellow('❌ Not found — run: openrappter onboard')}`);
   console.log(`  Telegram: ${hasTelegram ? chalk.green('✅ Connected') : chalk.dim('⬚  Not configured')}`);
   console.log(`  Setup:    ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run — try: openrappter onboard')}`);
   console.log(`  Agents:   ${agents.length} loaded`);

@@ -30,51 +30,29 @@ async function ensureHomeDir(): Promise<void> {
   await fs.mkdir(HOME_DIR, { recursive: true });
 }
 
-async function hasCopilotCLI(): Promise<boolean> {
-  // 1. Check system PATH
-  try {
-    await execAsync('copilot --version');
-    return true;
-  } catch { /* not on PATH */ }
+/** Check if Copilot is available via direct token exchange (no CLI needed) */
+async function hasCopilotAvailable(): Promise<boolean> {
+  const token = process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (token) return true;
 
-  // 2. Check local node_modules/.bin/copilot (installed via @github/copilot-sdk)
-  const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'copilot');
+  // Try gh CLI token as fallback
   try {
-    await fs.access(localBin);
-    return true;
-  } catch { /* not in local node_modules */ }
-
-  // 3. Check install-dir node_modules/.bin/copilot
-  const installBin = path.join(HOME_DIR, 'typescript', 'node_modules', '.bin', 'copilot');
-  try {
-    await fs.access(installBin);
-    return true;
-  } catch { /* not in install dir */ }
+    const { stdout } = await execAsync('gh auth token 2>/dev/null');
+    if (stdout.trim()) return true;
+  } catch { /* gh not available */ }
 
   return false;
 }
 
-/** Resolve the copilot binary path — checks system PATH, then local node_modules */
-async function resolveCopilotPath(): Promise<string | null> {
-  // 1. System PATH
+/** Resolve a GitHub token from env or gh CLI */
+async function resolveGithubToken(): Promise<string | null> {
+  const envToken = process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (envToken) return envToken;
+
   try {
-    const { stdout } = await execAsync('which copilot');
+    const { stdout } = await execAsync('gh auth token 2>/dev/null');
     if (stdout.trim()) return stdout.trim();
-  } catch { /* not on PATH */ }
-
-  // 2. Local node_modules/.bin/copilot
-  const localBin = path.join(__dirname, '..', 'node_modules', '.bin', 'copilot');
-  try {
-    await fs.access(localBin);
-    return localBin;
-  } catch { /* not here */ }
-
-  // 3. Install-dir node_modules/.bin/copilot
-  const installBin = path.join(HOME_DIR, 'typescript', 'node_modules', '.bin', 'copilot');
-  try {
-    await fs.access(installBin);
-    return installBin;
-  } catch { /* not here */ }
+  } catch { /* gh not available */ }
 
   return null;
 }
@@ -174,8 +152,20 @@ async function validateTelegramToken(token: string): Promise<{ valid: boolean; u
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// COPILOT SDK INTEGRATION
+// COPILOT DIRECT API INTEGRATION
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/** Singleton CopilotProvider for quick chat (non-daemon mode) */
+let _chatProvider: import('./providers/copilot.js').CopilotProvider | null = null;
+
+async function getChatProvider(): Promise<import('./providers/copilot.js').CopilotProvider> {
+  if (!_chatProvider) {
+    const { CopilotProvider } = await import('./providers/copilot.js');
+    const token = await resolveGithubToken();
+    _chatProvider = new CopilotProvider(token ? { githubToken: token } : undefined);
+  }
+  return _chatProvider;
+}
 
 async function chat(message: string): Promise<string> {
   // First try to match an agent using keyword patterns (fallback mode)
@@ -183,8 +173,8 @@ async function chat(message: string): Promise<string> {
   const result = await matchAndExecuteAgent(message, agents);
   if (result) return result;
 
-  // If no agent matched, use Copilot CLI if available
-  const hasCopilot = await hasCopilotCLI();
+  // If no agent matched, use Copilot API if available
+  const hasCopilot = await hasCopilotAvailable();
 
   if (!hasCopilot) {
     return JSON.stringify({
@@ -195,17 +185,12 @@ async function chat(message: string): Promise<string> {
   }
 
   try {
-    // Use Copilot CLI directly (resolve path to handle non-PATH installs)
-    const copilotBin = await resolveCopilotPath() ?? 'copilot';
-    const escapedMessage = message.replace(/'/g, "'\\''");
-    const { stdout, stderr } = await execAsync(`'${copilotBin}' --message '${escapedMessage}'`, { timeout: 60000 });
-    if (stdout.trim()) {
-      return stdout.trim();
-    }
-    if (stderr.trim()) {
-      return stderr.trim();
-    }
-    return `${EMOJI} ${NAME}: I processed your request but got no response.`;
+    const provider = await getChatProvider();
+    const response = await provider.chat([
+      { role: 'system', content: `You are ${NAME}, a helpful local-first AI assistant.` },
+      { role: 'user', content: message },
+    ]);
+    return response.content ?? `${EMOJI} ${NAME}: I processed your request but got no response.`;
   } catch (error) {
     const err = error as Error;
     if (err.message.includes('timeout')) {
@@ -374,14 +359,14 @@ program
         auth: token ? { mode: 'token', tokens: [token] } : { mode: 'none' },
       });
 
-      // Create the Assistant powered by Copilot SDK
+      // Create the Assistant powered by direct Copilot API (no CLI needed)
       const agents = await registry.getAllAgents();
-      const copilotPath = await resolveCopilotPath();
+      const githubToken = await resolveGithubToken();
       const assistant = new Assistant(agents, {
         name: NAME,
         description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
         model: process.env.OPENRAPPTER_MODEL,
-        clientOptions: copilotPath ? { cliPath: copilotPath } : undefined,
+        githubToken: githubToken ?? undefined,
       });
 
       // Set up channel registry — register all channels so they appear in the UI
@@ -763,20 +748,17 @@ program
 
 // Status command
 async function statusCommand(): Promise<void> {
-  const hasCopilot = await hasCopilotCLI();
+  const copilotOk = await hasCopilotAvailable();
   const config = await loadConfig();
   const agents = await registry.listAgents();
   const env = await loadEnv();
 
   const hasTelegram = !!(env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
-  const hasToken = !!(env.GITHUB_TOKEN || process.env.GITHUB_TOKEN);
 
   console.log(`\n${EMOJI} ${NAME} Status\n`);
   console.log(`  Version:  ${VERSION}`);
   console.log(`  Home:     ${HOME_DIR}`);
-  const copilotPath = await resolveCopilotPath();
-  const copilotOk = hasCopilot || hasToken || !!copilotPath;
-  console.log(`  Copilot:  ${copilotOk ? chalk.green('✅ Available') : chalk.yellow('❌ Not found — run: openrappter onboard')}`);
+  console.log(`  Copilot:  ${copilotOk ? chalk.green('✅ Available (direct API)') : chalk.yellow('❌ No GitHub token — run: openrappter onboard')}`);
   console.log(`  Telegram: ${hasTelegram ? chalk.green('✅ Connected') : chalk.dim('⬚  Not configured')}`);
   console.log(`  Setup:    ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run — try: openrappter onboard')}`);
   console.log(`  Agents:   ${agents.length} loaded`);
@@ -788,16 +770,16 @@ async function statusCommand(): Promise<void> {
 
 // Interactive mode
 async function interactiveMode(): Promise<void> {
-  const hasCopilot = await hasCopilotCLI();
+  const hasCopilot = await hasCopilotAvailable();
   const agents = await registry.listAgents();
 
   if (hasCopilot) {
-    console.log(chalk.dim('Using GitHub Copilot SDK...\n'));
+    console.log(chalk.dim('Using Copilot API (direct token exchange)...\n'));
   }
 
   console.log(`${EMOJI} ${NAME} v${VERSION} Chat`);
   console.log('─'.repeat(40));
-  console.log(`Copilot: ${hasCopilot ? '✅ Available' : '❌ Not found'}`);
+  console.log(`Copilot: ${hasCopilot ? '✅ Available' : '❌ No GitHub token'}`);
   console.log(`Agents: ${agents.length} loaded`);
   console.log('Type /help for commands, /quit to exit\n');
 

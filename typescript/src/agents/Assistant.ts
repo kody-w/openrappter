@@ -1,23 +1,18 @@
 /**
- * Assistant — Copilot SDK-powered agent orchestration.
+ * Assistant — LLM-powered agent orchestration via direct Copilot API.
  *
  * Mirrors the Python function.py Assistant class:
- *  1. Collects all agents' metadata and wraps them as Copilot SDK tools (defineTool)
- *  2. Creates a CopilotClient session with those tools + a system prompt
- *  3. Sends user messages via session.sendAndWait()
- *  4. The SDK/LLM decides which tool to call → handler runs agent.execute()
- *  5. Results flow back through the SDK and the LLM produces the final response
+ *  1. Collects all agents' metadata and wraps them as OpenAI-compatible tools
+ *  2. Creates a CopilotProvider for direct API access (no CLI dependency)
+ *  3. Sends user messages via provider.chat()
+ *  4. Handles tool-call loop: LLM decides which tool → handler runs agent.execute()
+ *  5. Results flow back through the LLM and it produces the final response
  *
- * Falls back to keyword-matching chat() when the Copilot CLI is not available.
+ * Uses direct GitHub token → Copilot API token exchange (no copilot binary needed).
  */
 
-import {
-  CopilotClient,
-  defineTool,
-  type CopilotClientOptions,
-  type SessionConfig,
-  type Tool as CopilotTool,
-} from '@github/copilot-sdk';
+import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
+import type { Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 
 export interface AssistantConfig {
@@ -27,10 +22,12 @@ export interface AssistantConfig {
   description?: string;
   /** Model override (e.g. "gpt-4.1", "claude-sonnet-4.5") */
   model?: string;
-  /** CopilotClient options (cliPath, cliUrl, githubToken, etc.) */
-  clientOptions?: CopilotClientOptions;
+  /** GitHub token for Copilot API (falls back to env vars) */
+  githubToken?: string;
   /** Whether to stream deltas (default true) */
   streaming?: boolean;
+  /** Max tool-call rounds before forcing a text response */
+  maxToolRounds?: number;
 }
 
 export interface AssistantResponse {
@@ -43,10 +40,10 @@ export interface AssistantResponse {
 export class Assistant {
   private agents: Map<string, BasicAgent>;
   private config: AssistantConfig;
-  private client: CopilotClient | null = null;
+  private provider: CopilotProvider;
   private agentLogs: string[] = [];
-  /** Maps conversation keys to Copilot SDK session IDs for multi-turn continuity */
-  private sessionIds: Map<string, string> = new Map();
+  /** Maps conversation keys to message history for multi-turn continuity */
+  private conversations: Map<string, Message[]> = new Map();
 
   constructor(
     agents: Map<string, BasicAgent>,
@@ -56,10 +53,15 @@ export class Assistant {
     this.config = {
       name: config?.name ?? 'openrappter',
       description: config?.description ?? 'a helpful local-first AI assistant',
-      model: config?.model,
-      clientOptions: config?.clientOptions,
+      model: config?.model ?? COPILOT_DEFAULT_MODEL,
+      githubToken: config?.githubToken,
       streaming: config?.streaming ?? true,
+      maxToolRounds: config?.maxToolRounds ?? 10,
     };
+
+    this.provider = new CopilotProvider({
+      githubToken: config?.githubToken,
+    });
   }
 
   /** Reload agents (e.g. after hot-load) */
@@ -70,12 +72,10 @@ export class Assistant {
   /**
    * Main entry point — send a message and get a response.
    *
-   * Uses Copilot SDK session resumption for multi-turn conversations.
-   * When a conversationKey is provided, the same SDK session is reused
-   * so the LLM sees the full conversation transcript.
+   * Maintains conversation history per conversationKey for multi-turn context.
    *
    * @param message         Current user message
-   * @param onDelta         Optional callback for streaming text deltas
+   * @param onDelta         Streaming callback (unused for now)
    * @param memoryContext   Extra context to inject into the system prompt
    * @param conversationKey Optional key to maintain conversation continuity (e.g., chat ID)
    */
@@ -87,127 +87,143 @@ export class Assistant {
   ): Promise<AssistantResponse> {
     this.agentLogs = [];
 
-    // Build Copilot SDK tools from agent metadata
-    const tools = this.buildCopilotTools();
+    // Build tools from agent metadata
+    const tools = this.buildTools();
 
     // Build system prompt
     const systemContent = this.buildSystemPrompt(memoryContext);
 
-    // Create client if needed
-    if (!this.client) {
-      this.client = new CopilotClient(this.config.clientOptions);
+    // Get or create conversation history
+    const key = conversationKey ?? 'default';
+    let history = this.conversations.get(key);
+    if (!history) {
+      history = [{ role: 'system', content: systemContent }];
+      this.conversations.set(key, history);
     }
 
-    const sessionConfig: SessionConfig = {
-      model: this.config.model,
-      streaming: this.config.streaming,
-      tools,
-      systemMessage: {
-        mode: 'append',
-        content: systemContent,
-      },
-    };
+    // Add user message
+    history.push({ role: 'user', content: message });
 
-    // Try to resume an existing session for this conversation
-    let session: Awaited<ReturnType<CopilotClient['createSession']>>;
-    const existingSessionId = conversationKey ? this.sessionIds.get(conversationKey) : undefined;
+    // Tool-call loop
+    let rounds = 0;
+    const maxRounds = this.config.maxToolRounds ?? 10;
 
-    if (existingSessionId) {
-      try {
-        session = await this.client.resumeSession(existingSessionId, sessionConfig);
-      } catch {
-        // Session expired or invalid — create a new one
-        session = await this.client.createSession(sessionConfig);
-        if (conversationKey) this.sessionIds.set(conversationKey, session.sessionId);
-      }
-    } else {
-      session = await this.client.createSession(sessionConfig);
-      if (conversationKey) this.sessionIds.set(conversationKey, session.sessionId);
-    }
+    while (rounds < maxRounds) {
+      rounds++;
 
-    // Collect the full response text
-    let fullContent = '';
-    let unsubscribe: (() => void) | undefined;
+      const response = await this.provider.chat(history, {
+        model: this.config.model,
+        tools: tools.length > 0 ? tools : undefined,
+      });
 
-    try {
-      if (this.config.streaming && onDelta) {
-        // Only wire up streaming deltas when a callback is provided (e.g., gateway UI).
-        // For channels like Telegram that just need the final text, skip delta accumulation
-        // to avoid duplicated text from multi-turn tool-call loops.
-        unsubscribe = session.on('assistant.message_delta', (event) => {
-          const delta = (event as { data?: { deltaContent?: string } }).data?.deltaContent ?? '';
-          onDelta(delta);
+      // If the LLM responded with tool calls, execute them
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        // Add assistant message with tool calls to history
+        history.push({
+          role: 'assistant',
+          content: response.content ?? '',
+          tool_calls: response.tool_calls,
         });
-      }
 
-      // Send the message and wait for the full response (SDK handles tool-call loop)
-      const response = await session.sendAndWait({ prompt: message });
-
-      // Always prefer the final response content from sendAndWait — it contains the
-      // complete, deduplicated text. Accumulated streaming deltas can contain duplicated
-      // text when the SDK runs multiple tool-call rounds.
-      if (response) {
-        const data = response.data as { content?: string } | undefined;
-        if (data?.content) {
-          fullContent = data.content;
+        // Execute each tool call
+        for (const tc of response.tool_calls) {
+          const result = await this.executeToolCall(tc);
+          history.push({
+            role: 'tool',
+            content: result,
+            tool_call_id: tc.id,
+          });
         }
+
+        // Continue the loop — LLM may want to call more tools or produce final answer
+        continue;
       }
+
+      // No tool calls — this is the final text response
+      const content = response.content ?? '';
+      history.push({ role: 'assistant', content });
+
+      // Trim history if it gets too long (keep system + last 40 messages)
+      if (history.length > 42) {
+        const system = history[0];
+        history = [system, ...history.slice(-40)];
+        this.conversations.set(key, history);
+      }
+
+      if (onDelta) onDelta(content);
 
       return {
-        content: fullContent,
+        content,
         agentLogs: [...this.agentLogs],
       };
-    } finally {
-      unsubscribe?.();
     }
+
+    // Max rounds exceeded — return whatever we have
+    const lastAssistant = history.filter(m => m.role === 'assistant').pop();
+    return {
+      content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
+      agentLogs: [...this.agentLogs],
+    };
   }
 
-  /** Gracefully shut down the Copilot CLI process */
+  /** Gracefully shut down */
   async stop(): Promise<void> {
-    if (this.client) {
-      await this.client.stop();
-      this.client = null;
-    }
+    this.conversations.clear();
   }
 
   // ── Private helpers ───────────────────────────────────────────────────
 
-  /** Convert agent metadata into Copilot SDK tool definitions */
-  private buildCopilotTools(): CopilotTool[] {
-    const tools: CopilotTool[] = [];
+  /** Execute a single tool call by dispatching to the matching agent */
+  private async executeToolCall(tc: ToolCall): Promise<string> {
+    const agentName = tc.function.name;
+    const agent = this.agents.get(agentName);
+
+    if (!agent) {
+      const msg = `Unknown agent: ${agentName}`;
+      this.agentLogs.push(msg);
+      return msg;
+    }
+
+    try {
+      let params: Record<string, unknown> = {};
+      try {
+        params = JSON.parse(tc.function.arguments);
+      } catch {
+        params = { query: tc.function.arguments };
+      }
+
+      const result = await agent.execute(params);
+      const resultStr = result == null ? 'Agent completed successfully' : String(result);
+      this.agentLogs.push(`Performed ${agentName} → ${truncate(resultStr, 200)}`);
+      return resultStr;
+    } catch (err) {
+      const errMsg = `Error: ${(err as Error).message}`;
+      this.agentLogs.push(`Performed ${agentName} → ${errMsg}`);
+      return errMsg;
+    }
+  }
+
+  /** Convert agent metadata into OpenAI-compatible tool definitions */
+  private buildTools(): Tool[] {
+    const tools: Tool[] = [];
 
     for (const agent of this.agents.values()) {
       if (!agent.metadata) continue;
 
-      const agentName = agent.metadata.name;
-      const agentRef = agent;
-      const logs = this.agentLogs;
-
-      tools.push(
-        defineTool(agentName, {
+      tools.push({
+        type: 'function',
+        function: {
+          name: agent.metadata.name,
           description: agent.metadata.description,
           parameters: agent.metadata.parameters as unknown as Record<string, unknown>,
-          handler: async (args: unknown) => {
-            const params = (args && typeof args === 'object') ? args as Record<string, unknown> : {};
-            try {
-              const result = await agentRef.execute(params);
-              const resultStr = result == null ? 'Agent completed successfully' : String(result);
-              logs.push(`Performed ${agentName} → ${truncate(resultStr, 200)}`);
-              return resultStr;
-            } catch (err) {
-              const errMsg = `Error: ${(err as Error).message}`;
-              logs.push(`Performed ${agentName} → ${errMsg}`);
-              return errMsg;
-            }
-          },
-        }),
-      );
+        },
+      });
     }
 
     return tools;
   }
 
-  /** Build the system prompt content (appended to SDK defaults) */
+  /** Build the system prompt content */
   private buildSystemPrompt(memoryContext?: string): string {
     const agentList = Array.from(this.agents.values())
       .map((a) => `- **${a.metadata.name}**: ${a.metadata.description}`)

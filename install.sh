@@ -945,8 +945,6 @@ fi
 # TypeScript runtime (primary)
 TS_DIR="$OPENRAPPTER_HOME/typescript"
 if [[ -f "$TS_DIR/dist/index.js" ]]; then
-    # Ensure copilot SDK binary is on PATH
-    export PATH="$TS_DIR/node_modules/.bin:$PATH"
     # Load env vars (GITHUB_TOKEN etc.)
     if [[ -f "$OPENRAPPTER_HOME/.env" ]]; then
         set -a
@@ -1077,26 +1075,11 @@ install_gh_cli() {
     return 1
 }
 
-# ── GitHub Copilot SDK setup ──────────────────────────────
+# ── GitHub Copilot setup (direct token exchange — no CLI binary needed) ──
 setup_copilot_sdk() {
-    ui_info "Setting up GitHub Copilot SDK"
+    ui_info "Setting up GitHub Copilot (direct API integration)"
 
-    # 1. Symlink the copilot binary from node_modules to user bin dir
-    local copilot_bin="$INSTALL_DIR/typescript/node_modules/.bin/copilot"
-    local bin_dir
-    bin_dir="$(get_bin_dir)"
-
-    if [[ -f "$copilot_bin" || -L "$copilot_bin" ]]; then
-        # Create symlink so `copilot` is on PATH
-        ln -sf "$copilot_bin" "$bin_dir/copilot" 2>/dev/null || true
-        if [[ -x "$bin_dir/copilot" ]]; then
-            ui_success "Copilot SDK binary linked to $bin_dir/copilot"
-        fi
-    else
-        ui_warn "Copilot binary not found in node_modules — SDK may not be installed"
-    fi
-
-    # 2. Install gh CLI if not present
+    # Install gh CLI if not present (used for token discovery)
     install_gh_cli || true
 
     # 3. Auto-detect GitHub token

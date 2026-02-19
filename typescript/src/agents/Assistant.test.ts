@@ -1,11 +1,11 @@
 /**
- * Tests for the Assistant class — Copilot SDK-powered agent routing.
+ * Tests for the Assistant class — direct Copilot API agent routing.
  *
- * These tests mock the CopilotClient/session to verify:
- * - Agent metadata is converted to Copilot SDK tools
+ * These tests mock the CopilotProvider to verify:
+ * - Agent metadata is converted to OpenAI-compatible tools
  * - System prompt includes agent list + memory context
- * - Tool handlers execute agents and return results
- * - Streaming deltas are forwarded
+ * - Tool-call loop executes agents and feeds results back
+ * - Multi-turn conversation history is maintained
  * - Graceful shutdown
  */
 
@@ -14,50 +14,26 @@ import { Assistant } from './Assistant.js';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
-// ── Mock the Copilot SDK ────────────────────────────────────────────────────
+// ── Mock the CopilotProvider ─────────────────────────────────────────────────
 
-// Capture what the Assistant passes to the SDK
-let capturedSessionConfig: Record<string, unknown> = {};
-let capturedPrompt = '';
-let sessionEventHandlers: Map<string, (event: unknown) => void> = new Map();
-let mockSendResponse: unknown = null;
-let unsubscribeCalls = 0;
+let chatCallCount = 0;
+let capturedMessages: unknown[] = [];
+let capturedOptions: unknown = {};
+let mockChatResponses: Array<{ content: string | null; tool_calls?: unknown[] }> = [];
 
-const mockSession = {
-  on: vi.fn((eventType: string, handler: (event: unknown) => void) => {
-    sessionEventHandlers.set(eventType, handler);
-    return () => {
-      unsubscribeCalls++;
-      sessionEventHandlers.delete(eventType);
-    };
-  }),
-  sendAndWait: vi.fn(async (opts: { prompt: string }) => {
-    capturedPrompt = opts.prompt;
-    return mockSendResponse;
-  }),
-  sessionId: 'mock-session-123',
-};
+const mockChat = vi.fn(async (messages: unknown[], options?: unknown) => {
+  capturedMessages = [...(messages as unknown[])]; // snapshot — history mutates after call
+  capturedOptions = options;
+  const idx = Math.min(chatCallCount, mockChatResponses.length - 1);
+  chatCallCount++;
+  return mockChatResponses[idx] ?? { content: 'Hello!', tool_calls: null };
+});
 
-const mockClient = {
-  createSession: vi.fn(async (config: Record<string, unknown>) => {
-    capturedSessionConfig = config;
-    return mockSession;
-  }),
-  resumeSession: vi.fn(async (sessionId: string, config: Record<string, unknown>) => {
-    capturedSessionConfig = config;
-    return mockSession;
-  }),
-  stop: vi.fn(async () => {}),
-};
-
-vi.mock('@github/copilot-sdk', () => ({
-  CopilotClient: vi.fn(() => mockClient),
-  defineTool: vi.fn((name: string, config: { description?: string; parameters?: unknown; handler: (args: unknown) => Promise<unknown> }) => ({
-    name,
-    description: config.description,
-    parameters: config.parameters,
-    handler: config.handler,
+vi.mock('../providers/copilot.js', () => ({
+  CopilotProvider: vi.fn(() => ({
+    chat: mockChat,
   })),
+  COPILOT_DEFAULT_MODEL: 'gpt-4.1',
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -92,34 +68,28 @@ function makeAgents(...agents: StubAgent[]): Map<string, BasicAgent> {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('Assistant (Copilot SDK)', () => {
+describe('Assistant (direct Copilot API)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedSessionConfig = {};
-    capturedPrompt = '';
-    sessionEventHandlers.clear();
-    mockSendResponse = { data: { content: 'Hello!' } };
-    unsubscribeCalls = 0;
+    chatCallCount = 0;
+    capturedMessages = [];
+    capturedOptions = {};
+    mockChatResponses = [{ content: 'Hello!', tool_calls: undefined }];
   });
 
-  it('creates a CopilotClient and session with tools', async () => {
+  it('sends messages via CopilotProvider.chat with tools', async () => {
     const shell = new StubAgent('Shell', 'Run commands', '{}');
     const memory = new StubAgent('Memory', 'Store facts', '{}');
     const assistant = new Assistant(makeAgents(shell, memory));
 
     await assistant.getResponse('hi');
 
-    expect(mockClient.createSession).toHaveBeenCalledTimes(1);
-    const tools = capturedSessionConfig.tools as unknown[];
-    expect(tools).toHaveLength(2);
-    expect((tools[0] as { name: string }).name).toBe('Shell');
-    expect((tools[1] as { name: string }).name).toBe('Memory');
-  });
-
-  it('sends the user message via sendAndWait', async () => {
-    const assistant = new Assistant(makeAgents());
-    await assistant.getResponse('what is the weather?');
-    expect(capturedPrompt).toBe('what is the weather?');
+    expect(mockChat).toHaveBeenCalledTimes(1);
+    const opts = capturedOptions as { tools?: unknown[] };
+    expect(opts.tools).toHaveLength(2);
+    const toolNames = (opts.tools as { function: { name: string } }[]).map(t => t.function.name);
+    expect(toolNames).toContain('Shell');
+    expect(toolNames).toContain('Memory');
   });
 
   it('includes system prompt with agent list and identity', async () => {
@@ -131,66 +101,70 @@ describe('Assistant (Copilot SDK)', () => {
 
     await assistant.getResponse('test');
 
-    const systemMsg = capturedSessionConfig.systemMessage as { mode: string; content: string };
-    expect(systemMsg.mode).toBe('append');
-    expect(systemMsg.content).toContain('TestBot');
-    expect(systemMsg.content).toContain('a test assistant');
-    expect(systemMsg.content).toContain('Shell');
-    expect(systemMsg.content).toContain('Execute shell commands');
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg).toBeDefined();
+    expect(systemMsg!.content).toContain('TestBot');
+    expect(systemMsg!.content).toContain('a test assistant');
+    expect(systemMsg!.content).toContain('Shell');
+    expect(systemMsg!.content).toContain('Execute shell commands');
   });
 
   it('includes memory context in system prompt when provided', async () => {
     const assistant = new Assistant(makeAgents());
     await assistant.getResponse('hi', undefined, 'User prefers dark mode.');
 
-    const systemMsg = capturedSessionConfig.systemMessage as { content: string };
-    expect(systemMsg.content).toContain('User prefers dark mode.');
-    expect(systemMsg.content).toContain('memory_context');
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).toContain('User prefers dark mode.');
+    expect(systemMsg!.content).toContain('memory_context');
   });
 
-  it('tool handler executes agent and returns result', async () => {
+  it('sends user message in the messages array', async () => {
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('what is the weather?');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const userMsg = messages.find(m => m.role === 'user');
+    expect(userMsg).toBeDefined();
+    expect(userMsg!.content).toBe('what is the weather?');
+  });
+
+  it('handles tool-call loop: executes agent and feeds result back', async () => {
     const shell = new StubAgent('Shell', 'Run commands', '{"status":"ok","output":"foo.txt"}');
+
+    // First response: LLM calls the Shell tool
+    // Second response: LLM produces final text
+    mockChatResponses = [
+      {
+        content: null,
+        tool_calls: [{
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'Shell', arguments: '{"query":"ls"}' },
+        }],
+      },
+      { content: 'Here are your files: foo.txt', tool_calls: undefined },
+    ];
+
     const assistant = new Assistant(makeAgents(shell));
+    const result = await assistant.getResponse('list files');
 
-    await assistant.getResponse('list files');
+    expect(result.content).toBe('Here are your files: foo.txt');
+    expect(result.agentLogs).toHaveLength(1);
+    expect(result.agentLogs[0]).toContain('Shell');
+    expect(result.agentLogs[0]).toContain('foo.txt');
+    expect(mockChat).toHaveBeenCalledTimes(2);
 
-    // Get the tool handler that was created via defineTool
-    const tools = capturedSessionConfig.tools as { name: string; handler: (args: unknown) => Promise<unknown> }[];
-    const shellTool = tools.find((t) => t.name === 'Shell')!;
-
-    // Invoke the handler as the SDK would
-    const result = await shellTool.handler({ query: 'ls' });
-    expect(result).toContain('foo.txt');
+    // Verify the tool result was fed back as a tool message
+    const secondCallMessages = mockChat.mock.calls[1][0] as { role: string; content: string; tool_call_id?: string }[];
+    const toolMsg = secondCallMessages.find(m => m.role === 'tool');
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg!.tool_call_id).toBe('call_1');
+    expect(toolMsg!.content).toContain('foo.txt');
   });
 
-  it('tool handler logs agent invocations', async () => {
-    const shell = new StubAgent('Shell', 'Run commands', 'done');
-    const assistant = new Assistant(makeAgents(shell));
-
-    // First call to set up tools
-    const result1 = await assistant.getResponse('run ls');
-
-    // Simulate the SDK calling the tool handler
-    const tools = capturedSessionConfig.tools as { name: string; handler: (args: unknown) => Promise<unknown> }[];
-    const shellTool = tools.find((t) => t.name === 'Shell')!;
-    await shellTool.handler({ query: 'ls' });
-
-    // Get response again to capture the logs from the handler
-    const result2 = await assistant.getResponse('check');
-    // The agent logs from the previous handler call should be in the first response's context
-    // but since we called handler manually after getResponse, check the second call
-    expect(result2.agentLogs).toHaveLength(0); // logs reset per getResponse call
-
-    // Test that logs accumulate within a single getResponse when handler is called
-    const assistant2 = new Assistant(makeAgents(shell));
-    const res = await assistant2.getResponse('test');
-    const tools2 = capturedSessionConfig.tools as { name: string; handler: (args: unknown) => Promise<unknown> }[];
-    await tools2[0].handler({});
-    // Can't check res.agentLogs here since sendAndWait already returned
-    // but the handler DID log — verified by the tool handler test above
-  });
-
-  it('tool handler catches agent errors gracefully', async () => {
+  it('handles agent errors gracefully in tool-call loop', async () => {
     class ErrorAgent extends BasicAgent {
       constructor() {
         super('Broken', {
@@ -204,129 +178,148 @@ describe('Assistant (Copilot SDK)', () => {
       }
     }
 
+    mockChatResponses = [
+      {
+        content: null,
+        tool_calls: [{
+          id: 'call_err',
+          type: 'function',
+          function: { name: 'Broken', arguments: '{}' },
+        }],
+      },
+      { content: 'The agent encountered an error.', tool_calls: undefined },
+    ];
+
     const agents = new Map<string, BasicAgent>();
     agents.set('Broken', new ErrorAgent());
     const assistant = new Assistant(agents);
 
-    await assistant.getResponse('break');
+    const result = await assistant.getResponse('break');
 
-    const tools = capturedSessionConfig.tools as { name: string; handler: (args: unknown) => Promise<unknown> }[];
-    const brokenTool = tools.find((t) => t.name === 'Broken')!;
-    const result = await brokenTool.handler({});
-    expect(result).toContain('Error: Something broke');
+    expect(result.content).toBe('The agent encountered an error.');
+    expect(result.agentLogs[0]).toContain('Error: Something broke');
   });
 
-  it('forwards streaming deltas via onDelta callback', async () => {
-    const assistant = new Assistant(makeAgents());
-
-    const deltas: string[] = [];
-    // Override the mock to trigger the delta handler
-    mockSession.sendAndWait.mockImplementationOnce(async () => {
-      // Simulate the SDK firing delta events
-      const handler = sessionEventHandlers.get('assistant.message_delta');
-      if (handler) {
-        handler({ data: { deltaContent: 'Hello' } });
-        handler({ data: { deltaContent: ' world' } });
-      }
-      return { data: { content: 'Hello world' } };
-    });
-
-    const result = await assistant.getResponse('hi', (delta) => deltas.push(delta));
-
-    expect(deltas).toEqual(['Hello', ' world']);
-    expect(result.content).toBe('Hello world');
-  });
-
-  it('returns non-streaming content from response.data', async () => {
+  it('returns non-streaming content from response', async () => {
     const assistant = new Assistant(makeAgents(), { streaming: false });
-    mockSendResponse = { data: { content: 'Direct response' } };
+    mockChatResponses = [{ content: 'Direct response', tool_calls: undefined }];
 
     const result = await assistant.getResponse('hello');
 
     expect(result.content).toBe('Direct response');
   });
 
-  it('passes model config to session', async () => {
-    const assistant = new Assistant(makeAgents(), { model: 'claude-sonnet-4.5' });
+  it('passes model config to provider.chat', async () => {
+    const assistant = new Assistant(makeAgents(), { model: 'gpt-4o' });
     await assistant.getResponse('hi');
-    expect(capturedSessionConfig.model).toBe('claude-sonnet-4.5');
+    expect((capturedOptions as { model?: string }).model).toBe('gpt-4o');
   });
 
-  it('stop() shuts down the client', async () => {
+  it('stop() clears conversations', async () => {
     const assistant = new Assistant(makeAgents());
-    await assistant.getResponse('hi'); // creates client
+    await assistant.getResponse('hi', undefined, undefined, 'conv-1');
     await assistant.stop();
-    expect(mockClient.stop).toHaveBeenCalledTimes(1);
+    // After stop, a new conversation should start fresh
+    chatCallCount = 0;
+    await assistant.getResponse('hi again', undefined, undefined, 'conv-1');
+    // Should only have system + user (no history from before stop)
+    const messages = capturedMessages as { role: string }[];
+    expect(messages.filter(m => m.role === 'user')).toHaveLength(1);
   });
 
-  // ── Listener cleanup & multi-turn tests ──────────────────────────────────
-
-  it('does not subscribe delta listener when no onDelta callback', async () => {
+  it('maintains multi-turn conversation history', async () => {
     const assistant = new Assistant(makeAgents());
+
+    mockChatResponses = [{ content: 'First reply', tool_calls: undefined }];
+    await assistant.getResponse('message 1', undefined, undefined, 'conv-42');
+
+    chatCallCount = 0;
+    mockChatResponses = [{ content: 'Second reply', tool_calls: undefined }];
+    await assistant.getResponse('message 2', undefined, undefined, 'conv-42');
+
+    // Second call should include history: system, user1, assistant1, user2
+    const messages = capturedMessages as { role: string; content: string }[];
+    expect(messages.filter(m => m.role === 'user')).toHaveLength(2);
+    expect(messages.filter(m => m.role === 'assistant')).toHaveLength(1); // first reply
+    expect(messages[messages.length - 1].content).toBe('message 2');
+  });
+
+  it('different conversation keys have separate history', async () => {
+    const assistant = new Assistant(makeAgents());
+
+    mockChatResponses = [{ content: 'Reply A', tool_calls: undefined }];
+    await assistant.getResponse('msg A', undefined, undefined, 'conv-A');
+
+    chatCallCount = 0;
+    mockChatResponses = [{ content: 'Reply B', tool_calls: undefined }];
+    await assistant.getResponse('msg B', undefined, undefined, 'conv-B');
+
+    // conv-B should only have system + user (no history from conv-A)
+    const messages = capturedMessages as { role: string; content: string }[];
+    const userMsgs = messages.filter(m => m.role === 'user');
+    expect(userMsgs).toHaveLength(1);
+    expect(userMsgs[0].content).toBe('msg B');
+  });
+
+  it('calls onDelta with final content', async () => {
+    const assistant = new Assistant(makeAgents());
+    mockChatResponses = [{ content: 'Hello world', tool_calls: undefined }];
+
+    const deltas: string[] = [];
+    const result = await assistant.getResponse('hi', (delta) => deltas.push(delta));
+
+    expect(result.content).toBe('Hello world');
+    expect(deltas).toEqual(['Hello world']);
+  });
+
+  it('setAgents replaces the agent map', async () => {
+    const assistant = new Assistant(makeAgents());
+    const shell = new StubAgent('Shell', 'Run commands', '{}');
+    assistant.setAgents(makeAgents(shell));
+
     await assistant.getResponse('hi');
 
-    // No listener should be registered when onDelta is not provided
-    expect(unsubscribeCalls).toBe(0);
-    expect(sessionEventHandlers.has('assistant.message_delta')).toBe(false);
+    const opts = capturedOptions as { tools?: unknown[] };
+    expect(opts.tools).toHaveLength(1);
   });
 
-  it('multi-turn conversations do not accumulate duplicate listeners', async () => {
+  it('handles unknown agent in tool call', async () => {
+    mockChatResponses = [
+      {
+        content: null,
+        tool_calls: [{
+          id: 'call_unknown',
+          type: 'function',
+          function: { name: 'NonExistent', arguments: '{}' },
+        }],
+      },
+      { content: 'Agent not found.', tool_calls: undefined },
+    ];
+
     const assistant = new Assistant(makeAgents());
+    const result = await assistant.getResponse('test');
 
-    // Simulate 3 turns in the same conversation
-    const allDeltas: string[] = [];
-    for (let turn = 0; turn < 3; turn++) {
-      mockSession.sendAndWait.mockImplementationOnce(async () => {
-        const handler = sessionEventHandlers.get('assistant.message_delta');
-        if (handler) {
-          handler({ data: { deltaContent: `turn${turn}` } });
-        }
-        return { data: { content: `turn${turn}` } };
-      });
-
-      const result = await assistant.getResponse(
-        `message ${turn}`,
-        (delta) => allDeltas.push(delta),
-        undefined,
-        'conv-1',
-      );
-
-      // Each turn should produce exactly its own content — no duplication
-      expect(result.content).toBe(`turn${turn}`);
-    }
-
-    // Each turn should have unsubscribed its listener
-    expect(unsubscribeCalls).toBe(3);
-    // Each delta should appear exactly once
-    expect(allDeltas).toEqual(['turn0', 'turn1', 'turn2']);
+    expect(result.content).toBe('Agent not found.');
+    expect(result.agentLogs[0]).toContain('Unknown agent: NonExistent');
   });
 
-  it('unsubscribes even when sendAndWait throws (with onDelta)', async () => {
-    const assistant = new Assistant(makeAgents());
-    mockSession.sendAndWait.mockRejectedValueOnce(new Error('network failure'));
+  it('respects maxToolRounds limit', async () => {
+    // Always return tool calls — should stop after maxToolRounds
+    mockChatResponses = Array(15).fill({
+      content: null,
+      tool_calls: [{
+        id: 'call_loop',
+        type: 'function',
+        function: { name: 'Shell', arguments: '{"query":"ls"}' },
+      }],
+    });
 
-    await expect(assistant.getResponse('hi', (d) => {})).rejects.toThrow('network failure');
+    const shell = new StubAgent('Shell', 'Run commands', 'ok');
+    const assistant = new Assistant(makeAgents(shell), { maxToolRounds: 3 });
+    const result = await assistant.getResponse('loop');
 
-    // Listener should still have been cleaned up
-    expect(unsubscribeCalls).toBe(1);
-    expect(sessionEventHandlers.has('assistant.message_delta')).toBe(false);
-  });
-
-  it('resumes existing session for same conversationKey', async () => {
-    const assistant = new Assistant(makeAgents());
-
-    // First turn — creates a new session
-    await assistant.getResponse('hi', undefined, undefined, 'chat-42');
-    expect(mockClient.createSession).toHaveBeenCalledTimes(1);
-    expect(mockClient.resumeSession).not.toHaveBeenCalled();
-
-    // Second turn — should resume the existing session
-    await assistant.getResponse('follow up', undefined, undefined, 'chat-42');
-    expect(mockClient.createSession).toHaveBeenCalledTimes(1); // still 1
-    expect(mockClient.resumeSession).toHaveBeenCalledTimes(1);
-    expect(mockClient.resumeSession).toHaveBeenCalledWith(
-      'mock-session-123',
-      expect.objectContaining({ streaming: true }),
-    );
+    // Should have called chat exactly 3 times (the max)
+    expect(mockChat).toHaveBeenCalledTimes(3);
+    expect(result.content).toContain('ran out of tool-call rounds');
   });
 });

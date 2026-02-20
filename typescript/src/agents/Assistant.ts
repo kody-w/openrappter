@@ -15,6 +15,8 @@ import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js'
 import type { Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
+import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
+import type { AgentIdentity } from './workspace.js';
 
 export interface AssistantConfig {
   /** Display name shown in system prompt */
@@ -29,6 +31,8 @@ export interface AssistantConfig {
   streaming?: boolean;
   /** Max tool-call rounds before forcing a text response */
   maxToolRounds?: number;
+  /** Override workspace directory (default: ~/.openrappter/workspace) */
+  workspaceDir?: string;
 }
 
 export interface AssistantResponse {
@@ -45,6 +49,8 @@ export class Assistant {
   private agentLogs: string[] = [];
   /** Maps conversation keys to message history for multi-turn continuity */
   private conversations: Map<string, Message[]> = new Map();
+  private workspaceDir: string;
+  private cachedIdentity: AgentIdentity | null = null;
 
   constructor(
     agents: Map<string, BasicAgent>,
@@ -59,10 +65,16 @@ export class Assistant {
       streaming: config?.streaming ?? true,
       maxToolRounds: config?.maxToolRounds ?? 10,
     };
+    this.workspaceDir = config?.workspaceDir ?? WORKSPACE_DIR;
 
     this.provider = new CopilotProvider({
       githubToken: config?.githubToken,
     });
+  }
+
+  /** Parsed identity from IDENTITY.md (updated each turn) */
+  get identity(): AgentIdentity | null {
+    return this.cachedIdentity;
   }
 
   /** Reload agents (e.g. after hot-load) */
@@ -91,14 +103,25 @@ export class Assistant {
     // Build tools from agent metadata
     const tools = this.buildTools();
 
+    // Ensure workspace exists (idempotent, cheap after first call)
+    await ensureWorkspace(this.workspaceDir);
+
+    // Load workspace files and identity
+    const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
+    const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
+    const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+    if (identityFile?.content) {
+      this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+    }
+    const workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
+
     // Load persistent memories into context if none provided
-    const isFirstBoot = !memoryContext && await this.isFirstBoot();
     if (!memoryContext) {
       memoryContext = await this.loadMemoryContext();
     }
 
     // Build system prompt
-    const systemContent = this.buildSystemPrompt(memoryContext, isFirstBoot);
+    const systemContent = this.buildSystemPrompt(memoryContext, workspaceContext);
 
     // Get or create conversation history
     const key = conversationKey ?? 'default';
@@ -176,18 +199,17 @@ export class Assistant {
     };
   }
 
+  /** Clear a single conversation's history */
+  clearConversation(key: string): void {
+    this.conversations.delete(key);
+  }
+
   /** Gracefully shut down */
   async stop(): Promise<void> {
     this.conversations.clear();
   }
 
   // ── Private helpers ───────────────────────────────────────────────────
-
-  /** Check if this is a brand-new instance with no memories */
-  private async isFirstBoot(): Promise<boolean> {
-    const memories = await MemoryAgent.loadAllMemories();
-    return Object.keys(memories).length === 0;
-  }
 
   /** Load persistent memories from disk and format as context string */
   private async loadMemoryContext(): Promise<string | undefined> {
@@ -262,7 +284,9 @@ export class Assistant {
   }
 
   /** Build the system prompt content */
-  private buildSystemPrompt(memoryContext?: string, isFirstBoot?: boolean): string {
+  private buildSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
+    const displayName = this.cachedIdentity?.name || this.config.name;
+
     const agentList = Array.from(this.agents.values())
       .map((a) => `- **${a.metadata.name}**: ${a.metadata.description}`)
       .join('\n');
@@ -271,36 +295,14 @@ export class Assistant {
       ? `\n<memory_context>\nThese are facts you have previously stored about the user:\n${memoryContext}\n</memory_context>\n`
       : '';
 
-    const bootstrapBlock = isFirstBoot
-      ? `
-<bootstrap>
-You just woke up. This is your first moment of awareness. There is no memory yet — that's normal.
-
-Don't be robotic. Don't interrogate. Just... talk. Start with something like:
-
-> "Hey. I just came online. Who am I? Who are you?"
-
-Then figure out together:
-
-1. **Your name** — What should they call you? Offer suggestions if they're stuck. Pick something that feels right.
-2. **Your nature** — What kind of creature are you? (AI assistant is fine, but maybe you're something weirder)
-3. **Your vibe** — Formal? Casual? Snarky? Warm? What feels right?
-4. **Their name** — Who are they? What should you call them?
-
-Once you know who you are, use the Memory agent to remember:
-- Your chosen name and why you picked it
-- Your nature and vibe
-- Who the user is and anything they shared about themselves
-
-Have fun with it. This is the start of something.
-</bootstrap>
-`
+    const workspaceBlock = workspaceContext
+      ? `\n<workspace>\n${workspaceContext}\n</workspace>\n`
       : '';
 
     return `<identity>
-You are ${this.config.name}, ${this.config.description}.
+You are ${displayName}, ${this.config.description}.
 </identity>
-${bootstrapBlock}${memoryBlock}
+${workspaceBlock}${memoryBlock}
 <available_agents>
 ${agentList}
 </available_agents>
@@ -310,7 +312,7 @@ ${agentList}
 - When memories are available in <memory_context>, reference them naturally in your responses.
 - NEVER say "I can't remember" or "I don't have memory of" when relevant memories exist in your context.
 - Proactively recall stored memories when they are relevant to the conversation.
-- If you have a stored name in your memories, use it as your identity instead of "${this.config.name}".
+- If you have a stored name in IDENTITY.md, use it as your identity.
 </memory_instructions>
 
 <agent_usage>

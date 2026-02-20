@@ -94,6 +94,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
     model: process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
+    workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
   });
 
   // Set up channel registry — register all channels so they appear in the UI

@@ -1,5 +1,7 @@
 import type { TuiGatewayClient } from './gateway-client.js';
 
+const SESSION_GREETING_PROMPT = 'A new session was started. Greet the user in your configured persona. Be yourself - use your name, vibe, and mood from your identity. Keep it to 1-3 sentences and ask what they want to do. Do not mention internal steps, files, tools, or reasoning.';
+
 export interface SlashCommand {
   name: string;
   description: string;
@@ -26,8 +28,22 @@ export const commands: SlashCommand[] = [
   }},
   { name: 'session', description: 'Switch session', execute: async (args) => `Session: ${args || 'default'}` },
   { name: 'model', description: 'Switch model', execute: async (args) => `Model: ${args || 'default'}` },
-  { name: 'new', description: 'New session', execute: async () => 'New session created' },
-  { name: 'reset', description: 'Reset session', execute: async () => 'Session reset' },
+  { name: 'new', description: 'Start a new session', execute: async (_args, client) => {
+    try {
+      await client.call('chat.send', { message: SESSION_GREETING_PROMPT });
+      return null;
+    } catch (err) {
+      return `Failed: ${(err as Error).message}`;
+    }
+  }},
+  { name: 'reset', description: 'Reset session', execute: async (_args, client) => {
+    try {
+      await client.call('chat.send', { message: SESSION_GREETING_PROMPT });
+      return null;
+    } catch (err) {
+      return `Failed: ${(err as Error).message}`;
+    }
+  }},
   { name: 'abort', description: 'Abort current request', execute: async () => 'Aborted' },
   { name: 'channels', description: 'List and configure channels', execute: async (_args, client) => {
     try {

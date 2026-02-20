@@ -36,6 +36,22 @@ vi.mock('../providers/copilot.js', () => ({
   COPILOT_DEFAULT_MODEL: 'gpt-4.1',
 }));
 
+// ── Mock the workspace module ────────────────────────────────────────────────
+
+let mockWorkspaceFiles: Array<{ name: string; path: string; content?: string; missing: boolean }> = [];
+let mockOnboardingCompleted = false;
+
+vi.mock('./workspace.js', async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    ensureWorkspace: vi.fn(async () => {}),
+    loadWorkspaceFiles: vi.fn(async () => mockWorkspaceFiles),
+    isOnboardingCompleted: vi.fn(async () => mockOnboardingCompleted),
+    WORKSPACE_DIR: '/tmp/test-workspace',
+  };
+});
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 class StubAgent extends BasicAgent {
@@ -75,6 +91,8 @@ describe('Assistant (direct Copilot API)', () => {
     capturedMessages = [];
     capturedOptions = {};
     mockChatResponses = [{ content: 'Hello!', tool_calls: undefined }];
+    mockWorkspaceFiles = [];
+    mockOnboardingCompleted = false;
   });
 
   it('sends messages via CopilotProvider.chat with tools', async () => {
@@ -321,5 +339,81 @@ describe('Assistant (direct Copilot API)', () => {
     // Should have called chat exactly 3 times (the max)
     expect(mockChat).toHaveBeenCalledTimes(3);
     expect(result.content).toContain('ran out of tool-call rounds');
+  });
+
+  // ── Workspace integration tests ──────────────────────────────────────────
+
+  it('system prompt includes workspace context when files exist', async () => {
+    mockWorkspaceFiles = [
+      { name: 'SOUL.md', path: '/tmp/SOUL.md', content: 'Be genuinely helpful.', missing: false },
+      { name: 'IDENTITY.md', path: '/tmp/IDENTITY.md', content: '- **Name:** Luna', missing: false },
+      { name: 'USER.md', path: '/tmp/USER.md', content: '- **Name:** Kody', missing: false },
+    ];
+
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('hi');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).toContain('workspace');
+    expect(systemMsg!.content).toContain('Be genuinely helpful.');
+  });
+
+  it('system prompt includes SOUL.md instruction when present', async () => {
+    mockWorkspaceFiles = [
+      { name: 'SOUL.md', path: '/tmp/SOUL.md', content: 'Soul content here.', missing: false },
+    ];
+
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('test');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).toContain('SOUL.md is your foundation');
+  });
+
+  it('identity name from IDENTITY.md overrides config name in system prompt', async () => {
+    mockWorkspaceFiles = [
+      { name: 'IDENTITY.md', path: '/tmp/IDENTITY.md', content: '- **Name:** Luna', missing: false },
+    ];
+
+    const assistant = new Assistant(makeAgents(), { name: 'openrappter' });
+    await assistant.getResponse('hi');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).toContain('You are Luna');
+    expect(assistant.identity?.name).toBe('Luna');
+  });
+
+  it('bootstrap content excluded when onboarding completed', async () => {
+    mockWorkspaceFiles = [
+      { name: 'SOUL.md', path: '/tmp/SOUL.md', content: 'Soul content.', missing: false },
+      { name: 'BOOTSTRAP.md', path: '/tmp/BOOTSTRAP.md', content: 'Bootstrap instructions.', missing: false },
+    ];
+    mockOnboardingCompleted = true;
+
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('hi');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).not.toContain('Bootstrap instructions.');
+  });
+
+  it('memory context works alongside workspace context', async () => {
+    mockWorkspaceFiles = [
+      { name: 'SOUL.md', path: '/tmp/SOUL.md', content: 'Soul content.', missing: false },
+      { name: 'IDENTITY.md', path: '/tmp/IDENTITY.md', content: '- **Name:** Luna', missing: false },
+    ];
+
+    const assistant = new Assistant(makeAgents());
+    await assistant.getResponse('hi', undefined, 'User likes cats.');
+
+    const messages = capturedMessages as { role: string; content: string }[];
+    const systemMsg = messages.find(m => m.role === 'system');
+    expect(systemMsg!.content).toContain('User likes cats.');
+    expect(systemMsg!.content).toContain('memory_context');
+    expect(systemMsg!.content).toContain('Soul content.');
   });
 });

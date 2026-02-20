@@ -122,7 +122,7 @@ describe('OuroborosAgent Parity', () => {
     it('should insert wordStats method for Gen 1', () => {
       const source = getAgentSource();
       const gen1 = EVOLUTION_CATALOG[0].apply(source, 1);
-      expect(gen1).toContain('wordStats(text: string)');
+      expect(gen1).toContain('wordStats(text)');
       expect(gen1).toContain('word_count');
       expect(gen1).toContain('unique_words');
       expect(gen1).toContain('most_frequent');
@@ -146,11 +146,11 @@ describe('OuroborosAgent Parity', () => {
       // Gen 5 should have all capabilities
       expect(source).toContain('readonly generation = 5');
       expect(source).toContain('class OuroborosGen5Agent');
-      expect(source).toContain('wordStats(text: string)');
-      expect(source).toContain('caesarEncrypt(text: string');
-      expect(source).toContain('caesarDecrypt(text: string');
-      expect(source).toContain('detectPatterns(text: string)');
-      expect(source).toContain('analyzeSentiment(text: string)');
+      expect(source).toContain('wordStats(text)');
+      expect(source).toContain('caesarEncrypt(text,');
+      expect(source).toContain('caesarDecrypt(text,');
+      expect(source).toContain('detectPatterns(text)');
+      expect(source).toContain('analyzeSentiment(text)');
       expect(source).toContain('reflectOnEvolution()');
     });
 
@@ -241,8 +241,10 @@ describe('OuroborosAgent Parity', () => {
 
     it('should have created all 5 generation files', () => {
       for (let g = 1; g <= 5; g++) {
-        const genPath = join(workDir, `OuroborosGen${g}Agent.ts`);
-        expect(existsSync(genPath)).toBe(true);
+        // In test (vitest) mode, files are .ts; in compiled mode, .mjs
+        const tsPath = join(workDir, `OuroborosGen${g}Agent.ts`);
+        const mjsPath = join(workDir, `OuroborosGen${g}Agent.mjs`);
+        expect(existsSync(tsPath) || existsSync(mjsPath)).toBe(true);
       }
     });
 

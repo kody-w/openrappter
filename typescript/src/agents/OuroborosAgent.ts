@@ -22,7 +22,10 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 // Absolute path to BasicAgent — computed in Gen 0, frozen as literal in generated files
-const BASIC_AGENT_PATH = fileURLToPath(new URL('./BasicAgent.ts', import.meta.url));
+// Resolve .js (compiled dist/) or .ts (dev tsx) — same pattern as selfPath below
+const _baJs = fileURLToPath(new URL('./BasicAgent.js', import.meta.url));
+const _baTs = fileURLToPath(new URL('./BasicAgent.ts', import.meta.url));
+const BASIC_AGENT_PATH = existsSync(_baJs) ? _baJs : _baTs;
 
 // ── Evolution Catalog ───────────────────────────────────────────────
 // Each entry adds a new capability via string splicing on the source.
@@ -40,9 +43,9 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     description: 'Adds wordStats() — word count, unique words, avg length, most frequent',
     apply: (source, nextGen) => {
       const method = `
-  wordStats(text: string): Record<string, unknown> {
+  wordStats(text) {
     const words = text.toLowerCase().match(/\\b[a-z]+\\b/g) ?? [];
-    const freq: Record<string, number> = {};
+    const freq = {};
     for (const w of words) freq[w] = (freq[w] ?? 0) + 1;
     const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     const avgLen = words.length ? words.reduce((s, w) => s + w.length, 0) / words.length : 0;
@@ -64,14 +67,14 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     description: 'Adds caesarEncrypt()/caesarDecrypt() — ROT13 encode/decode',
     apply: (source, nextGen) => {
       const method = `
-  caesarEncrypt(text: string, shift: number = 13): string {
+  caesarEncrypt(text, shift = 13) {
     return text.replace(/[a-zA-Z]/g, (ch) => {
       const base = ch >= 'a' ? 97 : 65;
       return String.fromCharCode(((ch.charCodeAt(0) - base + shift) % 26) + base);
     });
   }
 
-  caesarDecrypt(text: string, shift: number = 13): string {
+  caesarDecrypt(text, shift = 13) {
     return this.caesarEncrypt(text, 26 - shift);
   }`;
       const capability = `    const encrypted = this.caesarEncrypt(inputText);
@@ -86,7 +89,7 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     description: 'Adds detectPatterns() — finds emails, URLs, numbers, dates via regex',
     apply: (source, nextGen) => {
       const method = `
-  detectPatterns(text: string): Record<string, string[]> {
+  detectPatterns(text) {
     return {
       emails: text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g) ?? [],
       urls: text.match(/https?:\\/\\/[^\\s)]+/g) ?? [],
@@ -105,7 +108,7 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     description: 'Adds analyzeSentiment() — positive/negative word scoring (-1 to 1)',
     apply: (source, nextGen) => {
       const method = `
-  analyzeSentiment(text: string): { score: number; label: string; positive: string[]; negative: string[] } {
+  analyzeSentiment(text) {
     const positiveWords = ['good','great','excellent','amazing','wonderful','fantastic','love','happy','best','brilliant','perfect','beautiful','awesome'];
     const negativeWords = ['bad','terrible','awful','horrible','worst','hate','ugly','stupid','boring','poor','broken','fail','error'];
     const words = text.toLowerCase().match(/\\b[a-z]+\\b/g) ?? [];
@@ -127,7 +130,7 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     description: 'Adds reflectOnEvolution() — inspects own capabilities and produces identity summary',
     apply: (source, nextGen) => {
       const method = `
-  reflectOnEvolution(): Record<string, unknown> {
+  reflectOnEvolution() {
     const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(this))
       .filter(m => m !== 'constructor' && !m.startsWith('_'));
     return {
@@ -152,10 +155,10 @@ function spliceEvolution(
   newMethod: string,
   capabilityCall: string,
 ): string {
-  // 1. Update generation number
+  // 1. Bump the generation class field (handles TS `readonly` and compiled JS forms)
   let result = source.replace(
-    /readonly generation = \d+/,
-    `readonly generation = ${nextGen}`,
+    /^(\s*(?:readonly )?)generation = \d+/m,
+    `$1generation = ${nextGen}`,
   );
 
   // 2. Rename class globally
@@ -252,10 +255,11 @@ export class OuroborosAgent extends BasicAgent {
     }
 
     // Read own source
-    // In compiled dist/, the file is .js; in dev (tsx), it's .ts
+    // Resolve self: .mjs (generated evolution), .js (compiled dist/), or .ts (dev tsx)
+    const mjsPath = fileURLToPath(new URL('./OuroborosAgent.mjs', import.meta.url));
     const jsPath = fileURLToPath(new URL('./OuroborosAgent.js', import.meta.url));
     const tsPath = fileURLToPath(new URL('./OuroborosAgent.ts', import.meta.url));
-    const selfPath = existsSync(jsPath) ? jsPath : tsPath;
+    const selfPath = existsSync(mjsPath) ? mjsPath : existsSync(jsPath) ? jsPath : tsPath;
     const selfSource = readFileSync(selfPath, 'utf-8');
     this.evolutionLog.push(
       `Gen ${this.generation}: reading own source (${selfSource.split('\n').length} lines)`,
@@ -266,7 +270,9 @@ export class OuroborosAgent extends BasicAgent {
     const entry = EVOLUTION_CATALOG[nextGen - 1];
     const nextSource = entry.apply(selfSource, nextGen);
     const nextName = `OuroborosGen${nextGen}Agent`;
-    const nextPath = join(this.workDir, `${nextName}.ts`);
+    // Use same extension as source: .ts in dev/test (vitest), .mjs for compiled .js
+    const ext = selfPath.endsWith('.ts') ? '.ts' : '.mjs';
+    const nextPath = join(this.workDir, `${nextName}${ext}`);
 
     // Fix imports for tmpdir and write the evolved source
     const fixedSource = fixImports(nextSource);
@@ -293,7 +299,8 @@ export class OuroborosAgent extends BasicAgent {
       }
 
       // Diff Gen 0 vs Gen 5
-      const gen5Path = join(this.workDir, 'OuroborosGen5Agent.ts');
+      const gen5Ext = selfPath.endsWith('.ts') ? '.ts' : '.mjs';
+      const gen5Path = join(this.workDir, `OuroborosGen5Agent${gen5Ext}`);
       let diff = '';
       let gen5Lines = 0;
       if (existsSync(gen5Path)) {

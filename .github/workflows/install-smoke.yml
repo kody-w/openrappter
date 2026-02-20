@@ -50,8 +50,15 @@ jobs:
     needs: [unit-tests, shellcheck]
     steps:
       - uses: actions/checkout@v4
-      - name: Copy install.sh to Docker context
-        run: cp install.sh tests/install/docker/smoke/install.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build npm tarball
+        run: cd typescript && npm install --no-fund --no-audit && npm run build && npm pack
+      - name: Copy artifacts to Docker context
+        run: |
+          cp install.sh tests/install/docker/smoke/install.sh
+          cp typescript/openrappter-*.tgz tests/install/docker/smoke/
       - name: Build and run smoke test
         run: docker build --no-cache -t openrappter-test-smoke tests/install/docker/smoke/
 

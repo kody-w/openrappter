@@ -8,7 +8,7 @@
  *   GITHUB_TOKEN → Copilot API token (cached) → OpenAI-compatible API
  */
 
-import type { LLMProvider, Message, ChatOptions, ProviderResponse, Tool, ToolCall } from './types.js';
+import type { LLMProvider, Message, ChatOptions, ProviderResponse, Tool, ToolCall, StreamDelta } from './types.js';
 import {
   resolveCopilotApiToken,
   DEFAULT_COPILOT_API_BASE_URL,
@@ -64,6 +64,26 @@ interface OpenAIChatResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+}
+
+// ── SSE Stream Parser ────────────────────────────────────────────────────────
+
+export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for await (const chunk of body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(':')) continue;
+      if (trimmed === 'data: [DONE]') return;
+      if (trimmed.startsWith('data: ')) {
+        yield JSON.parse(trimmed.slice(6));
+      }
+    }
+  }
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -181,6 +201,96 @@ export class CopilotProvider implements LLMProvider {
         ? { input_tokens: data.usage.prompt_tokens, output_tokens: data.usage.completion_tokens }
         : undefined,
     };
+  }
+
+  async *chatStream(messages: Message[], options?: ChatOptions): AsyncGenerator<StreamDelta> {
+    const { token, baseUrl } = await this.ensureToken();
+    const model = options?.model ?? COPILOT_DEFAULT_MODEL;
+
+    const openaiMessages: OpenAIMessage[] = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      tool_calls: m.tool_calls as OpenAIToolCall[] | undefined,
+      tool_call_id: m.tool_call_id,
+    }));
+
+    const body: Record<string, unknown> = {
+      model,
+      messages: openaiMessages,
+      stream: true,
+    };
+
+    if (options?.tools && options.tools.length > 0) {
+      body.tools = options.tools.map((t: Tool): OpenAITool => ({
+        type: 'function',
+        function: {
+          name: t.function.name,
+          description: t.function.description,
+          parameters: t.function.parameters,
+        },
+      }));
+    }
+
+    if (options?.temperature != null) body.temperature = options.temperature;
+    if (options?.max_tokens != null) body.max_tokens = options.max_tokens;
+
+    const url = `${baseUrl}/chat/completions`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'text/event-stream',
+        'Editor-Version': 'vscode/1.96.2',
+        'User-Agent': 'GitHubCopilotChat/0.26.7',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ''}`);
+    }
+
+    if (!res.body) {
+      throw new Error('Copilot API returned no response body');
+    }
+
+    let lastFinishReason: string | undefined;
+
+    for await (const event of parseSSEStream(res.body)) {
+      const choices = event.choices as Array<{
+        delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> };
+        finish_reason?: string;
+      }> | undefined;
+
+      const choice = choices?.[0];
+      if (!choice) continue;
+
+      if (choice.finish_reason) {
+        lastFinishReason = choice.finish_reason;
+      }
+
+      const delta = choice.delta;
+      if (!delta) continue;
+
+      // Skip role-only deltas (first chunk is often just { role: 'assistant' })
+      if (!delta.content && !delta.tool_calls) continue;
+
+      yield {
+        content: delta.content ?? undefined,
+        tool_calls: delta.tool_calls?.map(tc => ({
+          index: tc.index,
+          id: tc.id,
+          type: tc.type as 'function' | undefined,
+          function: tc.function ? { name: tc.function.name, arguments: tc.function.arguments } : undefined,
+        })),
+        done: false,
+      };
+    }
+
+    yield { done: true, finish_reason: lastFinishReason };
   }
 
   async isAvailable(): Promise<boolean> {

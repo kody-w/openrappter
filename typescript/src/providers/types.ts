@@ -44,6 +44,18 @@ export interface ChatOptions {
   stream?: boolean;
 }
 
+export interface StreamDelta {
+  content?: string;
+  tool_calls?: Array<{
+    index: number;
+    id?: string;
+    type?: 'function';
+    function?: { name?: string; arguments?: string };
+  }>;
+  done: boolean;
+  finish_reason?: string;
+}
+
 export interface EmbeddingOptions {
   model?: string;
   dimensions?: number;

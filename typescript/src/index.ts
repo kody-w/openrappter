@@ -236,7 +236,6 @@ program
   .option('-s, --status', 'Show status')
   .option('-l, --list-agents', 'List available agents')
   .option('--exec <agent>', 'Execute a specific agent')
-  .option('--repl', 'Use simple readline chat instead of TUI')
   .option('--web', 'Open web UI in browser')
   .action(async (message, options) => {
     await ensureHomeDir();
@@ -327,32 +326,8 @@ program
       return;
     }
 
-    // Interactive mode — TUI by default, --repl for old readline REPL
-    if (options.repl) {
-      await interactiveMode();
-      return;
-    }
-
-    // Launch gateway in-process (silent) then start TUI
-    let port: number;
-    try {
-      const gw = await startGatewayInProcess({ silent: true });
-      port = gw.port;
-    } catch {
-      // Port likely in use — try connecting to existing gateway with health check
-      port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
-      try {
-        const healthResp = await fetch(`http://127.0.0.1:${port}/health`);
-        if (!healthResp.ok) throw new Error(`Health check returned ${healthResp.status}`);
-      } catch {
-        console.error(`Could not start or connect to gateway on port ${port}`);
-        console.error(`  Try: openrappter --daemon  (to start the gateway manually)`);
-        console.error(`  Or:  openrappter --repl    (for simple chat without gateway)`);
-        process.exit(1);
-      }
-    }
-    const { startTUI } = await import('./tui/index.js');
-    await startTUI({ port, token: process.env.OPENRAPPTER_TOKEN });
+    // Interactive mode — drop straight into streaming chat
+    await interactiveMode();
   });
 
 // Onboard command
@@ -658,88 +633,22 @@ async function statusCommand(): Promise<void> {
   console.log('');
 }
 
-// Interactive mode
+// Interactive mode — direct-API chat with streaming (no gateway needed)
 async function interactiveMode(): Promise<void> {
-  const hasCopilot = await hasCopilotAvailable();
-  const agents = await registry.listAgents();
+  const agents = await registry.getAllAgents();
+  const githubToken = await resolveGithubToken();
 
-  if (hasCopilot) {
-    console.log(chalk.dim('Using Copilot API (direct token exchange)...\n'));
-  }
-
-  console.log(`${EMOJI} ${NAME} v${VERSION} Chat`);
-  console.log('─'.repeat(40));
-  console.log(`Copilot: ${hasCopilot ? '✅ Available' : '❌ No GitHub token'}`);
-  console.log(`Agents: ${agents.length} loaded`);
-  console.log('Type /help for commands, /quit to exit\n');
-
-  const readline = await import('readline');
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
+  const { Assistant } = await import('./agents/Assistant.js');
+  const assistant = new Assistant(agents, {
+    name: NAME,
+    description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
+    model: process.env.OPENRAPPTER_MODEL,
+    githubToken: githubToken ?? undefined,
+    workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
   });
 
-  const prompt = (): void => {
-    rl.question(`${EMOJI} You: `, async (input) => {
-      const trimmed = input.trim();
-
-      if (!trimmed) {
-        prompt();
-        return;
-      }
-
-      if (trimmed === '/quit' || trimmed === '/exit') {
-        console.log(`\nGoodbye! ${EMOJI}\n`);
-        rl.close();
-        return;
-      }
-
-      if (trimmed === '/help') {
-        console.log(`
-${EMOJI} ${NAME} Commands:
-
-  /help    - Show this help
-  /status  - Show status
-  /agents  - List available agents
-  /quit    - Exit
-`);
-        prompt();
-        return;
-      }
-
-      if (trimmed === '/status') {
-        await statusCommand();
-        prompt();
-        return;
-      }
-
-      if (trimmed === '/agents') {
-        const agentList = await registry.listAgents();
-        for (const agent of agentList) {
-          console.log(`  • ${agent.name}: ${agent.description.slice(0, 50)}...`);
-        }
-        console.log();
-        prompt();
-        return;
-      }
-
-      const s = spinner();
-      s.start('Thinking...');
-
-      try {
-        const response = await chat(trimmed, registry);
-        s.stop('');
-        displayResult(response);
-      } catch (error) {
-        s.stop('');
-        console.log(`\n${EMOJI} ${NAME}: Sorry, I encountered an error.\n`);
-      }
-
-      prompt();
-    });
-  };
-
-  prompt();
+  const { startInteractiveChat } = await import('./tui/interactive.js');
+  await startInteractiveChat({ assistant, emoji: EMOJI, name: NAME, version: VERSION });
 }
 
 program.parse();

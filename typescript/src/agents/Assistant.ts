@@ -12,7 +12,7 @@
  */
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
-import type { Message, Tool, ToolCall } from '../providers/types.js';
+import type { Message, Tool, ToolCall, StreamDelta } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
@@ -197,6 +197,141 @@ export class Assistant {
       content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
       agentLogs: [...this.agentLogs],
     };
+  }
+
+  /**
+   * Streaming entry point — send a message and stream deltas in real-time.
+   *
+   * Falls back to getResponse() if the provider doesn't support streaming.
+   */
+  async getResponseStreaming(
+    message: string,
+    onDelta: (text: string) => void,
+    conversationKey?: string,
+  ): Promise<AssistantResponse> {
+    // Fall back to non-streaming if provider doesn't support chatStream
+    if (!this.hasStreamSupport()) {
+      return this.getResponse(message, onDelta, undefined, conversationKey);
+    }
+
+    this.agentLogs = [];
+
+    const tools = this.buildTools();
+
+    await ensureWorkspace(this.workspaceDir);
+    const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
+    const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
+    const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+    if (identityFile?.content) {
+      this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+    }
+    const workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
+
+    const memoryContext = await this.loadMemoryContext();
+    const systemContent = this.buildSystemPrompt(memoryContext, workspaceContext);
+
+    const key = conversationKey ?? 'default';
+    let history = this.conversations.get(key);
+    if (!history) {
+      history = [{ role: 'system', content: systemContent }];
+      this.conversations.set(key, history);
+    } else {
+      history[0] = { role: 'system', content: systemContent };
+    }
+
+    history.push({ role: 'user', content: message });
+
+    let rounds = 0;
+    const maxRounds = this.config.maxToolRounds ?? 10;
+
+    while (rounds < maxRounds) {
+      rounds++;
+
+      let fullContent = '';
+      const toolCallAccumulator = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
+      let finishReason: string | undefined;
+
+      for await (const delta of this.provider.chatStream(history, {
+        model: this.config.model,
+        tools: tools.length > 0 ? tools : undefined,
+      })) {
+        if (delta.done) {
+          finishReason = delta.finish_reason;
+          break;
+        }
+
+        if (delta.content) {
+          fullContent += delta.content;
+          onDelta(delta.content);
+        }
+
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const existing = toolCallAccumulator.get(tc.index);
+            if (!existing) {
+              toolCallAccumulator.set(tc.index, {
+                id: tc.id ?? '',
+                type: 'function',
+                function: {
+                  name: tc.function?.name ?? '',
+                  arguments: tc.function?.arguments ?? '',
+                },
+              });
+            } else {
+              if (tc.id) existing.id = tc.id;
+              if (tc.function?.name) existing.function.name += tc.function.name;
+              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+            }
+          }
+        }
+      }
+
+      const assembledToolCalls = Array.from(toolCallAccumulator.values());
+
+      if (assembledToolCalls.length > 0) {
+        history.push({
+          role: 'assistant',
+          content: fullContent || '',
+          tool_calls: assembledToolCalls,
+        });
+
+        for (const tc of assembledToolCalls) {
+          const result = await this.executeToolCall(tc);
+          history.push({
+            role: 'tool',
+            content: result,
+            tool_call_id: tc.id,
+          });
+        }
+
+        continue;
+      }
+
+      // No tool calls — final text response
+      history.push({ role: 'assistant', content: fullContent });
+
+      if (history.length > 42) {
+        const system = history[0];
+        history = [system, ...history.slice(-40)];
+        this.conversations.set(key, history);
+      }
+
+      return {
+        content: fullContent,
+        agentLogs: [...this.agentLogs],
+      };
+    }
+
+    const lastAssistant = history.filter(m => m.role === 'assistant').pop();
+    return {
+      content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
+      agentLogs: [...this.agentLogs],
+    };
+  }
+
+  /** Check if the provider supports streaming */
+  private hasStreamSupport(): boolean {
+    return typeof (this.provider as any).chatStream === 'function';
   }
 
   /** Clear a single conversation's history */

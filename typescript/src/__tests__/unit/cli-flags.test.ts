@@ -13,8 +13,8 @@ describe('CLI flags', () => {
     indexSource = await fs.readFile(path.join(srcRoot, 'index.ts'), 'utf-8');
   });
 
-  it('should have --repl flag in commander config', () => {
-    expect(indexSource).toContain("--repl");
+  it('should have --web flag in commander config', () => {
+    expect(indexSource).toContain("--web");
   });
 
   it('should have --daemon flag in commander config', () => {

@@ -112,6 +112,16 @@ describe('OuroborosAgent Parity', () => {
       expect(gen1).not.toMatch(/readonly generation = 0/);
     });
 
+    it('should update generation number in compiled JS (no readonly keyword)', () => {
+      // Simulate compiled JS where TypeScript strips `readonly`
+      const compiledSource = getAgentSource().replace(/readonly generation = 0/, 'generation = 0');
+      const gen1 = EVOLUTION_CATALOG[0].apply(compiledSource, 1);
+      // The class field should be bumped to 1
+      expect(gen1).toMatch(/^\s*generation = 1/m);
+      // Should not contain the original value
+      expect(gen1).not.toMatch(/^\s*generation = 0/m);
+    });
+
     it('should rename class from OuroborosAgent to OuroborosGen1Agent', () => {
       const source = getAgentSource();
       const gen1 = EVOLUTION_CATALOG[0].apply(source, 1);

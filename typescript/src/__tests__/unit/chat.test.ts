@@ -72,6 +72,54 @@ describe('matchAndExecuteAgent', () => {
     const result = await matchAndExecuteAgent('hello world', new Map());
     expect(result).toBeNull();
   });
+
+  it('should not match agents when only stop words overlap with description', async () => {
+    // "work", "today", "things", "focus" are all stop words — should NOT trigger
+    const serviceAgent = createMockAgent('Service', 'work on things today with focus and help');
+    agents.set('Service', serviceAgent);
+
+    const result = await matchAndExecuteAgent('What should I work on today?', agents);
+    expect(result).toBeNull();
+  });
+
+  it('should require at least 2 meaningful keyword matches for description routing', async () => {
+    const infraAgent = createMockAgent('Infra', 'deploy applications to production servers');
+    agents.set('Infra', infraAgent);
+
+    // Single meaningful word match (only "production") — should NOT route
+    // "check" is a stop word, "on" is too short, only "production" matches
+    const result1 = await matchAndExecuteAgent('check status on production', agents);
+    expect(result1).toBeNull();
+
+    // Two meaningful word matches ("deploy" + "applications") — SHOULD route
+    const result2 = await matchAndExecuteAgent('deploy applications immediately', agents);
+    expect(result2).not.toBeNull();
+    expect(infraAgent.execute).toHaveBeenCalled();
+  });
+
+  it('should prioritize direct agent name mention (score 3) over description matches', async () => {
+    const weatherAgent = createMockAgent('Weather', 'fetch weather forecast data');
+    const forecastAgent = createMockAgent('Forecast', 'daily weather forecast predictions');
+    agents.set('Weather', weatherAgent);
+    agents.set('Forecast', forecastAgent);
+
+    // Direct name mention "weather" should beat description matches
+    const result = await matchAndExecuteAgent('weather report please', agents);
+    expect(result).not.toBeNull();
+    expect(weatherAgent.execute).toHaveBeenCalled();
+    expect(forecastAgent.execute).not.toHaveBeenCalled();
+  });
+
+  it('should not hijack conversational messages with common words', async () => {
+    // These are real-world messages that were incorrectly routed before the fix
+    const webAgent = createMockAgent('Web', 'Fetch web pages and search the web');
+    agents.set('Web', webAgent);
+
+    // "What should I work on today?" was matching Web agent via "work"
+    expect(await matchAndExecuteAgent('What should I work on today?', agents)).toBeNull();
+    expect(await matchAndExecuteAgent('How are things going?', agents)).toBeNull();
+    expect(await matchAndExecuteAgent('Tell me something interesting', agents)).toBeNull();
+  });
 });
 
 describe('chat auto-auth', () => {

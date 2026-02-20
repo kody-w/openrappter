@@ -147,6 +147,44 @@ describe('copilot-token', () => {
       ).rejects.toThrow('does not have Copilot API access (HTTP 401)');
     });
 
+    it('should throw on HTTP 403 error', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'err403.json');
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        text: () => Promise.resolve('Forbidden'),
+      });
+
+      await expect(
+        resolveCopilotApiToken({
+          githubToken: 'bad-token',
+          cachePath,
+          fetchImpl: mockFetch as unknown as typeof fetch,
+        }),
+      ).rejects.toThrow('does not have Copilot API access (HTTP 403)');
+    });
+
+    it('should throw on HTTP 404 error', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'err404.json');
+
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: () => Promise.resolve('Not Found'),
+      });
+
+      await expect(
+        resolveCopilotApiToken({
+          githubToken: 'bad-token',
+          cachePath,
+          fetchImpl: mockFetch as unknown as typeof fetch,
+        }),
+      ).rejects.toThrow('does not have Copilot API access (HTTP 404)');
+    });
+
     it('should throw on missing token in response', async () => {
       const { resolveCopilotApiToken } = await import('../copilot-token.js');
       const cachePath = path.join(tmpDir, 'bad-resp.json');

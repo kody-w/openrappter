@@ -66,6 +66,9 @@ assert_executable() {
 export OPENRAPPTER_INSTALL_SH_NO_RUN=1
 source "$INSTALL_SCRIPT"
 
+# Pre-load script content for content assertion tests
+script_content="$(cat "$INSTALL_SCRIPT")"
+
 # ── Test Suite ──────────────────────────────────────────────
 printf "\n\033[1m🧪 openrappter install.sh tests\033[0m\n\n"
 
@@ -232,13 +235,13 @@ fi
 # ── Stages ──
 printf "\n\033[1m▸ Stage system\033[0m\n"
 
-assert_eq "$INSTALL_STAGE_TOTAL" "3" "INSTALL_STAGE_TOTAL is 3"
+assert_eq "$INSTALL_STAGE_TOTAL" "4" "INSTALL_STAGE_TOTAL is 4"
 
 INSTALL_STAGE_CURRENT=0
 ((TESTS_RUN++)) || true
 ui_stage_output="$(ui_stage "Test Stage" 2>&1)"
-if echo "$ui_stage_output" | grep -q "1/3"; then
-  pass "ui_stage shows [1/3] counter"
+if echo "$ui_stage_output" | grep -q "1/4"; then
+  pass "ui_stage shows [1/4] counter"
 else
   fail "ui_stage missing counter"
 fi
@@ -282,7 +285,6 @@ assert_contains "$INSTALL_DIR" ".openrappter" "INSTALL_DIR is in home directory"
 # ── Script Content Checks ──
 printf "\n\033[1m▸ Script content\033[0m\n"
 
-script_content="$(cat "$INSTALL_SCRIPT")"
 assert_contains "$script_content" "set -euo pipefail" "script uses strict mode"
 assert_contains "$script_content" "curl -fsSL" "script documents curl usage"
 assert_contains "$script_content" "nvm" "script handles nvm installation"
@@ -377,6 +379,114 @@ assert_eq "$INSTALL_DIR" "/tmp/test-install" "parse_args sets INSTALL_DIR with -
 
 # Reset
 INSTALL_DIR="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
+
+# New flags
+INSTALL_METHOD=""
+parse_args --method npm
+assert_eq "$INSTALL_METHOD" "npm" "parse_args sets INSTALL_METHOD with --method npm"
+
+INSTALL_METHOD=""
+parse_args --method git
+assert_eq "$INSTALL_METHOD" "git" "parse_args sets INSTALL_METHOD with --method git"
+
+OPT_NO_PROMPT=false
+parse_args --no-prompt
+assert_eq "$OPT_NO_PROMPT" "true" "parse_args sets OPT_NO_PROMPT with --no-prompt"
+
+OPT_SET_NPM_PREFIX=false
+parse_args --set-npm-prefix
+assert_eq "$OPT_SET_NPM_PREFIX" "true" "parse_args sets OPT_SET_NPM_PREFIX with --set-npm-prefix"
+
+# Reset
+INSTALL_METHOD=""
+OPT_NO_PROMPT=false
+OPT_SET_NPM_PREFIX=false
+
+# ── Install Method Detection ──
+printf "\n\033[1m▸ Install method detection\033[0m\n"
+
+# detect_existing_install should return "none" on a fresh system (no global npm, no git clone)
+((TESTS_RUN++)) || true
+existing="$(detect_existing_install)"
+if [[ "$existing" == "none" || "$existing" == "npm" || "$existing" == "git" ]]; then
+  pass "detect_existing_install returns valid value: $existing"
+else
+  fail "detect_existing_install returned unexpected: $existing"
+fi
+
+# choose_install_method with --method flag preset
+INSTALL_METHOD="npm"
+choose_install_method 2>/dev/null || true
+assert_eq "$INSTALL_METHOD" "npm" "choose_install_method respects --method npm"
+
+INSTALL_METHOD="git"
+choose_install_method 2>/dev/null || true
+assert_eq "$INSTALL_METHOD" "git" "choose_install_method respects --method git"
+
+# choose_install_method with no method and --no-prompt matches existing or defaults to npm
+INSTALL_METHOD=""
+OPT_NO_PROMPT=true
+choose_install_method 2>/dev/null || true
+((TESTS_RUN++)) || true
+if [[ "$INSTALL_METHOD" == "npm" || "$INSTALL_METHOD" == "git" ]]; then
+  pass "choose_install_method picks a valid method with --no-prompt: $INSTALL_METHOD"
+else
+  fail "choose_install_method returned unexpected: $INSTALL_METHOD"
+fi
+
+# Reset
+INSTALL_METHOD=""
+OPT_NO_PROMPT=false
+
+# ── npm Conflict Resolution ──
+printf "\n\033[1m▸ npm conflict resolution\033[0m\n"
+
+# resolve_npm_conflicts should handle missing/stale files gracefully
+# Use a temp bin dir to avoid modifying real files
+saved_get_bin_dir="$(type get_bin_dir | tail -n +2)"
+get_bin_dir() { echo "$TEMP_BIN"; }
+
+INSTALL_METHOD="npm"
+((TESTS_RUN++)) || true
+if resolve_npm_conflicts 2>/dev/null; then
+  pass "resolve_npm_conflicts handles missing files gracefully (npm method)"
+else
+  fail "resolve_npm_conflicts failed for npm method"
+fi
+
+INSTALL_METHOD="git"
+((TESTS_RUN++)) || true
+if resolve_npm_conflicts 2>/dev/null; then
+  pass "resolve_npm_conflicts handles missing files gracefully (git method)"
+else
+  fail "resolve_npm_conflicts failed for git method"
+fi
+
+# Restore original get_bin_dir
+eval "$saved_get_bin_dir"
+
+# Reset
+INSTALL_METHOD=""
+
+# ── New Script Content Checks ──
+printf "\n\033[1m▸ New script content (npm method)\033[0m\n"
+
+assert_contains "$script_content" "install_via_npm" "script has npm install function"
+assert_contains "$script_content" "install_via_git" "script has git install function (extracted)"
+assert_contains "$script_content" "detect_existing_install" "script has install detection"
+assert_contains "$script_content" "choose_install_method" "script has method chooser"
+assert_contains "$script_content" "ensure_build_tools" "script has build tool detection"
+assert_contains "$script_content" "resolve_npm_conflicts" "script has conflict resolution"
+assert_contains "$script_content" "detect_and_restart_gateway" "script has gateway restart"
+assert_contains "$script_content" "run_doctor_if_available" "script has doctor/migration"
+assert_contains "$script_content" "--method" "script supports --method flag"
+assert_contains "$script_content" "--no-prompt" "script supports --no-prompt flag"
+assert_contains "$script_content" "--set-npm-prefix" "script supports --set-npm-prefix flag"
+assert_contains "$script_content" "SHARP_IGNORE_GLOBAL_LIBVIPS" "script sets SHARP_IGNORE_GLOBAL_LIBVIPS"
+assert_contains "$script_content" "OPENRAPPTER_INSTALL_METHOD" "script supports OPENRAPPTER_INSTALL_METHOD env"
+assert_contains "$script_content" "OPENRAPPTER_VERSION" "script supports OPENRAPPTER_VERSION env"
+assert_contains "$script_content" "OPENRAPPTER_BETA" "script supports OPENRAPPTER_BETA env"
+assert_contains "$script_content" "NPM_PACKAGE" "script defines NPM_PACKAGE"
 
 # ── PATH helpers ──
 printf "\n\033[1m▸ PATH helpers\033[0m\n"

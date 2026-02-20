@@ -4,6 +4,9 @@ set -euo pipefail
 # OpenRappter Installer for macOS and Linux
 # Usage: curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
 
+# Prevent sharp from trying to download global libvips (causes build failures in CI/Docker)
+export SHARP_IGNORE_GLOBAL_LIBVIPS=1
+
 BOLD='\033[1m'
 ACCENT='\033[38;2;16;185;129m'       # green-bright  #10b981
 # shellcheck disable=SC2034
@@ -288,7 +291,7 @@ detect_arch() {
     case "$(uname -m 2>/dev/null || true)" in
         x86_64|amd64) echo "x64" ;;
         arm64|aarch64) echo "arm64" ;;
-        *) echo "$(uname -m)" ;;
+        *) uname -m ;;
     esac
 }
 
@@ -330,7 +333,7 @@ ui_error() {
     fi
 }
 
-INSTALL_STAGE_TOTAL=3
+INSTALL_STAGE_TOTAL=4
 INSTALL_STAGE_CURRENT=0
 
 ui_section() {
@@ -433,7 +436,10 @@ run_quiet_step() {
 show_install_plan() {
     ui_section "Install plan"
     ui_kv "OS" "$OS"
-    ui_kv "Install directory" "$INSTALL_DIR"
+    ui_kv "Method" "${INSTALL_METHOD:-auto}"
+    if [[ "$INSTALL_METHOD" == "git" ]]; then
+        ui_kv "Install directory" "$INSTALL_DIR"
+    fi
     ui_kv "Node.js minimum" "v${MIN_NODE}+"
     ui_kv "Python" "optional (3.${MIN_PYTHON_MINOR}+)"
     if [[ "${OPT_NO_COPILOT:-false}" == "true" ]]; then
@@ -493,6 +499,18 @@ TAGLINES+=("Shell yeah — I'm here to automate the toil and leave you the glory
 TAGLINES+=("The raptor has entered the chat. Your workflow will never be the same.")
 TAGLINES+=("Local-first AI that actually remembers things. Revolutionary, we know.")
 TAGLINES+=("pip install was so last season. curl | bash is the new hotness.")
+TAGLINES+=("npm install -g openrappter — because you deserve nice things.")
+TAGLINES+=("One command to install, zero commands to regret.")
+TAGLINES+=("I'm not saying I'm better than your last framework, but… actually yes, I am.")
+TAGLINES+=("Installing globally because commitment issues are for other packages.")
+TAGLINES+=("Your PATH is about to get a lot more interesting.")
+TAGLINES+=("Build tools? I'll handle those. You just sit there and look productive.")
+TAGLINES+=("Gateway restart? More like gateway glow-up.")
+TAGLINES+=("I auto-detect your install method. I'm basically psychic, but for shells.")
+TAGLINES+=("npm or git? Why not both? (But npm is faster, just saying.)")
+TAGLINES+=("The installer that installs installers. Wait, no — just the one you need.")
+TAGLINES+=("Conflict resolution: not just for diplomats anymore.")
+TAGLINES+=("Doctor's orders: your config needs a checkup after every upgrade.")
 
 HOLIDAY_NEW_YEAR="New Year's Day: New year, new config — same old EADDRINUSE, but this time we resolve it like grown-ups."
 HOLIDAY_LUNAR_NEW_YEAR="Lunar New Year: May your builds be lucky, your branches prosperous, and your merge conflicts chased away with fireworks."
@@ -559,6 +577,12 @@ INSTALL_DIR="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
 MIN_NODE=20
 MIN_PYTHON_MINOR=10
 BIN_NAME="openrappter"
+NPM_PACKAGE="openrappter"
+
+# Install method: "npm", "git", or "" (auto-detect/prompt)
+INSTALL_METHOD="${OPENRAPPTER_INSTALL_METHOD:-}"
+OPT_NO_PROMPT="${OPENRAPPTER_NO_PROMPT:-false}"
+OPT_SET_NPM_PREFIX=false
 
 print_usage() {
     cat <<EOF
@@ -569,30 +593,52 @@ Usage:
   curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- [options]
 
 Options:
-  --dir <path>                       Install directory (default: ~/.openrappter)
+  --method npm|git                   Install method (default: npm)
+  --dir <path>                       Install directory for git method (default: ~/.openrappter)
   --dry-run                          Print what would happen (no changes)
   --verbose                          Print debug output
+  --no-prompt                        Non-interactive mode (CI/automation)
+  --set-npm-prefix                   Force npm prefix fix (Linux EACCES workaround)
   --gum                              Force gum UI if possible
   --no-gum                           Disable gum UI
   --no-copilot                       Skip Copilot setup entirely
+  --no-onboard                       Skip onboard wizard
   --help, -h                         Show this help
 
 Environment variables:
   OPENRAPPTER_HOME=...              Install directory (default: ~/.openrappter)
+  OPENRAPPTER_INSTALL_METHOD=npm|git Install method override
+  OPENRAPPTER_VERSION=1.4.0         Pin specific version (npm method)
+  OPENRAPPTER_BETA=1                Install @beta tag (npm method)
+  OPENRAPPTER_NO_PROMPT=true        Non-interactive mode
   OPENRAPPTER_DRY_RUN=1             Dry run mode
   OPENRAPPTER_VERBOSE=1             Verbose output
   OPENRAPPTER_USE_GUM=auto|1|0      Default: auto (try gum on interactive TTY)
+  SHARP_IGNORE_GLOBAL_LIBVIPS=1     Skip global libvips download (set automatically)
 
 Examples:
   curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
-  curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --verbose
-  curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --dir ~/my-agents
+  curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --method npm
+  curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --method git --verbose
+  curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --no-prompt --no-copilot
 EOF
 }
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --method)
+                INSTALL_METHOD="$2"
+                shift 2
+                ;;
+            --no-prompt)
+                OPT_NO_PROMPT=true
+                shift
+                ;;
+            --set-npm-prefix)
+                OPT_SET_NPM_PREFIX=true
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=1
                 shift
@@ -1105,6 +1151,264 @@ fix_npm_prefix_if_needed() {
     fi
 }
 
+# ── Installation Method Detection ───────────────────────────
+detect_existing_install() {
+    # Check for npm global install
+    local npm_bin=""
+    npm_bin="$(npm list -g --depth=0 openrappter 2>/dev/null || true)"
+    if [[ "$npm_bin" == *"openrappter"* ]]; then
+        echo "npm"
+        return 0
+    fi
+
+    # Check for git clone install
+    if [[ -d "$INSTALL_DIR/.git" ]]; then
+        echo "git"
+        return 0
+    fi
+
+    echo "none"
+}
+
+choose_install_method() {
+    # Already set via --method flag or env var
+    if [[ -n "$INSTALL_METHOD" ]]; then
+        case "$INSTALL_METHOD" in
+            npm|git) return 0 ;;
+            *)
+                ui_error "Invalid install method: $INSTALL_METHOD (use 'npm' or 'git')"
+                exit 1
+                ;;
+        esac
+    fi
+
+    local existing
+    existing="$(detect_existing_install)"
+
+    # No existing install — default to npm
+    if [[ "$existing" == "none" ]]; then
+        INSTALL_METHOD="npm"
+        return 0
+    fi
+
+    # Existing install found — match it (or prompt)
+    if [[ "$OPT_NO_PROMPT" == "true" ]]; then
+        INSTALL_METHOD="$existing"
+        ui_info "Existing $existing install detected, upgrading via $existing (--no-prompt)"
+        return 0
+    fi
+
+    if [[ -n "$GUM" ]] && gum_is_tty; then
+        ui_info "Existing $existing install detected"
+        local choice
+        choice="$("$GUM" choose --header "Upgrade method:" "npm (recommended)" "git (current)" "Switch to npm" "Switch to git" </dev/tty)" || true
+        case "$choice" in
+            "npm (recommended)"|"Switch to npm") INSTALL_METHOD="npm" ;;
+            "git (current)"|"Switch to git") INSTALL_METHOD="git" ;;
+            *) INSTALL_METHOD="$existing" ;;
+        esac
+    else
+        # No gum, default to matching existing
+        INSTALL_METHOD="$existing"
+        ui_info "Existing $existing install detected, upgrading in-place"
+    fi
+}
+
+# ── Build Tools (Linux native modules) ─────────────────────
+ensure_build_tools() {
+    if [[ "$OS" != "linux" ]]; then
+        return 0
+    fi
+
+    # Check if gcc and make are available
+    if command -v gcc &>/dev/null && command -v make &>/dev/null; then
+        return 0
+    fi
+
+    ui_info "Installing build tools for native modules"
+    require_sudo
+
+    if command -v apt-get &>/dev/null; then
+        if is_root; then
+            run_quiet_step "Installing build-essential" apt-get install -y -qq build-essential
+        else
+            run_quiet_step "Installing build-essential" sudo apt-get install -y -qq build-essential
+        fi
+    elif command -v dnf &>/dev/null; then
+        if is_root; then
+            # shellcheck disable=SC2046
+            run_quiet_step "Installing Development Tools" dnf groupinstall -y -q "Development Tools"
+        else
+            # shellcheck disable=SC2046
+            run_quiet_step "Installing Development Tools" sudo dnf groupinstall -y -q "Development Tools"
+        fi
+    elif command -v yum &>/dev/null; then
+        if is_root; then
+            # shellcheck disable=SC2046
+            run_quiet_step "Installing Development Tools" yum groupinstall -y -q "Development Tools"
+        else
+            # shellcheck disable=SC2046
+            run_quiet_step "Installing Development Tools" sudo yum groupinstall -y -q "Development Tools"
+        fi
+    elif command -v apk &>/dev/null; then
+        if is_root; then
+            run_quiet_step "Installing build-base" apk add --no-cache build-base
+        else
+            run_quiet_step "Installing build-base" sudo apk add --no-cache build-base
+        fi
+    else
+        ui_warn "Could not detect package manager for build tools — native modules may fail"
+        return 0
+    fi
+
+    ui_success "Build tools installed"
+}
+
+# ── npm Global Install ─────────────────────────────────────
+install_via_npm() {
+    ui_info "Installing openrappter via npm (global)"
+
+    # Determine version spec
+    local pkg_spec="$NPM_PACKAGE"
+    if [[ -n "${OPENRAPPTER_VERSION:-}" ]]; then
+        pkg_spec="${NPM_PACKAGE}@${OPENRAPPTER_VERSION}"
+    elif [[ "${OPENRAPPTER_BETA:-0}" == "1" ]]; then
+        pkg_spec="${NPM_PACKAGE}@beta"
+    fi
+
+    # Fix npm prefix if needed (Linux EACCES)
+    if [[ "$OPT_SET_NPM_PREFIX" == "true" ]]; then
+        fix_npm_prefix_if_needed
+    else
+        fix_npm_prefix_if_needed
+    fi
+
+    # Attempt install
+    if retry 3 2 run_quiet_step "Installing $pkg_spec" npm install -g "$pkg_spec" --no-fund --no-audit; then
+        ui_success "npm install succeeded"
+    else
+        # Retry with build tools if it looks like a gyp error
+        ui_warn "npm install failed — checking if build tools are needed"
+        ensure_build_tools
+        if retry 2 3 run_quiet_step "Retrying $pkg_spec" npm install -g "$pkg_spec" --no-fund --no-audit; then
+            ui_success "npm install succeeded (after build tools)"
+        else
+            ui_error "npm install -g $pkg_spec failed after retries"
+            echo "  Try manually: npm install -g $pkg_spec"
+            echo "  Or use git method: curl ... | bash -s -- --method git"
+            exit 1
+        fi
+    fi
+
+    refresh_shell_command_cache
+
+    # Verify binary is on PATH
+    if command -v openrappter &>/dev/null; then
+        ui_success "openrappter binary found on PATH"
+    else
+        # Check npm global bin directory
+        local npm_bin_dir
+        npm_bin_dir="$(npm config get prefix 2>/dev/null)/bin"
+        if [[ -x "$npm_bin_dir/openrappter" ]]; then
+            ensure_path "$npm_bin_dir"
+            ui_success "openrappter binary found at $npm_bin_dir/openrappter"
+        else
+            ui_warn "openrappter binary not found on PATH — you may need to restart your shell"
+        fi
+    fi
+}
+
+# ── npm Conflict Resolution ────────────────────────────────
+resolve_npm_conflicts() {
+    local bin_dir
+    bin_dir="$(get_bin_dir)"
+
+    # Remove stale launcher script from a previous git install
+    # (npm creates its own symlink via package.json "bin")
+    if [[ "$INSTALL_METHOD" == "npm" && -f "$bin_dir/$BIN_NAME" ]]; then
+        # Check if it's our handwritten launcher (not an npm symlink)
+        if grep -q "openrappter launcher" "$bin_dir/$BIN_NAME" 2>/dev/null; then
+            local backup
+            backup="${bin_dir}/${BIN_NAME}.git-backup.$(date +%s)"
+            mv "$bin_dir/$BIN_NAME" "$backup"
+            ui_info "Backed up old git launcher to $backup"
+        fi
+    fi
+
+    # Remove dangling npm symlinks
+    if [[ "$INSTALL_METHOD" == "git" ]]; then
+        local npm_bin_dir
+        npm_bin_dir="$(npm config get prefix 2>/dev/null)/bin" || true
+        if [[ -n "$npm_bin_dir" && -L "$npm_bin_dir/openrappter" && ! -e "$npm_bin_dir/openrappter" ]]; then
+            rm -f "$npm_bin_dir/openrappter"
+            ui_info "Removed dangling npm symlink at $npm_bin_dir/openrappter"
+        fi
+    fi
+}
+
+# ── Gateway Daemon Restart ─────────────────────────────────
+detect_and_restart_gateway() {
+    local pid_file="$HOME/.openrappter/gateway.pid"
+    if [[ ! -f "$pid_file" ]]; then
+        return 0
+    fi
+
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -z "$pid" ]]; then
+        return 0
+    fi
+
+    # Check if process is still alive
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$pid_file"
+        return 0
+    fi
+
+    ui_info "Gateway daemon running (PID $pid)"
+
+    if [[ "$OPT_NO_PROMPT" == "true" ]]; then
+        ui_info "Restarting gateway (--no-prompt)"
+        kill "$pid" 2>/dev/null || true
+        sleep 1
+        # The gateway will auto-start on next openrappter invocation
+        rm -f "$pid_file"
+        ui_success "Gateway stopped (will auto-start on next use)"
+        return 0
+    fi
+
+    if [[ -n "$GUM" ]] && gum_is_tty; then
+        local choice
+        choice="$("$GUM" choose --header "Restart gateway daemon?" "Yes (recommended)" "No" </dev/tty)" || true
+        if [[ "$choice" == "Yes (recommended)" ]]; then
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            rm -f "$pid_file"
+            ui_success "Gateway stopped (will auto-start on next use)"
+        else
+            ui_info "Gateway left running (you may want to restart it manually)"
+        fi
+    else
+        ui_info "Restart the gateway manually if needed: kill $pid"
+    fi
+}
+
+# ── Doctor/Migration ────────────────────────────────────────
+run_doctor_if_available() {
+    local bin
+    bin="$(resolve_openrappter_bin 2>/dev/null || true)"
+    if [[ -z "$bin" ]]; then
+        return 0
+    fi
+
+    # Best-effort doctor run (non-fatal)
+    if "$bin" doctor --json >/dev/null 2>&1; then
+        ui_success "Doctor check passed"
+    else
+        ui_info "Doctor check skipped (not available or non-fatal issue)"
+    fi
+}
+
 # ── Git ─────────────────────────────────────────────────────
 check_git() {
     if command -v git &> /dev/null; then
@@ -1222,9 +1526,11 @@ ensure_path() {
             fi
 
             if ! grep -qF "$bin_dir" "$shell_rc" 2>/dev/null; then
-                echo "" >> "$shell_rc"
-                echo "# Added by openrappter installer" >> "$shell_rc"
-                echo "$path_line" >> "$shell_rc"
+                {
+                    echo ""
+                    echo "# Added by openrappter installer"
+                    echo "$path_line"
+                } >> "$shell_rc"
                 ui_warn "Added $bin_dir to PATH in $shell_rc"
             fi
         fi
@@ -1384,10 +1690,27 @@ resolve_openrappter_bin() {
 
 resolve_openrappter_version() {
     local version=""
-    local ts_pkg="$INSTALL_DIR/typescript/package.json"
-    if [[ -f "$ts_pkg" ]]; then
-        version="$(node -e "console.log(require('${ts_pkg}').version)" 2>/dev/null || true)"
+
+    # Try openrappter --version first (works for both npm and git installs)
+    local bin
+    bin="$(resolve_openrappter_bin 2>/dev/null || true)"
+    if [[ -n "$bin" ]]; then
+        version="$("$bin" --version 2>/dev/null || true)"
     fi
+
+    # Fall back to package.json (git install)
+    if [[ -z "$version" ]]; then
+        local ts_pkg="$INSTALL_DIR/typescript/package.json"
+        if [[ -f "$ts_pkg" ]]; then
+            version="$(node -e "console.log(require('${ts_pkg}').version)" 2>/dev/null || true)"
+        fi
+    fi
+
+    # Fall back to npm list (npm install)
+    if [[ -z "$version" ]]; then
+        version="$(npm list -g openrappter --depth=0 2>/dev/null | grep openrappter | sed 's/.*@//' || true)"
+    fi
+
     echo "$version"
 }
 
@@ -1569,7 +1892,7 @@ copilot_device_code_login() {
 
 copilot_validate_token() {
     local token="$1"
-    local response http_code body
+    local response http_code
     response="$(curl -sS -w "\n%{http_code}" \
         "https://api.github.com/copilot_internal/v2/token" \
         -H "Accept: application/json" \
@@ -1678,51 +2001,21 @@ setup_copilot_sdk() {
     fi
 }
 
-# ── Main ────────────────────────────────────────────────────
-main() {
-    if [[ "$HELP" == "1" ]]; then
-        print_usage
-        return 0
-    fi
-
-    bootstrap_gum_temp || true
-    print_installer_banner
-    print_gum_status
-    detect_os_or_die
-
-    show_install_plan
-
-    if [[ "$DRY_RUN" == "1" ]]; then
-        ui_success "Dry run complete (no changes made)"
-        return 0
-    fi
-
-    # Check for existing installation
+# ── Install via Git (extracted from original main) ─────────
+install_via_git() {
     local is_upgrade=false
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         is_upgrade=true
-        ui_info "Existing openrappter installation detected, upgrading"
     fi
 
-    # ── Stage 1: Preparing environment ──
-    ui_stage "Preparing environment"
-
-    install_homebrew
-
-    if ! check_node; then
-        install_node
-    fi
-
+    # Git is required for this method
     if ! check_git; then
         install_git
     fi
 
-    # ── Stage 2: Installing openrappter ──
-    ui_stage "Installing openrappter"
-
     # Clone or update repo
     if [[ "$is_upgrade" == "true" ]]; then
-        ui_info "Updating existing installation..."
+        ui_info "Updating existing git installation..."
         cd "$INSTALL_DIR"
         if [[ -z "$(git -C "$INSTALL_DIR" status --porcelain 2>/dev/null || true)" ]]; then
             run_quiet_step "Updating repository" git -C "$INSTALL_DIR" pull --rebase || true
@@ -1776,12 +2069,11 @@ main() {
     fi
 
     # Python runtime (optional)
-    local has_python=false
     local python_cmd
     python_cmd="$(get_python_cmd)"
 
     if [[ -n "$python_cmd" ]] && check_python_meets_min; then
-        has_python=true
+        HAS_PYTHON=true
         ui_success "Python $($python_cmd --version 2>&1 | sed 's/Python //') found"
 
         # Ensure pip is available (some Linux distros ship python3 without pip)
@@ -1828,30 +2120,18 @@ main() {
                     ui_success "Python runtime installed"
                 else
                     ui_warn "Python package install failed — TypeScript runtime still works"
-                    has_python=false
+                    HAS_PYTHON=false
                 fi
             fi
         else
             ui_warn "pip unavailable — skipping Python runtime (TypeScript works fine alone)"
-            has_python=false
+            HAS_PYTHON=false
         fi
     else
         ui_info "Python 3.${MIN_PYTHON_MINOR}+ not found — skipping (TypeScript works fine alone)"
     fi
 
-    # ── Stage 2b: GitHub Copilot SDK ──
-    # Start with a fresh .env so stale tokens don't persist across installs
-    local env_file="$INSTALL_DIR/.env"
-    if [[ -f "$env_file" ]]; then
-        ui_info "Clearing old .env for fresh setup"
-        rm -f "$env_file"
-    fi
-    setup_copilot_sdk
-
-    # ── Stage 3: Finalizing setup ──
-    ui_stage "Finalizing setup"
-
-    # Create launcher
+    # Create launcher (only for git method — npm uses package.json bin)
     local bin_dir
     bin_dir="$(get_bin_dir)"
     create_launcher "$bin_dir"
@@ -1860,8 +2140,96 @@ main() {
 
     # PATH warning
     warn_shell_path_missing_dir "$bin_dir" "bin dir"
+}
 
-    # Verify
+# ── Main ────────────────────────────────────────────────────
+main() {
+    if [[ "$HELP" == "1" ]]; then
+        print_usage
+        return 0
+    fi
+
+    bootstrap_gum_temp || true
+    print_installer_banner
+    print_gum_status
+    detect_os_or_die
+
+    # ── Stage 1: Preparing environment ──
+    ui_stage "Preparing environment"
+
+    install_homebrew
+
+    if ! check_node; then
+        install_node
+    fi
+
+    # Ensure build tools are available on Linux (for native modules like better-sqlite3)
+    ensure_build_tools
+
+    # ── Stage 2: Choose install method ──
+    ui_stage "Choosing install method"
+
+    choose_install_method
+
+    show_install_plan
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        ui_success "Dry run complete (no changes made)"
+        return 0
+    fi
+
+    # Check for existing installation (for upgrade messaging)
+    local is_upgrade=false
+    local existing_method
+    existing_method="$(detect_existing_install)"
+    if [[ "$existing_method" != "none" ]]; then
+        is_upgrade=true
+    fi
+
+    # Resolve conflicts when switching methods
+    resolve_npm_conflicts
+
+    # Global flag for Python availability (set by install_via_git)
+    HAS_PYTHON=false
+
+    # ── Stage 3: Install openrappter ──
+    ui_stage "Installing openrappter"
+
+    if [[ "$INSTALL_METHOD" == "npm" ]]; then
+        install_via_npm
+    else
+        install_via_git
+    fi
+
+    # ── Copilot SDK (for git method; npm method has .env in home dir) ──
+    if [[ "$INSTALL_METHOD" == "git" ]]; then
+        local env_file="$INSTALL_DIR/.env"
+        if [[ -f "$env_file" ]]; then
+            ui_info "Clearing old .env for fresh setup"
+            rm -f "$env_file"
+        fi
+        setup_copilot_sdk
+    else
+        # For npm method, store .env in ~/.openrappter/
+        mkdir -p "$HOME/.openrappter"
+        INSTALL_DIR="$HOME/.openrappter"
+        setup_copilot_sdk
+    fi
+
+    # ── Stage 4: Finalizing setup ──
+    ui_stage "Finalizing setup"
+
+    # Gateway restart on upgrades
+    if [[ "$is_upgrade" == "true" ]]; then
+        detect_and_restart_gateway
+    fi
+
+    # Doctor/migration check on upgrades
+    if [[ "$is_upgrade" == "true" ]]; then
+        run_doctor_if_available
+    fi
+
+    # Verify binary
     local OPENRAPPTER_BIN=""
     OPENRAPPTER_BIN="$(resolve_openrappter_bin || true)"
 
@@ -1923,7 +2291,9 @@ main() {
     # Determine if the user needs to activate PATH in their shell
     local needs_activation=false
     local shell_rc
+    local bin_dir
     shell_rc="$(get_shell_rc_file)"
+    bin_dir="$(get_bin_dir)"
     if needs_path_activation "$bin_dir"; then
         needs_activation=true
     fi
@@ -1935,11 +2305,7 @@ main() {
         echo ""
         if [[ -n "$GUM" ]]; then
             local activate_msg
-            if [[ "$(basename "${SHELL:-/bin/bash}")" == "fish" ]]; then
-                activate_msg="$(printf 'To start using openrappter, run:\n\n  source %s\n\nOr open a new terminal.' "$shell_rc")"
-            else
-                activate_msg="$(printf 'To start using openrappter, run:\n\n  source %s\n\nOr open a new terminal.' "$shell_rc")"
-            fi
+            activate_msg="$(printf 'To start using openrappter, run:\n\n  source %s\n\nOr open a new terminal.' "$shell_rc")"
             "$GUM" style --border rounded --border-foreground "#FFB020" --foreground "#FFB020" --bold --padding "1 2" "$activate_msg"
         else
             echo ""
@@ -1958,9 +2324,14 @@ main() {
     ui_kv "Check status" "openrappter --status"
     ui_kv "List agents" "openrappter --list-agents"
     ui_kv "Chat" "openrappter \"hello\""
-    ui_kv "Install dir" "$INSTALL_DIR"
-    ui_kv "Command" "$bin_dir/$BIN_NAME"
-    if [[ "$has_python" == "true" ]]; then
+    if [[ "$INSTALL_METHOD" == "git" ]]; then
+        ui_kv "Install dir" "$INSTALL_DIR"
+        ui_kv "Command" "$bin_dir/$BIN_NAME"
+    else
+        ui_kv "Method" "npm global"
+        ui_kv "Update" "npm update -g openrappter"
+    fi
+    if [[ "$HAS_PYTHON" == "true" ]]; then
         ui_kv "Python runtime" "also installed"
     fi
     echo ""

@@ -46,6 +46,9 @@
   },
   "files": [
     "dist/",
+    "!dist/**/*.test.*",
+    "!dist/**/__tests__/",
+    "!dist/**/__mocks__/",
     "bin/"
   ],
   "dependencies": {

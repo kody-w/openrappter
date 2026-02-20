@@ -1,0 +1,78 @@
+name: Install Smoke Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'install.sh'
+      - 'tests/install/**'
+      - '.github/workflows/install-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'install.sh'
+      - 'tests/install/**'
+      - '.github/workflows/install-smoke.yml'
+
+jobs:
+  unit-tests:
+    name: Unit tests (install.sh functions)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run install.sh unit tests
+        run: bash tests/test_install.sh
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+      - name: Run shellcheck on install.sh
+        run: shellcheck install.sh
+
+  docs-sync:
+    name: Verify docs/install.sh is in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs/install.sh matches root install.sh
+        run: diff install.sh docs/install.sh
+
+  docker-smoke:
+    name: Docker smoke test (npm method)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy install.sh to Docker context
+        run: cp install.sh tests/install/docker/smoke/install.sh
+      - name: Build and run smoke test
+        run: docker build --no-cache -t openrappter-test-smoke tests/install/docker/smoke/
+
+  docker-nonroot:
+    name: Docker non-root test
+    runs-on: ubuntu-latest
+    needs: [unit-tests, shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy install.sh to Docker context
+        run: cp install.sh tests/install/docker/nonroot/install.sh
+      - name: Build and run non-root test
+        run: docker build --no-cache -t openrappter-test-nonroot tests/install/docker/nonroot/
+
+  docker-git:
+    name: Docker git method test
+    runs-on: ubuntu-latest
+    needs: [unit-tests, shellcheck]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy install.sh to Docker context
+        run: cp install.sh tests/install/docker/git-method/install.sh
+      - name: Build and run git method test
+        run: docker build --no-cache -t openrappter-test-git tests/install/docker/git-method/

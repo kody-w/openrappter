@@ -11,6 +11,7 @@ export interface AgentParameter {
   type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
   description: string;
   enum?: string[];
+  items?: { type: string };
 }
 
 export interface AgentParameters {

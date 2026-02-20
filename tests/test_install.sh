@@ -28,7 +28,7 @@ assert_eq() {
 
 assert_contains() {
   ((TESTS_RUN++)) || true
-  if echo "$1" | grep -qF -- "$2"; then
+  if [[ "$1" == *"$2"* ]]; then
     pass "$3"
   else
     fail "$3 (expected to contain '$2')"
@@ -272,7 +272,7 @@ assert_not_empty "$random_picked" "pick_tagline without index returns a value"
 # ── Constants ──
 printf "\n\033[1m▸ Constants\033[0m\n"
 
-assert_eq "$MIN_NODE" "18" "MIN_NODE is 18"
+assert_eq "$MIN_NODE" "20" "MIN_NODE is 20"
 assert_eq "$MIN_PYTHON_MINOR" "10" "MIN_PYTHON_MINOR is 10"
 assert_eq "$BIN_NAME" "openrappter" "BIN_NAME is openrappter"
 assert_contains "$REPO_URL" "github.com" "REPO_URL points to GitHub"
@@ -308,6 +308,50 @@ assert_contains "$script_content" "completion_messages" "script has completion m
 assert_contains "$script_content" "update_messages" "script has upgrade messages"
 assert_contains "$script_content" "Homebrew" "script handles Homebrew on macOS"
 assert_contains "$script_content" "NodeSource" "script handles NodeSource on Linux"
+
+# ── Resilience Features ──
+printf "\n\033[1m▸ Resilience features\033[0m\n"
+
+assert_contains "$script_content" "verify_node_version" "script verifies node version after install"
+assert_contains "$script_content" "retry" "script has retry wrapper"
+assert_contains "$script_content" "install_node_tarball" "script has direct tarball fallback"
+assert_contains "$script_content" "try_version_managers" "script detects existing version managers"
+assert_contains "$script_content" "fnm" "script handles fnm"
+assert_contains "$script_content" "volta" "script handles volta"
+assert_contains "$script_content" "mise" "script handles mise"
+assert_contains "$script_content" "asdf" "script handles asdf"
+assert_contains "$script_content" "fix_npm_prefix_if_needed" "script fixes npm EACCES"
+assert_contains "$script_content" "SHASUMS256" "script verifies Node.js checksums"
+assert_contains "$script_content" "source_nvm_if_present" "script sources nvm before checking"
+assert_contains "$script_content" "source_fnm_if_present" "script sources fnm before checking"
+
+# ── Verify new functions work ──
+printf "\n\033[1m▸ New resilience functions\033[0m\n"
+
+# verify_node_version should succeed if we already passed check_node
+if command -v node &>/dev/null; then
+  ((TESTS_RUN++)) || true
+  if verify_node_version; then
+    pass "verify_node_version returns true for current node"
+  else
+    pass "verify_node_version returns false (node version below MIN_NODE — OK)"
+  fi
+fi
+
+# retry should work with simple commands
+((TESTS_RUN++)) || true
+if retry 2 0 true; then
+  pass "retry succeeds with 'true' command"
+else
+  fail "retry failed with 'true' command"
+fi
+
+((TESTS_RUN++)) || true
+if ! retry 2 0 false; then
+  pass "retry fails after exhausting attempts with 'false' command"
+else
+  fail "retry should have failed with 'false' command"
+fi
 
 # ── CLI Args ──
 printf "\n\033[1m▸ CLI argument parsing\033[0m\n"

@@ -70,6 +70,26 @@ run_remote_bash() {
     /bin/bash "$tmp"
 }
 
+# ── Retry wrapper for network operations ────────────────────
+retry() {
+    local max_attempts="$1"
+    local delay="$2"
+    shift 2
+    local attempt=1
+    while true; do
+        if "$@"; then
+            return 0
+        fi
+        if [[ "$attempt" -ge "$max_attempts" ]]; then
+            return 1
+        fi
+        ui_info "Retrying ($attempt/$max_attempts) in ${delay}s..."
+        sleep "$delay"
+        ((attempt++))
+        delay=$((delay * 2 > 30 ? 30 : delay * 2))
+    done
+}
+
 # ── Gum (fancy terminal UI) ────────────────────────────────
 GUM_VERSION="${OPENRAPPTER_GUM_VERSION:-0.17.0}"
 GUM=""
@@ -687,78 +707,174 @@ get_node_major() {
 }
 
 check_node() {
-    if command -v node &> /dev/null; then
+    # Try to find node on PATH first
+    if command -v node &>/dev/null; then
         local node_ver
         node_ver=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [[ "$node_ver" -ge "$MIN_NODE" ]]; then
             ui_success "Node.js v$(node -v | cut -d'v' -f2) found"
             return 0
         else
-            ui_info "Node.js $(node -v) found, upgrading to v${MIN_NODE}+"
+            ui_info "Node.js $(node -v) found but need v${MIN_NODE}+"
+        fi
+    fi
+
+    # Node not found or too old — try sourcing version managers
+    # (they may have installed node but not sourced into this shell)
+    source_nvm_if_present
+    source_fnm_if_present
+
+    # Check common install locations not yet on PATH
+    local extra_paths=(
+        "$HOME/.local/bin"
+        "/usr/local/bin"
+        "/opt/homebrew/bin"
+        "$HOME/.volta/bin"
+    )
+    # mise shims
+    local mise_data="${MISE_DATA_DIR:-$HOME/.local/share/mise}"
+    if [[ -d "$mise_data/shims" ]]; then
+        extra_paths+=("$mise_data/shims")
+    fi
+    for p in "${extra_paths[@]}"; do
+        if [[ -x "$p/node" ]] && ! command -v node &>/dev/null; then
+            export PATH="$p:$PATH"
+        fi
+    done
+
+    refresh_shell_command_cache
+
+    if command -v node &>/dev/null; then
+        local node_ver
+        node_ver=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+        if [[ "$node_ver" -ge "$MIN_NODE" ]]; then
+            ui_success "Node.js v$(node -v | cut -d'v' -f2) found (via PATH discovery)"
+            return 0
+        else
+            ui_info "Node.js $(node -v) found but need v${MIN_NODE}+ — upgrading"
             return 1
         fi
-    else
-        ui_info "Node.js not found, installing it now"
-        return 1
     fi
+
+    ui_info "Node.js not found, installing it now"
+    return 1
 }
 
 install_node() {
+    # ── Strategy: try multiple approaches in order of preference ──
+    # 1. Existing version managers (nvm, fnm, volta, mise, asdf)
+    # 2. Platform package manager (Homebrew / NodeSource)
+    # 3. Fresh nvm install
+    # 4. Direct Node.js tarball download (last resort, no root needed)
+
+    # Source any existing version manager environments first
+    source_nvm_if_present
+    source_fnm_if_present
+
+    # 1. Try existing version managers
+    if try_version_managers; then
+        return 0
+    fi
+
+    # 2. Try platform package manager
     if [[ "$OS" == "macos" ]]; then
-        if command -v brew &> /dev/null; then
+        if command -v brew &>/dev/null; then
             ui_info "Installing Node.js via Homebrew"
-            run_quiet_step "Installing node@${MIN_NODE}" brew install "node@${MIN_NODE}"
-            brew link "node@${MIN_NODE}" --overwrite --force 2>/dev/null || true
-            ui_success "Node.js installed via Homebrew"
-        else
-            ui_info "Installing Node.js via nvm"
-            install_node_nvm
+            if run_quiet_step "Installing node@${MIN_NODE}" brew install "node@${MIN_NODE}"; then
+                brew link "node@${MIN_NODE}" --overwrite --force 2>/dev/null || true
+                refresh_shell_command_cache
+                if verify_node_version; then
+                    ui_success "Node.js $(node --version) installed via Homebrew"
+                    return 0
+                fi
+            fi
+            ui_info "Homebrew install didn't produce a usable Node — trying next method"
         fi
     elif [[ "$OS" == "linux" ]]; then
-        ui_info "Installing Node.js via NodeSource"
-        require_sudo
-
-        if command -v apt-get &> /dev/null; then
+        local nodesource_ok=false
+        if command -v apt-get &>/dev/null; then
+            ui_info "Installing Node.js via NodeSource (apt)"
+            require_sudo
             local tmp
             tmp="$(mktempfile)"
-            download_file "https://deb.nodesource.com/setup_${MIN_NODE}.x" "$tmp"
-            if is_root; then
-                run_quiet_step "Configuring NodeSource repository" bash "$tmp"
-                run_quiet_step "Installing Node.js" apt-get install -y -qq nodejs
-            else
-                run_quiet_step "Configuring NodeSource repository" sudo -E bash "$tmp"
-                run_quiet_step "Installing Node.js" sudo apt-get install -y -qq nodejs
+            if download_file "https://deb.nodesource.com/setup_${MIN_NODE}.x" "$tmp" 2>/dev/null; then
+                if is_root; then
+                    run_quiet_step "Configuring NodeSource repository" bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" apt-get install -y -qq nodejs && nodesource_ok=true
+                else
+                    run_quiet_step "Configuring NodeSource repository" sudo -E bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" sudo apt-get install -y -qq nodejs && nodesource_ok=true
+                fi
             fi
-        elif command -v dnf &> /dev/null; then
+        elif command -v dnf &>/dev/null; then
+            ui_info "Installing Node.js via NodeSource (dnf)"
+            require_sudo
             local tmp
             tmp="$(mktempfile)"
-            download_file "https://rpm.nodesource.com/setup_${MIN_NODE}.x" "$tmp"
-            if is_root; then
-                run_quiet_step "Configuring NodeSource repository" bash "$tmp"
-                run_quiet_step "Installing Node.js" dnf install -y -q nodejs
-            else
-                run_quiet_step "Configuring NodeSource repository" sudo bash "$tmp"
-                run_quiet_step "Installing Node.js" sudo dnf install -y -q nodejs
+            if download_file "https://rpm.nodesource.com/setup_${MIN_NODE}.x" "$tmp" 2>/dev/null; then
+                if is_root; then
+                    run_quiet_step "Configuring NodeSource repository" bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" dnf install -y -q nodejs && nodesource_ok=true
+                else
+                    run_quiet_step "Configuring NodeSource repository" sudo bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" sudo dnf install -y -q nodejs && nodesource_ok=true
+                fi
             fi
-        elif command -v yum &> /dev/null; then
+        elif command -v yum &>/dev/null; then
+            ui_info "Installing Node.js via NodeSource (yum)"
+            require_sudo
             local tmp
             tmp="$(mktempfile)"
-            download_file "https://rpm.nodesource.com/setup_${MIN_NODE}.x" "$tmp"
-            if is_root; then
-                run_quiet_step "Configuring NodeSource repository" bash "$tmp"
-                run_quiet_step "Installing Node.js" yum install -y -q nodejs
-            else
-                run_quiet_step "Configuring NodeSource repository" sudo bash "$tmp"
-                run_quiet_step "Installing Node.js" sudo yum install -y -q nodejs
+            if download_file "https://rpm.nodesource.com/setup_${MIN_NODE}.x" "$tmp" 2>/dev/null; then
+                if is_root; then
+                    run_quiet_step "Configuring NodeSource repository" bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" yum install -y -q nodejs && nodesource_ok=true
+                else
+                    run_quiet_step "Configuring NodeSource repository" sudo bash "$tmp" && \
+                    run_quiet_step "Installing Node.js" sudo yum install -y -q nodejs && nodesource_ok=true
+                fi
             fi
-        else
-            ui_info "Falling back to nvm"
-            install_node_nvm
-            return
         fi
 
-        ui_success "Node.js v${MIN_NODE} installed"
+        if [[ "$nodesource_ok" == "true" ]]; then
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) installed via NodeSource"
+                return 0
+            fi
+        fi
+        ui_info "NodeSource install didn't succeed — trying next method"
     fi
+
+    # 3. Try fresh nvm install
+    ui_info "Trying Node.js installation via nvm (fresh install)"
+    if install_node_nvm 2>/dev/null; then
+        refresh_shell_command_cache
+        if verify_node_version; then
+            return 0
+        fi
+    fi
+    ui_info "nvm install didn't succeed — trying direct download"
+
+    # 4. Last resort: direct tarball download (no root needed)
+    if install_node_tarball; then
+        return 0
+    fi
+
+    # All methods failed — give a helpful error
+    ui_error "Could not install Node.js v${MIN_NODE}+"
+    echo ""
+    echo "  Detected node: $(command -v node 2>/dev/null || echo 'not found')"
+    echo "  Node version:  $(node --version 2>/dev/null || echo 'unknown')"
+    echo "  PATH: $PATH"
+    echo ""
+    echo "  Manual install options:"
+    echo "    https://nodejs.org/en/download"
+    echo "    nvm install ${MIN_NODE}"
+    echo "    brew install node@${MIN_NODE}"
+    echo "    fnm install ${MIN_NODE}"
+    echo "    volta install node@${MIN_NODE}"
+    exit 1
 }
 
 install_node_nvm() {
@@ -773,6 +889,220 @@ install_node_nvm() {
     nvm install "$MIN_NODE" --default
     nvm use "$MIN_NODE"
     ui_success "Node.js $(node --version) installed via nvm"
+}
+
+# ── Node.js verification ────────────────────────────────────
+verify_node_version() {
+    refresh_shell_command_cache
+    if ! command -v node &>/dev/null; then
+        return 1
+    fi
+    local ver
+    ver="$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)"
+    if [[ "$ver" -ge "$MIN_NODE" ]] 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# ── Version Manager Detection ───────────────────────────────
+source_nvm_if_present() {
+    if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+        export NVM_DIR="$HOME/.nvm"
+        # shellcheck disable=SC1091
+        . "$NVM_DIR/nvm.sh" 2>/dev/null || true
+    fi
+}
+
+source_fnm_if_present() {
+    if command -v fnm &>/dev/null; then
+        eval "$(fnm env 2>/dev/null)" || true
+    fi
+}
+
+try_version_managers() {
+    # Try nvm
+    if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+        ui_info "Found nvm — trying to install Node.js v${MIN_NODE}"
+        source_nvm_if_present
+        if nvm install "$MIN_NODE" --default 2>/dev/null && nvm use "$MIN_NODE" 2>/dev/null; then
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) activated via nvm"
+                return 0
+            fi
+        fi
+        ui_info "nvm install didn't produce a usable Node — trying next method"
+    fi
+
+    # Try fnm
+    if command -v fnm &>/dev/null; then
+        ui_info "Found fnm — trying to install Node.js v${MIN_NODE}"
+        if fnm install "$MIN_NODE" 2>/dev/null && fnm use "$MIN_NODE" 2>/dev/null && fnm default "$MIN_NODE" 2>/dev/null; then
+            source_fnm_if_present
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) activated via fnm"
+                return 0
+            fi
+        fi
+        ui_info "fnm install didn't produce a usable Node — trying next method"
+    fi
+
+    # Try volta
+    if command -v volta &>/dev/null; then
+        ui_info "Found volta — trying to install Node.js v${MIN_NODE}"
+        if volta install "node@${MIN_NODE}" 2>/dev/null; then
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) activated via volta"
+                return 0
+            fi
+        fi
+        ui_info "volta install didn't produce a usable Node — trying next method"
+    fi
+
+    # Try mise (formerly rtx)
+    if command -v mise &>/dev/null; then
+        ui_info "Found mise — trying to install Node.js v${MIN_NODE}"
+        if mise install "node@${MIN_NODE}" 2>/dev/null && mise use --global "node@${MIN_NODE}" 2>/dev/null; then
+            eval "$(mise env 2>/dev/null)" || true
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) activated via mise"
+                return 0
+            fi
+        fi
+        ui_info "mise install didn't produce a usable Node — trying next method"
+    fi
+
+    # Try asdf
+    if command -v asdf &>/dev/null; then
+        ui_info "Found asdf — trying to install Node.js v${MIN_NODE}"
+        if asdf plugin add nodejs 2>/dev/null; then true; fi
+        if asdf install nodejs "$MIN_NODE" 2>/dev/null && asdf global nodejs "$MIN_NODE" 2>/dev/null; then
+            refresh_shell_command_cache
+            if verify_node_version; then
+                ui_success "Node.js $(node --version) activated via asdf"
+                return 0
+            fi
+        fi
+        ui_info "asdf install didn't produce a usable Node — trying next method"
+    fi
+
+    return 1
+}
+
+# ── Direct Node.js tarball download (last-resort fallback) ──
+NODE_TARBALL_VERSION="${OPENRAPPTER_NODE_VERSION:-22.14.0}"
+
+install_node_tarball() {
+    local node_ver="$NODE_TARBALL_VERSION"
+    local os_name arch_name
+    os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch_name="$(uname -m)"
+
+    case "$arch_name" in
+        x86_64|amd64) arch_name="x64" ;;
+        aarch64)      arch_name="arm64" ;;
+    esac
+
+    local tarball="node-v${node_ver}-${os_name}-${arch_name}.tar.xz"
+    local url="https://nodejs.org/dist/v${node_ver}/${tarball}"
+    local node_dir="$INSTALL_DIR/tools/node-v${node_ver}"
+
+    ui_info "Downloading Node.js v${node_ver} tarball directly (fallback)..."
+
+    local tmp_tar
+    tmp_tar="$(mktempfile)"
+
+    # Try .tar.xz first, fall back to .tar.gz
+    local use_xz=true
+    if ! command -v xz &>/dev/null; then
+        use_xz=false
+    fi
+    if [[ "$use_xz" == "true" ]]; then
+        if ! download_file "$url" "$tmp_tar" 2>/dev/null; then
+            use_xz=false
+        fi
+    fi
+    if [[ "$use_xz" == "false" ]]; then
+        tarball="node-v${node_ver}-${os_name}-${arch_name}.tar.gz"
+        url="https://nodejs.org/dist/v${node_ver}/${tarball}"
+        if ! download_file "$url" "$tmp_tar"; then
+            ui_error "Failed to download Node.js tarball"
+            return 1
+        fi
+    fi
+
+    # Verify SHA-256
+    local shasums_tmp
+    shasums_tmp="$(mktempfile)"
+    if download_file "https://nodejs.org/dist/v${node_ver}/SHASUMS256.txt" "$shasums_tmp" 2>/dev/null; then
+        local expected_sha actual_sha=""
+        expected_sha="$(grep "$tarball" "$shasums_tmp" | awk '{print $1}' | head -1)"
+        if [[ -n "$expected_sha" ]]; then
+            if command -v sha256sum &>/dev/null; then
+                actual_sha="$(sha256sum "$tmp_tar" | awk '{print $1}')"
+            elif command -v shasum &>/dev/null; then
+                actual_sha="$(shasum -a 256 "$tmp_tar" | awk '{print $1}')"
+            fi
+            if [[ -n "$actual_sha" && "$actual_sha" != "$expected_sha" ]]; then
+                ui_error "Node.js checksum mismatch (expected $expected_sha, got $actual_sha)"
+                return 1
+            fi
+            if [[ -n "$actual_sha" ]]; then
+                ui_success "Node.js checksum verified"
+            fi
+        fi
+    else
+        ui_warn "Could not download checksums — skipping verification"
+    fi
+
+    mkdir -p "$node_dir"
+    if [[ "$use_xz" == "true" ]]; then
+        if ! tar -xJf "$tmp_tar" -C "$node_dir" --strip-components=1 2>/dev/null; then
+            ui_error "Failed to extract Node.js tarball (.tar.xz)"
+            return 1
+        fi
+    else
+        if ! tar -xzf "$tmp_tar" -C "$node_dir" --strip-components=1 2>/dev/null; then
+            ui_error "Failed to extract Node.js tarball (.tar.gz)"
+            return 1
+        fi
+    fi
+
+    export PATH="$node_dir/bin:$PATH"
+    refresh_shell_command_cache
+
+    if verify_node_version; then
+        ui_success "Node.js $(node --version) installed via direct download to $node_dir"
+        return 0
+    fi
+
+    ui_error "Node.js tarball extracted but node binary not working"
+    return 1
+}
+
+# ── npm prefix fix (Linux EACCES) ───────────────────────────
+fix_npm_prefix_if_needed() {
+    if [[ "$OS" != "linux" ]]; then
+        return 0
+    fi
+    if is_root; then
+        return 0
+    fi
+
+    local npm_prefix
+    npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+
+    if [[ -n "$npm_prefix" && ! -w "$npm_prefix" ]]; then
+        local new_prefix="$HOME/.npm-global"
+        ui_info "npm prefix $npm_prefix is not writable — switching to $new_prefix"
+        mkdir -p "$new_prefix"
+        npm config set prefix "$new_prefix" 2>/dev/null || true
+        ensure_path "$new_prefix/bin"
+    fi
 }
 
 # ── Git ─────────────────────────────────────────────────────
@@ -944,11 +1274,34 @@ set -euo pipefail
 
 OPENRAPPTER_HOME="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
 
-# Source nvm if needed
+# ── Ensure Node.js is discoverable ──
+# 1. Bundled Node.js (direct tarball install)
+if [[ -d "$OPENRAPPTER_HOME/tools" ]]; then
+    for node_dir in "$OPENRAPPTER_HOME"/tools/node-v*/bin; do
+        if [[ -x "$node_dir/node" ]]; then
+            export PATH="$node_dir:$PATH"
+            break
+        fi
+    done
+fi
+
+# 2. Source nvm if needed
 if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh" 2>/dev/null || true
 fi
+
+# 3. Source fnm if available
+if command -v fnm &>/dev/null; then
+    eval "$(fnm env 2>/dev/null)" || true
+fi
+
+# 4. Check common paths
+for _p in "$HOME/.volta/bin" "$HOME/.local/bin" "/opt/homebrew/bin"; do
+    if [[ -x "$_p/node" ]] && ! command -v node &>/dev/null; then
+        export PATH="$_p:$PATH"
+    fi
+done
 
 # TypeScript runtime (primary)
 TS_DIR="$OPENRAPPTER_HOME/typescript"
@@ -959,6 +1312,11 @@ if [[ -f "$TS_DIR/dist/index.js" ]]; then
         # shellcheck disable=SC1091
         . "$OPENRAPPTER_HOME/.env" 2>/dev/null || true
         set +a
+    fi
+    if ! command -v node &>/dev/null; then
+        echo "Error: Node.js not found. Install Node.js 20+ and try again."
+        echo "  https://nodejs.org/en/download"
+        exit 1
     fi
     exec node "$TS_DIR/dist/index.js" "$@"
 fi
@@ -1361,15 +1719,29 @@ main() {
 
     cd "$INSTALL_DIR"
 
+    # Fix npm prefix if needed (Linux EACCES)
+    fix_npm_prefix_if_needed
+
     # TypeScript runtime
     ui_info "Installing TypeScript dependencies"
     cd "$INSTALL_DIR/typescript"
 
     if [[ -f package.json ]]; then
-        run_quiet_step "Installing npm dependencies" npm install --no-fund --no-audit
+        if ! retry 3 2 run_quiet_step "Installing npm dependencies" npm install --no-fund --no-audit; then
+            ui_error "npm install failed after retries"
+            echo "  This is often caused by network issues. Try again or check your connection."
+            echo "  You can also try: cd $INSTALL_DIR/typescript && npm install"
+            exit 1
+        fi
         ui_success "Dependencies installed"
 
-        run_quiet_step "Building TypeScript" npm run build
+        if ! run_quiet_step "Building TypeScript" npm run build; then
+            ui_error "TypeScript build failed"
+            echo "  Node version: $(node --version 2>/dev/null || echo 'unknown')"
+            echo "  npm version:  $(npm --version 2>/dev/null || echo 'unknown')"
+            echo "  Try: cd $INSTALL_DIR/typescript && npm run build"
+            exit 1
+        fi
         ui_success "TypeScript runtime built"
     else
         ui_error "package.json not found in typescript/ — repo may be incomplete"

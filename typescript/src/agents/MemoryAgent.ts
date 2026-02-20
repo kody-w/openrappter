@@ -14,9 +14,15 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata, MemoryEcho } from './types.js';
 
 interface MemoryEntry {
+  id?: string;
   message: string;
   theme: string;
+  importance?: number;
+  tags?: string[];
+  date?: string;
+  time?: string;
   timestamp: string;
+  accessed?: number;
 }
 
 export class MemoryAgent extends BasicAgent {
@@ -45,7 +51,16 @@ export class MemoryAgent extends BasicAgent {
           },
           theme: {
             type: 'string',
-            description: 'Category/theme for the memory (e.g., preference, fact, note).',
+            description: 'Category/theme for the memory (e.g., preference, fact, insight, task).',
+          },
+          importance: {
+            type: 'number',
+            description: 'Importance rating 1-5 (default 3).',
+          },
+          tags: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Categorical tags for the memory.',
           },
         },
         required: [],
@@ -62,6 +77,8 @@ export class MemoryAgent extends BasicAgent {
     const message = kwargs.message as string | undefined;
     const query = kwargs.query as string | undefined;
     const theme = (kwargs.theme as string) || 'general';
+    const importance = kwargs.importance as number | undefined;
+    const tags = kwargs.tags as string[] | undefined;
 
     // Infer action from query if not specified
     if (!action && query) {
@@ -77,7 +94,7 @@ export class MemoryAgent extends BasicAgent {
 
     switch (action) {
       case 'remember':
-        return this.remember(message || query || '', theme);
+        return this.remember(message || query || '', theme, importance, tags);
       case 'recall':
         return this.recall(query || message || '');
       case 'list':
@@ -101,6 +118,17 @@ export class MemoryAgent extends BasicAgent {
     return [];
   }
 
+  /** Load all memory entries — used by Assistant for context injection */
+  static async loadAllMemories(): Promise<Record<string, MemoryEntry>> {
+    const memFile = path.join(os.homedir(), '.openrappter', 'memory.json');
+    try {
+      const data = await fs.readFile(memFile, 'utf-8');
+      return JSON.parse(data);
+    } catch {
+      return {};
+    }
+  }
+
   private async loadMemory(): Promise<Record<string, MemoryEntry>> {
     try {
       await fs.mkdir(this.memoryDir, { recursive: true });
@@ -116,7 +144,7 @@ export class MemoryAgent extends BasicAgent {
     await fs.writeFile(this.memoryFile, JSON.stringify(memory, null, 2));
   }
 
-  private async remember(message: string, theme: string): Promise<string> {
+  private async remember(message: string, theme: string, importance?: number, tags?: string[]): Promise<string> {
     if (!message) {
       return JSON.stringify({ status: 'error', message: 'No message provided to remember' });
     }
@@ -131,12 +159,20 @@ export class MemoryAgent extends BasicAgent {
     }
 
     const memory = await this.loadMemory();
+    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
     const key = `mem_${Date.now()}`;
-    
+    const now = new Date();
+
     memory[key] = {
+      id,
       message: cleanMessage,
       theme,
-      timestamp: new Date().toISOString(),
+      importance: importance ?? 3,
+      tags: tags ?? [],
+      date: now.toISOString().split('T')[0],
+      time: now.toTimeString().split(' ')[0],
+      timestamp: now.toISOString(),
+      accessed: 0,
     };
 
     await this.saveMemory(memory);

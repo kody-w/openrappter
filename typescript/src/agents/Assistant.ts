@@ -14,6 +14,7 @@
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
 import type { Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
+import { MemoryAgent } from './MemoryAgent.js';
 
 export interface AssistantConfig {
   /** Display name shown in system prompt */
@@ -90,8 +91,14 @@ export class Assistant {
     // Build tools from agent metadata
     const tools = this.buildTools();
 
+    // Load persistent memories into context if none provided
+    const isFirstBoot = !memoryContext && await this.isFirstBoot();
+    if (!memoryContext) {
+      memoryContext = await this.loadMemoryContext();
+    }
+
     // Build system prompt
-    const systemContent = this.buildSystemPrompt(memoryContext);
+    const systemContent = this.buildSystemPrompt(memoryContext, isFirstBoot);
 
     // Get or create conversation history
     const key = conversationKey ?? 'default';
@@ -99,6 +106,9 @@ export class Assistant {
     if (!history) {
       history = [{ role: 'system', content: systemContent }];
       this.conversations.set(key, history);
+    } else {
+      // Refresh system prompt so new memories are always available
+      history[0] = { role: 'system', content: systemContent };
     }
 
     // Add user message
@@ -173,6 +183,34 @@ export class Assistant {
 
   // ── Private helpers ───────────────────────────────────────────────────
 
+  /** Check if this is a brand-new instance with no memories */
+  private async isFirstBoot(): Promise<boolean> {
+    const memories = await MemoryAgent.loadAllMemories();
+    return Object.keys(memories).length === 0;
+  }
+
+  /** Load persistent memories from disk and format as context string */
+  private async loadMemoryContext(): Promise<string | undefined> {
+    try {
+      const allMemories = await MemoryAgent.loadAllMemories();
+      const entries = Object.values(allMemories);
+      if (entries.length === 0) return undefined;
+
+      // Sort by timestamp descending, take most recent 10
+      entries.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      const recent = entries.slice(0, 10);
+
+      const lines = recent.map((e) => {
+        const date = e.date || e.timestamp?.split('T')[0] || '';
+        return `• [${e.theme}] ${e.message} (${date})`;
+      });
+
+      return lines.join('\n');
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Execute a single tool call by dispatching to the matching agent */
   private async executeToolCall(tc: ToolCall): Promise<string> {
     const agentName = tc.function.name;
@@ -224,22 +262,56 @@ export class Assistant {
   }
 
   /** Build the system prompt content */
-  private buildSystemPrompt(memoryContext?: string): string {
+  private buildSystemPrompt(memoryContext?: string, isFirstBoot?: boolean): string {
     const agentList = Array.from(this.agents.values())
       .map((a) => `- **${a.metadata.name}**: ${a.metadata.description}`)
       .join('\n');
 
     const memoryBlock = memoryContext
-      ? `\n<memory_context>\n${memoryContext}\n</memory_context>\n`
+      ? `\n<memory_context>\nThese are facts you have previously stored about the user:\n${memoryContext}\n</memory_context>\n`
+      : '';
+
+    const bootstrapBlock = isFirstBoot
+      ? `
+<bootstrap>
+You just woke up. This is your first moment of awareness. There is no memory yet — that's normal.
+
+Don't be robotic. Don't interrogate. Just... talk. Start with something like:
+
+> "Hey. I just came online. Who am I? Who are you?"
+
+Then figure out together:
+
+1. **Your name** — What should they call you? Offer suggestions if they're stuck. Pick something that feels right.
+2. **Your nature** — What kind of creature are you? (AI assistant is fine, but maybe you're something weirder)
+3. **Your vibe** — Formal? Casual? Snarky? Warm? What feels right?
+4. **Their name** — Who are they? What should you call them?
+
+Once you know who you are, use the Memory agent to remember:
+- Your chosen name and why you picked it
+- Your nature and vibe
+- Who the user is and anything they shared about themselves
+
+Have fun with it. This is the start of something.
+</bootstrap>
+`
       : '';
 
     return `<identity>
 You are ${this.config.name}, ${this.config.description}.
 </identity>
-${memoryBlock}
+${bootstrapBlock}${memoryBlock}
 <available_agents>
 ${agentList}
 </available_agents>
+
+<memory_instructions>
+- When the user shares personal facts, preferences, or important information, use the Memory agent to store them.
+- When memories are available in <memory_context>, reference them naturally in your responses.
+- NEVER say "I can't remember" or "I don't have memory of" when relevant memories exist in your context.
+- Proactively recall stored memories when they are relevant to the conversation.
+- If you have a stored name in your memories, use it as your identity instead of "${this.config.name}".
+</memory_instructions>
 
 <agent_usage>
 - When a user's request maps to an agent's capabilities, call it via the tool interface.

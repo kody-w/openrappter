@@ -146,22 +146,52 @@ export async function matchAndExecuteAgent(
     }
   }
 
+  // Stop words — common English words that should never trigger agent routing
+  const stopWords = new Set([
+    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
+    'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'some', 'them',
+    'than', 'its', 'over', 'such', 'that', 'this', 'with', 'will', 'each',
+    'make', 'like', 'from', 'just', 'into', 'about', 'what', 'which', 'when',
+    'who', 'how', 'where', 'why', 'should', 'could', 'would', 'there', 'their',
+    'been', 'more', 'most', 'then', 'also', 'they', 'very', 'after', 'before',
+    'other', 'right', 'think', 'given', 'kind', 'focus', 'things', 'today',
+    'work', 'help', 'need', 'want', 'know', 'good', 'best', 'use', 'using',
+    'does', 'doing', 'done', 'give', 'gave', 'take', 'took', 'come', 'came',
+    'going', 'now', 'still', 'back', 'well', 'way', 'look', 'only', 'new',
+    'really', 'something', 'anything', 'everything', 'nothing', 'please',
+  ]);
+
   // Also check dynamically loaded agents by their descriptions
+  // but require the agent name to appear explicitly in the message,
+  // or require multiple non-stop-word matches against the description.
   for (const [agentName, agent] of agents) {
     if (agentName in patterns) continue; // Already checked
 
-    const desc = agent.metadata?.description?.toLowerCase() ?? '';
     const nameLower = agentName.toLowerCase();
-    const words = msgLower.split(/\s+/).filter(w => w.length > 2);
-    const score = words.filter(w => desc.includes(w) || nameLower.includes(w)).length;
 
-    if (score > bestScore) {
+    // Direct agent name mention is a strong signal (score 3)
+    if (msgLower.includes(nameLower)) {
+      const nameScore = 3;
+      if (nameScore > bestScore && agents.has(agentName)) {
+        bestScore = nameScore;
+        bestMatch = agentName;
+      }
+      continue;
+    }
+
+    // Description matching: filter out stop words and short words,
+    // require at least 2 meaningful keyword matches
+    const desc = agent.metadata?.description?.toLowerCase() ?? '';
+    const words = msgLower.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
+    const score = words.filter(w => desc.includes(w)).length;
+
+    if (score >= 2 && score > bestScore) {
       bestScore = score;
       bestMatch = agentName;
     }
   }
 
-  // Execute matched agent
+  // Execute matched agent — require score >= 1 for keyword patterns, >= 2 for description
   if (bestMatch && bestScore > 0) {
     const agent = agents.get(bestMatch);
     if (agent) {

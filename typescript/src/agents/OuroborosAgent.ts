@@ -252,7 +252,10 @@ export class OuroborosAgent extends BasicAgent {
     }
 
     // Read own source
-    const selfPath = fileURLToPath(new URL('./OuroborosAgent.ts', import.meta.url));
+    // In compiled dist/, the file is .js; in dev (tsx), it's .ts
+    const jsPath = fileURLToPath(new URL('./OuroborosAgent.js', import.meta.url));
+    const tsPath = fileURLToPath(new URL('./OuroborosAgent.ts', import.meta.url));
+    const selfPath = existsSync(jsPath) ? jsPath : tsPath;
     const selfSource = readFileSync(selfPath, 'utf-8');
     this.evolutionLog.push(
       `Gen ${this.generation}: reading own source (${selfSource.split('\n').length} lines)`,

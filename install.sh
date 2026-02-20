@@ -536,7 +536,7 @@ HELP=0
 
 REPO_URL="https://github.com/kody-w/openrappter.git"
 INSTALL_DIR="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
-MIN_NODE=18
+MIN_NODE=20
 MIN_PYTHON_MINOR=10
 BIN_NAME="openrappter"
 

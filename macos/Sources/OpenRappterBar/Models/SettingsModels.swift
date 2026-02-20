@@ -30,7 +30,7 @@ public struct ConnectionSettings: Codable, Sendable {
         host: String = AppConstants.defaultHost,
         port: Int = AppConstants.defaultPort,
         autoConnect: Bool = true,
-        autoStartGateway: Bool = false
+        autoStartGateway: Bool = true
     ) {
         self.host = host
         self.port = port

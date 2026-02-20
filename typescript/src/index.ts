@@ -299,7 +299,7 @@ program
     }
 
     if (options.web) {
-      const webRoot = path.resolve(__dirname, '../../ui/dist');
+      const webRoot = path.resolve(__dirname, '../ui/dist');
       if (!fs.existsSync(path.join(webRoot, 'index.html'))) {
         console.error('Web UI not built. Run: cd ui && npm run build');
         process.exit(1);

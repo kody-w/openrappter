@@ -22,17 +22,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowManager = ChatWindowManager(viewModel: viewModel, settingsViewModel: settingsViewModel)
         observeViewModel()
 
-        // Auto-connect if configured
-        if settingsViewModel.settingsStore.autoConnect {
+        // Auto-start gateway if configured (starts process then connects)
+        if settingsViewModel.settingsStore.autoStartGateway {
+            viewModel.startGateway()
+        } else if settingsViewModel.settingsStore.autoConnect {
+            // Only auto-connect standalone when not auto-starting
+            // (startGateway already calls connectToGateway on success)
             viewModel.connectToGateway(
                 host: settingsViewModel.settingsStore.host,
                 port: settingsViewModel.settingsStore.port
             )
-        }
-
-        // Auto-start gateway if configured
-        if settingsViewModel.settingsStore.autoStartGateway {
-            viewModel.startGateway()
         }
 
         // Configure settings ViewModel when RPC becomes available

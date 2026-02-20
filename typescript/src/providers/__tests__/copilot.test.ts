@@ -144,7 +144,7 @@ describe('copilot-token', () => {
           cachePath,
           fetchImpl: mockFetch as unknown as typeof fetch,
         }),
-      ).rejects.toThrow('Copilot token exchange failed: HTTP 401');
+      ).rejects.toThrow('does not have Copilot API access (HTTP 401)');
     });
 
     it('should throw on missing token in response', async () => {

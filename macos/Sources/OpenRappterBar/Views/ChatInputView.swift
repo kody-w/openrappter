@@ -21,7 +21,11 @@ public struct ChatInputView: View {
                     )
                     .frame(minHeight: 36, maxHeight: 120)
                     .onKeyPress(keys: [.return], phases: .down) { keyPress in
-                        if keyPress.modifiers.contains(.command) && viewModel.canSend {
+                        // Shift+Return inserts newline, plain Return sends
+                        if keyPress.modifiers.contains(.shift) {
+                            return .ignored
+                        }
+                        if viewModel.canSend {
                             viewModel.sendMessage()
                             return .handled
                         }
@@ -50,7 +54,7 @@ public struct ChatInputView: View {
                         }
                         .buttonStyle(.borderless)
                         .disabled(!viewModel.canSend)
-                        .help("Send (Cmd+Return)")
+                        .help("Send (Return)")
                     }
                 }
             }

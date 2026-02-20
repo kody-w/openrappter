@@ -48,7 +48,9 @@ export class GatewayClient {
   connId: string | null = null;
 
   constructor(opts?: GatewayClientOptions) {
-    this.url = opts?.url ?? `ws://${globalThis.location?.host ?? 'localhost:18790'}`;
+    this.url = opts?.url
+      ?? (import.meta as unknown as { env?: { VITE_GATEWAY_URL?: string } }).env?.VITE_GATEWAY_URL
+      ?? `ws://${globalThis.location?.host ?? 'localhost:18790'}`;
     this.token = opts?.token ?? null;
     this.password = opts?.password ?? null;
     this.maxReconnectAttempts = opts?.maxReconnectAttempts ?? 10;

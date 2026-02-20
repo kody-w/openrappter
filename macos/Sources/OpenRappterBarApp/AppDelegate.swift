@@ -206,20 +206,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         withObservationTracking {
             _ = viewModel.connectionState
             _ = viewModel.processState
+            _ = viewModel.menuBarUptime
         } onChange: { [weak self] in
             Task { @MainActor in
-                self?.updateStatusItemIcon()
+                self?.updateStatusItem()
                 self?.observeViewModel()
             }
         }
     }
 
-    private func updateStatusItemIcon() {
+    private func updateStatusItem() {
         let iconName = statusIconName(for: viewModel.connectionState)
         statusItem.button?.image = NSImage(
             systemSymbolName: iconName,
             accessibilityDescription: AppConstants.appName
         )
+
+        let uptime = viewModel.menuBarUptime
+        if uptime.isEmpty {
+            statusItem.button?.title = ""
+        } else {
+            statusItem.button?.title = " \(uptime)"
+        }
+        statusItem.button?.imagePosition = .imageLeading
     }
 
     private func statusIconName(for state: ConnectionState) -> String {

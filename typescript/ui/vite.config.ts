@@ -5,6 +5,10 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
   },
+  define: {
+    // In dev mode, tell the gateway client to connect directly to port 18790
+    'import.meta.env.VITE_GATEWAY_URL': JSON.stringify('ws://localhost:18790'),
+  },
   server: {
     port: 3000,
     proxy: {
@@ -13,9 +17,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/ws': {
-        target: 'ws://localhost:18790',
-        ws: true,
+      '/health': {
+        target: 'http://localhost:18790',
+        changeOrigin: true,
+      },
+      '/status': {
+        target: 'http://localhost:18790',
+        changeOrigin: true,
       },
     },
   },

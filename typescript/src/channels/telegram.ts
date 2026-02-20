@@ -37,6 +37,11 @@ export class TelegramChannel extends BaseChannel {
   }
 
   async connect(): Promise<void> {
+    if (!this.config.token || !this.config.token.match(/^\d+:.+$/)) {
+      this.status = 'error';
+      throw new Error('Telegram bot token not configured. Go to Channels → Telegram → Configure to set it.');
+    }
+
     this.status = 'connecting';
 
     try {

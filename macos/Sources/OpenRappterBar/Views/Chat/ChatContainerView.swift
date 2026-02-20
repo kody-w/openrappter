@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Chat Container View
@@ -92,6 +93,15 @@ public struct ChatContainerView: View {
                 .controlSize(.mini)
                 .buttonStyle(.bordered)
             }
+
+            Button {
+                openWebUI()
+            } label: {
+                Image(systemName: "globe")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Open Web UI")
 
             if let onOpenFullWindow {
                 Button {
@@ -189,6 +199,31 @@ public struct ChatContainerView: View {
             return session.displayTitle
         }
         return "New Chat"
+    }
+
+    /// Try the Vite dev server first (port 3000), fall back to gateway's built-in web UI.
+    private func openWebUI() {
+        Task {
+            let candidates = [
+                "http://localhost:3000",
+                "http://\(AppConstants.defaultHost):\(AppConstants.defaultPort)",
+            ]
+            for urlString in candidates {
+                if let url = URL(string: urlString) {
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 1
+                    if let (_, response) = try? await URLSession.shared.data(for: request),
+                       let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                        NSWorkspace.shared.open(url)
+                        return
+                    }
+                }
+            }
+            // Last resort: open the gateway URL anyway
+            if let url = URL(string: "http://\(AppConstants.defaultHost):\(AppConstants.defaultPort)") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 }
 

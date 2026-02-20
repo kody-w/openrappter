@@ -74,6 +74,10 @@ public final class AppViewModel {
     public var heartbeatHealth: HeartbeatHealth = .healthy
     public var heartbeatLatency: TimeInterval?
 
+    // Menu bar uptime display
+    public var menuBarUptime: String = ""
+    private var uptimeTimer: Task<Void, Never>?
+
     // Callbacks
     public var onRpcClientReady: ((RpcClient) -> Void)?
 
@@ -197,8 +201,10 @@ public final class AppViewModel {
                         await self?.fetchStatus()
                         await self?.heartbeatMonitor?.start()
                         self?.sessionsViewModel.syncFromGateway()
+                        self?.startUptimeTimer()
                     } else if state == .disconnected {
                         await self?.heartbeatMonitor?.stop()
+                        self?.stopUptimeTimer()
                     }
                 }
             }
@@ -316,6 +322,27 @@ public final class AppViewModel {
         if activities.count > AppConstants.maxActivities {
             activities = Array(activities.prefix(AppConstants.maxActivities))
         }
+    }
+
+    // MARK: - Uptime Timer
+
+    func startUptimeTimer() {
+        stopUptimeTimer()
+        uptimeTimer = Task {
+            while !Task.isCancelled {
+                await fetchStatus()
+                if let status = gatewayStatus {
+                    menuBarUptime = formatUptime(status.uptime)
+                }
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    func stopUptimeTimer() {
+        uptimeTimer?.cancel()
+        uptimeTimer = nil
+        menuBarUptime = ""
     }
 
     // MARK: - Helpers

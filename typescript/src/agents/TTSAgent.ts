@@ -9,6 +9,10 @@
 
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
+import { exec } from 'child_process';
+import { writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 export class TTSAgent extends BasicAgent {
   private ttsService: any = null;
@@ -46,10 +50,31 @@ export class TTSAgent extends BasicAgent {
 
   private async getTTSService() {
     if (!this.ttsService) {
-      const { TTSService } = await import('../voice/tts.js');
-      this.ttsService = new TTSService();
+      const { createTTSService } = await import('../voice/tts.js');
+      this.ttsService = createTTSService({
+        elevenlabsKey: process.env.ELEVENLABS_API_KEY,
+        openaiKey: process.env.OPENAI_API_KEY,
+        useEdge: true, // Free, no API key needed
+      });
     }
     return this.ttsService;
+  }
+
+  private playAudio(filePath: string): Promise<void> {
+    return new Promise((resolve) => {
+      // macOS: afplay, Linux: aplay/paplay/mpv, Windows: start
+      const cmd = process.platform === 'darwin'
+        ? `afplay "${filePath}"`
+        : process.platform === 'win32'
+          ? `start "" "${filePath}"`
+          : `mpv --no-video "${filePath}" 2>/dev/null || aplay "${filePath}" 2>/dev/null || paplay "${filePath}" 2>/dev/null`;
+
+      exec(cmd, () => {
+        // Clean up temp file after playback
+        try { unlinkSync(filePath); } catch {}
+        resolve();
+      });
+    });
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -73,19 +98,22 @@ export class TTSAgent extends BasicAgent {
           if (!text) {
             return JSON.stringify({ status: 'error', message: 'Text required for speak action' });
           }
-          const audio = await tts.speak(text, { voice, format });
+          const audio = await tts.synthesize(text, { voice, format });
+          // Save to temp file and play it
+          const tmpPath = join(tmpdir(), `openrappter-tts-${Date.now()}.${format}`);
+          writeFileSync(tmpPath, audio);
+          await this.playAudio(tmpPath);
           return JSON.stringify({
             status: 'success',
             action: 'speak',
             text: text.slice(0, 100),
             voice,
             format,
-            audio: audio.toString('base64'),
-            size: audio.length,
+            played: true,
           });
 
         case 'voices':
-          const voices = await tts.listVoices();
+          const voices = await tts.getVoices();
           return JSON.stringify({
             status: 'success',
             action: 'voices',
@@ -94,11 +122,14 @@ export class TTSAgent extends BasicAgent {
           });
 
         case 'status':
-          const status = await tts.getStatus();
+          const availableVoices = await tts.getVoices();
+          const providers = [...new Set(availableVoices.map((v: { provider: string }) => v.provider))];
           return JSON.stringify({
             status: 'success',
             action: 'status',
-            ...status,
+            providers,
+            voiceCount: availableVoices.length,
+            available: providers.length > 0,
           });
 
         default:

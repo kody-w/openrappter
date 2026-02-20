@@ -251,38 +251,57 @@ export class Assistant {
       const toolCallAccumulator = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
       let finishReason: string | undefined;
 
-      for await (const delta of this.provider.chatStream(history, {
-        model: this.config.model,
-        tools: tools.length > 0 ? tools : undefined,
-      })) {
-        if (delta.done) {
-          finishReason = delta.finish_reason;
-          break;
-        }
+      // Retry streaming call on transient fetch failures
+      const maxRetries = 2;
+      let lastError: Error | undefined;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          for await (const delta of this.provider.chatStream(history, {
+            model: this.config.model,
+            tools: tools.length > 0 ? tools : undefined,
+          })) {
+            if (delta.done) {
+              finishReason = delta.finish_reason;
+              break;
+            }
 
-        if (delta.content) {
-          fullContent += delta.content;
-          onDelta(delta.content);
-        }
+            if (delta.content) {
+              fullContent += delta.content;
+              onDelta(delta.content);
+            }
 
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const existing = toolCallAccumulator.get(tc.index);
-            if (!existing) {
-              toolCallAccumulator.set(tc.index, {
-                id: tc.id ?? '',
-                type: 'function',
-                function: {
-                  name: tc.function?.name ?? '',
-                  arguments: tc.function?.arguments ?? '',
-                },
-              });
-            } else {
-              if (tc.id) existing.id = tc.id;
-              if (tc.function?.name) existing.function.name += tc.function.name;
-              if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const existing = toolCallAccumulator.get(tc.index);
+                if (!existing) {
+                  toolCallAccumulator.set(tc.index, {
+                    id: tc.id ?? '',
+                    type: 'function',
+                    function: {
+                      name: tc.function?.name ?? '',
+                      arguments: tc.function?.arguments ?? '',
+                    },
+                  });
+                } else {
+                  if (tc.id) existing.id = tc.id;
+                  if (tc.function?.name) existing.function.name += tc.function.name;
+                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+                }
+              }
             }
           }
+          lastError = undefined;
+          break; // Success — exit retry loop
+        } catch (err) {
+          lastError = err as Error;
+          if (attempt < maxRetries && lastError.message.includes('fetch failed')) {
+            // Transient network error — wait briefly and retry
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+            fullContent = '';
+            toolCallAccumulator.clear();
+            continue;
+          }
+          throw lastError;
         }
       }
 

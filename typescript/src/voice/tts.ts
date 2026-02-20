@@ -148,151 +148,52 @@ export class OpenAITTS implements TTSProvider {
 }
 
 /**
- * Edge TTS Provider (Free, using Microsoft Edge's TTS API)
+ * Edge TTS Provider (Free, using node-edge-tts library)
  */
 export class EdgeTTS implements TTSProvider {
   name = 'edge';
-  private voices: Voice[] = [];
 
   async synthesize(text: string, options?: TTSOptions): Promise<Buffer> {
-    // Edge TTS uses a WebSocket-based API
-    // This is a simplified implementation using the edge-tts npm package pattern
-    const voice = options?.voice ?? 'en-US-AriaNeural';
-    const rate = options?.speed ? `${Math.round((options.speed - 1) * 100)}%` : '+0%';
-    const pitch = options?.pitch ? `${Math.round((options.pitch - 1) * 50)}Hz` : '+0Hz';
+    const { EdgeTTS: EdgeTTSLib } = await import('node-edge-tts');
+    const voice = options?.voice ?? 'en-US-MichelleNeural';
 
-    const websocketUrl = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
-    const connectionId = this.generateUUID();
+    const os = await import('os');
+    const path = await import('path');
+    const fs = await import('fs');
+    const tmpFile = path.join(os.tmpdir(), `openrappter-tts-${Date.now()}.mp3`);
 
-    return new Promise((resolve, reject) => {
-      import('ws').then(({ default: WebSocket }) => {
-        const ws = new WebSocket(
-          `${websocketUrl}?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=${connectionId}`,
-          {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
-            },
-          }
-        );
-
-        const audioChunks: Buffer[] = [];
-
-        ws.on('open', () => {
-          // Send config message
-          ws.send(
-            `Content-Type:application/json; charset=utf-8\r\n` +
-              `Path:speech.config\r\n\r\n` +
-              JSON.stringify({
-                context: {
-                  synthesis: {
-                    audio: {
-                      metadataoptions: { sentenceBoundaryEnabled: false, wordBoundaryEnabled: false },
-                      outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
-                    },
-                  },
-                },
-              })
-          );
-
-          // Send SSML message
-          const ssml =
-            `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
-            `<voice name='${voice}'><prosody rate='${rate}' pitch='${pitch}'>${this.escapeXml(text)}</prosody></voice>` +
-            `</speak>`;
-
-          ws.send(
-            `X-RequestId:${connectionId}\r\n` +
-              `Content-Type:application/ssml+xml\r\n` +
-              `Path:ssml\r\n\r\n` +
-              ssml
-          );
-        });
-
-        ws.on('message', (data: Buffer) => {
-          const message = data.toString();
-          if (message.includes('Path:audio')) {
-            // Extract audio data after the headers
-            const audioStart = data.indexOf(Buffer.from('Path:audio')) + 12;
-            const headerEnd = data.indexOf(Buffer.from('\r\n\r\n'), audioStart);
-            if (headerEnd !== -1) {
-              audioChunks.push(data.slice(headerEnd + 4));
-            }
-          } else if (message.includes('Path:turn.end')) {
-            ws.close();
-            resolve(Buffer.concat(audioChunks));
-          }
-        });
-
-        ws.on('error', reject);
-        ws.on('close', () => {
-          if (audioChunks.length === 0) {
-            reject(new Error('No audio data received'));
-          }
-        });
-      });
-    });
+    try {
+      const tts = new EdgeTTSLib({ voice });
+      await tts.ttsPromise(text, tmpFile);
+      const buffer = fs.readFileSync(tmpFile);
+      return buffer;
+    } finally {
+      // Clean up temp file
+      const fs2 = await import('fs');
+      fs2.unlink(tmpFile, () => {});
+    }
   }
 
   async getVoices(): Promise<Voice[]> {
-    if (this.voices.length > 0) {
-      return this.voices;
-    }
-
-    try {
-      const response = await fetch(
-        'https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/voices/list?trustedclienttoken=6A5AA1D4EAFF4E9FB37E23D68491D6F4'
-      );
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch voices');
-      }
-
-      const data = (await response.json()) as Array<{
-        ShortName: string;
-        FriendlyName: string;
-        Locale: string;
-        Gender: string;
-      }>;
-
-      this.voices = data.map((v) => ({
-        id: v.ShortName,
-        name: v.FriendlyName,
-        language: v.Locale,
-        gender: v.Gender.toLowerCase() as Voice['gender'],
-      }));
-
-      return this.voices;
-    } catch {
-      // Return default voices
-      return [
-        { id: 'en-US-AriaNeural', name: 'Aria', language: 'en-US', gender: 'female' },
-        { id: 'en-US-GuyNeural', name: 'Guy', language: 'en-US', gender: 'male' },
-        { id: 'en-GB-SoniaNeural', name: 'Sonia', language: 'en-GB', gender: 'female' },
-      ];
-    }
+    // node-edge-tts handles token management; return well-known voices
+    return [
+      { id: 'en-US-MichelleNeural', name: 'Michelle', language: 'en-US', gender: 'female' },
+      { id: 'en-US-AriaNeural', name: 'Aria', language: 'en-US', gender: 'female' },
+      { id: 'en-US-GuyNeural', name: 'Guy', language: 'en-US', gender: 'male' },
+      { id: 'en-US-JennyNeural', name: 'Jenny', language: 'en-US', gender: 'female' },
+      { id: 'en-GB-SoniaNeural', name: 'Sonia', language: 'en-GB', gender: 'female' },
+      { id: 'en-GB-RyanNeural', name: 'Ryan', language: 'en-GB', gender: 'male' },
+      { id: 'en-AU-NatashaNeural', name: 'Natasha', language: 'en-AU', gender: 'female' },
+    ];
   }
 
   async isAvailable(): Promise<boolean> {
-    return true; // Edge TTS is always available
-  }
-
-  private generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = (Math.random() * 16) | 0;
-      const v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
-  }
-
-  private escapeXml(text: string): string {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
+    try {
+      await import('node-edge-tts');
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

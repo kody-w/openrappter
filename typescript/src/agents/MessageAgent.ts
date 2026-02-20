@@ -94,47 +94,109 @@ export class MessageAgent extends BasicAgent {
   }
 
   private async sendMessage(channelId: string, conversationId: string, content: string): Promise<string> {
-    if (!this.channelRegistry) {
+    // Try channel registry first (daemon mode)
+    if (this.channelRegistry) {
+      const channel = this.channelRegistry.get(channelId);
+      if (channel) {
+        await channel.sendMessage(conversationId, content);
+        return JSON.stringify({
+          status: 'success',
+          action: 'send',
+          channelId,
+          conversationId,
+          message: 'Message sent successfully',
+        });
+      }
+    }
+
+    // Fallback: send directly via Telegram API (interactive mode)
+    if (channelId.toLowerCase().includes('telegram') || channelId.toLowerCase() === 'tg') {
+      return this.sendTelegramDirect(conversationId, content);
+    }
+
+    return JSON.stringify({
+      status: 'error',
+      message: this.channelRegistry
+        ? `Channel not found: ${channelId}`
+        : 'Channel registry not available. For Telegram, use channelId "telegram".',
+    });
+  }
+
+  private async sendTelegramDirect(chatId: string, content: string): Promise<string> {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
       return JSON.stringify({
         status: 'error',
-        message: 'Channel registry not available',
+        message: 'No TELEGRAM_BOT_TOKEN set. Run: openrappter onboard',
       });
     }
 
-    const channel = this.channelRegistry.get(channelId);
-    if (!channel) {
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: content,
+        parse_mode: 'Markdown',
+      }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      // If chat_id is missing/wrong, suggest how to find it
+      if (errBody.includes('chat not found') || errBody.includes('Bad Request')) {
+        return JSON.stringify({
+          status: 'error',
+          message: `Telegram API error: ${errBody}. Make sure the chat ID is correct. Send /start to the bot first, then check for your chat ID.`,
+        });
+      }
       return JSON.stringify({
         status: 'error',
-        message: `Channel not found: ${channelId}`,
+        message: `Telegram API error: HTTP ${res.status} — ${errBody}`,
       });
     }
-
-    await channel.sendMessage(conversationId, content);
 
     return JSON.stringify({
       status: 'success',
       action: 'send',
-      channelId,
-      conversationId,
-      message: 'Message sent successfully',
+      channelId: 'telegram',
+      conversationId: chatId,
+      message: 'Message sent via Telegram',
     });
   }
 
   private listChannels(): string {
-    if (!this.channelRegistry) {
+    if (this.channelRegistry) {
+      const channels = this.channelRegistry.listChannels();
       return JSON.stringify({
-        status: 'error',
-        message: 'Channel registry not available',
+        status: 'success',
+        action: 'list_channels',
+        channels,
+        count: channels.length,
       });
     }
 
-    const channels = this.channelRegistry.listChannels();
+    // No registry — report what's available via env tokens
+    const available: Array<{ id: string; type: string; configured: boolean }> = [];
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      available.push({ id: 'telegram', type: 'telegram', configured: true });
+    }
+    if (process.env.DISCORD_BOT_TOKEN) {
+      available.push({ id: 'discord', type: 'discord', configured: true });
+    }
+    if (process.env.SLACK_BOT_TOKEN) {
+      available.push({ id: 'slack', type: 'slack', configured: true });
+    }
 
     return JSON.stringify({
       status: 'success',
       action: 'list_channels',
-      channels,
-      count: channels.length,
+      channels: available,
+      count: available.length,
+      note: available.length > 0
+        ? 'Direct API mode — channels can send messages without the gateway.'
+        : 'No channel tokens configured. Run: openrappter onboard',
     });
   }
 

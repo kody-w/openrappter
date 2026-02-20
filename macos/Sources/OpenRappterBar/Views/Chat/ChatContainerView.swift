@@ -95,6 +95,15 @@ public struct ChatContainerView: View {
             }
 
             Button {
+                viewModel.chatViewModel.newSession()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("New Chat")
+
+            Button {
                 openWebUI()
             } label: {
                 Image(systemName: "globe")

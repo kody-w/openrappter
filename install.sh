@@ -1262,6 +1262,28 @@ warn_shell_path_missing_dir() {
     echo "    export PATH=\"${dir}:\$PATH\""
 }
 
+# Determine which shell rc file was (or would be) modified
+get_shell_rc_file() {
+    case "$(basename "${SHELL:-/bin/bash}")" in
+        zsh)  echo "$HOME/.zshrc" ;;
+        bash)
+            if [[ -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        fish) echo "$HOME/.config/fish/config.fish" ;;
+        *)    echo "$HOME/.profile" ;;
+    esac
+}
+
+# Returns true if openrappter will NOT be found in a new shell (needs PATH activation)
+needs_path_activation() {
+    local bin_dir="${1%/}"
+    [[ -n "$bin_dir" ]] && ! path_has_dir "$ORIGINAL_PATH" "$bin_dir"
+}
+
 # ── Launcher Script ────────────────────────────────────────
 create_launcher() {
     local bin_dir="$1"
@@ -1892,7 +1914,40 @@ main() {
     fi
     echo ""
 
+    # Determine if the user needs to activate PATH in their shell
+    local needs_activation=false
+    local shell_rc
+    shell_rc="$(get_shell_rc_file)"
+    if needs_path_activation "$bin_dir"; then
+        needs_activation=true
+    fi
+
     ui_section "What's next"
+
+    # Show prominent activation step FIRST if needed
+    if [[ "$needs_activation" == "true" ]]; then
+        echo ""
+        if [[ -n "$GUM" ]]; then
+            local activate_msg
+            if [[ "$(basename "${SHELL:-/bin/bash}")" == "fish" ]]; then
+                activate_msg="$(printf 'To start using openrappter, run:\n\n  source %s\n\nOr open a new terminal.' "$shell_rc")"
+            else
+                activate_msg="$(printf 'To start using openrappter, run:\n\n  source %s\n\nOr open a new terminal.' "$shell_rc")"
+            fi
+            "$GUM" style --border rounded --border-foreground "#FFB020" --foreground "#FFB020" --bold --padding "1 2" "$activate_msg"
+        else
+            echo ""
+            echo -e "${WARN}${BOLD}  ╭──────────────────────────────────────────────╮${NC}"
+            echo -e "${WARN}${BOLD}  │  To start using openrappter, run:            │${NC}"
+            echo -e "${WARN}${BOLD}  │                                              │${NC}"
+            echo -e "${WARN}${BOLD}  │    source ${shell_rc}${NC}"
+            echo -e "${WARN}${BOLD}  │                                              │${NC}"
+            echo -e "${WARN}${BOLD}  │  Or open a new terminal.                     │${NC}"
+            echo -e "${WARN}${BOLD}  ╰──────────────────────────────────────────────╯${NC}"
+        fi
+        echo ""
+    fi
+
     ui_kv "Setup wizard" "openrappter onboard"
     ui_kv "Check status" "openrappter --status"
     ui_kv "List agents" "openrappter --list-agents"
@@ -1917,6 +1972,16 @@ main() {
             echo ""
             ui_info "Non-interactive shell detected — skipping setup wizard."
             ui_info "Run 'openrappter onboard' in your terminal to complete setup."
+        fi
+    fi
+
+    # Repeat the activation reminder AFTER onboard (so user sees it last)
+    if [[ "$needs_activation" == "true" ]]; then
+        echo ""
+        if [[ -n "$GUM" ]]; then
+            "$GUM" style --foreground "#FFB020" --bold "⚠ Remember: source ${shell_rc}  (or open a new terminal)"
+        else
+            echo -e "${WARN}${BOLD}⚠ Remember: source ${shell_rc}  (or open a new terminal)${NC}"
         fi
     fi
 

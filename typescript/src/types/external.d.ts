@@ -28,11 +28,6 @@ declare module 'node-edge-tts' {
   }
 }
 
-declare module 'blessed' {
-  function screen(options?: Record<string, unknown>): unknown;
-  export = { screen };
-}
-
 declare module 'playwright-core' {
   export const chromium: {
     launch(options?: Record<string, unknown>): Promise<unknown>;

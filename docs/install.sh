@@ -1748,6 +1748,12 @@ main() {
     ui_info "Installing TypeScript dependencies"
     cd "$INSTALL_DIR/typescript"
 
+    # Clean stale build artifacts (prevents old compiled files from lingering after upgrades)
+    if [[ -d dist ]]; then
+        rm -rf dist
+        ui_info "Cleaned stale dist/ directory"
+    fi
+
     if [[ -f package.json ]]; then
         if ! retry 3 2 run_quiet_step "Installing npm dependencies" npm install --no-fund --no-audit; then
             ui_error "npm install failed after retries"

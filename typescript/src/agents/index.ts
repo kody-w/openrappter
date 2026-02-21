@@ -20,5 +20,5 @@ export { SessionsAgent } from './SessionsAgent.js';
 export { CronAgent } from './CronAgent.js';
 export { ImageAgent } from './ImageAgent.js';
 export { HackerNewsAgent } from './HackerNewsAgent.js';
-export { OuroborosAgent, EVOLUTION_CATALOG, judgeEvolution, loadLineageLog, saveLineageLog } from './OuroborosAgent.js';
-export type { EvolutionEntry, EvolutionScorecard, EvolutionLineage, LineageRunSummary, RunDelta, LevelScore, RPGStats, RPGStat } from './OuroborosAgent.js';
+export { OuroborosAgent, EVOLUTION_CATALOG, judgeEvolution, loadLineageLog, saveLineageLog, computeStreaks } from './OuroborosAgent.js';
+export type { EvolutionEntry, EvolutionScorecard, EvolutionLineage, LineageRunSummary, RunDelta, LevelStreak, LevelScore, RPGStats, RPGStat } from './OuroborosAgent.js';

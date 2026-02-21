@@ -11,9 +11,9 @@ import { tmpdir } from 'os';
 import {
   OuroborosAgent, EVOLUTION_CATALOG, EVOLVED_DIR,
   judgeEvolution, scoreWordStats, scoreCaesarCipher, scorePatterns,
-  scoreSentiment, scoreReflection, loadLineageLog, saveLineageLog,
+  scoreSentiment, scoreReflection, loadLineageLog, saveLineageLog, computeStreaks,
 } from '../../agents/OuroborosAgent.js';
-import type { EvolutionScorecard, EvolutionLineage, LineageRunSummary, LevelScore } from '../../agents/OuroborosAgent.js';
+import type { EvolutionScorecard, EvolutionLineage, LineageRunSummary, LevelStreak, LevelScore } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 
@@ -757,6 +757,106 @@ describe('OuroborosAgent Parity', () => {
       expect(capturedPrompt).toContain('Trajectory');
       // Should detect declining and include warning (90→80→70→current which is lower)
       expect(capturedPrompt.toLowerCase()).toContain('declining');
+    });
+  });
+
+  describe('streak multipliers', () => {
+    it('should return empty streaks for fewer than 3 prior runs', () => {
+      const runs: LineageRunSummary[] = [
+        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 55, overall_grade: 'C', rank_title: 'x', total_xp: 2750, level_xps: [550, 550, 550, 550, 550], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+      ];
+      const streaks = computeStreaks(runs);
+      // With only 2 runs, max consecutive is 1 — no streak kicks in
+      for (const s of streaks) {
+        expect(s.multiplier).toBe(1.0);
+        expect(s.label).toBeNull();
+      }
+    });
+
+    it('should detect MOMENTUM for 3+ consecutive improvements', () => {
+      const runs: LineageRunSummary[] = [
+        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 60, overall_grade: 'B', rank_title: 'x', total_xp: 3000, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+      ];
+      const streaks = computeStreaks(runs);
+      for (const s of streaks) {
+        expect(s.consecutive_improvements).toBe(3);
+        expect(s.label).toBe('MOMENTUM');
+        expect(s.multiplier).toBeGreaterThan(1.0);
+      }
+    });
+
+    it('should detect STAGNATION for 3+ consecutive declines', () => {
+      const runs: LineageRunSummary[] = [
+        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 80, overall_grade: 'A', rank_title: 'x', total_xp: 4000, level_xps: [800, 800, 800, 800, 800], level_grades: ['A', 'A', 'A', 'A', 'A'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 70, overall_grade: 'A', rank_title: 'x', total_xp: 3500, level_xps: [700, 700, 700, 700, 700], level_grades: ['A', 'A', 'A', 'A', 'A'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 60, overall_grade: 'B', rank_title: 'x', total_xp: 3000, level_xps: [600, 600, 600, 600, 600], level_grades: ['B', 'B', 'B', 'B', 'B'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+      ];
+      const streaks = computeStreaks(runs);
+      for (const s of streaks) {
+        expect(s.consecutive_declines).toBe(3);
+        expect(s.label).toBe('STAGNATION');
+        expect(s.multiplier).toBeLessThan(1.0);
+      }
+    });
+
+    it('should apply momentum multiplier to XP in scorecard', async () => {
+      const improvingRuns: LineageRunSummary[] = [
+        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 20, overall_grade: 'D', rank_title: 'x', total_xp: 1000, level_xps: [100, 100, 100, 100, 100], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+      ];
+
+      const sampleCaps: Record<string, unknown> = {
+        wordStats: { word_count: 15, unique_words: 12, avg_word_length: 4.5, most_frequent: [{ word: 'the', count: 3 }, { word: 'fox', count: 2 }] },
+        caesarCipher: { encrypted: 'Gur nznmvat sbk', decrypted: 'The amazing fox' },
+        patterns: { emails: ['test@example.com'], urls: ['https://test.dev'], numbers: [], dates: ['2026-01-15'] },
+        sentiment: { score: 1.0, label: 'positive', positive: ['amazing', 'great'], negative: [] },
+        reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], capability_count: 8, identity: 'I am OuroborosGen5Agent, generation 5. I have 8 methods.' },
+      };
+
+      // With streaks
+      const withStreaks = await judgeEvolution('The amazing fox', sampleCaps, undefined, improvingRuns);
+      // Without streaks
+      const withoutStreaks = await judgeEvolution('The amazing fox', sampleCaps, undefined, []);
+
+      // At least one level should have boosted XP
+      let foundBoosted = false;
+      for (let i = 0; i < 5; i++) {
+        const withS = withStreaks.levels[i];
+        const withoutS = withoutStreaks.levels[i];
+        if (withS.xp > withoutS.xp) {
+          foundBoosted = true;
+          expect(withS.base_xp).toBe(withoutS.base_xp); // raw stats identical
+          expect(withS.streak?.label).toBe('MOMENTUM');
+        }
+      }
+      expect(foundBoosted).toBe(true);
+    });
+
+    it('should include streak info in formatted scorecard', async () => {
+      const runs: LineageRunSummary[] = [
+        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 20, overall_grade: 'D', rank_title: 'x', total_xp: 1000, level_xps: [100, 100, 100, 100, 100], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+      ];
+
+      const sampleCaps: Record<string, unknown> = {
+        wordStats: { word_count: 15, unique_words: 12, avg_word_length: 4.5, most_frequent: [{ word: 'the', count: 3 }] },
+        caesarCipher: { encrypted: 'test', decrypted: 'test' },
+        patterns: { emails: ['a@b.com'], urls: [], numbers: [], dates: [] },
+        sentiment: { score: 0.5, label: 'positive', positive: ['good'], negative: [] },
+        reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: [], capability_count: 5, identity: 'test' },
+      };
+
+      const scorecard = await judgeEvolution('test', sampleCaps, undefined, runs);
+      expect(scorecard.formatted).toContain('MOMENTUM');
     });
   });
 

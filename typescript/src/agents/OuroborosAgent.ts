@@ -53,14 +53,24 @@ export interface RPGStats {
   WIS: RPGStat;
 }
 
+export interface LevelStreak {
+  level: number;
+  consecutive_improvements: number;
+  consecutive_declines: number;
+  multiplier: number; // 0.80 to 1.20
+  label: 'MOMENTUM' | 'STAGNATION' | null;
+}
+
 export interface LevelScore {
   level: number;
   title: string;
   capability: string;
   stats: RPGStats;
   xp: number;
+  base_xp: number;
   grade: string;
   verdict: string;
+  streak: LevelStreak | null;
 }
 
 export interface RunDelta {
@@ -469,12 +479,57 @@ export function scoreReflection(r: Record<string, unknown> | undefined): RPGStat
   return buildStats(pwr, int_, dex, wis);
 }
 
-function buildLevelScore(level: number, capability: string, stats: RPGStats): LevelScore {
-  const xp = computeXP(stats);
+export function computeStreaks(priorRuns: LineageRunSummary[]): LevelStreak[] {
+  const streaks: LevelStreak[] = [];
+  for (let lvl = 0; lvl < 5; lvl++) {
+    let improvements = 0;
+    let declines = 0;
+
+    // Walk backwards through runs counting consecutive direction
+    for (let i = priorRuns.length - 1; i >= 1; i--) {
+      const curr = priorRuns[i].level_xps[lvl] ?? 0;
+      const prev = priorRuns[i - 1].level_xps[lvl] ?? 0;
+      if (curr > prev) {
+        if (declines > 0) break; // streak broken
+        improvements++;
+      } else if (curr < prev) {
+        if (improvements > 0) break;
+        declines++;
+      } else {
+        break; // tie breaks streak
+      }
+    }
+
+    let multiplier = 1.0;
+    let label: LevelStreak['label'] = null;
+    if (improvements >= 3) {
+      multiplier = 1.0 + Math.min(improvements - 2, 4) * 0.05;
+      label = 'MOMENTUM';
+    } else if (declines >= 3) {
+      multiplier = 1.0 - Math.min(declines - 2, 4) * 0.05;
+      label = 'STAGNATION';
+    }
+
+    streaks.push({
+      level: lvl + 1,
+      consecutive_improvements: improvements,
+      consecutive_declines: declines,
+      multiplier: Math.round(multiplier * 100) / 100,
+      label,
+    });
+  }
+  return streaks;
+}
+
+function buildLevelScore(level: number, capability: string, stats: RPGStats, streak?: LevelStreak): LevelScore {
+  const baseXP = computeXP(stats);
+  const multiplier = streak?.multiplier ?? 1.0;
+  const xp = clamp(Math.round(baseXP * multiplier), 0, 1000);
   const grade = gradeFromXP(xp);
   const title = LEVEL_TITLES[level] ?? `Level ${level}`;
-  const verdict = `${title}: PWR=${stats.PWR.value} INT=${stats.INT.value} DEX=${stats.DEX.value} WIS=${stats.WIS.value} → ${xp}XP [${grade}]`;
-  return { level, title, capability, stats, xp, grade, verdict };
+  const streakTag = streak?.label ? ` [${streak.label} x${streak.multiplier}]` : '';
+  const verdict = `${title}: PWR=${stats.PWR.value} INT=${stats.INT.value} DEX=${stats.DEX.value} WIS=${stats.WIS.value} → ${xp}XP [${grade}]${streakTag}`;
+  return { level, title, capability, stats, xp, base_xp: baseXP, grade, verdict, streak: streak ?? null };
 }
 
 function computeOverall(levels: LevelScore[]): { totalXP: number; powerLevel: number; overallGrade: string; rankTitle: string } {
@@ -492,23 +547,25 @@ function computeOverall(levels: LevelScore[]): { totalXP: number; powerLevel: nu
 }
 
 function formatScorecard(levels: LevelScore[], overall: ReturnType<typeof computeOverall>): string {
-  const border = '╔══════════════════════════════════════════════════╗';
-  const bottom = '╚══════════════════════════════════════════════════╝';
-  const sep    = '╠══════════════════════════════════════════════════╣';
-  const pad = (s: string, w: number) => s.padEnd(w).slice(0, w);
+  const W = 62;
+  const border = '╔' + '═'.repeat(W) + '╗';
+  const bottom = '╚' + '═'.repeat(W) + '╝';
+  const sep    = '╠' + '═'.repeat(W) + '╣';
+  const row = (s: string) => `║  ${s.padEnd(W - 2)}║`;
 
   const lines: string[] = [border];
-  lines.push(`║  OUROBOROS EVOLUTION SCORECARD                    ║`);
-  lines.push(`║  Rank: ${pad(overall.rankTitle, 40)} ║`);
+  lines.push(row('OUROBOROS EVOLUTION SCORECARD'));
+  lines.push(row(`Rank: ${overall.rankTitle}`));
   lines.push(sep);
 
   for (const lvl of levels) {
-    lines.push(`║  Lv${lvl.level} ${pad(lvl.title, 20)} ${pad(lvl.capability, 21)} ║`);
-    lines.push(`║    PWR:${String(lvl.stats.PWR.value).padStart(2)} INT:${String(lvl.stats.INT.value).padStart(2)} DEX:${String(lvl.stats.DEX.value).padStart(2)} WIS:${String(lvl.stats.WIS.value).padStart(2)}  XP:${String(lvl.xp).padStart(4)} [${lvl.grade}]    ║`);
+    lines.push(row(`Lv${lvl.level} ${lvl.title.padEnd(20)} ${lvl.capability}`));
+    const streakTag = lvl.streak?.label ? `  ${lvl.streak.label}` : '';
+    lines.push(row(`  PWR:${String(lvl.stats.PWR.value).padStart(2)} INT:${String(lvl.stats.INT.value).padStart(2)} DEX:${String(lvl.stats.DEX.value).padStart(2)} WIS:${String(lvl.stats.WIS.value).padStart(2)}  XP:${String(lvl.xp).padStart(4)} [${lvl.grade}]${streakTag}`));
   }
 
   lines.push(sep);
-  lines.push(`║  TOTAL XP: ${String(overall.totalXP).padStart(5)}  POWER: ${String(overall.powerLevel).padStart(3)}  GRADE: ${overall.overallGrade}        ║`);
+  lines.push(row(`TOTAL XP: ${String(overall.totalXP).padStart(5)}  POWER: ${String(overall.powerLevel).padStart(3)}  GRADE: ${overall.overallGrade}`));
   lines.push(bottom);
 
   return lines.join('\n');
@@ -623,6 +680,14 @@ async function enhanceVerdictsWithLLM(
       }
     }
 
+    // Include active streak multipliers
+    const activeStreaks = levels
+      .filter(l => l.streak?.label)
+      .map(l => `Lv${l.level} ${l.streak!.label} (x${l.streak!.multiplier})`);
+    if (activeStreaks.length > 0) {
+      promptParts.push(`Active streaks: ${activeStreaks.join(', ')}. Mention these in your commentary — momentum should feel exciting, stagnation should feel urgent.`);
+    }
+
     promptParts.push('');
     promptParts.push('Write exactly 5 short RPG-flavored commentary strings (one per level), returned as a JSON array of strings.');
     promptParts.push('Each should be 1-2 sentences, dramatic and fun. Return ONLY the JSON array, no other text.');
@@ -666,7 +731,8 @@ export async function judgeEvolution(
     scoreReflection(caps.reflection as Record<string, unknown> | undefined),
   ];
 
-  const levels = scores.map((stats, i) => buildLevelScore(i + 1, capNames[i], stats));
+  const streaks = (priorRuns && priorRuns.length >= 3) ? computeStreaks(priorRuns) : [];
+  const levels = scores.map((stats, i) => buildLevelScore(i + 1, capNames[i], stats, streaks[i]));
 
   const overall = computeOverall(levels);
   const lineage = computeLineage(levels, overall, priorRuns ?? []);

@@ -1,37 +1,20 @@
-# Dependencies
+# Dependency directories
 node_modules/
-__pycache__/
-*.pyc
-*.egg-info/
-.eggs/
-*.egg
-
-# Build outputs
+# Editor config
+.vscode/
+.idea/
+# OS files
+.DS_Store
+Thumbs.db
+# Build artifacts
 dist/
 build/
-*.tgz
-
-# IDE and OS
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Test and coverage
-coverage/
-.nyc_output/
-.pytest_cache/
-htmlcov/
-
-# Environment
-.env
-.env.local
+# Logs & temp
 *.log
-
-# Package locks (keep package-lock.json, ignore others)
-yarn.lock
-pnpm-lock.yaml
-openclaw/
-docs/OPENCLAW_FEATURE_ANALYSIS.md
-.env
+*.swp
+# Python envs
+__pycache__/
+*.pyc
+.venv/
+# Misc
+ObsidianVault/

@@ -35,6 +35,7 @@ export interface AgentContext {
   priors: Record<string, Prior>;
   orientation: Orientation;
   upstream_slush?: Record<string, unknown>;
+  breadcrumbs?: Breadcrumb[];
 }
 
 export interface TemporalContext {
@@ -93,3 +94,41 @@ export interface AgentInfo {
   module: string;
   file: string;
 }
+
+export type SignalCategory = 'temporal' | 'query_signals' | 'memory_echoes' | 'behavioral' | 'priors';
+
+export interface SloshFilter {
+  include?: SignalCategory[];
+  exclude?: SignalCategory[];
+}
+
+export interface SloshPreferences {
+  prioritize?: SignalCategory[];
+  suppress?: SignalCategory[];
+}
+
+export interface Breadcrumb {
+  query: string;
+  timestamp: string;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+export interface SloshFeedback {
+  useful_signals: string[];
+  useless_signals: string[];
+}
+
+export interface SloshPrivacy {
+  disabled?: boolean;
+  redact?: string[];
+  obfuscate?: string[];
+}
+
+export interface SloshDebugEvent {
+  stage: 'post-slosh' | 'post-filter' | 'post-privacy' | 'post-perform';
+  timestamp: string;
+  context: AgentContext;
+  meta?: Record<string, unknown>;
+}
+
+export type SloshDebugHandler = (event: SloshDebugEvent) => void;

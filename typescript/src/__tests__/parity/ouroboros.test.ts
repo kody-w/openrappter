@@ -10,10 +10,10 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import {
   OuroborosAgent, EVOLUTION_CATALOG, EVOLVED_DIR,
-  judgeEvolution, scoreWordStats, scoreCaesarCipher, scorePatterns,
-  scoreSentiment, scoreReflection, loadLineageLog, saveLineageLog, computeStreaks,
+  assessEvolution, checkWordStats, checkCaesarCipher, checkPatterns,
+  checkSentiment, checkReflection, loadLineageLog, saveLineageLog, computeTrends,
 } from '../../agents/OuroborosAgent.js';
-import type { EvolutionScorecard, EvolutionLineage, LineageRunSummary, LevelStreak, LevelScore } from '../../agents/OuroborosAgent.js';
+import type { EvolutionReport, EvolutionLineage, LineageRunSummary, CapabilityTrend, CapabilityScore } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 
@@ -367,20 +367,18 @@ describe('OuroborosAgent Parity', () => {
       expect(agent.lastDataSlush).toBeDefined();
     }, 30000);
 
-    it('should include scorecard_summary in data_slush signals', async () => {
-      const workDir = join(testWorkDir, `slush-scorecard-${Date.now()}`);
+    it('should include report_summary in data_slush signals', async () => {
+      const workDir = join(testWorkDir, `slush-report-${Date.now()}`);
       const agent = new OuroborosAgent(workDir);
       const resultStr = await agent.execute({ input: 'The amazing fox is great' });
       const result = JSON.parse(resultStr);
       const signals = result.data_slush.signals;
 
-      expect(signals.scorecard_summary).toBeDefined();
-      expect(signals.scorecard_summary.power_level).toBeGreaterThanOrEqual(0);
-      expect(signals.scorecard_summary.overall_grade).toBeDefined();
-      expect(signals.scorecard_summary.rank_title).toBeDefined();
-      expect(signals.scorecard_summary.total_xp).toBeGreaterThan(0);
-      expect(signals.scorecard_summary.level_grades).toHaveLength(5);
-      expect(signals.scorecard_summary.verdicts).toHaveLength(5);
+      expect(signals.report_summary).toBeDefined();
+      expect(signals.report_summary.overall_quality).toBeGreaterThanOrEqual(0);
+      expect(signals.report_summary.status).toBeDefined();
+      expect(signals.report_summary.capability_scores).toHaveLength(5);
+      expect(signals.report_summary.summaries).toHaveLength(5);
     }, 30000);
 
     it('should include capability_digests in data_slush signals', async () => {
@@ -456,8 +454,8 @@ describe('OuroborosAgent Parity', () => {
       expect(slush2.signals.run_number).toBe(2);
       expect(slush2.signals.lineage).not.toBeNull();
       expect(slush2.signals.lineage.run_number).toBe(2);
-      expect(slush2.signals.lineage.prior_power_level).toBe(slush1.signals.scorecard_summary.power_level);
-      expect(slush2.signals.lineage.prior_grade).toBe(slush1.signals.scorecard_summary.overall_grade);
+      expect(slush2.signals.lineage.prior_quality).toBe(slush1.signals.report_summary.overall_quality);
+      expect(slush2.signals.lineage.prior_status).toBe(slush1.signals.report_summary.status);
       expect(slush2.signals.lineage.deltas).toHaveLength(5);
       expect(slush2.signals.lineage.cumulative_runs).toBe(2);
       expect(slush2.signals.lineage.history).toHaveLength(1);
@@ -474,15 +472,15 @@ describe('OuroborosAgent Parity', () => {
       mkdirSync(workDir, { recursive: true });
 
       const runs: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', power_level: 50, overall_grade: 'C', rank_title: 'Journeyman Mage', total_xp: 2500, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
-        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', power_level: 55, overall_grade: 'C', rank_title: 'Journeyman Mage', total_xp: 2750, level_xps: [550, 550, 550, 550, 550], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', overall_quality: 50, status: 'developing', level_qualities: [50, 50, 50, 50, 50], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
+        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', overall_quality: 55, status: 'developing', level_qualities: [55, 55, 55, 55, 55], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
       ];
 
       saveLineageLog(workDir, runs);
       const loaded = loadLineageLog(workDir);
       expect(loaded).toHaveLength(2);
       expect(loaded[0].run_number).toBe(1);
-      expect(loaded[1].power_level).toBe(55);
+      expect(loaded[1].overall_quality).toBe(55);
     });
 
     it('should return empty array for missing lineage log', () => {
@@ -492,95 +490,151 @@ describe('OuroborosAgent Parity', () => {
     });
   });
 
-  describe('RPG scoring', () => {
-    it('should give max PWR for 50+ words in scoreWordStats', () => {
+  describe('capability scoring', () => {
+    it('should pass all checks for complete word stats', () => {
       const ws = { word_count: 50, unique_words: 30, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5] };
-      const stats = scoreWordStats(ws);
-      expect(stats.PWR.value).toBe(10);
+      const result = checkWordStats(ws);
+      expect(result.quality).toBe(100);
+      expect(result.checks).toHaveLength(5);
+      expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
-    it('should give max WIS for 5 most_frequent entries', () => {
+    it('should pass has_diversity when ratio is exactly 0.5', () => {
       const ws = { word_count: 10, unique_words: 5, avg_word_length: 4.0, most_frequent: [1, 2, 3, 4, 5] };
-      const stats = scoreWordStats(ws);
-      expect(stats.WIS.value).toBe(10);
+      const result = checkWordStats(ws);
+      // has_words: 10>=3 ✓, has_diversity: 5/10=0.5 (>=0.5) ✓, balanced_length: ✓, frequency_depth: 5>=3 ✓, substantial_input: 10>=10 ✓
+      expect(result.quality).toBe(100);
+      const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
+      expect(diversityCheck?.passed).toBe(true);
     });
 
-    it('should give max DEX for avg_word_length of 5.0', () => {
-      const ws = { word_count: 10, unique_words: 5, avg_word_length: 5.0, most_frequent: [1] };
-      const stats = scoreWordStats(ws);
-      expect(stats.DEX.value).toBe(10);
+    it('should fail has_diversity when ratio is below 0.5', () => {
+      const ws = { word_count: 10, unique_words: 4, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const result = checkWordStats(ws);
+      // has_words: ✓, has_diversity: 4/10=0.4 (<0.5) ✗, balanced_length: ✓, frequency_depth: ✓, substantial_input: ✓
+      expect(result.quality).toBe(80);
+      const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
+      expect(diversityCheck?.passed).toBe(false);
     });
 
-    it('should handle undefined in scoreWordStats', () => {
-      const stats = scoreWordStats(undefined);
-      expect(stats.PWR.value).toBe(0);
-      expect(stats.INT.value).toBe(0);
-      expect(stats.DEX.value).toBe(0);
-      expect(stats.WIS.value).toBe(0);
+    it('should fail has_words for fewer than 3 words', () => {
+      const ws = { word_count: 2, unique_words: 2, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const result = checkWordStats(ws);
+      // has_words: 2<3 ✗, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 2<10 ✗
+      expect(result.quality).toBe(60);
+      const wordsCheck = result.checks.find(c => c.name === 'has_words');
+      expect(wordsCheck?.passed).toBe(false);
     });
 
-    it('should give DEX 10 for perfect roundtrip in scoreCaesarCipher', () => {
+    it('should fail substantial_input for fewer than 10 words', () => {
+      const ws = { word_count: 7, unique_words: 6, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const result = checkWordStats(ws);
+      // has_words: ✓, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 7<10 ✗
+      expect(result.quality).toBe(80);
+      const substantialCheck = result.checks.find(c => c.name === 'substantial_input');
+      expect(substantialCheck?.passed).toBe(false);
+    });
+
+    it('should pass balanced_length for avg 5.0', () => {
+      const ws = { word_count: 10, unique_words: 8, avg_word_length: 5.0, most_frequent: [1] };
+      const result = checkWordStats(ws);
+      const check = result.checks.find(c => c.name === 'balanced_length');
+      expect(check?.passed).toBe(true);
+    });
+
+    it('should return quality 0 for undefined word stats', () => {
+      const result = checkWordStats(undefined);
+      expect(result.quality).toBe(0);
+      expect(result.checks).toHaveLength(0);
+    });
+
+    it('should pass all checks for perfect caesar cipher roundtrip', () => {
       const input = 'hello world';
       const cc = { encrypted: 'uryyb jbeyq', decrypted: 'hello world' };
-      const stats = scoreCaesarCipher(cc, input);
-      expect(stats.DEX.value).toBe(10);
+      const result = checkCaesarCipher(cc, input);
+      expect(result.quality).toBe(100);
+      expect(result.checks).toHaveLength(3);
+      expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
-    it('should handle undefined in scoreCaesarCipher', () => {
-      const stats = scoreCaesarCipher(undefined, 'test');
-      expect(stats.PWR.value).toBe(0);
+    it('should return quality 0 for undefined caesar cipher', () => {
+      const result = checkCaesarCipher(undefined, 'test');
+      expect(result.quality).toBe(0);
+      expect(result.checks).toHaveLength(0);
     });
 
-    it('should give INT 10 for all 4 categories in scorePatterns', () => {
+    it('should pass all checks when all 4 pattern categories found', () => {
       const p = { emails: ['a@b.com'], urls: ['https://x.com'], numbers: ['42'], dates: ['2026-01-01'] };
-      const stats = scorePatterns(p);
-      expect(stats.INT.value).toBe(10);
+      const result = checkPatterns(p);
+      expect(result.quality).toBe(100);
+      expect(result.checks).toHaveLength(4);
+      expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
-    it('should give INT 5 for 2/4 categories in scorePatterns', () => {
+    it('should give quality 50 for 2/4 pattern categories', () => {
       const p = { emails: ['a@b.com'], urls: [], numbers: ['42'], dates: [] };
-      const stats = scorePatterns(p);
-      expect(stats.INT.value).toBe(5);
+      const result = checkPatterns(p);
+      expect(result.quality).toBe(50);
+      const passed = result.checks.filter(c => c.passed);
+      expect(passed).toHaveLength(2);
     });
 
-    it('should give high WIS for decisive sentiment score', () => {
+    it('should pass all checks for positive input with sufficient words', () => {
       const s = { score: 1.0, label: 'positive', positive: ['great', 'good'], negative: [] };
-      const stats = scoreSentiment(s);
-      expect(stats.WIS.value).toBe(10);
+      const result = checkSentiment(s);
+      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 2>=2 ✓, has_confidence: ✓
+      expect(result.quality).toBe(100);
+      const evidenceCheck = result.checks.find(c => c.name === 'sufficient_evidence');
+      expect(evidenceCheck?.passed).toBe(true);
     });
 
-    it('should give zero WIS for neutral sentiment', () => {
+    it('should fail sufficient_evidence with only 1 sentiment word', () => {
+      const s = { score: 1.0, label: 'positive', positive: ['great'], negative: [] };
+      const result = checkSentiment(s);
+      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 1<2 ✗, has_confidence: ✓
+      expect(result.quality).toBe(75);
+      const evidenceCheck = result.checks.find(c => c.name === 'sufficient_evidence');
+      expect(evidenceCheck?.passed).toBe(false);
+    });
+
+    it('should give quality 0 for neutral sentiment with no words', () => {
       const s = { score: 0, label: 'neutral', positive: [], negative: [] };
-      const stats = scoreSentiment(s);
-      expect(stats.WIS.value).toBe(0);
+      const result = checkSentiment(s);
+      expect(result.quality).toBe(0);
+      expect(result.checks.every(c => !c.passed)).toBe(true);
     });
 
-    it('should give PWR 10 for correct generation in scoreReflection', () => {
+    it('should pass all checks for correct Gen 5 reflection', () => {
       const r = { generation: 5, identity: 'I am Gen5', className: 'OuroborosGen5Agent', capability_count: 8 };
-      const stats = scoreReflection(r);
-      expect(stats.PWR.value).toBe(10);
+      const result = checkReflection(r);
+      expect(result.quality).toBe(100);
+      expect(result.checks).toHaveLength(4);
+      expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
-    it('should give PWR 2 for wrong generation in scoreReflection', () => {
+    it('should fail 2 checks for wrong generation in reflection', () => {
       const r = { generation: 3, identity: 'I am Gen3', className: 'OuroborosGen3Agent', capability_count: 5 };
-      const stats = scoreReflection(r);
-      expect(stats.PWR.value).toBe(2);
+      const result = checkReflection(r);
+      // correct_generation: false, knows_identity: true, correct_class: false, counted_capabilities: true
+      expect(result.quality).toBe(50);
+      const genCheck = result.checks.find(c => c.name === 'correct_generation');
+      expect(genCheck?.passed).toBe(false);
+      const classCheck = result.checks.find(c => c.name === 'correct_class');
+      expect(classCheck?.passed).toBe(false);
     });
 
-    it('should grade S for 900+ XP', () => {
-      // gradeFromXP is internal but tested via judgeEvolution — test indirectly via high stats
-      // Just verify structure through scoreWordStats producing valid values
+    it('should include check details with each check', () => {
       const ws = { word_count: 50, unique_words: 50, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5] };
-      const stats = scoreWordStats(ws);
-      // All stats should be 0-10
-      for (const key of ['PWR', 'INT', 'DEX', 'WIS'] as const) {
-        expect(stats[key].value).toBeGreaterThanOrEqual(0);
-        expect(stats[key].value).toBeLessThanOrEqual(10);
+      const result = checkWordStats(ws);
+      for (const check of result.checks) {
+        expect(check.name).toBeDefined();
+        expect(typeof check.passed).toBe('boolean');
+        expect(check.detail.length).toBeGreaterThan(0);
       }
     });
   });
 
-  describe('judgeEvolution', () => {
+  describe('assessEvolution', () => {
     const sampleCaps: Record<string, unknown> = {
       wordStats: { word_count: 15, unique_words: 12, avg_word_length: 4.5, most_frequent: [{ word: 'the', count: 3 }, { word: 'fox', count: 2 }] },
       caesarCipher: { encrypted: 'Gur nznmvat sbk', decrypted: 'The amazing fox' },
@@ -589,30 +643,26 @@ describe('OuroborosAgent Parity', () => {
       reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], capability_count: 8, identity: 'I am OuroborosGen5Agent, generation 5. I have 8 methods.' },
     };
 
-    it('should produce valid scorecard from real capabilities', async () => {
-      const scorecard = await judgeEvolution('The amazing fox', sampleCaps);
-      expect(scorecard.levels).toHaveLength(5);
-      expect(scorecard.total_xp).toBeGreaterThan(0);
-      expect(scorecard.power_level).toBeGreaterThanOrEqual(0);
-      expect(scorecard.power_level).toBeLessThanOrEqual(100);
-      expect(['S', 'A', 'B', 'C', 'D']).toContain(scorecard.overall_grade);
-      expect(scorecard.rank_title).toBeDefined();
-      expect(scorecard.formatted).toContain('OUROBOROS EVOLUTION SCORECARD');
+    it('should produce valid report from real capabilities', async () => {
+      const report = await assessEvolution('The amazing fox', sampleCaps);
+      expect(report.capabilities).toHaveLength(5);
+      expect(report.overall_quality).toBeGreaterThanOrEqual(0);
+      expect(report.overall_quality).toBeLessThanOrEqual(100);
+      expect(['strong', 'developing', 'weak']).toContain(report.status);
+      expect(report.formatted).toContain('EVOLUTION REPORT');
 
-      for (const level of scorecard.levels) {
-        expect(level.level).toBeGreaterThanOrEqual(1);
-        expect(level.level).toBeLessThanOrEqual(5);
-        expect(level.xp).toBeGreaterThanOrEqual(0);
-        expect(level.xp).toBeLessThanOrEqual(1000);
-        expect(['S', 'A', 'B', 'C', 'D']).toContain(level.grade);
-        expect(level.stats.PWR.value).toBeGreaterThanOrEqual(0);
-        expect(level.stats.PWR.value).toBeLessThanOrEqual(10);
+      for (const cap of report.capabilities) {
+        expect(cap.quality).toBeGreaterThanOrEqual(0);
+        expect(cap.quality).toBeLessThanOrEqual(100);
+        expect(['strong', 'developing', 'weak']).toContain(cap.status);
+        expect(Array.isArray(cap.checks)).toBe(true);
+        expect(cap.summary.length).toBeGreaterThan(0);
       }
     });
 
     it('should use deterministic mode when no provider given', async () => {
-      const scorecard = await judgeEvolution('test', sampleCaps);
-      expect(scorecard.judge_mode).toBe('deterministic');
+      const report = await assessEvolution('test', sampleCaps);
+      expect(report.judge_mode).toBe('deterministic');
     });
 
     it('should use hybrid mode with mock provider', async () => {
@@ -623,20 +673,20 @@ describe('OuroborosAgent Parity', () => {
         async chat() {
           return {
             content: JSON.stringify([
-              'The Lexicon Analyst awakens with burning insight!',
-              'The Cipher Adept weaves cryptographic shadows!',
-              'The Pattern Seeker pierces the veil of data!',
-              'The Emotion Reader channels primal forces!',
-              'The Ouroboros Sage achieves transcendence!',
+              'Word stats show comprehensive vocabulary analysis.',
+              'Caesar cipher achieves perfect roundtrip encryption.',
+              'Pattern detection covers most categories effectively.',
+              'Sentiment analysis could benefit from wider word range.',
+              'Self-reflection accurately identifies all capabilities.',
             ]),
             tool_calls: null,
           } satisfies ProviderResponse;
         },
       };
 
-      const scorecard = await judgeEvolution('test', sampleCaps, mockProvider);
-      expect(scorecard.judge_mode).toBe('hybrid');
-      expect(scorecard.levels[0].verdict).toContain('Lexicon Analyst');
+      const report = await assessEvolution('test', sampleCaps, mockProvider);
+      expect(report.judge_mode).toBe('hybrid');
+      expect(report.capabilities[0].summary).toContain('Word stats');
     });
 
     it('should fall back to deterministic if provider throws', async () => {
@@ -647,22 +697,22 @@ describe('OuroborosAgent Parity', () => {
         async chat() { throw new Error('provider exploded'); },
       };
 
-      const scorecard = await judgeEvolution('test', sampleCaps, failProvider);
-      expect(scorecard.judge_mode).toBe('deterministic');
-      // Verdicts should still exist (deterministic fallback)
-      for (const level of scorecard.levels) {
-        expect(level.verdict.length).toBeGreaterThan(0);
+      const report = await assessEvolution('test', sampleCaps, failProvider);
+      expect(report.judge_mode).toBe('deterministic');
+      // Summaries should still exist (deterministic fallback)
+      for (const cap of report.capabilities) {
+        expect(cap.summary.length).toBeGreaterThan(0);
       }
     });
 
     it('should have null lineage on first run (no prior runs)', async () => {
-      const scorecard = await judgeEvolution('test', sampleCaps);
-      expect(scorecard.lineage).toBeNull();
+      const report = await assessEvolution('test', sampleCaps);
+      expect(report.lineage).toBeNull();
     });
 
     it('should have null lineage with empty prior runs', async () => {
-      const scorecard = await judgeEvolution('test', sampleCaps, undefined, []);
-      expect(scorecard.lineage).toBeNull();
+      const report = await assessEvolution('test', sampleCaps, undefined, []);
+      expect(report.lineage).toBeNull();
     });
 
     it('should compute lineage from prior run summaries', async () => {
@@ -670,20 +720,18 @@ describe('OuroborosAgent Parity', () => {
         run_number: 1,
         timestamp: '2026-01-01T00:00:00Z',
         input_hash: 'abc123',
-        power_level: 40,
-        overall_grade: 'C',
-        rank_title: 'Journeyman Mage',
-        total_xp: 1250,
-        level_xps: [300, 250, 200, 100, 400],
-        level_grades: ['D', 'D', 'D', 'D', 'C'],
+        overall_quality: 40,
+        status: 'weak',
+        level_qualities: [30, 25, 20, 10, 40],
+        level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'],
       }];
 
-      const scorecard = await judgeEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
-      expect(scorecard.lineage).not.toBeNull();
-      const lineage = scorecard.lineage!;
+      const report = await assessEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
+      expect(report.lineage).not.toBeNull();
+      const lineage = report.lineage!;
       expect(lineage.run_number).toBe(2);
-      expect(lineage.prior_power_level).toBe(40);
-      expect(lineage.prior_grade).toBe('C');
+      expect(lineage.prior_quality).toBe(40);
+      expect(lineage.prior_status).toBe('weak');
       expect(lineage.deltas).toHaveLength(5);
       expect(lineage.cumulative_runs).toBe(2);
       expect(lineage.history).toHaveLength(1);
@@ -691,9 +739,9 @@ describe('OuroborosAgent Parity', () => {
       expect(['improving', 'stable', 'declining']).toContain(lineage.trend);
 
       for (const d of lineage.deltas) {
-        expect(d.level).toBeGreaterThanOrEqual(1);
-        expect(typeof d.xp_delta).toBe('number');
-        expect(typeof d.grade_change).toBe('string');
+        expect(d.capability.length).toBeGreaterThan(0);
+        expect(typeof d.quality_delta).toBe('number');
+        expect(typeof d.status_change).toBe('string');
       }
     });
 
@@ -702,34 +750,32 @@ describe('OuroborosAgent Parity', () => {
         run_number: 1,
         timestamp: '2026-01-01T00:00:00Z',
         input_hash: 'abc123',
-        power_level: 10,
-        overall_grade: 'D',
-        rank_title: 'Fledgling Mutant',
-        total_xp: 250,
-        level_xps: [50, 50, 50, 50, 50],
-        level_grades: ['D', 'D', 'D', 'D', 'D'],
+        overall_quality: 10,
+        status: 'weak',
+        level_qualities: [5, 5, 5, 5, 5],
+        level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'],
       }];
 
-      const scorecard = await judgeEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
-      expect(scorecard.lineage!.trend).toBe('improving');
+      const report = await assessEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
+      expect(report.lineage!.trend).toBe('improving');
     });
 
     it('should compute trajectory from 3+ data points', async () => {
       const priorRuns: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', power_level: 20, overall_grade: 'D', rank_title: 'Fledgling Mutant', total_xp: 500, level_xps: [100, 100, 100, 100, 100], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', power_level: 30, overall_grade: 'D', rank_title: 'Apprentice Scribe', total_xp: 750, level_xps: [150, 150, 150, 150, 150], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 3, timestamp: '2026-01-03T00:00:00Z', input_hash: 'c', power_level: 35, overall_grade: 'C', rank_title: 'Apprentice Scribe', total_xp: 900, level_xps: [180, 180, 180, 180, 180], level_grades: ['D', 'D', 'D', 'D', 'D'] },
+        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', overall_quality: 20, status: 'weak', level_qualities: [20, 20, 20, 20, 20], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', overall_quality: 30, status: 'weak', level_qualities: [30, 30, 30, 30, 30], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 3, timestamp: '2026-01-03T00:00:00Z', input_hash: 'c', overall_quality: 35, status: 'weak', level_qualities: [35, 35, 35, 35, 35], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
       ];
 
-      const scorecard = await judgeEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
-      expect(scorecard.lineage).not.toBeNull();
-      expect(scorecard.lineage!.history).toHaveLength(3);
-      expect(typeof scorecard.lineage!.trajectory).toBe('number');
-      // With 3 prior runs at 20, 30, 35 plus current (real caps), trajectory should be positive
-      expect(scorecard.lineage!.trajectory).toBeGreaterThan(0);
+      const report = await assessEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
+      expect(report.lineage).not.toBeNull();
+      expect(report.lineage!.history).toHaveLength(3);
+      expect(typeof report.lineage!.trajectory).toBe('number');
+      // With 3 prior runs at 20, 30, 35 plus current (high quality caps), trajectory should be positive
+      expect(report.lineage!.trajectory).toBeGreaterThan(0);
     });
 
-    it('should pass lineage context to LLM judge prompt', async () => {
+    it('should pass lineage context to LLM enhancement prompt', async () => {
       let capturedPrompt = '';
       const captureProvider: LLMProvider = {
         id: 'capture',
@@ -739,7 +785,7 @@ describe('OuroborosAgent Parity', () => {
           capturedPrompt = messages[0].content;
           return {
             content: JSON.stringify([
-              'Commentary 1', 'Commentary 2', 'Commentary 3', 'Commentary 4', 'Commentary 5',
+              'Suggestion 1', 'Suggestion 2', 'Suggestion 3', 'Suggestion 4', 'Suggestion 5',
             ]),
             tool_calls: null,
           };
@@ -747,69 +793,69 @@ describe('OuroborosAgent Parity', () => {
       };
 
       const priorRuns: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', power_level: 90, overall_grade: 'S', rank_title: 'Mythic Architect', total_xp: 4500, level_xps: [900, 900, 900, 900, 900], level_grades: ['S', 'S', 'S', 'S', 'S'] },
-        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', power_level: 80, overall_grade: 'A', rank_title: 'Grand Sorcerer', total_xp: 4000, level_xps: [800, 800, 800, 800, 800], level_grades: ['A', 'A', 'A', 'A', 'A'] },
-        { run_number: 3, timestamp: '2026-01-03T00:00:00Z', input_hash: 'c', power_level: 70, overall_grade: 'A', rank_title: 'Grand Sorcerer', total_xp: 3500, level_xps: [700, 700, 700, 700, 700], level_grades: ['A', 'A', 'A', 'A', 'A'] },
+        { run_number: 1, timestamp: '2026-01-01T00:00:00Z', input_hash: 'a', overall_quality: 100, status: 'strong', level_qualities: [100, 100, 100, 100, 100], level_statuses: ['strong', 'strong', 'strong', 'strong', 'strong'] },
+        { run_number: 2, timestamp: '2026-01-02T00:00:00Z', input_hash: 'b', overall_quality: 95, status: 'strong', level_qualities: [95, 95, 95, 95, 95], level_statuses: ['strong', 'strong', 'strong', 'strong', 'strong'] },
+        { run_number: 3, timestamp: '2026-01-03T00:00:00Z', input_hash: 'c', overall_quality: 90, status: 'strong', level_qualities: [90, 90, 90, 90, 90], level_statuses: ['strong', 'strong', 'strong', 'strong', 'strong'] },
       ];
 
-      await judgeEvolution('The amazing fox', sampleCaps, captureProvider, priorRuns);
+      await assessEvolution('The amazing fox', sampleCaps, captureProvider, priorRuns);
       expect(capturedPrompt).toContain('run #4');
       expect(capturedPrompt).toContain('Trajectory');
-      // Should detect declining and include warning (90→80→70→current which is lower)
+      // Should detect declining (100→95→90→current ~90, steep enough for negative trajectory)
       expect(capturedPrompt.toLowerCase()).toContain('declining');
     });
   });
 
-  describe('streak multipliers', () => {
-    it('should return empty streaks for fewer than 3 prior runs', () => {
+  describe('capability trends', () => {
+    it('should return neutral trends for fewer than 3 prior runs', () => {
       const runs: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
-        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 55, overall_grade: 'C', rank_title: 'x', total_xp: 2750, level_xps: [550, 550, 550, 550, 550], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '', input_hash: 'a', overall_quality: 50, status: 'developing', level_qualities: [50, 50, 50, 50, 50], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', overall_quality: 55, status: 'developing', level_qualities: [55, 55, 55, 55, 55], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
       ];
-      const streaks = computeStreaks(runs);
-      // With only 2 runs, max consecutive is 1 — no streak kicks in
-      for (const s of streaks) {
-        expect(s.multiplier).toBe(1.0);
-        expect(s.label).toBeNull();
+      const trends = computeTrends(runs);
+      // With only 2 runs, max consecutive is 1 — no trend kicks in
+      for (const t of trends) {
+        expect(t.multiplier).toBe(1.0);
+        expect(t.direction).toBeNull();
       }
     });
 
-    it('should detect MOMENTUM for 3+ consecutive improvements', () => {
+    it('should detect improving trend for 3+ consecutive improvements', () => {
       const runs: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
-        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 60, overall_grade: 'B', rank_title: 'x', total_xp: 3000, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '', input_hash: 'a', overall_quality: 20, status: 'weak', level_qualities: [20, 20, 20, 20, 20], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', overall_quality: 40, status: 'weak', level_qualities: [40, 40, 40, 40, 40], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', overall_quality: 60, status: 'developing', level_qualities: [60, 60, 60, 60, 60], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', overall_quality: 80, status: 'strong', level_qualities: [80, 80, 80, 80, 80], level_statuses: ['strong', 'strong', 'strong', 'strong', 'strong'] },
       ];
-      const streaks = computeStreaks(runs);
-      for (const s of streaks) {
-        expect(s.consecutive_improvements).toBe(3);
-        expect(s.label).toBe('MOMENTUM');
-        expect(s.multiplier).toBeGreaterThan(1.0);
+      const trends = computeTrends(runs);
+      for (const t of trends) {
+        expect(t.consecutive).toBe(3);
+        expect(t.direction).toBe('improving');
+        expect(t.multiplier).toBeGreaterThan(1.0);
       }
     });
 
-    it('should detect STAGNATION for 3+ consecutive declines', () => {
+    it('should detect declining trend for 3+ consecutive declines', () => {
       const runs: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 80, overall_grade: 'A', rank_title: 'x', total_xp: 4000, level_xps: [800, 800, 800, 800, 800], level_grades: ['A', 'A', 'A', 'A', 'A'] },
-        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 70, overall_grade: 'A', rank_title: 'x', total_xp: 3500, level_xps: [700, 700, 700, 700, 700], level_grades: ['A', 'A', 'A', 'A', 'A'] },
-        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 60, overall_grade: 'B', rank_title: 'x', total_xp: 3000, level_xps: [600, 600, 600, 600, 600], level_grades: ['B', 'B', 'B', 'B', 'B'] },
-        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [500, 500, 500, 500, 500], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '', input_hash: 'a', overall_quality: 80, status: 'strong', level_qualities: [80, 80, 80, 80, 80], level_statuses: ['strong', 'strong', 'strong', 'strong', 'strong'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', overall_quality: 60, status: 'developing', level_qualities: [60, 60, 60, 60, 60], level_statuses: ['developing', 'developing', 'developing', 'developing', 'developing'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', overall_quality: 40, status: 'weak', level_qualities: [40, 40, 40, 40, 40], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', overall_quality: 20, status: 'weak', level_qualities: [20, 20, 20, 20, 20], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
       ];
-      const streaks = computeStreaks(runs);
-      for (const s of streaks) {
-        expect(s.consecutive_declines).toBe(3);
-        expect(s.label).toBe('STAGNATION');
-        expect(s.multiplier).toBeLessThan(1.0);
+      const trends = computeTrends(runs);
+      for (const t of trends) {
+        expect(t.consecutive).toBe(3);
+        expect(t.direction).toBe('declining');
+        expect(t.multiplier).toBeLessThan(1.0);
       }
     });
 
-    it('should apply momentum multiplier to XP in scorecard', async () => {
+    it('should apply improving multiplier to quality in report', async () => {
       const improvingRuns: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 20, overall_grade: 'D', rank_title: 'x', total_xp: 1000, level_xps: [100, 100, 100, 100, 100], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '', input_hash: 'a', overall_quality: 20, status: 'weak', level_qualities: [10, 10, 10, 10, 10], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', overall_quality: 30, status: 'weak', level_qualities: [20, 20, 20, 20, 20], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', overall_quality: 40, status: 'weak', level_qualities: [30, 30, 30, 30, 30], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', overall_quality: 50, status: 'developing', level_qualities: [40, 40, 40, 40, 40], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
       ];
 
       const sampleCaps: Record<string, unknown> = {
@@ -820,31 +866,31 @@ describe('OuroborosAgent Parity', () => {
         reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], capability_count: 8, identity: 'I am OuroborosGen5Agent, generation 5. I have 8 methods.' },
       };
 
-      // With streaks
-      const withStreaks = await judgeEvolution('The amazing fox', sampleCaps, undefined, improvingRuns);
-      // Without streaks
-      const withoutStreaks = await judgeEvolution('The amazing fox', sampleCaps, undefined, []);
+      // With trends
+      const withTrends = await assessEvolution('The amazing fox', sampleCaps, undefined, improvingRuns);
+      // Without trends
+      const withoutTrends = await assessEvolution('The amazing fox', sampleCaps, undefined, []);
 
-      // At least one level should have boosted XP
+      // At least one capability should have boosted quality
       let foundBoosted = false;
       for (let i = 0; i < 5; i++) {
-        const withS = withStreaks.levels[i];
-        const withoutS = withoutStreaks.levels[i];
-        if (withS.xp > withoutS.xp) {
+        const withT = withTrends.capabilities[i];
+        const withoutT = withoutTrends.capabilities[i];
+        if (withT.quality > withoutT.quality) {
           foundBoosted = true;
-          expect(withS.base_xp).toBe(withoutS.base_xp); // raw stats identical
-          expect(withS.streak?.label).toBe('MOMENTUM');
+          expect(withT.base_quality).toBe(withoutT.base_quality); // raw checks identical
+          expect(withT.trend?.direction).toBe('improving');
         }
       }
       expect(foundBoosted).toBe(true);
     });
 
-    it('should include streak info in formatted scorecard', async () => {
+    it('should include trend info in formatted report', async () => {
       const runs: LineageRunSummary[] = [
-        { run_number: 1, timestamp: '', input_hash: 'a', power_level: 20, overall_grade: 'D', rank_title: 'x', total_xp: 1000, level_xps: [100, 100, 100, 100, 100], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 2, timestamp: '', input_hash: 'b', power_level: 30, overall_grade: 'D', rank_title: 'x', total_xp: 1500, level_xps: [200, 200, 200, 200, 200], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 3, timestamp: '', input_hash: 'c', power_level: 40, overall_grade: 'C', rank_title: 'x', total_xp: 2000, level_xps: [300, 300, 300, 300, 300], level_grades: ['D', 'D', 'D', 'D', 'D'] },
-        { run_number: 4, timestamp: '', input_hash: 'd', power_level: 50, overall_grade: 'C', rank_title: 'x', total_xp: 2500, level_xps: [400, 400, 400, 400, 400], level_grades: ['C', 'C', 'C', 'C', 'C'] },
+        { run_number: 1, timestamp: '', input_hash: 'a', overall_quality: 20, status: 'weak', level_qualities: [10, 10, 10, 10, 10], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 2, timestamp: '', input_hash: 'b', overall_quality: 30, status: 'weak', level_qualities: [20, 20, 20, 20, 20], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 3, timestamp: '', input_hash: 'c', overall_quality: 40, status: 'weak', level_qualities: [30, 30, 30, 30, 30], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
+        { run_number: 4, timestamp: '', input_hash: 'd', overall_quality: 50, status: 'developing', level_qualities: [40, 40, 40, 40, 40], level_statuses: ['weak', 'weak', 'weak', 'weak', 'weak'] },
       ];
 
       const sampleCaps: Record<string, unknown> = {
@@ -855,52 +901,52 @@ describe('OuroborosAgent Parity', () => {
         reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: [], capability_count: 5, identity: 'test' },
       };
 
-      const scorecard = await judgeEvolution('test', sampleCaps, undefined, runs);
-      expect(scorecard.formatted).toContain('MOMENTUM');
+      const report = await assessEvolution('test', sampleCaps, undefined, runs);
+      expect(report.formatted).toContain('improving');
     });
   });
 
-  describe('full cycle with scorecard', () => {
+  describe('full cycle with report', () => {
     let result: Record<string, unknown>;
     let workDir: string;
 
     beforeAll(async () => {
-      workDir = join(testWorkDir, `scorecard-${Date.now()}`);
+      workDir = join(testWorkDir, `report-${Date.now()}`);
       const agent = new OuroborosAgent(workDir);
       const input = 'The amazing fox is great. Email: test@example.com, URL: https://test.dev, Date: 2026-01-15';
       const resultStr = await agent.execute({ input });
       result = JSON.parse(resultStr);
     }, 30000);
 
-    it('should include scorecard in final output', () => {
-      expect(result.scorecard).toBeDefined();
-      const sc = result.scorecard as EvolutionScorecard;
-      expect(sc.levels).toHaveLength(5);
-      expect(sc.formatted).toContain('OUROBOROS EVOLUTION SCORECARD');
-      expect(sc.power_level).toBeGreaterThan(0);
+    it('should include report in final output', () => {
+      expect(result.report).toBeDefined();
+      const rpt = result.report as EvolutionReport;
+      expect(rpt.capabilities).toHaveLength(5);
+      expect(rpt.formatted).toContain('EVOLUTION REPORT');
+      expect(rpt.overall_quality).toBeGreaterThan(0);
     });
 
-    it('should have valid grades and XP', () => {
-      const sc = result.scorecard as EvolutionScorecard;
-      expect(sc.total_xp).toBeGreaterThan(0);
-      expect(['S', 'A', 'B', 'C', 'D']).toContain(sc.overall_grade);
-      expect(sc.rank_title.length).toBeGreaterThan(0);
+    it('should have valid quality and status', () => {
+      const rpt = result.report as EvolutionReport;
+      expect(rpt.overall_quality).toBeGreaterThan(0);
+      expect(rpt.overall_quality).toBeLessThanOrEqual(100);
+      expect(['strong', 'developing', 'weak']).toContain(rpt.status);
     });
 
     it('should use deterministic judge mode without provider', () => {
-      const sc = result.scorecard as EvolutionScorecard;
-      expect(sc.judge_mode).toBe('deterministic');
+      const rpt = result.report as EvolutionReport;
+      expect(rpt.judge_mode).toBe('deterministic');
     });
 
-    it('should also include scorecard on cached runs', async () => {
-      // Second run uses cache — should still have scorecard
+    it('should also include report on cached runs', async () => {
+      // Second run uses cache — should still have report
       const agent2 = new OuroborosAgent(workDir);
       const result2Str = await agent2.execute({ input: 'cached run test' });
       const result2 = JSON.parse(result2Str);
-      expect(result2.scorecard).toBeDefined();
-      const sc = result2.scorecard as EvolutionScorecard;
-      expect(sc.levels).toHaveLength(5);
-      expect(sc.power_level).toBeGreaterThanOrEqual(0);
+      expect(result2.report).toBeDefined();
+      const rpt = result2.report as EvolutionReport;
+      expect(rpt.capabilities).toHaveLength(5);
+      expect(rpt.overall_quality).toBeGreaterThanOrEqual(0);
     }, 30000);
   });
 

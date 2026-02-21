@@ -26,6 +26,7 @@
  * This mirrors the Python BasicAgent in agents/basic_agent.py
  */
 
+import { createHash } from 'crypto';
 import type {
   AgentMetadata,
   AgentContext,
@@ -35,6 +36,14 @@ import type {
   BehavioralHints,
   Prior,
   Orientation,
+  Breadcrumb,
+  SloshFilter,
+  SloshPreferences,
+  SloshFeedback,
+  SloshPrivacy,
+  SloshDebugEvent,
+  SloshDebugHandler,
+  SignalCategory,
 } from './types.js';
 
 export abstract class BasicAgent {
@@ -47,6 +56,17 @@ export abstract class BasicAgent {
    * Feed this into the next agent's upstream_slush for chaining.
    */
   lastDataSlush: Record<string, unknown> | null = null;
+
+  sloshFilter: SloshFilter | null = null;
+  sloshPreferences: SloshPreferences | null = null;
+  breadcrumbs: Breadcrumb[] = [];
+  maxBreadcrumbs: number = 5;
+  signalUtility: Map<string, number> = new Map();
+  sloshPrivacy: SloshPrivacy | null = null;
+  sloshDebug: boolean = false;
+  onSloshDebug: SloshDebugHandler | null = null;
+  autoSuppressThreshold: number = -3;
+  signalDecay: number = 0.9;
 
   constructor(name: string, metadata: AgentMetadata) {
     this.name = name;
@@ -64,28 +84,95 @@ export abstract class BasicAgent {
    */
   async execute(kwargs: Record<string, unknown> = {}): Promise<string> {
     const query = (kwargs.query ?? kwargs.request ?? kwargs.user_input ?? '') as string;
-    
-    this.context = this.slosh(query);
-    
+
+    // Extract per-call overrides
+    const callFilter = kwargs._sloshFilter as SloshFilter | undefined;
+    const callPrefs = kwargs._sloshPreferences as SloshPreferences | undefined;
+    delete kwargs._sloshFilter;
+    delete kwargs._sloshPreferences;
+
+    // Decay signal utility scores toward zero
+    this.decaySignalUtility();
+
+    const effectivePrivacy = this.sloshPrivacy;
+
+    if (effectivePrivacy?.disabled) {
+      this.context = this.buildMinimalContext();
+    } else {
+      this.context = this.slosh(query);
+      this.emitDebug('post-slosh', this.context);
+
+      const effectiveFilter = callFilter ?? this.sloshFilter;
+      if (effectiveFilter) {
+        this.applyFilter(this.context, effectiveFilter);
+      }
+
+      const effectivePrefs = callPrefs ?? this.sloshPreferences;
+      if (effectivePrefs) {
+        this.applyPreferences(this.context, effectivePrefs);
+      }
+
+      // Auto-suppress categories with utility scores at/below threshold
+      const autoSuppressed = this.computeAutoSuppress();
+      if (autoSuppressed.length > 0) {
+        const protectedCategories = effectiveFilter?.include;
+        const toSuppress = protectedCategories
+          ? autoSuppressed.filter(c => !protectedCategories.includes(c))
+          : autoSuppressed;
+        if (toSuppress.length > 0) {
+          this.applyFilter(this.context, { exclude: toSuppress });
+        }
+      }
+
+      this.emitDebug('post-filter', this.context);
+
+      if (effectivePrivacy) {
+        this.applyPrivacy(this.context, effectivePrivacy);
+      }
+      this.emitDebug('post-privacy', this.context);
+    }
+
+    // Attach breadcrumbs to context
+    this.context.breadcrumbs = [...this.breadcrumbs];
+
     // Merge upstream data_slush into context if provided
     const upstream = kwargs.upstream_slush as Record<string, unknown> | undefined;
     if (upstream && typeof upstream === 'object') {
       this.context.upstream_slush = upstream;
       delete kwargs.upstream_slush;
     }
-    
+
     kwargs._context = this.context;
-    
+
     const result = await this.perform(kwargs);
-    
+
     // Extract data_slush from result for downstream chaining
+    let parsed: Record<string, unknown> | null = null;
     try {
-      const parsed = JSON.parse(result);
-      this.lastDataSlush = parsed?.data_slush ?? null;
+      parsed = JSON.parse(result);
+      this.lastDataSlush = parsed?.data_slush as Record<string, unknown> ?? null;
     } catch {
       this.lastDataSlush = null;
     }
-    
+
+    // Extract and process slosh_feedback
+    if (parsed && typeof parsed === 'object' && 'slosh_feedback' in parsed) {
+      this.processSloshFeedback(parsed.slosh_feedback as SloshFeedback);
+    }
+
+    // Record breadcrumb (newest first)
+    const breadcrumb: Breadcrumb = {
+      query,
+      timestamp: new Date().toISOString(),
+      confidence: this.context.orientation.confidence,
+    };
+    this.breadcrumbs.unshift(breadcrumb);
+    if (this.breadcrumbs.length > this.maxBreadcrumbs) {
+      this.breadcrumbs = this.breadcrumbs.slice(0, this.maxBreadcrumbs);
+    }
+
+    this.emitDebug('post-perform', this.context, { result_length: result.length });
+
     return result;
   }
 
@@ -169,6 +256,204 @@ export abstract class BasicAgent {
       return (value ?? defaultValue) as T;
     }
     return ((this.context as unknown as Record<string, unknown>)[key] ?? defaultValue) as T;
+  }
+
+  /**
+   * Zero out excluded signal categories. include wins over exclude.
+   */
+  private applyFilter(context: AgentContext, filter: SloshFilter): void {
+    const categories: SignalCategory[] = ['temporal', 'query_signals', 'memory_echoes', 'behavioral', 'priors'];
+    let excluded: SignalCategory[];
+
+    if (filter.include && filter.include.length > 0) {
+      excluded = categories.filter(c => !filter.include!.includes(c));
+    } else if (filter.exclude && filter.exclude.length > 0) {
+      excluded = filter.exclude;
+    } else {
+      return;
+    }
+
+    for (const cat of excluded) {
+      switch (cat) {
+        case 'temporal':
+          context.temporal = {} as TemporalContext;
+          break;
+        case 'query_signals':
+          context.query_signals = { specificity: 'low', hints: [], word_count: 0, is_question: false, has_id_pattern: false };
+          break;
+        case 'memory_echoes':
+          context.memory_echoes = [];
+          break;
+        case 'behavioral':
+          context.behavioral = { prefers_brief: false, technical_level: 'standard', frequent_entities: [] };
+          break;
+        case 'priors':
+          context.priors = {};
+          break;
+      }
+    }
+  }
+
+  /**
+   * Apply preference-based signal tuning.
+   * suppress delegates to applyFilter. prioritize adds hint.
+   */
+  private applyPreferences(context: AgentContext, prefs: SloshPreferences): void {
+    if (prefs.suppress && prefs.suppress.length > 0) {
+      this.applyFilter(context, { exclude: prefs.suppress });
+    }
+    if (prefs.prioritize && prefs.prioritize.length > 0) {
+      const hint = `Signal priority: ${prefs.prioritize.join(', ')}`;
+      context.orientation.hints.unshift(hint);
+    }
+  }
+
+  /**
+   * Update signal utility scores from agent feedback.
+   */
+  private processSloshFeedback(feedback: SloshFeedback): void {
+    if (feedback.useful_signals) {
+      for (const path of feedback.useful_signals) {
+        this.signalUtility.set(path, (this.signalUtility.get(path) ?? 0) + 1);
+      }
+    }
+    if (feedback.useless_signals) {
+      for (const path of feedback.useless_signals) {
+        this.signalUtility.set(path, (this.signalUtility.get(path) ?? 0) - 1);
+      }
+    }
+  }
+
+  /**
+   * Compute categories to auto-suppress based on accumulated feedback scores.
+   * Groups signalUtility entries by top-level category and sums scores.
+   * Returns categories whose aggregate score is at or below autoSuppressThreshold.
+   */
+  private computeAutoSuppress(): SignalCategory[] {
+    if (this.signalUtility.size === 0) return [];
+
+    const allCategories: SignalCategory[] = ['temporal', 'query_signals', 'memory_echoes', 'behavioral', 'priors'];
+    const categoryScores = new Map<SignalCategory, number>();
+
+    for (const [path, score] of this.signalUtility) {
+      const root = path.split('.')[0] as SignalCategory;
+      if (allCategories.includes(root)) {
+        categoryScores.set(root, (categoryScores.get(root) ?? 0) + score);
+      }
+    }
+
+    const suppressed: SignalCategory[] = [];
+    for (const [cat, score] of categoryScores) {
+      if (score <= this.autoSuppressThreshold) {
+        suppressed.push(cat);
+      }
+    }
+    return suppressed;
+  }
+
+  /**
+   * Decay all signal utility scores toward zero by the signalDecay factor.
+   * Prunes entries with negligible scores to keep the map clean.
+   */
+  private decaySignalUtility(): void {
+    if (this.signalDecay >= 1 || this.signalUtility.size === 0) return;
+
+    for (const [key, score] of this.signalUtility) {
+      const decayed = score * this.signalDecay;
+      if (Math.abs(decayed) < 0.01) {
+        this.signalUtility.delete(key);
+      } else {
+        this.signalUtility.set(key, decayed);
+      }
+    }
+  }
+
+  /**
+   * Build a minimal context when privacy.disabled is true.
+   */
+  private buildMinimalContext(): AgentContext {
+    return {
+      timestamp: new Date().toISOString(),
+      temporal: {} as TemporalContext,
+      query_signals: { specificity: 'low', hints: [], word_count: 0, is_question: false, has_id_pattern: false },
+      memory_echoes: [],
+      behavioral: { prefers_brief: false, technical_level: 'standard', frequent_entities: [] },
+      priors: {},
+      orientation: { confidence: 'low', approach: 'clarify', hints: [], response_style: 'standard' },
+    };
+  }
+
+  /**
+   * Apply privacy controls: redact deletes values, obfuscate replaces with hash.
+   */
+  private applyPrivacy(context: AgentContext, privacy: SloshPrivacy): void {
+    if (privacy.redact) {
+      for (const path of privacy.redact) {
+        this.setNestedValue(context, path, undefined);
+      }
+    }
+    if (privacy.obfuscate) {
+      for (const path of privacy.obfuscate) {
+        const val = this.getNestedValue(context, path);
+        if (val !== undefined) {
+          const hash = createHash('sha256').update(String(val)).digest('hex').slice(0, 8);
+          this.setNestedValue(context, path, `[obfuscated:${hash}]`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Walk a dot-separated path and return the value, or undefined.
+   */
+  private getNestedValue(obj: unknown, dotPath: string): unknown {
+    const parts = dotPath.split('.');
+    let current = obj;
+    for (const part of parts) {
+      if (current && typeof current === 'object' && part in (current as Record<string, unknown>)) {
+        current = (current as Record<string, unknown>)[part];
+      } else {
+        return undefined;
+      }
+    }
+    return current;
+  }
+
+  /**
+   * Walk a dot-separated path and set or delete the value at the leaf.
+   */
+  private setNestedValue(obj: unknown, dotPath: string, value: unknown): void {
+    const parts = dotPath.split('.');
+    let current = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (current && typeof current === 'object' && parts[i] in (current as Record<string, unknown>)) {
+        current = (current as Record<string, unknown>)[parts[i]];
+      } else {
+        return;
+      }
+    }
+    if (current && typeof current === 'object') {
+      const leaf = parts[parts.length - 1];
+      if (value === undefined) {
+        delete (current as Record<string, unknown>)[leaf];
+      } else {
+        (current as Record<string, unknown>)[leaf] = value;
+      }
+    }
+  }
+
+  /**
+   * Emit a debug event if debugging is enabled.
+   */
+  private emitDebug(stage: SloshDebugEvent['stage'], context: AgentContext, meta?: Record<string, unknown>): void {
+    if (this.sloshDebug && this.onSloshDebug) {
+      this.onSloshDebug({
+        stage,
+        timestamp: new Date().toISOString(),
+        context: structuredClone(context),
+        meta,
+      });
+    }
   }
 
   /**

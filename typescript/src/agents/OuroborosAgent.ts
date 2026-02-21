@@ -38,76 +38,62 @@ export interface EvolutionEntry {
   apply: (source: string, nextGen: number) => string;
 }
 
-// ── RPG Scorecard Types ─────────────────────────────────────────────
+// ── Capability Assessment Types ─────────────────────────────────────
 
-export interface RPGStat {
-  value: number;
-  label: string;
-  description: string;
+export interface Check {
+  name: string;
+  passed: boolean;
+  detail: string;
 }
 
-export interface RPGStats {
-  PWR: RPGStat;
-  INT: RPGStat;
-  DEX: RPGStat;
-  WIS: RPGStat;
-}
-
-export interface LevelStreak {
-  level: number;
-  consecutive_improvements: number;
-  consecutive_declines: number;
-  multiplier: number; // 0.80 to 1.20
-  label: 'MOMENTUM' | 'STAGNATION' | null;
-}
-
-export interface LevelScore {
-  level: number;
-  title: string;
+export interface CapabilityTrend {
   capability: string;
-  stats: RPGStats;
-  xp: number;
-  base_xp: number;
-  grade: string;
-  verdict: string;
-  streak: LevelStreak | null;
+  direction: 'improving' | 'declining' | null;
+  consecutive: number;
+  multiplier: number; // 0.80 to 1.20
+}
+
+export interface CapabilityScore {
+  capability: string;
+  quality: number; // 0-100
+  base_quality: number; // before trend multiplier
+  checks: Check[];
+  status: 'strong' | 'developing' | 'weak';
+  summary: string;
+  trend: CapabilityTrend | null;
 }
 
 export interface RunDelta {
-  level: number;
-  xp_delta: number;
-  grade_change: string; // e.g. "D→B" or "=" for unchanged
+  capability: string;
+  quality_delta: number;
+  status_change: string; // e.g. "weak→strong" or "=" for unchanged
 }
 
 export interface LineageRunSummary {
   run_number: number;
   timestamp: string;
   input_hash: string;
-  power_level: number;
-  overall_grade: string;
-  rank_title: string;
-  total_xp: number;
-  level_xps: number[];
-  level_grades: string[];
+  overall_quality: number;
+  status: string;
+  level_qualities: number[];
+  level_statuses: string[];
 }
 
 export interface EvolutionLineage {
   run_number: number;
-  prior_power_level: number | null;
-  prior_grade: string | null;
+  prior_quality: number | null;
+  prior_status: string | null;
   deltas: RunDelta[];
   trend: 'improving' | 'stable' | 'declining';
   cumulative_runs: number;
   history: LineageRunSummary[];
-  trajectory: number; // slope of power_level over history (-100 to 100)
+  trajectory: number; // slope of quality over history (-100 to 100)
 }
 
-export interface EvolutionScorecard {
-  levels: LevelScore[];
-  total_xp: number;
-  power_level: number;
-  overall_grade: string;
-  rank_title: string;
+export interface EvolutionReport {
+  capabilities: CapabilityScore[];
+  overall_quality: number; // 0-100
+  status: 'strong' | 'developing' | 'weak';
   formatted: string;
   judge_mode: 'deterministic' | 'hybrid';
   lineage: EvolutionLineage | null;
@@ -369,126 +355,112 @@ export function saveLineageLog(workDir: string, runs: LineageRunSummary[]): void
   }
 }
 
-// ── RPG Scoring System ──────────────────────────────────────────────
-
-const LEVEL_TITLES: Record<number, string> = {
-  1: 'Lexicon Analyst',
-  2: 'Cipher Adept',
-  3: 'Pattern Seeker',
-  4: 'Emotion Reader',
-  5: 'Ouroboros Sage',
-};
+// ── Capability Assessment ───────────────────────────────────────────
 
 function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-function buildStats(pwr: number, int_: number, dex: number, wis: number): RPGStats {
-  return {
-    PWR: { value: clamp(Math.round(pwr), 0, 10), label: 'PWR', description: 'Output volume' },
-    INT: { value: clamp(Math.round(int_), 0, 10), label: 'INT', description: 'Analysis depth' },
-    DEX: { value: clamp(Math.round(dex), 0, 10), label: 'DEX', description: 'Precision' },
-    WIS: { value: clamp(Math.round(wis), 0, 10), label: 'WIS', description: 'Self-awareness' },
-  };
+function statusFromQuality(quality: number): 'strong' | 'developing' | 'weak' {
+  if (quality >= 80) return 'strong';
+  if (quality >= 50) return 'developing';
+  return 'weak';
 }
 
-function computeXP(stats: RPGStats): number {
-  const sum = stats.PWR.value + stats.INT.value + stats.DEX.value + stats.WIS.value;
-  return Math.round((sum / 40) * 1000);
-}
-
-function gradeFromXP(xp: number): string {
-  if (xp >= 900) return 'S';
-  if (xp >= 750) return 'A';
-  if (xp >= 600) return 'B';
-  if (xp >= 400) return 'C';
-  return 'D';
-}
-
-export function scoreWordStats(ws: Record<string, unknown> | undefined): RPGStats {
-  if (!ws) return buildStats(0, 0, 0, 0);
+export function checkWordStats(ws: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
+  if (!ws) return { quality: 0, checks: [] };
   const wordCount = (ws.word_count as number) ?? 0;
   const unique = (ws.unique_words as number) ?? 0;
   const avgLen = (ws.avg_word_length as number) ?? 0;
   const freq = (ws.most_frequent as unknown[]) ?? [];
 
-  const pwr = clamp(wordCount / 5, 0, 10);
-  const int_ = wordCount > 0 ? clamp((unique / wordCount) * 10, 0, 10) : 0;
-  const dex = clamp(10 - Math.abs(avgLen - 5.0) * 2, 0, 10);
-  const wis = clamp(freq.length * 2, 0, 10);
-  return buildStats(pwr, int_, dex, wis);
+  const checks: Check[] = [
+    { name: 'has_words', passed: wordCount >= 3, detail: `word_count=${wordCount}` },
+    { name: 'has_diversity', passed: wordCount > 0 && (unique / wordCount) >= 0.5, detail: `unique_ratio=${wordCount > 0 ? (unique / wordCount).toFixed(2) : '0'}` },
+    { name: 'balanced_length', passed: avgLen >= 3 && avgLen <= 7, detail: `avg_length=${avgLen}` },
+    { name: 'frequency_depth', passed: freq.length >= 3, detail: `freq_entries=${freq.length}` },
+    { name: 'substantial_input', passed: wordCount >= 10, detail: `word_count=${wordCount}` },
+  ];
+  const passed = checks.filter(c => c.passed).length;
+  return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function scoreCaesarCipher(cc: Record<string, unknown> | undefined, inputText: string): RPGStats {
-  if (!cc) return buildStats(0, 0, 0, 0);
+export function checkCaesarCipher(cc: Record<string, unknown> | undefined, inputText: string): { quality: number; checks: Check[] } {
+  if (!cc) return { quality: 0, checks: [] };
   const encrypted = (cc.encrypted as string) ?? '';
   const decrypted = (cc.decrypted as string) ?? '';
 
-  const pwr = clamp(encrypted.length / 10, 0, 10);
-  const int_ = 3; // Simple algo, fixed
-  const dex = decrypted === inputText ? 10 : clamp(5, 0, 10);
-  const wis = 2; // Fixed — no self-awareness in cipher
-  return buildStats(pwr, int_, dex, wis);
+  const checks: Check[] = [
+    { name: 'produced_output', passed: encrypted.length > 0, detail: `encrypted_length=${encrypted.length}` },
+    { name: 'roundtrip_intact', passed: decrypted === inputText, detail: `match=${decrypted === inputText}` },
+    { name: 'transformed', passed: encrypted !== inputText, detail: `different=${encrypted !== inputText}` },
+  ];
+  const passed = checks.filter(c => c.passed).length;
+  return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function scorePatterns(p: Record<string, unknown> | undefined): RPGStats {
-  if (!p) return buildStats(0, 0, 0, 0);
+export function checkPatterns(p: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
+  if (!p) return { quality: 0, checks: [] };
   const emails = (p.emails as unknown[]) ?? [];
   const urls = (p.urls as unknown[]) ?? [];
   const numbers = (p.numbers as unknown[]) ?? [];
   const dates = (p.dates as unknown[]) ?? [];
 
-  const total = emails.length + urls.length + numbers.length + dates.length;
-  const pwr = clamp(total * 2, 0, 10);
-
-  const categories = [emails, urls, numbers, dates];
-  const withMatches = categories.filter(c => c.length > 0).length;
-  const int_ = clamp((withMatches / 4) * 10, 0, 10);
-
-  // Distribution: how spread across categories (more spread = higher DEX)
-  const dex = total > 0 ? clamp((withMatches / 4) * 10, 0, 10) : 0;
-  const wis = 2; // Fixed
-  return buildStats(pwr, int_, dex, wis);
+  const checks: Check[] = [
+    { name: 'found_emails', passed: emails.length > 0, detail: `count=${emails.length}` },
+    { name: 'found_urls', passed: urls.length > 0, detail: `count=${urls.length}` },
+    { name: 'found_numbers', passed: numbers.length > 0, detail: `count=${numbers.length}` },
+    { name: 'found_dates', passed: dates.length > 0, detail: `count=${dates.length}` },
+  ];
+  const passed = checks.filter(c => c.passed).length;
+  return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function scoreSentiment(s: Record<string, unknown> | undefined): RPGStats {
-  if (!s) return buildStats(0, 0, 0, 0);
+export function checkSentiment(s: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
+  if (!s) return { quality: 0, checks: [] };
   const label = (s.label as string) ?? 'neutral';
   const pos = (s.positive as unknown[]) ?? [];
   const neg = (s.negative as unknown[]) ?? [];
   const score = (s.score as number) ?? 0;
 
-  const pwr = label !== 'neutral' ? clamp((pos.length + neg.length) * 2, 0, 10) : 1;
-  const int_ = clamp((pos.length + neg.length) * 2, 0, 10);
-  const dex = pos.length > 0 && neg.length > 0 ? 10 : clamp((pos.length + neg.length) * 2, 0, 10);
-  const wis = clamp(Math.abs(score) * 10, 0, 10);
-  return buildStats(pwr, int_, dex, wis);
+  const checks: Check[] = [
+    { name: 'detected_sentiment', passed: label !== 'neutral', detail: `label=${label}` },
+    { name: 'found_words', passed: (pos.length + neg.length) > 0, detail: `total=${pos.length + neg.length}` },
+    { name: 'sufficient_evidence', passed: (pos.length + neg.length) >= 2, detail: `sentiment_words=${pos.length + neg.length}` },
+    { name: 'has_confidence', passed: Math.abs(score) > 0.2, detail: `abs_score=${Math.abs(score)}` },
+  ];
+  const passed = checks.filter(c => c.passed).length;
+  return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function scoreReflection(r: Record<string, unknown> | undefined): RPGStats {
-  if (!r) return buildStats(0, 0, 0, 0);
+export function checkReflection(r: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
+  if (!r) return { quality: 0, checks: [] };
   const generation = (r.generation as number) ?? 0;
   const identity = (r.identity as string) ?? '';
   const className = (r.className as string) ?? '';
   const capCount = (r.capability_count as number) ?? 0;
 
-  const pwr = generation === 5 ? 10 : 2;
-  const int_ = clamp(identity.length / 10, 0, 10);
-  const dex = className.includes('Gen5') ? 10 : 3;
-  const wis = clamp(capCount, 0, 10);
-  return buildStats(pwr, int_, dex, wis);
+  const checks: Check[] = [
+    { name: 'correct_generation', passed: generation === 5, detail: `generation=${generation}` },
+    { name: 'knows_identity', passed: identity.length > 0, detail: `identity_length=${identity.length}` },
+    { name: 'correct_class', passed: className.includes('Gen5'), detail: `className=${className}` },
+    { name: 'counted_capabilities', passed: capCount > 0, detail: `count=${capCount}` },
+  ];
+  const passed = checks.filter(c => c.passed).length;
+  return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function computeStreaks(priorRuns: LineageRunSummary[]): LevelStreak[] {
-  const streaks: LevelStreak[] = [];
-  for (let lvl = 0; lvl < 5; lvl++) {
+export function computeTrends(priorRuns: LineageRunSummary[]): CapabilityTrend[] {
+  const capNames = ['Word Statistics', 'Caesar Cipher', 'Pattern Detection', 'Sentiment Heuristic', 'Self-Reflection'];
+  const trends: CapabilityTrend[] = [];
+  for (let idx = 0; idx < 5; idx++) {
     let improvements = 0;
     let declines = 0;
 
     // Walk backwards through runs counting consecutive direction
     for (let i = priorRuns.length - 1; i >= 1; i--) {
-      const curr = priorRuns[i].level_xps[lvl] ?? 0;
-      const prev = priorRuns[i - 1].level_xps[lvl] ?? 0;
+      const curr = priorRuns[i].level_qualities[idx] ?? 0;
+      const prev = priorRuns[i - 1].level_qualities[idx] ?? 0;
       if (curr > prev) {
         if (declines > 0) break; // streak broken
         improvements++;
@@ -501,52 +473,47 @@ export function computeStreaks(priorRuns: LineageRunSummary[]): LevelStreak[] {
     }
 
     let multiplier = 1.0;
-    let label: LevelStreak['label'] = null;
+    let direction: CapabilityTrend['direction'] = null;
     if (improvements >= 3) {
       multiplier = 1.0 + Math.min(improvements - 2, 4) * 0.05;
-      label = 'MOMENTUM';
+      direction = 'improving';
     } else if (declines >= 3) {
       multiplier = 1.0 - Math.min(declines - 2, 4) * 0.05;
-      label = 'STAGNATION';
+      direction = 'declining';
     }
 
-    streaks.push({
-      level: lvl + 1,
-      consecutive_improvements: improvements,
-      consecutive_declines: declines,
+    trends.push({
+      capability: capNames[idx],
+      direction,
+      consecutive: Math.max(improvements, declines),
       multiplier: Math.round(multiplier * 100) / 100,
-      label,
     });
   }
-  return streaks;
+  return trends;
 }
 
-function buildLevelScore(level: number, capability: string, stats: RPGStats, streak?: LevelStreak): LevelScore {
-  const baseXP = computeXP(stats);
-  const multiplier = streak?.multiplier ?? 1.0;
-  const xp = clamp(Math.round(baseXP * multiplier), 0, 1000);
-  const grade = gradeFromXP(xp);
-  const title = LEVEL_TITLES[level] ?? `Level ${level}`;
-  const streakTag = streak?.label ? ` [${streak.label} x${streak.multiplier}]` : '';
-  const verdict = `${title}: PWR=${stats.PWR.value} INT=${stats.INT.value} DEX=${stats.DEX.value} WIS=${stats.WIS.value} → ${xp}XP [${grade}]${streakTag}`;
-  return { level, title, capability, stats, xp, base_xp: baseXP, grade, verdict, streak: streak ?? null };
+function buildCapabilityScore(
+  capability: string,
+  result: { quality: number; checks: Check[] },
+  trend?: CapabilityTrend,
+): CapabilityScore {
+  const baseQuality = result.quality;
+  const multiplier = trend?.multiplier ?? 1.0;
+  const quality = clamp(Math.round(baseQuality * multiplier), 0, 100);
+  const status = statusFromQuality(quality);
+  const checkStr = result.checks.map(c => c.passed ? '\u2713' : '\u2717').join('');
+  const trendTag = trend?.direction ? ` [${trend.direction} x${trend.multiplier}]` : '';
+  const summary = `${capability}: ${quality}/100 ${status} ${checkStr}${trendTag}`;
+  return { capability, quality, base_quality: baseQuality, checks: result.checks, status, summary, trend: trend ?? null };
 }
 
-function computeOverall(levels: LevelScore[]): { totalXP: number; powerLevel: number; overallGrade: string; rankTitle: string } {
-  const totalXP = levels.reduce((sum, l) => sum + l.xp, 0);
-  const powerLevel = Math.round((totalXP / (levels.length * 1000)) * 100);
-  const overallGrade = gradeFromXP(Math.round(totalXP / levels.length));
-  const rankTitle =
-    powerLevel >= 90 ? 'Mythic Architect' :
-    powerLevel >= 75 ? 'Grand Sorcerer' :
-    powerLevel >= 60 ? 'Elite Codeweaver' :
-    powerLevel >= 45 ? 'Journeyman Mage' :
-    powerLevel >= 30 ? 'Apprentice Scribe' :
-    'Fledgling Mutant';
-  return { totalXP, powerLevel, overallGrade, rankTitle };
+function computeOverall(capabilities: CapabilityScore[]): { overallQuality: number; status: 'strong' | 'developing' | 'weak' } {
+  const totalQuality = capabilities.reduce((sum, c) => sum + c.quality, 0);
+  const overallQuality = Math.round(totalQuality / capabilities.length);
+  return { overallQuality, status: statusFromQuality(overallQuality) };
 }
 
-function formatScorecard(levels: LevelScore[], overall: ReturnType<typeof computeOverall>): string {
+function formatReport(capabilities: CapabilityScore[], overall: ReturnType<typeof computeOverall>): string {
   const W = 62;
   const border = '╔' + '═'.repeat(W) + '╗';
   const bottom = '╚' + '═'.repeat(W) + '╝';
@@ -554,18 +521,18 @@ function formatScorecard(levels: LevelScore[], overall: ReturnType<typeof comput
   const row = (s: string) => `║  ${s.padEnd(W - 2)}║`;
 
   const lines: string[] = [border];
-  lines.push(row('OUROBOROS EVOLUTION SCORECARD'));
-  lines.push(row(`Rank: ${overall.rankTitle}`));
+  lines.push(row('EVOLUTION REPORT'));
+  lines.push(row(`Overall: ${overall.overallQuality}/100  Status: ${overall.status}`));
   lines.push(sep);
 
-  for (const lvl of levels) {
-    lines.push(row(`Lv${lvl.level} ${lvl.title.padEnd(20)} ${lvl.capability}`));
-    const streakTag = lvl.streak?.label ? `  ${lvl.streak.label}` : '';
-    lines.push(row(`  PWR:${String(lvl.stats.PWR.value).padStart(2)} INT:${String(lvl.stats.INT.value).padStart(2)} DEX:${String(lvl.stats.DEX.value).padStart(2)} WIS:${String(lvl.stats.WIS.value).padStart(2)}  XP:${String(lvl.xp).padStart(4)} [${lvl.grade}]${streakTag}`));
+  for (const cap of capabilities) {
+    const checkStr = cap.checks.map(c => c.passed ? '\u2713' : '\u2717').join('');
+    const trendTag = cap.trend?.direction ? `  ${cap.trend.direction}` : '';
+    lines.push(row(`${cap.capability.padEnd(20)} ${String(cap.quality).padStart(3)}/100  ${cap.status.padEnd(12)} ${checkStr}${trendTag}`));
   }
 
   lines.push(sep);
-  lines.push(row(`TOTAL XP: ${String(overall.totalXP).padStart(5)}  POWER: ${String(overall.powerLevel).padStart(3)}  GRADE: ${overall.overallGrade}`));
+  lines.push(row(`QUALITY: ${String(overall.overallQuality).padStart(3)}  STATUS: ${overall.status}`));
   lines.push(bottom);
 
   return lines.join('\n');
@@ -573,13 +540,13 @@ function formatScorecard(levels: LevelScore[], overall: ReturnType<typeof comput
 
 function computeTrajectory(runs: LineageRunSummary[]): number {
   if (runs.length < 2) return 0;
-  // Simple linear regression slope on power_level
+  // Simple linear regression slope on overall_quality
   const n = runs.length;
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
   for (let i = 0; i < n; i++) {
     sumX += i;
-    sumY += runs[i].power_level;
-    sumXY += i * runs[i].power_level;
+    sumY += runs[i].overall_quality;
+    sumXY += i * runs[i].overall_quality;
     sumX2 += i * i;
   }
   const denom = n * sumX2 - sumX * sumX;
@@ -589,7 +556,7 @@ function computeTrajectory(runs: LineageRunSummary[]): number {
 }
 
 function computeLineage(
-  levels: LevelScore[],
+  capabilities: CapabilityScore[],
   overall: ReturnType<typeof computeOverall>,
   priorRuns: LineageRunSummary[],
 ): EvolutionLineage | null {
@@ -597,20 +564,19 @@ function computeLineage(
 
   const latest = priorRuns[priorRuns.length - 1];
 
-  const deltas: RunDelta[] = levels.map((lvl, i) => {
-    const priorXP = latest.level_xps[i] ?? 0;
-    const priorG = latest.level_grades[i] ?? 'D';
-    const gradeChange = priorG === lvl.grade ? '=' : `${priorG}→${lvl.grade}`;
-    return { level: lvl.level, xp_delta: lvl.xp - priorXP, grade_change: gradeChange };
+  const deltas: RunDelta[] = capabilities.map((cap, i) => {
+    const priorQuality = latest.level_qualities[i] ?? 0;
+    const priorStatus = latest.level_statuses[i] ?? 'weak';
+    const statusChange = priorStatus === cap.status ? '=' : `${priorStatus}\u2192${cap.status}`;
+    return { capability: cap.capability, quality_delta: cap.quality - priorQuality, status_change: statusChange };
   });
 
   const trajectory = computeTrajectory([
     ...priorRuns,
     // Include current run as a synthetic entry for trajectory calculation
     { run_number: latest.run_number + 1, timestamp: '', input_hash: '',
-      power_level: overall.powerLevel, overall_grade: overall.overallGrade,
-      rank_title: overall.rankTitle, total_xp: overall.totalXP,
-      level_xps: levels.map(l => l.xp), level_grades: levels.map(l => l.grade) },
+      overall_quality: overall.overallQuality, status: overall.status,
+      level_qualities: capabilities.map(c => c.quality), level_statuses: capabilities.map(c => c.status) },
   ]);
 
   // Trend: with 3+ data points use trajectory, otherwise use simple delta
@@ -620,14 +586,14 @@ function computeLineage(
     trend = trajectory > 1 ? 'improving' : trajectory < -1 ? 'declining' : 'stable';
   } else {
     // 2 total data points — use simple delta
-    const delta = overall.powerLevel - latest.power_level;
+    const delta = overall.overallQuality - latest.overall_quality;
     trend = delta > 2 ? 'improving' : delta < -2 ? 'declining' : 'stable';
   }
 
   return {
     run_number: latest.run_number + 1,
-    prior_power_level: latest.power_level,
-    prior_grade: latest.overall_grade,
+    prior_quality: latest.overall_quality,
+    prior_status: latest.status,
     deltas,
     trend,
     cumulative_runs: latest.run_number + 1,
@@ -636,8 +602,8 @@ function computeLineage(
   };
 }
 
-async function enhanceVerdictsWithLLM(
-  levels: LevelScore[],
+async function enhanceWithLLM(
+  capabilities: CapabilityScore[],
   input: string,
   caps: Record<string, unknown>,
   provider: LLMProvider,
@@ -647,15 +613,15 @@ async function enhanceVerdictsWithLLM(
     const available = await provider.isAvailable();
     if (!available) return false;
 
-    const summaryLines = levels.map(l =>
-      `Level ${l.level} "${l.title}" (${l.capability}): PWR=${l.stats.PWR.value} INT=${l.stats.INT.value} DEX=${l.stats.DEX.value} WIS=${l.stats.WIS.value}, XP=${l.xp}, Grade=${l.grade}`
+    const summaryLines = capabilities.map(c =>
+      `"${c.capability}": quality=${c.quality}/100, status=${c.status}, checks=${c.checks.map(ch => `${ch.name}:${ch.passed}`).join(',')}`
     );
 
     const promptParts = [
-      'You are an RPG game narrator rating an AI agent\'s evolution through 5 levels.',
+      'You are reviewing an AI agent\'s capability assessment after self-evolution through 5 stages.',
       `Input text processed: "${input.slice(0, 200)}"`,
       '',
-      'Level scores:',
+      'Capability scores:',
       ...summaryLines,
     ];
 
@@ -665,32 +631,32 @@ async function enhanceVerdictsWithLLM(
       promptParts.push(`This is run #${lineage.run_number} (${lineage.cumulative_runs} total). Trajectory: ${lineage.trajectory > 0 ? '+' : ''}${lineage.trajectory}.`);
 
       if (lineage.trend === 'declining' && lineage.history.length >= 2) {
-        promptParts.push('WARNING: This agent has been DECLINING for multiple runs. Focus your commentary on identifying weaknesses, what went wrong, and how to recover.');
+        promptParts.push('WARNING: This agent has been DECLINING for multiple runs. Focus on identifying weaknesses and how to recover.');
       } else if (lineage.trend === 'improving') {
-        promptParts.push('This agent has been IMPROVING. Celebrate the growth, highlight what is driving the improvement, and push for even more.');
+        promptParts.push('This agent has been IMPROVING. Highlight what is driving the improvement and suggest next steps.');
       } else if (lineage.trend === 'stable') {
-        promptParts.push('This agent has PLATEAUED. Challenge it — suggest specific areas to push harder and break through to the next tier.');
+        promptParts.push('This agent has PLATEAUED. Suggest specific areas to push harder.');
       }
 
-      const gradeChanges = lineage.deltas
-        .filter(d => d.grade_change !== '=')
-        .map(d => `Lv${d.level}: ${d.grade_change}`);
-      if (gradeChanges.length > 0) {
-        promptParts.push(`Grade changes since last run: ${gradeChanges.join(', ')}`);
+      const statusChanges = lineage.deltas
+        .filter(d => d.status_change !== '=')
+        .map(d => `${d.capability}: ${d.status_change}`);
+      if (statusChanges.length > 0) {
+        promptParts.push(`Status changes since last run: ${statusChanges.join(', ')}`);
       }
     }
 
-    // Include active streak multipliers
-    const activeStreaks = levels
-      .filter(l => l.streak?.label)
-      .map(l => `Lv${l.level} ${l.streak!.label} (x${l.streak!.multiplier})`);
-    if (activeStreaks.length > 0) {
-      promptParts.push(`Active streaks: ${activeStreaks.join(', ')}. Mention these in your commentary — momentum should feel exciting, stagnation should feel urgent.`);
+    // Include active trends
+    const activeTrends = capabilities
+      .filter(c => c.trend?.direction)
+      .map(c => `${c.capability} ${c.trend!.direction} (x${c.trend!.multiplier})`);
+    if (activeTrends.length > 0) {
+      promptParts.push(`Active trends: ${activeTrends.join(', ')}.`);
     }
 
     promptParts.push('');
-    promptParts.push('Write exactly 5 short RPG-flavored commentary strings (one per level), returned as a JSON array of strings.');
-    promptParts.push('Each should be 1-2 sentences, dramatic and fun. Return ONLY the JSON array, no other text.');
+    promptParts.push('Write exactly 5 short improvement suggestions (one per capability), returned as a JSON array of strings.');
+    promptParts.push('Each should be 1-2 sentences describing what the capability did well and what could improve. Return ONLY the JSON array, no other text.');
 
     const prompt = promptParts.join('\n');
 
@@ -706,7 +672,7 @@ async function enhanceVerdictsWithLLM(
 
     for (let i = 0; i < 5; i++) {
       if (typeof parsed[i] === 'string') {
-        levels[i].verdict = parsed[i];
+        capabilities[i].summary = parsed[i];
       }
     }
     return true;
@@ -715,42 +681,40 @@ async function enhanceVerdictsWithLLM(
   }
 }
 
-export async function judgeEvolution(
+export async function assessEvolution(
   input: string,
   caps: Record<string, unknown>,
   provider?: LLMProvider,
   priorRuns?: LineageRunSummary[],
-): Promise<EvolutionScorecard> {
+): Promise<EvolutionReport> {
   const capNames = ['Word Statistics', 'Caesar Cipher', 'Pattern Detection', 'Sentiment Heuristic', 'Self-Reflection'];
 
-  const scores: RPGStats[] = [
-    scoreWordStats(caps.wordStats as Record<string, unknown> | undefined),
-    scoreCaesarCipher(caps.caesarCipher as Record<string, unknown> | undefined, input),
-    scorePatterns(caps.patterns as Record<string, unknown> | undefined),
-    scoreSentiment(caps.sentiment as Record<string, unknown> | undefined),
-    scoreReflection(caps.reflection as Record<string, unknown> | undefined),
+  const results: { quality: number; checks: Check[] }[] = [
+    checkWordStats(caps.wordStats as Record<string, unknown> | undefined),
+    checkCaesarCipher(caps.caesarCipher as Record<string, unknown> | undefined, input),
+    checkPatterns(caps.patterns as Record<string, unknown> | undefined),
+    checkSentiment(caps.sentiment as Record<string, unknown> | undefined),
+    checkReflection(caps.reflection as Record<string, unknown> | undefined),
   ];
 
-  const streaks = (priorRuns && priorRuns.length >= 3) ? computeStreaks(priorRuns) : [];
-  const levels = scores.map((stats, i) => buildLevelScore(i + 1, capNames[i], stats, streaks[i]));
+  const trends = (priorRuns && priorRuns.length >= 3) ? computeTrends(priorRuns) : [];
+  const capabilities = results.map((result, i) => buildCapabilityScore(capNames[i], result, trends[i]));
 
-  const overall = computeOverall(levels);
-  const lineage = computeLineage(levels, overall, priorRuns ?? []);
+  const overall = computeOverall(capabilities);
+  const lineage = computeLineage(capabilities, overall, priorRuns ?? []);
 
   let judgeMode: 'deterministic' | 'hybrid' = 'deterministic';
   if (provider) {
-    const enhanced = await enhanceVerdictsWithLLM(levels, input, caps, provider, lineage);
+    const enhanced = await enhanceWithLLM(capabilities, input, caps, provider, lineage);
     if (enhanced) judgeMode = 'hybrid';
   }
 
-  const formatted = formatScorecard(levels, overall);
+  const formatted = formatReport(capabilities, overall);
 
   return {
-    levels,
-    total_xp: overall.totalXP,
-    power_level: overall.powerLevel,
-    overall_grade: overall.overallGrade,
-    rank_title: overall.rankTitle,
+    capabilities,
+    overall_quality: overall.overallQuality,
+    status: overall.status,
     formatted,
     judge_mode: judgeMode,
     lineage,
@@ -832,10 +796,10 @@ export class OuroborosAgent extends BasicAgent {
     const linesAdded = gen5Lines - selfLines;
     const finalLog = (childParsed.evolution_log as string[]) ?? childLog;
 
-    // Generate RPG scorecard — auto-load lineage log for cross-run tracking
+    // Generate capability assessment report — auto-load lineage log for cross-run tracking
     const capabilitiesOutput = (childParsed.capabilities ?? childParsed) as Record<string, unknown>;
     const lineageRuns = loadLineageLog(this.workDir);
-    const scorecard = await judgeEvolution(inputText, capabilitiesOutput, this.judgeProvider, lineageRuns);
+    const report = await assessEvolution(inputText, capabilitiesOutput, this.judgeProvider, lineageRuns);
 
     // Build capability digests for downstream agents
     const ws = capabilitiesOutput.wordStats as Record<string, unknown> | undefined;
@@ -884,19 +848,17 @@ export class OuroborosAgent extends BasicAgent {
       has_date: /\d{4}-\d{2}-\d{2}/.test(inputText),
     };
 
-    const runNumber = scorecard.lineage?.run_number ?? 1;
+    const runNumber = report.lineage?.run_number ?? 1;
 
     // Persist current run to lineage log for future runs
     const currentRunSummary: LineageRunSummary = {
       run_number: runNumber,
       timestamp: new Date().toISOString(),
       input_hash: computeSourceHash(inputText),
-      power_level: scorecard.power_level,
-      overall_grade: scorecard.overall_grade,
-      rank_title: scorecard.rank_title,
-      total_xp: scorecard.total_xp,
-      level_xps: scorecard.levels.map(l => l.xp),
-      level_grades: scorecard.levels.map(l => l.grade),
+      overall_quality: report.overall_quality,
+      status: report.status,
+      level_qualities: report.capabilities.map(c => c.quality),
+      level_statuses: report.capabilities.map(c => c.status),
     };
     saveLineageLog(this.workDir, [...lineageRuns, currentRunSummary]);
 
@@ -909,7 +871,7 @@ export class OuroborosAgent extends BasicAgent {
         generations: 5,
         evolution_log: finalLog,
         capabilities_output: capabilitiesOutput,
-        scorecard,
+        report,
         diff_summary: {
           gen0_lines: selfLines,
           gen5_lines: gen5Lines,
@@ -932,21 +894,17 @@ export class OuroborosAgent extends BasicAgent {
             lines_added: linesAdded,
             run_number: runNumber,
 
-            // Scorecard summary — downstream agents see these directly
-            scorecard_summary: {
-              power_level: scorecard.power_level,
-              overall_grade: scorecard.overall_grade,
-              rank_title: scorecard.rank_title,
-              total_xp: scorecard.total_xp,
-              judge_mode: scorecard.judge_mode,
-              level_grades: scorecard.levels.map(l => ({
-                level: l.level,
-                title: l.title,
-                capability: l.capability,
-                xp: l.xp,
-                grade: l.grade,
+            // Report summary — downstream agents see these directly
+            report_summary: {
+              overall_quality: report.overall_quality,
+              status: report.status,
+              judge_mode: report.judge_mode,
+              capability_scores: report.capabilities.map(c => ({
+                capability: c.capability,
+                quality: c.quality,
+                status: c.status,
               })),
-              verdicts: scorecard.levels.map(l => l.verdict),
+              summaries: report.capabilities.map(c => c.summary),
             },
 
             // Capability digests — what was actually found
@@ -956,7 +914,7 @@ export class OuroborosAgent extends BasicAgent {
             input_profile: inputProfile,
 
             // Lineage — cross-run progression
-            lineage: scorecard.lineage,
+            lineage: report.lineage,
           },
         }),
       },

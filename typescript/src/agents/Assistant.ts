@@ -12,6 +12,7 @@
  */
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
+import { truncateHistory } from '../providers/messages.js';
 import type { Message, Tool, ToolCall, StreamDelta } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
@@ -178,8 +179,7 @@ export class Assistant {
 
       // Trim history if it gets too long (keep system + last 40 messages)
       if (history.length > 42) {
-        const system = history[0];
-        history = [system, ...history.slice(-40)];
+        history = truncateHistory(history, 40);
         this.conversations.set(key, history);
       }
 
@@ -330,8 +330,7 @@ export class Assistant {
       history.push({ role: 'assistant', content: fullContent });
 
       if (history.length > 42) {
-        const system = history[0];
-        history = [system, ...history.slice(-40)];
+        history = truncateHistory(history, 40);
         this.conversations.set(key, history);
       }
 

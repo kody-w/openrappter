@@ -2,6 +2,8 @@
  * Session management RPC methods
  */
 
+import { sanitizeMessages } from '../../providers/messages.js';
+
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
     name: string,
@@ -101,7 +103,7 @@ export function registerSessionMethods(
     const originalCount = session.messages.length;
 
     if (originalCount > maxMessages) {
-      session.messages = session.messages.slice(-maxMessages);
+      session.messages = sanitizeMessages(session.messages.slice(-maxMessages));
     }
 
     return {

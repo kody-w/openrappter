@@ -416,4 +416,126 @@ describe('Assistant (direct Copilot API)', () => {
     expect(systemMsg!.content).toContain('memory_context');
     expect(systemMsg!.content).toContain('Soul content.');
   });
+
+  // ── Truncation safety tests ───────────────────────────────────────────────
+
+  it('truncation preserves tool-call pairs when boundary falls mid-pair', async () => {
+    const shell = new StubAgent('Shell', 'Run commands', '{"ok":true}');
+    const assistant = new Assistant(makeAgents(shell));
+
+    // Build a long conversation with a tool-call pair near the truncation boundary.
+    // We need >42 messages to trigger truncation. Each getResponse adds user + assistant
+    // (2 msgs), or user + assistant(tool_calls) + tool + assistant (4 msgs) for tool rounds.
+    // Simulate many turns to exceed 42.
+    for (let i = 0; i < 20; i++) {
+      chatCallCount = 0;
+      mockChatResponses = [{ content: `reply ${i}`, tool_calls: undefined }];
+      await assistant.getResponse(`msg ${i}`, undefined, undefined, 'trunc-test');
+    }
+
+    // Now do a tool-call turn — this should trigger truncation afterward
+    chatCallCount = 0;
+    mockChatResponses = [
+      {
+        content: null,
+        tool_calls: [{
+          id: 'trunc_tc',
+          type: 'function',
+          function: { name: 'Shell', arguments: '{"query":"ls"}' },
+        }],
+      },
+      { content: 'Files listed.', tool_calls: undefined },
+    ];
+    await assistant.getResponse('list files', undefined, undefined, 'trunc-test');
+
+    // The next call captures the history state sent to the provider
+    chatCallCount = 0;
+    mockChatResponses = [{ content: 'ok', tool_calls: undefined }];
+    await assistant.getResponse('thanks', undefined, undefined, 'trunc-test');
+
+    const msgs = capturedMessages as { role: string; tool_call_id?: string; tool_calls?: unknown[] }[];
+
+    // Every tool message must have a matching assistant with tool_calls
+    const toolMsgs = msgs.filter(m => m.role === 'tool');
+    for (const tm of toolMsgs) {
+      const hasMatch = msgs.some(
+        m => m.role === 'assistant' && Array.isArray(m.tool_calls) &&
+          (m.tool_calls as { id: string }[]).some(tc => tc.id === tm.tool_call_id),
+      );
+      expect(hasMatch).toBe(true);
+    }
+  });
+
+  it('after truncation, no tool message exists without a matching assistant', async () => {
+    const assistant = new Assistant(makeAgents());
+
+    // Fill with plain messages to exceed 42
+    for (let i = 0; i < 25; i++) {
+      chatCallCount = 0;
+      mockChatResponses = [{ content: `r${i}`, tool_calls: undefined }];
+      await assistant.getResponse(`m${i}`, undefined, undefined, 'orphan-check');
+    }
+
+    chatCallCount = 0;
+    mockChatResponses = [{ content: 'final', tool_calls: undefined }];
+    await assistant.getResponse('last', undefined, undefined, 'orphan-check');
+
+    const msgs = capturedMessages as { role: string; tool_call_id?: string; tool_calls?: unknown[] }[];
+    const toolMsgs = msgs.filter(m => m.role === 'tool');
+
+    for (const tm of toolMsgs) {
+      const hasMatch = msgs.some(
+        m => m.role === 'assistant' && Array.isArray(m.tool_calls) &&
+          (m.tool_calls as { id: string }[]).some(tc => tc.id === tm.tool_call_id),
+      );
+      expect(hasMatch).toBe(true);
+    }
+  });
+
+  it('long conversation with interleaved tool calls truncates cleanly', async () => {
+    const shell = new StubAgent('Shell', 'Run commands', '{"ok":true}');
+    const assistant = new Assistant(makeAgents(shell));
+
+    // Alternate between plain replies and tool-call rounds
+    for (let i = 0; i < 30; i++) {
+      chatCallCount = 0;
+      if (i % 3 === 0) {
+        // Tool-call round
+        mockChatResponses = [
+          {
+            content: null,
+            tool_calls: [{
+              id: `tc_${i}`,
+              type: 'function',
+              function: { name: 'Shell', arguments: '{}' },
+            }],
+          },
+          { content: `tool reply ${i}`, tool_calls: undefined },
+        ];
+      } else {
+        mockChatResponses = [{ content: `reply ${i}`, tool_calls: undefined }];
+      }
+      await assistant.getResponse(`msg ${i}`, undefined, undefined, 'long-conv');
+    }
+
+    // Capture final state
+    chatCallCount = 0;
+    mockChatResponses = [{ content: 'done', tool_calls: undefined }];
+    await assistant.getResponse('final', undefined, undefined, 'long-conv');
+
+    const msgs = capturedMessages as { role: string; tool_call_id?: string; tool_calls?: unknown[] }[];
+
+    // System message is always first
+    expect(msgs[0].role).toBe('system');
+
+    // No orphaned tool messages
+    const toolMsgs = msgs.filter(m => m.role === 'tool');
+    for (const tm of toolMsgs) {
+      const hasMatch = msgs.some(
+        m => m.role === 'assistant' && Array.isArray(m.tool_calls) &&
+          (m.tool_calls as { id: string }[]).some(tc => tc.id === tm.tool_call_id),
+      );
+      expect(hasMatch).toBe(true);
+    }
+  });
 });

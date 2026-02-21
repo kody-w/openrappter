@@ -133,6 +133,35 @@ TypeScript and Python implementations are designed to mirror each other. When mo
 
 Parity tests live at `typescript/src/__tests__/parity/`.
 
+## Capability Scoring Principles (OuroborosAgent)
+
+The capability assessment system (`checkWordStats`, `checkSentiment`, `checkCaesarCipher`, `checkPatterns`, `checkReflection` in `OuroborosAgent.ts`) follows these design rules:
+
+### Graduated thresholds over binary checks
+
+Never treat the mere presence of data as a passing check. Require minimum meaningful samples:
+- **Word counts**: `>= 3` for minimum meaningful sample, `>= 10` for statistically meaningful input
+- **Frequency distributions**: `>= 3` entries to constitute a real distribution, not a single lucky match
+- **Sentiment evidence**: `>= 2` sentiment-bearing words to confirm detection, not just 1
+
+### Inclusive boundaries
+
+Use `>=` not `>` for ratio thresholds. Natural text often lands exactly on boundaries (e.g., 50% unique word ratio is common). Excluding the boundary penalizes legitimate input.
+
+### Polarity-agnostic sentiment scoring
+
+Sentiment quality measures detection accuracy, not tonal range. Pure positive text ("amazing wonderful great") should score 100% if detected correctly. The `sufficient_evidence` check rewards having multiple sentiment-bearing words regardless of polarity — never require both positive AND negative words.
+
+### Pass/fail where appropriate
+
+Caesar cipher checks are inherently pass/fail (roundtrip either works or doesn't). Pattern detection checks measure breadth across categories. Reflection checks validate correctness. Don't add graduated thresholds where binary is the right model.
+
+### Quality = (passed checks / total checks) * 100
+
+Each check contributes equal weight. Adding a new check changes the denominator for all scores in that capability. When adding checks, verify downstream tests and integration expectations still hold.
+
+**Files**: `typescript/src/agents/OuroborosAgent.ts` (scoring functions), `typescript/src/__tests__/parity/ouroboros.test.ts` (capability scoring tests)
+
 ## UX Principles
 
 **Inline resolution over error messages.** If a feature requires setup (auth, tokens, config), trigger that setup flow inline when the user first needs it. Never respond with "run X command" — just run it. If interactive setup isn't possible (no TTY), provide the most minimal, actionable guidance possible.

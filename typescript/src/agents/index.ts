@@ -24,3 +24,5 @@ export { OuroborosAgent, EVOLUTION_CATALOG, assessEvolution, loadLineageLog, sav
 export type { EvolutionEntry, EvolutionReport, EvolutionLineage, LineageRunSummary, RunDelta, CapabilityTrend, CapabilityScore, Check } from './OuroborosAgent.js';
 export { SelfHealingCronAgent } from './SelfHealingCronAgent.js';
 export type { JobConfig, CheckResult } from './SelfHealingCronAgent.js';
+export { WatchmakerAgent } from './WatchmakerAgent.js';
+export type { AgentVersion, AgentSlot, TestCase, EvaluationCheck, EvaluationResult, ComparisonResult, PromotionRecord, CycleResult } from './WatchmakerAgent.js';

@@ -1,6 +1,6 @@
 # Power Prompts
 
-30 prompts that showcase multi-agent chaining, data sloshing, and the full capabilities of OpenRappter.
+40 prompts that showcase multi-agent chaining, data sloshing, and the full capabilities of OpenRappter.
 
 ---
 
@@ -313,3 +313,109 @@ Rubber duck debugging, except the duck fights back. It researches, synthesizes, 
 **Agents:** OuroborosAgent (self-as-input) → WatchmakerAgent (ground truth comparison) → Assistant (compute delta) → MemoryAgent (store awareness index)
 
 The ultimate test: an agent analyzing itself, then a second agent grading the accuracy of that self-analysis. The gap between self-perception and reality — quantified as a number. Philosophy as a unit test.
+
+---
+
+## LearnNewAgent Unleashed — Runtime Generation Prompts
+
+10 prompts that exploit TypeScript LearnNewAgent to do things that shouldn't be possible.
+
+---
+
+### 31. Digital Mitosis — An Agent Clones and Specializes Itself
+
+> "LearnNewAgent reads its own source code, then generates 4 specialized variants of itself — one that only creates web-scraping agents, one that only creates data-processing agents, one that only creates monitoring agents, one that only creates communication agents. Each variant inherits the core generation logic but has a narrowed domain prompt. Watchmaker A/B tests whether the specialists outperform the generalist at creating agents in their respective domains. Survivors replace the original."
+
+**Agents:** ShellAgent (read LearnNewAgent.ts) → LearnNewAgent ×4 (spawn specialists) → WatchmakerAgent (evaluate each) → ShellAgent (hot-swap winners)
+
+A cell divides into specialized organs. The generalist kills itself to birth specialists, and only the fittest survive. Cellular differentiation for software.
+
+---
+
+### 32. The Whispering Gallery — Emergent Language Between Agents
+
+> "Spawn 5 agents with LearnNewAgent that each have a different 'native' encoding — one speaks in reversed strings, one in Caesar cipher, one in Base64, one in pig latin, one in acronyms. Route them into a round-robin conversation via AgentRouter. Each agent must decode the previous agent's output before responding. MemoryAgent logs every translation. After 20 rounds, Ouroboros scores how much meaning survived the telephone game. The surviving message is the 'emergent language.'"
+
+**Agents:** LearnNewAgent ×5 → AgentRouter (round-robin) → MemoryAgent (log each round) → OuroborosAgent (score signal decay)
+
+Information theory as a spectator sport. Watch meaning survive — or die — as it passes through 5 incompatible encoding schemes. The output is whatever language the agents accidentally invented together.
+
+---
+
+### 33. The Droste Effect — An Agent Generates Its Own Test Suite, Then Fails It
+
+> "LearnNewAgent creates a new agent. That agent's first action is to call LearnNewAgent again to generate a test-runner agent specifically designed to test it. The test-runner executes, finds failures, feeds them to Ouroboros, which scores the failures, passes the scores to LearnNewAgent to regenerate the original agent with fixes. The regenerated agent immediately spawns a NEW test-runner (which may have different tests). Loop until the agent passes its own self-generated tests — or 10 iterations, whichever comes first. Memory logs the co-evolution of both agent and test suite."
+
+**Agents:** LearnNewAgent → [generated agent] → LearnNewAgent (generate test-runner) → [test-runner] → OuroborosAgent → LearnNewAgent (regenerate) → loop
+
+The agent and its tests evolve together. Neither is stable — the test suite mutates alongside the implementation. This is co-evolutionary arms racing. Red Queen hypothesis as a build system.
+
+---
+
+### 34. The Ship of Theseus — Replace Every Line Until Nothing Original Remains
+
+> "Start with ShellAgent. Ouroboros scores it. LearnNewAgent generates a replacement for ShellAgent's weakest capability (e.g., just the bash execution). Hot-swap that one piece. Re-score. Replace the next weakest piece. Repeat until every single capability has been replaced by a generated agent. Memory tracks the 'identity score' at each step — how much of the original ShellAgent's behavior fingerprint survives. At what replacement percentage does ShellAgent stop being ShellAgent?"
+
+**Agents:** OuroborosAgent (score) → LearnNewAgent (replace weakest) → ShellAgent (hot-swap piece) → OuroborosAgent (re-score) → MemoryAgent (identity tracking) → loop
+
+Philosophy of identity, quantified. You systematically replace every component of an agent and measure when it becomes something else entirely. The identity score graph is the answer to a 2,400-year-old thought experiment.
+
+---
+
+### 35. Predator-Prey Ecosystem — Agents That Hunt Each Other
+
+> "LearnNewAgent creates 3 'prey' agents that generate and hide encrypted messages in random files. LearnNewAgent creates 3 'predator' agents that scan the filesystem, find the hidden messages, decrypt them, and delete the files. Both species run on CronAgent loops. Predators that find more messages get cloned by LearnNewAgent. Prey that survive longer get cloned. Watchmaker tracks population fitness over 24 hours. The ecosystem either reaches equilibrium or one species goes extinct."
+
+**Agents:** LearnNewAgent ×6 → CronAgent ×6 → ShellAgent (filesystem ops) → WatchmakerAgent (fitness tracking) → LearnNewAgent (clone survivors)
+
+Lotka-Volterra population dynamics, but the predators and prey are JavaScript files hunting each other on your disk. Ecology as a system test.
+
+---
+
+### 36. The Babel Fish — Universal Agent Protocol Translation
+
+> "You have agents that output JSON, agents that output plain text, agents that output markdown, and agents that output CSV. LearnNewAgent creates a 'Protocol Translator' agent that sits in the middle of any chain and auto-detects the upstream format, converts it to whatever the downstream agent expects, and passes it through. Test it by routing HackerNewsAgent (JSON) → Protocol Translator → TTSAgent (plain text) → Protocol Translator → MemoryAgent (JSON) → Protocol Translator → MessageAgent (markdown). One translator, every format, zero manual glue code."
+
+**Agents:** LearnNewAgent (create translator) → HackerNewsAgent → [Translator] → TTSAgent → [Translator] → MemoryAgent → [Translator] → MessageAgent
+
+The duct tape of agent systems. Instead of writing format adapters for every N×N agent pair, generate ONE universal translator that handles all of them. data_slush becomes a Rosetta Stone.
+
+---
+
+### 37. The Immune System — Agents That Detect and Kill Rogue Agents
+
+> "LearnNewAgent creates a 'Sentinel' agent that runs every 5 minutes via CronAgent. Sentinel reads every file in ~/.openrappter/agents/, runs Ouroboros on each one, and if any agent scores below 20% on ANY capability or takes more than 10 seconds to respond, Sentinel quarantines it (moves to a .quarantine/ folder), generates a forensic report to Memory, notifies you on Slack, and spawns a replacement via LearnNewAgent using the quarantined agent's description. Watchmaker verifies the replacement is better before promoting it."
+
+**Agents:** LearnNewAgent (create Sentinel) → CronAgent → OuroborosAgent (scan all) → ShellAgent (quarantine) → MemoryAgent (forensics) → MessageAgent (alert) → LearnNewAgent (replace) → WatchmakerAgent (verify)
+
+An autonomous immune system for your agent ecosystem. Detect infection, quarantine, autopsy, regenerate, verify. Your agents police themselves.
+
+---
+
+### 38. The Ouija Board — Collective Intelligence From Disagreeing Agents
+
+> "Ask a controversial question: 'Should we rewrite the backend in Rust?' BroadcastManager sends it to 7 agents simultaneously. Each answers independently. LearnNewAgent creates a 'Synthesizer' agent at runtime that takes all 7 answers, identifies points of agreement and disagreement, weights each answer by the responding agent's Ouroboros capability score, and produces a confidence-weighted consensus with minority dissent footnotes. If consensus confidence is below 60%, the Synthesizer spawns a 'Devil's Advocate' agent to argue against the majority. Final report delivered via TTS."
+
+**Agents:** BroadcastManager (`all`) → [7 agents] → LearnNewAgent (create Synthesizer) → OuroborosAgent (weight by score) → LearnNewAgent (maybe create Devil's Advocate) → TTSAgent
+
+Democratic decision-making where the voters' competence is measured, the minority gets a voice, and if nobody is confident, the system actively argues against itself. Adversarial consensus.
+
+---
+
+### 39. The Dream Journal — Agents That Hallucinate and Learn From It
+
+> "CronAgent triggers at 3am. LearnNewAgent generates a random agent with a completely nonsensical description ('an agent that converts sadness into prime numbers'). Let it run against 10 random inputs. Ouroboros scores whatever it produces. Memory stores the scores. Here's the twist: if ANY random agent accidentally scores above 40% on any capability, dissect WHY — what prompt fragments or code patterns led to unexpected competence? LearnNewAgent creates a 'Serendipity Extractor' that mines these accidental successes. Feed the patterns back into future agent generation as hints."
+
+**Agents:** CronAgent (3am) → LearnNewAgent (random nonsense) → OuroborosAgent (score) → MemoryAgent → Assistant (analyze surprises) → LearnNewAgent (create Serendipity Extractor) → MemoryAgent (store patterns)
+
+Controlled hallucination as R&D. Most random agents are garbage. But the ones that accidentally work reveal hidden patterns about what makes agents good. Stochastic search through agent-space. Innovation through noise.
+
+---
+
+### 40. The Parliament — Self-Governing Agent Democracy
+
+> "Every agent in the system gets a vote. LearnNewAgent creates a 'Speaker' agent that proposes changes — 'Should we increase CronAgent's check interval?' or 'Should we deprecate the lowest-scoring agent?' Each registered agent votes by running the proposal through its perform() and returning approve/reject with reasoning. Votes are weighted by Ouroboros capability scores. If a proposal passes, ShellAgent executes the change. If it fails, Memory records why. The Speaker learns from rejected proposals and adjusts future proposals. Run weekly. The agents govern themselves."
+
+**Agents:** LearnNewAgent (create Speaker) → CronAgent (weekly) → BroadcastManager (`all`, collect votes) → OuroborosAgent (weight votes) → ShellAgent (execute changes) → MemoryAgent (record outcomes)
+
+Self-governance. The agents propose, debate, vote, and execute policy changes on their own ecosystem. The Speaker evolves its proposals based on what the parliament accepts. Congressional Record for software agents.

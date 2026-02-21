@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.4.0, ES modules, Node >=18)
+- `typescript/` — TypeScript/Node.js package (v1.4.1, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Separate production assistant system (pnpm, tsdown build)
 
@@ -98,7 +98,7 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 - `BasicAgent` — Abstract base with data sloshing
 - `ShellAgent` — Shell commands, file read/write/list (actions: `bash`, `read`, `write`, `list`; natural language query parsing)
 - `MemoryAgent` — Memory storage and retrieval (Python has `ContextMemoryAgent` and `ManageMemoryAgent`)
-- `LearnNewAgent` (Python only) — Meta-agent that generates new single file agents at runtime with hot-loading
+- `LearnNewAgent` — Meta-agent that generates new single file agents at runtime with hot-loading (both TypeScript and Python)
 
 **Multi-agent patterns** (TypeScript `src/agents/`):
 - `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first wins), `fallback` (try until success)
@@ -129,6 +129,7 @@ Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapp
 TypeScript and Python implementations are designed to mirror each other. When modifying agent logic, check both:
 - `typescript/src/agents/BasicAgent.ts` ↔ `python/openrappter/agents/basic_agent.py`
 - `typescript/src/agents/ShellAgent.ts` ↔ `python/openrappter/agents/shell_agent.py`
+- `typescript/src/agents/LearnNewAgent.ts` ↔ `python/openrappter/agents/learn_new_agent.py`
 - `typescript/src/clawhub.ts` ↔ `python/openrappter/clawhub.py`
 
 Parity tests live at `typescript/src/__tests__/parity/`.
@@ -161,6 +162,68 @@ Caesar cipher checks are inherently pass/fail (roundtrip either works or doesn't
 Each check contributes equal weight. Adding a new check changes the denominator for all scores in that capability. When adding checks, verify downstream tests and integration expectations still hold.
 
 **Files**: `typescript/src/agents/OuroborosAgent.ts` (scoring functions), `typescript/src/__tests__/parity/ouroboros.test.ts` (capability scoring tests)
+
+## Runtime Agent Generation (LearnNewAgent)
+
+LearnNewAgent is a meta-agent that creates new agents from natural language descriptions at runtime. It is the key enabler for prompt patterns like Lazarus, Darwin's Colosseum, Skill Forge, and Agent Factory.
+
+### Actions
+
+- **`create`** — Generate, write, and hot-load a new agent from a description
+- **`list`** — List all user-generated agents in the agents directory
+- **`delete`** — Remove a generated agent (core agents are protected)
+
+### Generated Agent Format
+
+TypeScript generates `.js` ESM files using a **factory pattern** to avoid import resolution issues:
+
+```javascript
+// Generated: ~/.openrappter/agents/sentiment_agent.js
+export function createAgent(BasicAgent) {
+  class SentimentAgent extends BasicAgent {
+    constructor() {
+      super('Sentiment', { name: 'Sentiment', description: '...', parameters: {...} });
+    }
+    async perform(kwargs) { /* generated logic */ }
+  }
+  return SentimentAgent;
+}
+```
+
+Python generates `.py` files with direct imports (standard `from openrappter.agents.basic_agent import BasicAgent`).
+
+### Hot-Loading
+
+- **TypeScript**: Dynamic `import()` with `pathToFileURL()` + cache-busting timestamp query param. The factory receives `BasicAgent` as a parameter, instantiates the class, and registers it in `loadedAgents` map.
+- **Python**: `importlib.util.spec_from_file_location()` → `module_from_spec()` → `exec_module()`. Registers in `sys.modules` for future imports.
+
+### Intelligence Inference
+
+The agent infers structure from the description text:
+
+- **Name generation**: Filters stop words (`that`, `this`, `with`, `from`, `agent`, `create`, `make`, `want`, `should`, `would`, `could`), extracts first 2 keywords > 3 chars, CamelCase joins them. Copilot CLI is an optional enhancer.
+- **Extra parameters**: Keywords like `file`/`path` → adds `path` param; `url`/`http` → `url` param; `number`/`count` → `count` param.
+- **Extra imports**: Keywords map to Node builtins (`fs`, `crypto`, `https`, `child_process`, etc.) or Python stdlib equivalents.
+- **Tags**: Keywords map to categories (`weather`, `api`, `web`, `filesystem`, `data`, `search`, `email`, `database`, `news`, `scheduling`, `voice`). Defaults to `['custom']`.
+
+### Dependency Management
+
+- **TypeScript**: Parses `import` statements from generated code, filters out Node builtins, runs `npm install` for missing packages.
+- **Python**: Parses `import`/`from` statements, filters stdlib via a known set, maps module→package names (e.g., `cv2`→`opencv-python`), runs `pip install`.
+
+### File Naming
+
+Both runtimes use snake_case: `CamelCase` → `camel_case_agent.{js,py}`. TypeScript uses `_agent.js` suffix; Python uses `_agent.py`.
+
+### Core Agent Protection
+
+Deletion is blocked for built-in agent files. TypeScript protects: `BasicAgent.ts`, `ShellAgent.ts`, `MemoryAgent.ts`, `LearnNewAgent.ts`, `AgentRegistry.ts`, `Assistant.ts` (plus `.js` variants). Python protects: `basic_agent.py`, `shell_agent.py`, `learn_new_agent.py`, `manage_memory_agent.py`, `context_memory_agent.py`.
+
+### Constructor
+
+The TypeScript constructor accepts an optional `agentsDir` parameter (defaults to `~/.openrappter/agents/`). Python uses `Path(__file__).parent` (the source agents directory).
+
+**Files**: `typescript/src/agents/LearnNewAgent.ts`, `python/openrappter/agents/learn_new_agent.py`, `typescript/src/__tests__/parity/learn-new-agent.test.ts` (61 tests)
 
 ## UX Principles
 

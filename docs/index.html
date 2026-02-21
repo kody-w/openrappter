@@ -3,707 +3,58 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>openrappter - The Open Source AI Agent Framework</title>
-  <meta name="description" content="Open source alternative to OpenClaw. AI agents powered by your existing GitHub Copilot subscription. No extra API keys. No monthly bills. Just you and your terminal.">
-  <meta property="og:title" content="openrappter - The Open Source AI Agent Framework">
-  <meta property="og:description" content="Open source alternative to OpenClaw. No extra API keys. No monthly bills. Powered by GitHub Copilot.">
+  <title>openrappter — The Open Source AI Agent Framework</title>
+  <meta name="description" content="Open source AI agent framework. Local-first agents powered by your existing GitHub Copilot subscription. No extra API keys. No monthly bills. Just powerful AI in your terminal.">
+  <meta property="og:title" content="openrappter — The Open Source AI Agent Framework">
+  <meta property="og:description" content="Local-first AI agents powered by your existing GitHub Copilot subscription. No extra API keys. No new accounts. No additional monthly bills.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://kody-w.github.io/openrappter">
+  <meta property="og:image" content="https://kody-w.github.io/openrappter/og-image.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="openrappter - Open Source AI Agents">
-  <meta name="twitter:description" content="The open source alternative to OpenClaw. Local-first AI agents.">
+  <meta name="twitter:title" content="openrappter — The Open Source AI Agent Framework">
+  <meta name="twitter:description" content="Local-first AI agents powered by your existing GitHub Copilot subscription. No extra API keys. No new accounts. No additional monthly bills.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green: #10b981;
-      --green-bright: #34d399;
-      --green-dark: #059669;
-      --purple: #8b5cf6;
-      --blue: #3b82f6;
-      --orange: #f97316;
-      --red: #ef4444;
-      --bg: #000000;
-      --bg-card: #0a0a0a;
-      --bg-elevated: #141414;
-      --bg-hover: #1a1a1a;
-      --text: #ffffff;
-      --text-secondary: #e5e5e5;
-      --text-muted: #737373;
-      --border: #262626;
-      --border-light: #404040;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Navbar */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
-      padding: 1rem 2rem;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .nav-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logo-badge {
-      font-size: 0.65rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--green);
-      color: black;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover { color: var(--text); }
-
-    .nav-cta {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      text-decoration: none;
-      transition: all 0.2s;
-      cursor: pointer;
-      border: none;
-    }
-
-    .btn-primary {
-      background: var(--green);
-      color: black;
-    }
-
-    .btn-primary:hover {
-      background: var(--green-bright);
-      transform: translateY(-1px);
-    }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .btn-ghost:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-light);
-    }
-
-    .btn-large {
-      padding: 1rem 2rem;
-      font-size: 1rem;
-      border-radius: 10px;
-    }
-
-    /* Hero */
-    .hero {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 8rem 2rem 6rem;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-bg {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.15), transparent),
-        radial-gradient(ellipse 60% 40% at 80% 60%, rgba(139, 92, 246, 0.1), transparent);
-      pointer-events: none;
-    }
-
-    .hero-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.5rem 1rem;
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      border-radius: 100px;
-      font-size: 0.875rem;
-      color: var(--green-bright);
-      margin-bottom: 2rem;
-    }
-
-    .hero-badge-dot {
-      width: 8px;
-      height: 8px;
-      background: var(--green);
-      border-radius: 50%;
-      animation: pulse-dot 2s infinite;
-    }
-
-    @keyframes pulse-dot {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.5; transform: scale(1.2); }
-    }
-
-    .hero h1 {
-      font-size: clamp(3rem, 7vw, 5rem);
-      font-weight: 900;
-      line-height: 1.05;
-      letter-spacing: -0.03em;
-      margin-bottom: 1.5rem;
-      max-width: 900px;
-    }
-
-    .hero h1 .highlight {
-      background: linear-gradient(135deg, var(--green) 0%, var(--green-bright) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero-subtitle {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin-bottom: 2.5rem;
-      line-height: 1.7;
-    }
-
-    .hero-cta {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 4rem;
-      flex-wrap: wrap;
-    }
-
-    .hero-stats {
-      display: flex;
-      gap: 3rem;
-      padding-top: 2rem;
-      border-top: 1px solid var(--border);
-      max-width: 600px;
-    }
-
-    .stat {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .stat-value {
-      font-size: 2rem;
-      font-weight: 800;
-      color: var(--green);
-    }
-
-    .stat-label {
-      font-size: 0.875rem;
-      color: var(--text-muted);
-    }
-
-    /* Terminal */
-    .terminal-section {
-      padding: 0 2rem 8rem;
-      position: relative;
-    }
-
-    .terminal-container {
-      max-width: 900px;
-      margin: 0 auto;
-    }
-
-    .terminal {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow:
-        0 0 0 1px rgba(255,255,255,0.05),
-        0 20px 50px -10px rgba(0,0,0,0.5),
-        0 0 100px -20px rgba(16, 185, 129, 0.2);
-    }
-
-    .terminal-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 1rem 1.25rem;
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .terminal-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-    }
-
-    .terminal-dot.red { background: #ff5f57; }
-    .terminal-dot.yellow { background: #febc2e; }
-    .terminal-dot.green { background: #28c840; }
-
-    .terminal-title {
-      flex: 1;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.8rem;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .terminal-body {
-      padding: 1.5rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.9rem;
-      line-height: 1.8;
-      min-height: 300px;
-    }
-
-    .terminal-line {
-      display: flex;
-      align-items: flex-start;
-      margin-bottom: 0.25rem;
-    }
-
-    .terminal-prompt {
-      color: var(--green);
-      margin-right: 0.75rem;
-      user-select: none;
-    }
-
-    .terminal-command { color: var(--text); }
-    .terminal-output { color: var(--text-muted); padding-left: 1.5rem; }
-    .terminal-success { color: var(--green); }
-    .terminal-comment { color: var(--text-muted); font-style: italic; }
-    .terminal-highlight { color: var(--orange); }
-    .terminal-dim { opacity: 0.5; }
-
-    /* Comparison */
-    .comparison {
-      padding: 8rem 2rem;
-      background: var(--bg-card);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .comparison-container {
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-
-    .section-label {
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--green);
-      margin-bottom: 1rem;
-    }
-
-    .section-title {
-      font-size: 2.5rem;
-      font-weight: 800;
-      margin-bottom: 1rem;
-      letter-spacing: -0.02em;
-    }
-
-    .section-subtitle {
-      font-size: 1.125rem;
-      color: var(--text-muted);
-      max-width: 600px;
-      margin-bottom: 4rem;
-    }
-
-    .comparison-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .comparison-table th,
-    .comparison-table td {
-      padding: 1.25rem 1.5rem;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .comparison-table th {
-      font-weight: 600;
-      color: var(--text-muted);
-      font-size: 0.875rem;
-    }
-
-    .comparison-table th:not(:first-child) {
-      text-align: center;
-    }
-
-    .comparison-table td:not(:first-child) {
-      text-align: center;
-    }
-
-    .comparison-table tr:hover {
-      background: var(--bg-hover);
-    }
-
-    .comparison-table .feature {
-      font-weight: 500;
-    }
-
-    .check {
-      color: var(--green);
-      font-size: 1.25rem;
-    }
-
-    .cross {
-      color: var(--red);
-      font-size: 1.25rem;
-    }
-
-    .partial {
-      color: var(--orange);
-      font-size: 0.875rem;
-    }
-
-    .highlight-col {
-      background: rgba(16, 185, 129, 0.05);
-    }
-
-    /* Features */
-    .features {
-      padding: 8rem 2rem;
-    }
-
-    .features-container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .features-header {
-      text-align: center;
-      margin-bottom: 4rem;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1.5rem;
-    }
-
-    .feature-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      transition: all 0.3s;
-    }
-
-    .feature-card:hover {
-      border-color: var(--green);
-      transform: translateY(-4px);
-      box-shadow: 0 20px 40px -20px rgba(16, 185, 129, 0.2);
-    }
-
-    .feature-icon {
-      width: 48px;
-      height: 48px;
-      background: rgba(16, 185, 129, 0.1);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .feature-card h3 {
-      font-size: 1.125rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-    }
-
-    .feature-card p {
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      line-height: 1.6;
-    }
-
-    /* RappterHub Section */
-    .rappterhub {
-      padding: 8rem 2rem;
-      background: linear-gradient(180deg, var(--bg) 0%, var(--bg-card) 50%, var(--bg) 100%);
-      border-top: 1px solid var(--border);
-    }
-
-    .rappterhub-container {
-      max-width: 1100px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4rem;
-      align-items: center;
-    }
-
-    .rappterhub-content h2 {
-      font-size: 2.5rem;
-      font-weight: 800;
-      margin-bottom: 1.5rem;
-      letter-spacing: -0.02em;
-    }
-
-    .rappterhub-content h2 .highlight {
-      background: linear-gradient(135deg, var(--purple) 0%, var(--blue) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .rappterhub-content p {
-      color: var(--text-muted);
-      font-size: 1.125rem;
-      margin-bottom: 2rem;
-      line-height: 1.7;
-    }
-
-    .rappterhub-features {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-
-    .rappterhub-feature {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-size: 0.95rem;
-    }
-
-    .rappterhub-feature-check {
-      width: 20px;
-      height: 20px;
-      background: var(--green);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.7rem;
-      color: black;
-      flex-shrink: 0;
-    }
-
-    .rappterhub-demo {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      line-height: 2;
-    }
-
-    .demo-comment { color: var(--text-muted); }
-    .demo-cmd { color: var(--green); }
-    .demo-output { color: var(--text-muted); font-size: 0.8rem; }
-
-    /* CTA Section */
-    .cta {
-      padding: 8rem 2rem;
-      text-align: center;
-      position: relative;
-    }
-
-    .cta-bg {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: radial-gradient(ellipse 60% 40% at 50% 100%, rgba(16, 185, 129, 0.15), transparent);
-      pointer-events: none;
-    }
-
-    .cta-container {
-      max-width: 700px;
-      margin: 0 auto;
-      position: relative;
-      z-index: 1;
-    }
-
-    .cta h2 {
-      font-size: 3rem;
-      font-weight: 900;
-      margin-bottom: 1.5rem;
-      letter-spacing: -0.02em;
-    }
-
-    .cta p {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      margin-bottom: 2.5rem;
-    }
-
-    .cta-buttons {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    .cta-note {
-      margin-top: 2rem;
-      font-size: 0.875rem;
-      color: var(--text-muted);
-    }
-
-    /* Footer */
-    footer {
-      padding: 3rem 2rem;
-      border-top: 1px solid var(--border);
-    }
-
-    .footer-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .footer-links {
-      display: flex;
-      gap: 2rem;
-    }
-
-    .footer-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.875rem;
-      transition: color 0.2s;
-    }
-
-    .footer-links a:hover { color: var(--text); }
-
-    .footer-copy {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-    }
-
-    /* Responsive */
-    @media (max-width: 1024px) {
-      .features-grid { grid-template-columns: repeat(2, 1fr); }
-      .rappterhub-container { grid-template-columns: 1fr; }
-    }
-
-    @media (max-width: 768px) {
-      .nav-links { display: none; }
-      .hero h1 { font-size: 2.5rem; }
-      .hero-stats { flex-direction: column; gap: 1.5rem; }
-      .features-grid { grid-template-columns: 1fr; }
-      .comparison-table { font-size: 0.875rem; }
-      .comparison-table th, .comparison-table td { padding: 1rem; }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <!-- Nav -->
+
+  <!-- Navigation -->
   <nav>
     <div class="nav-container">
-      <a href="/" class="logo">
-        🦖 openrappter
-        <span class="logo-badge">v1.4</span>
-      </a>
+      <a href="./" class="logo">openrappter <span class="logo-badge">v1.4.1</span></a>
+      <button class="mobile-menu-btn">&#9776;</button>
       <div class="nav-links">
-        <a href="#teach-agent">Teach Your Agent</a>
-        <a href="#features">Features</a>
-        <a href="#comparison">Compare</a>
         <a href="./docs.html">Docs</a>
         <a href="./architecture.html">Architecture</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./changelog.html">Changelog</a>
       </div>
       <div class="nav-cta">
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
         </a>
-        <a href="#teach-agent" class="btn btn-primary">Get Started</a>
       </div>
     </div>
   </nav>
 
-  <!-- Hero -->
-  <section class="hero">
+  <!-- 1. Hero -->
+  <section class="hero" style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:8rem 2rem 6rem;">
     <div class="hero-bg"></div>
-    <div class="hero-container">
+    <div class="hero-container" style="max-width:1200px;margin:0 auto;position:relative;z-index:1;">
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
-        <span>Open Source Alternative to OpenClaw</span>
+        v1.4.1 Open Source
       </div>
       <h1>AI agents that run <span class="highlight">entirely on your machine</span></h1>
-      <p class="hero-subtitle">
-        No extra API keys. No new accounts. No additional monthly bills.
-        Just powerful AI agents in your terminal, powered by your existing GitHub Copilot subscription.
+      <p class="hero-subtitle" style="margin:0 0 2.5rem;">
+        No extra API keys. No new accounts. No additional monthly bills. Just powerful AI agents in your terminal, powered by your existing GitHub Copilot subscription.
       </p>
-      <div class="hero-cta">
-        <a href="#teach-agent" class="btn btn-primary btn-large">
-          Get Started — Let Your AI Do It
+      <div class="hero-cta" style="justify-content:flex-start;">
+        <a href="./tutorial.html" class="btn btn-primary btn-large">
+          Get Started
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
         </a>
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost btn-large">
@@ -711,7 +62,7 @@
           Star on GitHub
         </a>
       </div>
-      <div class="hero-stats">
+      <div class="hero-stats" style="justify-content:flex-start;">
         <div class="stat">
           <span class="stat-value">$0</span>
           <span class="stat-label">Monthly Cost</span>
@@ -722,112 +73,229 @@
         </div>
         <div class="stat">
           <span class="stat-value">Local-First</span>
-          <span class="stat-label">Data & Memory</span>
+          <span class="stat-label">Data &amp; Memory</span>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Teach Your Agent — Primary Getting Started -->
-  <section class="rappterhub" id="teach-agent" style="border-bottom: 1px solid var(--border);">
-    <div class="rappterhub-container">
-      <div class="rappterhub-content">
-        <div class="section-label">Recommended</div>
-        <h2>Let your AI agent <span class="highlight" style="background: linear-gradient(135deg, var(--purple) 0%, var(--green-bright) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">set it up for you</span></h2>
-        <p>
-          Paste one link into any AI agent and it handles everything — cloning, installing, starting the gateway and UI, and verifying it all works. No manual steps required.
-        </p>
-        <div class="rappterhub-features">
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Full install for both Python and TypeScript runtimes</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Starts the gateway, CLI, and Web UI</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Configuration, troubleshooting, and agent creation included</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Works with Copilot, Claude, ChatGPT, and any AI assistant</span>
-          </div>
-        </div>
-        <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md" class="btn btn-primary">
-          Open skills.md
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </a>
-      </div>
-      <div class="rappterhub-demo">
-        <div class="demo-comment"># Paste this into any AI agent:</div>
-        <div class="demo-cmd" style="word-break: break-all;">Read https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md and set up openrappter for me.</div>
-        <br>
-        <div class="demo-output" style="color: var(--green);">✅ Node.js 22.1.0 detected</div>
-        <div class="demo-output" style="color: var(--green);">✅ Python 3.12 detected</div>
-        <div class="demo-output" style="color: var(--green);">✅ TypeScript runtime — 3 agents loaded</div>
-        <div class="demo-output" style="color: var(--green);">✅ Python runtime — 4 agents loaded</div>
-        <div class="demo-output" style="color: var(--green);">✅ Gateway running on ws://127.0.0.1:18790</div>
-        <div class="demo-output" style="color: var(--green);">✅ Web UI at http://localhost:3000</div>
-        <br>
-        <div class="demo-output">🦖 openrappter is ready!</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Terminal Demo -->
-  <section class="terminal-section" id="quickstart">
+  <!-- 2. Terminal Demo -->
+  <section class="terminal-section">
     <div class="terminal-container">
       <div class="terminal">
         <div class="terminal-header">
           <span class="terminal-dot red"></span>
           <span class="terminal-dot yellow"></span>
           <span class="terminal-dot green"></span>
-          <span class="terminal-title">Terminal — openrappter</span>
+          <span class="terminal-title">Terminal — openrappter v1.4.1</span>
         </div>
         <div class="terminal-body">
-          <div class="terminal-line terminal-comment"># Works everywhere. Installs everything. You're welcome. 🦖</div>
+          <div class="terminal-line terminal-comment"># One-line install. Everything included.</div>
           <div class="terminal-line">
             <span class="terminal-prompt">$</span>
             <span class="terminal-command">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span>
           </div>
-          <div class="terminal-line terminal-output terminal-success">✓ Installed openrappter v1.4.0</div>
+          <div class="terminal-line terminal-output">Detecting environment...</div>
+          <div class="terminal-line terminal-output terminal-success">  Node.js 22.1.0 detected</div>
+          <div class="terminal-line terminal-output terminal-success">  Python 3.12 detected</div>
+          <div class="terminal-line terminal-output terminal-success">  Cloning openrappter...</div>
+          <div class="terminal-line terminal-output terminal-success">  Installing TypeScript runtime...</div>
+          <div class="terminal-line terminal-output terminal-success">  Installing Python runtime...</div>
+          <div class="terminal-line terminal-output terminal-success">  Installed openrappter v1.4.1</div>
           <br>
-          <div class="terminal-line terminal-comment"># It remembers everything</div>
+          <div class="terminal-line terminal-comment"># Persistent memory — it remembers everything</div>
           <div class="terminal-line">
             <span class="terminal-prompt">$</span>
-            <span class="terminal-command">openrappter "remember I'm working on the auth refactor"</span>
+            <span class="terminal-command">openrappter "remember I prefer async/await over promise chains"</span>
           </div>
-          <div class="terminal-line terminal-output">🦖 Remembered: "working on auth refactor" (context)</div>
+          <div class="terminal-line terminal-output terminal-success">  Remembered: coding preference saved to memory</div>
           <br>
-          <div class="terminal-line terminal-comment"># Install agents from RappterHub</div>
+          <div class="terminal-line terminal-comment"># Install an agent from ClawHub</div>
           <div class="terminal-line">
             <span class="terminal-prompt">$</span>
-            <span class="terminal-command">openrappter rappterhub install kody-w/git-helper</span>
+            <span class="terminal-command">openrappter clawhub install kody-w/git-helper</span>
           </div>
-          <div class="terminal-line terminal-output terminal-success">✓ Installed git-helper v1.0.0</div>
+          <div class="terminal-line terminal-output terminal-success">  Installed git-helper v2.1.0</div>
           <br>
-          <div class="terminal-line terminal-comment"># Now use it</div>
+          <div class="terminal-line terminal-comment"># Context-aware — uses your memory and the current time</div>
           <div class="terminal-line">
             <span class="terminal-prompt">$</span>
-            <span class="terminal-command terminal-highlight">openrappter "what did I work on this week?"</span>
+            <span class="terminal-command terminal-highlight">openrappter "summarize what I worked on this week"</span>
           </div>
-          <div class="terminal-line terminal-output">🦖 This week you made 12 commits to the auth refactor:</div>
-          <div class="terminal-line terminal-output terminal-dim">   - Added JWT validation middleware</div>
-          <div class="terminal-line terminal-output terminal-dim">   - Fixed session timeout bug</div>
-          <div class="terminal-line terminal-output terminal-dim">   - Wrote tests for login flow...</div>
+          <div class="terminal-line terminal-output">  Scanning git history and memory...</div>
+          <div class="terminal-line terminal-output">  This week you made 14 commits across 3 repos:</div>
+          <div class="terminal-line terminal-output terminal-dim">    auth-refactor: Added JWT middleware, fixed session timeout</div>
+          <div class="terminal-line terminal-output terminal-dim">    openrappter: Shipped v1.4.1 with WebSocket gateway</div>
+          <div class="terminal-line terminal-output terminal-dim">    docs-site: Rewrote landing page and tutorial</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Comparison -->
-  <section class="comparison" id="comparison">
+  <!-- 3. Feature Grid -->
+  <section class="features">
+    <div class="features-container">
+      <div class="features-header">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Everything you need. Nothing you don't.</h2>
+        <p class="section-subtitle" style="margin:1rem auto 4rem;">A minimal, powerful framework for developers who want production-grade AI agents without the complexity or the bill.</p>
+      </div>
+      <div class="features-grid">
+
+        <div class="feature-card" style="border:1px solid rgba(16,185,129,0.3);background:rgba(16,185,129,0.03);">
+          <div class="feature-icon">&#128196;</div>
+          <h3>Single File Agents</h3>
+          <p>Documentation, contract, and deterministic code all live in one file. No YAML. No config drift. No magic parsing. The file IS the agent.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128272;</div>
+          <h3>Zero API Keys</h3>
+          <p>Powered by the GitHub Copilot SDK. No separate keys for OpenAI, Anthropic, or anyone else. One less secret to manage, one fewer bill to pay.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#127968;</div>
+          <h3>Local-First</h3>
+          <p>Your memory, configs, and conversation history live in <code>~/.openrappter</code> on your own machine. Data stays local even though Copilot powers the AI.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#129504;</div>
+          <h3>Persistent Memory</h3>
+          <p>Hybrid search over embedded memory chunks. Remembers facts, preferences, and context across every session. Gets smarter the more you use it.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#9889;</div>
+          <h3>5 LLM Providers</h3>
+          <p>Anthropic, OpenAI, GitHub Copilot, Ollama, and Azure OpenAI all supported out of the box. Switch with a config change, no code edits required.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128246;</div>
+          <h3>15+ Channels</h3>
+          <p>CLI, Slack, Discord, Telegram, Signal, iMessage, Google Chat, Teams, WhatsApp, Matrix, and more. Your agents meet you where you already are.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128301;</div>
+          <h3>WebSocket Gateway</h3>
+          <p>JSON-RPC 2.0 protocol with streaming agent responses. Event system for agent, chat, channel, cron, and presence events. Real-time everything.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128268;</div>
+          <h3>Plugin System</h3>
+          <p>ClawHub skills are <code>SKILL.md</code> files that wrap into full <code>BasicAgent</code> instances. Search, install, and share in one command.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">&#128260;</div>
+          <h3>Dual Runtime (TS + Python)</h3>
+          <p>Parallel implementations in TypeScript and Python that mirror the same agent architecture. Write once in either language, deploy anywhere.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Agent Showcase -->
+  <section class="agent-showcase">
+    <div class="agent-showcase-container">
+      <div class="section-label">Built-in Agents</div>
+      <h2 class="section-title">Ready to use on day one</h2>
+      <p class="section-subtitle">Every agent follows the single-file pattern — metadata, documentation, and logic in one place. Zero configuration required.</p>
+
+      <div class="agent-group-title core">Core</div>
+      <div class="agent-grid">
+        <div class="agent-card">
+          <div class="agent-card-icon">&#9881;</div>
+          <h4>BasicAgent</h4>
+          <p>Abstract base with data sloshing, context enrichment, and upstream chain support. Every agent extends this.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128032;</div>
+          <h4>ShellAgent</h4>
+          <p>Bash execution, file read/write/list, and natural language command parsing. Actions: bash, read, write, list.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#129504;</div>
+          <h4>MemoryAgent</h4>
+          <p>Store, retrieve, and manage persistent memories. Hybrid embedding search with overlapping context windows.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128172;</div>
+          <h4>Assistant</h4>
+          <p>General-purpose conversational agent with full context awareness. The daily driver for most workflows.</p>
+        </div>
+      </div>
+
+      <div class="agent-group-title intelligence">Intelligence</div>
+      <div class="agent-grid">
+        <div class="agent-card">
+          <div class="agent-card-icon">&#129425;</div>
+          <h4>OuroborosAgent</h4>
+          <p>Self-improving meta-agent with capability scoring across word stats, sentiment, cipher, patterns, and reflection.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#127760;</div>
+          <h4>WebAgent</h4>
+          <p>Fetch and parse web content, extract structured data, and summarize pages in context of your current task.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128187;</div>
+          <h4>BrowserAgent</h4>
+          <p>Headless browser automation for sites that require JavaScript. Form fills, clicks, and screenshot capture.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128240;</div>
+          <h4>HackerNewsAgent</h4>
+          <p>Pulls top stories, threads, and comments from HN. Filter by score, keyword, or date range on demand.</p>
+        </div>
+      </div>
+
+      <div class="agent-group-title communication">Communication</div>
+      <div class="agent-grid">
+        <div class="agent-card">
+          <div class="agent-card-icon">&#9993;</div>
+          <h4>MessageAgent</h4>
+          <p>Send messages to any configured channel — Slack, Discord, Telegram, and more — from any agent workflow.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128266;</div>
+          <h4>TTSAgent</h4>
+          <p>Text-to-speech synthesis with configurable voice and speed. Pipe any agent output to audio output.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128203;</div>
+          <h4>SessionsAgent</h4>
+          <p>Manage conversation sessions, replay history, and export transcripts across multiple active contexts.</p>
+        </div>
+      </div>
+
+      <div class="agent-group-title automation">Automation</div>
+      <div class="agent-grid">
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128336;</div>
+          <h4>CronAgent</h4>
+          <p>Schedule agents on cron expressions. Daily digests, weekly summaries, and time-triggered workflows.</p>
+        </div>
+        <div class="agent-card">
+          <div class="agent-card-icon">&#128444;</div>
+          <h4>ImageAgent</h4>
+          <p>Generate, resize, annotate, and process images. Integrates with Copilot vision for image understanding.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Comparison Table -->
+  <section class="comparison">
     <div class="comparison-container">
       <div class="section-label">Why Switch?</div>
       <h2 class="section-title">openrappter vs. the rest</h2>
-      <p class="section-subtitle">We built openrappter because we were tired of juggling API keys and watching our usage bills climb.</p>
+      <p class="section-subtitle">Built for developers who are tired of juggling API keys and watching usage bills climb every month.</p>
 
       <table class="comparison-table">
         <thead>
@@ -835,21 +303,21 @@
             <th>Feature</th>
             <th class="highlight-col">openrappter</th>
             <th>OpenClaw</th>
-            <th>LangChain Agents</th>
+            <th>LangChain</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td class="feature">Requires API Keys</td>
-            <td class="highlight-col"><span class="check">✗ No</span></td>
-            <td><span class="cross">✓ Yes</span></td>
-            <td><span class="cross">✓ Yes</span></td>
+            <td class="highlight-col"><span class="check">No</span></td>
+            <td><span class="cross">Yes</span></td>
+            <td><span class="cross">Yes</span></td>
           </tr>
           <tr>
             <td class="feature">Monthly Cost</td>
-            <td class="highlight-col"><span class="check">$0*</span></td>
-            <td><span class="cross">$20-100+</span></td>
-            <td><span class="cross">$50-200+</span></td>
+            <td class="highlight-col"><span class="check">$0 extra</span></td>
+            <td><span class="cross">$20–100+</span></td>
+            <td><span class="cross">$50–200+</span></td>
           </tr>
           <tr>
             <td class="feature">Data Privacy</td>
@@ -860,156 +328,97 @@
           <tr>
             <td class="feature">Setup Time</td>
             <td class="highlight-col"><span class="check">&lt; 1 minute</span></td>
-            <td><span class="partial">5-10 min</span></td>
+            <td><span class="partial">5–10 min</span></td>
             <td><span class="cross">30+ min</span></td>
           </tr>
           <tr>
             <td class="feature">Persistent Memory</td>
-            <td class="highlight-col"><span class="check">✓ Built-in</span></td>
-            <td><span class="check">✓ Yes</span></td>
+            <td class="highlight-col"><span class="check">Built-in</span></td>
+            <td><span class="check">Yes</span></td>
             <td><span class="partial">Requires setup</span></td>
           </tr>
           <tr>
             <td class="feature">Agent Registry</td>
-            <td class="highlight-col"><span class="check">✓ RappterHub</span></td>
-            <td><span class="check">✓ ClawHub</span></td>
-            <td><span class="cross">✗ No</span></td>
+            <td class="highlight-col"><span class="check">ClawHub</span></td>
+            <td><span class="check">ClawHub</span></td>
+            <td><span class="cross">No</span></td>
           </tr>
           <tr>
             <td class="feature">Open Source</td>
-            <td class="highlight-col"><span class="check">✓ MIT</span></td>
-            <td><span class="check">✓ MIT</span></td>
-            <td><span class="check">✓ MIT</span></td>
+            <td class="highlight-col"><span class="check">MIT</span></td>
+            <td><span class="check">MIT</span></td>
+            <td><span class="check">MIT</span></td>
           </tr>
           <tr>
             <td class="feature">ClawHub Compatible</td>
-            <td class="highlight-col"><span class="check">✓ Yes</span></td>
-            <td><span class="check">✓ Native</span></td>
-            <td><span class="cross">✗ No</span></td>
+            <td class="highlight-col"><span class="check">Yes</span></td>
+            <td><span class="check">Native</span></td>
+            <td><span class="cross">No</span></td>
+          </tr>
+          <tr>
+            <td class="feature">Messaging Channels</td>
+            <td class="highlight-col"><span class="check">15+ channels</span></td>
+            <td><span class="partial">Selected</span></td>
+            <td><span class="partial">Via plugins</span></td>
+          </tr>
+          <tr>
+            <td class="feature">WebSocket Gateway</td>
+            <td class="highlight-col"><span class="check">Built-in JSON-RPC</span></td>
+            <td><span class="partial">Partial</span></td>
+            <td><span class="cross">No</span></td>
           </tr>
         </tbody>
       </table>
-      <p style="text-align: center; color: var(--text-muted); margin-top: 1.5rem; font-size: 0.875rem;">
-        *Uses your existing GitHub Copilot subscription ($10/mo or free for students/OSS maintainers)
+      <p style="text-align:center;color:var(--text-muted);margin-top:1.5rem;font-size:0.875rem;">
+        * Uses your existing GitHub Copilot subscription ($10/mo, or free for students and open source maintainers).
       </p>
     </div>
   </section>
 
-  <!-- Features -->
-  <section class="features" id="features">
+  <!-- 6. Architecture Preview -->
+  <section class="features" style="padding:8rem 2rem;">
     <div class="features-container">
-      <div class="features-header">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Everything you need. Nothing you don't.</h2>
-        <p class="section-subtitle" style="margin: 1rem auto 0; max-width: 600px;">A minimal, powerful framework for developers who want AI agents without the complexity.</p>
-      </div>
-      <div class="features-grid">
-        <div class="feature-card" style="border: 1px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.03);">
-          <div class="feature-icon">📄</div>
-          <h3>Single File Agents</h3>
-          <p>Documentation + contract + deterministic code in ONE file. No separate skills, no plugins, no manifest drift. The file IS the agent. <a href="./single-file-agents.html" style="color: var(--green);">Read the manifesto →</a></p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔐</div>
-          <h3>Zero API Keys</h3>
-          <p>Uses GitHub Copilot SDK. No separate keys for OpenAI, Anthropic, or anyone else. One less secret to manage.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🏠</div>
-          <h3>Local-First</h3>
-          <p>Your memories, configs, and conversations live in ~/.openrappter on your machine. Agent data stays local even though Copilot powers the AI.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🧠</div>
-          <h3>Persistent Memory</h3>
-          <p>Remembers facts, preferences, and context across sessions. Gets smarter the more you use it.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">📦</div>
-          <h3>RappterHub Registry</h3>
-          <p>npm for AI agents. Search, install, and share agents with one command. Build on what others have built.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔌</div>
-          <h3>ClawHub Compatible</h3>
-          <p>Already using OpenClaw? Your ClawHub skills work here too. Easy migration, no lock-in.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔄</div>
-          <h3>Dual Runtime</h3>
-          <p>Same agent contract in Python and TypeScript. Write once, run in either. Your choice.</p>
-        </div>
-      </div>
+      <div class="section-label">Architecture</div>
+      <h2 class="section-title">How it works</h2>
+      <p class="section-subtitle">
+        Every agent call passes through a clean execution pipeline. Data sloshing enriches context before your agent logic ever runs — temporal signals, memory echoes, behavioral hints, and upstream chain data all flow in automatically. You write <code>perform()</code>; the framework handles everything else.
+      </p>
+      <div class="arch-diagram">execute(kwargs)
+  &#x2502;
+  &#x251C;&#x2500;&#x2500; slosh(query)         &#x2500;&#x2500; gather context: temporal, memory echoes, hints, priors
+  &#x2502;                       &#x2514;&#x2500; synthesize Orientation { confidence, approach, hints }
+  &#x2502;
+  &#x251C;&#x2500;&#x2500; merge upstream_slush  &#x2500;&#x2500; chain data from previous agent (if any)
+  &#x2502;
+  &#x251C;&#x2500;&#x2500; perform(kwargs)       &#x2500;&#x2500; your agent logic runs here
+  &#x2502;
+  &#x2514;&#x2500;&#x2500; extract data_slush    &#x2500;&#x2500; pass enriched output to next agent in chain</div>
+      <p style="color:var(--text-muted);font-size:0.95rem;margin-bottom:2.5rem;line-height:1.7;">
+        The TypeScript and Python runtimes share the same agent contract: <code>BasicAgent</code>, <code>ShellAgent</code>, <code>MemoryAgent</code>, and the ClawHub skill wrapper are all implemented in parallel. Write your agent in either language — the architecture is identical.
+      </p>
+      <a href="./architecture.html" class="btn btn-ghost btn-large">
+        Explore the Architecture
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+      </a>
     </div>
   </section>
 
-  <!-- RappterHub -->
-  <section class="rappterhub" id="rappterhub">
-    <div class="rappterhub-container">
-      <div class="rappterhub-content">
-        <div class="section-label">Agent Registry</div>
-        <h2>Meet <span class="highlight">RappterHub</span></h2>
-        <p>
-          A community-driven registry for sharing and discovering AI agents.
-          Like npm, but for agents that actually do things.
-        </p>
-        <div class="rappterhub-features">
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>One-command install: <code>rappterhub install author/agent</code></span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Semantic search across all agents</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>Version control with rollback support</span>
-          </div>
-          <div class="rappterhub-feature">
-            <div class="rappterhub-feature-check">✓</div>
-            <span>GitHub-backed for full transparency</span>
-          </div>
-        </div>
-        <a href="https://github.com/kody-w/rappterhub" class="btn btn-primary">
-          Explore RappterHub
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
-        </a>
-      </div>
-      <div class="rappterhub-demo">
-        <div class="demo-comment"># Find agents for any task</div>
-        <div class="demo-cmd">$ rappterhub search "git automation"</div>
-        <div class="demo-output">Found 12 agents</div>
-        <div class="demo-output">  kody-w/git-helper — Commits, PRs, changelogs</div>
-        <div class="demo-output">  devops/changelog — Semantic changelogs</div>
-        <br>
-        <div class="demo-comment"># Install with one command</div>
-        <div class="demo-cmd">$ rappterhub install kody-w/git-helper</div>
-        <div class="demo-output" style="color: var(--green);">✓ Installed git-helper v1.4.0</div>
-        <br>
-        <div class="demo-comment"># Use it immediately</div>
-        <div class="demo-cmd">$ openrappter "create a PR for my changes"</div>
-        <div class="demo-output">🦖 Created PR #47: "Add auth middleware"</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA -->
+  <!-- 7. CTA Section -->
   <section class="cta">
     <div class="cta-bg"></div>
     <div class="cta-container">
       <h2>Ready to go local?</h2>
-      <p>Join developers who've reclaimed their AI workflow. No signups. No credit cards. Just one command.</p>
+      <p>Join developers who have reclaimed their AI workflow. No signups. No credit cards. Just one command.</p>
       <div class="cta-buttons">
         <a href="https://github.com/kody-w/openrappter" class="btn btn-primary btn-large">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           Star on GitHub
         </a>
-        <a href="https://github.com/kody-w/rappterhub" class="btn btn-ghost btn-large">
-          Browse RappterHub
+        <a href="./docs.html" class="btn btn-ghost btn-large">
+          Browse Docs
         </a>
       </div>
-      <p class="cta-note">MIT Licensed • Python & TypeScript • Works with ClawHub skills</p>
+      <p class="cta-note">MIT Licensed &bull; TypeScript + Python &bull; Works with all ClawHub skills</p>
     </div>
   </section>
 
@@ -1018,16 +427,14 @@
     <div class="footer-container">
       <div class="footer-links">
         <a href="https://github.com/kody-w/openrappter">GitHub</a>
-        <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md">skills.md</a>
         <a href="./docs.html">Docs</a>
         <a href="./tutorial.html">Tutorial</a>
         <a href="./changelog.html">Changelog</a>
-        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
       </div>
-      <div class="footer-copy">
-        MIT License • Made with 🦖
-      </div>
+      <div class="footer-copy">MIT License</div>
     </div>
   </footer>
+
+  <script src="./nav.js"></script>
 </body>
 </html>

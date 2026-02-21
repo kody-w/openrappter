@@ -4,715 +4,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Architecture — openrappter</title>
-  <meta name="description" content="How openrappter works: dual-runtime agent framework architecture powered by GitHub Copilot.">
+  <meta name="description" content="How openrappter works under the hood: agent contract, data sloshing, execution flow, multi-agent orchestration, and directory structure.">
   <meta property="og:title" content="Architecture — openrappter">
-  <meta property="og:description" content="How openrappter works: dual-runtime agent framework architecture powered by GitHub Copilot.">
+  <meta property="og:description" content="How openrappter works under the hood: agent contract, data sloshing, execution flow, multi-agent orchestration, and directory structure.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green: #10b981;
-      --green-bright: #34d399;
-      --green-dark: #059669;
-      --purple: #8b5cf6;
-      --blue: #3b82f6;
-      --orange: #f97316;
-      --bg: #000000;
-      --bg-card: #0a0a0a;
-      --bg-elevated: #141414;
-      --bg-hover: #1a1a1a;
-      --text: #ffffff;
-      --text-secondary: #e5e5e5;
-      --text-muted: #737373;
-      --border: #262626;
-      --border-light: #404040;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* ── Navbar ── */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
-      padding: 1rem 2rem;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .nav-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logo-badge {
-      font-size: 0.65rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--green);
-      color: black;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover { color: var(--text); }
-    .nav-links a.active { color: var(--green); }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      text-decoration: none;
-      transition: all 0.2s;
-      cursor: pointer;
-      border: none;
-    }
-
-    .btn-primary {
-      background: var(--green);
-      color: black;
-    }
-
-    .btn-primary:hover {
-      background: var(--green-bright);
-      transform: translateY(-1px);
-    }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .btn-ghost:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-light);
-    }
-
-    .btn-large {
-      padding: 1rem 2rem;
-      font-size: 1rem;
-      border-radius: 10px;
-    }
-
-    /* ── Hero ── */
-    .hero {
-      min-height: 50vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      padding: 10rem 2rem 4rem;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-bg {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
-        radial-gradient(ellipse 60% 40% at 80% 60%, rgba(16, 185, 129, 0.1), transparent);
-      pointer-events: none;
-    }
-
-    .hero-content {
-      position: relative;
-      z-index: 1;
-      max-width: 700px;
-    }
-
-    .hero h1 {
-      font-size: 3.5rem;
-      font-weight: 900;
-      line-height: 1.1;
-      margin-bottom: 1rem;
-      background: linear-gradient(135deg, var(--text) 0%, var(--green-bright) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero p {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      max-width: 560px;
-      margin: 0 auto;
-    }
-
-    /* ── Sections ── */
-    .section {
-      padding: 5rem 2rem;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    .section-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      color: var(--green);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.75rem;
-    }
-
-    .section-title {
-      font-size: 2.2rem;
-      font-weight: 800;
-      margin-bottom: 1rem;
-    }
-
-    .section-subtitle {
-      font-size: 1.05rem;
-      color: var(--text-muted);
-      max-width: 640px;
-      margin-bottom: 2.5rem;
-    }
-
-    /* ── Architecture Diagram ── */
-    .diagram-wrapper {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 2.5rem;
-      box-shadow:
-        0 0 0 1px rgba(255,255,255,0.03),
-        0 20px 60px -10px rgba(0,0,0,0.5),
-        0 0 120px -30px rgba(16, 185, 129, 0.12);
-      overflow-x: auto;
-    }
-
-    .diagram-title {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      margin-bottom: 2rem;
-      text-align: center;
-    }
-
-    .diagram {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0;
-    }
-
-    .diagram-row {
-      display: flex;
-      gap: 1.5rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    .diagram-box {
-      background: var(--bg-elevated);
-      border: 1px solid var(--green-dark);
-      border-radius: 10px;
-      padding: 1rem 1.5rem;
-      text-align: center;
-      min-width: 170px;
-      position: relative;
-      transition: all 0.3s;
-      box-shadow: 0 0 20px -8px rgba(16, 185, 129, 0.15);
-    }
-
-    .diagram-box:hover {
-      border-color: var(--green-bright);
-      box-shadow: 0 0 30px -5px rgba(16, 185, 129, 0.3);
-      transform: translateY(-2px);
-    }
-
-    .diagram-box.cloud {
-      border-color: var(--purple);
-      box-shadow: 0 0 20px -8px rgba(139, 92, 246, 0.2);
-    }
-
-    .diagram-box.cloud:hover {
-      border-color: #a78bfa;
-      box-shadow: 0 0 30px -5px rgba(139, 92, 246, 0.35);
-    }
-
-    .diagram-box.storage {
-      border-color: var(--blue);
-      box-shadow: 0 0 20px -8px rgba(59, 130, 246, 0.15);
-    }
-
-    .diagram-box.storage:hover {
-      border-color: #60a5fa;
-      box-shadow: 0 0 30px -5px rgba(59, 130, 246, 0.3);
-    }
-
-    .diagram-box .box-title {
-      font-weight: 700;
-      font-size: 0.95rem;
-      margin-bottom: 0.25rem;
-    }
-
-    .diagram-box .box-sub {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
-
-    .diagram-box .box-tag {
-      position: absolute;
-      top: -0.55rem;
-      right: 0.75rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.6rem;
-      padding: 0.1rem 0.45rem;
-      border-radius: 3px;
-      font-weight: 600;
-    }
-
-    .box-tag.local {
-      background: var(--green-dark);
-      color: #d1fae5;
-    }
-
-    .box-tag.cloud-tag {
-      background: #6d28d9;
-      color: #ede9fe;
-    }
-
-    .box-tag.file-tag {
-      background: #1d4ed8;
-      color: #dbeafe;
-    }
-
-    .diagram-arrow {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 0.4rem 0;
-      color: var(--border-light);
-      font-size: 1.1rem;
-      line-height: 1;
-      user-select: none;
-    }
-
-    .diagram-arrow .arrow-line {
-      width: 2px;
-      height: 14px;
-      background: var(--border-light);
-    }
-
-    .agents-row {
-      display: flex;
-      gap: 0.5rem;
-      justify-content: center;
-    }
-
-    .agent-chip {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      padding: 0.35rem 0.75rem;
-      background: var(--bg-hover);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text-secondary);
-    }
-
-    .diagram-side-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      white-space: nowrap;
-    }
-
-    .diagram-row-with-label {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      justify-content: center;
-    }
-
-    /* ── Code Tabs ── */
-    .code-tabs {
-      margin-top: 2rem;
-    }
-
-    .tab-buttons {
-      display: flex;
-      gap: 0;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .tab-btn {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      padding: 0.75rem 1.5rem;
-      background: transparent;
-      color: var(--text-muted);
-      border: none;
-      cursor: pointer;
-      transition: all 0.2s;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-    }
-
-    .tab-btn:hover { color: var(--text-secondary); }
-
-    .tab-btn.active {
-      color: var(--green);
-      border-bottom-color: var(--green);
-    }
-
-    .tab-panel {
-      display: none;
-    }
-
-    .tab-panel.active {
-      display: block;
-    }
-
-    .code-block {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-top: none;
-      border-radius: 0 0 10px 10px;
-      padding: 1.5rem;
-      overflow-x: auto;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      line-height: 1.7;
-      color: var(--text-secondary);
-    }
-
-    .code-block .kw { color: var(--purple); }
-    .code-block .fn { color: var(--blue); }
-    .code-block .str { color: var(--green-bright); }
-    .code-block .cm { color: var(--text-muted); }
-    .code-block .typ { color: var(--orange); }
-
-    /* ── Rules Grid ── */
-    .rules-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1rem;
-      margin-top: 1.5rem;
-    }
-
-    .rule-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 1.25rem;
-      transition: all 0.3s;
-    }
-
-    .rule-card:hover {
-      border-color: var(--green);
-      transform: translateY(-2px);
-      box-shadow: 0 12px 30px -12px rgba(16, 185, 129, 0.15);
-    }
-
-    .rule-card .rule-icon {
-      font-size: 1.3rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .rule-card h4 {
-      font-size: 0.9rem;
-      margin-bottom: 0.35rem;
-    }
-
-    .rule-card p {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      line-height: 1.5;
-    }
-
-    .rule-card code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      background: var(--bg-elevated);
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      color: var(--green-bright);
-    }
-
-    /* ── Sloshing Signals ── */
-    .signals-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1.25rem;
-      margin-top: 2rem;
-    }
-
-    .signal-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      transition: all 0.3s;
-    }
-
-    .signal-card:hover {
-      border-color: var(--purple);
-      box-shadow: 0 12px 30px -12px rgba(139, 92, 246, 0.15);
-    }
-
-    .signal-card h4 {
-      font-size: 0.95rem;
-      font-weight: 700;
-      margin-bottom: 0.5rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .signal-card .signal-keys {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.35rem;
-    }
-
-    .signal-key {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      color: var(--text-muted);
-    }
-
-    /* ── Copilot Section ── */
-    .copilot-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1.25rem;
-      margin-top: 2rem;
-    }
-
-    .copilot-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      transition: all 0.3s;
-    }
-
-    .copilot-card:hover {
-      border-color: var(--purple);
-      box-shadow: 0 12px 30px -12px rgba(139, 92, 246, 0.15);
-    }
-
-    .copilot-card .card-icon {
-      font-size: 1.5rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .copilot-card h4 {
-      font-size: 0.95rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .copilot-card p {
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      line-height: 1.55;
-    }
-
-    /* ── Directory Tree ── */
-    .dir-tree {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      line-height: 1.9;
-      overflow-x: auto;
-      box-shadow:
-        0 0 0 1px rgba(255,255,255,0.03),
-        0 20px 50px -10px rgba(0,0,0,0.5);
-      margin-top: 2rem;
-    }
-
-    .dir-tree .folder { color: var(--blue); }
-    .dir-tree .file { color: var(--text-muted); }
-    .dir-tree .comment { color: #525252; }
-    .dir-tree .tree-line { color: var(--border-light); user-select: none; }
-
-    /* ── CTA ── */
-    .cta {
-      text-align: center;
-      padding: 5rem 2rem;
-      position: relative;
-    }
-
-    .cta-bg {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: radial-gradient(ellipse 70% 50% at 50% 100%, rgba(16, 185, 129, 0.08), transparent);
-      pointer-events: none;
-    }
-
-    .cta-content {
-      position: relative;
-      z-index: 1;
-    }
-
-    .cta h2 {
-      font-size: 2.5rem;
-      font-weight: 800;
-      margin-bottom: 1rem;
-    }
-
-    .cta p {
-      color: var(--text-muted);
-      font-size: 1.05rem;
-      margin-bottom: 2rem;
-    }
-
-    .cta-buttons {
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    /* ── Footer ── */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 2rem;
-      text-align: center;
-    }
-
-    .footer-container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .footer-links {
-      display: flex;
-      gap: 2rem;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 1rem;
-    }
-
-    .footer-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.85rem;
-      transition: color 0.2s;
-    }
-
-    .footer-links a:hover { color: var(--text); }
-
-    .footer-copy {
-      color: #525252;
-      font-size: 0.8rem;
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 768px) {
-      .nav-links { display: none; }
-
-      .hero h1 { font-size: 2.2rem; }
-      .hero p { font-size: 1rem; }
-
-      .section-title { font-size: 1.6rem; }
-
-      .diagram-wrapper { padding: 1.25rem; }
-
-      .diagram-row {
-        flex-direction: column;
-        align-items: center;
-        gap: 0;
-      }
-
-      .diagram-row .diagram-arrow {
-        display: flex;
-      }
-
-      .diagram-box { min-width: 200px; width: 100%; max-width: 280px; }
-
-      .diagram-row-with-label {
-        flex-direction: column;
-        gap: 0.5rem;
-      }
-
-      .agents-row {
-        flex-wrap: wrap;
-      }
-
-      .cta h2 { font-size: 1.8rem; }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 
 <!-- ── Navbar ── -->
 <nav>
   <div class="nav-container">
-    <a href="./" class="logo">
-      🦖 openrappter
-      <span class="logo-badge">v1.4</span>
-    </a>
+    <a href="./" class="logo">openrappter <span class="logo-badge">v1.4.1</span></a>
+    <button class="mobile-menu-btn">&#9776;</button>
     <div class="nav-links">
-      <a href="./">Home</a>
       <a href="./docs.html">Docs</a>
-      <a href="./teach.html">Teach Your Agent</a>
-      <a href="./single-file-agents.html">Manifesto</a>
-      <a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a>
+      <a href="./architecture.html">Architecture</a>
+      <a href="./tutorial.html">Tutorial</a>
+      <a href="./changelog.html">Changelog</a>
     </div>
-    <div>
-      <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost" target="_blank">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+    <div class="nav-cta">
+      <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
       </a>
     </div>
@@ -722,433 +38,398 @@
 <!-- ── Hero ── -->
 <section class="hero">
   <div class="hero-bg"></div>
-  <div class="hero-content">
-    <h1>How openrappter works</h1>
-    <p>A dual-runtime agent framework powered by GitHub Copilot</p>
-  </div>
+  <h1 style="background:linear-gradient(135deg,var(--text) 0%,var(--green-bright) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Architecture</h1>
+  <p class="hero-subtitle">How openrappter works under the hood</p>
 </section>
 
-<!-- ── System Overview ── -->
-<section class="section" id="overview">
+<!-- ── 1. System Overview ── -->
+<section class="doc-section" id="system-overview" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
   <div class="section-label">System Overview</div>
   <h2 class="section-title">Architecture at a glance</h2>
-  <p class="section-subtitle">Two interchangeable runtimes, one unified agent contract, automatic context enrichment, and cloud AI — all in your terminal.</p>
+  <p class="section-subtitle">openrappter is a layered, local-first AI agent framework. Channels funnel messages into a WebSocket gateway, which dispatches them through a registry of agents. Those agents talk to pluggable LLM providers, a hybrid memory system, and a persistent storage layer — all on your own machine.</p>
 
-  <div class="diagram-wrapper">
-    <div class="diagram-title">Your Terminal</div>
-    <div class="diagram">
-
-      <!-- Runtimes -->
-      <div class="diagram-row">
-        <div class="diagram-box">
-          <span class="box-tag local">local</span>
-          <div class="box-title">TypeScript Runtime</div>
-          <div class="box-sub">Node.js</div>
-        </div>
-        <div class="diagram-box">
-          <span class="box-tag local">local</span>
-          <div class="box-title">Python Runtime</div>
-          <div class="box-sub">3.10+</div>
-        </div>
-      </div>
-
-      <div class="diagram-arrow"><div class="arrow-line"></div>▼</div>
-
-      <!-- Registry -->
-      <div class="diagram-row">
-        <div class="diagram-box">
-          <span class="box-tag local">local</span>
-          <div class="box-title">Agent Registry</div>
-          <div class="box-sub">Auto-discovery</div>
-        </div>
-      </div>
-
-      <div class="diagram-arrow"><div class="arrow-line"></div>▼</div>
-
-      <!-- Agents -->
-      <div class="diagram-row">
-        <div class="diagram-box" style="min-width: 280px;">
-          <span class="box-tag local">local</span>
-          <div class="box-title">Built-in Agents</div>
-          <div class="agents-row" style="margin-top: 0.5rem;">
-            <span class="agent-chip">Shell</span>
-            <span class="agent-chip">Memory</span>
-            <span class="agent-chip">Learn</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="diagram-arrow"><div class="arrow-line"></div>▼</div>
-
-      <!-- Data Sloshing -->
-      <div class="diagram-row">
-        <div class="diagram-box">
-          <span class="box-tag local">local</span>
-          <div class="box-title">Data Sloshing</div>
-          <div class="box-sub">Context Layer</div>
-        </div>
-      </div>
-
-      <div class="diagram-arrow"><div class="arrow-line"></div>▼</div>
-
-      <!-- Cloud + Storage -->
-      <div class="diagram-row">
-        <div class="diagram-row-with-label">
-          <div class="diagram-box cloud">
-            <span class="box-tag cloud-tag">cloud</span>
-            <div class="box-title">GitHub Copilot</div>
-            <div class="box-sub">AI backbone</div>
-          </div>
-          <div class="diagram-side-label">◄ Cloud AI</div>
-        </div>
-        <div class="diagram-row-with-label">
-          <div class="diagram-box storage">
-            <span class="box-tag file-tag">file</span>
-            <div class="box-title">~/.openrappter</div>
-            <div class="box-sub">config │ memory</div>
-          </div>
-          <div class="diagram-side-label">◄ Local Storage</div>
-        </div>
-      </div>
-
-    </div>
-  </div>
+  <div class="arch-diagram">                     Channels
+    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+    &#9474;   CLI   &#9474;  Slack   &#9474;  Discord  &#9474; Telegram &#9474;  ...15+ more
+    &#9492;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+         &#9474;         &#9474;           &#9474;          &#9474;
+         &#9660;         &#9660;           &#9660;          &#9660;
+    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+    &#9474;           WebSocket Gateway               &#9474;
+    &#9474;        (JSON-RPC 2.0 / Streaming)         &#9474;
+    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                       &#9474;
+                       &#9660;
+    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+    &#9474;           Agent Registry                  &#9474;
+    &#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9474;
+    &#9474;   &#9474;Shell &#9474; &#9474;Memory&#9474; &#9474; Web  &#9474; &#9474;Browser&#9474;  &#9474;
+    &#9474;   &#9474;Agent &#9474; &#9474;Agent &#9474; &#9474;Agent &#9474; &#9474; Agent &#9474;  &#9474;
+    &#9474;   &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496;  &#9474;
+    &#9474;      &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;       &#9474;
+    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                       &#9474;
+         &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9532;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+         &#9660;             &#9660;             &#9660;
+    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+    &#9474;Providers&#9474;  &#9474;  Memory  &#9474;  &#9474; Storage  &#9474;
+    &#9474; Copilot &#9474;  &#9474; Chunker  &#9474;  &#9474;  SQLite  &#9474;
+    &#9474;Anthropic&#9474;  &#9474;Embeddings&#9474;  &#9474;In-Memory &#9474;
+    &#9474; OpenAI  &#9474;  &#9474;  Search  &#9474;  &#9474;          &#9474;
+    &#9474; Gemini  &#9474;  &#9474;          &#9474;  &#9474;          &#9474;
+    &#9474; Ollama  &#9474;  &#9474;          &#9474;  &#9474;          &#9474;
+    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
 </section>
 
-<!-- ── Agent Contract ── -->
-<section class="section" id="contract">
-  <div class="section-label">The Single File Agent</div>
-  <h2 class="section-title">Documentation + Contract + Code = One File</h2>
-  <p class="section-subtitle">Every agent defines its metadata using native code — Python dicts or TypeScript objects. No YAML, no config files, no magic. Just code. <a href="./single-file-agents.html" style="color:var(--green);">Read the manifesto →</a></p>
+<!-- ── 2. Agent Contract ── -->
+<section class="doc-section" id="agent-contract" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Agent Contract</div>
+  <h2 class="section-title">One file = one agent</h2>
+  <p class="section-subtitle">Every agent is a single file. The metadata contract, documentation, and deterministic logic all live together using native language constructs — Python dicts or TypeScript objects. No YAML. No config files. No magic parsing. The code IS the contract.</p>
+
+  <p style="color:var(--text-secondary);margin-bottom:1.5rem;font-size:0.95rem;line-height:1.7;">Three rules apply to every agent:</p>
+  <ul style="color:var(--text-secondary);margin:0 0 2rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li>Metadata lives in the constructor — name, description, and JSON Schema parameters are declared once in native code.</li>
+    <li><code>perform()</code> is the abstract method subclasses implement. It receives <code>kwargs</code>, returns a JSON string, and runs deterministically.</li>
+    <li>Return JSON with an optional <code>data_slush</code> key to pass curated signals to downstream agents in a chain.</li>
+  </ul>
 
   <div class="code-tabs">
-    <div class="tab-buttons">
-      <button class="tab-btn active" data-tab="python-tab" onclick="switchTab(event, 'python-tab')">Python</button>
-      <button class="tab-btn" data-tab="ts-tab" onclick="switchTab(event, 'ts-tab')">TypeScript</button>
+    <div class="code-tabs-header">
+      <button class="code-tab-btn active" onclick="switchTab(this, 'ts-contract')">TypeScript</button>
+      <button class="code-tab-btn" onclick="switchTab(this, 'py-contract')">Python</button>
     </div>
-    <div class="tab-panel active" id="python-tab">
-      <pre class="code-block"><span class="str">"""
-MyAgent — What this agent does.
-"""</span>
-<span class="kw">import</span> json
-<span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
+    <div class="code-tab-content active" id="ts-contract">
+      <pre><span class="kw">export class</span> <span class="typ">WeatherAgent</span> <span class="kw">extends</span> BasicAgent {
+  <span class="fn">constructor</span>() {
+    <span class="kw">const</span> metadata: <span class="typ">AgentMetadata</span> = {
+      name: <span class="str">'WeatherAgent'</span>,
+      description: <span class="str">'Fetches current weather'</span>,
+      parameters: {
+        type: <span class="str">'object'</span>,
+        properties: {
+          city: { type: <span class="str">'string'</span>, description: <span class="str">'City name'</span> }
+        },
+        required: [<span class="str">'city'</span>]
+      }
+    };
+    <span class="fn">super</span>(<span class="str">'WeatherAgent'</span>, metadata);
+  }
 
-<span class="kw">class</span> <span class="typ">MyAgent</span>(BasicAgent):
+  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;) {
+    <span class="kw">const</span> city = kwargs.city <span class="kw">as</span> <span class="typ">string</span>;
+    <span class="cm">// ... fetch weather ...</span>
+    <span class="kw">return</span> JSON.stringify({ temperature: <span class="val">72</span>, condition: <span class="str">'sunny'</span>, city });
+  }
+}</pre>
+    </div>
+    <div class="code-tab-content" id="py-contract">
+      <pre><span class="kw">class</span> <span class="typ">WeatherAgent</span>(BasicAgent):
     <span class="kw">def</span> <span class="fn">__init__</span>(self):
-        self.name = <span class="str">'MyAgent'</span>
+        self.name = <span class="str">'WeatherAgent'</span>
         self.metadata = {
             <span class="str">"name"</span>: self.name,
-            <span class="str">"description"</span>: <span class="str">"What this agent does"</span>,
+            <span class="str">"description"</span>: <span class="str">"Fetches current weather"</span>,
             <span class="str">"parameters"</span>: {
                 <span class="str">"type"</span>: <span class="str">"object"</span>,
                 <span class="str">"properties"</span>: {
-                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User input"</span>}
+                    <span class="str">"city"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"City name"</span>}
                 },
-                <span class="str">"required"</span>: []
+                <span class="str">"required"</span>: [<span class="str">"city"</span>]
             }
         }
         <span class="fn">super</span>().__init__(name=self.name, metadata=self.metadata)
 
     <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
-        query = kwargs.get(<span class="str">'query'</span>, <span class="str">''</span>)
-        <span class="cm"># self.context → enriched by data sloshing</span>
-        <span class="kw">return</span> json.dumps({<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"result"</span>: <span class="str">"..."</span>})</pre>
-    </div>
-    <div class="tab-panel" id="ts-tab">
-      <pre class="code-block"><span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
-<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
-
-<span class="kw">export class</span> <span class="typ">MyAgent</span> <span class="kw">extends</span> BasicAgent {
-  <span class="fn">constructor</span>() {
-    <span class="kw">const</span> metadata: <span class="typ">AgentMetadata</span> = {
-      name: <span class="str">'MyAgent'</span>,
-      description: <span class="str">'What this agent does'</span>,
-      parameters: {
-        type: <span class="str">'object'</span>,
-        properties: {
-          query: { type: <span class="str">'string'</span>, description: <span class="str">'User input'</span> }
-        },
-        required: []
-      }
-    };
-    <span class="fn">super</span>(<span class="str">'MyAgent'</span>, metadata);
-  }
-
-  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;): <span class="typ">Promise</span>&lt;<span class="typ">string</span>&gt; {
-    <span class="kw">const</span> query = kwargs.query <span class="kw">as</span> <span class="typ">string</span>;
-    <span class="cm">// this.context → enriched by data sloshing</span>
-    <span class="kw">return</span> JSON.stringify({ status: <span class="str">'success'</span>, result: <span class="str">'...'</span> });
-  }
-}</pre>
-    </div>
-  </div>
-
-  <div class="rules-grid">
-    <div class="rule-card">
-      <div class="rule-icon">📄</div>
-      <h4>Single File</h4>
-      <p>Native code contract + docs + logic. The file IS the agent IS the contract. No YAML, no config files.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">🎯</div>
-      <h4>Deterministic</h4>
-      <p><code>perform()</code> does the same thing every time. The AI decides <em>when</em> — the agent decides <em>how</em>.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">🔁</div>
-      <h4>JSON Return</h4>
-      <p>Always return JSON: <code>{"status": "success"}</code>. Include <code>data_slush</code> for chaining.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">🔍</div>
-      <h4>Auto-Discovery</h4>
-      <p>Drop a file in <code>agents/</code> and the registry finds it — no registration needed.</p>
+        city = kwargs.get(<span class="str">'city'</span>)
+        <span class="cm"># ... fetch weather ...</span>
+        <span class="kw">return</span> json.dumps({<span class="str">"temperature"</span>: <span class="val">72</span>, <span class="str">"condition"</span>: <span class="str">"sunny"</span>, <span class="str">"city"</span>: city})</pre>
     </div>
   </div>
 </section>
 
-<!-- ── Data Sloshing ── -->
-<section class="section" id="sloshing">
+<!-- ── 3. Data Sloshing ── -->
+<section class="doc-section" id="data-sloshing" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
   <div class="section-label">Data Sloshing</div>
-  <h2 class="section-title">Automatic context enrichment</h2>
-  <p class="section-subtitle">Before every agent action, openrappter enriches the call with temporal awareness, memory echoes, query signals, and behavioral hints. Agents never run "blind."</p>
+  <h2 class="section-title">Implicit context enrichment</h2>
+  <p class="section-subtitle">Before every agent action, openrappter automatically enriches the call with temporal awareness, memory echoes, query signals, and behavioral hints. Agents never run "blind" — they always have orientation context synthesized from all available signals.</p>
 
-  <div class="signals-grid">
-    <div class="signal-card">
-      <h4>🕐 Temporal</h4>
-      <div class="signal-keys">
-        <span class="signal-key">time_of_day</span>
-        <span class="signal-key">day_of_week</span>
-        <span class="signal-key">is_weekend</span>
-        <span class="signal-key">quarter</span>
-        <span class="signal-key">fiscal</span>
-        <span class="signal-key">likely_activity</span>
+  <p style="color:var(--text-secondary);margin-bottom:1.5rem;font-size:0.95rem;line-height:1.7;">The sloshing pipeline gathers signals across five categories and synthesizes them into an <strong>Orientation</strong> — a confidence score, recommended approach, and contextual hints — before your <code>perform()</code> runs.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:1.25rem;margin:2rem 0;">
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+      <h4 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;color:var(--text);">Temporal</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">time_of_day</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">day_of_week</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">is_weekend</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">hour</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">minute</span>
       </div>
     </div>
-    <div class="signal-card">
-      <h4>🔎 Query Signals</h4>
-      <div class="signal-keys">
-        <span class="signal-key">specificity</span>
-        <span class="signal-key">hints</span>
-        <span class="signal-key">word_count</span>
-        <span class="signal-key">is_question</span>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+      <h4 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;color:var(--text);">Query</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">intent</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">entities</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">sentiment</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">complexity</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">keywords</span>
       </div>
     </div>
-    <div class="signal-card">
-      <h4>🧠 Memory Echoes</h4>
-      <div class="signal-keys">
-        <span class="signal-key">relevant past interactions</span>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+      <h4 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;color:var(--text);">Memory</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">recent_memories</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">relevant_context</span>
       </div>
     </div>
-    <div class="signal-card">
-      <h4>🎯 Behavioral</h4>
-      <div class="signal-keys">
-        <span class="signal-key">prefers_brief</span>
-        <span class="signal-key">technical_level</span>
-        <span class="signal-key">frequent_entities</span>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+      <h4 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;color:var(--text);">Behavioral</h4>
+      <div style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">session_duration</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">interaction_count</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">patterns</span>
       </div>
     </div>
-    <div class="signal-card">
-      <h4>🧭 Orientation</h4>
-      <div class="signal-keys">
-        <span class="signal-key">confidence</span>
-        <span class="signal-key">approach</span>
-        <span class="signal-key">hints</span>
-        <span class="signal-key">response_style</span>
-      </div>
-    </div>
-    <div class="signal-card">
-      <h4>🧊 Upstream Slush</h4>
-      <div class="signal-keys">
-        <span class="signal-key">source_agent</span>
-        <span class="signal-key">agent-declared signals</span>
-        <span class="signal-key">live data from prior agent</span>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;">
+      <h4 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;color:var(--text);">Orientation <span style="font-size:0.75rem;font-weight:400;color:var(--text-muted);">(synthesized)</span></h4>
+      <div style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">confidence</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">approach</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;padding:0.2rem 0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);">hints</span>
       </div>
     </div>
   </div>
 
-  <div class="code-tabs" style="margin-top: 2.5rem;">
-    <div class="tab-buttons">
-      <button class="tab-btn active" data-tab="slosh-py" onclick="switchTab(event, 'slosh-py')">Python</button>
-      <button class="tab-btn" data-tab="slosh-ts" onclick="switchTab(event, 'slosh-ts')">TypeScript</button>
-    </div>
-    <div class="tab-panel active" id="slosh-py">
-      <pre class="code-block"><span class="cm"># Access the full context object</span>
-time = self.context[<span class="str">'temporal'</span>][<span class="str">'time_of_day'</span>]
-
-<span class="cm"># Or use the convenience helper</span>
-confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
-is_brief    = self.<span class="fn">get_signal</span>(<span class="str">'behavioral.prefers_brief'</span>)
-
-<span class="cm"># Access upstream data_slush from a chained agent</span>
-upstream = self.context.get(<span class="str">'upstream_slush'</span>, {})
-prev_temp = upstream.get(<span class="str">'temp_f'</span>)  <span class="cm"># live data from Agent A</span></pre>
-    </div>
-    <div class="tab-panel" id="slosh-ts">
-      <pre class="code-block"><span class="cm">// Access the full context object</span>
-<span class="kw">const</span> time = <span class="kw">this</span>.context.temporal.time_of_day;
-
-<span class="cm">// Or use the convenience helper</span>
-<span class="kw">const</span> confidence = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'orientation.confidence'</span>);
-<span class="kw">const</span> isBrief    = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'behavioral.prefers_brief'</span>);
-
-<span class="cm">// Access upstream data_slush from a chained agent</span>
-<span class="kw">const</span> upstream = <span class="kw">this</span>.context?.upstream_slush;
-<span class="kw">const</span> prevTemp = upstream?.temp_f;  <span class="cm">// live data from Agent A</span></pre>
-    </div>
-  </div>
-</section>
-
-<!-- ── Data Slush ── -->
-<section class="section" id="slush">
-  <div class="section-label">Data Slush</div>
-  <h2 class="section-title">Agent-to-agent signal pipeline</h2>
-  <p class="section-subtitle">Agents return a <code style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:var(--green-bright);background:var(--bg-elevated);padding:0.15rem 0.5rem;border-radius:4px;">data_slush</code> field — curated signals from live results — that the framework extracts and feeds into the next agent's context. No LLM needed between calls.</p>
+  <p style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.95rem;line-height:1.7;">Access signals via the dot-notation helper in both runtimes:</p>
 
   <div class="code-tabs">
-    <div class="tab-buttons">
-      <button class="tab-btn active" data-tab="slush-py" onclick="switchTab(event, 'slush-py')">Python</button>
-      <button class="tab-btn" data-tab="slush-ts" onclick="switchTab(event, 'slush-ts')">TypeScript</button>
+    <div class="code-tabs-header">
+      <button class="code-tab-btn active" onclick="switchTab(this, 'slosh-ts')">TypeScript</button>
+      <button class="code-tab-btn" onclick="switchTab(this, 'slosh-py')">Python</button>
     </div>
-    <div class="tab-panel active" id="slush-py">
-      <pre class="code-block"><span class="cm"># Agent A — return data_slush with curated signals</span>
-<span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
-    weather = fetch_weather(kwargs.get(<span class="str">'query'</span>))
-    <span class="kw">return</span> json.dumps({
-        <span class="str">"status"</span>: <span class="str">"success"</span>,
-        <span class="str">"result"</span>: weather,
-        <span class="str">"data_slush"</span>: {
-            <span class="str">"source_agent"</span>: self.name,
-            <span class="str">"temp_f"</span>: <span class="num">65</span>,
-            <span class="str">"condition"</span>: <span class="str">"cloudy"</span>,
-        }
-    })
+    <div class="code-tab-content active" id="slosh-ts">
+      <pre><span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;) {
+  <span class="cm">// Dot-notation helper — traverses nested context</span>
+  <span class="kw">const</span> timeOfDay  = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'temporal.time_of_day'</span>);
+  <span class="kw">const</span> confidence = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'orientation.confidence'</span>);
+  <span class="kw">const</span> approach   = <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'orientation.approach'</span>);
 
-<span class="cm"># Chain: A's data_slush feeds into B's context</span>
-result_a = agent_a.execute(query=<span class="str">"Smyrna GA"</span>)
-result_b = agent_b.execute(
-    query=<span class="str">"..."</span>,
-    upstream_slush=agent_a.last_data_slush
-)
-<span class="cm"># B's self.context['upstream_slush'] has A's signals</span></pre>
+  <span class="cm">// Full context object is also available directly</span>
+  <span class="kw">const</span> memories = <span class="kw">this</span>.context?.memory?.recent_memories ?? [];
+
+  <span class="cm">// Upstream slush from a chained agent</span>
+  <span class="kw">const</span> upstream = <span class="kw">this</span>.context?.upstream_slush;
+  <span class="kw">const</span> prevTemp = upstream?.temp_f;
+}</pre>
     </div>
-    <div class="tab-panel" id="slush-ts">
-      <pre class="code-block"><span class="cm">// Agent A — return data_slush with curated signals</span>
-<span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;): <span class="typ">Promise</span>&lt;<span class="typ">string</span>&gt; {
-  <span class="kw">const</span> weather = <span class="kw">await</span> fetchWeather(kwargs.query);
+    <div class="code-tab-content" id="slosh-py">
+      <pre><span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+    <span class="cm"># Dot-notation helper — traverses nested context</span>
+    time_of_day  = self.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>)
+    confidence   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
+    approach     = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)
+
+    <span class="cm"># Full context dict is also available directly</span>
+    memories = self.context.get(<span class="str">'memory'</span>, {}).get(<span class="str">'recent_memories'</span>, [])
+
+    <span class="cm"># Upstream slush from a chained agent</span>
+    upstream  = self.context.get(<span class="str">'upstream_slush'</span>, {})
+    prev_temp = upstream.get(<span class="str">'temp_f'</span>)</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── 4. Data Slush Pipeline ── -->
+<section class="doc-section" id="data-slush" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Data Slush Pipeline</div>
+  <h2 class="section-title">Agent-to-agent signal chaining</h2>
+  <p class="section-subtitle">After <code>perform()</code> returns, if the result JSON contains a <code>data_slush</code> key, the framework automatically extracts it to <code>lastDataSlush</code> (TypeScript) / <code>last_data_slush</code> (Python). Pass that to the next agent as <code>upstream_slush</code> and it merges into that agent's context — no LLM needed between calls.</p>
+
+  <p style="color:var(--text-secondary);margin-bottom:0.5rem;font-size:0.95rem;line-height:1.7;"><strong>Pipeline flow:</strong> Agent A <code>perform()</code> &#8594; <code>data_slush</code> extracted &#8594; passed as <code>upstream_slush</code> &#8594; Agent B <code>execute()</code> &#8594; merged into Agent B's context.</p>
+
+  <p style="color:var(--text-secondary);margin-bottom:1.5rem;font-size:0.95rem;line-height:1.7;"><strong>Key rules:</strong> <code>data_slush</code> should be curated (not a raw data dump), keys should be descriptive, and <code>source_agent</code> is a recommended convention for traceability.</p>
+
+  <div class="code-tabs">
+    <div class="code-tabs-header">
+      <button class="code-tab-btn active" onclick="switchTab(this, 'slush-pipeline-ts')">TypeScript</button>
+      <button class="code-tab-btn" onclick="switchTab(this, 'slush-pipeline-py')">Python</button>
+    </div>
+    <div class="code-tab-content active" id="slush-pipeline-ts">
+      <pre><span class="cm">// Agent A — curate signals in data_slush</span>
+<span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="typ">Record</span>&lt;<span class="typ">string</span>, <span class="typ">unknown</span>&gt;) {
+  <span class="kw">const</span> weather = <span class="kw">await</span> <span class="fn">fetchWeather</span>(kwargs.city <span class="kw">as</span> <span class="typ">string</span>);
   <span class="kw">return</span> JSON.stringify({
     status: <span class="str">'success'</span>,
     result: weather,
-    data_slush: {
+    data_slush: {           <span class="cm">// extracted to lastDataSlush automatically</span>
       source_agent: <span class="kw">this</span>.name,
-      temp_f: <span class="num">65</span>,
-      condition: <span class="str">'cloudy'</span>,
+      temp_f: weather.temperature,
+      condition: weather.condition,
     }
   });
 }
 
-<span class="cm">// Chain: A's data_slush feeds into B's context</span>
-<span class="kw">const</span> resultA = <span class="kw">await</span> agentA.execute({ query: <span class="str">'Smyrna GA'</span> });
-<span class="kw">const</span> resultB = <span class="kw">await</span> agentB.execute({
-  query: <span class="str">'...'</span>,
-  upstream_slush: agentA.lastDataSlush,
-});
-<span class="cm">// B's this.context.upstream_slush has A's signals</span></pre>
+<span class="cm">// Orchestrator: chain Agent A &#8594; Agent B</span>
+<span class="kw">const</span> resultA = <span class="kw">await</span> agentA.<span class="fn">execute</span>({ city: <span class="str">'Atlanta'</span> });
+<span class="kw">const</span> resultB = <span class="kw">await</span> agentB.<span class="fn">execute</span>({
+  query: <span class="str">'Should I bring a jacket?'</span>,
+  upstream_slush: agentA.lastDataSlush,   <span class="cm">// agent B sees temp_f + condition</span>
+});</pre>
     </div>
-  </div>
+    <div class="code-tab-content" id="slush-pipeline-py">
+      <pre><span class="cm"># Agent A — curate signals in data_slush</span>
+<span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+    weather = fetch_weather(kwargs.get(<span class="str">'city'</span>))
+    <span class="kw">return</span> json.dumps({
+        <span class="str">"status"</span>: <span class="str">"success"</span>,
+        <span class="str">"result"</span>: weather,
+        <span class="str">"data_slush"</span>: {          <span class="cm"># extracted to last_data_slush automatically</span>
+            <span class="str">"source_agent"</span>: self.name,
+            <span class="str">"temp_f"</span>: weather[<span class="str">"temperature"</span>],
+            <span class="str">"condition"</span>: weather[<span class="str">"condition"</span>],
+        }
+    })
 
-  <div class="rules-grid">
-    <div class="rule-card">
-      <div class="rule-icon">🧊</div>
-      <h4>Curated, Not Raw</h4>
-      <p>Agents declare which signals matter — not a data dump, but a focused handoff for downstream context.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">🔗</div>
-      <h4>LLM-Free Chaining</h4>
-      <p>Sub-agent pipelines, cron jobs, and broadcasts can pass live data between agents without an LLM interpreting.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">⚡</div>
-      <h4>Zero Boilerplate</h4>
-      <p>Return <code>data_slush</code> in your JSON — the framework handles extraction and injection automatically.</p>
-    </div>
-    <div class="rule-card">
-      <div class="rule-icon">🔄</div>
-      <h4>Self-Loop Ready</h4>
-      <p>Same agent can feed its own <code>last_data_slush</code> back — each invocation gets richer.</p>
+<span class="cm"># Orchestrator: chain Agent A &#8594; Agent B</span>
+result_a = agent_a.execute(city=<span class="str">'Atlanta'</span>)
+result_b = agent_b.execute(
+    query=<span class="str">'Should I bring a jacket?'</span>,
+    upstream_slush=agent_a.last_data_slush,  <span class="cm"># agent B sees temp_f + condition</span>
+)</pre>
     </div>
   </div>
 </section>
 
-<!-- ── How Copilot Fits In ── -->
-<section class="section" id="copilot">
-  <div class="section-label">How Copilot Fits In</div>
-  <h2 class="section-title">Cloud AI, local data</h2>
-  <p class="section-subtitle">GitHub Copilot provides the AI inference layer. Your agent data — memory, config, state — never leaves your machine.</p>
+<!-- ── 5. Execution Flow ── -->
+<section class="doc-section" id="execution-flow" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Execution Flow</div>
+  <h2 class="section-title">What happens when you call execute()</h2>
+  <p class="section-subtitle">Every agent invocation runs the same pipeline: gather implicit context, merge upstream signals, run your deterministic code, then extract output signals for downstream agents.</p>
 
-  <div class="copilot-grid">
-    <div class="copilot-card">
-      <div class="card-icon">🧠</div>
-      <h4>AI Inference Layer</h4>
-      <p>Copilot provides the cloud-based language model that powers agent reasoning and natural-language understanding.</p>
-    </div>
-    <div class="copilot-card">
-      <div class="card-icon">🔒</div>
-      <h4>Local Data</h4>
-      <p>All agent data — memory, config, and state — stays on your machine in <code style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--green-bright);">~/.openrappter</code>.</p>
-    </div>
-    <div class="copilot-card">
-      <div class="card-icon">🔑</div>
-      <h4>No Extra API Keys</h4>
-      <p>Uses your existing Copilot subscription. No separate OpenAI/Anthropic keys needed.</p>
-    </div>
-    <div class="copilot-card">
-      <div class="card-icon">🔄</div>
-      <h4>Offline Fallback</h4>
-      <p>Keyword-based agent matching works without Copilot, so core functionality stays available offline.</p>
-    </div>
-  </div>
+  <div class="arch-diagram">execute(kwargs)
+    &#9474;
+    &#9500;&#9472;&#9472;&#9658; slosh(query)          <span class="comment">// gather implicit context</span>
+    &#9474;      &#9500;&#9472;&#9472; temporal signals
+    &#9474;      &#9500;&#9472;&#9472; query analysis
+    &#9474;      &#9500;&#9472;&#9472; memory echoes
+    &#9474;      &#9492;&#9472;&#9472; behavioral hints
+    &#9474;              &#9474;
+    &#9474;              &#9660;
+    &#9474;        Orientation
+    &#9474;    (confidence, approach, hints)
+    &#9474;
+    &#9500;&#9472;&#9472;&#9658; merge upstream_slush   <span class="comment">// from previous agent</span>
+    &#9474;
+    &#9500;&#9472;&#9472;&#9658; perform(kwargs)        <span class="comment">// YOUR code runs here</span>
+    &#9474;
+    &#9492;&#9472;&#9472;&#9658; extract data_slush     <span class="comment">// for downstream agents</span></div>
+
+  <p style="color:var(--text-secondary);margin-top:1.5rem;font-size:0.95rem;line-height:1.7;">The <code>execute()</code> method is the public entry point and should never be overridden. Subclasses implement only <code>perform()</code>. This separation guarantees that sloshing, upstream merging, and slush extraction always run regardless of which agent is invoked.</p>
 </section>
 
-<!-- ── Directory Structure ── -->
-<section class="section" id="structure">
+<!-- ── 6. Multi-Agent Orchestration ── -->
+<section class="doc-section" id="multi-agent" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Multi-Agent Orchestration</div>
+  <h2 class="section-title">Broadcast, route, and nest agents</h2>
+  <p class="section-subtitle">TypeScript includes three built-in orchestration primitives for coordinating multiple agents: BroadcastManager for fan-out, AgentRouter for rule-based dispatch, and SubAgentManager for nested invocation with depth and loop guards.</p>
+
+  <h3 style="font-size:1.25rem;font-weight:700;margin:2.5rem 0 0.75rem;color:var(--text);">BroadcastManager</h3>
+  <p style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.95rem;line-height:1.7;">Send a message to multiple agents simultaneously. Three modes control how results are collected:</p>
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>all</strong> — wait for every agent to respond, collect all results into an array.</li>
+    <li><strong>race</strong> — return the first response that arrives, discard the rest.</li>
+    <li><strong>fallback</strong> — try agents sequentially; stop and return on the first success.</li>
+  </ul>
+
+  <div class="arch-diagram">         BroadcastManager (all mode)
+
+  broadcast(message)
+       &#9474;
+       &#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+       &#9474;              &#9474;              &#9474;
+       &#9660;              &#9660;              &#9660;
+  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;      &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;      &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+  &#9474;Agent A&#9474;      &#9474;Agent B&#9474;      &#9474;Agent C&#9474;
+  &#9492;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496;      &#9492;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496;      &#9492;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496;
+       &#9474;              &#9474;              &#9474;
+       &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                      &#9474;
+               results[A, B, C]</div>
+
+  <h3 style="font-size:1.25rem;font-weight:700;margin:2.5rem 0 0.75rem;color:var(--text);">AgentRouter</h3>
+  <p style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.95rem;line-height:1.7;">Rule-based routing dispatches messages to specific agents based on match criteria. Rules are evaluated in priority order, and session key isolation prevents context bleed between different callers.</p>
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>Match criteria:</strong> sender identity, channel name, group membership, regex pattern against message content.</li>
+    <li><strong>Priority ordering:</strong> rules with lower priority numbers run first, providing deterministic dispatch order.</li>
+    <li><strong>Session key isolation:</strong> each unique session key gets its own context, preventing cross-request interference.</li>
+  </ul>
+
+  <div class="arch-diagram">         AgentRouter
+
+  incoming message
+       &#9474;
+       &#9660;
+  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+  &#9474; Rule matching &#9474;
+  &#9474; (by priority) &#9474;
+  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+       &#9474;
+       &#9500;&#9472; sender == "alice"    &#9658; CustomerAgent
+       &#9500;&#9472; channel == "billing" &#9658; BillingAgent
+       &#9500;&#9472; /^deploy/i            &#9658; DeployAgent
+       &#9492;&#9472; (default)             &#9658; FallbackAgent</div>
+
+  <h3 style="font-size:1.25rem;font-weight:700;margin:2.5rem 0 0.75rem;color:var(--text);">SubAgentManager</h3>
+  <p style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.95rem;line-height:1.7;">Enables agents to invoke other agents recursively. Two guard mechanisms prevent runaway recursion:</p>
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>Depth limits:</strong> a configurable maximum nesting depth (default: 5) halts the call chain before it recurses indefinitely.</li>
+    <li><strong>Loop detection:</strong> a breadcrumb trail of agent names is passed through the context; invoking an agent already in the trail is rejected immediately.</li>
+  </ul>
+
+  <div class="arch-diagram">         SubAgentManager
+
+  AgentA.perform()
+       &#9474;
+       &#9492;&#9472;&#9658; subAgent.invoke(AgentB, depth=1)
+                  &#9474;
+                  &#9492;&#9472;&#9658; subAgent.invoke(AgentC, depth=2)
+                             &#9474;
+                             &#9492;&#9472;&#9658; depth check / loop check
+                                        &#9474;
+                                   AgentC.execute()
+                                        &#9474;
+                                      result &#8593;
+                             result propagates up</div>
+</section>
+
+<!-- ── 7. Directory Structure ── -->
+<section class="doc-section" id="directory-structure" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
   <div class="section-label">Directory Structure</div>
   <h2 class="section-title">Monorepo layout</h2>
-  <p class="section-subtitle">Two runtimes, one repo. Pick the language you prefer — the agent contract is identical.</p>
+  <p class="section-subtitle">TypeScript and Python share the same repo. The agent contract is identical across both runtimes. Drop a new agent file in the appropriate <code>agents/</code> directory and the registry discovers it automatically.</p>
 
-  <div class="dir-tree">
-<span class="folder">📁 openrappter/</span>
-<span class="tree-line">├── </span><span class="folder">📁 python/</span>
-<span class="tree-line">│   ├── </span><span class="folder">📁 openrappter/</span>
-<span class="tree-line">│   │   ├── </span><span class="file">📄 cli.py</span>          <span class="comment"># Entry point &amp; orchestrator</span>
-<span class="tree-line">│   │   └── </span><span class="folder">📁 agents/</span>         <span class="comment"># Python agents</span>
-<span class="tree-line">│   └── </span><span class="file">📄 pyproject.toml</span>
-<span class="tree-line">├── </span><span class="folder">📁 typescript/</span>
-<span class="tree-line">│   ├── </span><span class="folder">📁 src/</span>
-<span class="tree-line">│   │   ├── </span><span class="file">📄 index.ts</span>        <span class="comment"># Entry point</span>
-<span class="tree-line">│   │   └── </span><span class="folder">📁 agents/</span>         <span class="comment"># TypeScript agents</span>
-<span class="tree-line">│   ├── </span><span class="file">📄 package.json</span>
-<span class="tree-line">│   └── </span><span class="file">📄 tsconfig.json</span>
-<span class="tree-line">└── </span><span class="folder">📁 docs/</span>               <span class="comment"># GitHub Pages site</span>
-  </div>
-</section>
-
-<!-- ── CTA ── -->
-<section class="cta">
-  <div class="cta-bg"></div>
-  <div class="cta-content">
-    <h2>Ready to build?</h2>
-    <p>Create your first agent in minutes — or explore the docs.</p>
-    <div class="cta-buttons">
-      <a href="./tutorial.html" class="btn btn-primary btn-large">Tutorial →</a>
-      <a href="./docs.html" class="btn btn-ghost btn-large">Documentation</a>
-      <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost btn-large" target="_blank">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        GitHub
-      </a>
-    </div>
-  </div>
+  <pre style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:2rem;font-family:'JetBrains Mono',monospace;font-size:0.82rem;line-height:1.9;overflow-x:auto;margin-top:2rem;"><span style="color:var(--blue);">openrappter/</span>
+<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">typescript/</span>
+<span style="color:var(--border-light);">&#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">src/</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">agents/</span>         <span style="color:#525252;"># All agent implementations</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">channels/</span>       <span style="color:#525252;"># 15+ messaging channels</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">providers/</span>      <span style="color:#525252;"># LLM provider integrations</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">gateway/</span>        <span style="color:#525252;"># WebSocket server</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">memory/</span>         <span style="color:#525252;"># Chunking, embeddings, search</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">storage/</span>        <span style="color:#525252;"># SQLite + in-memory adapters</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">config/</span>         <span style="color:#525252;"># YAML/JSON config + Zod</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--text-muted);">clawhub.ts</span>      <span style="color:#525252;"># ClawHub client</span>
+<span style="color:var(--border-light);">&#9474;   &#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--blue);">skills/</span>         <span style="color:#525252;"># Skill registry</span>
+<span style="color:var(--border-light);">&#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">dist/</span>               <span style="color:#525252;"># Compiled output</span>
+<span style="color:var(--border-light);">&#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">package.json</span>
+<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">python/</span>
+<span style="color:var(--border-light);">&#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--blue);">openrappter/</span>
+<span style="color:var(--border-light);">&#9474;       &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">agents/</span>         <span style="color:#525252;"># Python agent mirror</span>
+<span style="color:var(--border-light);">&#9474;       &#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">clawhub.py</span>      <span style="color:#525252;"># ClawHub client</span>
+<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">docs/</span>                   <span style="color:#525252;"># GitHub Pages site</span>
+<span style="color:var(--border-light);">&#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">CLAUDE.md</span>               <span style="color:#525252;"># Agent architecture guide</span></pre>
 </section>
 
 <!-- ── Footer ── -->
@@ -1156,26 +437,15 @@ result_b = agent_b.execute(
   <div class="footer-container">
     <div class="footer-links">
       <a href="https://github.com/kody-w/openrappter">GitHub</a>
-      <a href="https://github.com/kody-w/rappterhub">RappterHub</a>
-      <a href="./teach.html">Teach Your Agent</a>
-      <a href="./docs.html">Documentation</a>
-      <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="./docs.html">Docs</a>
+      <a href="./tutorial.html">Tutorial</a>
+      <a href="./changelog.html">Changelog</a>
     </div>
-    <div class="footer-copy">
-      MIT License • Made with 🦖
-    </div>
+    <div class="footer-copy">MIT License</div>
   </div>
 </footer>
 
-<script>
-  function switchTab(e, tabId) {
-    const container = e.target.closest('.code-tabs');
-    container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    e.target.classList.add('active');
-    container.querySelector('#' + tabId).classList.add('active');
-  }
-</script>
+<script src="./nav.js"></script>
 
 </body>
 </html>

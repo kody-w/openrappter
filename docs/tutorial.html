@@ -3,1085 +3,606 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Create Your First Agent — openrappter</title>
-  <meta name="description" content="Build your first openrappter agent from scratch in 10 minutes. Step-by-step tutorial for Python and TypeScript.">
-  <meta property="og:title" content="Create Your First Agent — openrappter">
-  <meta property="og:description" content="From zero to a working agent in 10 minutes. Works in Python or TypeScript.">
+  <title>Quickstart Tutorial — openrappter</title>
+  <meta name="description" content="From zero to a working openrappter agent in minutes. Follow along in TypeScript or Python.">
+  <meta property="og:title" content="Quickstart Tutorial — openrappter">
+  <meta property="og:description" content="From zero to a working agent in minutes. Follow along in TypeScript or Python.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green: #10b981;
-      --green-bright: #34d399;
-      --green-dark: #059669;
-      --purple: #8b5cf6;
-      --blue: #3b82f6;
-      --orange: #f97316;
-      --red: #ef4444;
-      --bg: #000000;
-      --bg-card: #0a0a0a;
-      --bg-elevated: #141414;
-      --bg-hover: #1a1a1a;
-      --text: #ffffff;
-      --text-secondary: #e5e5e5;
-      --text-muted: #737373;
-      --border: #262626;
-      --border-light: #404040;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Navbar */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
-      padding: 1rem 2rem;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .nav-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logo-badge {
-      font-size: 0.65rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--green);
-      color: black;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover { color: var(--text); }
-
-    /* Hero */
-    .hero {
-      padding: 8rem 2rem 4rem;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 600px;
-      height: 400px;
-      background: radial-gradient(ellipse, rgba(16, 185, 129, 0.08) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    .hero h1 {
-      font-size: 3rem;
-      font-weight: 900;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      margin-bottom: 1rem;
-    }
-
-    .hero h1 .highlight {
-      background: linear-gradient(135deg, var(--green), var(--green-bright));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero-subtitle {
-      font-size: 1.15rem;
-      color: var(--text-muted);
-      max-width: 540px;
-      margin: 0 auto 2rem;
-    }
-
-    /* Language Toggle */
-    .lang-toggle {
-      display: inline-flex;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 4px;
-      gap: 4px;
-    }
-
-    .lang-toggle button {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      font-weight: 600;
-      padding: 0.5rem 1.5rem;
-      border: none;
-      border-radius: 7px;
-      cursor: pointer;
-      transition: all 0.25s;
-      background: transparent;
-      color: var(--text-muted);
-    }
-
-    .lang-toggle button.active {
-      background: var(--green);
-      color: black;
-    }
-
-    .lang-toggle button:not(.active):hover {
-      color: var(--text);
-      background: var(--bg-hover);
-    }
-
-    /* Main layout */
-    .content-wrapper {
-      display: flex;
-      justify-content: center;
-      gap: 3rem;
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 0 2rem 6rem;
-      position: relative;
-    }
-
-    .main-content {
-      max-width: 800px;
-      width: 100%;
-    }
-
-    /* Progress indicator */
-    .progress-nav {
-      position: sticky;
-      top: 6rem;
-      width: 160px;
-      flex-shrink: 0;
-      align-self: flex-start;
-      padding-top: 1rem;
-    }
-
-    .progress-nav ol {
-      list-style: none;
-      position: relative;
-      padding-left: 0;
-    }
-
-    .progress-nav ol::before {
-      content: '';
-      position: absolute;
-      left: 11px;
-      top: 12px;
-      bottom: 12px;
-      width: 2px;
-      background: var(--border);
-      border-radius: 1px;
-    }
-
-    .progress-nav li {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.5rem 0;
-    }
-
-    .progress-nav li a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.8rem;
-      font-weight: 500;
-      transition: color 0.2s;
-      white-space: nowrap;
-    }
-
-    .progress-nav li a:hover { color: var(--text); }
-
-    .progress-dot {
-      width: 24px;
-      height: 24px;
-      min-width: 24px;
-      border-radius: 50%;
-      background: var(--bg-elevated);
-      border: 2px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.65rem;
-      font-weight: 700;
-      color: var(--text-muted);
-      transition: all 0.3s;
-      z-index: 1;
-    }
-
-    .progress-nav li.active .progress-dot {
-      border-color: var(--green);
-      background: var(--green);
-      color: black;
-    }
-
-    .progress-nav li.active a {
-      color: var(--green-bright);
-    }
-
-    /* Step sections */
-    .step {
-      margin-bottom: 4rem;
-      scroll-margin-top: 6rem;
-    }
-
-    .step-header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .step-number {
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 1rem;
-    }
-
-    .step-number.green { background: rgba(16, 185, 129, 0.15); color: var(--green-bright); border: 2px solid rgba(16, 185, 129, 0.3); }
-    .step-number.purple { background: rgba(139, 92, 246, 0.15); color: var(--purple); border: 2px solid rgba(139, 92, 246, 0.3); }
-    .step-number.blue { background: rgba(59, 130, 246, 0.15); color: var(--blue); border: 2px solid rgba(59, 130, 246, 0.3); }
-    .step-number.orange { background: rgba(249, 115, 22, 0.15); color: var(--orange); border: 2px solid rgba(249, 115, 22, 0.3); }
-
-    .step-header h2 {
-      font-size: 1.6rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-
-    .step p, .step ul {
-      color: var(--text-secondary);
-      margin-bottom: 1rem;
-      font-size: 0.95rem;
-    }
-
-    .step ul {
-      padding-left: 1.5rem;
-    }
-
-    .step ul li {
-      margin-bottom: 0.5rem;
-    }
-
-    .step ul li code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      background: var(--bg-elevated);
-      padding: 0.15rem 0.45rem;
-      border-radius: 4px;
-      color: var(--green-bright);
-      border: 1px solid var(--border);
-    }
-
-    .step strong {
-      color: var(--text);
-    }
-
-    /* Inline code */
-    .main-content code:not(pre code) {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      background: var(--bg-elevated);
-      padding: 0.15rem 0.45rem;
-      border-radius: 4px;
-      color: var(--green-bright);
-      border: 1px solid var(--border);
-    }
-
-    /* Code blocks */
-    .code-block {
-      position: relative;
-      margin: 1.25rem 0 1.5rem;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      overflow: hidden;
-      background: var(--bg-card);
-    }
-
-    .code-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.6rem 1rem;
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .code-header-left {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .code-dots {
-      display: flex;
-      gap: 6px;
-    }
-
-    .code-dots span {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .code-dots span:nth-child(1) { background: #ef4444; }
-    .code-dots span:nth-child(2) { background: #f97316; }
-    .code-dots span:nth-child(3) { background: #22c55e; }
-
-    .code-filename {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-    }
-
-    .copy-btn {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.7rem;
-      padding: 0.3rem 0.6rem;
-      background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .copy-btn:hover {
-      border-color: var(--green);
-      color: var(--green-bright);
-    }
-
-    .copy-btn.copied {
-      border-color: var(--green);
-      color: var(--green);
-    }
-
-    .code-body {
-      padding: 1.25rem;
-      overflow-x: auto;
-    }
-
-    .code-body pre {
-      margin: 0;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      line-height: 1.7;
-      color: var(--text-secondary);
-      white-space: pre;
-      tab-size: 4;
-    }
-
-    /* CSS-only syntax highlighting */
-    .code-body .kw { color: var(--purple); }
-    .code-body .str { color: var(--green-bright); }
-    .code-body .cm { color: #525252; font-style: italic; }
-    .code-body .fn { color: var(--blue); }
-    .code-body .tp { color: var(--orange); }
-    .code-body .num { color: #f472b6; }
-    .code-body .op { color: var(--text-muted); }
-    .code-body .dec { color: var(--purple); font-style: italic; }
-
-    /* Language visibility */
-    .lang-python { display: block; }
-    .lang-typescript { display: none; }
-
-    body.show-typescript .lang-python { display: none; }
-    body.show-typescript .lang-typescript { display: block; }
-
-    /* Terminal mockup */
-    .terminal {
-      margin: 1.25rem 0 1.5rem;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      overflow: hidden;
-      background: var(--bg-card);
-    }
-
-    .terminal-header {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.6rem 1rem;
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .terminal-body {
-      padding: 1.25rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.82rem;
-      line-height: 1.7;
-      color: var(--text-secondary);
-      overflow-x: auto;
-    }
-
-    .terminal-body .prompt { color: var(--green-bright); }
-    .terminal-body .output { color: var(--text-muted); }
-    .terminal-body .success { color: var(--green); }
-
-    /* Info callouts */
-    .callout {
-      padding: 1rem 1.25rem;
-      border-radius: 10px;
-      margin: 1.25rem 0;
-      font-size: 0.9rem;
-      border: 1px solid;
-    }
-
-    .callout-green {
-      background: rgba(16, 185, 129, 0.06);
-      border-color: rgba(16, 185, 129, 0.2);
-      color: var(--green-bright);
-    }
-
-    .callout-purple {
-      background: rgba(139, 92, 246, 0.06);
-      border-color: rgba(139, 92, 246, 0.2);
-      color: #a78bfa;
-    }
-
-    .callout-blue {
-      background: rgba(59, 130, 246, 0.06);
-      border-color: rgba(59, 130, 246, 0.2);
-      color: #60a5fa;
-    }
-
-    /* Next steps grid */
-    .next-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-top: 1.25rem;
-    }
-
-    .next-card {
-      padding: 1.25rem;
-      border-radius: 10px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      text-decoration: none;
-      transition: all 0.2s;
-    }
-
-    .next-card:hover {
-      border-color: var(--border-light);
-      background: var(--bg-elevated);
-      transform: translateY(-2px);
-    }
-
-    .next-card-icon {
-      font-size: 1.4rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .next-card h4 {
-      color: var(--text);
-      font-size: 0.95rem;
-      font-weight: 700;
-      margin-bottom: 0.3rem;
-    }
-
-    .next-card p {
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      margin: 0;
-      line-height: 1.5;
-    }
-
-    /* Sticky toggle */
-    .sticky-toggle {
-      position: sticky;
-      top: 4rem;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.85);
-      backdrop-filter: blur(12px);
-      padding: 0.75rem 0;
-      margin-bottom: 2rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    /* Divider */
-    .step-divider {
-      height: 1px;
-      background: var(--border);
-      margin: 3rem 0;
-    }
-
-    /* Responsive */
-    @media (max-width: 900px) {
-      .progress-nav { display: none; }
-      .content-wrapper { padding: 0 1.25rem 4rem; }
-      .main-content { max-width: 100%; }
-    }
-
-    @media (max-width: 640px) {
-      .hero h1 { font-size: 2rem; }
-      .hero-subtitle { font-size: 1rem; }
-      .hero { padding: 7rem 1.25rem 2.5rem; }
-      .step-header h2 { font-size: 1.3rem; }
-      .next-grid { grid-template-columns: 1fr; }
-      .nav-links { display: none; }
-      .code-body pre { font-size: 0.75rem; }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+
   <!-- Nav -->
   <nav>
     <div class="nav-container">
-      <a href="./" class="logo">
-        🦖 openrappter
-        <span class="logo-badge">v1.4</span>
-      </a>
+      <a href="./" class="logo">openrappter <span class="logo-badge">v1.4.1</span></a>
+      <button class="mobile-menu-btn">&#9776;</button>
       <div class="nav-links">
-        <a href="./">Home</a>
         <a href="./docs.html">Docs</a>
         <a href="./architecture.html">Architecture</a>
-        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./changelog.html">Changelog</a>
+      </div>
+      <div class="nav-cta">
+        <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
       </div>
     </div>
   </nav>
 
   <!-- Hero -->
   <section class="hero">
-    <h1>Build your <span class="highlight">first agent</span></h1>
-    <p class="hero-subtitle">From zero to a working agent in 10 minutes. Works in Python or TypeScript.</p>
-    <div class="lang-toggle" id="heroToggle">
-      <button class="active" data-lang="python">Python</button>
-      <button data-lang="typescript">TypeScript</button>
-    </div>
+    <div class="hero-bg"></div>
+    <h1><span class="highlight">Quickstart</span> Tutorial</h1>
+    <p class="hero-subtitle">From zero to a working agent in minutes. Follow along in TypeScript or Python.</p>
   </section>
 
-  <!-- Content -->
-  <div class="content-wrapper">
-    <!-- Main -->
-    <div class="main-content">
+  <!-- Main layout -->
+  <div style="display:flex;justify-content:center;gap:3rem;max-width:1100px;margin:0 auto;padding:0 2rem 6rem;">
 
-      <!-- Sticky language toggle -->
-      <div class="sticky-toggle">
-        <div class="lang-toggle" id="stickyToggle">
-          <button class="active" data-lang="python">Python</button>
-          <button data-lang="typescript">TypeScript</button>
+    <!-- Progress sidebar -->
+    <div class="progress-nav">
+      <ol>
+        <li><a href="#step-1">1. Install</a></li>
+        <li><a href="#step-2">2. Verify</a></li>
+        <li><a href="#step-3">3. CLI Basics</a></li>
+        <li><a href="#step-4">4. Memory</a></li>
+        <li><a href="#step-5">5. Create Agent</a></li>
+        <li><a href="#step-6">6. Test It</a></li>
+        <li><a href="#step-7">7. Data Sloshing</a></li>
+        <li><a href="#step-8">8. Chain Agents</a></li>
+        <li><a href="#step-9">9. Multi-Agent</a></li>
+      </ol>
+    </div>
+
+    <!-- Content -->
+    <main style="max-width:800px;width:100%;">
+
+      <!-- Step 1: Install -->
+      <div class="step" id="step-1">
+        <div class="step-number">1</div>
+        <h2>Install</h2>
+        <p>There are three ways to get openrappter running. Pick whichever fits your workflow.</p>
+
+        <p><strong>Option A — one-line installer (recommended):</strong></p>
+        <pre><code><span class="cmd">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span></code></pre>
+        <p>The script detects your platform, clones the repo, installs dependencies, builds the TypeScript runtime, and adds <code>openrappter</code> to your PATH.</p>
+
+        <p><strong>Option B — manual clone:</strong></p>
+        <pre><code><span class="comment"># TypeScript runtime</span>
+<span class="cmd">git clone https://github.com/kody-w/openrappter.git</span>
+<span class="cmd">cd openrappter/typescript</span>
+<span class="cmd">npm install</span>
+<span class="cmd">npm run build</span>
+
+<span class="comment"># Python runtime (optional, mirrors TypeScript)</span>
+<span class="cmd">cd ../python</span>
+<span class="cmd">pip install -e .</span></code></pre>
+
+        <p><strong>Option C — teach your existing agent:</strong> If you already have an AI assistant, paste the <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md">skills.md</a> link into your conversation and ask it to set up openrappter for you. It can handle the full install and scaffold new agents.</p>
+
+        <div class="info-box">
+          <strong>Prerequisites:</strong> Node.js 18+ is required for the TypeScript runtime. Python 3.10+ is required for the Python runtime. Both runtimes implement the same agent contract and are interchangeable.
         </div>
       </div>
 
-      <!-- Step 1 -->
-      <section class="step" id="step-1">
-        <div class="step-header">
-          <div class="step-number green">1</div>
-          <h2>Understand the Contract</h2>
-        </div>
-        <p>Every openrappter agent follows a unified contract — the same pattern works in both Python and TypeScript.</p>
-        <ul>
-          <li>Extend <code>BasicAgent</code> — your agent inherits orchestration, context injection, and lifecycle hooks.</li>
-          <li>Define <strong>metadata</strong> in OpenAI tools format: <code>name</code>, <code>description</code>, and <code>parameters</code>.</li>
-          <li>Implement a <code>perform()</code> method — this is where your logic lives.</li>
-          <li>Return a <strong>JSON string</strong> with at least <code>{"status": "success"}</code> or <code>{"status": "error"}</code>.</li>
-        </ul>
-        <div class="callout callout-green">
-          💡 <strong>Data sloshing</strong> — before <code>perform()</code> is called, the orchestrator automatically enriches your agent with temporal awareness, memory echoes, query signals, and user preferences via <code>self.context</code> / <code>this.context</code>.
-        </div>
-      </section>
+      <!-- Step 2: Verify -->
+      <div class="step" id="step-2">
+        <div class="step-number">2</div>
+        <h2>Verify</h2>
+        <p>Confirm the installation is healthy before writing any code.</p>
 
-      <div class="step-divider"></div>
-
-      <!-- Step 2 -->
-      <section class="step" id="step-2">
-        <div class="step-header">
-          <div class="step-number purple">2</div>
-          <h2>Create the File</h2>
-        </div>
-        <p>Agents are auto-discovered by file naming convention. Just drop a file in the right folder.</p>
-
-        <div class="lang-python">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">terminal</span>
-              </div>
-            </div>
-            <div class="code-body">
-<pre><span class="prompt">$</span> touch python/openrappter/agents/greeting_agent.py</pre>
-            </div>
-          </div>
-          <div class="callout callout-purple">
-            📁 Python agents must match the <code>*_agent.py</code> pattern in <code>python/openrappter/agents/</code>.
-          </div>
-        </div>
-
-        <div class="lang-typescript">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">terminal</span>
-              </div>
-            </div>
-            <div class="code-body">
-<pre><span class="prompt">$</span> touch typescript/src/agents/GreetingAgent.ts</pre>
-            </div>
-          </div>
-          <div class="callout callout-purple">
-            📁 TypeScript agents must match the <code>*Agent.ts</code> pattern in <code>typescript/src/agents/</code>.
-          </div>
-        </div>
-      </section>
-
-      <div class="step-divider"></div>
-
-      <!-- Step 3 -->
-      <section class="step" id="step-3">
-        <div class="step-header">
-          <div class="step-number blue">3</div>
-          <h2>Write the Agent</h2>
-        </div>
-        <p>Here's a complete <strong>GreetingAgent</strong> that uses data sloshing to deliver time-aware greetings.</p>
-
-        <!-- Python version -->
-        <div class="lang-python">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">greeting_agent.py</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            </div>
-            <div class="code-body">
-<pre><span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
-<span class="kw">import</span> json
-
-<span class="kw">class</span> <span class="tp">GreetingAgent</span>(<span class="tp">BasicAgent</span>):
-    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="tp">self</span>):
-        <span class="tp">self</span>.name = <span class="str">'Greeting'</span>
-        <span class="tp">self</span>.metadata = {
-            <span class="str">"name"</span>: <span class="tp">self</span>.name,
-            <span class="str">"description"</span>: <span class="str">"Greets the user based on time of day and context"</span>,
-            <span class="str">"parameters"</span>: {
-                <span class="str">"type"</span>: <span class="str">"object"</span>,
-                <span class="str">"properties"</span>: {
-                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User's greeting or name"</span>}
-                },
-                <span class="str">"required"</span>: []
-            }
-        }
-        <span class="fn">super</span>().<span class="fn">__init__</span>(name=<span class="tp">self</span>.name, metadata=<span class="tp">self</span>.metadata)
-
-    <span class="kw">def</span> <span class="fn">perform</span>(<span class="tp">self</span>, **kwargs):
-        query = kwargs.<span class="fn">get</span>(<span class="str">'query'</span>, <span class="str">''</span>)
-        time_of_day = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>)
-
-        greetings = {
-            <span class="str">'early_morning'</span>: <span class="str">'Early bird! ☀️'</span>,
-            <span class="str">'morning'</span>:       <span class="str">'Good morning! 🌅'</span>,
-            <span class="str">'afternoon'</span>:     <span class="str">'Good afternoon! 🌤️'</span>,
-            <span class="str">'evening'</span>:       <span class="str">'Good evening! 🌆'</span>,
-            <span class="str">'night'</span>:         <span class="str">'Burning the midnight oil! 🌙'</span>
-        }
-
-        greeting = greetings.<span class="fn">get</span>(time_of_day, <span class="str">'Hello!'</span>)
-        name = query.<span class="fn">replace</span>(<span class="str">'hello'</span>, <span class="str">''</span>).<span class="fn">replace</span>(<span class="str">'hi'</span>, <span class="str">''</span>).<span class="fn">strip</span>() <span class="kw">or</span> <span class="str">'friend'</span>
-
-        <span class="kw">return</span> json.<span class="fn">dumps</span>({
-            <span class="str">"status"</span>: <span class="str">"success"</span>,
-            <span class="str">"response"</span>: <span class="kw">f</span><span class="str">"{greeting} Nice to meet you, {name}!"</span>,
-            <span class="str">"time_of_day"</span>: time_of_day
-        })</pre>
-            </div>
-          </div>
-        </div>
-
-        <!-- TypeScript version -->
-        <div class="lang-typescript">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">GreetingAgent.ts</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            </div>
-            <div class="code-body">
-<pre><span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
-<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
-
-<span class="kw">export class</span> <span class="tp">GreetingAgent</span> <span class="kw">extends</span> <span class="tp">BasicAgent</span> {
-  <span class="fn">constructor</span>() {
-    <span class="kw">const</span> metadata: <span class="tp">AgentMetadata</span> = {
-      name: <span class="str">'Greeting'</span>,
-      description: <span class="str">'Greets the user based on time of day and context'</span>,
-      parameters: {
-        type: <span class="str">'object'</span>,
-        properties: {
-          query: { type: <span class="str">'string'</span>, description: <span class="str">"User's greeting or name"</span> }
-        },
-        required: []
-      }
-    };
-    <span class="fn">super</span>(<span class="str">'Greeting'</span>, metadata);
-  }
-
-  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="tp">Record</span>&lt;<span class="tp">string</span>, <span class="tp">unknown</span>&gt;): <span class="tp">Promise</span>&lt;<span class="tp">string</span>&gt; {
-    <span class="kw">const</span> query = (kwargs.query <span class="kw">as</span> <span class="tp">string</span>) || <span class="str">''</span>;
-    <span class="kw">const</span> timeOfDay = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">string</span>&gt;(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>);
-
-    <span class="kw">const</span> greetings: <span class="tp">Record</span>&lt;<span class="tp">string</span>, <span class="tp">string</span>&gt; = {
-      early_morning: <span class="str">'Early bird! ☀️'</span>,
-      morning: <span class="str">'Good morning! 🌅'</span>,
-      afternoon: <span class="str">'Good afternoon! 🌤️'</span>,
-      evening: <span class="str">'Good evening! 🌆'</span>,
-      night: <span class="str">'Burning the midnight oil! 🌙'</span>
-    };
-
-    <span class="kw">const</span> greeting = greetings[timeOfDay ?? <span class="str">'morning'</span>] ?? <span class="str">'Hello!'</span>;
-    <span class="kw">const</span> name = query.<span class="fn">replace</span>(<span class="str">/hello|hi/gi</span>, <span class="str">''</span>).<span class="fn">trim</span>() || <span class="str">'friend'</span>;
-
-    <span class="kw">return</span> <span class="tp">JSON</span>.<span class="fn">stringify</span>({
-      status: <span class="str">'success'</span>,
-      response: <span class="str">`${greeting} Nice to meet you, ${name}!`</span>,
-      time_of_day: timeOfDay
-    });
-  }
-}</pre>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div class="step-divider"></div>
-
-      <!-- Step 4 -->
-      <section class="step" id="step-4">
-        <div class="step-header">
-          <div class="step-number orange">4</div>
-          <h2>Build &amp; Test</h2>
-        </div>
-        <p>Your agent is auto-discovered — just verify it shows up, then run it.</p>
-
-        <div class="lang-python">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">verify &amp; run</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            </div>
-            <div class="code-body">
-<pre><span class="cm"># List all discovered agents</span>
-<span class="prompt">$</span> python3 -m openrappter.cli --list-agents
-
-<span class="cm"># Run your new agent</span>
-<span class="prompt">$</span> openrappter --exec Greeting <span class="str">"hello Kody"</span></pre>
-            </div>
-          </div>
-        </div>
-
-        <div class="lang-typescript">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">verify &amp; run</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            </div>
-            <div class="code-body">
-<pre><span class="cm"># Build first, then verify</span>
-<span class="prompt">$</span> npm run build &amp;&amp; node dist/index.js --list-agents
-
-<span class="cm"># Run your new agent</span>
-<span class="prompt">$</span> node dist/index.js --exec Greeting <span class="str">"hello Kody"</span></pre>
-            </div>
-          </div>
-        </div>
-
-        <p>You should see output like this:</p>
+        <pre><code><span class="comment"># Check version — should print v1.4.1</span>
+<span class="cmd">openrappter --version</span></code></pre>
 
         <div class="terminal">
           <div class="terminal-header">
-            <div class="code-dots"><span></span><span></span><span></span></div>
-            <span class="code-filename">output</span>
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">openrappter --version</span>
           </div>
           <div class="terminal-body">
-<pre><span class="prompt">$</span> <span class="lang-python" style="display:inline">openrappter --exec Greeting "hello Kody"</span><span class="lang-typescript" style="display:none">node dist/index.js --exec Greeting "hello Kody"</span>
-<span class="output">⏳ Executing agent: Greeting...</span>
-<span class="output">📦 Data sloshing: injecting temporal + memory context</span>
-<span class="success">✅ Agent response:</span>
-{
-  <span class="str">"status"</span>: <span class="str">"success"</span>,
-  <span class="str">"response"</span>: <span class="str">"Good morning! 🌅 Nice to meet you, Kody!"</span>,
-  <span class="str">"time_of_day"</span>: <span class="str">"morning"</span>
-}</pre>
-          </div>
-        </div>
-      </section>
-
-      <div class="step-divider"></div>
-
-      <!-- Step 5 -->
-      <section class="step" id="step-5">
-        <div class="step-header">
-          <div class="step-number green">5</div>
-          <h2>Using Data Sloshing</h2>
-        </div>
-        <p>Data sloshing gives your agent rich context automatically. Use <code>get_signal()</code> to tap into it.</p>
-
-        <div class="lang-python">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">accessing signals</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter --version</span>
             </div>
-            <div class="code-body">
-<pre><span class="kw">def</span> <span class="fn">perform</span>(<span class="tp">self</span>, **kwargs):
-    <span class="cm"># Temporal awareness</span>
-    time_of_day  = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>)
-    fiscal_period = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'temporal.fiscal_period'</span>)
-
-    <span class="cm"># Confidence — adjust detail level</span>
-    confidence = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>, <span class="str">'medium'</span>)
-    <span class="kw">if</span> confidence == <span class="str">'low'</span>:
-        <span class="cm"># Ask clarifying questions instead of guessing</span>
-        <span class="kw">return</span> json.<span class="fn">dumps</span>({<span class="str">"status"</span>: <span class="str">"clarify"</span>, <span class="str">"message"</span>: <span class="str">"Could you be more specific?"</span>})
-
-    <span class="cm"># Query signals — is this a question?</span>
-    is_question = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'query_signals.is_question'</span>, <span class="kw">False</span>)
-    <span class="kw">if</span> is_question:
-        <span class="cm"># Format as an answer</span>
-        <span class="kw">return</span> json.<span class="fn">dumps</span>({<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"response"</span>: <span class="str">"Here's the answer..."</span>})
-
-    <span class="cm"># Memory echoes — recall past interactions</span>
-    echoes = <span class="tp">self</span>.<span class="fn">get_signal</span>(<span class="str">'memory_echoes'</span>, [])
-    <span class="kw">if</span> echoes:
-        last = echoes[<span class="num">0</span>]
-        <span class="cm"># Use previous context to personalize response</span></pre>
-            </div>
+            <div class="terminal-output">openrappter v1.4.1</div>
           </div>
         </div>
 
-        <div class="lang-typescript">
-          <div class="code-block">
-            <div class="code-header">
-              <div class="code-header-left">
-                <div class="code-dots"><span></span><span></span><span></span></div>
-                <span class="code-filename">accessing signals</span>
-              </div>
-              <button class="copy-btn" onclick="copyCode(this)">copy</button>
-            </div>
-            <div class="code-body">
-<pre><span class="kw">async</span> <span class="fn">perform</span>(kwargs: <span class="tp">Record</span>&lt;<span class="tp">string</span>, <span class="tp">unknown</span>&gt;): <span class="tp">Promise</span>&lt;<span class="tp">string</span>&gt; {
-  <span class="cm">// Temporal awareness</span>
-  <span class="kw">const</span> timeOfDay   = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">string</span>&gt;(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>);
-  <span class="kw">const</span> fiscalPeriod = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">string</span>&gt;(<span class="str">'temporal.fiscal_period'</span>);
+        <pre><code><span class="comment"># List all auto-discovered agents</span>
+<span class="cmd">openrappter --list-agents</span></code></pre>
 
-  <span class="cm">// Confidence — adjust detail level</span>
-  <span class="kw">const</span> confidence = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">string</span>&gt;(<span class="str">'orientation.confidence'</span>, <span class="str">'medium'</span>);
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">openrappter --list-agents</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter --list-agents</span>
+            </div>
+            <div class="terminal-output">Available agents (3):</div>
+            <div class="terminal-output">  BasicAgent     — Abstract base with data sloshing</div>
+            <div class="terminal-output">  ShellAgent     — Shell commands, file read/write/list</div>
+            <div class="terminal-output">  MemoryAgent    — Memory storage and retrieval</div>
+          </div>
+        </div>
+
+        <p>If you see agents listed, the runtime discovered your <code>src/agents/</code> (TypeScript) or <code>python/openrappter/agents/</code> (Python) directory successfully. Any custom agents you add there will appear here automatically.</p>
+      </div>
+
+      <!-- Step 3: CLI Basics -->
+      <div class="step" id="step-3">
+        <div class="step-number">3</div>
+        <h2>CLI Basics</h2>
+        <p>openrappter has three primary usage patterns from the command line.</p>
+
+        <p><strong>Interactive REPL mode</strong> — drop into a persistent session where the agent remembers context across messages:</p>
+        <pre><code><span class="cmd">openrappter</span></code></pre>
+
+        <p><strong>Single task mode</strong> — run one task and exit, useful for scripting:</p>
+        <pre><code><span class="cmd">openrappter --task "list files in current directory"</span></code></pre>
+
+        <p><strong>Specify an agent directly</strong> — bypass the router and run a named agent:</p>
+        <pre><code><span class="cmd">openrappter --agent shell "what's in my home directory?"</span>
+<span class="cmd">openrappter --exec ShellAgent "read package.json"</span></code></pre>
+
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">single task example</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter --task "list files in current directory"</span>
+            </div>
+            <div class="terminal-output">Executing ShellAgent...</div>
+            <div class="terminal-output">README.md  package.json  src/  dist/  node_modules/</div>
+            <div class="terminal-success">Done.</div>
+          </div>
+        </div>
+
+        <p>Other useful flags: <code>--status</code> shows loaded agents and runtime health, <code>--version</code> prints the version, and <code>--help</code> lists all available options.</p>
+      </div>
+
+      <!-- Step 4: Memory -->
+      <div class="step" id="step-4">
+        <div class="step-number">4</div>
+        <h2>Memory</h2>
+        <p>openrappter has first-class persistent memory that survives across sessions. Anything you store is written locally and recalled automatically in future queries.</p>
+
+        <p><strong>Store a fact:</strong></p>
+        <pre><code><span class="cmd">openrappter "remember that I prefer dark mode"</span></code></pre>
+
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">storing a memory</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter "remember that I prefer dark mode"</span>
+            </div>
+            <div class="terminal-success">Got it. I'll remember: "I prefer dark mode" (id: a3f1c9)</div>
+          </div>
+        </div>
+
+        <p><strong>Recall facts:</strong></p>
+        <pre><code><span class="cmd">openrappter "what do you know about my preferences?"</span></code></pre>
+
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">recalling memory</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter "what do you know about my preferences?"</span>
+            </div>
+            <div class="terminal-output">Here's what I remember about your preferences:</div>
+            <div class="terminal-output">  - I prefer dark mode  (stored 2 minutes ago)</div>
+          </div>
+        </div>
+
+        <p>Memory entries are stored at <code>~/.openrappter/memory.json</code> as structured JSON. Each entry contains an ID, content, tags, created timestamp, and an access counter that helps the agent prioritize frequently recalled facts.</p>
+
+        <div class="info-box">
+          <strong>Local-first:</strong> All memory is stored on your machine. No data leaves your system. You can inspect, back up, or wipe the file at any time with <code>cat ~/.openrappter/memory.json</code> or <code>rm ~/.openrappter/memory.json</code>.
+        </div>
+      </div>
+
+      <!-- Step 5: Create Agent -->
+      <div class="step" id="step-5">
+        <div class="step-number">5</div>
+        <h2>Create a Custom Agent</h2>
+        <p>Every agent in openrappter follows the single-file pattern: one file, one agent. The metadata contract, documentation, and implementation all live together using native language constructs — no YAML, no config files, no magic parsing.</p>
+
+        <p>Create a <strong>GreeterAgent</strong> that returns a time-aware greeting and passes data downstream via <code>data_slush</code>.</p>
+
+        <div class="code-tabs">
+          <div class="code-tabs-header">
+            <button class="code-tab-btn active" onclick="switchTab(this, 'ts-step5')">TypeScript</button>
+            <button class="code-tab-btn" onclick="switchTab(this, 'py-step5')">Python</button>
+          </div>
+          <div class="code-tab-content active" id="ts-step5">
+<pre><code><span class="comment">// typescript/src/agents/GreeterAgent.ts</span>
+<span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
+<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
+
+<span class="kw">export class</span> GreeterAgent <span class="kw">extends</span> BasicAgent {
+  <span class="fn">constructor</span>() {
+    <span class="kw">const</span> metadata: AgentMetadata = {
+      name: <span class="str">'GreeterAgent'</span>,
+      description: <span class="str">'Greets users by name with a fun fact'</span>,
+      parameters: {
+        type: <span class="str">'object'</span>,
+        properties: {
+          name: { type: <span class="str">'string'</span>, description: <span class="str">'Name to greet'</span> }
+        },
+        required: [<span class="str">'name'</span>]
+      }
+    };
+    <span class="fn">super</span>(<span class="str">'GreeterAgent'</span>, metadata);
+  }
+
+  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: Record&lt;string, unknown&gt;) {
+    <span class="kw">const</span> name = kwargs.name <span class="kw">as</span> string;
+    <span class="kw">const</span> hour = <span class="kw">new</span> <span class="fn">Date</span>().getHours();
+    <span class="kw">const</span> greeting = hour &lt; 12 ? <span class="str">'Good morning'</span> : hour &lt; 18 ? <span class="str">'Good afternoon'</span> : <span class="str">'Good evening'</span>;
+    <span class="kw">return</span> {
+      message: <span class="str">`${greeting}, ${name}!`</span>,
+      data_slush: { greeted_user: name, time_of_day: greeting }
+    };
+  }
+}</code></pre>
+          </div>
+          <div class="code-tab-content" id="py-step5">
+<pre><code><span class="comment"># python/openrappter/agents/greeter_agent.py</span>
+<span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">class</span> GreeterAgent(BasicAgent):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self):
+        self.name = <span class="str">'GreeterAgent'</span>
+        self.metadata = {
+            <span class="str">"name"</span>: self.name,
+            <span class="str">"description"</span>: <span class="str">"Greets users by name with a fun fact"</span>,
+            <span class="str">"parameters"</span>: {
+                <span class="str">"type"</span>: <span class="str">"object"</span>,
+                <span class="str">"properties"</span>: {
+                    <span class="str">"name"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"Name to greet"</span>}
+                },
+                <span class="str">"required"</span>: [<span class="str">"name"</span>]
+            }
+        }
+        <span class="fn">super</span>().__init__(name=self.name, metadata=self.metadata)
+
+    <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+        name = kwargs.<span class="fn">get</span>(<span class="str">'name'</span>, <span class="str">'World'</span>)
+        hour = datetime.<span class="fn">now</span>().hour
+        greeting = <span class="str">'Good morning'</span> <span class="kw">if</span> hour &lt; 12 <span class="kw">else</span> <span class="str">'Good afternoon'</span> <span class="kw">if</span> hour &lt; 18 <span class="kw">else</span> <span class="str">'Good evening'</span>
+        <span class="kw">return</span> {
+            <span class="str">"message"</span>: <span class="kw">f</span><span class="str">"{greeting}, {name}!"</span>,
+            <span class="str">"data_slush"</span>: {<span class="str">"greeted_user"</span>: name, <span class="str">"time_of_day"</span>: greeting}
+        }</code></pre>
+          </div>
+        </div>
+
+        <p>Drop the file into the agents directory. The framework auto-discovers all files matching <code>*Agent.ts</code> (TypeScript) or <code>*_agent.py</code> (Python) — no registration step required.</p>
+      </div>
+
+      <!-- Step 6: Test It -->
+      <div class="step" id="step-6">
+        <div class="step-number">6</div>
+        <h2>Test It</h2>
+        <p>After saving the file, confirm the agent is discovered and invoke it directly by name.</p>
+
+        <pre><code><span class="comment"># Verify it was discovered</span>
+<span class="cmd">openrappter --list-agents</span>
+<span class="comment"># Should now include GreeterAgent in the list</span>
+
+<span class="comment"># Invoke it directly</span>
+<span class="cmd">openrappter --agent greeter "greet Alice"</span></code></pre>
+
+        <div class="terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">invoking GreeterAgent</span>
+          </div>
+          <div class="terminal-body">
+            <div class="terminal-line">
+              <span class="terminal-prompt">$</span>
+              <span class="terminal-command">openrappter --agent greeter "greet Alice"</span>
+            </div>
+            <div class="terminal-output">Executing GreeterAgent...</div>
+            <div class="terminal-output">Data sloshing: injecting temporal + memory context</div>
+            <div class="terminal-success">Agent response:</div>
+            <div class="terminal-output">{</div>
+            <div class="terminal-output">  "message": "Good afternoon, Alice!",</div>
+            <div class="terminal-output">  "data_slush": {</div>
+            <div class="terminal-output">    "greeted_user": "Alice",</div>
+            <div class="terminal-output">    "time_of_day": "Good afternoon"</div>
+            <div class="terminal-output">  }</div>
+            <div class="terminal-output">}</div>
+          </div>
+        </div>
+
+        <p>The greeting matches the current time of day because the <code>perform()</code> method reads the system clock. In the next step, you will see how to get this and much richer context from the data sloshing pipeline instead.</p>
+
+        <p>You can also write a Vitest test alongside the agent (TypeScript) or a pytest file (Python) to validate behavior in CI:</p>
+
+        <pre><code><span class="comment">// typescript/src/__tests__/GreeterAgent.test.ts</span>
+<span class="kw">import</span> { describe, it, expect } <span class="kw">from</span> <span class="str">'vitest'</span>;
+<span class="kw">import</span> { GreeterAgent } <span class="kw">from</span> <span class="str">'../agents/GreeterAgent.js'</span>;
+
+describe(<span class="str">'GreeterAgent'</span>, () => {
+  it(<span class="str">'returns a greeting with the provided name'</span>, <span class="kw">async</span> () => {
+    <span class="kw">const</span> agent = <span class="kw">new</span> <span class="fn">GreeterAgent</span>();
+    <span class="kw">const</span> result = <span class="kw">await</span> agent.<span class="fn">perform</span>({ name: <span class="str">'Alice'</span> });
+    expect(result.message).<span class="fn">toContain</span>(<span class="str">'Alice'</span>);
+    expect(result.data_slush.greeted_user).<span class="fn">toBe</span>(<span class="str">'Alice'</span>);
+  });
+});</code></pre>
+      </div>
+
+      <!-- Step 7: Data Sloshing -->
+      <div class="step" id="step-7">
+        <div class="step-number">7</div>
+        <h2>Data Sloshing</h2>
+        <p>Before <code>perform()</code> is ever called, the framework automatically gathers context signals and synthesizes an <em>orientation</em> for your agent. This is data sloshing — implicit context enrichment that happens on every execution without any work from you.</p>
+
+        <p>The signals are accessible in <code>perform()</code> via <code>getSignal()</code> (TypeScript) or <code>get_signal()</code> (Python) using dot-notation paths:</p>
+
+        <div class="code-tabs">
+          <div class="code-tabs-header">
+            <button class="code-tab-btn active" onclick="switchTab(this, 'ts-step7')">TypeScript</button>
+            <button class="code-tab-btn" onclick="switchTab(this, 'py-step7')">Python</button>
+          </div>
+          <div class="code-tab-content active" id="ts-step7">
+<pre><code><span class="kw">async</span> <span class="fn">perform</span>(kwargs: Record&lt;string, unknown&gt;) {
+  <span class="comment">// Temporal awareness — injected before perform() runs</span>
+  <span class="kw">const</span> timeOfDay    = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;string&gt;(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>);
+  <span class="kw">const</span> isWeekend    = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;boolean&gt;(<span class="str">'temporal.is_weekend'</span>, <span class="kw">false</span>);
+  <span class="kw">const</span> fiscalPeriod = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;string&gt;(<span class="str">'temporal.fiscal_period'</span>);
+
+  <span class="comment">// Synthesized orientation — how confident is the agent?</span>
+  <span class="kw">const</span> confidence = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;string&gt;(<span class="str">'orientation.confidence'</span>, <span class="str">'medium'</span>);
+  <span class="kw">const</span> approach   = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;string&gt;(<span class="str">'orientation.approach'</span>);
   <span class="kw">if</span> (confidence === <span class="str">'low'</span>) {
-    <span class="cm">// Ask clarifying questions instead of guessing</span>
-    <span class="kw">return</span> <span class="tp">JSON</span>.<span class="fn">stringify</span>({ status: <span class="str">'clarify'</span>, message: <span class="str">'Could you be more specific?'</span> });
+    <span class="kw">return</span> { status: <span class="str">'clarify'</span>, message: <span class="str">'Could you be more specific?'</span> };
   }
 
-  <span class="cm">// Query signals — is this a question?</span>
-  <span class="kw">const</span> isQuestion = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">boolean</span>&gt;(<span class="str">'query_signals.is_question'</span>, <span class="kw">false</span>);
-  <span class="kw">if</span> (isQuestion) {
-    <span class="cm">// Format as an answer</span>
-    <span class="kw">return</span> <span class="tp">JSON</span>.<span class="fn">stringify</span>({ status: <span class="str">'success'</span>, response: <span class="str">'Here\'s the answer...'</span> });
+  <span class="comment">// Query signals — understand what the user is asking</span>
+  <span class="kw">const</span> isQuestion  = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;boolean&gt;(<span class="str">'query_signals.is_question'</span>, <span class="kw">false</span>);
+  <span class="kw">const</span> specificity = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;string&gt;(<span class="str">'query_signals.specificity'</span>);
+
+  <span class="comment">// Memory echoes — recent relevant memories surfaced automatically</span>
+  <span class="kw">const</span> echoes = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;any[]&gt;(<span class="str">'memory_echoes'</span>, []);
+  <span class="kw">if</span> (echoes.length &gt; 0) {
+    <span class="kw">const</span> lastEcho = echoes[0];  <span class="comment">// most relevant past interaction</span>
   }
 
-  <span class="cm">// Memory echoes — recall past interactions</span>
-  <span class="kw">const</span> echoes = <span class="kw">this</span>.<span class="fn">getSignal</span>&lt;<span class="tp">any</span>[]&gt;(<span class="str">'memory_echoes'</span>, []);
-  <span class="kw">if</span> (echoes.length) {
-    <span class="kw">const</span> last = echoes[<span class="num">0</span>];
-    <span class="cm">// Use previous context to personalize response</span>
-  }</pre>
-            </div>
+  <span class="comment">// Upstream slush — curated signals from the previous agent in a chain</span>
+  <span class="kw">const</span> upstream = <span class="kw">this</span>.context.upstream_slush ?? {};
+}</code></pre>
+          </div>
+          <div class="code-tab-content" id="py-step7">
+<pre><code><span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
+    <span class="comment"># Temporal awareness — injected before perform() runs</span>
+    time_of_day    = self.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>, <span class="str">'morning'</span>)
+    is_weekend     = self.<span class="fn">get_signal</span>(<span class="str">'temporal.is_weekend'</span>, <span class="kw">False</span>)
+    fiscal_period  = self.<span class="fn">get_signal</span>(<span class="str">'temporal.fiscal_period'</span>)
+
+    <span class="comment"># Synthesized orientation — how confident is the agent?</span>
+    confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>, <span class="str">'medium'</span>)
+    approach   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)
+    <span class="kw">if</span> confidence == <span class="str">'low'</span>:
+        <span class="kw">return</span> {<span class="str">"status"</span>: <span class="str">"clarify"</span>, <span class="str">"message"</span>: <span class="str">"Could you be more specific?"</span>}
+
+    <span class="comment"># Query signals — understand what the user is asking</span>
+    is_question  = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.is_question'</span>, <span class="kw">False</span>)
+    specificity  = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.specificity'</span>)
+
+    <span class="comment"># Memory echoes — recent relevant memories surfaced automatically</span>
+    echoes = self.<span class="fn">get_signal</span>(<span class="str">'memory_echoes'</span>, [])
+    <span class="kw">if</span> echoes:
+        last_echo = echoes[0]  <span class="comment"># most relevant past interaction</span>
+
+    <span class="comment"># Upstream slush — curated signals from the previous agent in a chain</span>
+    upstream = self.context.<span class="fn">get</span>(<span class="str">'upstream_slush'</span>, {})</code></pre>
           </div>
         </div>
 
-        <div class="callout callout-blue">
-          📡 <strong>All available signals:</strong> <code>temporal.*</code>, <code>memory_echoes</code>, <code>query_signals.*</code>, <code>behavioral_hints.*</code>, <code>orientation.*</code>, <code>upstream_slush.*</code> — see the <a href="./architecture.html" style="color: var(--blue);">Architecture</a> page for the full reference.
+        <p>All available signal namespaces: <code>temporal.*</code>, <code>memory_echoes</code>, <code>query_signals.*</code>, <code>behavioral_hints.*</code>, <code>orientation.*</code>, and <code>upstream_slush.*</code>. See the <a href="./architecture.html">Architecture page</a> for the full signal reference.</p>
+
+        <div class="info-box">
+          <strong>Data Slush:</strong> When your agent returns a <code>data_slush</code> key in its output, the framework extracts those values and stores them in <code>lastDataSlush</code> (TypeScript) or <code>last_data_slush</code> (Python). The next agent in the chain can receive this as <code>upstream_slush</code> — enabling LLM-free, deterministic agent-to-agent pipelines.
+        </div>
+      </div>
+
+      <!-- Step 8: Chain Agents -->
+      <div class="step" id="step-8">
+        <div class="step-number">8</div>
+        <h2>Chain Agents</h2>
+        <p>Agent chaining lets you build pipelines where one agent's output becomes the next agent's context. Agent A returns <code>data_slush</code> containing curated signals; Agent B receives that as <code>upstream_slush</code> via its <code>execute()</code> call.</p>
+
+        <div class="code-tabs">
+          <div class="code-tabs-header">
+            <button class="code-tab-btn active" onclick="switchTab(this, 'ts-step8')">TypeScript</button>
+            <button class="code-tab-btn" onclick="switchTab(this, 'py-step8')">Python</button>
+          </div>
+          <div class="code-tab-content active" id="ts-step8">
+<pre><code><span class="kw">import</span> { GreeterAgent } <span class="kw">from</span> <span class="str">'./agents/GreeterAgent.js'</span>;
+<span class="kw">import</span> { FollowUpAgent } <span class="kw">from</span> <span class="str">'./agents/FollowUpAgent.js'</span>;
+
+<span class="comment">// Step 1: Agent A runs and populates lastDataSlush</span>
+<span class="kw">const</span> greeter = <span class="kw">new</span> <span class="fn">GreeterAgent</span>();
+<span class="kw">await</span> greeter.<span class="fn">execute</span>({ query: <span class="str">'greet Alice'</span>, name: <span class="str">'Alice'</span> });
+
+<span class="comment">// greeter.lastDataSlush is now:</span>
+<span class="comment">// { greeted_user: "Alice", time_of_day: "Good afternoon" }</span>
+
+<span class="comment">// Step 2: Agent B receives A's slush as upstream context</span>
+<span class="kw">const</span> followUp = <span class="kw">new</span> <span class="fn">FollowUpAgent</span>();
+<span class="kw">const</span> result = <span class="kw">await</span> followUp.<span class="fn">execute</span>({
+  query: <span class="str">'suggest something for Alice'</span>,
+  upstream_slush: greeter.lastDataSlush   <span class="comment">// pass A's slush to B</span>
+});
+
+<span class="comment">// Inside FollowUpAgent.perform():</span>
+<span class="comment">// const greetedUser = this.getSignal('upstream_slush.greeted_user');</span>
+<span class="comment">// const timeOfDay   = this.getSignal('upstream_slush.time_of_day');</span></code></pre>
+          </div>
+          <div class="code-tab-content" id="py-step8">
+<pre><code><span class="kw">from</span> openrappter.agents.greeter_agent <span class="kw">import</span> GreeterAgent
+<span class="kw">from</span> openrappter.agents.follow_up_agent <span class="kw">import</span> FollowUpAgent
+
+<span class="comment"># Step 1: Agent A runs and populates last_data_slush</span>
+greeter = <span class="fn">GreeterAgent</span>()
+greeter.<span class="fn">execute</span>(query=<span class="str">'greet Alice'</span>, name=<span class="str">'Alice'</span>)
+
+<span class="comment"># greeter.last_data_slush is now:</span>
+<span class="comment"># {"greeted_user": "Alice", "time_of_day": "Good afternoon"}</span>
+
+<span class="comment"># Step 2: Agent B receives A's slush as upstream context</span>
+follow_up = <span class="fn">FollowUpAgent</span>()
+result = follow_up.<span class="fn">execute</span>(
+    query=<span class="str">'suggest something for Alice'</span>,
+    upstream_slush=greeter.last_data_slush   <span class="comment"># pass A's slush to B</span>
+)
+
+<span class="comment"># Inside FollowUpAgent.perform():</span>
+<span class="comment"># greeted_user = self.get_signal('upstream_slush.greeted_user')</span>
+<span class="comment"># time_of_day  = self.get_signal('upstream_slush.time_of_day')</span></code></pre>
+          </div>
         </div>
 
-        <div class="callout callout-blue" style="margin-top: 1rem;">
-          🧊 <strong>Data Slush:</strong> Agents can return a <code>data_slush</code> dict in their output — curated signals from live results. The framework extracts it to <code>last_data_slush</code> / <code>lastDataSlush</code>, which can be passed as <code>upstream_slush</code> to the next agent's <code>execute()</code>. This enables LLM-free agent-to-agent pipelines.
+        <p>This pattern is the foundation of LLM-free agent pipelines. Agent A extracts structured facts; Agent B reasons from them — no large language model required in the middle. The <code>data_slush</code> key acts as a typed handoff contract between agents.</p>
+
+        <p>For more complex graphs — fan-out, fan-in, conditional routing — see the multi-agent patterns in the next step.</p>
+      </div>
+
+      <!-- Step 9: Multi-Agent Patterns -->
+      <div class="step" id="step-9">
+        <div class="step-number">9</div>
+        <h2>Multi-Agent Patterns</h2>
+        <p>openrappter ships three built-in orchestration primitives for coordinating multiple agents: <code>BroadcastManager</code>, <code>AgentRouter</code>, and <code>SubAgent</code>. These cover the vast majority of multi-agent topologies.</p>
+
+        <p><strong>BroadcastManager</strong> — send a message to multiple agents simultaneously and collect results:</p>
+
+        <div class="code-tabs">
+          <div class="code-tabs-header">
+            <button class="code-tab-btn active" onclick="switchTab(this, 'ts-broadcast')">TypeScript</button>
+            <button class="code-tab-btn" onclick="switchTab(this, 'py-broadcast')">Python</button>
+          </div>
+          <div class="code-tab-content active" id="ts-broadcast">
+<pre><code><span class="kw">import</span> { BroadcastManager } <span class="kw">from</span> <span class="str">'./agents/broadcast.js'</span>;
+<span class="kw">import</span> { GreeterAgent } <span class="kw">from</span> <span class="str">'./agents/GreeterAgent.js'</span>;
+<span class="kw">import</span> { ShellAgent } <span class="kw">from</span> <span class="str">'./agents/ShellAgent.js'</span>;
+
+<span class="comment">// 'all' — wait for every agent to complete</span>
+<span class="kw">const</span> broadcast = <span class="kw">new</span> <span class="fn">BroadcastManager</span>([<span class="kw">new</span> <span class="fn">GreeterAgent</span>(), <span class="kw">new</span> <span class="fn">ShellAgent</span>()], <span class="str">'all'</span>);
+<span class="kw">const</span> results = <span class="kw">await</span> broadcast.<span class="fn">execute</span>({ query: <span class="str">'hello'</span> });
+
+<span class="comment">// 'race' — take the first agent to respond</span>
+<span class="kw">const</span> race = <span class="kw">new</span> <span class="fn">BroadcastManager</span>([agentA, agentB, agentC], <span class="str">'race'</span>);
+<span class="kw">const</span> first = <span class="kw">await</span> race.<span class="fn">execute</span>({ query: <span class="str">'who can answer this fastest?'</span> });
+
+<span class="comment">// 'fallback' — try agents in order until one succeeds</span>
+<span class="kw">const</span> fallback = <span class="kw">new</span> <span class="fn">BroadcastManager</span>([primaryAgent, backupAgent], <span class="str">'fallback'</span>);
+<span class="kw">const</span> safe = <span class="kw">await</span> fallback.<span class="fn">execute</span>({ query: <span class="str">'try primary, then backup'</span> });</code></pre>
+          </div>
+          <div class="code-tab-content" id="py-broadcast">
+<pre><code><span class="comment"># Python BroadcastManager mirrors the TypeScript API</span>
+<span class="kw">from</span> openrappter.agents.broadcast <span class="kw">import</span> BroadcastManager
+<span class="kw">from</span> openrappter.agents.greeter_agent <span class="kw">import</span> GreeterAgent
+<span class="kw">from</span> openrappter.agents.shell_agent <span class="kw">import</span> ShellAgent
+
+<span class="comment"># 'all' — wait for every agent to complete</span>
+broadcast = <span class="fn">BroadcastManager</span>([<span class="fn">GreeterAgent</span>(), <span class="fn">ShellAgent</span>()], mode=<span class="str">'all'</span>)
+results = broadcast.<span class="fn">execute</span>(query=<span class="str">'hello'</span>)
+
+<span class="comment"># 'race' — take the first agent to respond</span>
+race = <span class="fn">BroadcastManager</span>([agent_a, agent_b, agent_c], mode=<span class="str">'race'</span>)
+first = race.<span class="fn">execute</span>(query=<span class="str">'who can answer this fastest?'</span>)
+
+<span class="comment"># 'fallback' — try agents in order until one succeeds</span>
+fallback = <span class="fn">BroadcastManager</span>([primary_agent, backup_agent], mode=<span class="str">'fallback'</span>)
+safe = fallback.<span class="fn">execute</span>(query=<span class="str">'try primary, then backup'</span>)</code></pre>
+          </div>
         </div>
-      </section>
 
-      <div class="step-divider"></div>
+        <p><strong>AgentRouter</strong> — route messages to different agents based on rules (sender, channel, group, or pattern matching), with priority and session key isolation:</p>
 
-      <!-- Step 6 -->
-      <section class="step" id="step-6">
-        <div class="step-header">
-          <div class="step-number purple">6</div>
-          <h2>Next Steps</h2>
+        <pre><code><span class="kw">import</span> { AgentRouter } <span class="kw">from</span> <span class="str">'./agents/router.js'</span>;
+
+<span class="kw">const</span> router = <span class="kw">new</span> <span class="fn">AgentRouter</span>();
+router.<span class="fn">addRule</span>({ pattern: <span class="str">/^greet/i</span>, agent: <span class="kw">new</span> <span class="fn">GreeterAgent</span>(), priority: 10 });
+router.<span class="fn">addRule</span>({ pattern: <span class="str">/^run|^exec/i</span>, agent: <span class="kw">new</span> <span class="fn">ShellAgent</span>(), priority: 5 });
+router.<span class="fn">addRule</span>({ channel: <span class="str">'slack'</span>, agent: <span class="kw">new</span> <span class="fn">SlackAgent</span>(), priority: 1 });
+
+<span class="kw">const</span> result = <span class="kw">await</span> router.<span class="fn">route</span>({ query: <span class="str">'greet the team'</span>, channel: <span class="str">'cli'</span> });</code></pre>
+
+        <p><strong>SubAgent</strong> — invoke nested agents from within a parent agent's <code>perform()</code> method, with configurable depth limits and built-in loop detection to prevent infinite recursion:</p>
+
+        <pre><code><span class="kw">import</span> { SubAgent } <span class="kw">from</span> <span class="str">'./agents/subagent.js'</span>;
+
+<span class="comment">// Inside a parent agent's perform():</span>
+<span class="kw">const</span> sub = <span class="kw">new</span> <span class="fn">SubAgent</span>(<span class="kw">new</span> <span class="fn">ShellAgent</span>(), { maxDepth: 3 });
+<span class="kw">const</span> fileList = <span class="kw">await</span> sub.<span class="fn">invoke</span>({ action: <span class="str">'list'</span>, path: <span class="str">'.'</span> });</code></pre>
+
+        <div class="info-box">
+          <strong>Next:</strong> The <a href="./architecture.html">Architecture page</a> covers the full execution flow, all sloshing signal namespaces, the WebSocket gateway, multi-channel routing (Slack, Discord, Telegram, iMessage, Teams), and the ClawHub skills system in depth.
         </div>
-        <p>Your agent is live — here's where to go from here.</p>
 
-        <div class="next-grid">
-          <a class="next-card" href="./docs.html">
-            <div class="next-card-icon">🔗</div>
-            <h4>Add Keyword Matching</h4>
-            <p>Register your agent in <code>cli.py</code> or <code>index.ts</code> so users can invoke it by natural language.</p>
-          </a>
-          <a class="next-card" href="./architecture.html">
-            <div class="next-card-icon">🏗️</div>
-            <h4>Architecture Deep Dive</h4>
-            <p>Understand the orchestrator, data sloshing pipeline, and agent lifecycle in detail.</p>
-          </a>
-          <a class="next-card" href="https://github.com/kody-w/openrappter">
-            <div class="next-card-icon">🚀</div>
-            <h4>Share on RappterHub</h4>
-            <p>Publish your agent so others can install and use it. One command to share.</p>
-          </a>
-          <a class="next-card" href="./docs.html">
-            <div class="next-card-icon">📖</div>
-            <h4>API Reference</h4>
-            <p>Full reference for <code>BasicAgent</code>, context signals, and the agent registry.</p>
-          </a>
+        <!-- Next Steps -->
+        <div class="info-box" style="margin-top:2rem;">
+          <strong>Next Steps</strong>
+          <ul style="margin-top:0.5rem;padding-left:1.25rem;">
+            <li><a href="./docs.html">Full Documentation</a> — Complete reference for all systems</li>
+            <li><a href="./architecture.html">Architecture Deep Dive</a> — How data sloshing and agents work</li>
+            <li><a href="https://github.com/kody-w/openrappter">GitHub Repository</a> — Source code and contributing guide</li>
+          </ul>
         </div>
-      </section>
+      </div>
 
-    </div>
-
-    <!-- Progress indicator -->
-    <nav class="progress-nav" id="progressNav">
-      <ol>
-        <li class="active" data-step="step-1">
-          <span class="progress-dot">1</span>
-          <a href="#step-1">Contract</a>
-        </li>
-        <li data-step="step-2">
-          <span class="progress-dot">2</span>
-          <a href="#step-2">Create File</a>
-        </li>
-        <li data-step="step-3">
-          <span class="progress-dot">3</span>
-          <a href="#step-3">Write Code</a>
-        </li>
-        <li data-step="step-4">
-          <span class="progress-dot">4</span>
-          <a href="#step-4">Build &amp; Test</a>
-        </li>
-        <li data-step="step-5">
-          <span class="progress-dot">5</span>
-          <a href="#step-5">Data Sloshing</a>
-        </li>
-        <li data-step="step-6">
-          <span class="progress-dot">6</span>
-          <a href="#step-6">Next Steps</a>
-        </li>
-      </ol>
-    </nav>
+    </main>
   </div>
 
-  <script>
-    // Language toggle
-    function setLanguage(lang) {
-      document.body.classList.toggle('show-typescript', lang === 'typescript');
-      document.querySelectorAll('.lang-toggle button').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.lang === lang);
-      });
-      // Update terminal inline spans
-      document.querySelectorAll('.terminal-body .lang-python').forEach(el => {
-        el.style.display = lang === 'python' ? 'inline' : 'none';
-      });
-      document.querySelectorAll('.terminal-body .lang-typescript').forEach(el => {
-        el.style.display = lang === 'typescript' ? 'inline' : 'none';
-      });
-    }
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-links">
+        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="./docs.html">Docs</a>
+        <a href="./">Home</a>
+        <a href="./changelog.html">Changelog</a>
+      </div>
+      <div class="footer-copy">MIT License</div>
+    </div>
+  </footer>
 
-    document.querySelectorAll('.lang-toggle button').forEach(btn => {
-      btn.addEventListener('click', () => setLanguage(btn.dataset.lang));
-    });
-
-    // Copy button
-    function copyCode(btn) {
-      const pre = btn.closest('.code-block').querySelector('pre');
-      const text = pre.textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        btn.textContent = 'copied!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-          btn.textContent = 'copy';
-          btn.classList.remove('copied');
-        }, 2000);
-      });
-    }
-
-    // Progress indicator via IntersectionObserver
-    const steps = document.querySelectorAll('.step');
-    const progressItems = document.querySelectorAll('#progressNav li');
-
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const id = entry.target.id;
-          progressItems.forEach(li => {
-            li.classList.toggle('active', li.dataset.step === id);
-          });
-        }
-      });
-    }, {
-      rootMargin: '-20% 0px -60% 0px',
-      threshold: 0
-    });
-
-    steps.forEach(step => observer.observe(step));
-  </script>
+  <script src="./nav.js"></script>
 </body>
 </html>

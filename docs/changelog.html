@@ -3,431 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Changelog - openrappter</title>
-  <meta name="description" content="What's new in openrappter. Full changelog with version history, new features, and changes.">
+  <title>Changelog — openrappter</title>
+  <meta name="description" content="What's new in openrappter. Full changelog with version history.">
+  <meta property="og:title" content="Changelog — openrappter">
+  <meta property="og:description" content="What's new in openrappter. Full changelog with version history.">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green: #10b981;
-      --green-bright: #34d399;
-      --green-dark: #059669;
-      --purple: #8b5cf6;
-      --blue: #3b82f6;
-      --orange: #f97316;
-      --red: #ef4444;
-      --bg: #000000;
-      --bg-card: #0a0a0a;
-      --bg-elevated: #141414;
-      --bg-hover: #1a1a1a;
-      --text: #ffffff;
-      --text-secondary: #e5e5e5;
-      --text-muted: #737373;
-      --border: #262626;
-      --border-light: #404040;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Navbar */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
-      padding: 1rem 2rem;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .nav-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logo-badge {
-      font-size: 0.65rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--green);
-      color: black;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover { color: var(--text); }
-
-    .nav-cta {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      text-decoration: none;
-      transition: all 0.2s;
-      cursor: pointer;
-      border: none;
-    }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .btn-ghost:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-light);
-    }
-
-    /* Hero */
-    .hero {
-      padding: 10rem 2rem 4rem;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .hero-bg {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.15), transparent),
-        radial-gradient(ellipse 60% 40% at 80% 60%, rgba(139, 92, 246, 0.1), transparent);
-      pointer-events: none;
-    }
-
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4rem);
-      font-weight: 900;
-      letter-spacing: -0.03em;
-      margin-bottom: 0.75rem;
-      position: relative;
-      z-index: 1;
-      background: linear-gradient(135deg, var(--green) 0%, var(--green-bright) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero-subtitle {
-      font-size: 1.25rem;
-      color: var(--text-muted);
-      position: relative;
-      z-index: 1;
-    }
-
-    /* Timeline */
-    .timeline-section {
-      padding: 4rem 2rem 6rem;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    .timeline {
-      position: relative;
-    }
-
-    /* Vertical line */
-    .timeline::before {
-      content: '';
-      position: absolute;
-      left: 50%;
-      top: 0;
-      bottom: 0;
-      width: 2px;
-      background: linear-gradient(to bottom, var(--green), var(--green-dark), transparent);
-      transform: translateX(-1px);
-    }
-
-    .timeline-item {
-      position: relative;
-      width: 50%;
-      padding: 0 3rem 4rem;
-    }
-
-    /* Alternate left/right */
-    .timeline-item:nth-child(odd) {
-      left: 0;
-      padding-right: 3rem;
-      padding-left: 0;
-    }
-
-    .timeline-item:nth-child(even) {
-      left: 50%;
-      padding-left: 3rem;
-      padding-right: 0;
-    }
-
-    /* Circle dot on the line */
-    .timeline-dot {
-      position: absolute;
-      top: 0.5rem;
-      width: 16px;
-      height: 16px;
-      background: var(--green);
-      border: 3px solid var(--bg);
-      border-radius: 50%;
-      z-index: 2;
-      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
-    }
-
-    .timeline-item:nth-child(odd) .timeline-dot {
-      right: -8px;
-    }
-
-    .timeline-item:nth-child(even) .timeline-dot {
-      left: -8px;
-    }
-
-    /* Card */
-    .timeline-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      transition: border-color 0.3s, transform 0.3s;
-    }
-
-    .timeline-card:hover {
-      border-color: var(--border-light);
-      transform: translateY(-2px);
-    }
-
-    .version-badge {
-      display: inline-block;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 1.25rem;
-      font-weight: 700;
-      padding: 0.4rem 1rem;
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--green-bright);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      border-radius: 8px;
-      margin-bottom: 0.5rem;
-    }
-
-    .version-date {
-      font-size: 0.875rem;
-      color: var(--text-muted);
-      margin-bottom: 1.5rem;
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .change-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .change-group:last-child {
-      margin-bottom: 0;
-    }
-
-    .change-group-title {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 0.75rem;
-    }
-
-    .change-group-title.added {
-      color: var(--green-bright);
-    }
-
-    .change-group-title.changed {
-      color: var(--blue);
-    }
-
-    .change-group-title.technical {
-      color: var(--purple);
-    }
-
-    .change-icon {
-      font-size: 0.9rem;
-      line-height: 1;
-    }
-
-    .change-list {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .change-list li {
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-      padding-left: 1.25rem;
-      position: relative;
-      line-height: 1.5;
-    }
-
-    .change-list li::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0.55rem;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--border-light);
-    }
-
-    .change-list.added li::before {
-      background: rgba(16, 185, 129, 0.5);
-    }
-
-    .change-list.changed li::before {
-      background: rgba(59, 130, 246, 0.5);
-    }
-
-    .change-list.technical li::before {
-      background: rgba(139, 92, 246, 0.5);
-    }
-
-    /* Footer */
-    footer {
-      padding: 3rem 2rem;
-      border-top: 1px solid var(--border);
-    }
-
-    .footer-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .footer-links {
-      display: flex;
-      gap: 2rem;
-    }
-
-    .footer-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.875rem;
-      transition: color 0.2s;
-    }
-
-    .footer-links a:hover { color: var(--text); }
-
-    .footer-copy {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-    }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .nav-links { display: none; }
-
-      .timeline::before {
-        left: 20px;
-      }
-
-      .timeline-item,
-      .timeline-item:nth-child(odd),
-      .timeline-item:nth-child(even) {
-        width: 100%;
-        left: 0;
-        padding-left: 3.5rem;
-        padding-right: 0;
-      }
-
-      .timeline-item:nth-child(odd) .timeline-dot,
-      .timeline-item:nth-child(even) .timeline-dot {
-        left: 12px;
-        right: auto;
-      }
-
-      .timeline-card {
-        padding: 1.5rem;
-      }
-
-      .version-badge {
-        font-size: 1.1rem;
-      }
-
-      .footer-container {
-        flex-direction: column;
-        gap: 1rem;
-        text-align: center;
-      }
-
-      .footer-links {
-        flex-wrap: wrap;
-        justify-content: center;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <!-- Nav -->
+
   <nav>
     <div class="nav-container">
-      <a href="./" class="logo">
-        🦖 openrappter
-        <span class="logo-badge">v1.4</span>
-      </a>
+      <a href="./" class="logo">openrappter <span class="logo-badge">v1.4.1</span></a>
+      <button class="mobile-menu-btn">&#9776;</button>
       <div class="nav-links">
-        <a href="./">Home</a>
         <a href="./docs.html">Docs</a>
-        <a href="https://github.com/kody-w/openrappter">GitHub</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./changelog.html">Changelog</a>
       </div>
       <div class="nav-cta">
         <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
@@ -438,43 +33,73 @@
     </div>
   </nav>
 
-  <!-- Hero -->
   <section class="hero">
     <div class="hero-bg"></div>
-    <h1>Changelog</h1>
+    <h1 style="background:linear-gradient(135deg,var(--green) 0%,var(--green-bright) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Changelog</h1>
     <p class="hero-subtitle">What's new in openrappter</p>
   </section>
 
-  <!-- Timeline -->
   <section class="timeline-section">
     <div class="timeline">
 
-      <!-- v1.4.0 -->
+      <!-- v1.4.1 — newest, highlighted -->
       <div class="timeline-item">
-        <div class="timeline-dot" style="background: var(--green);"></div>
-        <div class="timeline-card" style="border: 1px solid rgba(16,185,129,0.3);">
-          <div class="version-badge" style="background: rgba(16,185,129,0.15); color: var(--green);">v1.4.0</div>
-          <div class="version-date">2026-02-11</div>
+        <div class="timeline-dot" style="background:var(--green);"></div>
+        <div class="timeline-card" style="border:1px solid rgba(16,185,129,0.3);">
+          <div class="version-badge" style="background:rgba(16,185,129,0.15);color:var(--green);">v1.4.1</div>
+          <div class="version-date">2026-02-20</div>
 
           <div class="change-group">
             <div class="change-group-title added">
-              <span class="change-icon">✚</span> Added
+              <span class="change-icon">+</span> Added
             </div>
             <ul class="change-list added">
-              <li><strong>Single File Agent Pattern</strong> — the defining architecture of openrappter. Documentation + contract + deterministic code in ONE file.</li>
-              <li>Native code constructors — metadata defined using Python dicts and TypeScript objects, no YAML or config files</li>
-              <li><code>slush_out()</code> / <code>slushOut()</code> — convenience helper for building <code>data_slush</code> dicts</li>
-              <li>SubAgentManager auto-chains <code>data_slush</code> between sequential sub-agent calls</li>
-              <li>BroadcastManager fallback mode passes <code>data_slush</code> between agents</li>
-              <li>All built-in agents use the native constructor pattern</li>
-              <li>LearnNewAgent generates agents with native code constructors</li>
-              <li><a href="./single-file-agents.html" style="color: var(--green);">Single File Agent Manifesto</a> — on RappterHub</li>
+              <li>OuroborosAgent capability scoring system with graduated thresholds</li>
+              <li>RPG evolution scorecard with persistent lineage tracking</li>
+              <li>Streak multipliers on XP for consistent improvements</li>
+              <li>Polarity-agnostic sentiment scoring</li>
+              <li>Expanded parity test suite for capability scoring</li>
+              <li>GitHub Pages site rewrite with full v1.4.1 documentation</li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <div class="change-group-title technical">
+              <span class="change-icon">*</span> Technical
+            </div>
+            <ul class="change-list technical">
+              <li>Node.js 20+ required</li>
+              <li>Updated all documentation for 12+ agents, 15+ channels, 5 providers</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <!-- v1.3.0 -->
+      <!-- v1.4.0 — Single File Agent Pattern -->
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-card">
+          <div class="version-badge">v1.4.0</div>
+          <div class="version-date">2026-02-11</div>
+
+          <div class="change-group">
+            <div class="change-group-title added">
+              <span class="change-icon">+</span> Added
+            </div>
+            <ul class="change-list added">
+              <li>Single File Agent Pattern — documentation + contract + deterministic code in ONE file</li>
+              <li>Native code constructors — metadata via Python dicts and TypeScript objects</li>
+              <li><code>slush_out()</code> / <code>slushOut()</code> convenience helper for building <code>data_slush</code></li>
+              <li>SubAgentManager auto-chains <code>data_slush</code> between sequential sub-agent calls</li>
+              <li>BroadcastManager fallback mode passes <code>data_slush</code> between agents</li>
+              <li>All built-in agents use native constructor pattern</li>
+              <li>LearnNewAgent generates agents with native code constructors</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.3.0 — Data Slush Pipeline -->
       <div class="timeline-item">
         <div class="timeline-dot"></div>
         <div class="timeline-card">
@@ -483,32 +108,32 @@
 
           <div class="change-group">
             <div class="change-group-title added">
-              <span class="change-icon">✚</span> Added
+              <span class="change-icon">+</span> Added
             </div>
             <ul class="change-list added">
-              <li>Data Slush: Agent-to-agent signal pipeline. Agents return a <code>data_slush</code> field with curated signals from live results that can be fed into downstream agents via <code>upstream_slush</code></li>
-              <li><code>last_data_slush</code> (Python) / <code>lastDataSlush</code> (TypeScript) property on BasicAgent for accessing the most recent data_slush output</li>
-              <li><code>upstream_slush</code> context key — automatically merged into agent context when chained</li>
-              <li>WeatherPoet example agent demonstrating data_slush with live weather API integration</li>
+              <li>Data Slush: Agent-to-agent signal pipeline</li>
+              <li><code>last_data_slush</code> / <code>lastDataSlush</code> property on BasicAgent</li>
+              <li><code>upstream_slush</code> context key — auto-merged when chained</li>
+              <li>WeatherPoet example agent demonstrating data_slush</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <!-- v1.4.0 -->
+      <!-- v1.2.0 — Monorepo & TypeScript -->
       <div class="timeline-item">
         <div class="timeline-dot"></div>
         <div class="timeline-card">
-          <div class="version-badge">v1.4.0</div>
+          <div class="version-badge">v1.2.0</div>
           <div class="version-date">2026-02-05</div>
 
           <div class="change-group">
             <div class="change-group-title added">
-              <span class="change-icon">✚</span> Added
+              <span class="change-icon">+</span> Added
             </div>
             <ul class="change-list added">
-              <li>Monorepo structure: Separate python/ and typescript/ directories</li>
-              <li>TypeScript agent system: Full port of Python agent pattern to TypeScript (BasicAgent.ts with data sloshing, AgentRegistry.ts for dynamic agent discovery, ShellAgent.ts and MemoryAgent.ts core agents)</li>
+              <li>Monorepo structure: separate python/ and typescript/ directories</li>
+              <li>TypeScript agent system: full port of Python agent pattern</li>
               <li>Unified agent contract between Python and TypeScript</li>
               <li>pyproject.toml for Python packaging</li>
             </ul>
@@ -516,20 +141,19 @@
 
           <div class="change-group">
             <div class="change-group-title changed">
-              <span class="change-icon">↻</span> Changed
+              <span class="change-icon">~</span> Changed
             </div>
             <ul class="change-list changed">
-              <li>Reorganized repository structure for dual-runtime maintenance</li>
+              <li>Repository restructured for dual-runtime maintenance</li>
               <li>Python package moved to python/openrappter/</li>
-              <li>TypeScript source moved to typescript/src/</li>
-              <li>Updated all documentation for monorepo structure</li>
-              <li>Lowered Node.js requirement to 18+ (from 22+)</li>
+              <li>TypeScript source at typescript/src/</li>
+              <li>Updated documentation for monorepo structure</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <!-- v1.1.0 -->
+      <!-- v1.1.0 — Agent System -->
       <div class="timeline-item">
         <div class="timeline-dot"></div>
         <div class="timeline-card">
@@ -538,7 +162,7 @@
 
           <div class="change-group">
             <div class="change-group-title added">
-              <span class="change-icon">✚</span> Added
+              <span class="change-icon">+</span> Added
             </div>
             <ul class="change-list added">
               <li>Dynamic agent discovery system (agents/ directory)</li>
@@ -551,7 +175,7 @@
 
           <div class="change-group">
             <div class="change-group-title changed">
-              <span class="change-icon">↻</span> Changed
+              <span class="change-icon">~</span> Changed
             </div>
             <ul class="change-list changed">
               <li>Renamed RAPPagent.py to openrappter.py</li>
@@ -562,7 +186,7 @@
         </div>
       </div>
 
-      <!-- v1.0.0 -->
+      <!-- v1.0.0 — Initial Release -->
       <div class="timeline-item">
         <div class="timeline-dot"></div>
         <div class="timeline-card">
@@ -571,25 +195,25 @@
 
           <div class="change-group">
             <div class="change-group-title added">
-              <span class="change-icon">✚</span> Added
+              <span class="change-icon">+</span> Added
             </div>
             <ul class="change-list added">
               <li>Initial release of openrappter</li>
-              <li>GitHub Copilot SDK integration (no extra API keys needed)</li>
+              <li>GitHub Copilot SDK integration (no extra API keys)</li>
               <li>Interactive chat mode</li>
               <li>Single task execution (--task)</li>
               <li>Persistent memory system</li>
               <li>Built-in skills: bash, read, write, list</li>
               <li>Custom skill support (YAML and Python)</li>
               <li>Onboarding wizard</li>
-              <li>Python standalone version (openrappter.py)</li>
+              <li>Python standalone version</li>
               <li>Full documentation and GitHub Pages site</li>
             </ul>
           </div>
 
           <div class="change-group">
             <div class="change-group-title technical">
-              <span class="change-icon">⚙</span> Technical
+              <span class="change-icon">*</span> Technical
             </div>
             <ul class="change-list technical">
               <li>Node.js 18+ required</li>
@@ -604,20 +228,18 @@
     </div>
   </section>
 
-  <!-- Footer -->
   <footer>
     <div class="footer-container">
       <div class="footer-links">
         <a href="https://github.com/kody-w/openrappter">GitHub</a>
-        <a href="https://github.com/kody-w/rappterhub">RappterHub</a>
-        <a href="./teach.html">Teach Your Agent</a>
-        <a href="https://github.com/kody-w/openrappter/tree/main/docs">Documentation</a>
-        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="./docs.html">Docs</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./">Home</a>
       </div>
-      <div class="footer-copy">
-        MIT License • Made with 🦖
-      </div>
+      <div class="footer-copy">MIT License</div>
     </div>
   </footer>
+
+  <script src="./nav.js"></script>
 </body>
 </html>

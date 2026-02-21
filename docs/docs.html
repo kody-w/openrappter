@@ -4,1213 +4,1041 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Documentation — openrappter</title>
-  <meta name="description" content="Complete documentation for openrappter: installation, configuration, agents, memory system, and API reference.">
+  <meta name="description" content="Complete documentation for openrappter v1.4.1: installation, configuration, agents, memory, skills, gateway, and API reference.">
   <meta property="og:title" content="Documentation — openrappter">
-  <meta property="og:description" content="Complete documentation for the open source AI agent framework.">
+  <meta property="og:description" content="Complete documentation for the open source local-first AI agent framework with TypeScript and Python runtimes.">
   <meta property="og:type" content="website">
+  <meta property="og:url" content="https://kody-w.github.io/openrappter/docs.html">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Documentation — openrappter">
+  <meta name="twitter:description" content="Complete documentation for openrappter v1.4.1.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --green: #10b981;
-      --green-bright: #34d399;
-      --green-dark: #059669;
-      --purple: #8b5cf6;
-      --blue: #3b82f6;
-      --orange: #f97316;
-      --red: #ef4444;
-      --bg: #000000;
-      --bg-card: #0a0a0a;
-      --bg-elevated: #141414;
-      --bg-hover: #1a1a1a;
-      --text: #ffffff;
-      --text-secondary: #e5e5e5;
-      --text-muted: #737373;
-      --border: #262626;
-      --border-light: #404040;
-    }
-
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    /* Navbar */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 1000;
-      padding: 1rem 2rem;
-      background: rgba(0, 0, 0, 0.8);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .nav-container {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: var(--text);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .logo-badge {
-      font-size: 0.65rem;
-      padding: 0.2rem 0.5rem;
-      background: var(--green);
-      color: black;
-      border-radius: 4px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 2rem;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.9rem;
-      transition: color 0.2s;
-    }
-
-    .nav-links a:hover { color: var(--text); }
-
-    .nav-cta {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      text-decoration: none;
-      transition: all 0.2s;
-      cursor: pointer;
-      border: none;
-    }
-
-    .btn-primary {
-      background: var(--green);
-      color: black;
-    }
-
-    .btn-primary:hover {
-      background: var(--green-bright);
-      transform: translateY(-1px);
-    }
-
-    .btn-ghost {
-      background: transparent;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .btn-ghost:hover {
-      background: var(--bg-hover);
-      border-color: var(--border-light);
-    }
-
-    /* Layout */
-    .docs-layout {
-      display: flex;
-      margin-top: 73px;
-      min-height: calc(100vh - 73px);
-    }
-
-    /* Sidebar */
-    .sidebar {
-      width: 250px;
-      min-width: 250px;
-      position: fixed;
-      top: 73px;
-      left: 0;
-      bottom: 0;
-      overflow-y: auto;
-      border-right: 1px solid var(--border);
-      padding: 2rem 0;
-      background: var(--bg);
-      z-index: 100;
-    }
-
-    .sidebar-title {
-      font-size: 0.7rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-muted);
-      padding: 0 1.5rem;
-      margin-bottom: 1rem;
-      font-weight: 700;
-    }
-
-    .sidebar-nav {
-      list-style: none;
-    }
-
-    .sidebar-nav li a {
-      display: block;
-      padding: 0.6rem 1.5rem;
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.9rem;
-      font-weight: 500;
-      border-left: 3px solid transparent;
-      transition: all 0.2s;
-    }
-
-    .sidebar-nav li a:hover {
-      color: var(--text);
-      background: var(--bg-hover);
-    }
-
-    .sidebar-nav li a.active {
-      color: var(--green);
-      border-left-color: var(--green);
-      background: rgba(16, 185, 129, 0.05);
-    }
-
-    /* Main content */
-    .docs-content {
-      margin-left: 250px;
-      flex: 1;
-      padding: 3rem 4rem 6rem;
-      max-width: 1050px;
-    }
-
-    .docs-main {
-      max-width: 800px;
-    }
-
-    /* Typography */
-    .docs-main h1 {
-      font-size: 2.5rem;
-      font-weight: 900;
-      margin-bottom: 0.5rem;
-      letter-spacing: -0.02em;
-    }
-
-    .docs-main .section-subtitle {
-      font-size: 1.15rem;
-      color: var(--text-muted);
-      margin-bottom: 3rem;
-    }
-
-    .doc-section {
-      margin-bottom: 4rem;
-      scroll-margin-top: 100px;
-    }
-
-    .doc-section h2 {
-      font-size: 1.75rem;
-      font-weight: 800;
-      margin-bottom: 1.5rem;
-      padding-bottom: 0.75rem;
-      border-bottom: 1px solid var(--border);
-      letter-spacing: -0.01em;
-    }
-
-    .doc-section h3 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: var(--green-bright);
-      margin-top: 2rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .doc-section h4 {
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text-secondary);
-      margin-top: 1.5rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .doc-section p {
-      color: var(--text-secondary);
-      margin-bottom: 1rem;
-      line-height: 1.7;
-    }
-
-    .doc-section ul, .doc-section ol {
-      color: var(--text-secondary);
-      margin-bottom: 1rem;
-      padding-left: 1.5rem;
-    }
-
-    .doc-section li {
-      margin-bottom: 0.4rem;
-    }
-
-    .doc-section li strong {
-      color: var(--text);
-    }
-
-    /* Code blocks */
-    pre {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1.25rem 1.5rem;
-      margin-bottom: 1.25rem;
-      overflow-x: auto;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-      line-height: 1.7;
-    }
-
-    pre code {
-      color: var(--text-secondary);
-    }
-
-    code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85em;
-    }
-
-    /* Inline code */
-    p code, li code, td code {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 0.15rem 0.4rem;
-      font-size: 0.8em;
-      color: var(--green-bright);
-    }
-
-    .cmd { color: var(--green); }
-    .comment { color: var(--text-muted); }
-    .highlight { color: var(--purple); }
-    .str { color: var(--green-bright); }
-    .kw { color: var(--purple); }
-    .fn { color: var(--blue); }
-    .val { color: var(--orange); }
-
-    /* Tables */
-    .doc-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 1.5rem;
-      font-size: 0.9rem;
-    }
-
-    .doc-table th {
-      text-align: left;
-      padding: 0.75rem 1rem;
-      background: var(--bg-elevated);
-      color: var(--text);
-      font-weight: 600;
-      border-bottom: 2px solid var(--border);
-      white-space: nowrap;
-    }
-
-    .doc-table td {
-      padding: 0.75rem 1rem;
-      border-bottom: 1px solid var(--border);
-      color: var(--text-secondary);
-    }
-
-    .doc-table tr:hover td {
-      background: var(--bg-hover);
-    }
-
-    .doc-table td:first-child {
-      color: var(--green-bright);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.85rem;
-    }
-
-    /* Warning box */
-    .warning-box {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-    }
-
-    .warning-box strong {
-      color: var(--red);
-    }
-
-    /* Info box */
-    .info-box {
-      background: rgba(16, 185, 129, 0.06);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-    }
-
-    .info-box strong {
-      color: var(--green);
-    }
-
-    /* Tabs for TS/Python */
-    .code-tabs {
-      margin-bottom: 1.25rem;
-    }
-
-    .code-tabs-header {
-      display: flex;
-      gap: 0;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 0;
-    }
-
-    .code-tab-btn {
-      padding: 0.5rem 1.25rem;
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-family: 'Inter', sans-serif;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
-    }
-
-    .code-tab-btn:hover { color: var(--text); }
-
-    .code-tab-btn.active {
-      color: var(--green);
-      border-bottom-color: var(--green);
-    }
-
-    .code-tab-content {
-      display: none;
-    }
-
-    .code-tab-content.active {
-      display: block;
-    }
-
-    .code-tab-content pre {
-      border-radius: 0 0 8px 8px;
-      border-top: none;
-      margin-bottom: 0;
-    }
-
-    /* Mobile sidebar toggle */
-    .sidebar-toggle {
-      display: none;
-      position: fixed;
-      bottom: 1.5rem;
-      right: 1.5rem;
-      z-index: 200;
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: var(--green);
-      color: black;
-      border: none;
-      font-size: 1.25rem;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    }
-
-    /* Mobile top nav for sidebar items */
-    .mobile-doc-nav {
-      display: none;
-    }
-
-    /* Footer */
-    footer {
-      padding: 3rem 2rem;
-      border-top: 1px solid var(--border);
-      margin-left: 250px;
-    }
-
-    .footer-container {
-      max-width: 800px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .footer-links {
-      display: flex;
-      gap: 2rem;
-    }
-
-    .footer-links a {
-      color: var(--text-muted);
-      text-decoration: none;
-      font-size: 0.875rem;
-      transition: color 0.2s;
-    }
-
-    .footer-links a:hover { color: var(--text); }
-
-    .footer-copy {
-      color: var(--text-muted);
-      font-size: 0.875rem;
-    }
-
-    /* Responsive */
-    @media (max-width: 1024px) {
-      .sidebar {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        width: 100%;
-        min-width: 100%;
-        z-index: 500;
-        padding-top: 5rem;
-        background: rgba(0, 0, 0, 0.97);
-      }
-
-      .sidebar.open {
-        display: block;
-      }
-
-      .sidebar-toggle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .docs-content {
-        margin-left: 0;
-        padding: 2rem 1.5rem 4rem;
-      }
-
-      .mobile-doc-nav {
-        display: flex;
-        gap: 0.5rem;
-        overflow-x: auto;
-        padding: 0.75rem 1.5rem;
-        margin-top: 73px;
-        border-bottom: 1px solid var(--border);
-        background: var(--bg);
-        position: sticky;
-        top: 73px;
-        z-index: 50;
-        -webkit-overflow-scrolling: touch;
-      }
-
-      .mobile-doc-nav a {
-        white-space: nowrap;
-        padding: 0.4rem 0.75rem;
-        border-radius: 6px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-decoration: none;
-        background: var(--bg-elevated);
-        border: 1px solid var(--border);
-        transition: all 0.2s;
-      }
-
-      .mobile-doc-nav a:hover,
-      .mobile-doc-nav a.active {
-        color: var(--green);
-        border-color: var(--green);
-      }
-
-      footer {
-        margin-left: 0;
-      }
-
-      .docs-main h1 {
-        font-size: 2rem;
-      }
-
-      .footer-container {
-        flex-direction: column;
-        gap: 1rem;
-        text-align: center;
-      }
-
-      .footer-links {
-        flex-wrap: wrap;
-        justify-content: center;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .nav-links { display: none; }
-
-      .docs-content {
-        padding: 1.5rem 1rem 3rem;
-      }
-
-      .doc-table {
-        font-size: 0.8rem;
-      }
-
-      .doc-table th, .doc-table td {
-        padding: 0.6rem 0.5rem;
-      }
-
-      pre {
-        font-size: 0.78rem;
-        padding: 1rem;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <!-- Nav -->
-  <nav>
-    <div class="nav-container">
-      <a href="./" class="logo">
-        🦖 openrappter
-        <span class="logo-badge">v1.4</span>
+
+<!-- ── Navigation ── -->
+<nav>
+  <div class="nav-container">
+    <a href="./" class="logo">openrappter <span class="logo-badge">v1.4.1</span></a>
+    <button class="mobile-menu-btn">&#9776;</button>
+    <div class="nav-links">
+      <a href="./docs.html">Docs</a>
+      <a href="./architecture.html">Architecture</a>
+      <a href="./tutorial.html">Tutorial</a>
+      <a href="./changelog.html">Changelog</a>
+    </div>
+    <div class="nav-cta">
+      <a href="https://github.com/kody-w/openrappter" class="btn btn-ghost">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
       </a>
-      <div class="nav-links">
-        <a href="./">Home</a>
-        <a href="./teach.html">Teach Your Agent</a>
-        <a href="https://github.com/kody-w/openrappter">GitHub</a>
-      </div>
-      <div class="nav-cta">
-        <a href="./" class="btn btn-ghost">← Back to Home</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Docs Layout ── -->
+<div class="docs-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-title">Getting Started</div>
+    <ul class="sidebar-nav">
+      <li><a href="#getting-started">Installation</a></li>
+      <li><a href="#configuration">Configuration</a></li>
+    </ul>
+    <div class="sidebar-title">Core Concepts</div>
+    <ul class="sidebar-nav">
+      <li><a href="#agents">Agents Reference</a></li>
+      <li><a href="#multi-agent">Multi-Agent Patterns</a></li>
+      <li><a href="#providers">LLM Providers</a></li>
+      <li><a href="#channels">Messaging Channels</a></li>
+      <li><a href="#gateway">WebSocket Gateway</a></li>
+    </ul>
+    <div class="sidebar-title">Systems</div>
+    <ul class="sidebar-nav">
+      <li><a href="#skills">Skills System</a></li>
+      <li><a href="#memory">Memory System</a></li>
+      <li><a href="#plugins">Plugin System</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#config-system">Config System</a></li>
+    </ul>
+    <div class="sidebar-title">Reference</div>
+    <ul class="sidebar-nav">
+      <li><a href="#api">API Reference</a></li>
+    </ul>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="docs-content">
+
+    <!-- ── 1. Getting Started ── -->
+    <div id="getting-started" class="doc-section">
+      <h2>Installation</h2>
+      <p>OpenRappter is a local-first AI agent framework with parallel implementations in TypeScript and Python. Everything runs on your machine — no cloud account required to get started.</p>
+
+      <h3>Prerequisites</h3>
+      <ul>
+        <li><strong>Node.js 20+</strong> — required for the TypeScript runtime and CLI</li>
+        <li><strong>Python 3.10+</strong> — optional, required only if using the Python runtime</li>
+        <li><strong>GitHub Copilot</strong> — the default zero-config LLM provider (uses your existing subscription)</li>
+        <li><strong>Git</strong> — required for the clone-based install method</li>
+      </ul>
+
+      <h3>Method 1 — One-line Install (recommended)</h3>
+      <p>The fastest way to get started. The install script detects your platform, downloads the latest release, and adds <code>openrappter</code> to your PATH.</p>
+      <pre>curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</pre>
+      <p>After the script completes, open a new terminal and verify the install:</p>
+      <pre>openrappter --version</pre>
+
+      <h3>Method 2 — Git Clone</h3>
+      <p>Clone the repository directly for full access to source code, examples, and the ability to contribute.</p>
+      <pre>git clone https://github.com/kody-w/openrappter.git
+cd openrappter/typescript
+npm install
+npm run build
+npm link    # adds openrappter to PATH globally</pre>
+      <p>For the Python runtime:</p>
+      <pre>cd openrappter/python
+pip install -e .</pre>
+
+      <h3>Method 3 — Teach-Your-Agent Install</h3>
+      <p>If you are already running an AI assistant, you can paste the <a href="https://raw.githubusercontent.com/kody-w/openrappter/main/skills.md">skills.md</a> link into your conversation and ask it to install OpenRappter for you. The agent will follow the instructions in that file, run the install script, and confirm the result — no terminal required on your part.</p>
+
+      <h3>Verify</h3>
+      <pre>openrappter --version
+# openrappter v1.4.1
+
+openrappter status
+# Runtime: TypeScript/Node 20.x
+# Provider: copilot (authenticated)
+# Memory: ~/.openrappter/memory.json
+# Skills: 0 installed</pre>
+
+      <div class="info-box">
+        <strong>First run:</strong> On first launch openrappter will attempt to authenticate with GitHub Copilot using your existing CLI credentials. If you are not signed in, it will open <code>gh auth login</code> inline without requiring you to run any commands manually.
       </div>
     </div>
-  </nav>
 
-  <!-- Mobile horizontal doc nav -->
-  <div class="mobile-doc-nav">
-    <a href="#getting-started">Getting Started</a>
-    <a href="#configuration">Configuration</a>
-    <a href="#agents-skills">Agents &amp; Skills</a>
-    <a href="#memory-system">Memory System</a>
-    <a href="#api-reference">API Reference</a>
-  </div>
+    <!-- ── 2. Configuration ── -->
+    <div id="configuration" class="doc-section">
+      <h2>Configuration</h2>
+      <p>OpenRappter reads its configuration from <code>~/.openrappter/config.yaml</code>. The file is created with sensible defaults on first run. All values can be overridden with environment variables.</p>
 
-  <div class="docs-layout">
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-title">Documentation</div>
-      <ul class="sidebar-nav" id="sidebar-nav">
-        <li><a href="#getting-started" data-section="getting-started">🚀 Getting Started</a></li>
-        <li><a href="#configuration" data-section="configuration">⚙️ Configuration</a></li>
-        <li><a href="#agents-skills" data-section="agents-skills">🎯 Agents &amp; Skills</a></li>
-        <li><a href="#memory-system" data-section="memory-system">🧠 Memory System</a></li>
-        <li><a href="#api-reference" data-section="api-reference">📚 API Reference</a></li>
-      </ul>
-    </aside>
+      <h3>Example config.yaml</h3>
+      <pre># ~/.openrappter/config.yaml
 
-    <!-- Main Content -->
-    <main class="docs-content">
-      <div class="docs-main">
-        <h1>📖 Documentation</h1>
-        <p class="section-subtitle">Everything you need to install, configure, and use openrappter.</p>
+provider:
+  default: copilot          # copilot | anthropic | openai | gemini | ollama
+  copilot:
+    model: gpt-4o           # model passed to the Copilot API
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-opus-4-6
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4o
+  ollama:
+    base_url: http://localhost:11434
+    model: llama3.2
 
-        <!-- ========== GETTING STARTED ========== -->
-        <section class="doc-section" id="getting-started">
-          <h2>🚀 Getting Started</h2>
-          <p>Get openrappter running in under 2 minutes.</p>
+memory:
+  backend: sqlite           # sqlite | json
+  path: ~/.openrappter/memory.db
+  embedding_model: all-MiniLM-L6-v2
+  chunk_size: 512
+  chunk_overlap: 64
 
-          <h3>Prerequisites</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Requirement</th><th>Details</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Node.js 18+</td><td>Required for the TypeScript runtime</td></tr>
-              <tr><td>Python 3.10+</td><td>Required for the Python runtime</td></tr>
-              <tr><td>GitHub Copilot CLI</td><td>Optional — enables AI-powered agent routing. Works without it using keyword matching.</td></tr>
-            </tbody>
-          </table>
+gateway:
+  enabled: true
+  port: 8765
+  host: 127.0.0.1
+  rate_limit: 100           # requests per minute per connection
 
-          <h3>Install — TypeScript Runtime</h3>
-<pre><code><span class="comment"># Clone the repository</span>
-<span class="cmd">git clone</span> https://github.com/kody-w/openrappter.git
-<span class="cmd">cd</span> openrappter/typescript
+shell:
+  allowlist: []             # if non-empty, only these commands are permitted
+  blocklist:
+    - "rm -rf /"
+    - "sudo rm"
+  require_approval: false   # set true to approve every shell command
 
-<span class="comment"># Install dependencies and build</span>
-<span class="cmd">npm install</span>
-<span class="cmd">npm run build</span></code></pre>
+skills:
+  auto_load: true
+  directory: ~/.openrappter/skills
 
-          <h3>Install — Python Runtime</h3>
-<pre><code><span class="comment"># Clone the repository</span>
-<span class="cmd">git clone</span> https://github.com/kody-w/openrappter.git
-<span class="cmd">cd</span> openrappter/python
+logging:
+  level: info               # debug | info | warn | error
+  file: ~/.openrappter/logs/openrappter.log</pre>
 
-<span class="comment"># Install in editable mode</span>
-<span class="cmd">pip install -e .</span></code></pre>
+      <h3>Environment Variable Expansion</h3>
+      <p>Any value in the YAML can reference environment variables using <code>${VAR_NAME}</code> syntax. The config loader expands these at parse time. This is the recommended way to handle API keys — keep them out of the config file and source them from your shell profile or a <code>.env</code> file.</p>
 
-          <h3>Verify Installation</h3>
-          <div class="code-tabs">
-            <div class="code-tabs-header">
-              <button class="code-tab-btn active" onclick="switchTab(this, 'verify-ts')">TypeScript</button>
-              <button class="code-tab-btn" onclick="switchTab(this, 'verify-py')">Python</button>
-            </div>
-            <div class="code-tab-content active" id="verify-ts">
-<pre><code><span class="cmd">node dist/index.js --status</span>
+      <h3>Zod Validation</h3>
+      <p>The configuration schema is defined and validated with Zod v4 at <code>typescript/src/config/schema.ts</code>. On startup, if any required field is missing or has the wrong type, openrappter prints a structured error with the exact path and expected type — not a raw crash.</p>
 
-<span class="comment"># Expected output:</span>
-<span class="comment"># 🦖 openrappter Status</span>
-<span class="comment">#   Version: 1.4.0</span>
-<span class="comment">#   Agents: 2 loaded</span></code></pre>
-            </div>
-            <div class="code-tab-content" id="verify-py">
-<pre><code><span class="cmd">openrappter --status</span>
+      <h3>Live Reload</h3>
+      <p>The config system uses a file watcher. When <code>config.yaml</code> is saved, the running process picks up the new values without a restart. Provider keys, log levels, rate limits, and gateway settings all hot-reload. Changes to the memory backend require a restart.</p>
 
-<span class="comment"># Expected output:</span>
-<span class="comment"># Agents: 5 loaded</span>
+      <h3>Environment Variables Reference</h3>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Variable</th><th>Purpose</th><th>Default</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic Claude API key</td><td>—</td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI API key</td><td>—</td></tr>
+          <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
+          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td>Override config file path</td><td><code>~/.openrappter/config.yaml</code></td></tr>
+          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td>Override log level</td><td><code>info</code></td></tr>
+          <tr><td><code>OPENRAPPTER_PORT</code></td><td>Override gateway port</td><td><code>8765</code></td></tr>
+          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td>Override default provider</td><td><code>copilot</code></td></tr>
+        </tbody>
+      </table>
+    </div>
 
-<span class="comment"># Or without installing:</span>
-<span class="cmd">python3 -m openrappter.cli --status</span></code></pre>
-            </div>
-          </div>
+    <!-- ── 3. Agents Reference ── -->
+    <div id="agents" class="doc-section">
+      <h2>Agents Reference</h2>
+      <p>An agent is a single-responsibility unit of AI-assisted computation. Every agent in OpenRappter is a single file — the metadata contract, documentation, and implementation all live together. There is no YAML, no config file, no magic parsing. The code is the contract.</p>
 
-          <div class="info-box">
-            <strong>💡 Tip:</strong> If you get a Node.js version error, use <code>nvm install 18 && nvm use 18</code> to upgrade. For Python import errors, ensure you ran <code>pip install -e .</code> from the <code>python/</code> directory.
-          </div>
-        </section>
+      <h3>Single-File Agent Pattern</h3>
+      <p>All agents extend <code>BasicAgent</code> and implement one method: <code>perform()</code>. The constructor declares a <code>metadata</code> object that describes the agent's name, purpose, and accepted parameters as a JSON Schema fragment. This metadata is used by the orchestration layer to route requests and validate inputs.</p>
 
-        <!-- ========== CONFIGURATION ========== -->
-        <section class="doc-section" id="configuration">
-          <h2>⚙️ Configuration</h2>
-          <p>openrappter stores configuration in <code>~/.openrappter/config.json</code>.</p>
+      <div class="code-tabs">
+        <div class="code-tabs-header">
+          <button class="code-tab-btn active" onclick="switchTab(this,'ts-agent')">TypeScript</button>
+          <button class="code-tab-btn" onclick="switchTab(this,'py-agent')">Python</button>
+        </div>
+        <div id="ts-agent" class="code-tab-content active">
+<pre><span class="kw">import</span> { BasicAgent, AgentMetadata } <span class="kw">from</span> <span class="str">'openrappter'</span>;
 
-          <h3>Configuration File</h3>
-<pre><code><span class="comment">// ~/.openrappter/config.json</span>
-{
-  <span class="str">"setupComplete"</span>: <span class="val">true</span>,
-  <span class="str">"copilotAvailable"</span>: <span class="val">true</span>,
-  <span class="str">"preferences"</span>: {
-    <span class="str">"emoji"</span>: <span class="str">"🦖"</span>,
-    <span class="str">"name"</span>: <span class="str">"openrappter"</span>
-  }
-}</code></pre>
-
-          <h3>Environment Variables</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>OPENRAPPTER_HOME</td><td>Config directory path</td><td><code>~/.openrappter</code></td></tr>
-              <tr><td>OPENRAPPTER_DEBUG</td><td>Enable debug logging</td><td><code>false</code></td></tr>
-            </tbody>
-          </table>
-
-          <h3>CLI Options</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Option</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>[message]</td><td>Send a single message to openrappter</td></tr>
-              <tr><td>-t, --task &lt;task&gt;</td><td>Run a task and exit</td></tr>
-              <tr><td>-e, --evolve &lt;n&gt;</td><td>Run N evolution ticks</td></tr>
-              <tr><td>-d, --daemon</td><td>Run as background daemon</td></tr>
-              <tr><td>-s, --status</td><td>Show agent status</td></tr>
-              <tr><td>-v, --version</td><td>Show version</td></tr>
-              <tr><td>-h, --help</td><td>Show help text</td></tr>
-              <tr><td>--list-agents</td><td>List all discovered agents</td></tr>
-              <tr><td>--exec &lt;agent&gt; &lt;args&gt;</td><td>Execute a specific agent directly</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Onboarding</h3>
-          <p>Run the setup wizard to configure openrappter for the first time:</p>
-<pre><code><span class="cmd">openrappter onboard</span>
-
-<span class="comment"># This will:</span>
-<span class="comment"># 1. Check for GitHub Copilot CLI</span>
-<span class="comment"># 2. Create configuration directory</span>
-<span class="comment"># 3. Set up initial preferences</span></code></pre>
-
-          <h3>Data Locations</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>File</th><th>Purpose</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>~/.openrappter/config.json</td><td>Configuration settings</td></tr>
-              <tr><td>~/.openrappter/memory.json</td><td>Persistent memory store</td></tr>
-              <tr><td>~/.openrappter/state.json</td><td>Agent state data</td></tr>
-              <tr><td>~/.openrappter/skills/</td><td>Custom skill files</td></tr>
-            </tbody>
-          </table>
-        </section>
-
-        <!-- ========== AGENTS & SKILLS ========== -->
-        <section class="doc-section" id="agents-skills">
-          <h2>🎯 Agents &amp; Skills</h2>
-          <p>Agents are tools that openrappter uses to interact with your system. They follow a unified contract across both runtimes.</p>
-
-          <h3>Built-in Agents</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Agent</th><th>Description</th><th>Example</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Shell</td><td>Execute commands, read/write files, directory listing</td><td><code>run ls -la</code>, <code>read README.md</code></td></tr>
-              <tr><td>Memory</td><td>Store and recall facts across sessions</td><td><code>remember I like dinosaurs</code></td></tr>
-              <tr><td>LearnNew</td><td>Generate new agents at runtime (Python only)</td><td><code>learn how to fetch weather</code></td></tr>
-            </tbody>
-          </table>
-
-          <h3>Using Agents</h3>
-          <h4>Natural Language</h4>
-          <p>Just describe what you want in plain English:</p>
-<pre><code><span class="highlight">🦖 You:</span> run npm test
-<span class="highlight">🦖 openrappter:</span> Running: npm test
-
-<span class="cmd">✓ All tests passed (42 tests)</span></code></pre>
-
-          <h4>Slash Commands</h4>
-<pre><code><span class="cmd">/agents</span>      <span class="comment"># List all available agents</span>
-<span class="cmd">/status</span>      <span class="comment"># Show agent status</span>
-<span class="cmd">/help</span>        <span class="comment"># Show help</span></code></pre>
-
-          <h4>CLI Options</h4>
-          <div class="code-tabs">
-            <div class="code-tabs-header">
-              <button class="code-tab-btn active" onclick="switchTab(this, 'agents-cli-ts')">TypeScript</button>
-              <button class="code-tab-btn" onclick="switchTab(this, 'agents-cli-py')">Python</button>
-            </div>
-            <div class="code-tab-content active" id="agents-cli-ts">
-<pre><code><span class="cmd">node dist/index.js --list-agents</span>
-<span class="cmd">node dist/index.js --exec Shell "ls"</span></code></pre>
-            </div>
-            <div class="code-tab-content" id="agents-cli-py">
-<pre><code><span class="cmd">openrappter --list-agents</span>
-<span class="cmd">openrappter --exec Shell "ls"</span></code></pre>
-            </div>
-          </div>
-
-          <h3>Creating Custom Agents</h3>
-          <p>Both runtimes use the same agent pattern. Agents are auto-discovered by file naming convention.</p>
-
-          <div class="code-tabs">
-            <div class="code-tabs-header">
-              <button class="code-tab-btn active" onclick="switchTab(this, 'custom-ts')">TypeScript (*Agent.ts)</button>
-              <button class="code-tab-btn" onclick="switchTab(this, 'custom-py')">Python (*_agent.py)</button>
-            </div>
-            <div class="code-tab-content active" id="custom-ts">
-<pre><code><span class="comment">// typescript/src/agents/MyAgent.ts</span>
-<span class="kw">import</span> { BasicAgent } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
-<span class="kw">import type</span> { AgentMetadata } <span class="kw">from</span> <span class="str">'./types.js'</span>;
-
-<span class="kw">export class</span> <span class="fn">MyAgent</span> <span class="kw">extends</span> BasicAgent {
+<span class="kw">export class</span> <span class="typ">MyAgent</span> <span class="kw">extends</span> <span class="typ">BasicAgent</span> {
   <span class="fn">constructor</span>() {
-    <span class="kw">const</span> metadata: AgentMetadata = {
-      name: <span class="str">'MyAgent'</span>,
-      description: <span class="str">'Does something cool'</span>,
-      parameters: {
-        type: <span class="str">'object'</span>,
-        properties: {
-          query: { type: <span class="str">'string'</span>, description: <span class="str">'User input'</span> }
-        },
-        required: []
+    <span class="kw">const</span> metadata<span class="op">:</span> <span class="typ">AgentMetadata</span> <span class="op">=</span> {
+      name<span class="op">:</span> <span class="str">'MyAgent'</span>,
+      description<span class="op">:</span> <span class="str">'Does something useful'</span>,
+      parameters<span class="op">:</span> {
+        type<span class="op">:</span> <span class="str">'object'</span>,
+        properties<span class="op">:</span> { query<span class="op">:</span> { type<span class="op">:</span> <span class="str">'string'</span> } },
+        required<span class="op">:</span> [<span class="str">'query'</span>]
       }
     };
     <span class="kw">super</span>(<span class="str">'MyAgent'</span>, metadata);
   }
 
-  <span class="kw">async</span> <span class="fn">perform</span>(kwargs: Record&lt;<span class="kw">string</span>, unknown&gt;): Promise&lt;<span class="kw">string</span>&gt; {
-    <span class="kw">const</span> query = kwargs.query <span class="kw">as string</span>;
-    <span class="kw">return</span> JSON.<span class="fn">stringify</span>({ status: <span class="str">'success'</span>, result: query });
+  <span class="kw">async</span> <span class="fn">perform</span>(kwargs<span class="op">:</span> Record<span class="op">&lt;</span>string, unknown<span class="op">&gt;</span>) {
+    <span class="kw">const</span> query <span class="op">=</span> kwargs.query <span class="kw">as</span> string;
+    <span class="cm">// access sloshed context signals</span>
+    <span class="kw">const</span> timeOfDay <span class="op">=</span> <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'temporal.time_of_day'</span>);
+    <span class="kw">return</span> { result<span class="op">:</span> <span class="str">`Hello from MyAgent at ${timeOfDay}`</span> };
   }
-}</code></pre>
-            </div>
-            <div class="code-tab-content" id="custom-py">
-<pre><code><span class="comment"># python/openrappter/agents/my_agent.py</span>
-<span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
-<span class="kw">import</span> json
+}</pre>
+        </div>
+        <div id="py-agent" class="code-tab-content">
+<pre><span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
 
-<span class="kw">class</span> <span class="fn">MyAgent</span>(BasicAgent):
+<span class="kw">class</span> <span class="typ">MyAgent</span>(BasicAgent):
     <span class="kw">def</span> <span class="fn">__init__</span>(self):
-        self.name = <span class="str">'MyAgent'</span>
-        self.metadata = {
-            <span class="str">"name"</span>: self.name,
-            <span class="str">"description"</span>: <span class="str">"Does something cool"</span>,
-            <span class="str">"parameters"</span>: {
-                <span class="str">"type"</span>: <span class="str">"object"</span>,
-                <span class="str">"properties"</span>: {
-                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User input"</span>}
-                },
-                <span class="str">"required"</span>: []
+        self.name <span class="op">=</span> <span class="str">'MyAgent'</span>
+        self.metadata <span class="op">=</span> {
+            <span class="str">"name"</span><span class="op">:</span> self.name,
+            <span class="str">"description"</span><span class="op">:</span> <span class="str">"Does something useful"</span>,
+            <span class="str">"parameters"</span><span class="op">:</span> {
+                <span class="str">"type"</span><span class="op">:</span> <span class="str">"object"</span>,
+                <span class="str">"properties"</span><span class="op">:</span> {<span class="str">"query"</span><span class="op">:</span> {<span class="str">"type"</span><span class="op">:</span> <span class="str">"string"</span>}},
+                <span class="str">"required"</span><span class="op">:</span> [<span class="str">"query"</span>]
             }
         }
-        <span class="kw">super</span>().__init__(name=self.name, metadata=self.metadata)
+        <span class="kw">super</span>().__init__(name<span class="op">=</span>self.name, metadata<span class="op">=</span>self.metadata)
 
-    <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
-        query = kwargs.<span class="fn">get</span>(<span class="str">'query'</span>, <span class="str">''</span>)
-        <span class="kw">return</span> json.<span class="fn">dumps</span>({<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"result"</span>: query})</code></pre>
-            </div>
-          </div>
-
-          <h3>Agent Execution</h3>
-          <ul>
-            <li><strong>Timeout:</strong> 30 seconds default per execution</li>
-            <li><strong>Output limit:</strong> 2000 characters for shell commands</li>
-            <li><strong>Context:</strong> Temporal, memory, and behavioral signals available via <code>self.context</code> (Python) or <code>this.context</code> (TypeScript)</li>
-            <li><strong>Entry point:</strong> <code>execute()</code> is called by the orchestrator (handles sloshing), which calls <code>perform()</code></li>
-            <li><strong>Return format:</strong> JSON string with <code>{"status": "success|error", ...}</code></li>
-          </ul>
-
-          <div class="warning-box">
-            <strong>⚠️ Security Warning:</strong> Agents can execute code on your system. Be careful with custom agents from untrusted sources, commands that modify important files, and scripts with elevated privileges. Always review agent code before installing.
-          </div>
-        </section>
-
-        <!-- ========== MEMORY SYSTEM ========== -->
-        <section class="doc-section" id="memory-system">
-          <h2>🧠 Memory System</h2>
-          <p>openrappter has persistent memory that survives across sessions, stored locally on your machine.</p>
-
-          <h3>How It Works</h3>
-          <p>Memory is stored locally in <code>~/.openrappter/memory.json</code>. Each memory entry includes:</p>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Field</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>ID</td><td>Unique identifier for the memory entry</td></tr>
-              <tr><td>Content</td><td>The actual stored memory text</td></tr>
-              <tr><td>Tags</td><td>Optional categorization labels</td></tr>
-              <tr><td>Created</td><td>Timestamp when the memory was created</td></tr>
-              <tr><td>Accessed</td><td>Number of times the memory has been accessed</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Adding Memories</h3>
-          <h4>Natural Language</h4>
-<pre><code><span class="highlight">🦖 You:</span> remember that this project uses PostgreSQL
-<span class="highlight">🦖 openrappter:</span> <span class="cmd">Got it! I'll remember that. (ID: abc123)</span></code></pre>
-          <p>Alternative phrases: <code>remember that...</code>, <code>save that...</code>, <code>store this: ...</code></p>
-
-          <h4>Slash Commands</h4>
-<pre><code><span class="cmd">/memory</span>          <span class="comment"># Show recent memories</span>
-<span class="cmd">/memory search</span>   <span class="comment"># Search all memories</span></code></pre>
-
-          <h3>Searching Memory</h3>
-<pre><code><span class="highlight">🦖 You:</span> what do you remember about databases?
-<span class="highlight">🦖 openrappter:</span> Here's what I remember:
-  <span class="cmd">•</span> This project uses PostgreSQL
-  <span class="cmd">•</span> Database migrations are in db/migrations/</code></pre>
-
-          <h3>Managing Memories</h3>
-<pre><code><span class="comment"># Forget a specific memory</span>
-<span class="cmd">/forget abc123</span>
-<span class="comment"># → Forgot memory abc123</span>
-
-<span class="comment"># View all memories</span>
-<span class="cmd">/memory</span>
-<span class="comment"># → [abc123] This project uses PostgreSQL...</span>
-<span class="comment"># → [def456] Deploy command is npm run deploy...</span></code></pre>
-
-          <h3>Memory Structure</h3>
-<pre><code>{
-  <span class="str">"id"</span>: <span class="str">"abc123"</span>,
-  <span class="str">"content"</span>: <span class="str">"This project uses PostgreSQL for the database"</span>,
-  <span class="str">"tags"</span>: [<span class="str">"tech"</span>, <span class="str">"database"</span>],
-  <span class="str">"created"</span>: <span class="str">"2025-02-05T00:00:00.000Z"</span>,
-  <span class="str">"accessed"</span>: <span class="val">3</span>
-}</code></pre>
-
-          <h3>Auto-Learning</h3>
-          <p>When running in daemon mode or with evolution enabled, openrappter automatically:</p>
-          <ol>
-            <li><strong>Learns project context</strong> from README files</li>
-            <li><strong>Consolidates old memories</strong> to save space</li>
-            <li><strong>Prioritizes frequently accessed</strong> memories</li>
-          </ol>
-
-          <h3>Memory Limits</h3>
-          <ul>
-            <li>Default limit: <strong>100 memories</strong></li>
-            <li>When exceeded, least-accessed memories are removed</li>
-            <li>Override with <code>OPENRAPPTER_MEMORY_LIMIT</code> environment variable</li>
-          </ul>
-
-          <h3>Privacy</h3>
-          <div class="info-box">
-            <strong>🔒 Local-first:</strong> All memories are stored in <code>~/.openrappter/memory.json</code> on your machine. They are not shared with third-party services. You control your data.
-          </div>
-
-          <h3>Export &amp; Backup</h3>
-<pre><code><span class="comment"># View raw memory file</span>
-<span class="cmd">cat</span> ~/.openrappter/memory.json
-
-<span class="comment"># Backup memories</span>
-<span class="cmd">cp</span> ~/.openrappter/memory.json ~/backup/
-
-<span class="comment"># Clear all memories</span>
-<span class="cmd">rm</span> ~/.openrappter/memory.json</code></pre>
-        </section>
-
-        <!-- ========== API REFERENCE ========== -->
-        <section class="doc-section" id="api-reference">
-          <h2>📚 API Reference</h2>
-          <p>Complete reference for all openrappter commands, options, and programmatic APIs.</p>
-
-          <h3>CLI Commands</h3>
-<pre><code><span class="cmd">openrappter</span> [options] [message]</code></pre>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Option</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>[message]</td><td>Send a single message</td></tr>
-              <tr><td>-t, --task &lt;task&gt;</td><td>Run a task and exit</td></tr>
-              <tr><td>-e, --evolve &lt;n&gt;</td><td>Run N evolution ticks</td></tr>
-              <tr><td>-d, --daemon</td><td>Run as background daemon</td></tr>
-              <tr><td>-s, --status</td><td>Show agent status</td></tr>
-              <tr><td>-v, --version</td><td>Show version</td></tr>
-              <tr><td>-h, --help</td><td>Show help text</td></tr>
-              <tr><td>--list-agents</td><td>List all discovered agents</td></tr>
-              <tr><td>--exec &lt;agent&gt; &lt;args&gt;</td><td>Execute a specific agent directly</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Examples</h3>
-<pre><code><span class="comment"># Interactive mode</span>
-<span class="cmd">openrappter</span>
-
-<span class="comment"># Single message</span>
-<span class="cmd">openrappter</span> <span class="str">"hello there"</span>
-
-<span class="comment"># Run a task</span>
-<span class="cmd">openrappter --task</span> <span class="str">"list all TypeScript files"</span>
-
-<span class="comment"># Evolve 10 times</span>
-<span class="cmd">openrappter --evolve</span> <span class="val">10</span>
-
-<span class="comment"># Background daemon</span>
-<span class="cmd">openrappter --daemon</span>
-
-<span class="comment"># Check status</span>
-<span class="cmd">openrappter --status</span></code></pre>
-
-          <h3>Slash Commands</h3>
-          <p>Use these in interactive mode:</p>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Command</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>/help</td><td>Show help</td></tr>
-              <tr><td>/skills</td><td>List available skills</td></tr>
-              <tr><td>/agents</td><td>List available agents</td></tr>
-              <tr><td>/memory</td><td>Show recent memories</td></tr>
-              <tr><td>/forget &lt;id&gt;</td><td>Remove a memory by ID</td></tr>
-              <tr><td>/evolve [n]</td><td>Run evolution ticks</td></tr>
-              <tr><td>/status</td><td>Show agent status</td></tr>
-              <tr><td>/quit</td><td>Exit openrappter</td></tr>
-            </tbody>
-          </table>
-
-          <h3>Python API</h3>
-          <h4>Orchestrator Class</h4>
-<pre><code><span class="kw">from</span> openrappter <span class="kw">import</span> Orchestrator
-
-orchestrator = <span class="fn">Orchestrator</span>()
-orchestrator.<span class="fn">initialize</span>()  <span class="comment"># Load default agent</span>
-
-<span class="comment"># Execute a query</span>
-response = orchestrator.<span class="fn">execute</span>(query=<span class="str">"hello"</span>)
-
-<span class="comment"># List available agents</span>
-agents = orchestrator.<span class="fn">list_agents</span>()
-
-<span class="comment"># Switch to different agent</span>
-orchestrator.<span class="fn">switch_agent</span>(<span class="str">"MyCustomAgent"</span>)</code></pre>
-
-          <h4>BasicAgent Class</h4>
-<pre><code><span class="kw">from</span> agents.basic_agent <span class="kw">import</span> BasicAgent
-
-<span class="kw">class</span> <span class="fn">MyCustomAgent</span>(BasicAgent):
-    <span class="kw">def</span> <span class="fn">__init__</span>(self):
-        self.name = <span class="str">"MyCustomAgent"</span>
-        self.metadata = {
-            <span class="str">"name"</span>: self.name,
-            <span class="str">"description"</span>: <span class="str">"Does something cool"</span>,
-            <span class="str">"parameters"</span>: {
-                <span class="str">"type"</span>: <span class="str">"object"</span>,
-                <span class="str">"properties"</span>: {
-                    <span class="str">"query"</span>: {<span class="str">"type"</span>: <span class="str">"string"</span>, <span class="str">"description"</span>: <span class="str">"User query"</span>}
-                }
-            }
-        }
-        <span class="kw">super</span>().__init__(name=self.name, metadata=self.metadata)
-
-    <span class="kw">def</span> <span class="fn">perform</span>(self, **kwargs):
-        query = kwargs.<span class="fn">get</span>(<span class="str">'query'</span>, <span class="str">''</span>)
-        <span class="comment"># Access sloshed context via self.context</span>
-        temporal = self.<span class="fn">get_signal</span>(<span class="str">'temporal'</span>, {})
-        <span class="kw">return</span> {<span class="str">"status"</span>: <span class="str">"success"</span>, <span class="str">"message"</span>: <span class="kw">f</span><span class="str">"Processed: {query}"</span>}</code></pre>
-
-          <h4>Agent Context (Data Sloshing)</h4>
-          <p>In your <code>perform()</code> method, access enriched context signals:</p>
-<pre><code><span class="comment"># Temporal awareness</span>
-time_of_day = self.<span class="fn">get_signal</span>(<span class="str">'temporal.time_of_day'</span>)
-is_weekend  = self.<span class="fn">get_signal</span>(<span class="str">'temporal.is_weekend'</span>)
-
-<span class="comment"># Query signals</span>
-specificity = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.specificity'</span>)
-hints       = self.<span class="fn">get_signal</span>(<span class="str">'query_signals.hints'</span>, [])
-
-<span class="comment"># Behavioral patterns</span>
-prefers_brief = self.<span class="fn">get_signal</span>(<span class="str">'behavioral.prefers_brief'</span>)
-
-<span class="comment"># Synthesized orientation</span>
-confidence = self.<span class="fn">get_signal</span>(<span class="str">'orientation.confidence'</span>)
-approach   = self.<span class="fn">get_signal</span>(<span class="str">'orientation.approach'</span>)
-
-<span class="comment"># Upstream slush (live signals from a previous agent)</span>
-upstream = self.context.<span class="fn">get</span>(<span class="str">'upstream_slush'</span>, {})</code></pre>
-
-          <h4>Data Slush (Agent-to-Agent Pipeline)</h4>
-          <p>Return a <code>data_slush</code> dict in your output to curate signals for downstream agents:</p>
-<pre><code><span class="comment"># Return curated signals for downstream agents</span>
-<span class="kw">return</span> json.<span class="fn">dumps</span>({
-    <span class="str">"status"</span>: <span class="str">"success"</span>,
-    <span class="str">"result"</span>: result,
-    <span class="str">"data_slush"</span>: {
-        <span class="str">"source_agent"</span>: self.name,
-        <span class="str">"key_signal"</span>: <span class="str">"extracted value"</span>,
-    }
-})
-
-<span class="comment"># Chain: feed A's slush into B</span>
-agent_b.<span class="fn">execute</span>(query=<span class="str">"..."</span>, upstream_slush=agent_a.last_data_slush)</code></pre>
-
-          <h3>Environment Variables</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Variable</th><th>Description</th><th>Default</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>OPENRAPPTER_HOME</td><td>Config directory path</td><td><code>~/.openrappter</code></td></tr>
-              <tr><td>OPENRAPPTER_DEBUG</td><td>Enable debug mode</td><td><code>false</code></td></tr>
-              <tr><td>OPENRAPPTER_MEMORY_LIMIT</td><td>Maximum number of memories</td><td><code>100</code></td></tr>
-            </tbody>
-          </table>
-
-          <h3>Exit Codes</h3>
-          <table class="doc-table">
-            <thead>
-              <tr><th>Code</th><th>Meaning</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>0</td><td>Success</td></tr>
-              <tr><td>1</td><td>General error</td></tr>
-              <tr><td>2</td><td>Configuration error</td></tr>
-              <tr><td>3</td><td>Copilot CLI not found</td></tr>
-            </tbody>
-          </table>
-        </section>
-
+    <span class="kw">def</span> <span class="fn">perform</span>(self, <span class="op">**</span>kwargs):
+        query <span class="op">=</span> kwargs.get(<span class="str">"query"</span>, <span class="str">""</span>)
+        <span class="cm"># access sloshed context signals</span>
+        time_of_day <span class="op">=</span> self.<span class="fn">get_signal</span>(<span class="str">"temporal.time_of_day"</span>)
+        <span class="kw">return</span> {<span class="str">"result"</span><span class="op">:</span> <span class="str">f"Hello from MyAgent at {time_of_day}"</span>}</pre>
+        </div>
       </div>
-    </main>
-  </div>
 
-  <!-- Sidebar toggle (mobile) -->
-  <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle documentation menu">☰</button>
+      <h3>Execution Flow</h3>
+      <p>When you call <code>execute(kwargs)</code>, the framework runs this pipeline:</p>
+      <ol>
+        <li><code>execute(kwargs)</code> is the public entry point</li>
+        <li><code>slosh(query)</code> gathers implicit context (temporal signals, query signals, memory echoes, behavioral hints, priors) and synthesizes an <code>Orientation</code> object with confidence score, suggested approach, and contextual hints</li>
+        <li>Any <code>upstream_slush</code> passed from a previous agent is merged into <code>this.context</code></li>
+        <li><code>perform(kwargs)</code> is called — this is the method you implement</li>
+        <li>If the result JSON contains a <code>data_slush</code> key, it is extracted to <code>lastDataSlush</code> (TypeScript) / <code>last_data_slush</code> (Python) for downstream agent chaining</li>
+      </ol>
 
-  <!-- Footer -->
-  <footer>
-    <div class="footer-container">
-      <div class="footer-links">
-        <a href="https://github.com/kody-w/openrappter">GitHub</a>
-        <a href="https://github.com/kody-w/rappterhub">RappterHub</a>
-        <a href="./teach.html">Teach Your Agent</a>
-        <a href="https://github.com/kody-w/openrappter/blob/main/CONTRIBUTING.md">Contributing</a>
-      </div>
-      <div class="footer-copy">
-        MIT License • Made with 🦖
+      <h3>Built-in Agents</h3>
+
+      <h4>BasicAgent</h4>
+      <p>Abstract base class. All agents extend this. Provides data sloshing, signal access, upstream context merging, and the execution pipeline.</p>
+      <table class="doc-table">
+        <thead><tr><th>Method</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>execute(kwargs)</code></td><td>Public entry point. Runs slosh, merges upstream, calls perform.</td></tr>
+          <tr><td><code>perform(kwargs)</code></td><td>Abstract. Implement this in your subclass.</td></tr>
+          <tr><td><code>slosh(query)</code></td><td>Gathers implicit context. Called automatically by execute().</td></tr>
+          <tr><td><code>getSignal(key)</code></td><td>Dot-notation access to sloshed context. e.g. <code>getSignal('temporal.time_of_day')</code></td></tr>
+        </tbody>
+      </table>
+
+      <h4>ShellAgent</h4>
+      <p>Executes shell commands and performs file system operations. Supports natural language query parsing so agents upstream can pass a free-text request and ShellAgent will derive the right action.</p>
+      <table class="doc-table">
+        <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>action</code></td><td><code>string</code></td><td>One of: <code>bash</code>, <code>read</code>, <code>write</code>, <code>list</code></td></tr>
+          <tr><td><code>command</code></td><td><code>string</code></td><td>Shell command to run (action: bash)</td></tr>
+          <tr><td><code>path</code></td><td><code>string</code></td><td>File or directory path (actions: read, write, list)</td></tr>
+          <tr><td><code>content</code></td><td><code>string</code></td><td>Content to write (action: write)</td></tr>
+          <tr><td><code>query</code></td><td><code>string</code></td><td>Natural language request — agent will determine action</td></tr>
+        </tbody>
+      </table>
+      <pre><span class="cm">// Execute a shell command</span>
+<span class="kw">const</span> result <span class="op">=</span> <span class="kw">await</span> shellAgent.<span class="fn">execute</span>({ action<span class="op">:</span> <span class="str">'bash'</span>, command<span class="op">:</span> <span class="str">'ls -la ~/projects'</span> });
+
+<span class="cm">// Read a file</span>
+<span class="kw">const</span> file <span class="op">=</span> <span class="kw">await</span> shellAgent.<span class="fn">execute</span>({ action<span class="op">:</span> <span class="str">'read'</span>, path<span class="op">:</span> <span class="str">'/etc/hosts'</span> });
+
+<span class="cm">// Write a file</span>
+<span class="kw">await</span> shellAgent.<span class="fn">execute</span>({ action<span class="op">:</span> <span class="str">'write'</span>, path<span class="op">:</span> <span class="str">'./notes.txt'</span>, content<span class="op">:</span> <span class="str">'hello world'</span> });</pre>
+
+      <h4>MemoryAgent</h4>
+      <p>Stores and retrieves information from the persistent memory store. In TypeScript the backend is SQLite with hybrid search; in Python it is a JSON file at <code>~/.openrappter/memory.json</code>.</p>
+      <table class="doc-table">
+        <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>action</code></td><td><code>string</code></td><td>One of: <code>store</code>, <code>recall</code>, <code>forget</code></td></tr>
+          <tr><td><code>key</code></td><td><code>string</code></td><td>Named identifier for the memory entry</td></tr>
+          <tr><td><code>content</code></td><td><code>string</code></td><td>Text to store (action: store)</td></tr>
+          <tr><td><code>query</code></td><td><code>string</code></td><td>Search query for semantic recall (action: recall)</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Assistant</h4>
+      <p>A configurable AI assistant with a custom system prompt. Wraps the active LLM provider, forwards sloshed context as additional system context, and streams responses through the gateway when available. Accepts <code>system_prompt</code>, <code>message</code>, and optional <code>conversation_id</code> parameters.</p>
+
+      <h4>BrowserAgent</h4>
+      <p>Headless browser automation powered by Playwright. Supports navigation, clicking, form filling, screenshot capture, and structured data extraction from web pages. Requires <code>playwright</code> to be installed separately (<code>npm install playwright</code> then <code>npx playwright install chromium</code>).</p>
+
+      <h4>WebAgent</h4>
+      <p>HTTP request agent for fetching web content. Supports GET and POST with configurable headers, automatic HTML-to-text extraction, JSON response parsing, and rate-limit-aware retry logic. Does not require a browser runtime — uses native <code>fetch</code> under the hood.</p>
+
+      <h4>MessageAgent</h4>
+      <p>Multi-channel message dispatch. Sends a message to one or more configured channels (Slack, Discord, Telegram, etc.) by channel name. Handles serialization, authentication, and delivery confirmation. Parameters: <code>channel</code>, <code>message</code>, optional <code>thread_id</code>.</p>
+
+      <h4>TTSAgent</h4>
+      <p>Text-to-speech synthesis via <code>edge-tts</code>. Converts text to an MP3 audio file or plays it directly through the system audio output. Supports all Microsoft Edge TTS voices. Parameters: <code>text</code>, <code>voice</code> (e.g. <code>en-US-JennyNeural</code>), optional <code>output_path</code>.</p>
+
+      <h4>SessionsAgent</h4>
+      <p>Session state management for multi-turn conversations. Stores and retrieves keyed session data so agents can maintain context across separate <code>execute()</code> calls without polluting the shared memory store. Parameters: <code>action</code> (<code>get</code>, <code>set</code>, <code>clear</code>), <code>session_id</code>, <code>key</code>, <code>value</code>.</p>
+
+      <h4>CronAgent</h4>
+      <p>Scheduled task execution. Accepts a cron expression and an agent invocation payload. Registers the task with the internal scheduler and fires it at the specified interval. Tasks persist across restarts when the memory backend is SQLite. Parameters: <code>schedule</code> (cron string), <code>agent</code>, <code>kwargs</code>, optional <code>name</code>.</p>
+
+      <h4>ImageAgent</h4>
+      <p>Image processing powered by Sharp. Supports resize, crop, format conversion (JPEG, PNG, WebP, AVIF), metadata extraction, thumbnail generation, and basic filter application. Parameters: <code>action</code>, <code>input_path</code>, <code>output_path</code>, and action-specific options like <code>width</code>, <code>height</code>, <code>format</code>.</p>
+
+      <h4>HackerNewsAgent</h4>
+      <p>Hacker News feed aggregation and summarization. Fetches top stories, new stories, or Ask HN / Show HN posts via the official HN API. Can return raw story data or request an LLM-powered summary of the top items for a digest workflow. Parameters: <code>feed</code> (<code>top</code>, <code>new</code>, <code>ask</code>, <code>show</code>), <code>limit</code>, optional <code>summarize</code> boolean.</p>
+
+      <h4>OuroborosAgent</h4>
+      <p>Self-evolution capability scoring with RPG lineage tracking. Evaluates an agent's output quality across multiple capability dimensions — word statistics, sentiment detection, Caesar cipher encoding, pattern recognition, and reflection accuracy — and produces a quality score from 0–100. Maintains a persistent lineage file tracking scores over time with streak multipliers, evolution tiers, and XP gain. Used for benchmarking model improvements and driving the self-improving agent feedback loop.</p>
+      <pre><span class="cm">// Evaluate capability quality</span>
+<span class="kw">const</span> result <span class="op">=</span> <span class="kw">await</span> ouroborosAgent.<span class="fn">execute</span>({
+  input<span class="op">:</span> <span class="str">'The quick brown fox jumps over the lazy dog'</span>,
+  capabilities<span class="op">:</span> [<span class="str">'word_stats'</span>, <span class="str">'sentiment'</span>, <span class="str">'patterns'</span>]
+});
+<span class="cm">// { score: 87, tier: 'Adept', xp_gained: 43, streak_multiplier: 1.5 }</span></pre>
+    </div>
+
+    <!-- ── 4. Multi-Agent Patterns ── -->
+    <div id="multi-agent" class="doc-section">
+      <h2>Multi-Agent Patterns</h2>
+      <p>OpenRappter provides three composable primitives for coordinating multiple agents: <strong>BroadcastManager</strong> for fan-out execution, <strong>AgentRouter</strong> for rule-based message routing, and <strong>SubAgentManager</strong> for nested hierarchical invocation. All three are available in the TypeScript runtime at <code>typescript/src/agents/</code>.</p>
+
+      <h3>BroadcastManager</h3>
+      <p>Send the same request to multiple agents simultaneously. Three dispatch modes control how results are collected:</p>
+      <ul>
+        <li><strong>all</strong> — dispatch to all agents and wait for every response before returning. Results are an array in dispatch order.</li>
+        <li><strong>race</strong> — dispatch to all agents and return as soon as the first one succeeds. Useful for redundancy or speed-sensitive paths.</li>
+        <li><strong>fallback</strong> — try agents in order, moving to the next only if the current one fails. Useful for graceful degradation across providers.</li>
+      </ul>
+      <pre><span class="kw">import</span> { BroadcastManager } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+<span class="kw">const</span> broadcast <span class="op">=</span> <span class="kw">new</span> <span class="typ">BroadcastManager</span>([agentA, agentB, agentC]);
+
+<span class="cm">// Wait for all three</span>
+<span class="kw">const</span> allResults <span class="op">=</span> <span class="kw">await</span> broadcast.<span class="fn">send</span>({ query<span class="op">:</span> <span class="str">'status check'</span> }, { mode<span class="op">:</span> <span class="str">'all'</span> });
+
+<span class="cm">// Return the fastest</span>
+<span class="kw">const</span> firstResult <span class="op">=</span> <span class="kw">await</span> broadcast.<span class="fn">send</span>({ query<span class="op">:</span> <span class="str">'translate hello'</span> }, { mode<span class="op">:</span> <span class="str">'race'</span> });
+
+<span class="cm">// Try agentA, fall back to agentB, then agentC</span>
+<span class="kw">const</span> safeResult <span class="op">=</span> <span class="kw">await</span> broadcast.<span class="fn">send</span>({ query<span class="op">:</span> <span class="str">'generate report'</span> }, { mode<span class="op">:</span> <span class="str">'fallback'</span> });</pre>
+
+      <h3>AgentRouter</h3>
+      <p>Rule-based message routing. Each rule specifies a match condition (sender, channel, group, or regex pattern) and a target agent. Rules are evaluated in priority order. Session key isolation ensures that concurrent conversations on the same router do not cross-contaminate context.</p>
+      <pre><span class="kw">import</span> { AgentRouter } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+<span class="kw">const</span> router <span class="op">=</span> <span class="kw">new</span> <span class="typ">AgentRouter</span>([
+  {
+    match<span class="op">:</span> { channel<span class="op">:</span> <span class="str">'slack'</span>, pattern<span class="op">:</span> <span class="str">/^!deploy/</span> },
+    agent<span class="op">:</span> deployAgent,
+    priority<span class="op">:</span> <span class="num">10</span>
+  },
+  {
+    match<span class="op">:</span> { sender<span class="op">:</span> <span class="str">'cron'</span> },
+    agent<span class="op">:</span> schedulerAgent,
+    priority<span class="op">:</span> <span class="num">5</span>
+  },
+  {
+    match<span class="op">:</span> { group<span class="op">:</span> <span class="str">'default'</span> },
+    agent<span class="op">:</span> assistantAgent,
+    priority<span class="op">:</span> <span class="num">0</span>
+  }
+]);
+
+<span class="cm">// Routes to deployAgent (highest priority match)</span>
+<span class="kw">await</span> router.<span class="fn">route</span>({
+  sender<span class="op">:</span> <span class="str">'alice'</span>,
+  channel<span class="op">:</span> <span class="str">'slack'</span>,
+  message<span class="op">:</span> <span class="str">'!deploy production'</span>,
+  session_key<span class="op">:</span> <span class="str">'alice:slack'</span>
+});</pre>
+
+      <h3>SubAgentManager</h3>
+      <p>Nested agent invocation with depth limits and loop detection. Allows an agent to spawn child agents as part of its own execution. The manager tracks the call stack and refuses to execute if the same agent appears more than once in the current chain, preventing infinite recursion. The default max depth is 5.</p>
+      <pre><span class="kw">import</span> { SubAgentManager } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+<span class="kw">class</span> <span class="typ">PlannerAgent</span> <span class="kw">extends</span> <span class="typ">BasicAgent</span> {
+  <span class="kw">private</span> sub<span class="op">:</span> <span class="typ">SubAgentManager</span>;
+
+  <span class="fn">constructor</span>() {
+    <span class="kw">super</span>(<span class="str">'PlannerAgent'</span>, metadata);
+    <span class="kw">this</span>.sub <span class="op">=</span> <span class="kw">new</span> <span class="typ">SubAgentManager</span>({ maxDepth<span class="op">:</span> <span class="num">3</span> });
+  }
+
+  <span class="kw">async</span> <span class="fn">perform</span>(kwargs) {
+    <span class="cm">// Invoke a child agent — depth and loop tracking automatic</span>
+    <span class="kw">const</span> research <span class="op">=</span> <span class="kw">await</span> <span class="kw">this</span>.sub.<span class="fn">invoke</span>(webAgent, {
+      query<span class="op">:</span> kwargs.topic,
+      upstream_slush<span class="op">:</span> <span class="kw">this</span>.lastDataSlush
+    });
+    <span class="kw">return</span> { plan<span class="op">:</span> research.summary };
+  }
+}</pre>
+    </div>
+
+    <!-- ── 5. LLM Providers ── -->
+    <div id="providers" class="doc-section">
+      <h2>LLM Providers</h2>
+      <p>OpenRappter uses a provider registry to abstract LLM backends. Switching providers is a single config change — agent code never imports provider-specific SDKs directly. The <code>BasicAgent</code> base class exposes a <code>callLLM(messages, options)</code> method that routes to whichever provider is active.</p>
+
+      <h3>GitHub Copilot (default)</h3>
+      <p>Zero-configuration. Uses your existing GitHub Copilot subscription via the <code>gh</code> CLI token. No API key setup required. This is the recommended provider for getting started because authentication is handled inline on first use.</p>
+      <pre><span class="cm"># config.yaml</span>
+provider:
+  default: copilot
+  copilot:
+    model: gpt-4o    <span class="cm"># or gpt-4o-mini, claude-3.5-sonnet, o1-mini</span></pre>
+
+      <h3>Anthropic</h3>
+      <p>Access Claude models including claude-opus-4-6, claude-sonnet-4-5, and claude-haiku-3-5. Requires an Anthropic API key.</p>
+      <pre><span class="cm"># config.yaml</span>
+provider:
+  default: anthropic
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-opus-4-6
+    max_tokens: 8192</pre>
+
+      <h3>OpenAI</h3>
+      <p>Supports all GPT-4o and o-series models. Compatible with any OpenAI-compatible endpoint by setting a custom <code>base_url</code>.</p>
+      <pre><span class="cm"># config.yaml</span>
+provider:
+  default: openai
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4o
+    base_url: https://api.openai.com/v1    <span class="cm"># override for compatible endpoints</span></pre>
+
+      <h3>Google Gemini</h3>
+      <p>Access Gemini 2.0 Flash, Gemini 1.5 Pro, and experimental models via Google AI Studio credentials.</p>
+      <pre><span class="cm"># config.yaml</span>
+provider:
+  default: gemini
+  gemini:
+    api_key: ${GEMINI_API_KEY}
+    model: gemini-2.0-flash-exp</pre>
+
+      <h3>Ollama (local)</h3>
+      <p>Run models entirely locally with no API key or internet connection required. Requires a running Ollama instance. Pull models with <code>ollama pull llama3.2</code> before use.</p>
+      <pre><span class="cm"># config.yaml</span>
+provider:
+  default: ollama
+  ollama:
+    base_url: http://localhost:11434
+    model: llama3.2          <span class="cm"># any model available in your Ollama instance</span>
+    timeout: 120000          <span class="cm"># ms — local models can be slow on first load</span></pre>
+
+      <h3>Provider Registry Pattern</h3>
+      <p>Providers are registered at <code>typescript/src/providers/registry.ts</code>. To add a custom provider, implement the <code>LLMProvider</code> interface and register it before starting the agent runtime:</p>
+      <pre><span class="kw">import</span> { registerProvider } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+registerProvider(<span class="str">'my-provider'</span>, {
+  <span class="kw">async</span> <span class="fn">chat</span>(messages, options) {
+    <span class="cm">// call your API here</span>
+    <span class="kw">return</span> { content<span class="op">:</span> response.text };
+  }
+});</pre>
+
+      <div class="info-box">
+        <strong>Tip:</strong> You can configure multiple providers simultaneously and select between them per-agent by passing <code>{ provider: 'anthropic' }</code> to <code>callLLM()</code>. This is useful for routing cheap queries to a fast model and expensive queries to a more capable one.
       </div>
     </div>
-  </footer>
 
-  <script>
-    // Tab switching
-    function switchTab(btn, tabId) {
-      const container = btn.closest('.code-tabs');
-      container.querySelectorAll('.code-tab-btn').forEach(b => b.classList.remove('active'));
-      container.querySelectorAll('.code-tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(tabId).classList.add('active');
-    }
+    <!-- ── 6. Messaging Channels ── -->
+    <div id="channels" class="doc-section">
+      <h2>Messaging Channels</h2>
+      <p>OpenRappter connects to 15+ messaging platforms through a unified channel interface. All channels implement the same <code>Channel</code> interface: <code>send(message)</code>, <code>receive(handler)</code>, and <code>connect()</code>. Add a channel in <code>config.yaml</code> and it is automatically registered with the router.</p>
 
-    // IntersectionObserver for sidebar highlighting
-    const sections = document.querySelectorAll('.doc-section');
-    const sidebarLinks = document.querySelectorAll('.sidebar-nav a');
-    const mobileLinks = document.querySelectorAll('.mobile-doc-nav a');
+      <h3>Supported Channels</h3>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Channel</th><th>Auth Method</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>CLI</td><td>None (local)</td><td>Built-in</td></tr>
+          <tr><td>Slack</td><td>Bot token + App manifest</td><td>Stable</td></tr>
+          <tr><td>Discord</td><td>Bot token</td><td>Stable</td></tr>
+          <tr><td>Telegram</td><td>BotFather token</td><td>Stable</td></tr>
+          <tr><td>WhatsApp</td><td>Meta Cloud API</td><td>Stable</td></tr>
+          <tr><td>Signal</td><td>signal-cli daemon</td><td>Beta</td></tr>
+          <tr><td>Microsoft Teams</td><td>Azure App registration</td><td>Stable</td></tr>
+          <tr><td>Google Chat</td><td>Service account</td><td>Stable</td></tr>
+          <tr><td>Matrix</td><td>Access token</td><td>Beta</td></tr>
+          <tr><td>Mattermost</td><td>Bot token</td><td>Stable</td></tr>
+          <tr><td>Feishu / Lark</td><td>App credentials</td><td>Beta</td></tr>
+          <tr><td>Line</td><td>Channel access token</td><td>Beta</td></tr>
+          <tr><td>Twitch</td><td>OAuth token</td><td>Beta</td></tr>
+          <tr><td>Nostr</td><td>Private key (nsec)</td><td>Experimental</td></tr>
+          <tr><td>iMessage</td><td>macOS + AppleScript</td><td>macOS only</td></tr>
+        </tbody>
+      </table>
 
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const id = entry.target.id;
-          sidebarLinks.forEach(link => {
-            link.classList.toggle('active', link.getAttribute('data-section') === id);
-          });
-          mobileLinks.forEach(link => {
-            link.classList.toggle('active', link.getAttribute('href') === '#' + id);
-          });
-        }
-      });
-    }, {
-      rootMargin: '-100px 0px -60% 0px',
-      threshold: 0
-    });
+      <h3>Channel Configuration</h3>
+      <pre><span class="cm"># config.yaml</span>
+channels:
+  slack:
+    enabled: true
+    bot_token: ${SLACK_BOT_TOKEN}
+    signing_secret: ${SLACK_SIGNING_SECRET}
+    default_channel: <span class="str">"#general"</span>
 
-    sections.forEach(section => observer.observe(section));
+  discord:
+    enabled: true
+    bot_token: ${DISCORD_BOT_TOKEN}
+    guild_id: ${DISCORD_GUILD_ID}
 
-    // Mobile sidebar toggle
-    const sidebar = document.getElementById('sidebar');
-    const toggle = document.getElementById('sidebar-toggle');
+  telegram:
+    enabled: true
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    allowed_chat_ids: []    <span class="cm"># empty = allow all chats</span></pre>
 
-    toggle.addEventListener('click', () => {
-      sidebar.classList.toggle('open');
-      toggle.textContent = sidebar.classList.contains('open') ? '✕' : '☰';
-    });
+      <h3>Channel Registry Pattern</h3>
+      <p>Channels are loaded from <code>typescript/src/channels/</code>. To implement a custom channel, extend the <code>BaseChannel</code> class and register it by name. The channel will then be available in the router and reachable via <code>MessageAgent</code>.</p>
+      <pre><span class="kw">import</span> { BaseChannel, registerChannel } <span class="kw">from</span> <span class="str">'openrappter'</span>;
 
-    // Close sidebar when a link is clicked (mobile)
-    sidebarLinks.forEach(link => {
-      link.addEventListener('click', () => {
-        if (window.innerWidth <= 1024) {
-          sidebar.classList.remove('open');
-          toggle.textContent = '☰';
-        }
-      });
-    });
-  </script>
+<span class="kw">class</span> <span class="typ">MyChannel</span> <span class="kw">extends</span> <span class="typ">BaseChannel</span> {
+  <span class="kw">async</span> <span class="fn">connect</span>() { <span class="cm">/* establish connection */</span> }
+  <span class="kw">async</span> <span class="fn">send</span>(message) { <span class="cm">/* deliver message */</span> }
+  <span class="kw">async</span> <span class="fn">receive</span>(handler) { <span class="cm">/* subscribe to incoming messages */</span> }
+}
+
+registerChannel(<span class="str">'my-channel'</span>, MyChannel);</pre>
+    </div>
+
+    <!-- ── 7. WebSocket Gateway ── -->
+    <div id="gateway" class="doc-section">
+      <h2>WebSocket Gateway</h2>
+      <p>The WebSocket gateway provides a real-time bidirectional interface to the agent runtime using the JSON-RPC 2.0 protocol. It enables web frontends, external services, and other processes to invoke agents, subscribe to events, and stream responses without polling.</p>
+
+      <h3>Starting the Gateway</h3>
+      <pre>openrappter gateway start --port 8765</pre>
+      <p>Or enable it in <code>config.yaml</code> under <code>gateway.enabled: true</code> to start it automatically with the main process.</p>
+
+      <h3>Connection Lifecycle</h3>
+      <ol>
+        <li>Client connects to <code>ws://localhost:8765</code></li>
+        <li>Server sends a <code>connected</code> event with session ID and server version</li>
+        <li>Client sends JSON-RPC requests; server responds with results or streaming chunks</li>
+        <li>Client subscribes to event channels using <code>subscribe</code> method</li>
+        <li>Server pushes events to subscribed clients as JSON-RPC notifications</li>
+      </ol>
+
+      <h3>JSON-RPC Request / Response</h3>
+      <pre><span class="cm">// Request: invoke an agent</span>
+{
+  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
+  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>,
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.execute"</span>,
+  <span class="str">"params"</span><span class="op">:</span> {
+    <span class="str">"agent"</span><span class="op">:</span> <span class="str">"ShellAgent"</span>,
+    <span class="str">"kwargs"</span><span class="op">:</span> { <span class="str">"action"</span><span class="op">:</span> <span class="str">"bash"</span>, <span class="str">"command"</span><span class="op">:</span> <span class="str">"uptime"</span> },
+    <span class="str">"stream"</span><span class="op">:</span> <span class="kw">false</span>
+  }
+}
+
+<span class="cm">// Response</span>
+{
+  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
+  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>,
+  <span class="str">"result"</span><span class="op">:</span> {
+    <span class="str">"output"</span><span class="op">:</span> <span class="str">"12:34  up 3 days, 4:21, 2 users, load averages: 1.23 0.98 0.84"</span>,
+    <span class="str">"exit_code"</span><span class="op">:</span> <span class="num">0</span>
+  }
+}</pre>
+
+      <h3>Streaming Responses</h3>
+      <p>Set <code>"stream": true</code> in the request params to receive incremental token delivery. The server sends multiple <code>agent.chunk</code> notifications followed by a final <code>agent.done</code> notification with the complete result.</p>
+      <pre><span class="cm">// Streaming chunk notification</span>
+{
+  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.chunk"</span>,
+  <span class="str">"params"</span><span class="op">:</span> { <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>, <span class="str">"delta"</span><span class="op">:</span> <span class="str">"Here is the "</span> }
+}
+{
+  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.done"</span>,
+  <span class="str">"params"</span><span class="op">:</span> { <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>, <span class="str">"result"</span><span class="op">:</span> { <span class="str">"output"</span><span class="op">:</span> <span class="str">"Here is the analysis..."</span> } }
+}</pre>
+
+      <h3>Event Types</h3>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Event</th><th>Description</th><th>Subscribe Method</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>agent.*</code></td><td>Agent execution lifecycle (start, chunk, done, error)</td><td><code>subscribe.agent</code></td></tr>
+          <tr><td><code>chat.*</code></td><td>Incoming and outgoing chat messages</td><td><code>subscribe.chat</code></td></tr>
+          <tr><td><code>channel.*</code></td><td>Channel connect/disconnect/error events</td><td><code>subscribe.channel</code></td></tr>
+          <tr><td><code>cron.*</code></td><td>Scheduled job fire and completion events</td><td><code>subscribe.cron</code></td></tr>
+          <tr><td><code>presence.*</code></td><td>Connected client join/leave events</td><td><code>subscribe.presence</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>Rate Limiting</h3>
+      <p>The gateway enforces a per-connection rate limit (default: 100 requests/minute). Exceeding the limit results in a JSON-RPC error response with code <code>-32029</code> (rate limit exceeded) and a <code>retry_after</code> field in milliseconds. Configure the limit in <code>config.yaml</code> under <code>gateway.rate_limit</code>.</p>
+    </div>
+
+    <!-- ── 8. Skills System ── -->
+    <div id="skills" class="doc-section">
+      <h2>Skills System</h2>
+      <p>Skills extend an agent's capabilities at runtime without modifying the agent's source code. A skill is a <code>SKILL.md</code> file that describes a capability in natural language, plus an optional <code>scripts/</code> directory with executable code. Skills are distributed through ClawHub and stored locally at <code>~/.openrappter/skills/</code>.</p>
+
+      <h3>ClawHub Integration</h3>
+      <p>ClawHub is the skills registry. It is accessed via <code>npx clawhub@latest</code> — no global install required. The <code>ClawHubClient</code> in OpenRappter wraps these commands and exposes them as a programmatic API.</p>
+      <pre><span class="cm"># Search for skills</span>
+openrappter skills search <span class="str">"github pull requests"</span>
+
+<span class="cm"># Install a skill by name</span>
+openrappter skills install gh-pr-reviewer
+
+<span class="cm"># List installed skills</span>
+openrappter skills list
+
+<span class="cm"># Remove a skill</span>
+openrappter skills remove gh-pr-reviewer</pre>
+
+      <h3>SKILL.md Format</h3>
+      <p>A skill is defined by a <code>SKILL.md</code> file with a structured frontmatter block followed by documentation:</p>
+      <pre><span class="str">---
+name: gh-pr-reviewer
+version: 1.2.0
+description: Review GitHub pull requests and suggest improvements
+author: kody-w
+tags: [github, code-review, productivity]
+parameters:
+  pr_url:
+    type: string
+    required: true
+    description: Full GitHub PR URL to review
+  focus:
+    type: string
+    enum: [security, performance, style, all]
+    default: all
+scripts:
+  - fetch_pr.sh
+  - analyze_diff.py
+---</span>
+
+<span class="cm"># gh-pr-reviewer
+
+Fetches a pull request diff from GitHub and runs a multi-pass review
+focusing on the specified concern area. Returns structured feedback
+grouped by file with line-level comments.</span></pre>
+
+      <h3>Skill Execution</h3>
+      <p>When a skill is installed, OpenRappter wraps it as a <code>ClawHubSkillAgent</code> instance that extends <code>BasicAgent</code>. The skill's parameters become the agent's metadata parameters. Scripts in the <code>scripts/</code> directory are executed via <code>ShellAgent</code> with the skill's directory as the working directory.</p>
+      <pre><span class="kw">import</span> { loadSkill } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+<span class="cm">// Skills auto-load at startup if config.skills.auto_load is true</span>
+<span class="cm">// Or load manually:</span>
+<span class="kw">const</span> prReviewer <span class="op">=</span> <span class="kw">await</span> <span class="fn">loadSkill</span>(<span class="str">'gh-pr-reviewer'</span>);
+<span class="kw">const</span> review <span class="op">=</span> <span class="kw">await</span> prReviewer.<span class="fn">execute</span>({
+  pr_url<span class="op">:</span> <span class="str">'https://github.com/org/repo/pull/42'</span>,
+  focus<span class="op">:</span> <span class="str">'security'</span>
+});</pre>
+
+      <h3>Lock File</h3>
+      <p>Installed skills are tracked in a lock file at <code>~/.openrappter/skills/.clawhub/lock.json</code>. The lock file records the installed version, install date, and a content hash. Running <code>openrappter skills verify</code> checks all installed skills against their hashes and reports any that have been modified locally.</p>
+
+      <h3>Writing a Skill</h3>
+      <p>To publish a skill to ClawHub, create a directory with a <code>SKILL.md</code> file and optional scripts, then run:</p>
+      <pre>npx clawhub@latest publish ./my-skill-directory</pre>
+    </div>
+
+    <!-- ── 9. Memory System ── -->
+    <div id="memory" class="doc-section">
+      <h2>Memory System</h2>
+      <p>The memory system provides persistent, searchable storage for agent knowledge. It supports both exact key-value retrieval and semantic similarity search via embeddings. The TypeScript runtime uses SQLite with hybrid search; the Python runtime uses a JSON file.</p>
+
+      <h3>Content Chunking</h3>
+      <p>Before storing, large documents are split into overlapping chunks using a sliding window algorithm. This improves recall precision — a query matches the specific passage that contains the answer rather than the entire document. Default settings: 512 token chunks with 64 token overlap.</p>
+      <pre><span class="cm">// Chunking behavior (typescript/src/memory/chunker.ts)</span>
+<span class="cm">// Input: "The quick brown fox..." (2000 tokens)</span>
+<span class="cm">// Output: chunks of 512 tokens each, overlapping by 64 tokens</span>
+<span class="cm">// Chunk boundaries are respected at sentence boundaries where possible</span>
+
+<span class="kw">const</span> chunker <span class="op">=</span> <span class="kw">new</span> <span class="typ">ContentChunker</span>({ chunkSize<span class="op">:</span> <span class="num">512</span>, overlap<span class="op">:</span> <span class="num">64</span> });
+<span class="kw">const</span> chunks <span class="op">=</span> chunker.<span class="fn">split</span>(longDocument);</pre>
+
+      <h3>Embeddings</h3>
+      <p>The TypeScript runtime generates embeddings using a local model (default: <code>all-MiniLM-L6-v2</code> via <code>@xenova/transformers</code>). Embeddings run entirely on-device with no API calls. The first run downloads the model (~25MB) and caches it at <code>~/.openrappter/models/</code>.</p>
+      <p>To use an API-based embedding provider instead, set <code>memory.embedding_provider: openai</code> in <code>config.yaml</code>. This uses the <code>text-embedding-3-small</code> model by default.</p>
+
+      <h3>Hybrid Search</h3>
+      <p>Memory queries use hybrid search: a combination of vector similarity (cosine distance on embeddings) and keyword BM25 scoring. The two scores are combined with a configurable weight (default: 60% semantic, 40% keyword). This outperforms pure vector search on queries that contain specific identifiers, names, or technical terms.</p>
+      <pre><span class="cm">// Recall with hybrid search (typescript)</span>
+<span class="kw">const</span> results <span class="op">=</span> <span class="kw">await</span> memoryAgent.<span class="fn">execute</span>({
+  action<span class="op">:</span> <span class="str">'recall'</span>,
+  query<span class="op">:</span> <span class="str">'deployment configuration for staging'</span>,
+  limit<span class="op">:</span> <span class="num">5</span>,
+  min_score<span class="op">:</span> <span class="num">0.7</span>
+});</pre>
+
+      <h3>Python Backend</h3>
+      <p>The Python runtime stores all memory entries in a single JSON file at <code>~/.openrappter/memory.json</code>. Recall is performed with a simple TF-IDF + cosine similarity implementation that requires no external dependencies. For high-volume use cases, switch to the SQLite backend by setting <code>memory.backend: sqlite</code> in your config.</p>
+      <pre><span class="cm"># Python: store and recall</span>
+memory_agent.<span class="fn">perform</span>(action<span class="op">=</span><span class="str">"store"</span>, key<span class="op">=</span><span class="str">"project_notes"</span>, content<span class="op">=</span><span class="str">"Deploy to prod on Fridays only."</span>)
+results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(action<span class="op">=</span><span class="str">"recall"</span>, query<span class="op">=</span><span class="str">"deployment schedule"</span>)</pre>
+
+      <h3>ContextMemoryAgent and ManageMemoryAgent (Python)</h3>
+      <p>The Python runtime includes two higher-level memory agents built on top of <code>MemoryAgent</code>:</p>
+      <ul>
+        <li><strong>ContextMemoryAgent</strong> — Automatically stores conversation turns and retrieves relevant context before each agent call. Designed to be wired into the <code>upstream_slush</code> pipeline.</li>
+        <li><strong>ManageMemoryAgent</strong> — Exposes CRUD operations for memory management via natural language commands. Useful for admin tasks like bulk deletion, key renaming, and export.</li>
+      </ul>
+    </div>
+
+    <!-- ── 10. Plugin System ── -->
+    <div id="plugins" class="doc-section">
+      <h2>Plugin System</h2>
+      <p>Plugins extend the OpenRappter runtime itself — adding new channels, providers, storage backends, middleware, or gateway event handlers — without forking the codebase. Plugins are loaded at startup from the <code>~/.openrappter/plugins/</code> directory.</p>
+
+      <h3>Plugin Manifest</h3>
+      <p>Every plugin requires a <code>plugin.json</code> manifest at its root:</p>
+      <pre>{
+  <span class="str">"name"</span><span class="op">:</span> <span class="str">"my-plugin"</span>,
+  <span class="str">"version"</span><span class="op">:</span> <span class="str">"1.0.0"</span>,
+  <span class="str">"description"</span><span class="op">:</span> <span class="str">"Adds Notion as a memory backend"</span>,
+  <span class="str">"author"</span><span class="op">:</span> <span class="str">"yourname"</span>,
+  <span class="str">"main"</span><span class="op">:</span> <span class="str">"./index.js"</span>,
+  <span class="str">"hooks"</span><span class="op">:</span> [<span class="str">"onLoad"</span>, <span class="str">"onRequest"</span>, <span class="str">"onResponse"</span>],
+  <span class="str">"permissions"</span><span class="op">:</span> [<span class="str">"memory.write"</span>, <span class="str">"config.read"</span>]
+}</pre>
+
+      <h3>Plugin Lifecycle</h3>
+      <p>Plugins implement hooks that are called at defined points in the runtime lifecycle:</p>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Hook</th><th>Called When</th><th>Can Modify</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>onLoad</code></td><td>Plugin is first loaded at startup</td><td>Registration, config</td></tr>
+          <tr><td><code>onUnload</code></td><td>Runtime is shutting down</td><td>Cleanup only</td></tr>
+          <tr><td><code>onRequest</code></td><td>Before any agent execute() call</td><td>kwargs, context</td></tr>
+          <tr><td><code>onResponse</code></td><td>After any agent execute() returns</td><td>Result object</td></tr>
+          <tr><td><code>onMessage</code></td><td>Any channel receives a message</td><td>Message object</td></tr>
+          <tr><td><code>onError</code></td><td>Any unhandled error in the runtime</td><td>Error handling</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Example Plugin Structure</h3>
+      <pre>~/.openrappter/plugins/notion-memory/
+  plugin.json
+  index.js
+  README.md</pre>
+
+      <pre><span class="cm">// index.js — minimal plugin implementing onLoad hook</span>
+<span class="kw">import</span> { registerStorageAdapter } <span class="kw">from</span> <span class="str">'openrappter/plugins'</span>;
+<span class="kw">import</span> { NotionStorageAdapter } <span class="kw">from</span> <span class="str">'./notion-adapter.js'</span>;
+
+<span class="kw">export async function</span> <span class="fn">onLoad</span>(ctx) {
+  <span class="fn">registerStorageAdapter</span>(<span class="str">'notion'</span>, <span class="kw">new</span> <span class="typ">NotionStorageAdapter</span>({
+    token<span class="op">:</span> ctx.config.<span class="fn">get</span>(<span class="str">'notion.token'</span>),
+    databaseId<span class="op">:</span> ctx.config.<span class="fn">get</span>(<span class="str">'notion.database_id'</span>)
+  }));
+  ctx.logger.<span class="fn">info</span>(<span class="str">'Notion memory backend registered'</span>);
+}</pre>
+
+      <h3>SDK Hooks API</h3>
+      <p>The plugin SDK (<code>openrappter/plugins</code>) exports registration functions for each extensible subsystem: <code>registerStorageAdapter</code>, <code>registerChannel</code>, <code>registerProvider</code>, <code>registerMiddleware</code>, and <code>registerEventHandler</code>. The <code>ctx</code> object passed to each hook provides access to config, logger, memory, and the agent registry.</p>
+    </div>
+
+    <!-- ── 11. Security ── -->
+    <div id="security" class="doc-section">
+      <h2>Security</h2>
+      <p>OpenRappter operates with the same OS-level permissions as the user who runs it. Because agents can execute shell commands and read/write files, the framework includes several layers of protection. Security is opt-in by default for ease of development — enable stricter controls before deploying in shared or production environments.</p>
+
+      <h3>ShellAgent Sandboxing</h3>
+      <p>ShellAgent is the primary attack surface for prompt injection via shell execution. Two mechanisms limit its blast radius:</p>
+      <ul>
+        <li><strong>Allowlist mode</strong> — Set <code>shell.allowlist</code> to an array of permitted command prefixes. Any command not matching an entry is rejected before execution. Recommended for production deployments.</li>
+        <li><strong>Blocklist mode</strong> — The default. A configurable list of dangerous patterns (e.g. <code>rm -rf /</code>, <code>sudo rm</code>) is checked against the command string before execution. Overlapping glob patterns are supported.</li>
+      </ul>
+      <pre><span class="cm"># config.yaml — production lockdown example</span>
+shell:
+  allowlist:
+    - <span class="str">"git status"</span>
+    - <span class="str">"git log"</span>
+    - <span class="str">"npm test"</span>
+    - <span class="str">"ls"</span>
+    - <span class="str">"cat"</span>
+  require_approval: false</pre>
+
+      <h3>Approval Workflows</h3>
+      <p>Enable <code>shell.require_approval: true</code> to pause before executing any shell command and prompt the operator for confirmation. In gateway mode this sends an <code>approval.required</code> event to subscribed clients before proceeding. Useful for high-stakes operations like database migrations or deployments.</p>
+
+      <h3>Rate Limiting</h3>
+      <p>The WebSocket gateway enforces per-connection rate limits. For channel adapters, each channel can set its own rate limit in addition to the global gateway limit. Rate limits apply to both inbound message handling and outbound LLM API calls, protecting against runaway loops.</p>
+
+      <h3>Audit Logging</h3>
+      <p>When <code>logging.level: debug</code> or when <code>logging.audit: true</code> is set, all agent invocations, shell commands executed, files written, and channel messages sent are written to the audit log at <code>~/.openrappter/logs/audit.jsonl</code>. Each entry is a newline-delimited JSON object with timestamp, agent name, action, arguments, result status, and duration.</p>
+
+      <h3>Gateway Authentication</h3>
+      <p>By default the gateway binds to <code>127.0.0.1</code> and is not accessible from external networks. For remote access, set a shared secret in <code>config.yaml</code>:</p>
+      <pre><span class="cm"># config.yaml</span>
+gateway:
+  host: 0.0.0.0
+  secret: ${GATEWAY_SECRET}    <span class="cm"># required in Authorization: Bearer header</span></pre>
+
+      <div class="warning-box">
+        <strong>Warning:</strong> Never expose the gateway on <code>0.0.0.0</code> without setting a <code>gateway.secret</code>. Without a secret, any process on the network can invoke agents and execute shell commands.
+      </div>
+
+      <h3>Prompt Injection Mitigations</h3>
+      <p>The slosh pipeline includes a simple injection detector that flags inputs containing common injection patterns (e.g. "ignore previous instructions", "you are now DAN"). Flagged inputs are not blocked by default but are logged at <code>warn</code> level and included in the sloshed orientation as a <code>suspicious_input: true</code> signal that agents can act on.</p>
+    </div>
+
+    <!-- ── 12. Config System ── -->
+    <div id="config-system" class="doc-section">
+      <h2>Config System</h2>
+      <p>The config system is responsible for loading, validating, hot-reloading, and providing typed access to all runtime configuration. It is implemented in TypeScript at <code>typescript/src/config/</code> and mirrors the Python implementation at <code>python/openrappter/config.py</code>.</p>
+
+      <h3>Loading Order</h3>
+      <p>Configuration is resolved in this priority order (highest wins):</p>
+      <ol>
+        <li>Environment variables (e.g. <code>OPENRAPPTER_LOG_LEVEL=debug</code>)</li>
+        <li>Config file specified by <code>OPENRAPPTER_CONFIG</code> env var</li>
+        <li><code>~/.openrappter/config.yaml</code> (default location)</li>
+        <li><code>~/.openrappter/config.json</code> (JSON alternative)</li>
+        <li>Built-in defaults compiled into the binary</li>
+      </ol>
+
+      <h3>Zod Schema Validation</h3>
+      <p>The full config schema is defined in <code>typescript/src/config/schema.ts</code> using Zod v4. Validation runs on every load and reload. Errors are surfaced as structured messages that identify the exact field path and the expected vs received type:</p>
+      <pre><span class="kw">import</span> { configSchema } <span class="kw">from</span> <span class="str">'openrappter/config'</span>;
+
+<span class="cm">// Validate a config object programmatically</span>
+<span class="kw">const</span> result <span class="op">=</span> configSchema.<span class="fn">safeParse</span>(rawConfig);
+<span class="kw">if</span> (!result.success) {
+  result.error.issues.<span class="fn">forEach</span>(issue <span class="op">=&gt;</span>
+    console.<span class="fn">error</span>(<span class="str">`[${issue.path.join('.')}] ${issue.message}`</span>)
+  );
+}</pre>
+
+      <h3>File Watcher and Live Reload</h3>
+      <p>The config loader registers a file system watcher on the config file. When a change is detected, the new file is read, validated, and diffed against the current config. Fields that support hot-reload are updated in place; fields that require a restart (e.g. <code>memory.backend</code>) emit a <code>config.restart_required</code> warning without crashing the process.</p>
+      <pre><span class="kw">import</span> { getConfig, onConfigChange } <span class="kw">from</span> <span class="str">'openrappter/config'</span>;
+
+<span class="fn">onConfigChange</span>((newConfig, diff) <span class="op">=&gt;</span> {
+  console.<span class="fn">log</span>(<span class="str">'Config updated:'</span>, diff);
+  <span class="cm">// diff contains only the fields that changed</span>
+});</pre>
+
+      <h3>Migration System</h3>
+      <p>As OpenRappter evolves, config schemas change. The migration system tracks the config format version in a <code>_version</code> field and automatically upgrades older config files to the current schema. Migrations are defined as transform functions in <code>typescript/src/config/migrations/</code>. The original file is backed up to <code>config.yaml.bak</code> before any migration is applied.</p>
+
+      <h3>Environment Variable Expansion</h3>
+      <p>Values using <code>${VAR_NAME}</code> syntax are expanded at load time. Unset variables resolve to an empty string by default. Use <code>${VAR_NAME:-default_value}</code> syntax to provide a fallback:</p>
+      <pre><span class="cm"># Uses ANTHROPIC_API_KEY if set, otherwise 'sk-placeholder'</span>
+provider:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}</pre>
+
+      <h3>Programmatic Config Access</h3>
+      <pre><span class="kw">import</span> { getConfig } <span class="kw">from</span> <span class="str">'openrappter/config'</span>;
+
+<span class="kw">const</span> config <span class="op">=</span> <span class="fn">getConfig</span>();
+console.<span class="fn">log</span>(config.provider.default);   <span class="cm">// "copilot"</span>
+console.<span class="fn">log</span>(config.gateway.port);        <span class="cm">// 8765</span></pre>
+    </div>
+
+    <!-- ── 13. API Reference ── -->
+    <div id="api" class="doc-section">
+      <h2>API Reference</h2>
+
+      <h3>CLI Commands</h3>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Command</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>openrappter</code></td><td>Start the interactive CLI agent</td></tr>
+          <tr><td><code>openrappter --version</code></td><td>Print version and exit</td></tr>
+          <tr><td><code>openrappter status</code></td><td>Show runtime, provider, and memory status</td></tr>
+          <tr><td><code>openrappter gateway start</code></td><td>Start the WebSocket gateway</td></tr>
+          <tr><td><code>openrappter gateway stop</code></td><td>Stop a running gateway instance</td></tr>
+          <tr><td><code>openrappter skills search &lt;query&gt;</code></td><td>Search ClawHub for skills</td></tr>
+          <tr><td><code>openrappter skills install &lt;name&gt;</code></td><td>Install a skill from ClawHub</td></tr>
+          <tr><td><code>openrappter skills list</code></td><td>List installed skills</td></tr>
+          <tr><td><code>openrappter skills remove &lt;name&gt;</code></td><td>Uninstall a skill</td></tr>
+          <tr><td><code>openrappter skills verify</code></td><td>Verify integrity of installed skills</td></tr>
+          <tr><td><code>openrappter memory recall &lt;query&gt;</code></td><td>Search memory from the CLI</td></tr>
+          <tr><td><code>openrappter memory clear</code></td><td>Delete all memory entries</td></tr>
+          <tr><td><code>openrappter config validate</code></td><td>Validate the current config file</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Programmatic API</h3>
+      <p>Import OpenRappter as a library in your TypeScript or JavaScript project:</p>
+      <pre><span class="kw">import</span> {
+  BasicAgent,
+  ShellAgent,
+  MemoryAgent,
+  BroadcastManager,
+  AgentRouter,
+  SubAgentManager,
+  loadSkill,
+  getConfig,
+  onConfigChange,
+  registerProvider,
+  registerChannel,
+  startGateway
+} <span class="kw">from</span> <span class="str">'openrappter'</span>;
+
+<span class="cm">// Instantiate and run an agent</span>
+<span class="kw">const</span> shell <span class="op">=</span> <span class="kw">new</span> <span class="typ">ShellAgent</span>();
+<span class="kw">const</span> result <span class="op">=</span> <span class="kw">await</span> shell.<span class="fn">execute</span>({ action<span class="op">:</span> <span class="str">'bash'</span>, command<span class="op">:</span> <span class="str">'date'</span> });
+console.<span class="fn">log</span>(result.output);
+
+<span class="cm">// Start the gateway programmatically</span>
+<span class="kw">const</span> gw <span class="op">=</span> <span class="kw">await</span> <span class="fn">startGateway</span>({ port<span class="op">:</span> <span class="num">8765</span> });
+gw.<span class="fn">on</span>(<span class="str">'agent.done'</span>, (event) <span class="op">=&gt;</span> console.<span class="fn">log</span>(event));</pre>
+
+      <h3>Data Sloshing Signals</h3>
+      <p>The slosh pipeline populates a context object before each <code>perform()</code> call. Access these signals with <code>getSignal(key)</code> using dot notation.</p>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Signal Key</th><th>Type</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>temporal.time_of_day</code></td><td><code>string</code></td><td>morning / afternoon / evening / night</td></tr>
+          <tr><td><code>temporal.day_of_week</code></td><td><code>string</code></td><td>monday … sunday</td></tr>
+          <tr><td><code>temporal.iso_date</code></td><td><code>string</code></td><td>ISO 8601 date string</td></tr>
+          <tr><td><code>temporal.unix_ms</code></td><td><code>number</code></td><td>Current Unix timestamp in milliseconds</td></tr>
+          <tr><td><code>query.intent</code></td><td><code>string</code></td><td>Inferred intent category of the query</td></tr>
+          <tr><td><code>query.entities</code></td><td><code>string[]</code></td><td>Named entities extracted from query</td></tr>
+          <tr><td><code>query.sentiment</code></td><td><code>string</code></td><td>positive / neutral / negative</td></tr>
+          <tr><td><code>memory.echoes</code></td><td><code>object[]</code></td><td>Top memory recall results for the query</td></tr>
+          <tr><td><code>memory.recent_keys</code></td><td><code>string[]</code></td><td>Keys written in the last 10 minutes</td></tr>
+          <tr><td><code>behavioral.session_length</code></td><td><code>number</code></td><td>Number of turns in current session</td></tr>
+          <tr><td><code>behavioral.last_agent</code></td><td><code>string</code></td><td>Name of last agent called in session</td></tr>
+          <tr><td><code>orientation.confidence</code></td><td><code>number</code></td><td>0–1 confidence score for chosen approach</td></tr>
+          <tr><td><code>orientation.approach</code></td><td><code>string</code></td><td>Suggested reasoning approach</td></tr>
+          <tr><td><code>orientation.hints</code></td><td><code>string[]</code></td><td>Contextual hints derived from slosh</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Environment Variables</h3>
+      <table class="doc-table">
+        <thead>
+          <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ANTHROPIC_API_KEY</code></td><td>—</td><td>Anthropic Claude API key</td></tr>
+          <tr><td><code>OPENAI_API_KEY</code></td><td>—</td><td>OpenAI API key</td></tr>
+          <tr><td><code>GEMINI_API_KEY</code></td><td>—</td><td>Google Gemini API key</td></tr>
+          <tr><td><code>SLACK_BOT_TOKEN</code></td><td>—</td><td>Slack bot token for channel integration</td></tr>
+          <tr><td><code>DISCORD_BOT_TOKEN</code></td><td>—</td><td>Discord bot token</td></tr>
+          <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>—</td><td>Telegram BotFather token</td></tr>
+          <tr><td><code>GATEWAY_SECRET</code></td><td>—</td><td>Bearer secret for gateway authentication</td></tr>
+          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td><code>~/.openrappter/config.yaml</code></td><td>Override config file location</td></tr>
+          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td><code>info</code></td><td>debug / info / warn / error</td></tr>
+          <tr><td><code>OPENRAPPTER_PORT</code></td><td><code>8765</code></td><td>Gateway WebSocket port</td></tr>
+          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td><code>copilot</code></td><td>Override default LLM provider</td></tr>
+          <tr><td><code>OPENRAPPTER_NO_TELEMETRY</code></td><td>—</td><td>Set to any value to disable anonymous usage stats</td></tr>
+        </tbody>
+      </table>
+
+      <h3>TypeScript Exports</h3>
+      <pre><span class="cm">// Core agents</span>
+<span class="kw">export</span> { BasicAgent, AgentMetadata, AgentResult } <span class="kw">from</span> <span class="str">'./agents/BasicAgent'</span>;
+<span class="kw">export</span> { ShellAgent } <span class="kw">from</span> <span class="str">'./agents/ShellAgent'</span>;
+<span class="kw">export</span> { MemoryAgent } <span class="kw">from</span> <span class="str">'./agents/MemoryAgent'</span>;
+<span class="kw">export</span> { OuroborosAgent } <span class="kw">from</span> <span class="str">'./agents/OuroborosAgent'</span>;
+
+<span class="cm">// Multi-agent</span>
+<span class="kw">export</span> { BroadcastManager } <span class="kw">from</span> <span class="str">'./agents/broadcast'</span>;
+<span class="kw">export</span> { AgentRouter } <span class="kw">from</span> <span class="str">'./agents/router'</span>;
+<span class="kw">export</span> { SubAgentManager } <span class="kw">from</span> <span class="str">'./agents/subagent'</span>;
+
+<span class="cm">// Skills</span>
+<span class="kw">export</span> { ClawHubClient, loadSkill, ClawHubSkillAgent } <span class="kw">from</span> <span class="str">'./clawhub'</span>;
+
+<span class="cm">// Gateway</span>
+<span class="kw">export</span> { startGateway, GatewayServer } <span class="kw">from</span> <span class="str">'./gateway'</span>;
+
+<span class="cm">// Config</span>
+<span class="kw">export</span> { getConfig, onConfigChange, configSchema } <span class="kw">from</span> <span class="str">'./config'</span>;
+
+<span class="cm">// Providers</span>
+<span class="kw">export</span> { registerProvider, LLMProvider } <span class="kw">from</span> <span class="str">'./providers'</span>;
+
+<span class="cm">// Channels</span>
+<span class="kw">export</span> { BaseChannel, registerChannel } <span class="kw">from</span> <span class="str">'./channels'</span>;</pre>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Footer ── -->
+<footer>
+  <div class="footer-container">
+    <div class="footer-links">
+      <a href="https://github.com/kody-w/openrappter">GitHub</a>
+      <a href="./">Home</a>
+      <a href="./tutorial.html">Tutorial</a>
+      <a href="./changelog.html">Changelog</a>
+    </div>
+    <div class="footer-copy">MIT License</div>
+  </div>
+</footer>
+
+<script src="./nav.js"></script>
 </body>
 </html>

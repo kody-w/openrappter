@@ -124,7 +124,7 @@ export class AudioProcessor {
       await fs.writeFile(tmpPath, input);
 
       const formData = new FormData();
-      const audioBlob = new Blob([input], { type: 'audio/mpeg' });
+      const audioBlob = new Blob([new Uint8Array(input)] as BlobPart[], { type: 'audio/mpeg' });
       formData.append('file', audioBlob, 'audio.mp3');
       formData.append('model', options.model ?? 'whisper-1');
       if (options.language) formData.append('language', options.language);

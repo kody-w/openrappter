@@ -26,3 +26,4 @@ export { SelfHealingCronAgent } from './SelfHealingCronAgent.js';
 export type { JobConfig, CheckResult } from './SelfHealingCronAgent.js';
 export { WatchmakerAgent } from './WatchmakerAgent.js';
 export type { AgentVersion, AgentSlot, TestCase, EvaluationCheck, EvaluationResult, ComparisonResult, PromotionRecord, CycleResult } from './WatchmakerAgent.js';
+export { LearnNewAgent } from './LearnNewAgent.js';

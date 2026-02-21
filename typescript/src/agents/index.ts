@@ -22,3 +22,5 @@ export { ImageAgent } from './ImageAgent.js';
 export { HackerNewsAgent } from './HackerNewsAgent.js';
 export { OuroborosAgent, EVOLUTION_CATALOG, assessEvolution, loadLineageLog, saveLineageLog, computeTrends } from './OuroborosAgent.js';
 export type { EvolutionEntry, EvolutionReport, EvolutionLineage, LineageRunSummary, RunDelta, CapabilityTrend, CapabilityScore, Check } from './OuroborosAgent.js';
+export { SelfHealingCronAgent } from './SelfHealingCronAgent.js';
+export type { JobConfig, CheckResult } from './SelfHealingCronAgent.js';

@@ -1,6 +1,6 @@
 {
   "name": "openrappter",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,7 @@
     "lint": "eslint src/",
     "demo": "tsx examples/quickstart.ts",
     "demo:ouroboros": "tsx examples/ouroboros.ts",
+    "demo:learn": "tsx examples/learn-new.ts",
     "format": "prettier --write .",
     "prepare": "npm run build"
   },

@@ -29,8 +29,12 @@ export type { AgentVersion, AgentSlot, TestCase, EvaluationCheck, EvaluationResu
 export { LearnNewAgent } from './LearnNewAgent.js';
 export { AgentChain, createAgentChain } from './chain.js';
 export type { ChainStep, ChainStepResult, ChainResult, ChainOptions } from './chain.js';
+export { AgentGraph, createAgentGraph } from './graph.js';
+export type { GraphNode, GraphNodeResult, GraphResult, GraphOptions } from './graph.js';
 export { PipelineAgent } from './PipelineAgent.js';
 export type { PipelineStep, PipelineSpec, PipelineResult, StepResult } from './PipelineAgent.js';
 export { GitAgent } from './GitAgent.js';
 export { CodeReviewAgent } from './CodeReviewAgent.js';
 export type { ReviewFinding, ReviewResult } from './CodeReviewAgent.js';
+export { AgentTracer, createTracer, globalTracer } from './tracer.js';
+export type { TraceSpan, TraceContext, AgentTracerOptions } from './tracer.js';

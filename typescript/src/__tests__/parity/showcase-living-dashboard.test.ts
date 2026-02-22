@@ -181,7 +181,7 @@ describe('Showcase: Living Dashboard', () => {
     it('should register DashboardQuery agent as MCP tool', () => {
       const dashboard = new DashboardHandler();
       const queryAgent = new DashboardQueryAgent(dashboard);
-      const mcp = new McpServer({ name: 'openrappter', version: '1.7.0' });
+      const mcp = new McpServer({ name: 'openrappter', version: '1.8.0' });
 
       mcp.registerAgent(queryAgent);
       expect(mcp.hasTool('DashboardQuery')).toBe(true);

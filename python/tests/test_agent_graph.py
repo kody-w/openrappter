@@ -1,6 +1,8 @@
 """Tests for AgentGraph - DAG executor for parallel agent pipelines."""
 
 import json
+import time
+import threading
 import pytest
 
 from openrappter.agents.basic_agent import BasicAgent
@@ -66,6 +68,25 @@ class FailingAgent(BasicAgent):
 
     def perform(self, **kwargs):
         raise RuntimeError("intentional failure")
+
+
+class SlowAgent(BasicAgent):
+    """Sleeps for a configurable duration, records thread id."""
+
+    def __init__(self, name="Slow", delay=0.1):
+        self._delay = delay
+        self.thread_id = None
+        metadata = {
+            "name": name,
+            "description": f"Slow agent: {name}",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+        super().__init__(name=name, metadata=metadata)
+
+    def perform(self, **kwargs):
+        self.thread_id = threading.current_thread().ident
+        time.sleep(self._delay)
+        return json.dumps({"status": "success", "agent": self.name, "data_slush": {"done": True}})
 
 
 # ---------------------------------------------------------------------------
@@ -287,3 +308,52 @@ class TestRunValidation:
         graph.add_node(GraphNode(name="a", agent=EchoAgent(), depends_on=["missing"]))
         with pytest.raises(ValueError, match="validation failed"):
             graph.run()
+
+
+# ---------------------------------------------------------------------------
+# Tests: parallel execution
+# ---------------------------------------------------------------------------
+
+class TestParallelExecution:
+    def test_parallel_roots_execute_concurrently(self):
+        """Three roots each sleeping 0.1s should finish in ~0.1s (not 0.3s)."""
+        agents = [SlowAgent(f"S{i}", delay=0.1) for i in range(3)]
+        graph = AgentGraph()
+        for i, agent in enumerate(agents):
+            graph.add_node(GraphNode(name=f"s{i}", agent=agent))
+
+        start = time.time()
+        result = graph.run()
+        elapsed = time.time() - start
+
+        assert result.status == "success"
+        assert len(result.nodes) == 3
+        # Parallel: should be well under 0.3s total (sequential would be ~0.3s)
+        assert elapsed < 0.25, f"Took {elapsed:.2f}s — expected parallel (~0.1s)"
+
+    def test_parallel_false_falls_back_to_sequential(self):
+        """With parallel=False, three roots sleeping 0.1s should take ~0.3s."""
+        agents = [SlowAgent(f"S{i}", delay=0.1) for i in range(3)]
+        graph = AgentGraph({'parallel': False})
+        for i, agent in enumerate(agents):
+            graph.add_node(GraphNode(name=f"s{i}", agent=agent))
+
+        start = time.time()
+        result = graph.run()
+        elapsed = time.time() - start
+
+        assert result.status == "success"
+        # Sequential: should be >= 0.3s
+        assert elapsed >= 0.25, f"Took {elapsed:.2f}s — expected sequential (~0.3s)"
+
+    def test_parallel_uses_different_threads(self):
+        """Parallel roots should execute on different threads."""
+        agents = [SlowAgent(f"S{i}", delay=0.05) for i in range(3)]
+        graph = AgentGraph()
+        for i, agent in enumerate(agents):
+            graph.add_node(GraphNode(name=f"s{i}", agent=agent))
+
+        graph.run()
+        thread_ids = {a.thread_id for a in agents}
+        # At least 2 different thread IDs (main thread won't be reused by executor)
+        assert len(thread_ids) >= 2, f"Expected multiple threads, got {thread_ids}"

@@ -13,9 +13,9 @@ merged into a combined upstream_slush keyed by node name:
 Mirrors TypeScript agents/graph.ts
 """
 
-import asyncio
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -58,6 +58,7 @@ class AgentGraph:
         self._nodes = {}  # name -> GraphNode (ordered dict in Python 3.7+)
         self._node_timeout = options.get('node_timeout')
         self._stop_on_error = options.get('stop_on_error', False)
+        self._parallel = options.get('parallel', True)
 
     def add_node(self, node=None, *, name=None, agent=None, kwargs=None, depends_on=None):
         """Add a node to the graph. Returns self for fluent chaining.
@@ -158,28 +159,49 @@ class AgentGraph:
                 continue
 
             # Execute all runnable nodes in this level
-            for name in to_run:
-                result = self._execute_node(name, node_results, initial_kwargs)
-                node_results[name] = result
-                execution_order.append(name)
+            if self._parallel and not self._stop_on_error and len(to_run) > 1:
+                # Parallel execution via ThreadPoolExecutor
+                level_results = {}
+                with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
+                    futures = {
+                        executor.submit(self._execute_node, name, node_results, initial_kwargs): name
+                        for name in to_run
+                    }
+                    for future in as_completed(futures):
+                        name = futures[future]
+                        level_results[name] = future.result()
 
-                if result.status == 'error':
-                    if self._stop_on_error:
-                        # Mark all remaining unexecuted nodes as skipped
-                        for remaining_name in self._nodes:
-                            if remaining_name not in node_results:
-                                node_results[remaining_name] = self._make_skipped(remaining_name)
-                                execution_order.append(remaining_name)
-                        return GraphResult(
-                            status='error',
-                            nodes=node_results,
-                            execution_order=execution_order,
-                            total_duration_ms=int((time.time() - graph_start) * 1000),
-                            error=result.result.get('message', 'A node failed'),
-                        )
-                    else:
-                        # Mark all transitive dependents as skipped
+                # Process results in stable order
+                for name in to_run:
+                    result = level_results[name]
+                    node_results[name] = result
+                    execution_order.append(name)
+                    if result.status == 'error':
                         self._collect_dependents(name, skipped)
+            else:
+                # Sequential execution (stop_on_error needs per-node checking, or parallel=False)
+                for name in to_run:
+                    result = self._execute_node(name, node_results, initial_kwargs)
+                    node_results[name] = result
+                    execution_order.append(name)
+
+                    if result.status == 'error':
+                        if self._stop_on_error:
+                            # Mark all remaining unexecuted nodes as skipped
+                            for remaining_name in self._nodes:
+                                if remaining_name not in node_results:
+                                    node_results[remaining_name] = self._make_skipped(remaining_name)
+                                    execution_order.append(remaining_name)
+                            return GraphResult(
+                                status='error',
+                                nodes=node_results,
+                                execution_order=execution_order,
+                                total_duration_ms=int((time.time() - graph_start) * 1000),
+                                error=result.result.get('message', 'A node failed'),
+                            )
+                        else:
+                            # Mark all transitive dependents as skipped
+                            self._collect_dependents(name, skipped)
 
         has_errors = any(r.status == 'error' for r in node_results.values())
         has_skipped = any(r.status == 'skipped' for r in node_results.values())

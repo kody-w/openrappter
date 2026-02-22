@@ -47,7 +47,7 @@ interface JsonRpcResponse {
 export interface McpServerOptions {
   /** Server name (default: 'openrappter') */
   name?: string;
-  /** Server version (default: '1.8.2') */
+  /** Server version (default: '1.9.0') */
   version?: string;
 }
 
@@ -59,7 +59,7 @@ export class McpServer {
   constructor(options?: McpServerOptions) {
     this.serverInfo = {
       name: options?.name ?? 'openrappter',
-      version: options?.version ?? '1.8.2',
+      version: options?.version ?? '1.9.0',
     };
   }
 

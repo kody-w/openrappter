@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.8.2, ES modules, Node >=20)
+- `typescript/` — TypeScript/Node.js package (v1.9.0, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Competitor repo copy (reference only, ignore submodule drift)
 
@@ -185,7 +185,7 @@ Exposes OpenRappter agents as MCP (Model Context Protocol) tools via JSON-RPC 2.
 ```typescript
 import { McpServer } from './mcp/server.js';
 
-const server = new McpServer({ name: 'openrappter', version: '1.8.2' });
+const server = new McpServer({ name: 'openrappter', version: '1.9.0' });
 server.registerAgent(shellAgent);
 server.registerAgent(memoryAgent);
 await server.serve(); // reads stdin, writes stdout

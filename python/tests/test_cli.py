@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 class TestVersion:
     def test_package_version(self):
         from openrappter import __version__
-        assert __version__ == "1.8.2"
+        assert __version__ == "1.9.0"
 
     def test_cli_version_matches(self):
         """Verify cli.py version matches package version."""

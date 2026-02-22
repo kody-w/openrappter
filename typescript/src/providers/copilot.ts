@@ -11,7 +11,6 @@
 import type { LLMProvider, Message, ChatOptions, ProviderResponse, Tool, ToolCall, StreamDelta } from './types.js';
 import {
   resolveCopilotApiToken,
-  DEFAULT_COPILOT_API_BASE_URL,
   type ResolvedCopilotToken,
 } from './copilot-token.js';
 

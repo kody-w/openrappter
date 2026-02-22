@@ -217,7 +217,7 @@ describe('PipelineAgent', () => {
         }
         async perform(_kwargs: Record<string, unknown>): Promise<string> {
           // BasicAgent.execute() moves upstream_slush from kwargs into this.context
-          capturedContext = this.context as Record<string, unknown>;
+          capturedContext = this.context as unknown as Record<string, unknown>;
           return JSON.stringify({ status: 'success', agent: 'InspectB' });
         }
       }

@@ -63,10 +63,15 @@ class TestAgentDiscovery:
             assert "properties" in meta["parameters"]
 
     def test_agent_files_follow_naming_convention(self):
-        """All agent files in agents/ should be *_agent.py."""
+        """All agent files in agents/ should be *_agent.py or known exceptions."""
+        # Some modules (broadcast, router, subagent) are multi-agent utility
+        # files that don't follow the single-agent naming convention.
+        exceptions = {"broadcast.py", "router.py", "subagent.py"}
         agents_dir = Path(__file__).parent.parent / "openrappter" / "agents"
         py_files = [f.name for f in agents_dir.glob("*.py") if f.name != "__init__.py"]
         for name in py_files:
+            if name in exceptions:
+                continue
             assert name.endswith("_agent.py"), f"{name} doesn't follow *_agent.py convention"
 
 

@@ -5,7 +5,7 @@
  * data_slush is forwarded to a fix agent via upstream_slush.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { BroadcastManager } from '../../agents/broadcast.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata, AgentResult } from '../../agents/types.js';
@@ -25,7 +25,7 @@ class LogAnalyzerAgent extends BasicAgent {
     this.delayMs = delayMs;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     await new Promise(r => setTimeout(r, this.delayMs));
     return JSON.stringify({
       status: 'success',
@@ -54,7 +54,7 @@ class StackTraceParserAgent extends BasicAgent {
     this.delayMs = delayMs;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     await new Promise(r => setTimeout(r, this.delayMs));
     return JSON.stringify({
       status: 'success',
@@ -83,7 +83,7 @@ class ErrorCategorizerAgent extends BasicAgent {
     this.delayMs = delayMs;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     await new Promise(r => setTimeout(r, this.delayMs));
     return JSON.stringify({
       status: 'success',

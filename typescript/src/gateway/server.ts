@@ -11,9 +11,6 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type {
-  RpcRequest,
-  RpcResponse,
-  RpcEvent,
   GatewayConfig,
   GatewayStatus,
   ConnectionInfo,
@@ -24,7 +21,6 @@ import type {
   AgentResponse,
   ChatSession,
   ChatMessage,
-  ChannelStatus,
   SendMessageRequest,
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
@@ -337,7 +333,7 @@ export class GatewayServer {
   private serveStaticFile(req: IncomingMessage, res: ServerResponse): void {
     const webRoot = this.config.webRoot!;
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-    let filePath = decodeURIComponent(url.pathname);
+    const filePath = decodeURIComponent(url.pathname);
 
     // Guard against path traversal
     const resolved = path.resolve(webRoot, '.' + filePath);
@@ -832,7 +828,7 @@ export class GatewayServer {
 
   // ── Agent Execution with Chat Events ─────────────────────────────────
 
-  private async executeAgentWithEvents(sessionKey: string, runId: string, message: string, connId: string): Promise<void> {
+  private async executeAgentWithEvents(sessionKey: string, runId: string, message: string, _connId: string): Promise<void> {
     if (!this.agentHandler) return;
 
     try {
@@ -883,7 +879,7 @@ export class GatewayServer {
     if (!mapping) return;
 
     const envFile = path.join(os.homedir(), '.openrappter', '.env');
-    let existing: Record<string, string> = {};
+    const existing: Record<string, string> = {};
 
     // Read existing env file
     try {

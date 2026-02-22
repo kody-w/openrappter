@@ -3,7 +3,7 @@
  * frame-based messaging, chat.send → agent wiring, and event broadcasting.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { WebSocket } from 'ws';
 import { GatewayServer } from './server.js';
 import type { AgentRequest, AgentResponse, StreamingResponse } from './types.js';

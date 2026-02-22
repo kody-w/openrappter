@@ -158,7 +158,7 @@ class MockLearnNewAgent extends BasicAgent {
     this.agentsToReturn = agentsToReturn;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     const agent = this.agentsToReturn[this.callIndex] ?? this.agentsToReturn[this.agentsToReturn.length - 1];
     this.callIndex++;
     this.createdAgents.push(agent);

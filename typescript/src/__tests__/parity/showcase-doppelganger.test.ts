@@ -168,7 +168,7 @@ describe('Showcase: Doppelganger', () => {
       const chain = new AgentChain()
         .add('original', new TextProcessorAgent(), { text: inputText })
         .add('clone', new TextProcessorCloneAgent(), { text: inputText })
-        .add('compare', new ComparisonAgent(), {}, (prevResult: AgentResult, slush) => {
+        .add('compare', new ComparisonAgent(), {}, (prevResult: AgentResult, _slush) => {
           // Gather both results for comparison
           return {
             original_result: chain['steps'][0] ? undefined : undefined, // Will be overridden

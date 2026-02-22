@@ -147,7 +147,7 @@ class FactoryAgent extends BasicAgent {
     this.generation = generation;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     const parentGen = this.generation;
     const childGen = parentGen + 1;
     const childName = `FactoryChild_Gen${childGen}`;
@@ -177,7 +177,7 @@ class EvolverAgent extends BasicAgent {
     super(name, metadata);
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     // upstream_slush is deleted from kwargs by BasicAgent.execute() and placed in this.context
     const upstream = this.context?.upstream_slush as Record<string, unknown> | undefined;
     const prevScore = (upstream?.score as number) ?? 25;

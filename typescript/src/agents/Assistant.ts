@@ -13,7 +13,7 @@
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
 import { truncateHistory } from '../providers/messages.js';
-import type { Message, Tool, ToolCall, StreamDelta } from '../providers/types.js';
+import type { Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
@@ -249,7 +249,6 @@ export class Assistant {
 
       let fullContent = '';
       const toolCallAccumulator = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
-      let finishReason: string | undefined;
 
       // Retry streaming call on transient fetch failures
       const maxRetries = 2;
@@ -261,7 +260,6 @@ export class Assistant {
             tools: tools.length > 0 ? tools : undefined,
           })) {
             if (delta.done) {
-              finishReason = delta.finish_reason;
               break;
             }
 

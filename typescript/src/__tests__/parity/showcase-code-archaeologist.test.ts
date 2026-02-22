@@ -22,7 +22,7 @@ class GitHistoryAgent extends BasicAgent {
     super('GitHistory', metadata);
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     return JSON.stringify({
       status: 'success',
       commits: 142,

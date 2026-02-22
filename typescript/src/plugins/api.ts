@@ -24,7 +24,7 @@ export interface PluginAPI {
 /**
  * Create a PluginAPI instance for a specific plugin
  */
-export function createPluginAPI(pluginId: string, loader: unknown): PluginAPI {
+export function createPluginAPI(pluginId: string, _loader: unknown): PluginAPI {
   return {
     registerAgent(agent: unknown): void {
       // Implementation would use loader to register the agent
@@ -51,7 +51,7 @@ export function createPluginAPI(pluginId: string, loader: unknown): PluginAPI {
       console.log(`[${pluginId}] Registering provider:`, provider);
     },
 
-    registerHttpHandler(route: string, handler: unknown): void {
+    registerHttpHandler(route: string, _handler: unknown): void {
       console.log(`[${pluginId}] Registering HTTP handler for route ${route}`);
     },
 

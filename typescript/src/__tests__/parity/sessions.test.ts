@@ -29,15 +29,6 @@ describe('Session Management Parity', () => {
     });
 
     it('should list sessions with filters', () => {
-      const request = {
-        method: 'sessions.list',
-        params: {
-          channelType: 'telegram',
-          limit: 20,
-          offset: 0,
-        },
-      };
-
       const response = {
         sessions: [
           { id: 'session_1', channelType: 'telegram', userId: 'user_1', messageCount: 10 },
@@ -51,11 +42,6 @@ describe('Session Management Parity', () => {
     });
 
     it('should preview session (summary without full messages)', () => {
-      const request = {
-        method: 'sessions.preview',
-        params: { sessionId: 'session_1' },
-      };
-
       const response = {
         id: 'session_1',
         channelType: 'telegram',
@@ -83,11 +69,6 @@ describe('Session Management Parity', () => {
     });
 
     it('should reset session (clear messages but keep session)', () => {
-      const request = {
-        method: 'sessions.reset',
-        params: { sessionId: 'session_1' },
-      };
-
       const response = {
         success: true,
         sessionId: 'session_1',
@@ -99,21 +80,11 @@ describe('Session Management Parity', () => {
     });
 
     it('should delete session entirely', () => {
-      const request = {
-        method: 'sessions.delete',
-        params: { sessionId: 'session_1' },
-      };
-
       const response = { deleted: true };
       expect(response.deleted).toBe(true);
     });
 
     it('should compact sessions (remove old data)', () => {
-      const request = {
-        method: 'sessions.compact',
-        params: { olderThanDays: 30 },
-      };
-
       const response = {
         compacted: 15,
         freedBytes: 1024000,
@@ -123,15 +94,6 @@ describe('Session Management Parity', () => {
     });
 
     it('should resolve session by channel + user', () => {
-      const request = {
-        method: 'sessions.resolve',
-        params: {
-          channelType: 'telegram',
-          channelId: 'chat_456',
-          userId: 'user_789',
-        },
-      };
-
       const response = {
         sessionId: 'session_abc123',
         isNew: false,

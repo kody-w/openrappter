@@ -204,7 +204,7 @@ export class LearnNewAgent extends BasicAgent {
     return 'Custom';
   }
 
-  private tryGenerateNameViaCopilot(description: string): string | null {
+  private tryGenerateNameViaCopilot(_description: string): string | null {
     // Synchronous check — we don't await because name generation
     // should be fast. Copilot is optional enhancement.
     // This is intentionally a no-op for now; Copilot integration
@@ -350,7 +350,7 @@ ${performBody}
 `;
   }
 
-  private generatePerformBody(description: string): string {
+  private generatePerformBody(_description: string): string {
     // Simple echo/process implementation — Copilot integration can enhance this later
     return `      if (!query) {
         return JSON.stringify({

@@ -227,6 +227,7 @@ describe('CopilotProvider.chatStream', () => {
     const provider = await createProvider();
 
     await expect(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       for await (const _ of provider.chatStream([{ role: 'user', content: 'hi' }])) {
         // should not reach here
       }

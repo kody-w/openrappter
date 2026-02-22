@@ -42,7 +42,7 @@ export class AgentRegistry {
               this.agents.set(instance.name, instance);
             }
           }
-        } catch (e) {
+        } catch {
           // Skip agents that fail to load
         }
       }

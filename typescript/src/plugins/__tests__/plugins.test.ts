@@ -10,7 +10,6 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Manifest validation tests
@@ -660,15 +659,15 @@ describe('Plugin Manager', () => {
 
 describe('Plugin System Integration', () => {
   it('a plugin can use the SDK and its registrations are accessible via manager', async () => {
-    const { createPluginContext } = await import('../sdk.js');
     const { PluginManager } = await import('../manager.js');
+    await import('../sdk.js'); // SDK imported for type reference
 
     const mgr = new PluginManager({ pluginDir: '/tmp/plugins' });
 
     // Simulate a plugin module that uses the SDK
     const pluginModule = {
       default: {
-        initialize: async (ctx: ReturnType<typeof createPluginContext>) => {
+        initialize: async (ctx: any) => {
           ctx.registerTool({
             name: 'greet',
             description: 'Greet someone',

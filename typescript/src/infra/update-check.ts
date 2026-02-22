@@ -38,7 +38,7 @@ export async function checkForUpdate(
       latestVersion,
       currentVersion,
     };
-  } catch (error) {
+  } catch {
     // On error, assume no update
     return {
       hasUpdate: false,

@@ -274,7 +274,6 @@ export class SelfHealingCronAgent extends BasicAgent {
 
     // Step 3: Unhealthy — run restart command
     checkResult.restarted = true;
-    let restartOutput: string | undefined;
     let restartSuccess = false;
 
     try {
@@ -283,10 +282,9 @@ export class SelfHealingCronAgent extends BasicAgent {
         command: job.restartCommand,
       });
       const shellParsed = JSON.parse(shellResult);
-      restartOutput = shellParsed.output;
       restartSuccess = shellParsed.status === 'success';
     } catch {
-      restartOutput = 'Restart command failed';
+      // restart command failed
     }
 
     // Step 4: Re-check after restart (single attempt)
@@ -416,7 +414,6 @@ export class SelfHealingCronAgent extends BasicAgent {
       return JSON.stringify({ status: 'error', message: `Job not found: ${name}` });
     }
 
-    const job = this.jobs.get(name)!;
     this.jobs.delete(name);
     this.checkHistory.delete(name);
 

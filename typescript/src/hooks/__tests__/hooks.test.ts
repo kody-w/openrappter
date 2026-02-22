@@ -601,7 +601,6 @@ phase: boot
 \`\`\`
 `;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const fakeEntries: any[] = [
         { name: 'hook1.md', isFile: () => true, isDirectory: () => false },
         { name: 'hook2.md', isFile: () => true, isDirectory: () => false },
@@ -609,7 +608,6 @@ phase: boot
       ];
 
       vi.spyOn(fs, 'existsSync').mockReturnValue(true);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(fs, 'readdirSync').mockReturnValue(fakeEntries as any);
       vi.spyOn(fs, 'readFileSync').mockReturnValue(validContent);
 
@@ -636,7 +634,6 @@ return { data: { loaded: true } };
 \`\`\`
 `;
       vi.spyOn(fs, 'existsSync').mockReturnValue(true);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.spyOn(fs, 'readdirSync').mockReturnValue([
         { name: 'reg-boot.md', isFile: () => true, isDirectory: () => false },
       ] as any);

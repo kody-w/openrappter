@@ -399,7 +399,7 @@ describe('Plugin Types', () => {
         {
           route: '/api/test',
           method: 'POST',
-          handler: async (req: unknown, res: unknown) => {
+          handler: async (_req: unknown, _res: unknown) => {
             // Handler implementation
           },
         },
@@ -459,8 +459,8 @@ describe('Plugin Types', () => {
           name: 'Cache Service',
           factory: () => {
             return {
-              get: (key: string) => null,
-              set: (key: string, value: unknown) => {},
+              get: (_key: string) => null,
+              set: (_key: string, _value: unknown) => {},
               clear: () => {},
             };
           },

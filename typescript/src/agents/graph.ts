@@ -327,7 +327,7 @@ export class AgentGraph {
 
     // Build kwargs: initial (for root nodes) + static node kwargs
     const isRoot = (node.dependsOn ?? []).length === 0;
-    let kwargs: Record<string, unknown> = {
+    const kwargs: Record<string, unknown> = {
       ...(isRoot && initialKwargs ? initialKwargs : {}),
       ...(node.kwargs ?? {}),
     };

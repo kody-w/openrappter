@@ -3,7 +3,7 @@
  * Manages device identity, trust, and token management
  */
 
-import { randomBytes, createHash, createHmac, generateKeyPairSync } from 'crypto';
+import { randomBytes, createHash, generateKeyPairSync } from 'crypto';
 
 export interface Device {
   id: string;
@@ -376,7 +376,7 @@ export class DevicePairingManager {
       }
     }
 
-    for (const [id, request] of this.pairingRequests) {
+    for (const [, request] of this.pairingRequests) {
       if (request.status === 'pending' && new Date(request.expiresAt) < now) {
         request.status = 'expired';
         expiredRequests++;

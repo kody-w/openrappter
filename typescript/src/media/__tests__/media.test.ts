@@ -5,9 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 
 // ---------------------------------------------------------------------------
 // Mock sharp

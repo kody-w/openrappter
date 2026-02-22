@@ -76,7 +76,7 @@ describe('Showcase: Ouroboros Accelerator', () => {
     it('should chain evolution → review', async () => {
       const chain = new AgentChain()
         .add('evolve', new EvolutionAgent(), { source: 'function add(a,b) { return a+b; }' })
-        .add('review', new ReviewAgent(), {}, (prevResult: AgentResult, slush) => {
+        .add('review', new ReviewAgent(), {}, (prevResult: AgentResult, _slush) => {
           return { content: (prevResult as Record<string, unknown>).evolved_source as string ?? '' };
         });
 

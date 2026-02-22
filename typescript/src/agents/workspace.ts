@@ -291,7 +291,7 @@ export async function ensureWorkspace(dir?: string): Promise<void> {
   const workDir = dir ?? WORKSPACE_DIR;
   await fs.mkdir(workDir, { recursive: true });
 
-  let state = await readOnboardingState(workDir);
+  const state = await readOnboardingState(workDir);
   let stateChanged = false;
 
   // Seed template files (SOUL, IDENTITY, USER)

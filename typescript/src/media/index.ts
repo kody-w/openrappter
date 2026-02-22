@@ -191,10 +191,6 @@ export class MediaManager {
     if (this.cleanupRegistered) return;
     this.cleanupRegistered = true;
 
-    const cleanup = async () => {
-      await this.fileManager.cleanupAll();
-    };
-
     process.once('exit', () => {
       // Synchronous best-effort on 'exit'
       for (const path of this.fileManager.getTrackedFiles()) {

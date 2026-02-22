@@ -471,7 +471,6 @@ describe('Memory Parity', () => {
 
   describe('Embedding Generation', () => {
     it('should generate embeddings for text', async () => {
-      const text = 'Hello world';
       const embeddingDim = 1536; // OpenAI embedding dimension
 
       const mockEmbedding = new Float32Array(embeddingDim);
@@ -487,7 +486,6 @@ describe('Memory Parity', () => {
 
     it('should cache embeddings', async () => {
       const cache = new Map<string, Float32Array>();
-      const text = 'Hello world';
       const hash = 'hash_123';
 
       cache.set(hash, new Float32Array([0.1, 0.2, 0.3]));

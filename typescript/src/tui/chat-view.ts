@@ -1,5 +1,4 @@
 import { renderMarkdown } from './markdown.js';
-import { theme } from './theme.js';
 
 export class ChatView {
   private messages: Array<{ role: string; content: string }> = [];

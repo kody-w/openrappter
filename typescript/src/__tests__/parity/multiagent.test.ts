@@ -3,8 +3,7 @@
  * Tests session routing, broadcast groups, sub-agent invocation
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { describe, it, expect } from 'vitest';
 
 describe('Multi-Agent Parity', () => {
   describe('Session Routing', () => {
@@ -161,7 +160,6 @@ describe('Multi-Agent Parity', () => {
           agents: ['agent_a', 'agent_b', 'agent_c'],
         };
 
-        const message = { content: 'Hello' };
         const results: { agentId: string; response: string }[] = [];
 
         for (const agentId of group.agents) {

@@ -21,7 +21,7 @@
 import type { Command } from 'commander';
 import { execSync } from 'child_process';
 import { existsSync, statSync } from 'fs';
-import { homedir, platform, tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { createConnection } from 'net';
 
@@ -203,7 +203,6 @@ function checkMemorySystem(): CheckResult {
 function checkDiskSpace(): CheckResult {
   try {
     const tmp = tmpdir();
-    const stat = statSync(tmp);
     // On most systems we can estimate from the fs stats
     // Use df command as a portable way to get disk space
     const out = execSync(`df -k "${tmp}" 2>/dev/null | tail -1`, {
@@ -324,16 +323,12 @@ export function registerDoctorCommand(program: Command): void {
       console.log(`${'Check'.padEnd(nameWidth)}  Status  Message`);
       console.log('-'.repeat(nameWidth + 40));
 
-      let hasIssues = false;
       for (const result of results) {
         const statusLabel = colorStatus(result.status);
         const name = result.name.padEnd(nameWidth);
         console.log(`${name}  ${statusLabel}  ${result.message}`);
         if (result.detail) {
           console.log(`${''.padEnd(nameWidth)}         ${result.detail}`);
-        }
-        if (result.status === 'warn' || result.status === 'fail') {
-          hasIssues = true;
         }
       }
 

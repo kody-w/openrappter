@@ -322,7 +322,7 @@ async function runPanopticon(): Promise<DemoRunResult> {
   const s1 = await timeStep('Create tracer + dashboard', async () => {
     const dashboard = new DashboardHandler();
     const spans: string[] = [];
-    const tracer = createTracer({
+    createTracer({
       onSpanComplete: (span) => {
         spans.push(span.agentName);
         dashboard.addTrace({
@@ -779,7 +779,7 @@ async function runSloshDeepDive(): Promise<DemoRunResult> {
 
 async function runMemoryRecall(): Promise<DemoRunResult> {
   const { MemoryManager } = await import('../../memory/manager.js');
-  const { chunkContent, generateSnippet } = await import('../../memory/chunker.js');
+  const { chunkContent } = await import('../../memory/chunker.js');
   const steps: DemoStepResult[] = [];
 
   const s1 = await timeStep('Chunk content', async () => {
@@ -1113,7 +1113,7 @@ const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
 
 export function registerShowcaseMethods(
   server: MethodRegistrar,
-  deps?: Record<string, unknown>,
+  _deps?: Record<string, unknown>,
 ): void {
   server.registerMethod<void, { demos: DemoInfo[] }>('showcase.list', async () => {
     return { demos: DEMOS };

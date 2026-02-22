@@ -264,7 +264,6 @@ export class GitAgent extends BasicAgent {
 
     // Commit
     const { stdout, stderr } = this.execFn(`git commit -m "${message}"`, this.cwd);
-    const success = !stderr || stderr.includes('');
 
     const dataSlush = this.slushOut({
       signals: { committed: true, message },

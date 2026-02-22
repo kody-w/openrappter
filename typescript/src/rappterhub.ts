@@ -14,6 +14,6 @@ export class RappterHubClient {
 
 export function getClient(): RappterHubClient { return new RappterHubClient(); }
 export async function rappterhubSearch(q: string): Promise<string> { return JSON.stringify({ status: 'success', query: q, results: [] }); }
-export async function rappterhubInstall(s: string): Promise<string> { return JSON.stringify({ status: 'info', message: 'Install via Python CLI' }); }
+export async function rappterhubInstall(_s: string): Promise<string> { return JSON.stringify({ status: 'info', message: 'Install via Python CLI' }); }
 export async function rappterhubList(): Promise<string> { return JSON.stringify({ status: 'success', agents: [] }); }
-export async function rappterhubUninstall(s: string): Promise<string> { return JSON.stringify({ status: 'info', message: 'Uninstall via Python CLI' }); }
+export async function rappterhubUninstall(_s: string): Promise<string> { return JSON.stringify({ status: 'info', message: 'Uninstall via Python CLI' }); }

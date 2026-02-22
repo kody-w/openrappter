@@ -71,18 +71,25 @@ interface OpenAIChatResponse {
 export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
   const decoder = new TextDecoder();
   let buffer = '';
-  for await (const chunk of body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith(':')) continue;
-      if (trimmed === 'data: [DONE]') return;
-      if (trimmed.startsWith('data: ')) {
-        yield JSON.parse(trimmed.slice(6));
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const { done, value: chunk } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (trimmed === 'data: [DONE]') return;
+        if (trimmed.startsWith('data: ')) {
+          yield JSON.parse(trimmed.slice(6));
+        }
       }
     }
+  } finally {
+    reader.releaseLock();
   }
 }
 

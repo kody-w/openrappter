@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.4.1, ES modules, Node >=20)
+- `typescript/` — TypeScript/Node.js package (v1.5.0, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Separate production assistant system (pnpm, tsdown build)
 
@@ -104,6 +104,7 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 - `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first wins), `fallback` (try until success)
 - `AgentRouter` (`router.ts`) — Rule-based message routing by sender/channel/group/pattern with priority; session key isolation
 - `SubAgent` (`subagent.ts`) — Nested agent invocation with depth limits and loop detection
+- `AgentChain` (`chain.ts`) — Sequential pipeline with automatic `data_slush` forwarding between steps; supports transforms, timeouts, stopOnError/continue modes
 
 ## Architecture: Skills (ClawHub)
 

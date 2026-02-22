@@ -83,7 +83,7 @@ async function main() {
 
   console.log('\nStep 2: Querying dashboard via MCP...');
   const queryAgent = new DashboardQueryAgent(dashboard);
-  const mcp = new McpServer({ name: 'openrappter', version: '1.7.0' });
+  const mcp = new McpServer({ name: 'openrappter', version: '1.8.0' });
   mcp.registerAgent(queryAgent);
 
   const response = await mcp.handleRequest({

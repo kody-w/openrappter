@@ -7,6 +7,7 @@
  * Mirrors Python agents/manage_memory_agent.py and context_memory_agent.py
  */
 
+import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -159,7 +160,7 @@ export class MemoryAgent extends BasicAgent {
     }
 
     const memory = await this.loadMemory();
-    const id = crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+    const id = randomUUID().replace(/-/g, '').slice(0, 12);
     const key = `mem_${Date.now()}`;
     const now = new Date();
 

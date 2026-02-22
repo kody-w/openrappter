@@ -5,7 +5,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug';
+type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase';
 
 interface NavItem {
   id: View;
@@ -124,6 +124,7 @@ export class OpenRappterSidebar extends LitElement {
     { id: 'agents', label: 'Agents', icon: '🤖' },
     { id: 'skills', label: 'Skills', icon: '🧩' },
     { id: 'cron', label: 'Cron Jobs', icon: '⏰' },
+    { id: 'showcase', label: 'Showcase', icon: '🎪' },
     { id: 'config', label: 'Config', icon: '⚙️' },
     { id: 'devices', label: 'Devices', icon: '💻' },
     { id: 'presence', label: 'Health', icon: '🏥' },
@@ -151,7 +152,7 @@ export class OpenRappterSidebar extends LitElement {
       <nav>
         <div class="nav-section">
           <div class="nav-section-title">Main</div>
-          ${this.navItems.slice(0, 6).map(
+          ${this.navItems.slice(0, 7).map(
             (item) => html`
               <div
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"
@@ -166,7 +167,7 @@ export class OpenRappterSidebar extends LitElement {
 
         <div class="nav-section">
           <div class="nav-section-title">System</div>
-          ${this.navItems.slice(6).map(
+          ${this.navItems.slice(7).map(
             (item) => html`
               <div
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"

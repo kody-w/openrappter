@@ -679,7 +679,7 @@ describe('Plugin System Integration', () => {
             execute: async ({ name }: Record<string, unknown>) => `Hello, ${name}!`,
           });
 
-          ctx.registerHook('before_agent_start', async (context) => {
+          ctx.registerHook('before_agent_start', async (context: unknown) => {
             return { ...context as object, pluginActive: true };
           });
 

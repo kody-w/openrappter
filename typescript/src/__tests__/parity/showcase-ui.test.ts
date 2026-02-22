@@ -36,9 +36,9 @@ describe('Showcase RPC Methods', () => {
   });
 
   describe('showcase.list', () => {
-    it('returns array of 10 demos', async () => {
+    it('returns array of 11 demos', async () => {
       const result = await server.call<void, { demos: DemoInfo[] }>('showcase.list');
-      expect(result.demos).toHaveLength(10);
+      expect(result.demos).toHaveLength(11);
     });
 
     it('each demo has id, name, description, category, agentTypes', async () => {
@@ -68,6 +68,7 @@ describe('Showcase RPC Methods', () => {
       const validCategories = [
         'Competition', 'Safety', 'Analysis', 'Observability',
         'Evolution', 'Meta', 'Parallel', 'DAG', 'Verification', 'Cloning',
+        'Recursion',
       ];
       for (const demo of result.demos) {
         expect(validCategories).toContain(demo.category);
@@ -87,6 +88,7 @@ describe('Showcase RPC Methods', () => {
       'time-loop',
       'ghost-protocol',
       'ouroboros-squared',
+      'inception-stack',
     ];
 
     for (const demoId of demoIds) {
@@ -137,9 +139,9 @@ describe('Showcase RPC Methods', () => {
   });
 
   describe('showcase.runall', () => {
-    it('runs all 10 demos', async () => {
+    it('runs all 11 demos', async () => {
       const result = await server.call<void, { results: DemoRunResult[] }>('showcase.runall');
-      expect(result.results).toHaveLength(10);
+      expect(result.results).toHaveLength(11);
     });
 
     it('returns results in order', async () => {

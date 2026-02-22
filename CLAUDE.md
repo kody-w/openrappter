@@ -226,15 +226,15 @@ CORS enabled by default. Trace store is in-memory with a 500-entry circular buff
 
 ## Architecture: Showcase Dashboard Page
 
-Web dashboard page for browsing and running the 10 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
+Web dashboard page for browsing and running the 11 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
 
 ### RPC Methods
 
 Registered in both the method registry (`methods/index.ts`) and directly in the gateway server's built-in methods (`server.ts`):
 
-- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 10 demos (id, name, description, category, agentTypes)
+- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 11 demos (id, name, description, category, agentTypes)
 - **`showcase.run`** — Takes `{ demoId: string }`, runs the demo with inline mock agents, returns `{ demoId, name, status, steps[], totalDurationMs, summary, error? }`
-- **`showcase.runall`** — Runs all 10 demos sequentially, returns `{ results: DemoRunResult[] }`
+- **`showcase.runall`** — Runs all 11 demos sequentially, returns `{ results: DemoRunResult[] }`
 
 All demos are deterministic (mock agents, no LLM calls). Each demo runner creates its agents inline, executes the orchestration pattern, and collects step-by-step results with timing.
 
@@ -252,6 +252,7 @@ All demos are deterministic (mock agents, no LLM calls). Each demo runner create
 | `time-loop` | The Architect | DAG | AgentGraph multi-upstream |
 | `ghost-protocol` | Mirror Test | Verification | AgentGraph parallel compare |
 | `ouroboros-squared` | Doppelganger | Cloning | AgentTracer + clone chain |
+| `inception-stack` | The Inception Stack | Recursion | Recursive agent meta-creation |
 
 ### UI Component
 
@@ -403,7 +404,7 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 
 ## Showcase Prompts (v1.7.0)
 
-10 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
+11 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
 
 ### Showcase Index
 
@@ -419,8 +420,9 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 | 8 | Code Archaeologist | AgentGraph fan-out / fan-in | `examples/code-archaeologist.ts` | `showcase-code-archaeologist.test.ts` | 6 |
 | 9 | Agent Compiler | PipelineAgent conditional steps | `examples/agent-compiler.ts` | `showcase-agent-compiler.test.ts` | 9 |
 | 10 | Doppelganger | AgentTracer + clone comparison | `examples/doppelganger.ts` | `showcase-doppelganger.test.ts` | 6 |
+| 11 | The Inception Stack | Recursive agent meta-creation | `examples/inception-stack.ts` | `showcase-inception-stack.test.ts` | 10 |
 
-All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (72 tests).
+All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (82 tests).
 
 ### 1. The Architect — LearnNewAgent + AgentGraph DAG
 
@@ -469,6 +471,15 @@ PipelineAgent with a conditional step triggered by `data_slush` values:
 ### 10. Doppelganger — AgentTracer + Clone Comparison
 
 Traces a TextProcessorAgent (deterministic word count / longest word / reverse) via `startSpan`/`endSpan` with `recordIO: true`. Extracts trace to build a description for creating a "clone" agent. Both original and clone run on the same input, then a ComparisonAgent checks field-by-field equality. Tests verify trace IO capture, duration recording, identical clone output, and divergence detection.
+
+### 11. The Inception Stack — Recursive Agent Meta-Creation
+
+Agents writing agents writing agents, 3 levels deep. Each level's `perform()` creates and invokes the next level — true recursive meta-creation inside perform, not external orchestration:
+- **DreamArchitectAgent (Level 1)**: Sets up SubAgentManager(`maxDepth: 4`), creates DreamBuilder, invokes it via manager
+- **DreamBuilderAgent (Level 2)**: Creates DreamExtractor inside `perform()`, invokes it via SubAgentManager
+- **DreamExtractorAgent (Level 3 — Limbo)**: Innermost. Deterministic extraction (char count, vowel count, totem)
+
+A shared `agents` map (closure) is populated by each level before invoking the next. SubAgentManager tracks depth (0→1→2) and blocks when `maxDepth` exceeded. AgentTracer captures nested parent-child spans. Data slush bubbles up: Level 3 result nested inside Level 2 nested inside Level 1, with each level's `source_agent` preserved.
 
 ## UX Principles
 

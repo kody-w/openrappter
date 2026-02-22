@@ -112,6 +112,62 @@ const DEMOS: DemoInfo[] = [
     category: 'Recursion',
     agentTypes: ['SubAgentManager', 'AgentTracer', 'BasicAgent'],
   },
+  {
+    id: 'slosh-deep-dive',
+    name: 'Data Sloshing Deep Dive',
+    description: 'Full data sloshing pipeline — signal categories, SloshFilter, SloshPrivacy, debug, feedback, breadcrumbs',
+    category: 'Context',
+    agentTypes: ['BasicAgent'],
+  },
+  {
+    id: 'memory-recall',
+    name: 'Memory Recall',
+    description: 'MemoryManager FTS search, overlapping chunking, snippets, source filtering, lifecycle',
+    category: 'Memory',
+    agentTypes: ['MemoryManager'],
+  },
+  {
+    id: 'channel-switchboard',
+    name: 'Channel Switchboard',
+    description: 'ChannelRegistry multi-channel routing — register, connect, route, status, disconnect',
+    category: 'Channels',
+    agentTypes: ['ChannelRegistry', 'BaseChannel'],
+  },
+  {
+    id: 'config-hotswap',
+    name: 'Config Hotswap',
+    description: 'Config utilities — JSON5 parsing, Zod validation, deep merge, env var substitution, JSON Schema',
+    category: 'Config',
+    agentTypes: ['ConfigLoader'],
+  },
+  {
+    id: 'persistence-vault',
+    name: 'Persistence Vault',
+    description: 'In-memory SQLite StorageAdapter — sessions, chunks, cron jobs, KV config, transactions',
+    category: 'Storage',
+    agentTypes: ['StorageAdapter'],
+  },
+  {
+    id: 'healing-loop',
+    name: 'Healing Loop',
+    description: 'SelfHealingCronAgent — setup, health check, restart, recovery, status tracking, teardown',
+    category: 'Resilience',
+    agentTypes: ['SelfHealingCronAgent', 'BasicAgent'],
+  },
+  {
+    id: 'auth-fortress',
+    name: 'Authorization Fortress',
+    description: 'ApprovalManager — deny/allowlist/full policies, priority rules, scoping, request/approve/reject',
+    category: 'Security',
+    agentTypes: ['ApprovalManager'],
+  },
+  {
+    id: 'stream-weaver',
+    name: 'Stream Weaver',
+    description: 'StreamManager — sessions, blocks, delta accumulation, subscribers, lifecycle',
+    category: 'Streaming',
+    agentTypes: ['StreamManager'],
+  },
 ];
 
 // ── Demo runner helpers ──
@@ -650,6 +706,389 @@ async function runInceptionStack(): Promise<DemoRunResult> {
   return { demoId: 'inception-stack', name: 'The Inception Stack', status: 'success', steps, totalDurationMs: total, summary: 'Recursion: 3-level agent meta-creation with depth tracking and tracing' };
 }
 
+async function runSloshDeepDive(): Promise<DemoRunResult> {
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Default slosh — all 5 categories', async () => {
+    const agent = new MockAgent('SloshTest', 'Slosh test', {
+      data_slush: { source_agent: 'SloshTest', captured: true },
+    });
+    await agent.execute({ query: 'show me recent items' });
+    const ctx = agent.context!;
+    return {
+      categories: ['temporal', 'query_signals', 'memory_echoes', 'behavioral', 'priors']
+        .filter(k => (ctx as Record<string, unknown>)[k] !== undefined),
+      orientation: ctx.orientation.approach,
+    };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('SloshFilter + SloshPrivacy', async () => {
+    const agent = new MockAgent('SloshTest', 'Slosh test', {
+      data_slush: { source_agent: 'SloshTest' },
+    });
+    agent.sloshFilter = { include: ['temporal'] };
+    agent.sloshPrivacy = { obfuscate: ['temporal.day_of_week'] };
+    await agent.execute({ query: 'filtered' });
+    return {
+      memory_echoes: agent.context!.memory_echoes.length,
+      day_obfuscated: /^\[obfuscated:/.test(agent.context!.temporal.day_of_week ?? ''),
+    };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Debug events + getSignal', async () => {
+    const agent = new MockAgent('SloshTest', 'Slosh test', {
+      data_slush: { source_agent: 'SloshTest' },
+    });
+    agent.sloshDebug = true;
+    const stages: string[] = [];
+    agent.onSloshDebug = (e: { stage: string }) => stages.push(e.stage);
+    await agent.execute({ query: 'debug test' });
+    const tod = agent.getSignal<string>('temporal.time_of_day');
+    return { stageCount: stages.length, hasTimeOfDay: !!tod, breadcrumbs: agent.breadcrumbs.length };
+  });
+  steps.push(s3);
+
+  const s4 = await timeStep('Feedback loop + breadcrumbs', async () => {
+    // Use a raw BasicAgent subclass for feedback
+    class FeedbackAgent extends BasicAgent {
+      async perform(): Promise<string> {
+        return JSON.stringify({
+          status: 'success',
+          data_slush: { source_agent: 'FeedbackAgent' },
+          slosh_feedback: { useful_signals: [], useless_signals: ['temporal.time_of_day'] },
+        });
+      }
+    }
+    const agent = new FeedbackAgent('FeedbackTest', {
+      name: 'FeedbackTest', description: 'Feedback', parameters: { type: 'object', properties: {}, required: [] },
+    });
+    agent.autoSuppressThreshold = -2;
+    agent.signalDecay = 1;
+    await agent.execute({ query: 'a' });
+    await agent.execute({ query: 'b' });
+    await agent.execute({ query: 'c' });
+    return { utilityScore: agent.signalUtility.get('temporal.time_of_day'), breadcrumbs: agent.breadcrumbs.length };
+  });
+  steps.push(s4);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'slosh-deep-dive', name: 'Data Sloshing Deep Dive', status: 'success', steps, totalDurationMs: total, summary: 'Slosh: 5 categories, filter, privacy, debug, feedback, breadcrumbs' };
+}
+
+async function runMemoryRecall(): Promise<DemoRunResult> {
+  const { MemoryManager } = await import('../../memory/manager.js');
+  const { chunkContent, generateSnippet } = await import('../../memory/chunker.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Chunk content', async () => {
+    const chunks = chunkContent('word '.repeat(200).trim(), { chunkSize: 100, overlap: 20 });
+    return { inputChars: 999, chunks: chunks.length };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Add documents + FTS search', async () => {
+    const mgr = new MemoryManager({ chunkSize: 512 });
+    await mgr.add('AgentGraph executes DAG nodes in parallel', 'workspace', '/graph.md');
+    await mgr.add('ChannelRegistry routes messages', 'workspace', '/channels.md');
+    const results = await mgr.searchFts('AgentGraph parallel');
+    return { resultCount: results.length, topScore: results[0]?.score };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Lifecycle — remove + clear', async () => {
+    const mgr = new MemoryManager({ chunkSize: 512 });
+    await mgr.add('Content A', 'workspace', '/a.md');
+    await mgr.add('Content B', 'workspace', '/b.md');
+    const removed = mgr.removeBySourcePath('/a.md');
+    const afterRemove = mgr.getStatus().totalChunks;
+    mgr.clear();
+    return { removed, afterRemove, afterClear: mgr.getStatus().totalChunks };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'memory-recall', name: 'Memory Recall', status: 'success', steps, totalDurationMs: total, summary: 'Memory: chunking, FTS search, lifecycle' };
+}
+
+async function runChannelSwitchboard(): Promise<DemoRunResult> {
+  const { BaseChannel } = await import('../../channels/base.js');
+  const { ChannelRegistry } = await import('../../channels/registry.js');
+  const steps: DemoStepResult[] = [];
+
+  class InlineChannel extends BaseChannel {
+    sent: string[] = [];
+    constructor(name: string) { super(name, name); }
+    async connect(): Promise<void> { this.connected = true; }
+    async disconnect(): Promise<void> { this.connected = false; }
+    async send(_cid: string, msg: { content: string }): Promise<void> { this.sent.push(msg.content); }
+  }
+
+  const s1 = await timeStep('Register + connect channels', async () => {
+    const registry = new ChannelRegistry();
+    const slack = new InlineChannel('slack');
+    const discord = new InlineChannel('discord');
+    registry.register(slack);
+    registry.register(discord);
+    await registry.connectAll();
+    return { names: registry.names(), allConnected: registry.list().every(ch => ch.connected) };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Route messages', async () => {
+    const registry = new ChannelRegistry();
+    const slack = new InlineChannel('slack');
+    const discord = new InlineChannel('discord');
+    registry.register(slack);
+    registry.register(discord);
+    await registry.sendMessage({ channelId: 'slack', conversationId: 'C1', content: 'Alert!' });
+    return { slackMsgs: slack.sent.length, discordMsgs: discord.sent.length };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Probe + disconnect', async () => {
+    const registry = new ChannelRegistry();
+    const slack = new InlineChannel('slack');
+    registry.register(slack);
+    await slack.connect();
+    const statuses = registry.getStatusList();
+    await registry.disconnectAll();
+    return { statusCount: statuses.length, allDisconnected: registry.list().every(ch => !ch.connected) };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'channel-switchboard', name: 'Channel Switchboard', status: 'success', steps, totalDurationMs: total, summary: 'Channels: register, connect, route, probe, disconnect' };
+}
+
+async function runConfigHotswap(): Promise<DemoRunResult> {
+  const { substituteEnvVars, mergeConfigs, parseConfigContent } = await import('../../config/loader.js');
+  const { validateConfig, getConfigJsonSchema } = await import('../../config/schema.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Parse JSON5 + validate', async () => {
+    const parsed = parseConfigContent('{ "configVersion": 1, "gateway": { "port": 8080, "bind": "loopback" } }');
+    const result = validateConfig(parsed);
+    return { valid: result.success };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Merge configs', async () => {
+    const merged = mergeConfigs(
+      { gateway: { port: 8080, bind: 'loopback' as const } },
+      { gateway: { port: 9090, bind: 'all' as const }, cron: { enabled: true } },
+    );
+    return { port: merged.gateway?.port, cronEnabled: merged.cron?.enabled };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Env substitution + schema', async () => {
+    process.env._DEMO_PORT = '4000';
+    const sub = substituteEnvVars('port=${_DEMO_PORT}');
+    delete process.env._DEMO_PORT;
+    const schema = getConfigJsonSchema();
+    return { substituted: sub, schemaKeys: Object.keys(schema.properties as object).length };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'config-hotswap', name: 'Config Hotswap', status: 'success', steps, totalDurationMs: total, summary: 'Config: parse, validate, merge, env substitution, JSON Schema' };
+}
+
+async function runPersistenceVault(): Promise<DemoRunResult> {
+  const { createStorageAdapter } = await import('../../storage/index.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Initialize in-memory storage', async () => {
+    const storage = createStorageAdapter({ type: 'memory', inMemory: true });
+    await storage.initialize();
+    await storage.close();
+    return { initialized: true };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Session save/get/filter', async () => {
+    const storage = createStorageAdapter({ type: 'memory', inMemory: true });
+    await storage.initialize();
+    await storage.saveSession({
+      id: 's1', channelId: 'slack', conversationId: 'C1', agentId: 'A',
+      metadata: {}, messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    const got = await storage.getSession('s1');
+    await storage.close();
+    return { saved: !!got };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Cron + memory chunks', async () => {
+    const storage = createStorageAdapter({ type: 'memory', inMemory: true });
+    await storage.initialize();
+    await storage.saveCronJob({
+      id: 'j1', name: 'test', schedule: '* * * * *', agentId: 'A', message: 'go',
+      enabled: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    });
+    const job = await storage.getCronJob('j1');
+    await storage.close();
+    return { jobName: job?.name };
+  });
+  steps.push(s3);
+
+  const s4 = await timeStep('Config KV operations', async () => {
+    const storage = createStorageAdapter({ type: 'memory', inMemory: true });
+    await storage.initialize();
+    await storage.setConfig('a', '1');
+    await storage.setConfig('b', '2');
+    const all = await storage.getAllConfig();
+    await storage.close();
+    return { configCount: Object.keys(all).length };
+  });
+  steps.push(s4);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'persistence-vault', name: 'Persistence Vault', status: 'success', steps, totalDurationMs: total, summary: 'Storage: sessions, cron, KV config, transactions in-memory' };
+}
+
+async function runHealingLoop(): Promise<DemoRunResult> {
+  const { SelfHealingCronAgent } = await import('../../agents/SelfHealingCronAgent.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Setup health check job', async () => {
+    const agent = new SelfHealingCronAgent({
+      webAgent: new MockAgent('Web', 'Web', { status: 'success' }),
+      shellAgent: new MockAgent('Shell', 'Shell', { status: 'success', output: 'ok' }),
+      messageAgent: new MockAgent('Msg', 'Msg', { status: 'success' }),
+    });
+    const result = JSON.parse(await agent.execute({
+      action: 'setup', name: 'api', url: 'http://localhost/health',
+      restartCommand: 'restart', notifyChannel: 'slack', conversationId: 'C1',
+    }));
+    return { jobName: result.job?.name };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Healthy check', async () => {
+    const agent = new SelfHealingCronAgent({
+      webAgent: new MockAgent('Web', 'Web', { status: 'success' }),
+      shellAgent: new MockAgent('Shell', 'Shell', { status: 'success' }),
+      messageAgent: new MockAgent('Msg', 'Msg', { status: 'success' }),
+    });
+    await agent.execute({
+      action: 'setup', name: 'api', url: 'http://localhost/health',
+      restartCommand: 'restart', notifyChannel: '', conversationId: '',
+    });
+    const result = JSON.parse(await agent.execute({ action: 'check', name: 'api' }));
+    return { healthy: result.healthy, actionTaken: result.data_slush?.action_taken };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Status + history', async () => {
+    const agent = new SelfHealingCronAgent({
+      webAgent: new MockAgent('Web', 'Web', { status: 'success' }),
+      shellAgent: new MockAgent('Shell', 'Shell', { status: 'success' }),
+      messageAgent: new MockAgent('Msg', 'Msg', { status: 'success' }),
+    });
+    await agent.execute({
+      action: 'setup', name: 'api', url: 'http://localhost/health',
+      restartCommand: 'restart', notifyChannel: '', conversationId: '',
+    });
+    await agent.execute({ action: 'check', name: 'api' });
+    const status = JSON.parse(await agent.execute({ action: 'status', name: 'api' }));
+    return { uptime: status.stats?.uptimePercent, checks: status.stats?.totalChecks };
+  });
+  steps.push(s3);
+
+  const s4 = await timeStep('Teardown', async () => {
+    const agent = new SelfHealingCronAgent();
+    await agent.execute({
+      action: 'setup', name: 'api', url: 'http://localhost/health',
+      restartCommand: 'restart', notifyChannel: '', conversationId: '',
+    });
+    const result = JSON.parse(await agent.execute({ action: 'teardown', name: 'api' }));
+    return { removed: result.status === 'success' };
+  });
+  steps.push(s4);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'healing-loop', name: 'Healing Loop', status: 'success', steps, totalDurationMs: total, summary: 'Resilience: setup, health check, restart recovery, status tracking, teardown' };
+}
+
+async function runAuthFortress(): Promise<DemoRunResult> {
+  const { createApprovalManager } = await import('../../security/approvals.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Deny + Full + Allowlist policies', async () => {
+    const mgr = createApprovalManager();
+    mgr.setDefaultPolicy('deny');
+    const denied = mgr.checkApproval({ toolName: 'bash', toolArgs: {} });
+    mgr.setDefaultPolicy('full');
+    const allowed = mgr.checkApproval({ toolName: 'bash', toolArgs: {} });
+    return { denyResult: denied.allowed, fullResult: allowed.allowed };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Priority ordering + scoping', async () => {
+    const mgr = createApprovalManager();
+    mgr.addRule({ id: 'low', name: 'Allow', policy: 'full', tools: ['bash'], priority: 1, enabled: true });
+    mgr.addRule({ id: 'high', name: 'Block', policy: 'deny', tools: ['bash'], priority: 100, enabled: true });
+    const result = mgr.checkApproval({ toolName: 'bash', toolArgs: {} });
+    return { winnerId: result.rule?.id, allowed: result.allowed };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Request/approve/reject', async () => {
+    const mgr = createApprovalManager();
+    mgr.setDefaultPolicy('allowlist');
+    const promise = mgr.requestApproval({ toolName: 'bash', toolArgs: {} });
+    const pending = mgr.getPendingRequests();
+    mgr.approveRequest(pending[0].id, 'admin');
+    const result = await promise;
+    return { approved: result.allowed, pendingBefore: pending.length };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'auth-fortress', name: 'Authorization Fortress', status: 'success', steps, totalDurationMs: total, summary: 'Security: deny/allowlist/full policies, priority rules, approve/reject' };
+}
+
+async function runStreamWeaver(): Promise<DemoRunResult> {
+  const { StreamManager } = await import('../../gateway/streaming.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Sessions + blocks', async () => {
+    const mgr = new StreamManager();
+    const session = mgr.createSession('s1');
+    mgr.pushBlock('s1', { type: 'text', content: 'Hello', done: false });
+    mgr.pushBlock('s1', { type: 'tool_call', content: '{}', done: true });
+    return { blockCount: mgr.getSession('s1')?.blocks.length, status: session.status };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Deltas + subscribers', async () => {
+    const mgr = new StreamManager();
+    mgr.createSession('s2');
+    const received: string[] = [];
+    mgr.onBlock('s2', (b) => received.push(b.delta ?? ''));
+    mgr.pushDelta('s2', 'b1', 'Hel');
+    mgr.pushDelta('s2', 'b1', 'lo');
+    return { accumulated: mgr.getSession('s2')?.blocks[0].content, notifications: received.length };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Lifecycle', async () => {
+    const mgr = new StreamManager();
+    mgr.createSession('s1');
+    mgr.createSession('s2');
+    mgr.complete('s1');
+    mgr.error('s2');
+    return { active: mgr.activeSessions() };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'stream-weaver', name: 'Stream Weaver', status: 'success', steps, totalDurationMs: total, summary: 'Streaming: sessions, blocks, delta accumulation, subscribers, lifecycle' };
+}
+
 const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'darwins-colosseum': runDarwinsColosseum,
   'infinite-regress': runInfiniteRegress,
@@ -662,6 +1101,14 @@ const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'ghost-protocol': runGhostProtocol,
   'ouroboros-squared': runOuroborosSquared,
   'inception-stack': runInceptionStack,
+  'slosh-deep-dive': runSloshDeepDive,
+  'memory-recall': runMemoryRecall,
+  'channel-switchboard': runChannelSwitchboard,
+  'config-hotswap': runConfigHotswap,
+  'persistence-vault': runPersistenceVault,
+  'healing-loop': runHealingLoop,
+  'auth-fortress': runAuthFortress,
+  'stream-weaver': runStreamWeaver,
 };
 
 export function registerShowcaseMethods(

@@ -47,7 +47,7 @@ interface JsonRpcResponse {
 export interface McpServerOptions {
   /** Server name (default: 'openrappter') */
   name?: string;
-  /** Server version (default: '1.8.0') */
+  /** Server version (default: '1.8.2') */
   version?: string;
 }
 

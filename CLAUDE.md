@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.8.0, ES modules, Node >=20)
+- `typescript/` — TypeScript/Node.js package (v1.8.2, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Competitor repo copy (reference only, ignore submodule drift)
 

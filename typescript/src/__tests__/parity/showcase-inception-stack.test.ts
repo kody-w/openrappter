@@ -23,7 +23,7 @@ function createAgents() {
       super('DreamExtractor', {
         name: 'DreamExtractor',
         description: 'Extracts dream data from a seed (Level 3)',
-        parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
       });
     }
 
@@ -49,7 +49,7 @@ function createAgents() {
       super('DreamBuilder', {
         name: 'DreamBuilder',
         description: 'Builds dream structure by creating Level 3 agent (Level 2)',
-        parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
       });
     }
 
@@ -82,7 +82,7 @@ function createAgents() {
       super('DreamArchitect', {
         name: 'DreamArchitect',
         description: 'Designs the inception stack (Level 1)',
-        parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
       });
       this.maxDepth = maxDepth;
     }

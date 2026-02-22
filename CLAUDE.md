@@ -224,6 +224,55 @@ CORS enabled by default. Trace store is in-memory with a 500-entry circular buff
 
 **Files**: `typescript/src/gateway/dashboard.ts`, `typescript/src/__tests__/parity/dashboard-api.test.ts` (21 tests)
 
+## Architecture: Showcase Dashboard Page
+
+Web dashboard page for browsing and running the 10 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
+
+### RPC Methods
+
+Registered in both the method registry (`methods/index.ts`) and directly in the gateway server's built-in methods (`server.ts`):
+
+- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 10 demos (id, name, description, category, agentTypes)
+- **`showcase.run`** — Takes `{ demoId: string }`, runs the demo with inline mock agents, returns `{ demoId, name, status, steps[], totalDurationMs, summary, error? }`
+- **`showcase.runall`** — Runs all 10 demos sequentially, returns `{ results: DemoRunResult[] }`
+
+All demos are deterministic (mock agents, no LLM calls). Each demo runner creates its agents inline, executes the orchestration pattern, and collects step-by-step results with timing.
+
+### Demo IDs → Showcase Names
+
+| Demo ID | Name | Category | Pattern |
+|---------|------|----------|---------|
+| `darwins-colosseum` | Darwin's Colosseum | Competition | AgentGraph tournament |
+| `infinite-regress` | Infinite Regression | Safety | SubAgentManager limits |
+| `ship-of-theseus` | Code Archaeologist | Analysis | AgentGraph fan-out/fan-in |
+| `panopticon` | Living Dashboard | Observability | Chain → Tracer → Dashboard |
+| `lazarus-loop` | Ouroboros Accelerator | Evolution | AgentChain with slush |
+| `agent-factory-factory` | Agent Compiler | Meta | PipelineAgent conditional |
+| `swarm-vote` | Swarm Debugger | Parallel | BroadcastManager race |
+| `time-loop` | The Architect | DAG | AgentGraph multi-upstream |
+| `ghost-protocol` | Mirror Test | Verification | AgentGraph parallel compare |
+| `ouroboros-squared` | Doppelganger | Cloning | AgentTracer + clone chain |
+
+### UI Component
+
+`typescript/ui/src/components/showcase.ts` — `<openrappter-showcase>` Lit element:
+
+- Card grid layout (`repeat(auto-fill, minmax(340px, 1fr))`)
+- Category filter chips (All, Competition, Safety, Analysis, etc.)
+- Per-demo "Run" button with inline spinner; "Run All" with progress counter
+- Result panel per card: status badge, step-by-step results with durations, total time
+- Data flow: `connectedCallback()` → `gateway.call('showcase.list')` → render cards; click Run → `gateway.call('showcase.run', { demoId })` → display result
+
+### Wiring (5 touch points for adding a dashboard page)
+
+1. **View type** — `app.ts`: `'showcase'` in `View` union
+2. **Route** — `app.ts` `renderView()`: `case 'showcase'` → `<openrappter-showcase>`
+3. **Title** — `app.ts` `getViewTitle()`: `showcase: 'Showcase'`
+4. **Sidebar** — `sidebar.ts`: `{ id: 'showcase', label: 'Showcase', icon: '🎪' }` at index 6 (Main section, `.slice(0, 7)`)
+5. **Entry import** — `main.ts`: `import './components/showcase.js'`
+
+**Files**: `typescript/src/gateway/methods/showcase-methods.ts`, `typescript/ui/src/components/showcase.ts`, `typescript/src/__tests__/parity/showcase-ui.test.ts` (21 tests)
+
 ## Architecture: Skills (ClawHub)
 
 Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapped as `ClawHubSkillAgent` instances (extending `BasicAgent`).

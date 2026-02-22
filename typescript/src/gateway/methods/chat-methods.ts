@@ -20,14 +20,14 @@ interface ChatInjectParams {
   role?: 'system' | 'user' | 'assistant';
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   messageId: string;
   role: 'system' | 'user' | 'assistant';
   content: string;
   timestamp: number;
 }
 
-interface ChatSession {
+export interface ChatSession {
   id: string;
   messages: ChatMessage[];
 }

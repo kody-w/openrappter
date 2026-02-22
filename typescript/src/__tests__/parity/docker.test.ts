@@ -3,13 +3,8 @@
  * Tests Docker build, health checks, volume persistence
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import * as fs from 'fs';
+import { describe, it, expect } from 'vitest';
 import * as path from 'path';
-
-const execAsync = promisify(exec);
 
 describe('Docker Parity', () => {
   describe('Dockerfile', () => {

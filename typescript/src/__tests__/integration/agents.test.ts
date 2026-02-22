@@ -8,7 +8,7 @@
  * - SubAgentManager depth limits and loop detection
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata, AgentContext, AgentResult } from '../../agents/types.js';

@@ -677,7 +677,7 @@ describe('Built-in Skills', () => {
         let parsed: unknown;
         try {
           parsed = JSON.parse(jsonStr);
-        } catch (e) {
+        } catch {
           // Some skills use multiline metadata; that's OK
           parsed = null;
         }

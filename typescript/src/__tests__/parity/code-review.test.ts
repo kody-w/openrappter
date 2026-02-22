@@ -7,7 +7,7 @@
  * Mirrors Python agents/code_review_agent.py
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { CodeReviewAgent } from '../../agents/CodeReviewAgent.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 
@@ -17,11 +17,6 @@ import { BasicAgent } from '../../agents/BasicAgent.js';
  * Build a string of exactly `length` chars using a repeating pattern.
  * Useful for crafting lines that land precisely on the length threshold.
  */
-function padLine(content: string, length: number): string {
-  const base = content.padEnd(length - 1, 'x');
-  return base.length >= length ? base.slice(0, length) : base + 'x';
-}
-
 /** Repeat `char` n times. */
 function repeat(char: string, n: number): string {
   return char.repeat(n);

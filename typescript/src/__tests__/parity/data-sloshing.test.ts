@@ -10,7 +10,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type {
   AgentMetadata,
-  AgentContext,
   SloshFilter,
   SloshPreferences,
   SloshDebugEvent,

@@ -3,9 +3,7 @@
  * Tests that gateway RPC methods match openclaw spec
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
-import WebSocket from 'ws';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock WebSocket
 vi.mock('ws', () => ({

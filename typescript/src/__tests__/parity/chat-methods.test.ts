@@ -5,9 +5,9 @@
  * with dependency injection.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { registerChatMethods } from '../../gateway/methods/chat-methods.js';
-import type { ChatMethodsDeps } from '../../gateway/methods/chat-methods.js';
+import type { ChatSession } from '../../gateway/methods/chat-methods.js';
 
 // ── Mock server ──
 
@@ -86,8 +86,8 @@ describe('Chat Methods', () => {
   describe('chat.inject', () => {
     it('should store message in existing session', async () => {
       const server = createMockServer();
-      const sessionStore = new Map([
-        ['sess-1', { id: 'sess-1', messages: [] as Array<{ messageId: string; role: string; content: string; timestamp: number }> }],
+      const sessionStore = new Map<string, ChatSession>([
+        ['sess-1', { id: 'sess-1', messages: [] }],
       ]);
       registerChatMethods(server, { sessionStore });
 
@@ -106,7 +106,7 @@ describe('Chat Methods', () => {
 
     it('should create session if missing', async () => {
       const server = createMockServer();
-      const sessionStore = new Map<string, { id: string; messages: Array<{ messageId: string; role: string; content: string; timestamp: number }> }>();
+      const sessionStore = new Map<string, ChatSession>();
       registerChatMethods(server, { sessionStore });
 
       const result = await server.call<

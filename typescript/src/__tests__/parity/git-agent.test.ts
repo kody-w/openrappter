@@ -8,7 +8,7 @@
  * Mirrors Python agents/git_agent.py
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { GitAgent } from '../../agents/GitAgent.js';
 import type { ExecFn } from '../../agents/GitAgent.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';

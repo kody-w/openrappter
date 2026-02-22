@@ -185,7 +185,7 @@ Exposes OpenRappter agents as MCP (Model Context Protocol) tools via JSON-RPC 2.
 ```typescript
 import { McpServer } from './mcp/server.js';
 
-const server = new McpServer({ name: 'openrappter', version: '1.8.0' });
+const server = new McpServer({ name: 'openrappter', version: '1.8.2' });
 server.registerAgent(shellAgent);
 server.registerAgent(memoryAgent);
 await server.serve(); // reads stdin, writes stdout

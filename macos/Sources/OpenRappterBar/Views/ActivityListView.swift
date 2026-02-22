@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct ActivityListView: View {
     @Bindable var viewModel: AppViewModel
 

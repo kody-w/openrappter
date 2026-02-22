@@ -131,7 +131,9 @@ public final class ChatWindowManager {
         panelCloseObserver = NotificationCenter.default.addObserver(
             forName: .panelDidClose, object: panel, queue: .main
         ) { [weak self] _ in
-            self?.removeGlobalMonitor()
+            Task { @MainActor in
+                self?.removeGlobalMonitor()
+            }
         }
 
         chatPanel = panel

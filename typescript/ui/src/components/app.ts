@@ -6,7 +6,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug';
+type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase';
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -155,6 +155,8 @@ export class OpenRappterApp extends LitElement {
         return html`<openrappter-presence></openrappter-presence>`;
       case 'debug':
         return html`<openrappter-debug></openrappter-debug>`;
+      case 'showcase':
+        return html`<openrappter-showcase></openrappter-showcase>`;
       default:
         return html`<openrappter-chat></openrappter-chat>`;
     }
@@ -197,6 +199,7 @@ export class OpenRappterApp extends LitElement {
       devices: 'Devices',
       presence: 'System Health',
       debug: 'Debug',
+      showcase: 'Showcase',
     };
     return titles[this.currentView];
   }

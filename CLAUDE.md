@@ -185,7 +185,7 @@ Exposes OpenRappter agents as MCP (Model Context Protocol) tools via JSON-RPC 2.
 ```typescript
 import { McpServer } from './mcp/server.js';
 
-const server = new McpServer({ name: 'openrappter', version: '1.6.0' });
+const server = new McpServer({ name: 'openrappter', version: '1.8.0' });
 server.registerAgent(shellAgent);
 server.registerAgent(memoryAgent);
 await server.serve(); // reads stdin, writes stdout
@@ -410,7 +410,7 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 
 **Files**: `typescript/src/agents/LearnNewAgent.ts`, `python/openrappter/agents/learn_new_agent.py`, `typescript/src/__tests__/parity/learn-new-agent.test.ts` (61 tests)
 
-## Showcase Prompts (v1.7.0)
+## Showcase Prompts (v1.8.0)
 
 19 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
 

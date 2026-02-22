@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct GeneralSettingsView: View {
     @Bindable var settingsStore: SettingsStore
     @State private var startAtLogin: Bool = false

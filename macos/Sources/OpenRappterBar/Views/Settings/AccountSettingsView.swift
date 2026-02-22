@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - Account Settings View
 
+@MainActor
 public struct AccountSettingsView: View {
     var viewModel: AccountViewModel
 

@@ -105,6 +105,13 @@ const DEMOS: DemoInfo[] = [
     category: 'Cloning',
     agentTypes: ['AgentChain', 'AgentTracer', 'BasicAgent'],
   },
+  {
+    id: 'inception-stack',
+    name: 'The Inception Stack',
+    description: 'Recursive agent meta-creation — agents writing agents 3 levels deep with depth tracking',
+    category: 'Recursion',
+    agentTypes: ['SubAgentManager', 'AgentTracer', 'BasicAgent'],
+  },
 ];
 
 // ── Demo runner helpers ──
@@ -504,6 +511,145 @@ async function runOuroborosSquared(): Promise<DemoRunResult> {
   return { demoId: 'ouroboros-squared', name: 'Doppelganger', status: 'success', steps, totalDurationMs: total, summary: 'Clone: traced original, created clone, chained comparison' };
 }
 
+async function runInceptionStack(): Promise<DemoRunResult> {
+  const { SubAgentManager } = await import('../../agents/subagent.js');
+  const { createTracer } = await import('../../agents/tracer.js');
+  const steps: DemoStepResult[] = [];
+
+  const s1 = await timeStep('Create inception agents + tracker', async () => {
+    const agents = new Map<string, BasicAgent>();
+
+    // Level 3 — Innermost
+    class DreamExtractorAgent extends BasicAgent {
+      constructor() {
+        super('DreamExtractor', {
+          name: 'DreamExtractor', description: 'Extracts dream data (Level 3)',
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        });
+      }
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        const seed = (kwargs.dream_seed ?? '') as string;
+        const charCount = seed.length;
+        const vowelCount = seed.split('').filter((c: string) => 'aeiouAEIOU'.includes(c)).length;
+        const totem = `totem_${charCount}_${vowelCount}`;
+        return JSON.stringify({
+          status: 'success', level: 3, extraction: { char_count: charCount, vowel_count: vowelCount }, totem,
+          data_slush: { source_agent: 'DreamExtractor', level: 3, totem },
+        });
+      }
+    }
+
+    // Level 2
+    class DreamBuilderAgent extends BasicAgent {
+      constructor() {
+        super('DreamBuilder', {
+          name: 'DreamBuilder', description: 'Builds dream (Level 2)',
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        });
+      }
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        const mgr = kwargs._manager as SubAgentManager;
+        const ctx = kwargs._subagent_context as import('../../agents/subagent.js').SubAgentContext;
+        const seed = (kwargs.dream_seed ?? '') as string;
+        const ext = new DreamExtractorAgent();
+        agents.set('DreamExtractor', ext);
+        const inner = await mgr.invoke('DreamExtractor', seed, ctx) as Record<string, unknown>;
+        return JSON.stringify({
+          status: 'success', level: 2, inner,
+          data_slush: { source_agent: 'DreamBuilder', level: 2 },
+        });
+      }
+    }
+
+    const manager = new SubAgentManager({ maxDepth: 4 });
+    manager.setExecutor(async (agentId, message, context) => {
+      const agent = agents.get(agentId);
+      if (!agent) throw new Error(`Agent not found: ${agentId}`);
+      const result = await agent.execute({
+        dream_seed: message, _manager: manager, _subagent_context: context,
+      });
+      return JSON.parse(result) as AgentResult;
+    });
+
+    const builder = new DreamBuilderAgent();
+    agents.set('DreamBuilder', builder);
+
+    return { agentCount: 2, maxDepth: 4 };
+  });
+  steps.push(s1);
+
+  const s2 = await timeStep('Execute 3-level inception stack', async () => {
+    const agents = new Map<string, BasicAgent>();
+
+    class DreamExtractorAgent extends BasicAgent {
+      constructor() {
+        super('DreamExtractor', {
+          name: 'DreamExtractor', description: 'Level 3',
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        });
+      }
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        const seed = (kwargs.dream_seed ?? '') as string;
+        return JSON.stringify({
+          status: 'success', level: 3, totem: `totem_${seed.length}`,
+          data_slush: { source_agent: 'DreamExtractor', level: 3 },
+        });
+      }
+    }
+
+    class DreamBuilderAgent extends BasicAgent {
+      constructor() {
+        super('DreamBuilder', {
+          name: 'DreamBuilder', description: 'Level 2',
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+        });
+      }
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        const mgr = kwargs._manager as SubAgentManager;
+        const ctx = kwargs._subagent_context as import('../../agents/subagent.js').SubAgentContext;
+        agents.set('DreamExtractor', new DreamExtractorAgent());
+        const inner = await mgr.invoke('DreamExtractor', (kwargs.dream_seed ?? '') as string, ctx) as Record<string, unknown>;
+        return JSON.stringify({
+          status: 'success', level: 2, inner,
+          data_slush: { source_agent: 'DreamBuilder', level: 2 },
+        });
+      }
+    }
+
+    const manager = new SubAgentManager({ maxDepth: 4 });
+    manager.setExecutor(async (agentId, message, context) => {
+      const agent = agents.get(agentId);
+      if (!agent) throw new Error(`Agent not found: ${agentId}`);
+      const result = await agent.execute({
+        dream_seed: message, _manager: manager, _subagent_context: context,
+      });
+      return JSON.parse(result) as AgentResult;
+    });
+
+    agents.set('DreamBuilder', new DreamBuilderAgent());
+    const ctx = manager.createContext('DreamArchitect');
+    const innerResult = await manager.invoke('DreamBuilder', 'inception', ctx) as Record<string, unknown>;
+    return { levels: 3, hasInner: !!innerResult.inner, status: 'success' };
+  });
+  steps.push(s2);
+
+  const s3 = await timeStep('Verify depth overflow', async () => {
+    const manager = new SubAgentManager({ maxDepth: 2 });
+    const canInvokeAtDepth0 = manager.canInvoke('Agent', 0);
+    const canInvokeAtDepth2 = manager.canInvoke('Agent', 2);
+    const tracer = createTracer();
+    const { context } = tracer.startSpan('DreamArchitect', 'execute');
+    const { span: l2 } = tracer.startSpan('DreamBuilder', 'execute', context);
+    tracer.endSpan(l2.id, { status: 'success' });
+    tracer.endSpan(context.spanId, { status: 'success' });
+    return { canInvokeAtDepth0, blockedAtMaxDepth: !canInvokeAtDepth2, traceSpans: tracer.getTrace(context.traceId).length };
+  });
+  steps.push(s3);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return { demoId: 'inception-stack', name: 'The Inception Stack', status: 'success', steps, totalDurationMs: total, summary: 'Recursion: 3-level agent meta-creation with depth tracking and tracing' };
+}
+
 const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'darwins-colosseum': runDarwinsColosseum,
   'infinite-regress': runInfiniteRegress,
@@ -515,6 +661,7 @@ const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'time-loop': runTimeLoop,
   'ghost-protocol': runGhostProtocol,
   'ouroboros-squared': runOuroborosSquared,
+  'inception-stack': runInceptionStack,
 };
 
 export function registerShowcaseMethods(

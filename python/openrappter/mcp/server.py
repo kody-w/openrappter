@@ -17,7 +17,7 @@ class McpServer:
         options = options or {}
         self._server_info = {
             'name': options.get('name', 'openrappter'),
-            'version': options.get('version', '1.8.0'),
+            'version': options.get('version', '1.8.2'),
         }
         self._agents = {}  # name -> agent
 

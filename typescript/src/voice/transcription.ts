@@ -26,7 +26,7 @@ export class OpenAIWhisper implements TranscriptionProvider {
     const formData = new FormData();
 
     // Create blob from buffer
-    const blob = new Blob([audio], { type: this.detectMimeType(audio) });
+    const blob = new Blob([new Uint8Array(audio)] as BlobPart[], { type: this.detectMimeType(audio) });
     formData.append('file', blob, 'audio.mp3');
     formData.append('model', 'whisper-1');
 

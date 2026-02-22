@@ -708,7 +708,7 @@ export class WatchmakerAgent extends BasicAgent {
     } else {
       const avgLatency = (resultA.latencyMs + resultB.latencyMs) / 2;
       const latencyThreshold = avgLatency > 0 ? Math.abs(latencyDelta) / avgLatency : 0;
-      if (latencyThreshold > 0.2) {
+      if (latencyThreshold > 0.2 && Math.abs(latencyDelta) >= 5) {
         winner = latencyDelta < 0 ? 'B' : 'A';
         reason = `Latency tiebreaker: ${Math.abs(latencyDelta)}ms difference`;
       } else {

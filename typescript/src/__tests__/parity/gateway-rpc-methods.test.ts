@@ -36,13 +36,15 @@ describe('Gateway RPC Methods', () => {
 
   describe('Method Registration', () => {
     it('should register all method groups', () => {
-      // Should have methods from all 13 method groups
-      expect(methods.size).toBeGreaterThanOrEqual(20);
+      // Should have methods from all 17 method groups
+      expect(methods.size).toBeGreaterThanOrEqual(30);
     });
 
     it('should register chat methods', () => {
       expect(methods.has('chat.abort')).toBe(true);
       expect(methods.has('chat.inject')).toBe(true);
+      expect(methods.has('chat.list')).toBe(true);
+      expect(methods.has('chat.delete')).toBe(true);
     });
 
     it('should register models methods', () => {
@@ -95,6 +97,8 @@ describe('Gateway RPC Methods', () => {
     it('should register skills methods', () => {
       expect(methods.has('skills.install')).toBe(true);
       expect(methods.has('skills.update')).toBe(true);
+      expect(methods.has('skills.list')).toBe(true);
+      expect(methods.has('skills.toggle')).toBe(true);
     });
 
     it('should register config methods', () => {
@@ -106,12 +110,35 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('cron.update')).toBe(true);
       expect(methods.has('cron.status')).toBe(true);
       expect(methods.has('cron.runs')).toBe(true);
+      expect(methods.has('cron.list')).toBe(true);
+      expect(methods.has('cron.add')).toBe(true);
+      expect(methods.has('cron.enable')).toBe(true);
+      expect(methods.has('cron.run')).toBe(true);
+      expect(methods.has('cron.remove')).toBe(true);
     });
 
     it('should register agents methods', () => {
+      expect(methods.has('agents.list')).toBe(true);
       expect(methods.has('agents.identity.get')).toBe(true);
       expect(methods.has('agents.files.list')).toBe(true);
       expect(methods.has('agents.files.get')).toBe(true);
+    });
+
+    it('should register channels methods', () => {
+      expect(methods.has('channels.list')).toBe(true);
+      expect(methods.has('channels.connect')).toBe(true);
+      expect(methods.has('channels.disconnect')).toBe(true);
+      expect(methods.has('channels.probe')).toBe(true);
+      expect(methods.has('channels.configure')).toBe(true);
+    });
+
+    it('should register connections methods', () => {
+      expect(methods.has('connections.list')).toBe(true);
+    });
+
+    it('should register system methods', () => {
+      expect(methods.has('status')).toBe(true);
+      expect(methods.has('health')).toBe(true);
     });
   });
 
@@ -142,6 +169,24 @@ describe('Gateway RPC Methods', () => {
       expect(result).toBeDefined();
       expect(result).toHaveProperty('status');
       expect(result).toHaveProperty('messageId');
+    });
+
+    it('chat.list handler should be callable', async () => {
+      const methodInfo = methods.get('chat.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('chat.delete handler should be callable', async () => {
+      const methodInfo = methods.get('chat.delete');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({ sessionId: 'nonexistent' }, {});
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('deleted');
     });
 
     it('models.list handler should be callable', async () => {
@@ -225,6 +270,15 @@ describe('Gateway RPC Methods', () => {
       expect(result).toHaveProperty('jobCount');
     });
 
+    it('cron.list handler should be callable', async () => {
+      const methodInfo = methods.get('cron.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
+    });
+
     it('skills.install handler should be callable but may throw without registry', async () => {
       const methodInfo = methods.get('skills.install');
       expect(methodInfo).toBeDefined();
@@ -233,6 +287,24 @@ describe('Gateway RPC Methods', () => {
       await expect(
         methodInfo!.handler({ name: 'test-skill' }, {})
       ).rejects.toThrow();
+    });
+
+    it('skills.list handler should be callable', async () => {
+      const methodInfo = methods.get('skills.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('agents.list handler should be callable', async () => {
+      const methodInfo = methods.get('agents.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
     });
 
     it('agents.files.list handler should be callable', async () => {
@@ -244,23 +316,68 @@ describe('Gateway RPC Methods', () => {
       expect(result).toHaveProperty('files');
       expect(Array.isArray(result.files)).toBe(true);
     });
+
+    it('channels.list handler should be callable', async () => {
+      const methodInfo = methods.get('channels.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('connections.list handler should be callable', async () => {
+      const methodInfo = methods.get('connections.list');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(Array.isArray(result)).toBe(true);
+    });
+
+    it('status handler should be callable', async () => {
+      const methodInfo = methods.get('status');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('running');
+      expect(result).toHaveProperty('version');
+    });
+
+    it('health handler should be callable', async () => {
+      const methodInfo = methods.get('health');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({}, {});
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('status');
+      expect(result).toHaveProperty('version');
+    });
   });
 
   describe('Method Naming Convention', () => {
-    it('all methods should follow dot notation', () => {
-      methods.forEach((info, name) => {
-        expect(name).toContain('.');
+    // 'status' and 'health' are exceptions (no dot prefix, matching UI calls)
+    const DOT_EXCEPTIONS = new Set(['status', 'health']);
+
+    it('all methods should follow dot notation (except system methods)', () => {
+      methods.forEach((_info, name) => {
+        if (!DOT_EXCEPTIONS.has(name)) {
+          expect(name).toContain('.');
+        }
       });
     });
 
     it('method names should be lowercase', () => {
-      methods.forEach((info, name) => {
+      methods.forEach((_info, name) => {
         expect(name).toBe(name.toLowerCase());
       });
     });
 
-    it('method names should follow group.action pattern', () => {
-      methods.forEach((info, name) => {
+    it('method names should follow group.action pattern (except system methods)', () => {
+      methods.forEach((_info, name) => {
+        if (DOT_EXCEPTIONS.has(name)) return;
+
         const parts = name.split('.');
         expect(parts.length).toBeGreaterThanOrEqual(2);
 
@@ -279,8 +396,9 @@ describe('Gateway RPC Methods', () => {
     it('should group methods by domain', () => {
       const groups = new Map<string, string[]>();
 
-      methods.forEach((info, name) => {
-        const [group] = name.split('.');
+      methods.forEach((_info, name) => {
+        // 'status' and 'health' are standalone system methods
+        const group = name.includes('.') ? name.split('.')[0] : name;
         if (!groups.has(group)) {
           groups.set(group, []);
         }
@@ -302,8 +420,12 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('cron')).toBe(true);
       expect(groups.has('agents')).toBe(true);
       expect(groups.has('showcase')).toBe(true);
+      expect(groups.has('channels')).toBe(true);
+      expect(groups.has('connections')).toBe(true);
+      expect(groups.has('status')).toBe(true);
+      expect(groups.has('health')).toBe(true);
 
-      expect(groups.size).toBe(14);
+      expect(groups.size).toBe(18);
     });
 
     it('chat group should have expected methods', () => {
@@ -313,7 +435,9 @@ describe('Gateway RPC Methods', () => {
 
       expect(chatMethods).toContain('chat.abort');
       expect(chatMethods).toContain('chat.inject');
-      expect(chatMethods.length).toBe(2);
+      expect(chatMethods).toContain('chat.list');
+      expect(chatMethods).toContain('chat.delete');
+      expect(chatMethods.length).toBe(4);
     });
 
     it('tts group should have expected methods', () => {
@@ -371,10 +495,61 @@ describe('Gateway RPC Methods', () => {
         name.startsWith('agents.')
       );
 
+      expect(agentsMethods).toContain('agents.list');
       expect(agentsMethods).toContain('agents.identity.get');
       expect(agentsMethods).toContain('agents.files.list');
       expect(agentsMethods).toContain('agents.files.get');
-      expect(agentsMethods.length).toBe(3);
+      expect(agentsMethods.length).toBe(4);
+    });
+
+    it('cron group should have expected methods', () => {
+      const cronMethods = Array.from(methods.keys()).filter((name) =>
+        name.startsWith('cron.')
+      );
+
+      expect(cronMethods).toContain('cron.update');
+      expect(cronMethods).toContain('cron.status');
+      expect(cronMethods).toContain('cron.runs');
+      expect(cronMethods).toContain('cron.list');
+      expect(cronMethods).toContain('cron.add');
+      expect(cronMethods).toContain('cron.enable');
+      expect(cronMethods).toContain('cron.run');
+      expect(cronMethods).toContain('cron.remove');
+      expect(cronMethods.length).toBe(8);
+    });
+
+    it('skills group should have expected methods', () => {
+      const skillsMethods = Array.from(methods.keys()).filter((name) =>
+        name.startsWith('skills.')
+      );
+
+      expect(skillsMethods).toContain('skills.install');
+      expect(skillsMethods).toContain('skills.update');
+      expect(skillsMethods).toContain('skills.list');
+      expect(skillsMethods).toContain('skills.toggle');
+      expect(skillsMethods.length).toBe(4);
+    });
+
+    it('channels group should have expected methods', () => {
+      const channelsMethods = Array.from(methods.keys()).filter((name) =>
+        name.startsWith('channels.')
+      );
+
+      expect(channelsMethods).toContain('channels.list');
+      expect(channelsMethods).toContain('channels.connect');
+      expect(channelsMethods).toContain('channels.disconnect');
+      expect(channelsMethods).toContain('channels.probe');
+      expect(channelsMethods).toContain('channels.configure');
+      expect(channelsMethods.length).toBe(5);
+    });
+
+    it('connections group should have expected methods', () => {
+      const connectionsMethods = Array.from(methods.keys()).filter((name) =>
+        name.startsWith('connections.')
+      );
+
+      expect(connectionsMethods).toContain('connections.list');
+      expect(connectionsMethods.length).toBe(1);
     });
   });
 

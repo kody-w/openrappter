@@ -16,6 +16,9 @@ import { registerConfigMethods } from './config-methods.js';
 import { registerCronMethods } from './cron-methods.js';
 import { registerAgentsMethods } from './agents-methods.js';
 import { registerShowcaseMethods } from './showcase-methods.js';
+import { registerChannelsMethods } from './channels-methods.js';
+import { registerConnectionsMethods } from './connections-methods.js';
+import { registerSystemMethods } from './system-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -48,6 +51,9 @@ export function registerAllMethods(
   registerCronMethods(server, deps);
   registerAgentsMethods(server, deps);
   registerShowcaseMethods(server, deps);
+  registerChannelsMethods(server, deps);
+  registerConnectionsMethods(server, deps);
+  registerSystemMethods(server, deps);
 }
 
 // Re-export individual registration functions
@@ -66,4 +72,7 @@ export {
   registerCronMethods,
   registerAgentsMethods,
   registerShowcaseMethods,
+  registerChannelsMethods,
+  registerConnectionsMethods,
+  registerSystemMethods,
 };

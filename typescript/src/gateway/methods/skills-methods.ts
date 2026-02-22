@@ -30,6 +30,7 @@ interface SkillRegistry {
     enabled: boolean;
     source: string;
   }>;
+  toggle?(id: string, enabled: boolean): { id: string; enabled: boolean };
 }
 
 interface SkillsMethodsDeps {
@@ -73,5 +74,33 @@ export function registerSkillsMethods(
     const updates = await registry.update(params.names);
 
     return { updates };
+  });
+
+  // List installed skills
+  server.registerMethod<
+    void,
+    Array<{ name: string; version: string; enabled: boolean; source: string }>
+  >('skills.list', async () => {
+    const registry = deps?.skillRegistry;
+
+    if (!registry) {
+      return [];
+    }
+
+    return registry.list();
+  });
+
+  // Toggle a skill enabled/disabled
+  server.registerMethod<
+    { id: string; enabled: boolean },
+    { id: string; enabled: boolean }
+  >('skills.toggle', async (params) => {
+    const registry = deps?.skillRegistry;
+
+    if (!registry || !registry.toggle) {
+      throw new Error('Skill registry not available');
+    }
+
+    return registry.toggle(params.id, params.enabled);
   });
 }

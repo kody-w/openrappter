@@ -32,6 +32,14 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
+export interface ChatSessionSummary {
+  id: string;
+  agentId?: string;
+  messageCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ChatMethodsDeps {
   abortControllers?: Map<string, AbortController>;
   sessionStore?: Map<string, ChatSession>;
@@ -85,6 +93,28 @@ export function registerChatMethods(server: MethodRegistrar, deps?: ChatMethodsD
         messageId,
         sessionId,
       };
+    }
+  );
+
+  // List all chat sessions
+  server.registerMethod<void, ChatSessionSummary[]>(
+    'chat.list',
+    async () => {
+      return Array.from(sessionStore.values()).map((s) => ({
+        id: s.id,
+        agentId: (s as unknown as Record<string, unknown>).agentId as string | undefined,
+        messageCount: s.messages.length,
+        createdAt: (s as unknown as Record<string, unknown>).createdAt as string | undefined,
+        updatedAt: (s as unknown as Record<string, unknown>).updatedAt as string | undefined,
+      }));
+    }
+  );
+
+  // Delete a chat session
+  server.registerMethod<{ sessionId: string }, { deleted: boolean }>(
+    'chat.delete',
+    async (params) => {
+      return { deleted: sessionStore.delete(params.sessionId) };
     }
   );
 }

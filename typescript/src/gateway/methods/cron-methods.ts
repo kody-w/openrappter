@@ -90,4 +90,66 @@ export function registerCronMethods(
       return { runs };
     }
   );
+
+  // ── Dashboard CRUD methods (local cronStore) ──
+
+  const cronStore: Array<Record<string, unknown>> = [];
+
+  // List all cron jobs
+  server.registerMethod<void, Array<Record<string, unknown>>>(
+    'cron.list',
+    async () => {
+      return cronStore;
+    }
+  );
+
+  // Add a cron job
+  server.registerMethod<Record<string, unknown>, Record<string, unknown>>(
+    'cron.add',
+    async (params) => {
+      const job = {
+        id: `cron_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        ...params,
+      };
+      cronStore.push(job);
+      return job;
+    }
+  );
+
+  // Enable/disable a cron job
+  server.registerMethod<{ jobId: string; enabled: boolean }, { enabled: boolean }>(
+    'cron.enable',
+    async (params) => {
+      const job = cronStore.find((j) => j.id === params.jobId);
+      if (job) {
+        job.enabled = params.enabled;
+        return { enabled: params.enabled };
+      }
+      throw new Error('Job not found');
+    }
+  );
+
+  // Trigger a cron job
+  server.registerMethod<{ jobId: string }, { triggered: boolean }>(
+    'cron.run',
+    async (params) => {
+      const job = cronStore.find((j) => j.id === params.jobId);
+      if (!job) throw new Error('Job not found');
+      job.lastRun = Date.now();
+      return { triggered: true };
+    }
+  );
+
+  // Remove a cron job
+  server.registerMethod<{ jobId: string }, { removed: boolean }>(
+    'cron.remove',
+    async (params) => {
+      const idx = cronStore.findIndex((j) => j.id === params.jobId);
+      if (idx >= 0) {
+        cronStore.splice(idx, 1);
+        return { removed: true };
+      }
+      return { removed: false };
+    }
+  );
 }

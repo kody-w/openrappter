@@ -36,12 +36,24 @@ interface AgentRegistry {
 
 interface AgentsMethodsDeps {
   agentRegistry?: AgentRegistry;
+  agentList?: () => Array<Record<string, unknown>>;
 }
 
 export function registerAgentsMethods(
   server: MethodRegistrar,
   deps?: AgentsMethodsDeps
 ): void {
+  // List all agents (summary)
+  server.registerMethod<void, Array<Record<string, unknown>>>(
+    'agents.list',
+    async () => {
+      if (deps?.agentList) {
+        return deps.agentList();
+      }
+      return [];
+    }
+  );
+
   server.registerMethod<{ name: string }, { metadata: AgentMetadata | null }>(
     'agents.identity.get',
     async (params) => {

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-02-22
+
+### Added
+
+- **Dashboard RPC parity**: All 12 UI pages now fully functional — 19 missing RPC methods registered
+  - `chat.list`, `chat.delete` — session management for chat and sessions pages
+  - `cron.list`, `cron.add`, `cron.enable`, `cron.run`, `cron.remove` — full CRUD for cron page
+  - `skills.list`, `skills.toggle` — skill listing and enable/disable for skills page
+  - `agents.list` — agent summary listing for agents page
+  - `channels.list`, `channels.connect`, `channels.disconnect`, `channels.probe`, `channels.configure` — channel ops for channels page
+  - `connections.list` — device listing for devices page
+  - `status`, `health` — system info for debug and presence pages
+- 3 new method files: `channels-methods.ts`, `connections-methods.ts`, `system-methods.ts`
+- `dashboard-rpc.test.ts` — 30 new handler tests for all dashboard RPC methods
+- Updated `gateway-rpc-methods.test.ts` — 25 → 55 tests covering 18 method groups
+- Total test count: 2753 tests across 106 files
+
 ## [1.8.2] - 2026-02-22
 
 ### Fixed

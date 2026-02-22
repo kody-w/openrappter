@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.6.0, ES modules, Node >=20)
+- `typescript/` — TypeScript/Node.js package (v1.7.0, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Separate production assistant system (pnpm, tsdown build)
 
@@ -351,6 +351,75 @@ Deletion is blocked for built-in agent files. TypeScript protects: `BasicAgent.t
 The TypeScript constructor accepts an optional `agentsDir` parameter (defaults to `~/.openrappter/agents/`). Python uses `Path(__file__).parent` (the source agents directory).
 
 **Files**: `typescript/src/agents/LearnNewAgent.ts`, `python/openrappter/agents/learn_new_agent.py`, `typescript/src/__tests__/parity/learn-new-agent.test.ts` (61 tests)
+
+## Showcase Prompts (v1.7.0)
+
+10 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
+
+### Showcase Index
+
+| # | Name | Pattern | Example | Test | Tests |
+|---|------|---------|---------|------|-------|
+| 1 | The Architect | LearnNewAgent + AgentGraph DAG | `examples/architect.ts` | `showcase-architect.test.ts` | 7 |
+| 2 | Ouroboros Accelerator | AgentChain evolution → code review | `examples/ouroboros-accelerator.ts` | `showcase-accelerator.test.ts` | 7 |
+| 3 | Swarm Debugger | BroadcastManager race mode + slush forwarding | `examples/swarm-debugger.ts` | `showcase-swarm-debugger.test.ts` | 5 |
+| 4 | Mirror Test | Parallel parity comparison via AgentGraph | `examples/mirror-test.ts` | `showcase-mirror-test.test.ts` | 5 |
+| 5 | Watchmaker's Tournament | Competing agents + evaluator graph | `examples/watchmaker-tournament.ts` | `showcase-watchmaker-tournament.test.ts` | 7 |
+| 6 | Living Dashboard | Tracer → Dashboard → MCP self-monitoring | `examples/living-dashboard.ts` | `showcase-living-dashboard.test.ts` | 7 |
+| 7 | Infinite Regression | SubAgent depth limits + loop detection | `examples/infinite-regression.ts` | `showcase-infinite-regression.test.ts` | 13 |
+| 8 | Code Archaeologist | AgentGraph fan-out / fan-in | `examples/code-archaeologist.ts` | `showcase-code-archaeologist.test.ts` | 6 |
+| 9 | Agent Compiler | PipelineAgent conditional steps | `examples/agent-compiler.ts` | `showcase-agent-compiler.test.ts` | 9 |
+| 10 | Doppelganger | AgentTracer + clone comparison | `examples/doppelganger.ts` | `showcase-doppelganger.test.ts` | 6 |
+
+All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (72 tests).
+
+### 1. The Architect — LearnNewAgent + AgentGraph DAG
+
+Runtime-created agents (DataValidator, Transformer, Reporter) wired into an AgentGraph. Reporter depends on both upstream nodes and receives merged `upstream_slush = { validate: {...}, transform: {...} }`. Demonstrates DAG wiring, topological execution order, multi-upstream slush merging, and error propagation (skip dependents / stopOnError).
+
+### 2. Ouroboros Accelerator — AgentChain + Code Review
+
+AgentChain: `evolve` step (EvolutionAgent) → `review` step (ReviewAgent). A transform function extracts `evolved_source` from the evolution result and passes it as `content` to the review step. Demonstrates chain transforms, data_slush propagation through steps, and stopOnError behavior.
+
+### 3. Swarm Debugger — BroadcastManager (race) + Fix Agent
+
+Three debug agents (LogAnalyzer, StackTraceParser, ErrorCategorizer) with different delays race via `BroadcastManager` in `race` mode. The fastest responder's `data_slush` is forwarded as `upstream_slush` to a FixSuggestionAgent. Key API: `broadcast(groupId, message, executor)` where executor is `(agentId, msg) => agent.execute({query: msg})`.
+
+### 4. Mirror Test — AgentGraph Parallel Comparison
+
+Two sentiment analysis agents (SentimentA, SentimentB) run as parallel AgentGraph roots. A ComparatorAgent depends on both, receiving `upstream_slush = { sentimentA: {...}, sentimentB: {...} }`. Compares sentiment labels for parity and computes confidence delta between implementations.
+
+### 5. Watchmaker's Tournament — Competing Agents + Evaluator
+
+Three CompetitorAgents run in parallel with no dependencies. A TournamentEvaluatorAgent depends on all three, reads `this.context.upstream_slush` with all competitors' slush, sorts by quality score, and picks the winner. Tests verify ranking order, tie handling, and skip-on-failure behavior.
+
+### 6. Living Dashboard — Tracer → Dashboard → MCP Self-Monitoring
+
+AgentChain runs demo agents (HealthCheck, Metrics, Report). AgentTracer captures spans via `onSpanComplete` callback → feeds `DashboardHandler.addTrace()`. A DashboardQueryAgent reads traces from the dashboard and is registered on McpServer. MCP `tools/call` queries the dashboard — the system monitors itself. Full loop: chain → tracer → dashboard → MCP query.
+
+### 7. Infinite Regression — SubAgent Depth Limits + Loop Detection
+
+Demonstrates SubAgentManager safety mechanisms:
+- **Depth limits**: `canInvoke(agentId, depth)` returns false when `depth >= maxDepth`
+- **Loop detection**: `context.history.slice(-10).filter(c => c.targetAgentId === id).length >= 3` triggers error
+- **Blocked/allowed agents**: allowlist and blocklist enforcement
+- Tests manually accumulate `SubAgentCall` records in `context.history` to simulate sequential sub-agent invocations (since `invoke()` creates child contexts without mutating the parent)
+
+### 8. Code Archaeologist — AgentGraph Fan-out / Fan-in
+
+Three analysis agents (GitHistoryAgent, DependencyAnalyzerAgent, ComplexityScorerAgent) run as parallel graph roots. A SynthesisAgent depends on all three and receives merged `upstream_slush` keyed by node name. Cross-references git hotspots with complexity risky files to identify priority refactoring targets.
+
+### 9. Agent Compiler — PipelineAgent Conditional Steps
+
+PipelineAgent with a conditional step triggered by `data_slush` values:
+- InputParserAgent emits `data_slush.needs_new_agent = true/false`
+- Conditional step: `{ field: 'needs_new_agent', equals: true }` (evaluated by `PipelineAgent.evaluateCondition()`)
+- If true, runs AgentCreatorAgent (simulating LearnNewAgent), then DynamicExecutorAgent
+- Tests verify conditional fires/skips, `exists` condition checks, data_slush threading, and end-to-end pipeline completion
+
+### 10. Doppelganger — AgentTracer + Clone Comparison
+
+Traces a TextProcessorAgent (deterministic word count / longest word / reverse) via `startSpan`/`endSpan` with `recordIO: true`. Extracts trace to build a description for creating a "clone" agent. Both original and clone run on the same input, then a ComparisonAgent checks field-by-field equality. Tests verify trace IO capture, duration recording, identical clone output, and divergence detection.
 
 ## UX Principles
 

@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenRappter is a local-first AI agent framework with parallel implementations in **TypeScript** and **Python**. It provides agent orchestration with built-in "data sloshing" (implicit context enrichment), a skills system via ClawHub, memory persistence, multi-channel messaging, and a WebSocket gateway. The `openclaw/` directory is a separate, bundled production AI assistant system with its own build.
+OpenRappter is a local-first AI agent framework with parallel implementations in **TypeScript** and **Python**. It provides agent orchestration with built-in "data sloshing" (implicit context enrichment), a skills system via ClawHub, memory persistence, multi-channel messaging, and a WebSocket gateway. The `openclaw/` directory is a copy of a competitor's repo tracked as a reference — ignore submodule pointer drift in git status.
 
 ## Repository Layout
 
 - `typescript/` — TypeScript/Node.js package (v1.7.0, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
-- `openclaw/` — Separate production assistant system (pnpm, tsdown build)
+- `openclaw/` — Competitor repo copy (reference only, ignore submodule drift)
 
 ## Build & Test Commands
 

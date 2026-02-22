@@ -8,7 +8,7 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.5.0, ES modules, Node >=20)
+- `typescript/` — TypeScript/Node.js package (v1.6.0, ES modules, Node >=20)
 - `python/` — Python package (mirrors TypeScript agent architecture)
 - `openclaw/` — Separate production assistant system (pnpm, tsdown build)
 
@@ -105,6 +105,124 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 - `AgentRouter` (`router.ts`) — Rule-based message routing by sender/channel/group/pattern with priority; session key isolation
 - `SubAgent` (`subagent.ts`) — Nested agent invocation with depth limits and loop detection
 - `AgentChain` (`chain.ts`) — Sequential pipeline with automatic `data_slush` forwarding between steps; supports transforms, timeouts, stopOnError/continue modes
+- `AgentGraph` (`graph.ts`) — DAG executor with parallel execution, topological sort, cycle detection, and multi-upstream `data_slush` merging
+
+## Architecture: AgentGraph (DAG Executor)
+
+`AgentGraph` executes agents as a directed acyclic graph. Nodes whose dependencies are satisfied run concurrently; data flows automatically between nodes.
+
+### Key types
+
+- `GraphNode` — `{ name, agent, kwargs?, dependsOn?: string[] }` — a node in the DAG
+- `GraphNodeResult` — `{ name, agentName, result, dataSlush, durationMs, status: 'success'|'error'|'skipped' }`
+- `GraphResult` — `{ status, nodes: Map, executionOrder, totalDurationMs, error? }`
+- `GraphOptions` — `{ nodeTimeout?, stopOnError?: boolean }`
+
+### Execution model
+
+1. `validate()` checks for missing dependencies and cycles (DFS three-color algorithm)
+2. `run()` computes topological levels via Kahn's algorithm
+3. Each level's nodes execute concurrently via `Promise.all`
+4. Multi-dependency slush merging: `upstream_slush = { nodeA: { ...slushA }, nodeB: { ...slushB } }`
+5. Failed nodes: dependents are marked `skipped` (default) or execution stops immediately (`stopOnError: true`)
+
+```typescript
+const graph = new AgentGraph()
+  .addNode({ name: 'fetch', agent: webAgent, kwargs: { url: '...' } })
+  .addNode({ name: 'parse', agent: parseAgent, dependsOn: ['fetch'] })
+  .addNode({ name: 'store', agent: memAgent, dependsOn: ['parse'] })
+  .addNode({ name: 'notify', agent: msgAgent, dependsOn: ['parse'] });
+
+const result = await graph.run();
+// 'parse' runs after 'fetch'; 'store' and 'notify' run in parallel after 'parse'
+```
+
+**Files**: `typescript/src/agents/graph.ts`, `typescript/src/__tests__/parity/agent-graph.test.ts` (19 tests)
+
+## Architecture: Agent Observability (AgentTracer)
+
+Span-based tracing system for agent execution. Tracks start/end/duration/inputs/outputs across chains, graphs, and sub-agent calls.
+
+### Key types
+
+- `TraceSpan` — `{ id, parentId, traceId, agentName, operation, startTime, endTime, durationMs, status, inputs?, outputs?, dataSlush?, error?, tags? }`
+- `TraceContext` — `{ traceId, spanId, baggage? }` — propagated through chains/graphs to link parent-child spans
+- `AgentTracerOptions` — `{ maxSpans?: number, recordIO?: boolean, onSpanComplete?: (span) => void }`
+
+### Usage
+
+```typescript
+import { globalTracer } from './agents/tracer.js';
+
+const { span, context } = globalTracer.startSpan('ShellAgent', 'execute', undefined, { action: 'bash' });
+// ... run agent ...
+globalTracer.endSpan(span.id, { status: 'success', outputs: { exitCode: 0 } });
+
+// Child spans link to parents via context propagation
+const { span: child } = globalTracer.startSpan('MemoryAgent', 'execute', context);
+```
+
+- `getTrace(traceId)` — all spans for a trace in chronological order
+- `getActiveSpans()` / `getCompletedSpans(limit?)` — query running/finished spans
+- `toJSON()` — serializable summary with per-trace rollups for dashboards
+- `globalTracer` singleton + `createTracer(options)` factory
+
+**Files**: `typescript/src/agents/tracer.ts`, `typescript/src/__tests__/parity/agent-tracer.test.ts` (24 tests)
+
+## Architecture: MCP Server
+
+Exposes OpenRappter agents as MCP (Model Context Protocol) tools via JSON-RPC 2.0 over stdio. Enables Claude Code, Cursor, and other MCP-capable clients to discover and invoke agents.
+
+### Protocol
+
+- `initialize` — returns server info and capabilities (`{ tools: {} }`)
+- `tools/list` — returns agent metadata mapped to MCP tool definitions
+- `tools/call` — routes to `agent.execute()`, returns content as MCP text blocks
+- `ping` — keepalive
+
+### Usage
+
+```typescript
+import { McpServer } from './mcp/server.js';
+
+const server = new McpServer({ name: 'openrappter', version: '1.6.0' });
+server.registerAgent(shellAgent);
+server.registerAgent(memoryAgent);
+await server.serve(); // reads stdin, writes stdout
+```
+
+Agent metadata maps to MCP tools: `name` → tool name, `description` → tool description, `parameters` → `inputSchema`. Tool call errors return `{ isError: true, content: [{ type: 'text', text: 'Error: ...' }] }` per MCP spec.
+
+**Files**: `typescript/src/mcp/server.ts`, `typescript/src/__tests__/parity/mcp-server.test.ts` (18 tests)
+
+## Architecture: Dashboard REST API
+
+HTTP endpoints for the web dashboard UI. Designed as a mountable handler on the existing gateway HTTP server.
+
+### Endpoints (default prefix: `/api`)
+
+- `GET /api/agents` — list all registered agents with metadata
+- `POST /api/agents/execute` — execute an agent: `{ agentName, kwargs }` → `{ status, result, durationMs }`
+- `GET /api/traces[?limit=N]` — recent execution traces
+- `DELETE /api/traces` — clear trace history
+- `GET /api/status` — agent count, trace count, agent names
+
+### Usage
+
+```typescript
+import { DashboardHandler } from './gateway/dashboard.js';
+
+const dashboard = new DashboardHandler({ prefix: '/api', cors: true });
+dashboard.registerAgents([shellAgent, memoryAgent]);
+
+// In HTTP handler:
+const handled = await dashboard.handle(req, res);
+if (!handled) { /* pass to next handler */ }
+```
+
+CORS enabled by default. Trace store is in-memory with a 500-entry circular buffer. Execution traces are automatically recorded on each `/api/agents/execute` call.
+
+**Files**: `typescript/src/gateway/dashboard.ts`, `typescript/src/__tests__/parity/dashboard-api.test.ts` (21 tests)
 
 ## Architecture: Skills (ClawHub)
 
@@ -119,7 +237,8 @@ Skills are `SKILL.md` files stored in `~/.openrappter/skills/`. Skills get wrapp
 ## Architecture: Other Key Systems
 
 - **Memory** (`typescript/src/memory/`) — Content chunker (overlapping windows), embeddings, hybrid search; Python uses JSON at `~/.openrappter/memory.json`
-- **Gateway** (`typescript/src/gateway/`) — WebSocket server, JSON-RPC 2.0 protocol, streaming agent responses, event system (agent, chat, channel, cron, presence)
+- **Gateway** (`typescript/src/gateway/`) — WebSocket server, JSON-RPC 2.0 protocol, streaming agent responses, event system (agent, chat, channel, cron, presence); Dashboard REST API (`dashboard.ts`)
+- **MCP** (`typescript/src/mcp/`) — MCP server exposing agents as tools via stdio transport
 - **Channels** (`typescript/src/channels/`) — CLI, Slack, Discord, Telegram, Signal, iMessage, Google Chat, Teams, WhatsApp, Matrix
 - **Storage** (`typescript/src/storage/`) — `StorageAdapter` interface with SQLite and in-memory implementations; migration system
 - **Config** (`typescript/src/config/`) — YAML/JSON loading, Zod schema validation, file watcher for live reload
@@ -131,9 +250,16 @@ TypeScript and Python implementations are designed to mirror each other. When mo
 - `typescript/src/agents/BasicAgent.ts` ↔ `python/openrappter/agents/basic_agent.py`
 - `typescript/src/agents/ShellAgent.ts` ↔ `python/openrappter/agents/shell_agent.py`
 - `typescript/src/agents/LearnNewAgent.ts` ↔ `python/openrappter/agents/learn_new_agent.py`
+- `typescript/src/agents/broadcast.ts` ↔ `python/openrappter/agents/broadcast.py`
+- `typescript/src/agents/router.ts` ↔ `python/openrappter/agents/router.py`
+- `typescript/src/agents/subagent.ts` ↔ `python/openrappter/agents/subagent.py`
+- `typescript/src/agents/PipelineAgent.ts` ↔ `python/openrappter/agents/pipeline_agent.py`
+- `typescript/src/agents/GitAgent.ts` ↔ `python/openrappter/agents/git_agent.py`
+- `typescript/src/agents/CodeReviewAgent.ts` ↔ `python/openrappter/agents/code_review_agent.py`
+- `typescript/src/agents/WebAgent.ts` ↔ `python/openrappter/agents/web_agent.py`
 - `typescript/src/clawhub.ts` ↔ `python/openrappter/clawhub.py`
 
-Parity tests live at `typescript/src/__tests__/parity/`.
+Parity tests: `typescript/src/__tests__/parity/` and `python/tests/` (broadcast, router, subagent, pipeline, git_agent, code_review, web_agent).
 
 ## Capability Scoring Principles (OuroborosAgent)
 

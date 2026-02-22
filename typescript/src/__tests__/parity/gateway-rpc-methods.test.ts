@@ -301,8 +301,9 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('config')).toBe(true);
       expect(groups.has('cron')).toBe(true);
       expect(groups.has('agents')).toBe(true);
+      expect(groups.has('showcase')).toBe(true);
 
-      expect(groups.size).toBe(13);
+      expect(groups.size).toBe(14);
     });
 
     it('chat group should have expected methods', () => {

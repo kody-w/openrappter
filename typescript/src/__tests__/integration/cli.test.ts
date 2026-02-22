@@ -15,7 +15,6 @@ import { AgentRegistry } from '../../agents/AgentRegistry.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import { ShellAgent } from '../../agents/ShellAgent.js';
 import { MemoryAgent } from '../../agents/MemoryAgent.js';
-import type { AgentMetadata } from '../../agents/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

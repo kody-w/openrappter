@@ -3,8 +3,7 @@
  * Tests that all channels match openclaw feature parity
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock channel implementations
 vi.mock('../../channels/whatsapp.js', () => ({

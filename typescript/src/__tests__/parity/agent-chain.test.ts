@@ -7,7 +7,6 @@
 import { describe, it, expect } from 'vitest';
 import { AgentChain, createAgentChain } from '../../agents/chain.js';
 import { ShellAgent } from '../../agents/ShellAgent.js';
-import { MemoryAgent } from '../../agents/MemoryAgent.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata } from '../../agents/types.js';
 

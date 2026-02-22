@@ -282,11 +282,10 @@ describe('Config Integration', () => {
       const configPath = join(tmpDir, 'watch-err.json5');
       writeFileSync(configPath, '{}');
 
-      let errorCaught: Error | null = null;
       const watcher = new ConfigWatcher({
         path: configPath,
         debounceMs: 50,
-        onError: (err) => { errorCaught = err; },
+        onError: () => { /* intentionally ignored — test verifies no crash */ },
       });
 
       await watcher.start();

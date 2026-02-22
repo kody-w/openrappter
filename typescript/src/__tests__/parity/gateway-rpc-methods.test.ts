@@ -117,7 +117,7 @@ describe('Gateway RPC Methods', () => {
 
   describe('Method Handlers', () => {
     it('each registered method should have a function handler', () => {
-      methods.forEach((info, name) => {
+      methods.forEach((info, _name) => {
         expect(typeof info.handler).toBe('function');
       });
     });
@@ -380,7 +380,7 @@ describe('Gateway RPC Methods', () => {
 
   describe('Method Auth Requirements', () => {
     it('should track requiresAuth flag for each method', () => {
-      methods.forEach((info, name) => {
+      methods.forEach((info, _name) => {
         expect(typeof info.requiresAuth).toBe('boolean');
       });
     });

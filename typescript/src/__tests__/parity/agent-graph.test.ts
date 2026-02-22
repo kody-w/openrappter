@@ -45,7 +45,7 @@ class DelayAgent extends BasicAgent {
     this.delayMs = delayMs;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     await new Promise(resolve => setTimeout(resolve, this.delayMs));
     return JSON.stringify({
       status: 'success',

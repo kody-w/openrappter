@@ -3,7 +3,7 @@
  * Tests SQLite persistence, vector search, FTS search
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock better-sqlite3
 vi.mock('better-sqlite3', () => ({

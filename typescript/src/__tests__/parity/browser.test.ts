@@ -148,28 +148,24 @@ describe('Browser Automation Parity', () => {
 
   describe('DOM Inspection', () => {
     it('should get element text', () => {
-      const action = { type: 'getText', selector: 'h1' };
       const result = { text: 'Page Title' };
 
       expect(result.text).toBeDefined();
     });
 
     it('should get element attributes', () => {
-      const action = { type: 'getAttribute', selector: 'a', attribute: 'href' };
       const result = { value: 'https://example.com' };
 
       expect(result.value).toBeDefined();
     });
 
     it('should get page HTML', () => {
-      const action = { type: 'getHTML', selector: '#content' };
       const result = { html: '<div id="content">...</div>' };
 
       expect(result.html).toBeDefined();
     });
 
     it('should query elements count', () => {
-      const action = { type: 'count', selector: '.list-item' };
       const result = { count: 10 };
 
       expect(result.count).toBeGreaterThanOrEqual(0);
@@ -200,7 +196,6 @@ describe('Browser Automation Parity', () => {
     });
 
     it('should access localStorage', () => {
-      const action = { type: 'localStorage.get', key: 'user_prefs' };
       const result = { value: '{"theme":"dark"}' };
 
       expect(result.value).toBeDefined();

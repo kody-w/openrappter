@@ -12,11 +12,6 @@ import { describe, it, expect } from 'vitest';
 describe('Skills Ecosystem Parity', () => {
   describe('Skill Registry', () => {
     it('should search for skills', () => {
-      const request = {
-        method: 'skills.search',
-        params: { query: 'notes' },
-      };
-
       const response = {
         results: [
           { name: 'apple-notes', description: 'Access Apple Notes', version: '1.0.0' },
@@ -28,11 +23,6 @@ describe('Skills Ecosystem Parity', () => {
     });
 
     it('should install skill from ClawHub', () => {
-      const request = {
-        method: 'skills.install',
-        params: { slug: 'apple-notes' },
-      };
-
       const response = {
         success: true,
         skill: 'apple-notes',
@@ -70,11 +60,6 @@ describe('Skills Ecosystem Parity', () => {
     });
 
     it('should update installed skill', () => {
-      const request = {
-        method: 'skills.update',
-        params: { name: 'apple-notes' },
-      };
-
       const response = {
         updated: true,
         from: '1.0.0',
@@ -260,11 +245,6 @@ Perform mathematical calculations.
 
   describe('Skill Binaries', () => {
     it('should support skill binary download', () => {
-      const request = {
-        method: 'skills.bins',
-        params: { skill: 'whisper', platform: 'darwin-arm64' },
-      };
-
       const response = {
         available: true,
         url: 'https://clawhub.dev/bins/whisper/darwin-arm64',

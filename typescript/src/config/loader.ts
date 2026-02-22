@@ -6,7 +6,7 @@ import { readFileSync, existsSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import JSON5 from 'json5';
-import { validateConfig, type ValidatedConfig } from './schema.js';
+import { validateConfig } from './schema.js';
 import type { OpenRappterConfig } from './types.js';
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.openrappter');

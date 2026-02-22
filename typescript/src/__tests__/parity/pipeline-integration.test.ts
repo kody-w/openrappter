@@ -622,17 +622,6 @@ export function add(a: number, b: number): number {
 }
 `.trim();
 
-    const messyCode = `
-import fs from 'fs';
-import fs from 'fs';
-console.log('debug');
-const x: any = 1;
-const y: any = 2;
-const z: any = 3;
-const w: any = 4;
-const v: any = 5;
-const u: any = 6;
-`.trim();
 
     it('PipelineAgent wraps CodeReviewAgent: runs review and gets score in result', async () => {
       const codeReview = new CodeReviewAgent();

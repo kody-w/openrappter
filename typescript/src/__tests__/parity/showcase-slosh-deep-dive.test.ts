@@ -5,9 +5,9 @@
  * SloshPrivacy, debug handler, feedback loop, breadcrumbs, and getSignal().
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { BasicAgent } from '../../agents/BasicAgent.js';
-import type { AgentMetadata, SloshFilter, SloshPrivacy, SloshDebugEvent } from '../../agents/types.js';
+import type { AgentMetadata, SloshDebugEvent } from '../../agents/types.js';
 
 // ── Inline agent that captures context in perform() ──
 

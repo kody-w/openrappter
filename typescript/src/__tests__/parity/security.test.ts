@@ -193,11 +193,6 @@ describe('Security Parity', () => {
 
   describe('Node-Level Approvals', () => {
     it('should get node approval status', () => {
-      const request = {
-        method: 'exec.approvals.node.get',
-        params: { nodeId: 'node_123' },
-      };
-
       const response = {
         nodeId: 'node_123',
         policy: 'allowlist',

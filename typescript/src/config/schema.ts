@@ -113,7 +113,7 @@ export function validateConfig(data: unknown): { success: boolean; data?: Valida
 export function getConfigJsonSchema(): Record<string, unknown> {
   const shape = openRappterConfigSchema.shape;
   const properties: Record<string, unknown> = {};
-  for (const [key, schema] of Object.entries(shape)) {
+  for (const [key] of Object.entries(shape)) {
     properties[key] = { type: 'object', description: `${key} configuration section` };
   }
   return {

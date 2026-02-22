@@ -340,7 +340,6 @@ describe('Configuration Loader', () => {
     });
 
     it('should create backup before write', async () => {
-      const configPath = '~/.openrappter/config.json5';
       const backupPath = '~/.openrappter/config.backup.json5';
       expect(backupPath).toContain('backup');
     });

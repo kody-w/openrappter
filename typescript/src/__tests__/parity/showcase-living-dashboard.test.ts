@@ -6,13 +6,13 @@
  * reads traces from the dashboard — the system monitors itself.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AgentChain } from '../../agents/chain.js';
 import { createTracer } from '../../agents/tracer.js';
 import { McpServer } from '../../mcp/server.js';
 import { DashboardHandler } from '../../gateway/dashboard.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
-import type { AgentMetadata, AgentResult } from '../../agents/types.js';
+import type { AgentMetadata } from '../../agents/types.js';
 
 // ── Inline agents ──
 

@@ -3,7 +3,7 @@
  * Discovers and loads bundled SKILL.md files shipped with openrappter.
  */
 
-import { readdir, readFile } from 'fs/promises';
+import { readdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {

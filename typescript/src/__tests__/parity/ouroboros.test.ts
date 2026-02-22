@@ -13,7 +13,7 @@ import {
   assessEvolution, checkWordStats, checkCaesarCipher, checkPatterns,
   checkSentiment, checkReflection, loadLineageLog, saveLineageLog, computeTrends,
 } from '../../agents/OuroborosAgent.js';
-import type { EvolutionReport, EvolutionLineage, LineageRunSummary, CapabilityTrend, CapabilityScore } from '../../agents/OuroborosAgent.js';
+import type { EvolutionReport, LineageRunSummary } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 

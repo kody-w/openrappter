@@ -114,7 +114,7 @@ export class MemoryAgent extends BasicAgent {
   /**
    * Override sloshMemory to integrate with our storage
    */
-  protected sloshMemory(query: string): MemoryEcho[] {
+  protected sloshMemory(_query: string): MemoryEcho[] {
     // Synchronous version for sloshing - returns empty, actual search in recall()
     return [];
   }

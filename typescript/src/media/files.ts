@@ -5,7 +5,6 @@
  */
 
 import { promises as fs } from 'fs';
-import { existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, dirname } from 'path';
 import { randomBytes } from 'crypto';

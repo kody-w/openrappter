@@ -32,12 +32,6 @@ describe('Power Prompts Parity', () => {
     });
 
     it('should fetch calendar events for estimated destination', () => {
-      const calendarQuery = {
-        skill: 'calendar',
-        action: 'next_event',
-        params: { timeframe: '2h', hasLocation: true },
-      };
-
       const calendarResult = {
         event: 'Team lunch',
         location: '123 Main St, SF',
@@ -49,15 +43,6 @@ describe('Power Prompts Parity', () => {
     });
 
     it('should request location from paired device node', () => {
-      const locationRequest = {
-        method: 'node.invoke',
-        params: {
-          nodeId: 'phone_1',
-          capability: 'location',
-          action: 'getCurrentLocation',
-        },
-      };
-
       const locationResult = {
         latitude: 37.7749,
         longitude: -122.4194,
@@ -148,17 +133,6 @@ describe('Power Prompts Parity', () => {
     });
 
     it('should summarize collected mentions using agent', () => {
-      const summaryRequest = {
-        agentId: 'main',
-        action: 'summarize',
-        input: [
-          'alice in #general: review PR #42',
-          'bob in #engineering: deploy failed',
-          'carol in #design: new mockups ready',
-        ].join('\n'),
-        format: 'digest',
-      };
-
       const summaryResult = {
         digest: '**Slack Digest (10:00–11:00)**\n- PR review requested (#general)\n- Deploy failure (#engineering) ⚠️\n- Design mockups ready (#design)',
         mentionCount: 3,
@@ -521,13 +495,6 @@ describe('Power Prompts Parity', () => {
     });
 
     it('should capture screenshots of open browser tabs', () => {
-      const screenshotRequest = {
-        action: 'browser.screenshot',
-        targets: 'all_tabs',
-        format: 'png',
-        maxTabs: 10,
-      };
-
       const screenshotResults = [
         { tabId: 1, url: 'https://github.com/org/repo/pull/42', image: '/tmp/tab1.png' },
         { tabId: 2, url: 'https://docs.google.com/document/d/123', image: '/tmp/tab2.png' },
@@ -731,15 +698,6 @@ describe('Power Prompts Parity', () => {
     });
 
     it('should draft reply matching learned tone', () => {
-      const draftRequest = {
-        incomingMessage: 'Can you have the Q1 projections ready by Friday?',
-        sender: 'boss',
-        draftConfig: {
-          useToneProfile: true,
-          relationship: 'boss',
-        },
-      };
-
       const draft = {
         text: "Absolutely, I'll have the Q1 projections finalized by end of day Thursday to give you time to review.",
         confidence: 0.85,

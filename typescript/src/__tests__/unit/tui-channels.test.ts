@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { commands, parseSlashCommand, executeSlashCommand } from '../../tui/slash-commands.js';
+import { describe, it, expect, vi } from 'vitest';
+import { commands, executeSlashCommand } from '../../tui/slash-commands.js';
 
 function createMockClient(responses: Record<string, unknown> = {}) {
   return {

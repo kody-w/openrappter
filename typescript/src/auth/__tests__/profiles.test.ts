@@ -7,7 +7,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   AuthProfileManager,
-  FailoverProfile,
   FailoverProfileInput,
   createAuthProfileManager,
 } from '../profile-manager.js';

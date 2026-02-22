@@ -3,7 +3,6 @@
  * Uses better-sqlite3 for synchronous operations wrapped in async interface
  */
 
-import { randomUUID } from 'crypto';
 import type {
   StorageAdapter,
   Session,
@@ -14,9 +13,8 @@ import type {
   CronLogRecord,
   Device,
   StorageConfig,
-  MigrationRecord,
 } from './types.js';
-import { migrations, getPendingMigrations } from './migrations.js';
+import { getPendingMigrations } from './migrations.js';
 
 // Type definitions for better-sqlite3 (dynamically imported)
 interface Database {

@@ -28,7 +28,7 @@ class CompetitorAgent extends BasicAgent {
     this.solution = solution;
   }
 
-  async perform(kwargs: Record<string, unknown>): Promise<string> {
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
     return JSON.stringify({
       status: 'success',
       solution: this.solution,

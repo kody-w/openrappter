@@ -5,7 +5,7 @@
  * including vector storage, hybrid search, and sync functionality.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Types we expect to implement
 interface MemoryChunk {
@@ -302,7 +302,6 @@ describe('Memory Manager', () => {
 
   describe('Memory sync', () => {
     it('should watch session transcript files', async () => {
-      const mockWatch = vi.fn();
       const transcriptDir = '~/.openrappter/sessions';
 
       // Should watch for changes
@@ -310,7 +309,6 @@ describe('Memory Manager', () => {
     });
 
     it('should watch workspace files', async () => {
-      const workspaceDir = '~/workspace';
       const patterns = ['**/*.md', '**/*.txt', '**/*.json'];
 
       expect(patterns).toContain('**/*.md');

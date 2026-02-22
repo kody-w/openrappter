@@ -3,7 +3,7 @@
  * Remote access via Tailscale Serve/Funnel
  */
 
-import { exec, execSync, spawn, ChildProcess } from 'child_process';
+import { exec, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -253,7 +253,7 @@ export class TailscaleClient {
   async getFunnelStatus(): Promise<{ running: boolean; url?: string }> {
     try {
       const { stdout } = await execAsync(`${this.cliPath} funnel status --json`);
-      const config = JSON.parse(stdout);
+      JSON.parse(stdout);
       const dnsName = await this.getDNSName();
       const hostname = dnsName?.replace(/\..*$/, '');
       return {

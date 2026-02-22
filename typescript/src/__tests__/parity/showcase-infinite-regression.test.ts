@@ -7,7 +7,6 @@
 
 import { describe, it, expect } from 'vitest';
 import { SubAgentManager, type SubAgentContext, type SubAgentCall } from '../../agents/subagent.js';
-import type { AgentResult } from '../../agents/types.js';
 
 describe('Showcase: Infinite Regression', () => {
   describe('Depth limits', () => {

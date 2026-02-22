@@ -9,7 +9,7 @@ vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
     ...actual,
-    promisify: (fn: unknown) => {
+    promisify: (_fn: unknown) => {
       // Return a function that calls the mocked exec and wraps in promise
       return async (...args: unknown[]) => {
         const { exec } = await import('child_process');

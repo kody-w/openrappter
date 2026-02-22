@@ -3,8 +3,8 @@
  * Manages skill discovery, installation, and loading from ClawHub
  */
 
-import { readdir, readFile, writeFile, mkdir, stat, rm } from 'fs/promises';
-import { join, dirname } from 'path';
+import { readdir, readFile, writeFile, mkdir, rm } from 'fs/promises';
+import { join } from 'path';
 import { homedir } from 'os';
 
 export interface Skill {

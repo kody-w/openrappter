@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ApprovalManager, createApprovalManager } from '../../security/approvals.js';
-import type { ApprovalRule, ApprovalContext } from '../../security/approvals.js';
+import { createApprovalManager } from '../../security/approvals.js';
+import type { ApprovalContext } from '../../security/approvals.js';
 
 describe('Showcase: Authorization Fortress', () => {
   describe('Default deny policy', () => {

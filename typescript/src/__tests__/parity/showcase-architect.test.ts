@@ -6,7 +6,7 @@
  * error propagation through DAG.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AgentGraph } from '../../agents/graph.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata } from '../../agents/types.js';

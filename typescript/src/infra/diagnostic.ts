@@ -113,7 +113,7 @@ export async function runDiagnostics(): Promise<DiagnosticCheck[]> {
         detail: `Status: ${response.status}`,
       });
     }
-  } catch (error) {
+  } catch {
     checks.push({
       name: 'Gateway',
       status: 'warn',

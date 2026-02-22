@@ -26,15 +26,6 @@ const registry = new AgentRegistry(path.join(__dirname, 'agents'));
 // ONBOARDING HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function hasGhCLI(): Promise<boolean> {
-  try {
-    await execAsync('gh --version');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function getGhToken(): Promise<string | null> {
   try {
     const { stdout } = await execAsync('gh auth token');

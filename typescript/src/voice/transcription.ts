@@ -7,7 +7,6 @@ import type {
   TranscriptionProvider,
   TranscriptionOptions,
   TranscriptionResult,
-  TranscriptionSegment,
 } from './types.js';
 
 /**

@@ -143,12 +143,9 @@ function compileHandler(
     })(context);
   `;
 
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
   return (context) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const fn = new Function('context', wrappedCode);
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return fn(context) as Promise<import('./types.js').HookResult | void>;
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));

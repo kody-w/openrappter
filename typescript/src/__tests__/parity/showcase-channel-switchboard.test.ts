@@ -5,7 +5,7 @@
  * Uses MockChannel extending BaseChannel.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { BaseChannel } from '../../channels/base.js';
 import { ChannelRegistry } from '../../channels/registry.js';
 import type { IncomingMessage, OutgoingMessage } from '../../channels/types.js';

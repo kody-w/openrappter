@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { StreamManager } from '../../gateway/streaming.js';
-import type { StreamBlock, StreamSession } from '../../gateway/streaming.js';
+import type { StreamBlock } from '../../gateway/streaming.js';
 
 describe('Showcase: Stream Weaver', () => {
   describe('Session lifecycle', () => {

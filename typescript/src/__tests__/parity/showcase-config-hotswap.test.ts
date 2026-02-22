@@ -5,7 +5,7 @@
  * substituteEnvVars, getConfigJsonSchema. Pure function tests, no agents.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { substituteEnvVars, mergeConfigs, parseConfigContent } from '../../config/loader.js';
 import { validateConfig, getConfigJsonSchema } from '../../config/schema.js';
 

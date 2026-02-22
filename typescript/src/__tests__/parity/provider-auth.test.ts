@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DeviceCodeFlow, DeviceCodeResponse, TokenResponse } from '../../auth/device-code.js';
-import { AuthProfileStore, AuthProfile } from '../../auth/profiles.js';
+import { AuthProfileStore } from '../../auth/profiles.js';
 import { OAuthClient, OAuthTokenStore, OAuthToken } from '../../auth/oauth.js';
 
 describe('Device Code Flow', () => {

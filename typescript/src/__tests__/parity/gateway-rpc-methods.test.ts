@@ -128,7 +128,7 @@ describe('Gateway RPC Methods', () => {
 
       const result = await methodInfo!.handler({ runId: 'test' }, {});
       expect(result).toBeDefined();
-      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('status');
     });
 
     it('chat.inject handler should be callable', async () => {
@@ -140,7 +140,7 @@ describe('Gateway RPC Methods', () => {
         {}
       );
       expect(result).toBeDefined();
-      expect(result).toHaveProperty('success');
+      expect(result).toHaveProperty('status');
       expect(result).toHaveProperty('messageId');
     });
 

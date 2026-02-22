@@ -12,5 +12,20 @@ Core Agents:
 """
 
 from openrappter.agents.basic_agent import BasicAgent
+from openrappter.agents.chain import AgentChain, create_agent_chain
+from openrappter.agents.graph import AgentGraph, GraphNode, create_agent_graph
+from openrappter.agents.tracer import AgentTracer, TraceSpan, TraceContext, create_tracer, global_tracer
 
-__all__ = ['BasicAgent']
+__all__ = [
+    'BasicAgent',
+    'AgentChain',
+    'create_agent_chain',
+    'AgentGraph',
+    'GraphNode',
+    'create_agent_graph',
+    'AgentTracer',
+    'TraceSpan',
+    'TraceContext',
+    'create_tracer',
+    'global_tracer',
+]

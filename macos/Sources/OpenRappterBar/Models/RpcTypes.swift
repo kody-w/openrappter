@@ -3,7 +3,7 @@ import Foundation
 // MARK: - AnyCodable
 
 /// Type-erased JSON value wrapper for dynamic payloads.
-public struct AnyCodable: Codable, Equatable, Sendable {
+public struct AnyCodable: Codable, Equatable, @unchecked Sendable {
     public let value: Any
 
     public init(_ value: Any) {

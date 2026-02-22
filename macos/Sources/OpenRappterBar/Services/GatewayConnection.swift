@@ -263,14 +263,14 @@ public actor GatewayConnection: GatewayConnectionProtocol {
                 do {
                     try await transport.send(data)
                 } catch {
-                    await self.removePendingAndResume(id: id, with: .failure(error))
+                    self.removePendingAndResume(id: id, with: .failure(error))
                 }
             }
 
             // Handshake timeout
             Task {
                 try? await Task.sleep(for: .seconds(AppConstants.handshakeTimeout))
-                await self.removePendingAndResume(id: id, with: .failure(GatewayConnectionError.requestTimeout))
+                self.removePendingAndResume(id: id, with: .failure(GatewayConnectionError.requestTimeout))
             }
         }
 

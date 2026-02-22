@@ -226,15 +226,15 @@ CORS enabled by default. Trace store is in-memory with a 500-entry circular buff
 
 ## Architecture: Showcase Dashboard Page
 
-Web dashboard page for browsing and running the 11 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
+Web dashboard page for browsing and running the 19 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
 
 ### RPC Methods
 
 Registered in both the method registry (`methods/index.ts`) and directly in the gateway server's built-in methods (`server.ts`):
 
-- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 11 demos (id, name, description, category, agentTypes)
+- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 19 demos (id, name, description, category, agentTypes)
 - **`showcase.run`** — Takes `{ demoId: string }`, runs the demo with inline mock agents, returns `{ demoId, name, status, steps[], totalDurationMs, summary, error? }`
-- **`showcase.runall`** — Runs all 11 demos sequentially, returns `{ results: DemoRunResult[] }`
+- **`showcase.runall`** — Runs all 19 demos sequentially, returns `{ results: DemoRunResult[] }`
 
 All demos are deterministic (mock agents, no LLM calls). Each demo runner creates its agents inline, executes the orchestration pattern, and collects step-by-step results with timing.
 
@@ -253,6 +253,14 @@ All demos are deterministic (mock agents, no LLM calls). Each demo runner create
 | `ghost-protocol` | Mirror Test | Verification | AgentGraph parallel compare |
 | `ouroboros-squared` | Doppelganger | Cloning | AgentTracer + clone chain |
 | `inception-stack` | The Inception Stack | Recursion | Recursive agent meta-creation |
+| `slosh-deep-dive` | Data Sloshing Deep Dive | Context | SloshFilter, SloshPrivacy, debug, feedback |
+| `memory-recall` | Memory Recall | Memory | MemoryManager FTS, chunking, snippets |
+| `channel-switchboard` | Channel Switchboard | Channels | ChannelRegistry routing, status |
+| `config-hotswap` | Config Hotswap | Config | validateConfig, mergeConfigs, env vars |
+| `persistence-vault` | Persistence Vault | Storage | In-memory SQLite StorageAdapter |
+| `healing-loop` | Healing Loop | Resilience | SelfHealingCronAgent self-repair |
+| `auth-fortress` | Authorization Fortress | Security | ApprovalManager policies, rules |
+| `stream-weaver` | Stream Weaver | Streaming | StreamManager sessions, blocks, deltas |
 
 ### UI Component
 
@@ -404,7 +412,7 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 
 ## Showcase Prompts (v1.7.0)
 
-11 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
+19 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
 
 ### Showcase Index
 
@@ -421,8 +429,16 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 | 9 | Agent Compiler | PipelineAgent conditional steps | `examples/agent-compiler.ts` | `showcase-agent-compiler.test.ts` | 9 |
 | 10 | Doppelganger | AgentTracer + clone comparison | `examples/doppelganger.ts` | `showcase-doppelganger.test.ts` | 6 |
 | 11 | The Inception Stack | Recursive agent meta-creation | `examples/inception-stack.ts` | `showcase-inception-stack.test.ts` | 10 |
+| 12 | Data Sloshing Deep Dive | SloshFilter, SloshPrivacy, debug, feedback | `examples/slosh-deep-dive.ts` | `showcase-slosh-deep-dive.test.ts` | 9 |
+| 13 | Memory Recall | MemoryManager FTS, chunking, snippets | `examples/memory-recall.ts` | `showcase-memory-recall.test.ts` | 8 |
+| 14 | Channel Switchboard | ChannelRegistry routing, status | `examples/channel-switchboard.ts` | `showcase-channel-switchboard.test.ts` | 7 |
+| 15 | Config Hotswap | validateConfig, mergeConfigs, env vars | `examples/config-hotswap.ts` | `showcase-config-hotswap.test.ts` | 7 |
+| 16 | Persistence Vault | In-memory SQLite StorageAdapter | `examples/persistence-vault.ts` | `showcase-persistence-vault.test.ts` | 8 |
+| 17 | Healing Loop | SelfHealingCronAgent self-repair loop | `examples/healing-loop.ts` | `showcase-healing-loop.test.ts` | 7 |
+| 18 | Authorization Fortress | ApprovalManager policies, rules, flows | `examples/auth-fortress.ts` | `showcase-auth-fortress.test.ts` | 9 |
+| 19 | Stream Weaver | StreamManager sessions, blocks, deltas | `examples/stream-weaver.ts` | `showcase-stream-weaver.test.ts` | 9 |
 
-All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (82 tests).
+All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (176 tests).
 
 ### 1. The Architect — LearnNewAgent + AgentGraph DAG
 
@@ -480,6 +496,38 @@ Agents writing agents writing agents, 3 levels deep. Each level's `perform()` cr
 - **DreamExtractorAgent (Level 3 — Limbo)**: Innermost. Deterministic extraction (char count, vowel count, totem)
 
 A shared `agents` map (closure) is populated by each level before invoking the next. SubAgentManager tracks depth (0→1→2) and blocks when `maxDepth` exceeded. AgentTracer captures nested parent-child spans. Data slush bubbles up: Level 3 result nested inside Level 2 nested inside Level 1, with each level's `source_agent` preserved.
+
+### 12. Data Sloshing Deep Dive — Full Slosh Pipeline
+
+Tests the complete data sloshing pipeline in BasicAgent. An inline `SloshTestAgent` captures `this.context` in perform(). Tests cover: default slosh populating all 5 signal categories (temporal, query_signals, memory_echoes, behavioral, priors), SloshFilter include/exclude zeroing categories, SloshPrivacy redact (deletes paths) and obfuscate (replaces with `[obfuscated:hash]`), SloshDebug capturing 4 stages (post-slosh, post-filter, post-privacy, post-perform), signal feedback loop accumulating utility scores with auto-suppress at threshold, getSignal() dot-notation with defaults, and breadcrumb LIFO accumulation.
+
+### 13. Memory Recall — MemoryManager FTS + Chunking
+
+Tests MemoryManager and chunker utilities directly (no agents). Covers overlapping window chunking (verifying overlap between adjacent chunks), short content staying as a single chunk, add content with chunk creation via getStatus(), FTS search returning relevant results with score > 0, source filtering in search, snippet generation highlighting query terms, and clear/remove lifecycle operations.
+
+### 14. Channel Switchboard — ChannelRegistry Routing
+
+Tests ChannelRegistry with inline MockChannel extending BaseChannel. Covers registering multiple channels and listing names, getting channel by name, connectAll() setting connected=true on all channels, sendMessage() routing to the correct channel, onMessage handler firing on emitMessage, status tracking with getStatusList(), and disconnectAll() disconnecting all channels.
+
+### 15. Config Hotswap — Config Utilities
+
+Pure function tests on config utilities (no agents). Covers JSON5 parsing with comments and trailing commas via parseConfigContent(), validating correct config (success: true), rejecting invalid config with error details, deep merging two configs preserving all sections via mergeConfigs(), environment variable substitution (${VAR}) via substituteEnvVars(), handling missing env vars, and JSON Schema export including all config sections.
+
+### 16. Persistence Vault — In-Memory SQLite Storage
+
+Tests the full StorageAdapter interface via `createStorageAdapter({ type: 'memory' })`. Covers session save/get/delete lifecycle, session filtering by channelId, memory chunk save and retrieval, cron job and log persistence, config KV set/get/getAll operations, sequential multi-operation workflows, in-memory initialization without file path, and close/reinitialize confirming data isolation.
+
+### 17. Healing Loop — SelfHealingCronAgent
+
+Tests the self-healing cron agent with MockWebAgent, MockShellAgent, and MockMessageAgent injected via `setAgents()`. Covers setup creating job config with data_slush, healthy check returning health_status='healthy' and action_taken='none', unhealthy-to-restart-to-recovery path (restarted=true, recovered=true, action_taken='restarted_recovered'), persistent failure path (restart doesn't help, action_taken='restarted_still_down'), status tracking uptime percentage, history recording all checks, teardown removing job, and data_slush always including action_taken.
+
+### 18. Authorization Fortress — ApprovalManager
+
+Tests ApprovalManager directly (no agents). Covers deny policy blocking all tool calls, full policy allowing all, allowlist with allowedTools, priority ordering (higher wins), scoped rules by channel and agent, blocked patterns via regex, request/approve flow with pending request creation and approval, and request/reject flow with reason and cleanup verification.
+
+### 19. Stream Weaver — StreamManager
+
+Tests StreamManager directly (no agents). Covers creating an active session, pushing text blocks, pushing multiple block types (text, tool_call, thinking), delta accumulation via pushDelta building content incrementally, subscriber notification on pushBlock, unsubscribe cleanup, complete/error marking session lifecycle, and active sessions count tracking.
 
 ## UX Principles
 

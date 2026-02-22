@@ -108,7 +108,7 @@ public final class NetworkDiscovery {
 
     private func handleResults(_ results: Set<NWBrowser.Result>) {
         discoveredGateways = results.compactMap { result in
-            guard case .service(let name, let type, _, _) = result.endpoint else { return nil }
+            guard case .service(let name, _, _, _) = result.endpoint else { return nil }
             // We'll resolve the actual host/port when the user selects one
             return DiscoveredGateway(
                 name: name,

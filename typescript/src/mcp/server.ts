@@ -59,7 +59,7 @@ export class McpServer {
   constructor(options?: McpServerOptions) {
     this.serverInfo = {
       name: options?.name ?? 'openrappter',
-      version: options?.version ?? '1.8.0',
+      version: options?.version ?? '1.8.2',
     };
   }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct StatusMenuView: View {
     @Bindable var viewModel: AppViewModel
 

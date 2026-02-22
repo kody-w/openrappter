@@ -6,6 +6,7 @@ import SwiftUI
 /// Main chat view used in both the floating panel and the full window.
 /// In compact (panel) mode, shows a single-column layout.
 /// In full (window) mode, shows a sidebar with sessions + main chat area.
+@MainActor
 public struct ChatContainerView: View {
     @Bindable var viewModel: AppViewModel
     let isCompact: Bool

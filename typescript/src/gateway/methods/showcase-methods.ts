@@ -580,7 +580,7 @@ async function runInceptionStack(): Promise<DemoRunResult> {
       constructor() {
         super('DreamExtractor', {
           name: 'DreamExtractor', description: 'Extracts dream data (Level 3)',
-          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
         });
       }
       async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -600,11 +600,11 @@ async function runInceptionStack(): Promise<DemoRunResult> {
       constructor() {
         super('DreamBuilder', {
           name: 'DreamBuilder', description: 'Builds dream (Level 2)',
-          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
         });
       }
       async perform(kwargs: Record<string, unknown>): Promise<string> {
-        const mgr = kwargs._manager as SubAgentManager;
+        const mgr = kwargs._manager as InstanceType<typeof SubAgentManager>;
         const ctx = kwargs._subagent_context as import('../../agents/subagent.js').SubAgentContext;
         const seed = (kwargs.dream_seed ?? '') as string;
         const ext = new DreamExtractorAgent();
@@ -641,7 +641,7 @@ async function runInceptionStack(): Promise<DemoRunResult> {
       constructor() {
         super('DreamExtractor', {
           name: 'DreamExtractor', description: 'Level 3',
-          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
         });
       }
       async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -657,11 +657,11 @@ async function runInceptionStack(): Promise<DemoRunResult> {
       constructor() {
         super('DreamBuilder', {
           name: 'DreamBuilder', description: 'Level 2',
-          parameters: { type: 'object', properties: { dream_seed: { type: 'string' } }, required: ['dream_seed'] },
+          parameters: { type: 'object', properties: { dream_seed: { type: 'string', description: 'Dream seed text' } }, required: ['dream_seed'] },
         });
       }
       async perform(kwargs: Record<string, unknown>): Promise<string> {
-        const mgr = kwargs._manager as SubAgentManager;
+        const mgr = kwargs._manager as InstanceType<typeof SubAgentManager>;
         const ctx = kwargs._subagent_context as import('../../agents/subagent.js').SubAgentContext;
         agents.set('DreamExtractor', new DreamExtractorAgent());
         const inner = await mgr.invoke('DreamExtractor', (kwargs.dream_seed ?? '') as string, ctx) as Record<string, unknown>;
@@ -717,7 +717,7 @@ async function runSloshDeepDive(): Promise<DemoRunResult> {
     const ctx = agent.context!;
     return {
       categories: ['temporal', 'query_signals', 'memory_echoes', 'behavioral', 'priors']
-        .filter(k => (ctx as Record<string, unknown>)[k] !== undefined),
+        .filter(k => (ctx as unknown as Record<string, unknown>)[k] !== undefined),
       orientation: ctx.orientation.approach,
     };
   });

@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 public struct ChatInputView: View {
     @Bindable var viewModel: AppViewModel
 

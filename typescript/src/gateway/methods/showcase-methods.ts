@@ -130,10 +130,14 @@ class MockAgent extends BasicAgent {
   }
 }
 
+const LOG_PREFIX = '\x1b[35m[showcase]\x1b[0m';
+
 async function timeStep<T>(label: string, fn: () => Promise<T>): Promise<DemoStepResult & { value: T }> {
   const start = Date.now();
   const value = await fn();
-  return { label, result: value, durationMs: Date.now() - start, value };
+  const ms = Date.now() - start;
+  console.log(`${LOG_PREFIX}   \x1b[32m✓\x1b[0m ${label} \x1b[90m(${ms}ms)\x1b[0m`);
+  return { label, result: value, durationMs: ms, value };
 }
 
 // ── Individual demo runners ──
@@ -523,7 +527,9 @@ export function registerShowcaseMethods(
 
   server.registerMethod<{ demoId: string }, DemoRunResult>('showcase.run', async (params) => {
     const runner = DEMO_RUNNERS[params.demoId];
+    const demoName = DEMOS.find((d) => d.id === params.demoId)?.name ?? params.demoId;
     if (!runner) {
+      console.log(`${LOG_PREFIX} \x1b[31m✗\x1b[0m Unknown demo: ${params.demoId}`);
       return {
         demoId: params.demoId,
         name: 'Unknown',
@@ -534,29 +540,41 @@ export function registerShowcaseMethods(
         error: `Unknown demo ID: ${params.demoId}`,
       };
     }
+    console.log(`${LOG_PREFIX} \x1b[1mRunning: ${demoName}\x1b[0m`);
     try {
-      return await runner();
+      const result = await runner();
+      console.log(`${LOG_PREFIX} \x1b[32mDone:\x1b[0m ${demoName} — \x1b[32m${result.status}\x1b[0m \x1b[90m(${result.totalDurationMs}ms)\x1b[0m`);
+      return result;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`${LOG_PREFIX} \x1b[31mFailed:\x1b[0m ${demoName} — ${msg}`);
       return {
         demoId: params.demoId,
-        name: DEMOS.find((d) => d.id === params.demoId)?.name ?? 'Unknown',
+        name: demoName,
         status: 'error' as const,
         steps: [],
         totalDurationMs: 0,
         summary: '',
-        error: err instanceof Error ? err.message : String(err),
+        error: msg,
       };
     }
   });
 
   server.registerMethod<void, { results: DemoRunResult[] }>('showcase.runall', async () => {
+    console.log(`${LOG_PREFIX} \x1b[1m━━━ Running all ${DEMOS.length} demos ━━━\x1b[0m`);
+    const allStart = Date.now();
     const results: DemoRunResult[] = [];
     for (const demo of DEMOS) {
       const runner = DEMO_RUNNERS[demo.id];
       if (runner) {
+        console.log(`${LOG_PREFIX} \x1b[1mRunning: ${demo.name}\x1b[0m`);
         try {
-          results.push(await runner());
+          const result = await runner();
+          console.log(`${LOG_PREFIX} \x1b[32mDone:\x1b[0m ${demo.name} — \x1b[32m${result.status}\x1b[0m \x1b[90m(${result.totalDurationMs}ms)\x1b[0m`);
+          results.push(result);
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`${LOG_PREFIX} \x1b[31mFailed:\x1b[0m ${demo.name} — ${msg}`);
           results.push({
             demoId: demo.id,
             name: demo.name,
@@ -564,11 +582,13 @@ export function registerShowcaseMethods(
             steps: [],
             totalDurationMs: 0,
             summary: '',
-            error: err instanceof Error ? err.message : String(err),
+            error: msg,
           });
         }
       }
     }
+    const passed = results.filter((r) => r.status === 'success').length;
+    console.log(`${LOG_PREFIX} \x1b[1m━━━ Complete: ${passed}/${results.length} passed \x1b[90m(${Date.now() - allStart}ms)\x1b[0m`);
     return { results };
   });
 }

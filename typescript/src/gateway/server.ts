@@ -28,6 +28,7 @@ import type {
   SendMessageRequest,
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
+import { registerShowcaseMethods } from './methods/showcase-methods.js';
 
 const DEFAULT_PORT = 18790;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
@@ -824,6 +825,9 @@ export class GatewayServer {
       this.saveConfig(params.content);
       return { saved: true };
     }, { requiresAuth: true });
+
+    // Showcase methods
+    registerShowcaseMethods(this);
   }
 
   // ── Agent Execution with Chat Events ─────────────────────────────────

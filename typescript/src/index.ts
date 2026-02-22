@@ -14,7 +14,7 @@ import { chat, displayResult } from './chat.js';
 
 const execAsync = promisify(exec);
 
-const VERSION = '1.8.2';
+const VERSION = '1.9.0';
 const EMOJI = '🦖';
 const NAME = 'openrappter';
 

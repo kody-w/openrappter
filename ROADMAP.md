@@ -1,202 +1,273 @@
-# Capability Scoring Roadmap
+# OpenRappter Roadmap
 
-Roadmap for the OuroborosAgent capability assessment system (`typescript/src/agents/OuroborosAgent.ts`).
+> Last updated: 2026-02-22 | Current version: **1.9.1**
 
-The scoring system currently uses five deterministic checks (`checkWordStats`, `checkSentiment`, `checkCaesarCipher`, `checkPatterns`, `checkReflection`) with graduated thresholds, inclusive boundaries, polarity-agnostic sentiment, and per-capability trend tracking via `computeTrends`. This document outlines what comes next.
+## Where We Are
 
----
+OpenRappter is a local-first AI agent framework with dual TypeScript/Python runtimes. The core is solid: 18 agents, 6 orchestration patterns (Chain, Graph, Broadcast, Router, SubAgent, Pipeline), 22 messaging channels, 5 LLM providers, a WebSocket gateway with 60+ RPC methods, a 12-page Lit dashboard, 20 deterministic showcase demos, an MCP server, span-based tracing, and 2,800+ tests.
 
-## Phase 1: Quick Wins
+The Multi-Rappter Gateway (v1.9.1) introduced hot-loadable souls — the gateway acts as a brainstem that can summon one or more rappter configurations per request via single, parallel, race, or chain modes.
 
-Low risk, high signal improvements that slot into existing check functions.
+TypeScript is the primary runtime. Python is ~60% complete.
 
-### Lexical entropy in `checkWordStats`
+### What exists today
 
-Add Shannon entropy of the word frequency distribution as a new check. The frequency map already exists (`freq` in `wordStats()`), so entropy is a few lines:
-
-```
-H = -sum(p * log2(p))   where p = count / total
-```
-
-Higher entropy = richer vocabulary. Threshold: `H >= 2.0` for a passing check.
-
-**Rationale:** The current `has_diversity` check uses a simple unique/total ratio. Entropy captures distributional shape — a text with 10 unique words used once each scores higher than one where a single word dominates, even if both have the same unique ratio.
-
-### Negation handling in `checkSentiment`
-
-`analyzeSentiment()` currently matches bare words against positive/negative lists. "Not good" scores as positive because "good" is in the list. Add a negation window: if any of `[not, no, never, don't, doesn't, isn't, wasn't, aren't, won't, can't, couldn't, shouldn't]` appears within 2 tokens before a sentiment word, flip its polarity.
-
-**Rationale:** Without negation handling, the sentiment check can be confidently wrong on common phrases. This is the single highest-signal improvement to sentiment accuracy.
-
-### Per-capability trajectory tracking
-
-`computeTrajectory()` currently computes a single linear regression slope on `overall_quality` across runs. Extend it to compute an independent slope per capability using each run's `level_qualities[i]`.
-
-**Rationale:** Overall trajectory masks divergent trends. Word stats might be improving while sentiment declines — the current system can't detect this. Per-capability slopes enable targeted feedback.
-
-### Confidence intervals on trajectory
-
-Only report a trajectory trend (improving/declining) when the slope exceeds 2x its standard error. Currently any nonzero slope gets reported.
-
-**Rationale:** With small run counts (3-5 runs), noise dominates. A trajectory of +0.3 on 4 data points isn't meaningful. Standard error gates prevent false trend signals.
-
-### Input difficulty scoring
-
-Score how well-suited the input text is to each capability. An input with no emails, URLs, or dates will always score 0/4 on pattern detection — that's an input limitation, not a capability failure.
-
-**Rationale:** The current system can't distinguish "the capability is broken" from "the input didn't contain relevant content." Input profiling (already partially implemented via `inputProfile` in `_wrapFinalReport`) provides the denominator for that distinction.
+| Area | TypeScript | Python | Notes |
+|------|-----------|--------|-------|
+| Core agents | 18 | 13 | 5 TS agents not yet ported |
+| Orchestration | Chain, Graph, Broadcast, Router, SubAgent, Pipeline | Chain, Graph, Broadcast, Router, SubAgent, Pipeline | Full parity |
+| Channels | 22 (Slack, Discord, Telegram, WhatsApp, Signal, Teams, etc.) | Base + Registry only | No channel implementations in Python |
+| Providers | Copilot, Anthropic, OpenAI, Gemini, Ollama | Config skeleton | No provider implementations in Python |
+| Gateway | WebSocket + HTTP, 60+ RPC methods | None | TS only |
+| Dashboard | 12 pages (Lit 3.1 web components) | N/A | TS only |
+| MCP Server | Full (JSON-RPC 2.0 over stdio) | Skeleton | Needs integration |
+| Storage | SQLite + in-memory | SQLite | Full parity |
+| Config | YAML/JSON5, Zod validation, env substitution | YAML | Full parity |
+| Security | ApprovalManager, audit, rate limiting | Partial | |
+| Memory | FTS + chunking + embeddings | FTS + chunking | Full parity |
+| Skills (ClawHub) | Full | Full | Full parity |
+| Plugins | Full system | None | TS only |
+| Showcase demos | 20 | 14 | 6 remaining |
+| Tests | 2,803 across 108 files | 126 across 37 files | Python needs catch-up |
+| Rappter Manager | Souls + summon modes | None | TS only, new in v1.9.1 |
 
 ---
 
-## Phase 2: Graduated Scoring
+## Phase 1: Foundation Hardening (v1.10 — v1.12)
 
-Replace remaining binary checks with graduated quality measures.
+_Finish what's started. Close gaps. Make it production-worthy._
 
-### Weighted sentiment words
+### 1.1 Python Runtime Completion
 
-Assign intensity tiers: `"good" = 0.5`, `"amazing" = 1.0`, `"absolutely amazing" = 1.5`. Replace the current equal-weight word counting with weighted sums. The sentiment score formula becomes `(weighted_pos - weighted_neg) / (weighted_pos + weighted_neg)`.
+- [ ] Port remaining agents: `BrowserAgent`, `ImageAgent`, `TTSAgent`, `MessageAgent`, `SessionsAgent`
+- [ ] Implement channel integrations (Slack, Discord, Telegram minimum)
+- [ ] Implement provider integrations (Anthropic, OpenAI, Ollama)
+- [ ] Python WebSocket gateway (asyncio, mirroring TS protocol)
+- [ ] Python plugin system
+- [ ] Port remaining 6 showcase demos
+- [ ] Python test count from 126 to 500+ (match TS test-per-module ratios)
 
-**Rationale:** "Good" and "amazing" currently contribute equally. Intensity weighting makes the sentiment score more discriminating and enables a graduated `has_confidence` check instead of the current binary `abs(score) > 0.2` threshold.
+### 1.2 Rappter Multi-Soul Expansion
 
-### Pattern quality scoring
+- [ ] Soul config persistence — save/load from `~/.openrappter/souls/*.json`
+- [ ] Soul-specific conversation history (isolated sessions per soul)
+- [ ] Soul identity injection — system prompt and personality per soul
+- [ ] Dashboard page for soul management (list, load, unload, summon)
+- [ ] `rappter.create` RPC — create souls from natural language descriptions via LearnNewAgent patterns
+- [ ] Soul templates — prebuilt configurations ("researcher", "coder", "ops", "analyst")
+- [ ] Soul-to-soul communication — souls can summon other souls
 
-The current `checkPatterns` uses four binary found/not-found checks. Replace with:
-- **Well-formedness**: validate that matched patterns are plausible (e.g., emails contain valid TLDs, URLs resolve to valid structure)
-- **Density**: patterns found / input length, normalized
-- **False-positive penalty**: deduct for matches that fail validation
+### 1.3 Observability & Operations
 
-**Rationale:** Finding "123" as a number match is trivially easy. The current system can't distinguish high-quality pattern detection from noise matches.
+- [ ] Cost attribution — per-agent and per-soul LLM spend tracking
+- [ ] Execution timeline visualization in dashboard (Gantt-style span viewer)
+- [ ] Error rate tracking with threshold-based alerting
+- [ ] Agent memory usage monitoring
+- [ ] Structured logging (JSON output mode for log aggregators)
 
-### Character-level cipher verification
+### 1.4 CI & Quality
 
-The current `checkCaesarCipher` verifies roundtrip and transformation but doesn't check individual characters. Add a check that verifies every alphabetic character was shifted by exactly the expected amount and that case was preserved.
-
-**Rationale:** A cipher implementation that only shifts some characters (e.g., skipping non-ASCII) would pass the current checks. Character-level verification catches partial implementations.
-
-### Reflection method verification
-
-`checkReflection` currently checks that `capability_count > 0` and `className` includes "Gen5". Add cross-validation: compare the declared methods list against the actual prototype chain to verify accuracy.
-
-**Rationale:** The reflection capability claims to list its own methods, but the current check doesn't verify the list is correct. A reflection that over-counts or under-counts should score lower.
-
-### Lexical diversity index
-
-Replace the simple `unique / total` ratio in `checkWordStats` with Simpson's Diversity Index or type-token ratio (TTR) with a standardized sample size. Simpson's D accounts for frequency distribution, not just presence/absence.
-
-**Rationale:** The current `has_diversity` check passes at `>= 0.5` unique ratio. This is a blunt instrument — Simpson's D naturally handles the difference between "many words used once" and "a few words used often."
-
----
-
-## Phase 3: Cross-Capability Intelligence
-
-Track how capabilities affect each other over history.
-
-### Correlation engine
-
-Build a correlation matrix across capability scores using the `lineage-log.json` history. For each pair of capabilities, compute Pearson correlation on their `level_qualities` over the last N runs.
-
-**Rationale:** Capabilities aren't independent. Word diversity likely correlates with sentiment breadth. Understanding these relationships enables smarter recommendations ("improving your vocabulary will likely improve sentiment detection too").
-
-### Target correlations to investigate
-
-- **Word diversity -> sentiment breadth**: richer vocabulary should yield more sentiment-bearing words
-- **Pattern density -> entropy relationship**: inputs with many structured patterns (emails, URLs) tend to have lower lexical entropy
-- **Reflection accuracy -> actual capability count**: reflection should correctly count available capabilities
-
-### Bottleneck identification
-
-Identify which capability is holding overall quality down. The bottleneck is the capability with the lowest quality that has the highest average correlation with other capabilities — improving it would have the largest ripple effect.
-
-**Rationale:** The current system treats all five capabilities independently. Bottleneck detection converts the report from "here are five scores" to "fix this one thing to improve everything."
+- [ ] GitHub Actions pipeline: lint, test, build for both runtimes
+- [ ] Performance benchmark suite (agent latency, gateway throughput, memory footprint)
+- [ ] Flaky test detection and quarantine
+- [ ] Code coverage reporting (target: 80% for both runtimes)
+- [ ] Automated release workflow (changelog generation, npm/pypi publish)
 
 ---
 
-## Phase 4: Predictive & LLM-Enhanced
+## Phase 2: Intelligence Layer (v2.0 — v2.2)
 
-Leverage the existing `enhanceWithLLM` pipeline and trajectory data for forward-looking intelligence.
+_Make agents smarter and more autonomous._
 
-### Root-cause LLM analysis
+### 2.1 Adaptive Routing & Failover
 
-Change the LLM prompt from "write improvement suggestions" to "diagnose why this capability is weak." Feed the raw capability output (word frequencies, matched patterns, sentiment words) alongside the score breakdown so the LLM can point to specific failure modes.
+- [ ] Performance-weighted routing — route to agents based on historical success rates
+- [ ] Cost-aware routing — prefer cheaper providers when quality is comparable
+- [ ] Automatic fallback chains — cascade to alternatives on provider failure
+- [ ] Circuit breakers — automatic failure isolation to prevent cascading errors
+- [ ] Retry strategies — configurable backoff, jitter, and max attempts per agent
 
-**Rationale:** The current LLM enhancement produces generic suggestions. With raw data, it can say "sentiment scored low because the only sentiment word was 'good' which appeared in a negation context" instead of "try using more sentiment-bearing words."
+### 2.2 Knowledge & Memory
 
-### Predictive quality model
+- [ ] Semantic knowledge graph — entity extraction and relationship mapping
+- [ ] Cross-session memory — agents remember context across conversations
+- [ ] Memory summarization — compress old memories into condensed representations
+- [ ] Shared memory pool — multiple agents and souls contribute to a common knowledge base
+- [ ] Memory import/export for backup and instance transfer
 
-Extrapolate the trajectory with confidence bounds. Using the existing `computeTrajectory` linear regression, add prediction intervals: "at current trajectory, overall quality will reach 80 in ~3 runs (p=0.7)."
+### 2.3 Data Sloshing v2
 
-**Rationale:** Trajectory is currently backwards-looking ("things have been improving"). Prediction makes it actionable ("you're N runs from strong status").
+- [ ] Learned signal weights — adjust importance based on accumulated feedback scores
+- [ ] Cross-agent signal propagation — one agent's slosh influences another's context
+- [ ] Custom signal providers — plug in external sources (calendar, weather, market data)
+- [ ] Signal compression for long-running conversations
+- [ ] Temporal decay — older signals lose weight over time
 
-### Input-capability matching assessment via LLM
+### 2.4 Advanced Orchestration
 
-Use the LLM to evaluate whether the input text is a fair test of each capability. An input with no emails shouldn't penalize pattern detection. The LLM can assess this more nuancedly than rule-based `inputProfile`.
+- [ ] Consensus patterns — voting and quorum mechanisms for multi-agent decisions
+- [ ] Streaming result aggregation — combine outputs from parallel agents in real-time
+- [ ] Agent result caching with TTL and invalidation
+- [ ] Conditional graph edges — dynamic DAG rewiring based on runtime results
+- [ ] Agent priority queues — ensure critical agents execute first under load
 
-**Rationale:** Phase 1 input difficulty scoring handles obvious cases (no emails = no email detection). LLM assessment handles subtle cases (sarcastic text that confuses sentiment, ambiguous date formats).
+### 2.5 Capability Scoring (OuroborosAgent)
 
-### Confidence-scored LLM suggestions
+_Extending the existing deterministic scoring system._
 
-Wrap each LLM suggestion with a confidence score based on how much data supports it. Suggestions backed by 10+ runs of history get high confidence; first-run suggestions get low confidence.
+**Quick wins:**
+- [ ] Lexical entropy in `checkWordStats` (Shannon entropy, threshold H >= 2.0)
+- [ ] Negation handling in `checkSentiment` (2-token window: "not good" flips polarity)
+- [ ] Per-capability trajectory tracking (independent slope per capability in `computeTrajectory`)
+- [ ] Confidence intervals on trajectory (require slope > 2x standard error)
+- [ ] Input difficulty scoring (distinguish "capability broken" from "unfair input")
 
-**Rationale:** The current LLM suggestions have no epistemic humility. A suggestion based on one run shouldn't carry the same weight as one based on a clear 10-run trend.
+**Graduated scoring:**
+- [ ] Weighted sentiment words (intensity tiers: "good" = 0.5, "amazing" = 1.0)
+- [ ] Pattern quality scoring (well-formedness validation, density, false-positive penalty)
+- [ ] Character-level cipher verification (every character shifted by expected amount)
+- [ ] Reflection method cross-validation (compare declared methods against prototype chain)
+- [ ] Simpson's Diversity Index replacing simple unique/total ratio
 
-### Multi-run archival summaries
+**Cross-capability intelligence:**
+- [ ] Correlation matrix across capability scores over history
+- [ ] Bottleneck identification (lowest-scoring capability with highest cross-correlation)
 
-The lineage log currently caps at 20 runs (`MAX_LINEAGE_ENTRIES`). Before evicting old entries, generate a compressed summary: average quality by capability, trend direction, notable events (status changes, quality jumps).
-
-**Rationale:** After 20 runs, history is lost. Archival summaries preserve long-term signal without unbounded storage growth.
-
-### Enriched `data_slush` signals
-
-Expand the `data_slush` output (currently in `_wrapFinalReport`) with:
-- Confidence intervals on each capability score
-- Volatility metric (standard deviation of quality over recent runs)
-- Growth headroom (distance to next status tier)
-- Specific recommendations keyed by capability
-
-**Rationale:** Downstream agents consuming `data_slush` currently get raw scores. Enriched signals let them make informed routing decisions ("this agent's sentiment is volatile, route sentiment-heavy queries elsewhere").
-
----
-
-## Trend System Improvements
-
-Cross-cutting enhancements to `computeTrends` and trajectory tracking.
-
-### Weighted regression
-
-Weight recent runs more heavily in trajectory calculation. The current `computeTrajectory` uses uniform weights. Apply exponential decay: `weight = decay^(n - i)` where `decay = 0.85`.
-
-**Rationale:** A quality improvement 15 runs ago matters less than one 2 runs ago. Weighted regression makes trajectory more responsive to recent changes.
-
-### Magnitude-aware multipliers
-
-The current streak multiplier (`computeTrends`) treats all improvements equally — a +1 quality delta gets the same multiplier as a +20 delta. Scale the multiplier by the average magnitude of improvements in the streak.
-
-**Rationale:** Three consecutive +1 improvements shouldn't earn the same bonus as three consecutive +15 improvements. Magnitude awareness rewards real progress.
-
-### Volatility penalty
-
-If a capability's quality oscillates (e.g., 60, 80, 55, 85), reduce its trend multiplier even if the overall direction is positive. Measure volatility as the standard deviation of run-over-run deltas.
-
-**Rationale:** Erratic scores indicate unreliable capability behavior. The trend system shouldn't reward inconsistency.
-
-### Softer trend thresholds
-
-`computeTrends` currently requires 3 consecutive same-direction changes before applying a multiplier. Lower to 2 consecutive for a reduced multiplier (e.g., `1.02` instead of `1.05`), keeping 3+ for the full multiplier.
-
-**Rationale:** Nascent trends are real but uncertain. Detecting them earlier (with smaller effect) provides earlier signal without overreacting.
-
-### Acceleration tracking
-
-Track the slope of slopes — is the rate of improvement itself increasing or decreasing? If trajectory was +2 over the last 5 runs but +5 over the last 3, the agent is accelerating.
-
-**Rationale:** Trajectory tells you direction. Acceleration tells you momentum. An agent with positive trajectory but negative acceleration is about to plateau — useful for predictive feedback.
+**Predictive & LLM-enhanced:**
+- [ ] Root-cause LLM analysis (diagnose why a capability is weak, not generic suggestions)
+- [ ] Predictive quality model with confidence bounds
+- [ ] Confidence-scored LLM suggestions (weighted by data backing)
+- [ ] Multi-run archival summaries (compress before lineage log eviction)
 
 ---
 
-## Implementation Notes
+## Phase 3: Developer Experience (v2.3 — v2.5)
 
-- Each phase builds on the previous. Phase 2 items assume Phase 1 is in place (e.g., weighted sentiment needs negation handling first).
-- All scoring changes must follow the principles in `CLAUDE.md`: graduated thresholds, inclusive boundaries (`>=`), polarity-agnostic sentiment, quality = passed/total * 100.
-- Adding a new check changes the denominator for all scores in that capability. Verify downstream tests (`typescript/src/__tests__/parity/ouroboros.test.ts`) after each addition.
-- Trend system changes affect all capabilities simultaneously. Test with synthetic lineage logs before deploying.
-- LLM-enhanced features (Phase 4) degrade gracefully — `enhanceWithLLM` already returns `false` on failure, keeping deterministic scores intact.
+_Make it easy to build on._
+
+### 3.1 Agent Development Tools
+
+- [ ] Scaffolding CLI (`openrappter create agent <name>`)
+- [ ] Agent testing framework — fixtures, mocks, assertions for agent contracts
+- [ ] Watch mode for agent files — auto-reload on change
+- [ ] Step-through debugging with breakpoints
+- [ ] VSCode extension — metadata preview, inline test runner, agent graph visualization
+
+### 3.2 API & Integration
+
+- [ ] OpenAPI spec generation from agent metadata
+- [ ] Webhook support — trigger agents from external HTTP callbacks
+- [ ] Event bus — pub/sub for inter-agent communication without direct coupling
+- [ ] Client SDK packages (`@openrappter/client` for TS, `openrappter-client` for Python)
+- [ ] CLI plugin system — third-party commands installable via skills
+
+### 3.3 Documentation
+
+- [ ] Architecture decision records (ADRs)
+- [ ] Agent cookbook — common patterns with working examples
+- [ ] Migration guide between major versions
+- [ ] Auto-generated API reference from source
+
+### 3.4 Deployment
+
+- [ ] Docker image (multi-stage, <100MB)
+- [ ] Docker Compose for development (gateway + dashboard + storage)
+- [ ] Kubernetes Helm chart
+- [ ] Environment profiles (dev, staging, production)
+- [ ] K8s health probes wired to gateway health endpoint
+
+---
+
+## Phase 4: Scale (v3.0 — v3.2)
+
+_Run at production scale._
+
+### 4.1 Distributed Execution
+
+- [ ] Multi-node agent coordination — agents running across machines
+- [ ] W3C trace context propagation for distributed tracing
+- [ ] Agent registry service — central catalog across network nodes
+- [ ] Message bus integration (Redis Streams, NATS, or RabbitMQ)
+- [ ] Work queue — distribute invocations across worker nodes
+
+### 4.2 Multi-Tenancy
+
+- [ ] Tenant isolation — separate agent pools, memory, and sessions
+- [ ] Usage quotas and rate limiting per tenant
+- [ ] Tenant-scoped secrets management
+- [ ] Admin dashboard for tenant CRUD
+
+### 4.3 Storage at Scale
+
+- [ ] PostgreSQL storage adapter
+- [ ] Redis caching layer for hot data
+- [ ] S3/blob storage for large artifacts (images, audio, generated files)
+- [ ] Database migration tooling (up/down/rollback)
+
+### 4.4 Performance
+
+- [ ] Agent connection pooling
+- [ ] Batch execution — vectorized operations for bulk agent calls
+- [ ] Lazy agent loading — load on first invocation, not startup
+- [ ] Memory pressure management — evict idle agents under load
+- [ ] Horizontal auto-scaling (stateless gateway behind load balancer)
+
+---
+
+## Phase 5: Emergent Capabilities (v3.3+)
+
+_Push the boundaries of what agent systems can do._
+
+### 5.1 Swarm Intelligence
+
+- [ ] Stigmergy — agents leave environmental signals that influence others
+- [ ] Agent reputation and trust scores earned through outcomes
+- [ ] Emergent specialization — agents develop roles from interaction patterns
+- [ ] Collective memory — distributed knowledge store shared across the swarm
+
+### 5.2 Meta-Learning
+
+- [ ] Agent self-improvement — analyze own performance and adjust behavior
+- [ ] Few-shot learning — acquire new tasks from minimal examples
+- [ ] Capability transfer — trained skills migrate between agents
+- [ ] Agent fusion — automatically combine agents into a more capable composite
+
+### 5.3 Natural Language Composition
+
+- [ ] "Build me an agent that..." — full conversational agent authoring
+- [ ] "Connect these agents into a pipeline" — NL orchestration
+- [ ] "What agents do I need for X?" — capability gap analysis
+- [ ] Agent marketplace — publish, discover, install community agents
+
+### 5.4 Edge & Hardware
+
+- [ ] Mobile deployment (React Native or Capacitor shell)
+- [ ] Raspberry Pi / IoT agent runtime
+- [ ] GPU-accelerated inference for local models
+- [ ] Offline-first mode — full functionality without internet
+
+---
+
+## Version History
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| **1.9.1** | 2026-02-22 | Multi-Rappter Gateway (hot-loadable souls), Agent Stock Exchange showcase, 2,803 tests |
+| **1.9.0** | 2026-02-22 | Dashboard RPC parity (all 12 pages functional), 60+ RPC methods |
+| **1.8.2** | 2026-02-22 | Python package exports, stale version fixes |
+| **1.8.1** | 2026-02-22 | Python AgentGraph, 9 Python showcase ports, 11 new Python modules |
+| **1.8.0** | 2026-02-17 | Python AgentChain/Graph/Tracer parity, chat methods |
+| **1.7.0** | 2026-02-14 | 19 Showcase Prompts, Phoenix Protocol, showcase dashboard page |
+| **1.6.0** | 2026-02-12 | AgentGraph, AgentTracer, MCP Server, Dashboard REST API |
+| **1.5.0** | 2026-02-11 | AgentChain, LearnNewAgent TypeScript port |
+
+---
+
+## Principles
+
+1. **Local-first** — runs on your machine, no cloud dependency required
+2. **Single file = single agent** — metadata, docs, and code in one file. No YAML, no config files.
+3. **Deterministic orchestration** — LLMs for thinking, code for coordination
+4. **Language parity** — TypeScript and Python mirror each other
+5. **Test-driven** — make a plan, write tests, build it, run until green, ship
+6. **No magic** — native language constructs over DSLs and config parsing

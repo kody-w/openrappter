@@ -202,6 +202,8 @@ export const GatewayEvents = {
   CRON_COMPLETE: 'cron.complete',
   PRESENCE: 'presence',
   HEARTBEAT: 'heartbeat',
+  RAPPTER: 'rappter',
+  RAPPTER_SUMMON: 'rappter.summon',
   SHUTDOWN: 'shutdown',
   ERROR: 'error',
 } as const;

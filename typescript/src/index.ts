@@ -88,6 +88,17 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
   });
 
+  // Set up RappterManager — multi-soul brainstem
+  const { RappterManager } = await import('./gateway/rappter-manager.js');
+  const rappterManager = new RappterManager(agents);
+  await rappterManager.loadSoul({
+    id: 'default',
+    name: NAME,
+    description: 'Default rappter soul — backward-compatible assistant',
+    emoji: EMOJI,
+  });
+  server.setRappterManager(rappterManager);
+
   // Set up channel registry — register all channels so they appear in the UI
   const channelRegistry = new ChannelRegistry();
 

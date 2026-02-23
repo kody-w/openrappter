@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Philosophy
+
+Make a plan, write test cases, build the application, run those tests until the application passes, then publish to the public repo and let the user know when they can test.
+
 ## Project Overview
 
 OpenRappter is a local-first AI agent framework with parallel implementations in **TypeScript** and **Python**. It provides agent orchestration with built-in "data sloshing" (implicit context enrichment), a skills system via ClawHub, memory persistence, multi-channel messaging, and a WebSocket gateway. The `openclaw/` directory is a copy of a competitor's repo tracked as a reference — ignore submodule pointer drift in git status.

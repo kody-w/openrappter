@@ -50,7 +50,7 @@ export function registerSystemMethods(
         port: 0,
         connections: 0,
         uptime: Math.floor(process.uptime() * 1000),
-        version: '1.9.0',
+        version: '1.9.1',
         startedAt,
       };
     }
@@ -65,7 +65,7 @@ export function registerSystemMethods(
       }
       return {
         status: 'ok',
-        version: '1.9.0',
+        version: '1.9.1',
         uptime: Math.floor(process.uptime() * 1000),
         timestamp: Date.now(),
         checks: {},

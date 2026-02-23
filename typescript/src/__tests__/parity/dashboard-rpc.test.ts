@@ -631,7 +631,7 @@ describe('Dashboard RPC — status / health', () => {
     registerSystemMethods(server, {
       getStatus: () => ({
         running: true, port: 8080, connections: 3, uptime: 12345,
-        version: '1.9.0', startedAt: '2026-01-01T00:00:00Z',
+        version: '1.9.1', startedAt: '2026-01-01T00:00:00Z',
       }),
     });
 
@@ -640,7 +640,7 @@ describe('Dashboard RPC — status / health', () => {
     expect(result).toHaveProperty('port', 8080);
     expect(result).toHaveProperty('connections', 3);
     expect(result).toHaveProperty('uptime');
-    expect(result).toHaveProperty('version', '1.9.0');
+    expect(result).toHaveProperty('version', '1.9.1');
     expect(result).toHaveProperty('startedAt');
   });
 
@@ -659,7 +659,7 @@ describe('Dashboard RPC — status / health', () => {
     const server = createMockServer();
     registerSystemMethods(server, {
       getHealth: () => ({
-        status: 'ok', version: '1.9.0', uptime: 5000,
+        status: 'ok', version: '1.9.1', uptime: 5000,
         timestamp: Date.now(), checks: { gateway: 'ok', agents: 'ok' },
       }),
     });

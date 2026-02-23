@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **5 remaining UI-called RPC methods** registered in method files for MockServer/test parity
+  - `chat.messages` — retrieve session messages with optional limit
+  - `channels.send` — send a message via channel registry
+  - `agents.files.read`, `agents.files.write` — read/write agent files via registry
+  - `config.apply` — apply raw config with configManager or in-memory fallback
+- 16 new tests across `dashboard-rpc.test.ts` and `gateway-rpc-methods.test.ts`
+- Total test count: 2769 tests across 106 files
+
 ## [1.9.0] - 2026-02-22
 
 ### Added

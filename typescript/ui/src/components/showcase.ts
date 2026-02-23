@@ -350,6 +350,7 @@ export class OpenRappterShowcase extends LitElement {
       DAG: '🔀',
       Verification: '🪞',
       Cloning: '🧪',
+      Emergent: '📈',
     };
     return icons[category] ?? '🎪';
   }

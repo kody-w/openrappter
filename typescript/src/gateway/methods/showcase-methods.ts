@@ -168,6 +168,13 @@ const DEMOS: DemoInfo[] = [
     category: 'Streaming',
     agentTypes: ['StreamManager'],
   },
+  {
+    id: 'agent-stock-exchange',
+    name: 'Agent Stock Exchange',
+    description: 'Multi-round marketplace — 3 analysts bid on 20 tasks, emergent specialization via AgentGraph + BroadcastManager + AgentRouter',
+    category: 'Emergent',
+    agentTypes: ['AgentGraph', 'BroadcastManager', 'AgentRouter', 'BasicAgent'],
+  },
 ];
 
 // ── Demo runner helpers ──
@@ -1089,6 +1096,326 @@ async function runStreamWeaver(): Promise<DemoRunResult> {
   return { demoId: 'stream-weaver', name: 'Stream Weaver', status: 'success', steps, totalDurationMs: total, summary: 'Streaming: sessions, blocks, delta accumulation, subscribers, lifecycle' };
 }
 
+// ── Agent Stock Exchange types + helpers ──
+
+interface Task {
+  round: number;
+  category: string;
+  difficulty: number;
+  basePrice: number;
+}
+
+interface AnalystState {
+  name: string;
+  specialty: string;
+  wallet: number;
+  reputation: number;
+}
+
+interface RoundRecord {
+  round: number;
+  task: Task;
+  bids: { name: string; bid: number }[];
+  winner: string;
+  qualityPassed: boolean;
+}
+
+const CATEGORIES = ['data', 'web', 'security', 'infra'];
+
+function generateTask(round: number): Task {
+  const category = CATEGORIES[round % 4];
+  const difficulty = ((round * 7 + 3) % 5) + 1;
+  const basePrice = 100;
+  return { round, category, difficulty, basePrice };
+}
+
+function calculateBid(baseCost: number, difficulty: number, specialtyMatch: boolean, reputation: number): number {
+  const difficultyFactor = 1 + (difficulty - 1) * 0.15;
+  const specialtyDiscount = specialtyMatch ? 0.25 : 0;
+  const reputationDiscount = Math.min(reputation * 0.02, 0.15);
+  return baseCost * difficultyFactor * (1 - specialtyDiscount) * (1 - reputationDiscount);
+}
+
+function calculateQuality(specialtyMatch: boolean): number {
+  return specialtyMatch ? 0.95 : 0.7;
+}
+
+function qualityPasses(quality: number, difficulty: number): boolean {
+  return quality >= difficulty * 0.15;
+}
+
+class BrokerAgent extends BasicAgent {
+  private roundNum: number;
+  constructor(roundNum: number) {
+    super('Broker', {
+      name: 'Broker', description: 'Generates deterministic tasks',
+      parameters: { type: 'object', properties: { round: { type: 'number', description: 'Round number' } }, required: [] },
+    });
+    this.roundNum = roundNum;
+  }
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const round = (kwargs.round as number) ?? this.roundNum;
+    const task = generateTask(round);
+    return JSON.stringify({
+      status: 'success', task,
+      data_slush: { source_agent: 'Broker', task },
+    });
+  }
+}
+
+class AnalystAgent extends BasicAgent {
+  private specialty: string;
+  private baseCost: number;
+  private rep: number;
+  constructor(analystName: string, specialty: string, baseCost: number, reputation: number) {
+    super(analystName, {
+      name: analystName, description: `Analyst specializing in ${specialty}`,
+      parameters: { type: 'object', properties: { task: { type: 'object', description: 'Task to bid on' } }, required: [] },
+    });
+    this.specialty = specialty;
+    this.baseCost = baseCost;
+    this.rep = reputation;
+  }
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const task = kwargs.task as Task;
+    const specialtyMatch = task.category === this.specialty;
+    const bid = calculateBid(this.baseCost, task.difficulty, specialtyMatch, this.rep);
+    return JSON.stringify({
+      status: 'success', bid, specialty: this.specialty, specialtyMatch,
+      data_slush: { source_agent: this.name, bid, specialty: this.specialty, specialtyMatch },
+    });
+  }
+}
+
+class AuctioneerAgent extends BasicAgent {
+  constructor() {
+    super('Auctioneer', {
+      name: 'Auctioneer', description: 'Picks lowest bid',
+      parameters: { type: 'object', properties: {}, required: [] },
+    });
+  }
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const upstream = (kwargs._context as Record<string, unknown>)?.upstream_slush as Record<string, Record<string, unknown>> | undefined;
+    if (!upstream) return JSON.stringify({ status: 'error', message: 'No bids' });
+    const bids = Object.entries(upstream)
+      .filter(([, s]) => typeof s.bid === 'number')
+      .map(([, s]) => ({ name: s.source_agent as string, bid: s.bid as number, specialty: s.specialty as string, specialtyMatch: s.specialtyMatch as boolean }));
+    bids.sort((a, b) => a.bid - b.bid);
+    const winner = bids[0];
+    return JSON.stringify({
+      status: 'success', winner: winner.name, winningBid: winner.bid, allBids: bids,
+      data_slush: { source_agent: 'Auctioneer', winner: winner.name, winningBid: winner.bid, specialtyMatch: winner.specialtyMatch },
+    });
+  }
+}
+
+class SettlementAgent extends BasicAgent {
+  private analysts: AnalystState[];
+  private task: Task;
+  constructor(analysts: AnalystState[], task: Task) {
+    super('Settlement', {
+      name: 'Settlement', description: 'Updates wallets and reputation',
+      parameters: { type: 'object', properties: {}, required: [] },
+    });
+    this.analysts = analysts;
+    this.task = task;
+  }
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const upstream = (kwargs._context as Record<string, unknown>)?.upstream_slush as Record<string, Record<string, unknown>> | undefined;
+    if (!upstream) return JSON.stringify({ status: 'error', message: 'No auction result' });
+    const auctionSlush = Object.values(upstream).find(s => s.source_agent === 'Auctioneer')!;
+    const winnerName = auctionSlush.winner as string;
+    const winningBid = auctionSlush.winningBid as number;
+    const specialtyMatch = auctionSlush.specialtyMatch as boolean;
+
+    const winner = this.analysts.find(a => a.name === winnerName)!;
+    winner.wallet += this.task.basePrice - winningBid;
+    const quality = calculateQuality(specialtyMatch);
+    const passed = qualityPasses(quality, this.task.difficulty);
+    if (specialtyMatch) {
+      winner.reputation += 1;
+    } else if (passed) {
+      winner.reputation += 0.5;
+    } else {
+      winner.reputation -= 1;
+    }
+
+    return JSON.stringify({
+      status: 'success', winner: winnerName, walletDelta: this.task.basePrice - winningBid,
+      qualityPassed: passed, reputationAfter: winner.reputation,
+      data_slush: { source_agent: 'Settlement', winner: winnerName, qualityPassed: passed },
+    });
+  }
+}
+
+class MarketReportAgent extends BasicAgent {
+  constructor() {
+    super('MarketReport', {
+      name: 'MarketReport', description: 'Final market analysis',
+      parameters: { type: 'object', properties: { analysts: { type: 'array', description: 'Analyst states' }, history: { type: 'array', description: 'Round history' } }, required: [] },
+    });
+  }
+  async perform(kwargs: Record<string, unknown>): Promise<string> {
+    const analysts = kwargs.analysts as AnalystState[];
+    const history = kwargs.history as RoundRecord[];
+
+    const wealthDistribution = analysts.map(a => ({ name: a.name, wallet: Math.round(a.wallet * 100) / 100, reputation: a.reputation }));
+    wealthDistribution.sort((a, b) => b.wallet - a.wallet);
+
+    const categoryWins: Record<string, Record<string, number>> = {};
+    for (const rec of history) {
+      if (!categoryWins[rec.task.category]) categoryWins[rec.task.category] = {};
+      categoryWins[rec.task.category][rec.winner] = (categoryWins[rec.task.category][rec.winner] || 0) + 1;
+    }
+
+    const avgBids = history.reduce((sum, r) => sum + r.bids.reduce((s, b) => s + b.bid, 0) / r.bids.length, 0) / history.length;
+
+    return JSON.stringify({
+      status: 'success',
+      wealthDistribution,
+      categoryWins,
+      avgBidPrice: Math.round(avgBids * 100) / 100,
+      totalRounds: history.length,
+      data_slush: { source_agent: 'MarketReport', wealthDistribution, categoryWins },
+    });
+  }
+}
+
+async function runAgentStockExchange(): Promise<DemoRunResult> {
+  const { AgentGraph } = await import('../../agents/graph.js');
+  const { BroadcastManager } = await import('../../agents/broadcast.js');
+  const { AgentRouter } = await import('../../agents/router.js');
+  const steps: DemoStepResult[] = [];
+
+  // Step 1: Initialize analysts
+  const s1 = await timeStep('Initialize 3 analyst agents', async () => {
+    const analysts: AnalystState[] = [
+      { name: 'DataPro', specialty: 'data', wallet: 0, reputation: 0 },
+      { name: 'WebWiz', specialty: 'web', wallet: 0, reputation: 0 },
+      { name: 'SecOps', specialty: 'security', wallet: 0, reputation: 0 },
+    ];
+    return { count: analysts.length, names: analysts.map(a => a.name) };
+  });
+  steps.push(s1);
+
+  // Step 2: BroadcastManager demo — all mode collects all bids
+  const s2 = await timeStep('BroadcastManager — collect all bids', async () => {
+    const agents: Record<string, BasicAgent> = {
+      DataPro: new AnalystAgent('DataPro', 'data', 80, 0),
+      WebWiz: new AnalystAgent('WebWiz', 'web', 100, 0),
+      SecOps: new AnalystAgent('SecOps', 'security', 120, 0),
+    };
+    const manager = new BroadcastManager();
+    manager.createGroup({
+      id: 'bid-round', name: 'Bid Round',
+      agentIds: ['DataPro', 'WebWiz', 'SecOps'], mode: 'all',
+    });
+    const task = generateTask(0);
+    const executor = async (agentId: string, message: string): Promise<AgentResult> => {
+      const agent = agents[agentId];
+      const resultStr = await agent.execute({ query: message, task });
+      return JSON.parse(resultStr) as AgentResult;
+    };
+    const result = await manager.broadcast('bid-round', 'bid', executor);
+    return { allSucceeded: result.allSucceeded, totalBids: result.results.size };
+  });
+  steps.push(s2);
+
+  // Step 3: AgentRouter demo — route by specialty pattern
+  const s3 = await timeStep('AgentRouter — route by specialty', async () => {
+    const router = new AgentRouter();
+    router.addRule({ id: 'data-route', priority: 10, conditions: [{ type: 'pattern', pattern: /data/i }], agentId: 'DataPro' });
+    router.addRule({ id: 'web-route', priority: 10, conditions: [{ type: 'pattern', pattern: /web/i }], agentId: 'WebWiz' });
+    router.addRule({ id: 'sec-route', priority: 10, conditions: [{ type: 'pattern', pattern: /security/i }], agentId: 'SecOps' });
+    router.setDefaultAgent('DataPro');
+
+    const dataRoute = router.route({ senderId: 'system', channelId: 'market', conversationId: 'r1', message: 'data analysis needed' });
+    const webRoute = router.route({ senderId: 'system', channelId: 'market', conversationId: 'r2', message: 'web scraping task' });
+    return { dataAgent: dataRoute.agentId, webAgent: webRoute.agentId };
+  });
+  steps.push(s3);
+
+  // Step 4: Run 20 auction rounds via AgentGraph
+  const analysts: AnalystState[] = [
+    { name: 'DataPro', specialty: 'data', wallet: 0, reputation: 0 },
+    { name: 'WebWiz', specialty: 'web', wallet: 0, reputation: 0 },
+    { name: 'SecOps', specialty: 'security', wallet: 0, reputation: 0 },
+  ];
+  const roundHistory: RoundRecord[] = [];
+
+  const s4 = await timeStep('Run 20 auction rounds (AgentGraph DAG)', async () => {
+    for (let round = 0; round < 20; round++) {
+      const task = generateTask(round);
+      const broker = new BrokerAgent(round);
+      const analystAgents = analysts.map(a =>
+        new AnalystAgent(a.name, a.specialty, a.name === 'DataPro' ? 80 : a.name === 'WebWiz' ? 100 : 120, a.reputation),
+      );
+      const auctioneer = new AuctioneerAgent();
+      const settlement = new SettlementAgent(analysts, task);
+
+      const graph = new AgentGraph()
+        .addNode({ name: 'broker', agent: broker, kwargs: { round } })
+        .addNode({ name: 'analyst-DataPro', agent: analystAgents[0], kwargs: { task }, dependsOn: ['broker'] })
+        .addNode({ name: 'analyst-WebWiz', agent: analystAgents[1], kwargs: { task }, dependsOn: ['broker'] })
+        .addNode({ name: 'analyst-SecOps', agent: analystAgents[2], kwargs: { task }, dependsOn: ['broker'] })
+        .addNode({ name: 'auctioneer', agent: auctioneer, dependsOn: ['analyst-DataPro', 'analyst-WebWiz', 'analyst-SecOps'] })
+        .addNode({ name: 'settlement', agent: settlement, dependsOn: ['auctioneer'] });
+
+      const result = await graph.run();
+
+      const auctionResult = result.nodes.get('auctioneer')?.result as Record<string, unknown>;
+      const allBids = (auctionResult?.allBids as Array<{ name: string; bid: number }>) ?? [];
+      const winnerName = (auctionResult?.winner as string) ?? '';
+      const settlementResult = result.nodes.get('settlement')?.result as Record<string, unknown>;
+
+      roundHistory.push({
+        round,
+        task,
+        bids: allBids.map(b => ({ name: b.name, bid: b.bid })),
+        winner: winnerName,
+        qualityPassed: (settlementResult?.qualityPassed as boolean) ?? true,
+      });
+    }
+    return { rounds: 20, wallets: analysts.map(a => ({ name: a.name, wallet: Math.round(a.wallet * 100) / 100 })) };
+  });
+  steps.push(s4);
+
+  // Step 5: Market report
+  const s5 = await timeStep('Generate market report', async () => {
+    const report = new MarketReportAgent();
+    const resultStr = await report.execute({ analysts, history: roundHistory });
+    const reportResult = JSON.parse(resultStr) as Record<string, unknown>;
+    return { avgBidPrice: reportResult.avgBidPrice, totalRounds: reportResult.totalRounds, wealthDistribution: reportResult.wealthDistribution };
+  });
+  steps.push(s5);
+
+  // Step 6: Verify specialization emergence
+  const s6 = await timeStep('Verify specialization emergence', async () => {
+    const categoryWins: Record<string, Record<string, number>> = {};
+    for (const rec of roundHistory) {
+      if (!categoryWins[rec.task.category]) categoryWins[rec.task.category] = {};
+      categoryWins[rec.task.category][rec.winner] = (categoryWins[rec.task.category][rec.winner] || 0) + 1;
+    }
+    const specialistWins: Record<string, boolean> = {};
+    const specialistMap: Record<string, string> = { data: 'DataPro', web: 'WebWiz', security: 'SecOps' };
+    for (const [cat, specialist] of Object.entries(specialistMap)) {
+      const wins = categoryWins[cat] ?? {};
+      const specialistCount = wins[specialist] ?? 0;
+      const totalCatRounds = Object.values(wins).reduce((s, v) => s + v, 0);
+      specialistWins[cat] = totalCatRounds > 0 && specialistCount > totalCatRounds / 2;
+    }
+    return { specialistWins, categoryWins };
+  });
+  steps.push(s6);
+
+  const total = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  return {
+    demoId: 'agent-stock-exchange', name: 'Agent Stock Exchange', status: 'success',
+    steps, totalDurationMs: total,
+    summary: `Market: 20 rounds, 3 analysts, wallets: ${analysts.map(a => `${a.name}=${Math.round(a.wallet)}`).join(', ')}`,
+  };
+}
+
 const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'darwins-colosseum': runDarwinsColosseum,
   'infinite-regress': runInfiniteRegress,
@@ -1109,6 +1436,7 @@ const DEMO_RUNNERS: Record<string, () => Promise<DemoRunResult>> = {
   'healing-loop': runHealingLoop,
   'auth-fortress': runAuthFortress,
   'stream-weaver': runStreamWeaver,
+  'agent-stock-exchange': runAgentStockExchange,
 };
 
 export function registerShowcaseMethods(

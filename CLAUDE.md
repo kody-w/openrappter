@@ -226,15 +226,15 @@ CORS enabled by default. Trace store is in-memory with a 500-entry circular buff
 
 ## Architecture: Showcase Dashboard Page
 
-Web dashboard page for browsing and running the 19 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
+Web dashboard page for browsing and running the 20 Power Prompts demos in the browser. Uses Lit 3.1 web components with WebSocket RPC.
 
 ### RPC Methods
 
 Registered in both the method registry (`methods/index.ts`) and directly in the gateway server's built-in methods (`server.ts`):
 
-- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 19 demos (id, name, description, category, agentTypes)
+- **`showcase.list`** — Returns `{ demos: DemoInfo[] }` with metadata for all 20 demos (id, name, description, category, agentTypes)
 - **`showcase.run`** — Takes `{ demoId: string }`, runs the demo with inline mock agents, returns `{ demoId, name, status, steps[], totalDurationMs, summary, error? }`
-- **`showcase.runall`** — Runs all 19 demos sequentially, returns `{ results: DemoRunResult[] }`
+- **`showcase.runall`** — Runs all 20 demos sequentially, returns `{ results: DemoRunResult[] }`
 
 All demos are deterministic (mock agents, no LLM calls). Each demo runner creates its agents inline, executes the orchestration pattern, and collects step-by-step results with timing.
 
@@ -261,6 +261,7 @@ All demos are deterministic (mock agents, no LLM calls). Each demo runner create
 | `healing-loop` | Healing Loop | Resilience | SelfHealingCronAgent self-repair |
 | `auth-fortress` | Authorization Fortress | Security | ApprovalManager policies, rules |
 | `stream-weaver` | Stream Weaver | Streaming | StreamManager sessions, blocks, deltas |
+| `agent-stock-exchange` | Agent Stock Exchange | Emergent | AgentGraph + BroadcastManager + AgentRouter marketplace |
 
 ### UI Component
 
@@ -412,7 +413,7 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 
 ## Showcase Prompts (v1.8.0)
 
-19 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
+20 advanced agent orchestration patterns with runnable examples and deterministic test suites. Each demonstrates a different framework capability. All helper agents are defined inline — no new core agent files. Tests use vitest mocking, no LLM calls.
 
 ### Showcase Index
 
@@ -437,8 +438,9 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 | 17 | Healing Loop | SelfHealingCronAgent self-repair loop | `examples/healing-loop.ts` | `showcase-healing-loop.test.ts` | 7 |
 | 18 | Authorization Fortress | ApprovalManager policies, rules, flows | `examples/auth-fortress.ts` | `showcase-auth-fortress.test.ts` | 9 |
 | 19 | Stream Weaver | StreamManager sessions, blocks, deltas | `examples/stream-weaver.ts` | `showcase-stream-weaver.test.ts` | 9 |
+| 20 | Agent Stock Exchange | AgentGraph + BroadcastManager + AgentRouter marketplace | `examples/agent-stock-exchange.ts` | `showcase-agent-stock-exchange.test.ts` | 12 |
 
-All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts` (176 tests).
+All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts`.
 
 ### 1. The Architect — LearnNewAgent + AgentGraph DAG
 

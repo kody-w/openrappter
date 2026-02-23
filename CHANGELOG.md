@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Showcase #20: Agent Stock Exchange** — multi-round marketplace simulation where 3 analyst agents bid on 20 deterministic tasks across 4 categories (data/web/security/infra). Exercises AgentGraph, BroadcastManager, AgentRouter, and BasicAgent + data_slush simultaneously. Emergent specialization, reputation effects, and wealth distribution.
 - **5 remaining UI-called RPC methods** registered in method files for MockServer/test parity
   - `chat.messages` — retrieve session messages with optional limit
   - `channels.send` — send a message via channel registry

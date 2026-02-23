@@ -32,6 +32,8 @@ interface AgentRegistry {
     content: string;
     language: string;
   }>;
+  readAgentFile?(agentId: string, path: string): Promise<{ content: string }>;
+  writeAgentFile?(agentId: string, path: string, content: string): Promise<{ written: true }>;
 }
 
 interface AgentsMethodsDeps {
@@ -101,5 +103,39 @@ export function registerAgentsMethods(
     }
 
     return registry.getAgentFile(params.name);
+  });
+
+  server.registerMethod<
+    { agentId: string; path: string },
+    { content: string }
+  >('agents.files.read', async (params) => {
+    const registry = deps?.agentRegistry;
+
+    if (!registry) {
+      throw new Error('Agent registry not available');
+    }
+
+    if (!registry.readAgentFile) {
+      throw new Error('Agent registry does not support readAgentFile');
+    }
+
+    return registry.readAgentFile(params.agentId, params.path);
+  });
+
+  server.registerMethod<
+    { agentId: string; path: string; content: string },
+    { written: true }
+  >('agents.files.write', async (params) => {
+    const registry = deps?.agentRegistry;
+
+    if (!registry) {
+      throw new Error('Agent registry not available');
+    }
+
+    if (!registry.writeAgentFile) {
+      throw new Error('Agent registry does not support writeAgentFile');
+    }
+
+    return registry.writeAgentFile(params.agentId, params.path, params.content);
   });
 }

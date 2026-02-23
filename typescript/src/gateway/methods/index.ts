@@ -47,7 +47,7 @@ export function registerAllMethods(
   registerLogsMethods(server);
   registerSessionMethods(server, deps);
   registerSkillsMethods(server, deps);
-  registerConfigMethods(server);
+  registerConfigMethods(server, deps);
   registerCronMethods(server, deps);
   registerAgentsMethods(server, deps);
   registerShowcaseMethods(server, deps);

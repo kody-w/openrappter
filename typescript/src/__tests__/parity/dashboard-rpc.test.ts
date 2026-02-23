@@ -143,6 +143,54 @@ describe('Dashboard RPC — chat.list / chat.delete', () => {
   });
 });
 
+// ── chat.messages ───────────────────────────────────────────────────────
+
+describe('Dashboard RPC — chat.messages', () => {
+  it('should return messages for a session', async () => {
+    const { registerChatMethods } = await import('../../gateway/methods/chat-methods.js');
+    const server = createMockServer();
+    const sessionStore = new Map();
+    const messages = [
+      { messageId: 'm1', role: 'user', content: 'hello', timestamp: 1000 },
+      { messageId: 'm2', role: 'assistant', content: 'hi', timestamp: 1001 },
+      { messageId: 'm3', role: 'user', content: 'bye', timestamp: 1002 },
+    ];
+    sessionStore.set('s1', { id: 's1', messages });
+    registerChatMethods(server, { sessionStore });
+
+    const result = await server.call<Array<Record<string, unknown>>>('chat.messages', { sessionId: 's1' });
+    expect(result).toHaveLength(3);
+    expect(result[0]).toHaveProperty('messageId', 'm1');
+    expect(result[2]).toHaveProperty('messageId', 'm3');
+  });
+
+  it('should respect limit parameter', async () => {
+    const { registerChatMethods } = await import('../../gateway/methods/chat-methods.js');
+    const server = createMockServer();
+    const sessionStore = new Map();
+    const messages = [
+      { messageId: 'm1', role: 'user', content: 'a', timestamp: 1000 },
+      { messageId: 'm2', role: 'assistant', content: 'b', timestamp: 1001 },
+      { messageId: 'm3', role: 'user', content: 'c', timestamp: 1002 },
+    ];
+    sessionStore.set('s1', { id: 's1', messages });
+    registerChatMethods(server, { sessionStore });
+
+    const result = await server.call<Array<Record<string, unknown>>>('chat.messages', { sessionId: 's1', limit: 2 });
+    expect(result).toHaveLength(2);
+    expect(result[0]).toHaveProperty('messageId', 'm2');
+    expect(result[1]).toHaveProperty('messageId', 'm3');
+  });
+
+  it('should throw on missing session', async () => {
+    const { registerChatMethods } = await import('../../gateway/methods/chat-methods.js');
+    const server = createMockServer();
+    registerChatMethods(server);
+
+    await expect(server.call('chat.messages', { sessionId: 'nope' })).rejects.toThrow('Session not found');
+  });
+});
+
 // ── channels.* ──────────────────────────────────────────────────────────
 
 describe('Dashboard RPC — channels.*', () => {
@@ -432,6 +480,145 @@ describe('Dashboard RPC — connections.list', () => {
     const result = await server.call<unknown[]>('connections.list');
     expect(result).toEqual(connections);
     expect(result).toHaveLength(2);
+  });
+});
+
+// ── channels.send ───────────────────────────────────────────────────────
+
+describe('Dashboard RPC — channels.send', () => {
+  it('should send a message via registry', async () => {
+    const { registerChannelsMethods } = await import('../../gateway/methods/channels-methods.js');
+    const server = createMockServer();
+    let sentParams: Record<string, unknown> = {};
+    registerChannelsMethods(server, {
+      channelRegistry: {
+        getStatusList: () => [],
+        connectChannel: async () => {},
+        disconnectChannel: async () => {},
+        probeChannel: async () => ({ ok: true, latencyMs: 0 }),
+        configureChannel: () => {},
+        sendMessage: async (params) => { sentParams = params; return { sent: true }; },
+      },
+    });
+
+    const result = await server.call<{ sent: boolean }>('channels.send', {
+      channelId: 'slack', conversationId: 'c1', content: 'hello',
+    });
+    expect(result.sent).toBe(true);
+    expect(sentParams).toHaveProperty('channelId', 'slack');
+    expect(sentParams).toHaveProperty('content', 'hello');
+  });
+
+  it('should throw without registry', async () => {
+    const { registerChannelsMethods } = await import('../../gateway/methods/channels-methods.js');
+    const server = createMockServer();
+    registerChannelsMethods(server);
+
+    await expect(server.call('channels.send', {
+      channelId: 'slack', conversationId: 'c1', content: 'hello',
+    })).rejects.toThrow();
+  });
+});
+
+// ── agents.files.read / agents.files.write ──────────────────────────────
+
+describe('Dashboard RPC — agents.files.read / agents.files.write', () => {
+  it('should read an agent file via registry', async () => {
+    const { registerAgentsMethods } = await import('../../gateway/methods/agents-methods.js');
+    const server = createMockServer();
+    registerAgentsMethods(server, {
+      agentRegistry: {
+        getMetadata: async () => null,
+        listAgentFiles: async () => [],
+        getAgentFile: async () => ({ name: '', content: '', language: '' }),
+        readAgentFile: async (_agentId: string, _path: string) => ({ content: 'file contents here' }),
+        writeAgentFile: async () => ({ written: true as const }),
+      },
+    });
+
+    const result = await server.call<{ content: string }>('agents.files.read', {
+      agentId: 'ShellAgent', path: 'src/index.ts',
+    });
+    expect(result.content).toBe('file contents here');
+  });
+
+  it('should throw agents.files.read without registry', async () => {
+    const { registerAgentsMethods } = await import('../../gateway/methods/agents-methods.js');
+    const server = createMockServer();
+    registerAgentsMethods(server);
+
+    await expect(server.call('agents.files.read', {
+      agentId: 'ShellAgent', path: 'src/index.ts',
+    })).rejects.toThrow();
+  });
+
+  it('should write an agent file via registry', async () => {
+    const { registerAgentsMethods } = await import('../../gateway/methods/agents-methods.js');
+    const server = createMockServer();
+    let writtenPath = '';
+    let writtenContent = '';
+    registerAgentsMethods(server, {
+      agentRegistry: {
+        getMetadata: async () => null,
+        listAgentFiles: async () => [],
+        getAgentFile: async () => ({ name: '', content: '', language: '' }),
+        readAgentFile: async () => ({ content: '' }),
+        writeAgentFile: async (_agentId: string, path: string, content: string) => {
+          writtenPath = path;
+          writtenContent = content;
+          return { written: true as const };
+        },
+      },
+    });
+
+    const result = await server.call<{ written: boolean }>('agents.files.write', {
+      agentId: 'ShellAgent', path: 'src/helper.ts', content: 'new code',
+    });
+    expect(result.written).toBe(true);
+    expect(writtenPath).toBe('src/helper.ts');
+    expect(writtenContent).toBe('new code');
+  });
+
+  it('should throw agents.files.write without registry', async () => {
+    const { registerAgentsMethods } = await import('../../gateway/methods/agents-methods.js');
+    const server = createMockServer();
+    registerAgentsMethods(server);
+
+    await expect(server.call('agents.files.write', {
+      agentId: 'ShellAgent', path: 'src/index.ts', content: 'x',
+    })).rejects.toThrow();
+  });
+});
+
+// ── config.apply ────────────────────────────────────────────────────────
+
+describe('Dashboard RPC — config.apply', () => {
+  it('should apply config via configManager', async () => {
+    const { registerConfigMethods } = await import('../../gateway/methods/config-methods.js');
+    const server = createMockServer();
+    let appliedRaw = '';
+    registerConfigMethods(server, {
+      configManager: {
+        apply: async (raw: string) => { appliedRaw = raw; return { applied: true }; },
+      },
+    });
+
+    const result = await server.call<{ applied: boolean }>('config.apply', {
+      raw: '{"server":{"port":9090}}',
+    });
+    expect(result.applied).toBe(true);
+    expect(appliedRaw).toBe('{"server":{"port":9090}}');
+  });
+
+  it('should fallback to in-memory store without configManager', async () => {
+    const { registerConfigMethods } = await import('../../gateway/methods/config-methods.js');
+    const server = createMockServer();
+    registerConfigMethods(server);
+
+    const result = await server.call<{ applied: boolean }>('config.apply', {
+      raw: '{"server":{"port":4000}}',
+    });
+    expect(result.applied).toBe(true);
   });
 });
 

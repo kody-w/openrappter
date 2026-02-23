@@ -16,6 +16,12 @@ interface ChannelRegistry {
   disconnectChannel(type: string): Promise<void>;
   probeChannel(type: string): Promise<{ ok: boolean; latencyMs: number }>;
   configureChannel(type: string, config: Record<string, unknown>): void;
+  sendMessage?(params: {
+    channelId: string;
+    conversationId: string;
+    content: string;
+    replyTo?: string;
+  }): Promise<{ sent: boolean }>;
 }
 
 interface ChannelsMethodsDeps {
@@ -69,6 +75,20 @@ export function registerChannelsMethods(
       if (!deps?.channelRegistry) throw new Error('Channel registry not configured');
       deps.channelRegistry.configureChannel(params.type, params.config);
       return { configured: true };
+    }
+  );
+
+  server.registerMethod<
+    { channelId: string; conversationId: string; content: string; replyTo?: string },
+    { sent: boolean }
+  >(
+    'channels.send',
+    async (params) => {
+      if (!deps?.channelRegistry) throw new Error('Channel registry not configured');
+      if (!deps.channelRegistry.sendMessage) {
+        throw new Error('Channel registry does not support sendMessage');
+      }
+      return deps.channelRegistry.sendMessage(params);
     }
   );
 }

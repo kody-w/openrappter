@@ -117,4 +117,21 @@ export function registerChatMethods(server: MethodRegistrar, deps?: ChatMethodsD
       return { deleted: sessionStore.delete(params.sessionId) };
     }
   );
+
+  // Get messages for a session
+  server.registerMethod<{ sessionId: string; limit?: number }, ChatMessage[]>(
+    'chat.messages',
+    async (params) => {
+      const { sessionId, limit } = params;
+      const session = sessionStore.get(sessionId);
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`);
+      }
+      const messages = session.messages;
+      if (limit !== undefined && limit > 0) {
+        return messages.slice(-limit);
+      }
+      return messages;
+    }
+  );
 }

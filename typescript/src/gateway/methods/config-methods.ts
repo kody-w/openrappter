@@ -50,7 +50,15 @@ let currentConfig: Record<string, unknown> = {
   providers: {},
 };
 
-export function registerConfigMethods(server: MethodRegistrar): void {
+interface ConfigManager {
+  apply(raw: string, baseHash?: string): Promise<{ applied: boolean }>;
+}
+
+interface ConfigMethodsDeps {
+  configManager?: ConfigManager;
+}
+
+export function registerConfigMethods(server: MethodRegistrar, deps?: ConfigMethodsDeps): void {
   server.registerMethod<
     { updates: Record<string, unknown> },
     { success: boolean; config: Record<string, unknown> }
@@ -71,5 +79,17 @@ export function registerConfigMethods(server: MethodRegistrar): void {
 
   server.registerMethod<void, { schema: unknown }>('config.schema', async () => {
     return { schema: configSchema };
+  });
+
+  server.registerMethod<
+    { raw: string; baseHash?: string },
+    { applied: boolean }
+  >('config.apply', async (params) => {
+    if (deps?.configManager) {
+      return deps.configManager.apply(params.raw, params.baseHash);
+    }
+    // Fallback: store raw in in-memory currentConfig
+    currentConfig = JSON.parse(params.raw);
+    return { applied: true };
   });
 }

@@ -45,6 +45,7 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('chat.inject')).toBe(true);
       expect(methods.has('chat.list')).toBe(true);
       expect(methods.has('chat.delete')).toBe(true);
+      expect(methods.has('chat.messages')).toBe(true);
     });
 
     it('should register models methods', () => {
@@ -104,6 +105,7 @@ describe('Gateway RPC Methods', () => {
     it('should register config methods', () => {
       expect(methods.has('config.patch')).toBe(true);
       expect(methods.has('config.schema')).toBe(true);
+      expect(methods.has('config.apply')).toBe(true);
     });
 
     it('should register cron methods', () => {
@@ -122,6 +124,8 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('agents.identity.get')).toBe(true);
       expect(methods.has('agents.files.list')).toBe(true);
       expect(methods.has('agents.files.get')).toBe(true);
+      expect(methods.has('agents.files.read')).toBe(true);
+      expect(methods.has('agents.files.write')).toBe(true);
     });
 
     it('should register channels methods', () => {
@@ -130,6 +134,7 @@ describe('Gateway RPC Methods', () => {
       expect(methods.has('channels.disconnect')).toBe(true);
       expect(methods.has('channels.probe')).toBe(true);
       expect(methods.has('channels.configure')).toBe(true);
+      expect(methods.has('channels.send')).toBe(true);
     });
 
     it('should register connections methods', () => {
@@ -354,6 +359,51 @@ describe('Gateway RPC Methods', () => {
       expect(result).toHaveProperty('status');
       expect(result).toHaveProperty('version');
     });
+
+    it('chat.messages handler should be callable but throw without session', async () => {
+      const methodInfo = methods.get('chat.messages');
+      expect(methodInfo).toBeDefined();
+
+      await expect(
+        methodInfo!.handler({ sessionId: 'nonexistent' }, {})
+      ).rejects.toThrow('Session not found');
+    });
+
+    it('channels.send handler should be callable but throw without registry', async () => {
+      const methodInfo = methods.get('channels.send');
+      expect(methodInfo).toBeDefined();
+
+      await expect(
+        methodInfo!.handler({ channelId: 'slack', conversationId: 'c1', content: 'hi' }, {})
+      ).rejects.toThrow();
+    });
+
+    it('agents.files.read handler should be callable but throw without registry', async () => {
+      const methodInfo = methods.get('agents.files.read');
+      expect(methodInfo).toBeDefined();
+
+      await expect(
+        methodInfo!.handler({ agentId: 'ShellAgent', path: 'index.ts' }, {})
+      ).rejects.toThrow();
+    });
+
+    it('agents.files.write handler should be callable but throw without registry', async () => {
+      const methodInfo = methods.get('agents.files.write');
+      expect(methodInfo).toBeDefined();
+
+      await expect(
+        methodInfo!.handler({ agentId: 'ShellAgent', path: 'index.ts', content: 'x' }, {})
+      ).rejects.toThrow();
+    });
+
+    it('config.apply handler should be callable', async () => {
+      const methodInfo = methods.get('config.apply');
+      expect(methodInfo).toBeDefined();
+
+      const result = await methodInfo!.handler({ raw: '{"server":{"port":3000}}' }, {});
+      expect(result).toBeDefined();
+      expect(result).toHaveProperty('applied', true);
+    });
   });
 
   describe('Method Naming Convention', () => {
@@ -437,7 +487,8 @@ describe('Gateway RPC Methods', () => {
       expect(chatMethods).toContain('chat.inject');
       expect(chatMethods).toContain('chat.list');
       expect(chatMethods).toContain('chat.delete');
-      expect(chatMethods.length).toBe(4);
+      expect(chatMethods).toContain('chat.messages');
+      expect(chatMethods.length).toBe(5);
     });
 
     it('tts group should have expected methods', () => {
@@ -499,7 +550,9 @@ describe('Gateway RPC Methods', () => {
       expect(agentsMethods).toContain('agents.identity.get');
       expect(agentsMethods).toContain('agents.files.list');
       expect(agentsMethods).toContain('agents.files.get');
-      expect(agentsMethods.length).toBe(4);
+      expect(agentsMethods).toContain('agents.files.read');
+      expect(agentsMethods).toContain('agents.files.write');
+      expect(agentsMethods.length).toBe(6);
     });
 
     it('cron group should have expected methods', () => {
@@ -540,7 +593,8 @@ describe('Gateway RPC Methods', () => {
       expect(channelsMethods).toContain('channels.disconnect');
       expect(channelsMethods).toContain('channels.probe');
       expect(channelsMethods).toContain('channels.configure');
-      expect(channelsMethods.length).toBe(5);
+      expect(channelsMethods).toContain('channels.send');
+      expect(channelsMethods.length).toBe(6);
     });
 
     it('connections group should have expected methods', () => {

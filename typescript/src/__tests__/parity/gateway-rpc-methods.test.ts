@@ -474,8 +474,9 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('connections')).toBe(true);
       expect(groups.has('status')).toBe(true);
       expect(groups.has('health')).toBe(true);
+      expect(groups.has('rappter')).toBe(true);
 
-      expect(groups.size).toBe(18);
+      expect(groups.size).toBe(19);
     });
 
     it('chat group should have expected methods', () => {
@@ -620,8 +621,8 @@ describe('Gateway RPC Methods', () => {
         (info) => info.requiresAuth
       ).length;
 
-      // Currently none of the methods require auth
-      expect(authRequiredCount).toBe(0);
+      // rappter.summon, rappter.load, rappter.unload, rappter.reload require auth
+      expect(authRequiredCount).toBe(4);
     });
   });
 });

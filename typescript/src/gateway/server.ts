@@ -25,6 +25,8 @@ import type {
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
+import { registerRappterMethods } from './methods/rappter-methods.js';
+import type { RappterManager } from './rappter-manager.js';
 
 const DEFAULT_PORT = 18790;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
@@ -58,6 +60,9 @@ export class GatewayServer {
   private config: GatewayConfig;
   private startedAt: number | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
+
+  // Rappter multi-soul manager
+  private rappterManager?: RappterManager;
 
   // External handlers
   private agentHandler?: (
@@ -192,6 +197,10 @@ export class GatewayServer {
 
   setAgentList(listFn: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[]): void {
     this.agentList = listFn;
+  }
+
+  setRappterManager(manager: RappterManager): void {
+    this.rappterManager = manager;
   }
 
   registerMethod<P = unknown, R = unknown>(
@@ -824,6 +833,11 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+
+    // Rappter multi-soul methods
+    if (this.rappterManager) {
+      registerRappterMethods(this, { rappterManager: this.rappterManager });
+    }
   }
 
   // ── Agent Execution with Chat Events ─────────────────────────────────

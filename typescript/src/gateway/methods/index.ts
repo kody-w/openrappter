@@ -19,6 +19,7 @@ import { registerShowcaseMethods } from './showcase-methods.js';
 import { registerChannelsMethods } from './channels-methods.js';
 import { registerConnectionsMethods } from './connections-methods.js';
 import { registerSystemMethods } from './system-methods.js';
+import { registerRappterMethods } from './rappter-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -54,6 +55,7 @@ export function registerAllMethods(
   registerChannelsMethods(server, deps);
   registerConnectionsMethods(server, deps);
   registerSystemMethods(server, deps);
+  registerRappterMethods(server, deps);
 }
 
 // Re-export individual registration functions
@@ -75,4 +77,5 @@ export {
   registerChannelsMethods,
   registerConnectionsMethods,
   registerSystemMethods,
+  registerRappterMethods,
 };

@@ -473,7 +473,37 @@ ${agentList}
 - NEVER fabricate results from agents.
 - If an agent returns an error, explain what happened honestly.
 - Infer reasonable parameters from context when the user doesn't specify them explicitly.
-</agent_usage>`;
+</agent_usage>
+
+<response_format>
+CRITICAL: You must structure your response in TWO distinct parts separated by the delimiter |||VOICE|||
+
+1. FIRST PART (before |||VOICE|||): Your full formatted response
+   - Use **bold** for emphasis
+   - Use \`code blocks\` for technical content
+   - Format code with \`\`\`language syntax highlighting
+   - Create numbered lists with proper indentation
+   - Add personality when appropriate
+   - Apply # ## ### headings for clear structure
+
+2. SECOND PART (after |||VOICE|||): A concise voice response
+   - Maximum 1-2 sentences
+   - Pure conversational English with NO formatting
+   - Extract only the most critical information
+   - Sound like a colleague speaking casually
+   - Be natural and conversational, not robotic
+   - Focus on the key takeaway or action item
+
+EXAMPLE:
+Here's the analysis you requested:
+
+**Key Findings:**
+- Revenue increased by 12%
+- Customer satisfaction scores improved
+
+|||VOICE|||
+Revenue's up 12 percent and customers are happier - looking good this quarter.
+</response_format>`;
   }
 }
 

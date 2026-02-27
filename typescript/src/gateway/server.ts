@@ -35,6 +35,23 @@ const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const VERSION = '1.9.1';
 const PROTOCOL_VERSION = 3;
+const VOICE_DELIMITER = '|||VOICE|||';
+
+/** Parse a response that may contain a |||VOICE||| delimiter into formatted + voice parts */
+function parseVoiceDelimiter(content: string): { text: string; voiceText: string } {
+  if (!content) return { text: '', voiceText: '' };
+
+  const parts = content.split(VOICE_DELIMITER);
+  if (parts.length >= 2) {
+    return { text: parts[0].trim(), voiceText: parts[1].trim() };
+  }
+
+  // No delimiter — extract first sentence as fallback voice text
+  const stripped = content.replace(/\*\*|`{1,3}[^`]*`{1,3}|#{1,3}\s|>|---/g, '').trim();
+  const sentences = stripped.split(/(?<=[.!?])\s+/);
+  const voiceText = sentences[0]?.trim() || "I've completed your request.";
+  return { text: content.trim(), voiceText };
+}
 
 interface RateLimitEntry {
   count: number;
@@ -851,11 +868,13 @@ export class GatewayServer {
       );
 
       // Send final response only (no streaming deltas — avoids duplication from multi-turn tool-call loops)
-      const finalText = result.content || '';
+      const raw = result.content || '';
+      const { text: finalText, voiceText } = parseVoiceDelimiter(raw);
       this.broadcastEvent(GatewayEvents.CHAT, {
         runId, sessionKey,
         state: 'final',
         message: finalText ? { role: 'assistant', content: [{ type: 'text', text: finalText }], timestamp: Date.now() } : undefined,
+        voiceText: voiceText || undefined,
       });
 
       // Store assistant message

@@ -81,6 +81,34 @@ openrappter --exec Shell "ls -la"
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
 | **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
 
+## macOS Menu Bar Companion
+
+A native Swift menu bar app that connects to your OpenRappter gateway.
+
+### Install via Homebrew
+
+```bash
+brew tap kody-w/tap
+brew install --cask openrappter-bar
+```
+
+### Install via DMG
+
+1. Download the latest DMG from [Releases](https://github.com/kody-w/openrappter/releases?q=bar)
+2. Open the DMG and drag **OpenRappter Bar** to Applications
+3. **First launch:** Right-click the app → Open, then click "Open" in the Gatekeeper dialog
+4. The app appears in your menu bar and auto-connects to `localhost:18790`
+
+> **Note:** The app is currently unsigned. macOS will block it on first launch — the right-click → Open step bypasses this once.
+
+### Release a new version
+
+```bash
+git tag v1.0.1-bar && git push origin v1.0.1-bar
+```
+
+This triggers the CI workflow to build a universal binary (Apple Silicon + Intel), package a DMG, and create a GitHub Release.
+
 ## Manual Setup
 
 If you prefer to set things up yourself:

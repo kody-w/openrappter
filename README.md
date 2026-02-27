@@ -150,6 +150,22 @@ node dist/index.js "recall openrappter"
 node dist/index.js "ls"
 ```
 
+### macOS Menu Bar App
+
+Download **OpenRappter Bar** from [Releases](https://github.com/kody-w/openrappter/releases) — it's a `.dmg` with a drag-to-Applications installer.
+
+> **First launch:** macOS may show "unidentified developer" since the app isn't notarized. To open it, **right-click the app → Open → Open**. You only need to do this once.
+
+Or build from source:
+
+```bash
+cd macos
+./scripts/build-mac-app.sh
+./scripts/codesign-mac-app.sh
+./scripts/create-dmg.sh
+# DMG created at macos/dist/OpenRappterBar-1.0.0.dmg
+```
+
 ## Built-in Agents
 
 ### Python Runtime

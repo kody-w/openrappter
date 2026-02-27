@@ -12,8 +12,14 @@ echo "==> Building OpenRappter Bar v${VERSION} (universal binary)..."
 
 cd "$PROJECT_DIR"
 
-# Build universal binary (arm64 + x86_64)
-swift build -c release --arch arm64 --arch x86_64 --product OpenRappterBar
+# Build universal binary — build each arch separately then lipo merge
+# (--arch arm64 --arch x86_64 in a single swift build uses xcodebuild
+# which has issues with swiftLanguageMode in Package.swift)
+swift build -c release --arch arm64 --product OpenRappterBar
+swift build -c release --arch x86_64 --product OpenRappterBar
+
+ARM_BIN=$(swift build -c release --arch arm64 --product OpenRappterBar --show-bin-path)/OpenRappterBar
+X86_BIN=$(swift build -c release --arch x86_64 --product OpenRappterBar --show-bin-path)/OpenRappterBar
 
 # Create .app bundle structure
 APP_DIR="$DIST_DIR/$APP_NAME.app"
@@ -21,9 +27,8 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-# Copy binary
-BUILD_DIR=$(swift build -c release --arch arm64 --arch x86_64 --product OpenRappterBar --show-bin-path)
-cp "$BUILD_DIR/OpenRappterBar" "$APP_DIR/Contents/MacOS/"
+# Copy binary — lipo merge into universal
+lipo -create "$ARM_BIN" "$X86_BIN" -output "$APP_DIR/Contents/MacOS/OpenRappterBar"
 
 # Verify universal binary
 echo "==> Verifying architectures..."

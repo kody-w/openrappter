@@ -163,7 +163,7 @@ export class EdgeTTS implements TTSProvider {
     const tmpFile = path.join(os.tmpdir(), `openrappter-tts-${Date.now()}.mp3`);
 
     try {
-      const tts = new EdgeTTSLib({ voice });
+      const tts = new EdgeTTSLib({ voice, timeout: 30000 });
       await tts.ttsPromise(text, tmpFile);
       const buffer = fs.readFileSync(tmpFile);
       return buffer;

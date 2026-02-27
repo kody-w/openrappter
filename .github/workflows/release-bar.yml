@@ -1,0 +1,60 @@
+name: Release macOS Menu Bar
+
+on:
+  push:
+    tags:
+      - 'v*-bar'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release DMG
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.0'
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" | sed 's/-bar$//' >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: swift build --product RunTests && .build/debug/RunTests
+
+      - name: Build universal binary + DMG
+        run: VERSION=${{ steps.version.outputs.version }} bash scripts/build-mac-app.sh
+
+      - name: Upload DMG as release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "OpenRappter Bar ${{ steps.version.outputs.version }}"
+          body: |
+            ## OpenRappter Bar ${{ steps.version.outputs.version }}
+
+            macOS menu bar companion for the OpenRappter gateway.
+
+            ### Install
+            1. Download `OpenRappter-Bar-${{ steps.version.outputs.version }}.dmg`
+            2. Open the DMG and drag **OpenRappter Bar** to Applications
+            3. **First launch:** Right-click → Open (Gatekeeper bypass for unsigned app)
+            4. The app appears in your menu bar and connects to the gateway at `localhost:18790`
+
+            ### Requirements
+            - macOS 14 (Sonoma) or later
+            - Universal binary (Apple Silicon + Intel)
+
+            ### Homebrew
+            ```bash
+            brew tap openrappter/tap
+            brew install --cask openrappter-bar
+            ```
+          files: macos/dist/OpenRappter-Bar-${{ steps.version.outputs.version }}.dmg
+          fail_on_unmatched_files: true

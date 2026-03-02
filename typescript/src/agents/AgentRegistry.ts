@@ -24,8 +24,10 @@ export class AgentRegistry {
   async discoverAgents(): Promise<void> {
     if (this.loaded) return;
 
+    let builtinFound = false;
     try {
       const files = await fs.readdir(this.agentsDir);
+      builtinFound = true;
       const agentFiles = files.filter(
         f => (f.endsWith('Agent.js') || f.endsWith('Agent.ts')) && !f.startsWith('Basic') && !f.startsWith('_')
       );
@@ -53,7 +55,10 @@ export class AgentRegistry {
     }
 
     // Also discover factory-based agents from ~/.openrappter/agents/
-    await this.discoverUserAgents();
+    // Only if the built-in agents dir was valid (skip in test contexts)
+    if (builtinFound) {
+      await this.discoverUserAgents();
+    }
 
     this.loaded = true;
   }

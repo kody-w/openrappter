@@ -3,6 +3,7 @@
  */
 
 import type { RappterManager, RappterSoulConfig, SummonParams, SummonResult, RappterSoulInfo, RappterSoulStatus } from '../rappter-manager.js';
+import type { SoulTemplate } from '../soul-templates/index.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -101,5 +102,40 @@ export function registerRappterMethods(
       if (!soul) throw new Error(`Soul not found: ${params.rappterId}`);
       return soul.getStatus();
     },
+  );
+
+  // ── Soul Templates ──
+
+  // List available templates
+  server.registerMethod<{ category?: string }, { templates: SoulTemplate[] }>(
+    'rappter.templates',
+    async (params) => {
+      const manager = getManager();
+      const templates = manager.listTemplates(params.category as SoulTemplate['category']);
+      return { templates };
+    },
+  );
+
+  // Load a soul from a template
+  server.registerMethod<
+    { templateId: string; overrides?: Partial<RappterSoulConfig> },
+    { soul: RappterSoulInfo }
+  >(
+    'rappter.load-template',
+    async (params) => {
+      const manager = getManager();
+      const soul = await manager.loadTemplate(params.templateId, params.overrides);
+      const status = soul.getStatus();
+      return {
+        soul: {
+          id: status.id,
+          name: status.name,
+          description: status.description,
+          emoji: status.emoji,
+          agentCount: status.agentCount,
+        },
+      };
+    },
+    { requiresAuth: true },
   );
 }

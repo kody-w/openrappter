@@ -80,10 +80,43 @@ openrappter --exec Shell "ls -la"
 | **RappterHub** | Install community agents with `openrappter rappterhub install author/agent` |
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
 | **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
+| **Background Daemon** | Runs persistently via launchd — cron jobs, Telegram bot, and gateway always alive |
+| **Cron Scheduling** | Built-in cron with agent executor — schedule any agent to run on any schedule |
+| **Dream Mode** | Memory consolidation agent — deduplicates, prunes stale facts, logs what it cleaned |
+| **Soul Templates** | 10 prebuilt personas (coder, researcher, ops, narrator, oracle, etc.) — summon with one call |
+| **Self-Updating** | Checks GitHub for new releases, updates with one command |
+| **30-Day Onboarding** | Daily tip notifications that teach one feature per day with a command to try |
+| **Dino Tamagotchi** | Animated 🦖 menu bar icon that looks around, reacts to pokes, and reflects system state |
 
 ## macOS Menu Bar Companion
 
-A native Swift menu bar app that connects to your OpenRappter gateway.
+A native Swift menu bar app with an animated 🦖 tamagotchi icon.
+
+**Two ways to get started — same result:**
+
+| Path | For | How |
+|------|-----|-----|
+| **Menu bar app** | Non-technical users | Install DMG → click 🦖 → visual wizard |
+| **Terminal** | Developers | `curl install` → `openrappter onboard` |
+
+### The Dino Tamagotchi 🦖
+
+Your menu bar gets a pet dinosaur that:
+- **Looks around** randomly (👀🦖 or 🦖👀) every ~8 seconds
+- **Reacts to pokes** — click it and it shows happiness (🦖✨ → 🦖💚)
+- **Gets excited** after 5+ pokes (🦖🎉 → 🦖⚡ → 🦖🔥)
+- **Sleeps** when disconnected (🦖💤)
+- **Thinks** when processing requests (🦖💭)
+
+### Visual Onboarding
+
+First-time users see a step-by-step setup wizard right in the menu bar panel — no terminal required:
+
+1. **Welcome** — meet your dino
+2. **GitHub auth** — device code flow (opens browser)
+3. **Telegram** — optional bot connection
+4. **Auto-start** — daemon launches, launchd installs, cron jobs activate
+5. **Done** — transitions to chat, first tip notification fires
 
 ### Install via Homebrew
 
@@ -168,6 +201,25 @@ node dist/index.js "ls"
 | `Assistant` | Copilot SDK-powered orchestrator — routes queries to agents via tool calling |
 | `Shell` | Execute bash commands, read/write files, list directories |
 | `Memory` | Store and recall facts — remember, recall, list, forget |
+| `Dream` | Memory consolidation — deduplicates entries, prunes stale facts, logs what it cleaned |
+| `MorningBrief` | Daily briefing pipeline — chains Web (weather), calendar, Memory (priorities), TTS |
+| `DailyTip` | 30-day onboarding drip — sends native notification with one feature tip per day |
+| `Update` | Self-update — checks GitHub for new releases, pulls and rebuilds |
+| `Browser` | Headless browser automation for web scraping, testing, and interaction |
+| `CodeReview` | Deterministic heuristic code review — checks for bugs, security, and style |
+| `Cron` | Manage scheduled jobs — add, remove, enable/disable recurring agent tasks |
+| `Git` | Git repository operations — status, diff, log, branch management |
+| `HackerNews` | Fetch top Hacker News stories |
+| `Image` | Analyze and process images from URLs |
+| `LearnNew` | Generate new agents from natural language descriptions at runtime |
+| `Message` | Multi-channel messaging — Telegram, Slack, Discord, and more |
+| `Ouroboros` | Self-evolving agent — reads its own source, generates improved versions across 5 generations |
+| `Pipeline` | Declarative multi-agent pipeline runner with data_slush threading |
+| `SelfHealingCron` | Autonomous health check agent with auto-restart and alerting |
+| `Sessions` | Chat session management — list, retrieve, switch conversations |
+| `TTS` | Text-to-speech synthesis with multiple voice options |
+| `Watchmaker` | Agent ecosystem manager — evaluates quality, A/B tests, promotes winners |
+| `Web` | Fetch web pages and search the web with SSRF protection |
 
 ## Creating Custom Agents — The Single File Agent Pattern
 
@@ -231,6 +283,85 @@ export class MyAgent extends BasicAgent {
 ```
 
 > Python agents hot-load automatically. TypeScript agents require `npm run build` after creation.
+
+## Soul Templates
+
+Prebuilt rappter personas you can summon with one call. Each template defines which agents are included, a system prompt personality, and an emoji.
+
+| Template | Emoji | Category | Personality |
+|----------|-------|----------|-------------|
+| `assistant` | 🦖 | general | Default — full agent access |
+| `coder` | 💻 | development | Senior engineer — writes code, ships PRs |
+| `reviewer` | 🔍 | development | Code review specialist — finds bugs |
+| `researcher` | 🔬 | research | Searches, reads, synthesizes findings |
+| `analyst` | 📊 | research | Turns raw data into insights |
+| `ops` | 🛠 | operations | Monitors, heals, deploys, alerts |
+| `scheduler` | ⏱ | operations | Automates everything that repeats |
+| `narrator` | 🎙 | creative | Voice-first — speaks all responses via TTS |
+| `oracle` | 🔮 | creative | Meta-AI that evolves and improves agents |
+| `companion` | 💬 | creative | Warm conversational AI that remembers everything |
+
+```bash
+# Via gateway RPC
+{ "method": "rappter.load-template", "params": { "templateId": "coder" } }
+{ "method": "rappter.templates", "params": { "category": "research" } }
+```
+
+## Background Daemon & Cron
+
+openrappter runs as a persistent background daemon via macOS launchd (or systemd on Linux). The daemon keeps the gateway alive, runs cron jobs, and maintains Telegram/channel connections.
+
+```bash
+# Start manually
+openrappter --daemon
+
+# Auto-starts on login after onboard (via launchd)
+# Cron jobs in ~/.openrappter/cron.json fire automatically
+```
+
+### Built-in Cron Jobs
+
+After onboarding, these are pre-configured:
+
+| Job | Schedule | Agent | What it does |
+|-----|----------|-------|-------------|
+| `daily-tip` | 9am daily | DailyTip | Sends a native notification teaching one feature |
+| `dream-mode` | 3am daily | Dream | Consolidates memory — dedup, prune stale |
+| `morning-brief` | 8am daily | MorningBrief | Weather + calendar + priorities spoken via TTS |
+
+## Self-Updating
+
+openrappter can check for and install updates from the public repo.
+
+```bash
+# Check for updates
+openrappter --exec Update "check"
+
+# Install update (git pull + rebuild)
+openrappter --exec Update "update"
+
+# View changelog
+openrappter --exec Update "changelog"
+```
+
+## 30-Day Onboarding Tips
+
+After setup, you receive one native notification per day at 9am teaching a new feature:
+
+- **Week 1:** Basics — chat, memory, shell, status, agents, web search
+- **Week 2:** Power features — code review, cron, TTS, dream mode, Hacker News, dashboard
+- **Week 3:** Customization — LearnNew, soul templates, pipelines, self-healing, marketplace
+- **Week 4:** Advanced — Watchmaker evolution, data sloshing, channels, browser, skills
+
+Each notification is **clickable** — opens the OpenRappter Bar app (or web dashboard) so you can try the feature immediately.
+
+```bash
+# Preview all tips
+openrappter --exec DailyTip "preview"
+
+# Send a specific day's tip
+openrappter --exec DailyTip "15"
+```
 
 ## Data Sloshing
 

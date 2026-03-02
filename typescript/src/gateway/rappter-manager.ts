@@ -9,6 +9,12 @@
  */
 
 import type { BasicAgent } from '../agents/BasicAgent.js';
+import {
+  type SoulTemplate,
+  getTemplate,
+  listTemplates,
+  templateToConfig,
+} from './soul-templates/index.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -273,6 +279,25 @@ export class RappterManager {
         agentCount: status.agentCount,
       };
     });
+  }
+
+  /** Load a soul from a built-in template */
+  async loadTemplate(
+    templateId: string,
+    overrides?: Partial<RappterSoulConfig>,
+  ): Promise<RappterSoul> {
+    const template = getTemplate(templateId);
+    if (!template) {
+      const available = listTemplates().map(t => t.templateId).join(', ');
+      throw new Error(`Template not found: ${templateId}. Available: ${available}`);
+    }
+    const config = templateToConfig(template, overrides);
+    return this.loadSoul(config);
+  }
+
+  /** List all available soul templates */
+  listTemplates(category?: SoulTemplate['category']): SoulTemplate[] {
+    return listTemplates(category);
   }
 
   /**

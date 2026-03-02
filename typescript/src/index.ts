@@ -174,6 +174,38 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
   await server.start();
 
+  // ── Cron Service — load jobs and start scheduler ──
+  try {
+    const { CronService } = await import('./cron/service.js');
+    const cronService = new CronService();
+    const cronFile = path.join(HOME_DIR, 'cron.json');
+    try {
+      const cronData = JSON.parse(fs.readFileSync(cronFile, 'utf-8'));
+      await cronService.loadJobs(cronData);
+    } catch {
+      // No cron.json yet — that's fine
+    }
+    await cronService.start({
+      execute: async (agentId: string, message: string) => {
+        const agent = agents.get(agentId);
+        if (!agent) return `Agent not found: ${agentId}`;
+        return agent.execute({ query: message });
+      },
+    });
+    server.setCronService({
+      list: () => cronService.listJobs().map(j => ({
+        id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled,
+      })),
+      run: async (id: string) => { await cronService.executeJob(id, 'force'); },
+      enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
+      disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+    });
+    const jobCount = cronService.listEnabledJobs().length;
+    if (jobCount > 0) log(`${EMOJI} Cron started — ${jobCount} jobs scheduled`);
+  } catch (err) {
+    console.warn(`${EMOJI} Cron init failed:`, (err as Error).message);
+  }
+
   // Override channels.list to include EventEmitter-based channels not in registry
   const extraChannels = [
     { id: 'signal', type: 'signal' },

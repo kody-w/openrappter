@@ -7,6 +7,8 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
+import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentInfo } from './types.js';
 
@@ -50,7 +52,40 @@ export class AgentRegistry {
       // Directory doesn't exist yet
     }
 
+    // Also discover factory-based agents from ~/.openrappter/agents/
+    await this.discoverUserAgents();
+
     this.loaded = true;
+  }
+
+  /** Load user-generated agents (LearnNew factory pattern) from ~/.openrappter/agents/ */
+  private async discoverUserAgents(): Promise<void> {
+    const userAgentsDir = path.join(os.homedir(), '.openrappter', 'agents');
+    try {
+      const files = await fs.readdir(userAgentsDir);
+      const agentFiles = files.filter(f => f.endsWith('_agent.js'));
+
+      for (const file of agentFiles) {
+        try {
+          const filePath = path.join(userAgentsDir, file);
+          const fileUrl = pathToFileURL(filePath).href + `?t=${Date.now()}`;
+          const mod = await import(fileUrl);
+          if (typeof mod.createAgent === 'function') {
+            const AgentClass = mod.createAgent(BasicAgent);
+            if (AgentClass) {
+              const instance = new AgentClass() as BasicAgent;
+              if (!this.agents.has(instance.name)) {
+                this.agents.set(instance.name, instance);
+              }
+            }
+          }
+        } catch {
+          // Skip agents that fail to load
+        }
+      }
+    } catch {
+      // Directory doesn't exist yet
+    }
   }
 
   async getAgent(name: string): Promise<BasicAgent | undefined> {

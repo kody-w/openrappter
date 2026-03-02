@@ -383,7 +383,7 @@ program
     const config = await loadConfig();
 
     // ── Step 1: GitHub Copilot (device code OAuth — no gh CLI required) ────
-    log.step('Step 1 of 3 — GitHub Copilot');
+    log.step('Step 1 of 4 — GitHub Copilot');
 
     let copilotReady = false;
 
@@ -504,7 +504,7 @@ program
     }
 
     // ── Step 2: Telegram ────────────────────────────────────────────────────
-    log.step('Step 2 of 3 — Telegram');
+    log.step('Step 2 of 4 — Telegram');
 
     const connectTelegram = await confirm({
       message: 'Connect a Telegram bot?',
@@ -551,7 +551,7 @@ program
     }
 
     // ── Step 3: Save & Verify ───────────────────────────────────────────────
-    log.step('Step 3 of 3 — Saving configuration');
+    log.step('Step 3 of 4 — Saving configuration');
 
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
@@ -584,15 +584,139 @@ program
     ];
     note(summaryLines.join('\n'), '📋 Setup Summary');
 
-    note(
-      `Start the daemon:    openrappter --daemon\n` +
-      `Check status:        openrappter --status\n` +
-      `Chat:                openrappter "hello"\n` +
-      `Re-run setup:        openrappter onboard`,
-      "What's next"
-    );
+    // ── Step 4: Start daemon automatically ──────────────────────────────────
+    log.step('Step 4 of 4 — Starting background daemon');
 
-    outro(`${EMOJI} You're all set! Happy hacking.`);
+    let daemonStarted = false;
+    const daemonPort = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+
+    // Check if daemon is already running
+    let alreadyRunning = false;
+    try {
+      const net = await import('net');
+      alreadyRunning = await new Promise<boolean>((resolve) => {
+        const sock = net.createConnection({ host: '127.0.0.1', port: daemonPort }, () => {
+          sock.destroy();
+          resolve(true);
+        });
+        sock.on('error', () => resolve(false));
+        sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
+      });
+    } catch {
+      alreadyRunning = false;
+    }
+
+    if (alreadyRunning) {
+      log.success(`Daemon already running on port ${daemonPort}`);
+      daemonStarted = true;
+    } else {
+      // Start the daemon in a detached child process
+      const s = spinner();
+      s.start('Starting openrappter daemon…');
+      try {
+        const { spawn } = await import('child_process');
+        const nodeBin = process.execPath;
+        const indexPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+
+        const child = spawn(nodeBin, [indexPath, '--daemon'], {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...env },
+        });
+
+        // Wait up to 8 seconds for the gateway to start
+        const started = await new Promise<boolean>((resolve) => {
+          let output = '';
+          const timeout = setTimeout(() => resolve(false), 8000);
+          child.stdout?.on('data', (data: Buffer) => {
+            output += data.toString();
+            if (output.includes('gateway running')) {
+              clearTimeout(timeout);
+              resolve(true);
+            }
+          });
+          child.on('error', () => { clearTimeout(timeout); resolve(false); });
+        });
+
+        child.unref();
+
+        if (started) {
+          daemonStarted = true;
+          s.stop('Daemon started — gateway running on ws://127.0.0.1:' + daemonPort);
+        } else {
+          s.stop('Daemon may still be starting — check with: openrappter --status');
+        }
+      } catch (err) {
+        s.stop(`Could not start daemon: ${(err as Error).message}`);
+      }
+    }
+
+    // Install launchd agent (macOS) so daemon survives reboots
+    if (process.platform === 'darwin') {
+      const plistPath = path.join(process.env.HOME ?? '', 'Library', 'LaunchAgents', 'com.openrappter.daemon.plist');
+      try {
+        const nodeBin = process.execPath;
+        const indexPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+        const logPath = path.join(HOME_DIR, 'daemon.log');
+
+        const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openrappter.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodeBin}</string>
+        <string>${indexPath}</string>
+        <string>--daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${logPath}</string>
+    <key>StandardErrorPath</key>
+    <string>${logPath}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}</string>
+        <key>HOME</key>
+        <string>${process.env.HOME ?? ''}</string>
+    </dict>
+</dict>
+</plist>`;
+
+        fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+        fs.writeFileSync(plistPath, plist);
+        // Load the plist (don't fail if already loaded)
+        execAsync(`launchctl load -w "${plistPath}" 2>/dev/null`).catch(() => {});
+        log.success('Auto-start installed — daemon will restart on login');
+      } catch {
+        log.info('Auto-start not installed — run `openrappter --daemon` manually after reboots');
+      }
+    } else {
+      log.info('Tip: Add `openrappter --daemon &` to your shell profile for auto-start');
+    }
+
+    // ── Final Summary ───────────────────────────────────────────────────────
+    const finalLines = [
+      `Copilot:    ${copilotReady ? '✅ Ready' : '❌ Not configured'}`,
+      `Telegram:   ${telegramReady ? '✅ Connected' : '⬚  Skipped'}`,
+      `Daemon:     ${daemonStarted ? '✅ Running on port ' + daemonPort : '⬚  Not started'}`,
+      `Cron Jobs:  ${daemonStarted ? '✅ Scheduled' : '⬚  Waiting for daemon'}`,
+      `Auto-start: ${process.platform === 'darwin' ? '✅ Installed (launchd)' : '⬚  Manual'}`,
+      '',
+      `Chat:       openrappter "hello"`,
+      `Status:     openrappter --status`,
+      `Dashboard:  openrappter --web`,
+      `Re-run:     openrappter onboard`,
+    ];
+    note(finalLines.join('\n'), `${EMOJI} Everything is running`);
+
+    outro(`${EMOJI} You're all set! openrappter is running in the background.`);
   });
 
 // Reset command

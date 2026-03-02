@@ -33,6 +33,7 @@ public final class ChatWindowManager {
 
     private let viewModel: AppViewModel
     private let settingsViewModel: SettingsViewModel
+    private let onboardingViewModel = OnboardingViewModel()
 
     public init(viewModel: AppViewModel, settingsViewModel: SettingsViewModel) {
         self.viewModel = viewModel
@@ -117,14 +118,37 @@ public final class ChatWindowManager {
         panel.minSize = NSSize(width: 320, height: 360)
         panel.maxSize = NSSize(width: 600, height: AppConstants.panelMaxHeight)
 
-        // SwiftUI content
-        let contentView = ChatContainerView(
-            viewModel: viewModel,
-            isCompact: true,
-            onOpenFullWindow: { [weak self] in
-                self?.openFullWindow()
-            }
-        )
+        // SwiftUI content — show onboarding wizard if not set up
+        let contentView: AnyView
+        if onboardingViewModel.needsOnboarding && !onboardingViewModel.isComplete {
+            contentView = AnyView(
+                OnboardingView(viewModel: onboardingViewModel) { [weak self] in
+                    // Onboarding complete — swap to chat
+                    guard let self, let panel = self.chatPanel else { return }
+                    let chatView = ChatContainerView(
+                        viewModel: self.viewModel,
+                        isCompact: true,
+                        onOpenFullWindow: { [weak self] in self?.openFullWindow() }
+                    )
+                    panel.contentView = NSHostingView(rootView: chatView)
+                    // Reconnect to gateway since daemon was just started
+                    self.viewModel.connectToGateway(
+                        host: self.settingsViewModel.settingsStore.host,
+                        port: self.settingsViewModel.settingsStore.port
+                    )
+                }
+            )
+        } else {
+            contentView = AnyView(
+                ChatContainerView(
+                    viewModel: viewModel,
+                    isCompact: true,
+                    onOpenFullWindow: { [weak self] in
+                        self?.openFullWindow()
+                    }
+                )
+            )
+        }
         panel.contentView = NSHostingView(rootView: contentView)
 
         // Observe panel close via Escape

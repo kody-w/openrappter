@@ -701,6 +701,40 @@ program
       log.info('Tip: Add `openrappter --daemon &` to your shell profile for auto-start');
     }
 
+    // ── Set up daily tip cron job (onboarding drip) ──
+    try {
+      const cronFile = path.join(HOME_DIR, 'cron.json');
+      let cronJobs: Array<Record<string, unknown>> = [];
+      try {
+        cronJobs = JSON.parse(fs.readFileSync(cronFile, 'utf-8'));
+      } catch { /* no cron.json yet */ }
+
+      const hasTip = cronJobs.some(j => j.agentId === 'DailyTip');
+      if (!hasTip) {
+        cronJobs.push({
+          id: 'job_daily_tip',
+          name: 'daily-tip',
+          schedule: '0 9 * * *',
+          agentId: 'DailyTip',
+          message: 'Send today\'s onboarding tip',
+          enabled: true,
+          createdAt: new Date().toISOString(),
+        });
+        fs.writeFileSync(cronFile, JSON.stringify(cronJobs, null, 2));
+        log.success('Daily tips enabled — you\'ll get one tip per day at 9am for 30 days');
+      }
+    } catch {
+      // Non-critical — tips just won't be scheduled
+    }
+
+    // Send the first tip immediately as a welcome notification
+    try {
+      const tipAgent = (await registry.getAgent('DailyTip'));
+      if (tipAgent) {
+        await tipAgent.execute({ action: 'tip' });
+      }
+    } catch { /* non-critical */ }
+
     // ── Final Summary ───────────────────────────────────────────────────────
     const finalLines = [
       `Copilot:    ${copilotReady ? '✅ Ready' : '❌ Not configured'}`,
@@ -708,6 +742,7 @@ program
       `Daemon:     ${daemonStarted ? '✅ Running on port ' + daemonPort : '⬚  Not started'}`,
       `Cron Jobs:  ${daemonStarted ? '✅ Scheduled' : '⬚  Waiting for daemon'}`,
       `Auto-start: ${process.platform === 'darwin' ? '✅ Installed (launchd)' : '⬚  Manual'}`,
+      `Daily Tips: ✅ 30-day onboarding series at 9am`,
       '',
       `Chat:       openrappter "hello"`,
       `Status:     openrappter --status`,

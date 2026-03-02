@@ -723,6 +723,23 @@ program
         fs.writeFileSync(cronFile, JSON.stringify(cronJobs, null, 2));
         log.success('Daily tips enabled — you\'ll get one tip per day at 9am for 30 days');
       }
+
+      // Install terminal-notifier for clickable notifications (macOS)
+      if (process.platform === 'darwin') {
+        try {
+          await execAsync('which terminal-notifier');
+        } catch {
+          try {
+            await execAsync('which brew');
+            const s = spinner();
+            s.start('Installing clickable notifications (terminal-notifier)…');
+            await execAsync('brew install terminal-notifier');
+            s.stop('Clickable notifications ready — tips will open the app when clicked');
+          } catch {
+            // Homebrew not available or install failed — osascript fallback works fine
+          }
+        }
+      }
     } catch {
       // Non-critical — tips just won't be scheduled
     }
@@ -732,6 +749,7 @@ program
       const tipAgent = (await registry.getAgent('DailyTip'));
       if (tipAgent) {
         await tipAgent.execute({ action: 'tip' });
+        log.success('Welcome notification sent — click it to open openrappter!');
       }
     } catch { /* non-critical */ }
 

@@ -26,7 +26,7 @@ interface Tip {
 
 const TIPS: Tip[] = [
   // Week 1: Basics
-  { day: 1, title: 'Welcome to openrappter! 🦖', body: 'I\'m your AI agent running in the background. Try chatting with me right now.', command: 'openrappter "what can you do?"' },
+  { day: 1, title: 'Welcome to openrappter! 🦖', body: 'I\'m your AI agent running in the background. Click this notification to chat with me, or try the command below.', command: 'openrappter "what can you do?"' },
   { day: 2, title: 'I remember things 🧠', body: 'Tell me facts and I\'ll remember them forever. Try it:', command: 'openrappter "remember that I prefer dark mode"' },
   { day: 3, title: 'I can run shell commands 🖥️', body: 'Ask me to check disk space, find files, or run any command.', command: 'openrappter --exec Shell "df -h"' },
   { day: 4, title: 'Check my status anytime 📊', body: 'See all connected agents, channels, and services at a glance.', command: 'openrappter --status' },
@@ -113,29 +113,58 @@ export class DailyTipAgent extends BasicAgent {
   }
 
   private sendNotification(title: string, body: string, command: string): void {
-    const fullBody = `${body}\n\n💡 Try: ${command}`;
+    const port = process.env.OPENRAPPTER_PORT ?? '18790';
+    const webUrl = `http://127.0.0.1:${port}`;
+    const barApp = '/Applications/OpenRappter Bar.app';
+    const hasBar = (() => { try { return require('fs').existsSync(barApp); } catch { return false; } })();
+    const hasTerminalNotifier = (() => { try { execSync('which terminal-notifier', { stdio: 'pipe' }); return true; } catch { return false; } })();
 
-    if (process.platform === 'darwin') {
-      // macOS native notification
+    if (process.platform === 'darwin' && hasTerminalNotifier) {
+      // Clickable notification — opens web UI or menu bar app on click
+      const openTarget = hasBar ? barApp : webUrl;
+      const subtitle = hasBar ? 'Click to open OpenRappter Bar' : 'Click to open web dashboard';
       const escapedTitle = title.replace(/"/g, '\\"');
-      const escapedBody = fullBody.replace(/"/g, '\\"');
+      const escapedBody = `${body}\n\n💡 Try: ${command}`.replace(/"/g, '\\"');
+      const escapedSubtitle = subtitle.replace(/"/g, '\\"');
       try {
+        const iconFlag = hasBar
+          ? `-appIcon "${barApp}/Contents/Resources/AppIcon.icns"`
+          : '';
         execSync(
-          `osascript -e 'display notification "${escapedBody}" with title "${escapedTitle}"'`,
+          `terminal-notifier -title "${escapedTitle}" -subtitle "${escapedSubtitle}" -message "${escapedBody}" -open "${openTarget}" ${iconFlag} -group openrappter`,
           { timeout: 5000, stdio: 'pipe' },
         );
       } catch {
-        // Notification failed — not critical
+        // Fall back to osascript
+        this.sendOsascriptNotification(title, body, command);
       }
+    } else if (process.platform === 'darwin') {
+      this.sendOsascriptNotification(title, body, command);
     } else if (process.platform === 'linux') {
+      const escapedTitle = title.replace(/"/g, '\\"');
+      const fullBody = `${body}\n\n💡 Try: ${command}`.replace(/"/g, '\\"');
       try {
+        // notify-send with --action for clickable on modern desktops
         execSync(
-          `notify-send "${title}" "${fullBody}"`,
+          `notify-send "${escapedTitle}" "${fullBody}" --app-name=openrappter`,
           { timeout: 5000, stdio: 'pipe' },
         );
       } catch {
         // notify-send not available
       }
+    }
+  }
+
+  private sendOsascriptNotification(title: string, body: string, command: string): void {
+    const escapedTitle = title.replace(/"/g, '\\"');
+    const escapedBody = `${body}\\n\\n💡 Try: ${command}`.replace(/"/g, '\\"');
+    try {
+      execSync(
+        `osascript -e 'display notification "${escapedBody}" with title "${escapedTitle}"'`,
+        { timeout: 5000, stdio: 'pipe' },
+      );
+    } catch {
+      // Notification failed — not critical
     }
   }
 

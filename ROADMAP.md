@@ -49,7 +49,7 @@ _Finish what's started. Close gaps. Make it production-worthy._
 
 ### 1.2 Rappter Multi-Soul Expansion
 
-- [ ] Soul config persistence — save/load from `~/.openrappter/souls/*.json`
+- [x] Soul config persistence — save/load from `~/.openrappter/souls/*.json`
 - [ ] Soul-specific conversation history (isolated sessions per soul)
 - [ ] Soul identity injection — system prompt and personality per soul
 - [ ] Dashboard page for soul management (list, load, unload, summon)
@@ -71,7 +71,7 @@ _Finish what's started. Close gaps. Make it production-worthy._
 - [ ] Performance benchmark suite (agent latency, gateway throughput, memory footprint)
 - [ ] Flaky test detection and quarantine
 - [ ] Code coverage reporting (target: 80% for both runtimes)
-- [ ] Automated release workflow (changelog generation, npm/pypi publish)
+- [x] Automated release workflow (changelog generation, npm/pypi publish)
 
 ---
 

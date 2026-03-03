@@ -84,13 +84,23 @@ public final class NetworkDiscovery {
         )
 
         return await withCheckedContinuation { continuation in
+            // Guard against double-resume (timeout + state change race)
+            let resumed = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+            resumed.initialize(to: false)
+
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     connection.cancel()
-                    continuation.resume(returning: true)
+                    if !resumed.pointee {
+                        resumed.pointee = true
+                        continuation.resume(returning: true)
+                    }
                 case .failed, .cancelled:
-                    continuation.resume(returning: false)
+                    if !resumed.pointee {
+                        resumed.pointee = true
+                        continuation.resume(returning: false)
+                    }
                 default:
                     break
                 }
@@ -100,6 +110,12 @@ public final class NetworkDiscovery {
             // Timeout after 1 second
             DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                 connection.cancel()
+                if !resumed.pointee {
+                    resumed.pointee = true
+                    continuation.resume(returning: false)
+                }
+                resumed.deinitialize(count: 1)
+                resumed.deallocate()
             }
         }
     }

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>openrappter v1.9.1 — Dream Mode, Soul Templates, Dino Tamagotchi & More</title>
+<meta name="description" content="The biggest openrappter release yet: Dream Mode memory consolidation, 10 Soul Templates, animated Dino Tamagotchi, 30-day onboarding tips, self-updating, and a complete menu bar rewrite.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        'neo-green': '#10b981',
+        'neo-purple': '#8b5cf6',
+        'neo-blue': '#3b82f6',
+        'neo-orange': '#f59e0b',
+        'neo-bg': '#fffdf7',
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  .neo-border { border: 3px solid #000; }
+  .neo-shadow { box-shadow: 6px 6px 0 #000; }
+  .neo-shadow-sm { box-shadow: 4px 4px 0 #000; }
+  .neo-shadow:hover { box-shadow: 2px 2px 0 #000; transform: translate(4px, 4px); }
+  .code-block { background: #0d1117; color: #e6edf3; border: 3px solid #000; }
+  .tag { display: inline-block; padding: 2px 10px; border: 2px solid #000; border-radius: 999px; font-size: 12px; font-weight: 600; }
+</style>
+</head>
+<body class="bg-neo-bg text-black font-sans">
+
+<!-- Nav -->
+<nav class="sticky top-0 z-50 bg-white border-b-[3px] border-black px-6 py-4">
+  <div class="max-w-4xl mx-auto flex items-center justify-between">
+    <a href="../" class="text-xl font-black">🦖 openrappter</a>
+    <div class="flex items-center gap-4">
+      <a href="../" class="text-sm font-semibold hover:text-neo-green">← Back to Home</a>
+      <a href="https://github.com/kody-w/openrappter" class="text-sm font-semibold hover:text-neo-green">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<article class="max-w-4xl mx-auto px-6 py-16">
+
+  <!-- Header -->
+  <div class="mb-12">
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <span class="tag bg-neo-green/10 text-neo-green border-neo-green">v1.9.1</span>
+      <span class="tag">Release</span>
+      <span class="tag">March 3, 2026</span>
+    </div>
+    <h1 class="text-5xl md:text-6xl font-black leading-tight mb-6">
+      Dream Mode, Soul Templates,<br>& The Dino Tamagotchi 🦖
+    </h1>
+    <p class="text-xl text-gray-600 leading-relaxed max-w-2xl">
+      The biggest openrappter release yet. Your AI agent now dreams, evolves personalities, lives in your menu bar as an animated dinosaur, teaches itself to you over 30 days, and updates itself. Here's everything that shipped.
+    </p>
+  </div>
+
+  <!-- Hero image / terminal -->
+  <div class="code-block rounded-2xl p-6 mb-16 neo-shadow font-mono text-sm overflow-x-auto">
+    <div class="flex items-center gap-2 mb-4">
+      <div class="w-3 h-3 rounded-full bg-red-500"></div>
+      <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+      <div class="w-3 h-3 rounded-full bg-green-500"></div>
+      <span class="ml-2 text-gray-500 text-xs">Terminal — openrappter v1.9.1</span>
+    </div>
+<span class="text-gray-500">$</span> <span class="text-neo-green">openrappter --exec Dream ""</span>
+<span class="text-gray-400">{</span>
+  <span class="text-neo-blue">"total_before"</span>: <span class="text-neo-orange">123</span>,
+  <span class="text-neo-blue">"duplicates_found"</span>: <span class="text-neo-orange">103</span>,
+  <span class="text-neo-blue">"total_after"</span>: <span class="text-neo-orange">21</span>,
+  <span class="text-neo-blue">"message"</span>: <span class="text-neo-green">"83% memory bloat removed"</span>
+<span class="text-gray-400">}</span>
+  </div>
+
+  <!-- Body -->
+  <div class="prose prose-lg max-w-none">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">🧠</span> Dream Mode — Your AI Cleans Its Own Brain
+    </h2>
+    <p class="text-lg text-gray-700 mb-4">
+      Every night at 3am, the Dream agent wakes up, reviews all stored memories, and consolidates them. It finds duplicates via token similarity, prunes stale entries that were never accessed, and logs what it cleaned.
+    </p>
+    <p class="text-lg text-gray-700 mb-4">
+      On the first run, it found that <strong>"vitest is the test framework"</strong> had been stored <strong>90+ times</strong>. Dream mode consolidated 123 memories down to 21 unique ones — <strong>83% bloat removed</strong> in one command.
+    </p>
+    <div class="code-block rounded-xl p-4 mb-6 font-mono text-sm neo-shadow-sm">
+<span class="text-gray-500"># Full dream cycle</span>
+<span class="text-neo-green">openrappter --exec Dream ""</span>
+
+<span class="text-gray-500"># Dry run — see what would be cleaned</span>
+<span class="text-neo-green">openrappter --exec Dream "audit"</span>
+
+<span class="text-gray-500"># Schedule nightly at 3am (already done during onboard)</span>
+<span class="text-gray-400">{ "schedule": "0 3 * * *", "agentId": "Dream" }</span>
+    </div>
+    <p class="text-lg text-gray-700">Like biological sleep for AI. The system gets cleaner the longer it runs.</p>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">👻</span> Soul Templates — 10 Prebuilt Personalities
+    </h2>
+    <p class="text-lg text-gray-700 mb-6">
+      Soul templates let you summon specialized versions of your rappter. Each one defines which agents are included, a system prompt personality, and an emoji identity.
+    </p>
+    <div class="grid md:grid-cols-2 gap-4 mb-6">
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>💻 Coder</strong> — Writes code, runs tests, ships PRs</div>
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>🔬 Researcher</strong> — Searches, reads, synthesizes</div>
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>🛠 DevOps</strong> — Monitors, heals, deploys, alerts</div>
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>🎙 Narrator</strong> — Voice-first, speaks everything via TTS</div>
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>🔮 Oracle</strong> — The AI that improves the AI</div>
+      <div class="neo-border rounded-xl p-4 neo-shadow-sm bg-white"><strong>💬 Companion</strong> — Warm, remembers everything, chats anywhere</div>
+    </div>
+    <p class="text-lg text-gray-700">Plus: <strong>assistant</strong>, <strong>reviewer</strong>, <strong>analyst</strong>, and <strong>scheduler</strong>. Load any with one API call.</p>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">🦖</span> The Dino Tamagotchi
+    </h2>
+    <p class="text-lg text-gray-700 mb-4">
+      Your menu bar now has a pet dinosaur. The 🦖 replaces the old checkmark icon and actually <em>behaves</em>:
+    </p>
+    <div class="neo-border rounded-xl p-6 bg-white neo-shadow-sm mb-6">
+      <div class="grid md:grid-cols-2 gap-4 text-base">
+        <div>👀🦖 — Looks around randomly every ~8 seconds</div>
+        <div>🦖✨ — Reacts to clicks with happiness</div>
+        <div>🦖🎉 → 🦖⚡ → 🦖🔥 — Gets excited after 5+ pokes</div>
+        <div>🦖💤 — Sleeps when disconnected</div>
+        <div>🦖💭 — Thinks when processing requests</div>
+        <div>🦖💚 — Happy when connected</div>
+      </div>
+    </div>
+    <p class="text-lg text-gray-700">It's a tamagotchi that also happens to be a fully functional AI agent framework.</p>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">📬</span> 30-Day Onboarding Tips
+    </h2>
+    <p class="text-lg text-gray-700 mb-4">
+      After setup, you get one native macOS notification per day at 9am. Each teaches a single feature with a command to try. <strong>Click the notification to open the app.</strong>
+    </p>
+    <div class="neo-border rounded-xl p-6 bg-white neo-shadow-sm mb-6">
+      <p class="font-bold mb-2">Sample schedule:</p>
+      <ul class="space-y-1 text-gray-700">
+        <li><strong>Day 1:</strong> "I'm your AI agent running in the background. Click to chat."</li>
+        <li><strong>Day 5:</strong> "I have 22 specialized agents. See them all: <code class="bg-gray-100 px-1 rounded">--list-agents</code>"</li>
+        <li><strong>Day 11:</strong> "Dream Mode cleans my brain every night. Run it: <code class="bg-gray-100 px-1 rounded">--exec Dream audit</code>"</li>
+        <li><strong>Day 15:</strong> "Create your own agents. Describe one in English."</li>
+        <li><strong>Day 22:</strong> "Watchmaker evaluates quality and promotes winners. Darwinian evolution."</li>
+        <li><strong>Day 30:</strong> "You've graduated! 🎓"</li>
+      </ul>
+    </div>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">🧙</span> Visual Onboarding — No Terminal Required
+    </h2>
+    <p class="text-lg text-gray-700 mb-4">
+      Non-technical users can now set up openrappter entirely from the menu bar app. Install the DMG, click the 🦖, and a SwiftUI wizard walks you through:
+    </p>
+    <ol class="list-decimal list-inside text-lg text-gray-700 space-y-2 mb-4">
+      <li><strong>Welcome</strong> — meet your dino</li>
+      <li><strong>GitHub auth</strong> — device code flow (opens browser)</li>
+      <li><strong>Telegram</strong> — optional bot connection</li>
+      <li><strong>Auto-start</strong> — daemon launches, launchd installs, cron activates</li>
+      <li><strong>Done</strong> — transitions to chat, first tip fires</li>
+    </ol>
+    <p class="text-lg text-gray-700">Two paths to the same destination. Terminal for developers, menu bar for everyone else.</p>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6 flex items-center gap-3">
+      <span class="text-4xl">⚡</span> Everything Else
+    </h2>
+
+    <div class="space-y-4 mb-8">
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>🔄 Self-Updating</strong> — New <code class="bg-gray-100 px-1 rounded">Update</code> agent checks GitHub for releases, pulls, and rebuilds. Plus a new automated release workflow (tag → test → changelog → GitHub Release → npm publish).
+      </div>
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>⏱ Cron Actually Works Now</strong> — The CronService was never wired into the gateway startup. Fixed. Your cron jobs (sweet-nothings, morning-brief, dream-mode, daily-tip) now actually fire.
+      </div>
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>🌅 MorningBrief Agent</strong> — Chains Web (weather) → Calendar → Memory (priorities) → TTS (speak). Runs at 8am daily.
+      </div>
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>🔍 AgentRegistry Discovery</strong> — User-generated agents (from LearnNew) are now auto-discovered and available in <code class="bg-gray-100 px-1 rounded">--list-agents</code> and <code class="bg-gray-100 px-1 rounded">--exec</code>.
+      </div>
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>💾 Soul Persistence</strong> — Save, load, and delete soul configs to <code class="bg-gray-100 px-1 rounded">~/.openrappter/souls/*.json</code>. Souls survive daemon restarts.
+      </div>
+      <div class="neo-border rounded-xl p-4 bg-white">
+        <strong>🐛 NetworkDiscovery Crash Fix</strong> — Fixed a double-resume race condition in <code class="bg-gray-100 px-1 rounded">CheckedContinuation</code> that was crashing the menu bar app.
+      </div>
+    </div>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6">By The Numbers</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="neo-border rounded-xl p-4 text-center neo-shadow-sm bg-white">
+        <div class="text-3xl font-black text-neo-green">22</div>
+        <div class="text-sm text-gray-500">Built-in Agents</div>
+      </div>
+      <div class="neo-border rounded-xl p-4 text-center neo-shadow-sm bg-white">
+        <div class="text-3xl font-black text-neo-purple">10</div>
+        <div class="text-sm text-gray-500">Soul Templates</div>
+      </div>
+      <div class="neo-border rounded-xl p-4 text-center neo-shadow-sm bg-white">
+        <div class="text-3xl font-black text-neo-blue">2,803</div>
+        <div class="text-sm text-gray-500">Tests Passing</div>
+      </div>
+      <div class="neo-border rounded-xl p-4 text-center neo-shadow-sm bg-white">
+        <div class="text-3xl font-black text-neo-orange">4</div>
+        <div class="text-sm text-gray-500">PRs Shipped</div>
+      </div>
+    </div>
+
+    <hr class="my-12 border-t-[3px] border-black">
+
+    <h2 class="text-3xl font-black mt-16 mb-6">Get It</h2>
+    <div class="code-block rounded-xl p-4 mb-6 font-mono text-sm neo-shadow-sm">
+<span class="text-gray-500"># Install / update</span>
+<span class="text-neo-green">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span>
+
+<span class="text-gray-500"># Or if already installed</span>
+<span class="text-neo-green">openrappter --exec Update "update"</span>
+    </div>
+
+    <!-- Newsletter -->
+    <div class="neo-border rounded-2xl p-8 bg-neo-green/5 neo-shadow mb-8">
+      <h3 class="text-2xl font-black mb-2">Stay in the loop 🦖</h3>
+      <p class="text-gray-600 mb-4">Get release notes, tips, and the occasional dino meme. No spam.</p>
+      <a href="https://rappter.beehiiv.com/" target="_blank" class="inline-block neo-border rounded-xl px-6 py-3 bg-black text-white font-bold hover:bg-neo-green transition-colors neo-shadow-sm">📬 Subscribe to Newsletter →</a>
+    </div>
+
+  </div>
+</article>
+
+<!-- Footer -->
+<footer class="border-t-[3px] border-black bg-white px-6 py-8 mt-16">
+  <div class="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <span class="font-black">🦖 openrappter</span>
+    <div class="flex gap-6 text-sm">
+      <a href="../" class="hover:text-neo-green font-semibold">Home</a>
+      <a href="../docs.html" class="hover:text-neo-green font-semibold">Docs</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-neo-green font-semibold">GitHub</a>
+      <a href="https://rappter.com" class="hover:text-neo-green font-semibold">rappter.com</a>
+    </div>
+    <span class="text-sm text-gray-500">Built with 🦖 by <a href="https://github.com/kody-w" class="underline">Kody W</a></span>
+  </div>
+</footer>
+

@@ -9,6 +9,9 @@
  */
 
 import type { BasicAgent } from '../agents/BasicAgent.js';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
 import {
   type SoulTemplate,
   getTemplate,
@@ -298,6 +301,78 @@ export class RappterManager {
   /** List all available soul templates */
   listTemplates(category?: SoulTemplate['category']): SoulTemplate[] {
     return listTemplates(category);
+  }
+
+  // ── Persistence ──
+
+  private get soulsDir(): string {
+    return path.join(os.homedir(), '.openrappter', 'souls');
+  }
+
+  /** Save a soul config to disk for persistence across restarts */
+  async saveSoul(soulId: string): Promise<string> {
+    const soul = this.souls.get(soulId);
+    if (!soul) throw new Error(`Soul not found: ${soulId}`);
+
+    await fs.mkdir(this.soulsDir, { recursive: true });
+    const filePath = path.join(this.soulsDir, `${soulId}.json`);
+    await fs.writeFile(filePath, JSON.stringify(soul.config, null, 2));
+    return filePath;
+  }
+
+  /** Save a raw config to disk (without loading it first) */
+  async saveSoulConfig(config: RappterSoulConfig): Promise<string> {
+    await fs.mkdir(this.soulsDir, { recursive: true });
+    const filePath = path.join(this.soulsDir, `${config.id}.json`);
+    await fs.writeFile(filePath, JSON.stringify(config, null, 2));
+    return filePath;
+  }
+
+  /** Delete a saved soul config from disk */
+  async deleteSavedSoul(soulId: string): Promise<boolean> {
+    const filePath = path.join(this.soulsDir, `${soulId}.json`);
+    try {
+      await fs.unlink(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** List all saved soul configs from disk */
+  async listSavedSouls(): Promise<RappterSoulConfig[]> {
+    try {
+      const files = await fs.readdir(this.soulsDir);
+      const configs: RappterSoulConfig[] = [];
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        try {
+          const data = await fs.readFile(path.join(this.soulsDir, file), 'utf-8');
+          configs.push(JSON.parse(data));
+        } catch {
+          // Skip corrupt files
+        }
+      }
+      return configs;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Load all saved souls from disk and start them */
+  async loadSavedSouls(): Promise<RappterSoul[]> {
+    const configs = await this.listSavedSouls();
+    const loaded: RappterSoul[] = [];
+    for (const config of configs) {
+      if (this.souls.has(config.id)) continue;
+      try {
+        const soul = await this.loadSoul(config);
+        loaded.push(soul);
+      } catch {
+        // Skip souls that fail to load
+      }
+    }
+    return loaded;
   }
 
   /**

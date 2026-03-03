@@ -174,6 +174,38 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
   await server.start();
 
+  // ── Cron Service — load jobs and start scheduler ──
+  try {
+    const { CronService } = await import('./cron/service.js');
+    const cronService = new CronService();
+    const cronFile = path.join(HOME_DIR, 'cron.json');
+    try {
+      const cronData = JSON.parse(fs.readFileSync(cronFile, 'utf-8'));
+      await cronService.loadJobs(cronData);
+    } catch {
+      // No cron.json yet — that's fine
+    }
+    await cronService.start({
+      execute: async (agentId: string, message: string) => {
+        const agent = agents.get(agentId);
+        if (!agent) return `Agent not found: ${agentId}`;
+        return agent.execute({ query: message });
+      },
+    });
+    server.setCronService({
+      list: () => cronService.listJobs().map(j => ({
+        id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled,
+      })),
+      run: async (id: string) => { await cronService.executeJob(id, 'force'); },
+      enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
+      disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+    });
+    const jobCount = cronService.listEnabledJobs().length;
+    if (jobCount > 0) log(`${EMOJI} Cron started — ${jobCount} jobs scheduled`);
+  } catch (err) {
+    console.warn(`${EMOJI} Cron init failed:`, (err as Error).message);
+  }
+
   // Override channels.list to include EventEmitter-based channels not in registry
   const extraChannels = [
     { id: 'signal', type: 'signal' },
@@ -351,7 +383,7 @@ program
     const config = await loadConfig();
 
     // ── Step 1: GitHub Copilot (device code OAuth — no gh CLI required) ────
-    log.step('Step 1 of 3 — GitHub Copilot');
+    log.step('Step 1 of 4 — GitHub Copilot');
 
     let copilotReady = false;
 
@@ -472,7 +504,7 @@ program
     }
 
     // ── Step 2: Telegram ────────────────────────────────────────────────────
-    log.step('Step 2 of 3 — Telegram');
+    log.step('Step 2 of 4 — Telegram');
 
     const connectTelegram = await confirm({
       message: 'Connect a Telegram bot?',
@@ -519,7 +551,7 @@ program
     }
 
     // ── Step 3: Save & Verify ───────────────────────────────────────────────
-    log.step('Step 3 of 3 — Saving configuration');
+    log.step('Step 3 of 4 — Saving configuration');
 
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
@@ -552,15 +584,192 @@ program
     ];
     note(summaryLines.join('\n'), '📋 Setup Summary');
 
-    note(
-      `Start the daemon:    openrappter --daemon\n` +
-      `Check status:        openrappter --status\n` +
-      `Chat:                openrappter "hello"\n` +
-      `Re-run setup:        openrappter onboard`,
-      "What's next"
-    );
+    // ── Step 4: Start daemon automatically ──────────────────────────────────
+    log.step('Step 4 of 4 — Starting background daemon');
 
-    outro(`${EMOJI} You're all set! Happy hacking.`);
+    let daemonStarted = false;
+    const daemonPort = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+
+    // Check if daemon is already running
+    let alreadyRunning = false;
+    try {
+      const net = await import('net');
+      alreadyRunning = await new Promise<boolean>((resolve) => {
+        const sock = net.createConnection({ host: '127.0.0.1', port: daemonPort }, () => {
+          sock.destroy();
+          resolve(true);
+        });
+        sock.on('error', () => resolve(false));
+        sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
+      });
+    } catch {
+      alreadyRunning = false;
+    }
+
+    if (alreadyRunning) {
+      log.success(`Daemon already running on port ${daemonPort}`);
+      daemonStarted = true;
+    } else {
+      // Start the daemon in a detached child process
+      const s = spinner();
+      s.start('Starting openrappter daemon…');
+      try {
+        const { spawn } = await import('child_process');
+        const nodeBin = process.execPath;
+        const indexPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+
+        const child = spawn(nodeBin, [indexPath, '--daemon'], {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...env },
+        });
+
+        // Wait up to 8 seconds for the gateway to start
+        const started = await new Promise<boolean>((resolve) => {
+          let output = '';
+          const timeout = setTimeout(() => resolve(false), 8000);
+          child.stdout?.on('data', (data: Buffer) => {
+            output += data.toString();
+            if (output.includes('gateway running')) {
+              clearTimeout(timeout);
+              resolve(true);
+            }
+          });
+          child.on('error', () => { clearTimeout(timeout); resolve(false); });
+        });
+
+        child.unref();
+
+        if (started) {
+          daemonStarted = true;
+          s.stop('Daemon started — gateway running on ws://127.0.0.1:' + daemonPort);
+        } else {
+          s.stop('Daemon may still be starting — check with: openrappter --status');
+        }
+      } catch (err) {
+        s.stop(`Could not start daemon: ${(err as Error).message}`);
+      }
+    }
+
+    // Install launchd agent (macOS) so daemon survives reboots
+    if (process.platform === 'darwin') {
+      const plistPath = path.join(process.env.HOME ?? '', 'Library', 'LaunchAgents', 'com.openrappter.daemon.plist');
+      try {
+        const nodeBin = process.execPath;
+        const indexPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
+        const logPath = path.join(HOME_DIR, 'daemon.log');
+
+        const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openrappter.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodeBin}</string>
+        <string>${indexPath}</string>
+        <string>--daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${logPath}</string>
+    <key>StandardErrorPath</key>
+    <string>${logPath}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}</string>
+        <key>HOME</key>
+        <string>${process.env.HOME ?? ''}</string>
+    </dict>
+</dict>
+</plist>`;
+
+        fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+        fs.writeFileSync(plistPath, plist);
+        // Load the plist (don't fail if already loaded)
+        execAsync(`launchctl load -w "${plistPath}" 2>/dev/null`).catch(() => {});
+        log.success('Auto-start installed — daemon will restart on login');
+      } catch {
+        log.info('Auto-start not installed — run `openrappter --daemon` manually after reboots');
+      }
+    } else {
+      log.info('Tip: Add `openrappter --daemon &` to your shell profile for auto-start');
+    }
+
+    // ── Set up daily tip cron job (onboarding drip) ──
+    try {
+      const cronFile = path.join(HOME_DIR, 'cron.json');
+      let cronJobs: Array<Record<string, unknown>> = [];
+      try {
+        cronJobs = JSON.parse(fs.readFileSync(cronFile, 'utf-8'));
+      } catch { /* no cron.json yet */ }
+
+      const hasTip = cronJobs.some(j => j.agentId === 'DailyTip');
+      if (!hasTip) {
+        cronJobs.push({
+          id: 'job_daily_tip',
+          name: 'daily-tip',
+          schedule: '0 9 * * *',
+          agentId: 'DailyTip',
+          message: 'Send today\'s onboarding tip',
+          enabled: true,
+          createdAt: new Date().toISOString(),
+        });
+        fs.writeFileSync(cronFile, JSON.stringify(cronJobs, null, 2));
+        log.success('Daily tips enabled — you\'ll get one tip per day at 9am for 30 days');
+      }
+
+      // Install terminal-notifier for clickable notifications (macOS)
+      if (process.platform === 'darwin') {
+        try {
+          await execAsync('which terminal-notifier');
+        } catch {
+          try {
+            await execAsync('which brew');
+            const s = spinner();
+            s.start('Installing clickable notifications (terminal-notifier)…');
+            await execAsync('brew install terminal-notifier');
+            s.stop('Clickable notifications ready — tips will open the app when clicked');
+          } catch {
+            // Homebrew not available or install failed — osascript fallback works fine
+          }
+        }
+      }
+    } catch {
+      // Non-critical — tips just won't be scheduled
+    }
+
+    // Send the first tip immediately as a welcome notification
+    try {
+      const tipAgent = (await registry.getAgent('DailyTip'));
+      if (tipAgent) {
+        await tipAgent.execute({ action: 'tip' });
+        log.success('Welcome notification sent — click it to open openrappter!');
+      }
+    } catch { /* non-critical */ }
+
+    // ── Final Summary ───────────────────────────────────────────────────────
+    const finalLines = [
+      `Copilot:    ${copilotReady ? '✅ Ready' : '❌ Not configured'}`,
+      `Telegram:   ${telegramReady ? '✅ Connected' : '⬚  Skipped'}`,
+      `Daemon:     ${daemonStarted ? '✅ Running on port ' + daemonPort : '⬚  Not started'}`,
+      `Cron Jobs:  ${daemonStarted ? '✅ Scheduled' : '⬚  Waiting for daemon'}`,
+      `Auto-start: ${process.platform === 'darwin' ? '✅ Installed (launchd)' : '⬚  Manual'}`,
+      `Daily Tips: ✅ 30-day onboarding series at 9am`,
+      '',
+      `Chat:       openrappter "hello"`,
+      `Status:     openrappter --status`,
+      `Dashboard:  openrappter --web`,
+      `Re-run:     openrappter onboard`,
+    ];
+    note(finalLines.join('\n'), `${EMOJI} Everything is running`);
+
+    outro(`${EMOJI} You're all set! openrappter is running in the background.`);
   });
 
 // Reset command

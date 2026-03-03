@@ -10,6 +10,7 @@ import OpenRappterBarLib
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var windowManager: ChatWindowManager!
+    private let dino = DinoStatusIcon()
 
     public let viewModel = AppViewModel()
     public let settingsViewModel = SettingsViewModel()
@@ -58,10 +59,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: statusIconName(for: .disconnected),
-                accessibilityDescription: AppConstants.appName
-            )
+            // Animated dino tamagotchi icon
+            dino.attach(to: button)
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -76,6 +75,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
+            // Poke the dino! Then open the panel
+            dino.poke()
             windowManager.togglePanel(relativeTo: statusItem.button)
         }
     }
@@ -215,27 +216,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusItem() {
-        let iconName = statusIconName(for: viewModel.connectionState)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: iconName,
-            accessibilityDescription: AppConstants.appName
-        )
-
-        let uptime = viewModel.menuBarUptime
-        if uptime.isEmpty {
-            statusItem.button?.title = ""
-        } else {
-            statusItem.button?.title = " \(uptime)"
-        }
-        statusItem.button?.imagePosition = .imageLeading
+        // Update dino mood based on connection state
+        dino.setConnectionState(connected: viewModel.connectionState == .connected)
     }
 
-    private func statusIconName(for state: ConnectionState) -> String {
-        switch state {
-        case .connected: return "checkmark.circle.fill"
-        case .connecting, .handshaking: return "arrow.triangle.2.circlepath"
-        case .reconnecting: return "arrow.clockwise"
-        case .disconnected: return "xmark.circle"
-        }
-    }
 }

@@ -170,10 +170,10 @@ describe('Navigation consistency', () => {
         expect(logo!.getAttribute('href')).toBe('./');
       });
 
-      it('version badge shows v1.4.1', () => {
+      it('version badge shows v1.9.1', () => {
         const badge = doc.querySelector('.logo-badge');
         expect(badge).not.toBeNull();
-        expect(badge!.textContent).toContain('v1.4.1');
+        expect(badge!.textContent).toContain('v1.9.1');
       });
     });
   }
@@ -367,8 +367,8 @@ describe('changelog.html content', () => {
     text = doc.body.textContent!;
   });
 
-  it('has v1.4.1 entry', () => {
-    expect(text).toContain('v1.4.1');
+  it('has v1.9.1 entry', () => {
+    expect(text).toContain('v1.9.1');
   });
 
   it('has v1.4.0 entry', () => {

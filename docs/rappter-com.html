@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>rappter — Your Digital Twin</title>
+  <meta name="description" content="Starts as a rappter. Becomes more of yourself over time. AI that learns you, works for you, and evolves with you.">
+  <meta property="og:title" content="rappter — Your Digital Twin">
+  <meta property="og:description" content="Starts as a rappter. Becomes more of yourself over time.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://rappter.com">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: '#fffdf7',
+            accent: '#10b981',
+            brutal: '#000000',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    .neo { border: 3px solid #000; }
+    .neo-shadow { box-shadow: 8px 8px 0 #000; }
+    .neo-shadow-sm { box-shadow: 4px 4px 0 #000; }
+    .neo-shadow:hover { box-shadow: 4px 4px 0 #000; transform: translate(4px, 4px); }
+    .neo-shadow-sm:hover { box-shadow: 2px 2px 0 #000; transform: translate(2px, 2px); }
+    .neo-r { border-radius: 16px; }
+
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+    @keyframes look { 0%,40% { content: "🦖"; } 45%,55% { content: "👀🦖"; } 60%,100% { content: "🦖"; } }
+    .dino { animation: float 4s ease-in-out infinite; display: inline-block; }
+    .dino::after { content: ""; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { opacity: 0; animation: fadeUp 0.6s ease forwards; }
+    .delay-1 { animation-delay: 0.1s; }
+    .delay-2 { animation-delay: 0.2s; }
+    .delay-3 { animation-delay: 0.3s; }
+    .delay-4 { animation-delay: 0.4s; }
+    .delay-5 { animation-delay: 0.5s; }
+
+    /* Gradient text */
+    .grad-text {
+      background: linear-gradient(135deg, #10b981 0%, #3b82f6 50%, #8b5cf6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+  </style>
+</head>
+<body class="bg-cream text-black font-sans">
+
+<!-- ═══════ NAV ═══════ -->
+<nav class="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-sm border-b-[3px] border-black px-6 py-4">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <a href="#" class="text-xl font-black flex items-center gap-2"><span class="dino text-2xl">🦖</span> rappter</a>
+    <div class="hidden md:flex items-center gap-8 text-sm font-semibold">
+      <a href="#how" class="hover:text-accent transition-colors">How It Works</a>
+      <a href="#tiers" class="hover:text-accent transition-colors">Plans</a>
+      <a href="#faq" class="hover:text-accent transition-colors">FAQ</a>
+      <a href="https://kody-w.github.io/openrappter/" class="hover:text-accent transition-colors">Open Source</a>
+    </div>
+    <a href="#contact" class="neo neo-r neo-shadow-sm bg-accent text-white font-bold px-5 py-2 text-sm transition-all">
+      Get Started →
+    </a>
+  </div>
+</nav>
+
+<!-- ═══════ HERO ═══════ -->
+<section class="min-h-screen flex items-center justify-center px-6 pt-24 pb-16 relative overflow-hidden">
+  <!-- Subtle grid bg -->
+  <div class="absolute inset-0 opacity-[0.03]" style="background-image: radial-gradient(#000 1px, transparent 1px); background-size: 24px 24px;"></div>
+
+  <div class="max-w-4xl mx-auto text-center relative z-10">
+    <div class="fade-up">
+      <div class="inline-block neo neo-r neo-shadow-sm bg-white px-4 py-2 text-sm font-bold mb-8">
+        🦖 The future of personal AI
+      </div>
+    </div>
+
+    <h1 class="text-6xl sm:text-7xl md:text-8xl font-black leading-[0.9] mb-8 fade-up delay-1">
+      Buy Your<br><span class="grad-text">Digital Twin</span>
+    </h1>
+
+    <p class="text-xl sm:text-2xl text-gray-600 max-w-2xl mx-auto mb-12 leading-relaxed fade-up delay-2">
+      Starts as a rappter. Becomes more of <strong class="text-black">yourself</strong> over time. An AI that learns you, works for you, and evolves with you — forever.
+    </p>
+
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 fade-up delay-3">
+      <a href="#contact" class="neo neo-r neo-shadow bg-accent text-white font-black px-8 py-4 text-lg transition-all">
+        Get Your Digital Twin →
+      </a>
+      <a href="https://kody-w.github.io/openrappter/" class="neo neo-r neo-shadow bg-white font-bold px-8 py-4 text-lg transition-all">
+        Try Free (Open Source)
+      </a>
+    </div>
+
+    <div class="mt-16 flex flex-wrap items-center justify-center gap-6 text-sm text-gray-500 fade-up delay-4">
+      <span class="flex items-center gap-1"><span class="text-accent font-bold">✓</span> Your data stays local</span>
+      <span class="flex items-center gap-1"><span class="text-accent font-bold">✓</span> Learns from every interaction</span>
+      <span class="flex items-center gap-1"><span class="text-accent font-bold">✓</span> Runs 24/7 in the background</span>
+      <span class="flex items-center gap-1"><span class="text-accent font-bold">✓</span> Adapts to your workflows</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ THE VISION ═══════ -->
+<section class="py-24 px-6 bg-white border-y-[3px] border-black">
+  <div class="max-w-4xl mx-auto text-center">
+    <h2 class="text-4xl sm:text-5xl font-black mb-8">Not Another AI Tool.</h2>
+    <p class="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed mb-12">
+      Most AI forgets you the moment you close the tab. Your Digital Twin <strong class="text-black">remembers everything</strong>. It learns your preferences, your voice, your workflows. It starts as an assistant. It becomes an extension of you.
+    </p>
+    <div class="grid md:grid-cols-3 gap-6">
+      <div class="neo neo-r neo-shadow-sm bg-cream p-8 text-left transition-all">
+        <div class="text-4xl mb-4">🧒</div>
+        <h3 class="font-black text-lg mb-2">Day 1 — A Rappter</h3>
+        <p class="text-gray-600 text-sm">It knows your name. It follows instructions. It's helpful but generic — like every other AI.</p>
+      </div>
+      <div class="neo neo-r neo-shadow-sm bg-cream p-8 text-left transition-all">
+        <div class="text-4xl mb-4">🧠</div>
+        <h3 class="font-black text-lg mb-2">Month 1 — It Knows You</h3>
+        <p class="text-gray-600 text-sm">It remembers your preferences. Anticipates your needs. Speaks in your tone. Handles your repetitive work.</p>
+      </div>
+      <div class="neo neo-r neo-shadow-sm bg-cream p-8 text-left transition-all">
+        <div class="text-4xl mb-4">👤</div>
+        <h3 class="font-black text-lg mb-2">Year 1 — Your Twin</h3>
+        <p class="text-gray-600 text-sm">It thinks like you. It drafts like you. It decides like you. It's the version of you that never sleeps.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ HOW IT WORKS ═══════ -->
+<section id="how" class="py-24 px-6">
+  <div class="max-w-4xl mx-auto">
+    <div class="text-center mb-16">
+      <h2 class="text-4xl sm:text-5xl font-black mb-4">How It Works</h2>
+      <p class="text-xl text-gray-600">Three steps. One conversation. A lifetime of compounding intelligence.</p>
+    </div>
+
+    <div class="space-y-8">
+      <div class="neo neo-r neo-shadow bg-white p-8 flex flex-col md:flex-row items-start gap-6 transition-all">
+        <div class="neo neo-r bg-accent text-white font-black text-2xl w-14 h-14 flex items-center justify-center shrink-0">1</div>
+        <div>
+          <h3 class="font-black text-xl mb-2">We Consult</h3>
+          <p class="text-gray-600">An initial call to understand your workflows, tools, communication style, and what you need automated. We design your Twin's personality and capabilities around <em>you</em>.</p>
+        </div>
+      </div>
+      <div class="neo neo-r neo-shadow bg-white p-8 flex flex-col md:flex-row items-start gap-6 transition-all">
+        <div class="neo neo-r bg-accent text-white font-black text-2xl w-14 h-14 flex items-center justify-center shrink-0">2</div>
+        <div>
+          <h3 class="font-black text-xl mb-2">We Build It</h3>
+          <p class="text-gray-600">We configure your Digital Twin with custom agents, memory schemas, integrations, and workflows. A follow-up demo call walks you through everything — you're live in days, not months.</p>
+        </div>
+      </div>
+      <div class="neo neo-r neo-shadow bg-white p-8 flex flex-col md:flex-row items-start gap-6 transition-all">
+        <div class="neo neo-r bg-accent text-white font-black text-2xl w-14 h-14 flex items-center justify-center shrink-0">3</div>
+        <div>
+          <h3 class="font-black text-xl mb-2">It Evolves</h3>
+          <p class="text-gray-600">Your Twin runs 24/7 — learning, remembering, optimizing. Dream Mode consolidates its memory every night. Ouroboros evolves its own capabilities. It gets better the longer it runs.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ TIERS ═══════ -->
+<section id="tiers" class="py-24 px-6 bg-black text-white">
+  <div class="max-w-6xl mx-auto">
+    <div class="text-center mb-16">
+      <h2 class="text-4xl sm:text-6xl font-black mb-4">Choose Your Path</h2>
+      <p class="text-xl text-gray-400">From open source to full ownership. Start free, scale when you're ready.</p>
+    </div>
+
+    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+      <!-- Community -->
+      <div class="bg-white/5 border-[3px] border-white/20 rounded-2xl p-8 flex flex-col hover:border-accent transition-all">
+        <span class="text-sm font-bold text-gray-400 mb-2">COMMUNITY</span>
+        <div class="text-2xl font-black mb-1 text-white">Open Source</div>
+        <p class="text-gray-500 text-sm mb-6">Free forever</p>
+        <ul class="space-y-3 text-sm flex-1 mb-8 text-gray-400">
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Full openrappter framework</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> 22 agents, soul templates</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Dream mode, self-updating</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Community support</li>
+        </ul>
+        <a href="https://kody-w.github.io/openrappter/" class="neo neo-r text-center font-bold py-3 bg-white/10 text-white border-white/30 hover:bg-accent hover:border-accent transition-all block">
+          Install Free
+        </a>
+      </div>
+
+      <!-- Digital Twin Lease -->
+      <div class="bg-white/5 border-[3px] border-white/20 rounded-2xl p-8 flex flex-col hover:border-accent transition-all">
+        <span class="text-sm font-bold text-accent mb-2">DIGITAL TWIN</span>
+        <div class="text-2xl font-black mb-1 text-white">Built For You</div>
+        <p class="text-gray-500 text-sm mb-6">Bespoke setup & ongoing access</p>
+        <ul class="space-y-3 text-sm flex-1 mb-8 text-gray-400">
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Everything in Community</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Consultation + demo call</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Adapted to YOUR use case</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> We set it up, teach you</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Ongoing consulting available</li>
+        </ul>
+        <a href="#contact" class="neo neo-r text-center font-bold py-3 bg-accent text-white border-accent hover:bg-accent/80 transition-all block">
+          Start Your Twin →
+        </a>
+      </div>
+
+      <!-- White Glove -->
+      <div class="bg-accent/10 border-[3px] border-accent rounded-2xl p-8 flex flex-col relative">
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2">
+          <span class="bg-accent text-white text-xs font-black px-3 py-1 rounded-full">⭐ MOST POPULAR</span>
+        </div>
+        <span class="text-sm font-bold text-accent mb-2 mt-2">WHITE GLOVE</span>
+        <div class="text-2xl font-black mb-1 text-white">Full Partnership</div>
+        <p class="text-gray-500 text-sm mb-6">Dedicated team, for life</p>
+        <ul class="space-y-3 text-sm flex-1 mb-8 text-gray-400">
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Everything in Digital Twin</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Full white glove support</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Priority, dedicated team</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Continuous optimization</li>
+          <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Your Twin evolves with backing</li>
+        </ul>
+        <a href="#contact" class="neo neo-r text-center font-bold py-3 bg-white text-black border-white hover:bg-accent hover:text-white hover:border-accent transition-all block">
+          Let's Talk →
+        </a>
+      </div>
+
+      <!-- Own Your AI -->
+      <div class="bg-white/5 border-[3px] border-yellow-500/40 rounded-2xl p-8 flex flex-col hover:border-yellow-500 transition-all">
+        <span class="text-sm font-bold text-yellow-500 mb-2">🏠 OWN YOUR AI</span>
+        <div class="text-2xl font-black mb-1 text-white">Total Ownership</div>
+        <p class="text-gray-500 text-sm mb-6">Hardware, software, yours forever</p>
+        <ul class="space-y-3 text-sm flex-1 mb-8 text-gray-400">
+          <li class="flex items-start gap-2"><span class="text-yellow-500 font-bold">✓</span> Full hardware + software</li>
+          <li class="flex items-start gap-2"><span class="text-yellow-500 font-bold">✓</span> AI lives on YOUR device</li>
+          <li class="flex items-start gap-2"><span class="text-yellow-500 font-bold">✓</span> White glove maintenance</li>
+          <li class="flex items-start gap-2"><span class="text-yellow-500 font-bold">✓</span> Complete data sovereignty</li>
+          <li class="flex items-start gap-2"><span class="text-yellow-500 font-bold">✓</span> Stop paying? Keep the AI.</li>
+        </ul>
+        <a href="#contact" class="neo neo-r text-center font-bold py-3 bg-yellow-500 text-black border-yellow-500 hover:bg-yellow-400 transition-all block">
+          Schedule Consultation →
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ FAQ ═══════ -->
+<section id="faq" class="py-24 px-6">
+  <div class="max-w-3xl mx-auto">
+    <h2 class="text-4xl font-black text-center mb-12">Questions</h2>
+    <div class="space-y-4" id="faq-list">
+
+      <div class="neo neo-r neo-shadow-sm bg-white overflow-hidden">
+        <button onclick="this.parentElement.classList.toggle('open')" class="w-full text-left p-6 font-bold text-lg flex justify-between items-center">
+          What is a Digital Twin?
+          <span class="text-2xl transition-transform duration-200" style="display:inline-block">+</span>
+        </button>
+        <div class="faq-answer px-6 pb-6 text-gray-600 hidden">
+          Your Digital Twin is an AI that learns <em>you</em> — your preferences, your voice, your decision-making patterns, your workflows. Over time it becomes capable of drafting emails like you, making decisions like you, and handling tasks the way you would. It's not a chatbot. It's the version of you that never sleeps, never forgets, and compounds in capability every day.
+        </div>
+      </div>
+
+      <div class="neo neo-r neo-shadow-sm bg-white overflow-hidden">
+        <button onclick="this.parentElement.classList.toggle('open')" class="w-full text-left p-6 font-bold text-lg flex justify-between items-center">
+          What happens during the consultation?
+          <span class="text-2xl transition-transform duration-200" style="display:inline-block">+</span>
+        </button>
+        <div class="faq-answer px-6 pb-6 text-gray-600 hidden">
+          We spend time understanding your world — your tools, your communication style, your biggest time sinks, and the workflows you wish were automated. Then we design a Twin that fits your life. A follow-up demo call puts you in the driver's seat with your custom-built AI.
+        </div>
+      </div>
+
+      <div class="neo neo-r neo-shadow-sm bg-white overflow-hidden">
+        <button onclick="this.parentElement.classList.toggle('open')" class="w-full text-left p-6 font-bold text-lg flex justify-between items-center">
+          Is my data private?
+          <span class="text-2xl transition-transform duration-200" style="display:inline-block">+</span>
+        </button>
+        <div class="faq-answer px-6 pb-6 text-gray-600 hidden">
+          Yes. Your Digital Twin runs local-first. Memory, config, and state live on your machine in <code class="bg-gray-100 px-1 rounded">~/.openrappter/</code>. With the "Own Your AI" tier, the entire system — hardware and software — is physically yours. Nobody else has access.
+        </div>
+      </div>
+
+      <div class="neo neo-r neo-shadow-sm bg-white overflow-hidden">
+        <button onclick="this.parentElement.classList.toggle('open')" class="w-full text-left p-6 font-bold text-lg flex justify-between items-center">
+          What if I stop paying for White Glove?
+          <span class="text-2xl transition-transform duration-200" style="display:inline-block">+</span>
+        </button>
+        <div class="faq-answer px-6 pb-6 text-gray-600 hidden">
+          Your Twin keeps running. The open source core is always free. You just lose the dedicated support team, priority access, and continuous optimization. With the "Own Your AI" tier, you keep everything — the hardware, the software, and all the training data — forever.
+        </div>
+      </div>
+
+      <div class="neo neo-r neo-shadow-sm bg-white overflow-hidden">
+        <button onclick="this.parentElement.classList.toggle('open')" class="w-full text-left p-6 font-bold text-lg flex justify-between items-center">
+          Can I try it before committing?
+          <span class="text-2xl transition-transform duration-200" style="display:inline-block">+</span>
+        </button>
+        <div class="faq-answer px-6 pb-6 text-gray-600 hidden">
+          Absolutely. The entire framework is <a href="https://kody-w.github.io/openrappter/" class="text-accent underline font-semibold">open source and free</a>. Install it, play with it, build agents. When you're ready for a version built specifically for you — that's when we talk.
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ CONTACT / CTA ═══════ -->
+<section id="contact" class="py-24 px-6 bg-black text-white">
+  <div class="max-w-3xl mx-auto text-center">
+    <div class="text-6xl mb-6 dino">🦖</div>
+    <h2 class="text-4xl sm:text-5xl font-black mb-6">Ready to meet your Twin?</h2>
+    <p class="text-xl text-gray-400 mb-10 max-w-xl mx-auto">
+      Start a conversation. We'll build something that becomes more valuable every single day.
+    </p>
+
+    <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
+      <a href="mailto:kody@rappter.com" class="neo neo-r neo-shadow bg-accent text-white font-black px-8 py-4 text-lg transition-all border-accent">
+        📧 kody@rappter.com
+      </a>
+      <a href="https://t.me/kodywildfeuer" target="_blank" class="neo neo-r neo-shadow bg-white text-black font-black px-8 py-4 text-lg transition-all">
+        💬 Message on Telegram
+      </a>
+    </div>
+
+    <!-- Newsletter -->
+    <div class="neo neo-r bg-white/10 p-8 max-w-md mx-auto">
+      <h3 class="font-black text-xl mb-2">Stay in the loop</h3>
+      <p class="text-gray-400 text-sm mb-4">Weekly insights on Digital Twins, AI agents, and building the future.</p>
+      <a href="https://rappter.beehiiv.com/" target="_blank" class="neo neo-r bg-accent text-white font-bold px-6 py-3 inline-block transition-all hover:bg-accent/80 border-accent">
+        📬 Subscribe to Newsletter →
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ FOOTER ═══════ -->
+<footer class="border-t-[3px] border-black bg-white px-6 py-8">
+  <div class="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <span class="font-black text-lg">🦖 rappter</span>
+    <div class="flex flex-wrap gap-6 text-sm font-semibold">
+      <a href="https://kody-w.github.io/openrappter/" class="hover:text-accent transition-colors">Open Source</a>
+      <a href="https://kody-w.github.io/openrappter/docs.html" class="hover:text-accent transition-colors">Docs</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-accent transition-colors">GitHub</a>
+      <a href="https://rappter.beehiiv.com/" class="hover:text-accent transition-colors">Newsletter</a>
+      <a href="https://github.com/rappterhub/rappterhub" class="hover:text-accent transition-colors">RappterHub</a>
+    </div>
+    <span class="text-sm text-gray-500">© 2026 <a href="https://github.com/kody-w" class="underline">Kody W</a></span>
+  </div>
+</footer>
+
+<script>
+// FAQ toggle
+document.querySelectorAll('.neo.neo-r.neo-shadow-sm.bg-white.overflow-hidden').forEach(el => {
+  const btn = el.querySelector('button');
+  const answer = el.querySelector('.faq-answer');
+  const icon = btn.querySelector('span:last-child');
+  btn.addEventListener('click', () => {
+    const open = !answer.classList.contains('hidden');
+    // Close all
+    document.querySelectorAll('.faq-answer').forEach(a => a.classList.add('hidden'));
+    document.querySelectorAll('.neo.neo-r.neo-shadow-sm.bg-white.overflow-hidden button span:last-child').forEach(s => s.textContent = '+');
+    if (!open) {
+      answer.classList.remove('hidden');
+      icon.textContent = '−';
+    }
+  });
+});
+
+// Scroll-triggered fade-in
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.style.opacity = '1';
+      e.target.style.transform = 'translateY(0)';
+    }
+  });
+}, { threshold: 0.1 });
+document.querySelectorAll('section > div').forEach(el => {
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(20px)';
+  el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+  observer.observe(el);
+});
+</script>
+
+</body>
+</html>

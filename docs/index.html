@@ -1,625 +1,828 @@
 <!DOCTYPE html>
 <html lang="en" class="scroll-smooth">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>openrappter — Your AI Agent. Your Digital Twin. 🦖</title>
-  <meta name="description" content="AI agent framework that becomes your Digital Twin over time. Local-first AI agents powered by your existing GitHub Copilot subscription.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openrappter — Your Digital Twin</title>
+  <meta name="description" content="An AI that lives on your Mac, learns everything about you, and becomes more of yourself over time. Free & open source." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script>
     tailwind.config = {
       theme: {
         extend: {
-          colors: {
-            cream: '#fffdf7',
-            accent: '#10b981',
-            'accent-dark': '#059669',
-            brutal: '#000000',
-            editor: '#0d1117',
-          },
           fontFamily: {
             sans: ['Inter', 'system-ui', 'sans-serif'],
             mono: ['JetBrains Mono', 'monospace'],
           },
-          boxShadow: {
-            brutal: '8px 8px 0 #000',
-            'brutal-sm': '4px 4px 0 #000',
-            'brutal-lg': '12px 12px 0 #000',
-            'brutal-accent': '8px 8px 0 #10b981',
-            'brutal-hover': '4px 4px 0 #000',
+          colors: {
+            base: '#09090b',
+            surface: '#111113',
+            'surface-2': '#18181b',
+            border: '#27272a',
+            emerald: { 500: '#10b981' },
+            violet: { 500: '#8b5cf6' },
           },
-          borderRadius: {
-            brutal: '12px',
-            'brutal-lg': '16px',
-          },
-        }
-      }
-    }
+        },
+      },
+    };
   </script>
   <style>
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { background: #09090b; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; line-height: 1.8; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
 
-    /* Dino animation */
-    @keyframes dinoLook {
-      0%, 40% { transform: scaleX(1); }
-      45%, 55% { transform: scaleX(1) rotate(-5deg); }
-      60%, 70% { transform: scaleX(-1) rotate(5deg); }
-      75%, 85% { transform: scaleX(-1); }
-      90%, 100% { transform: scaleX(1); }
-    }
-    @keyframes dinoBlink {
-      0%, 45% { opacity: 1; }
-      46%, 49% { opacity: 0; }
-      50%, 100% { opacity: 1; }
-    }
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #09090b; }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+
+    /* Dino float animation */
     @keyframes dinoFloat {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-12px); }
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50% { transform: translateY(-18px) rotate(2deg); }
     }
-    .dino-container {
-      animation: dinoFloat 3s ease-in-out infinite;
-    }
-    .dino-body {
-      animation: dinoLook 6s ease-in-out infinite;
-      display: inline-block;
-      font-size: 6rem;
-      line-height: 1;
-    }
-    .dino-eye {
-      animation: dinoBlink 4s ease-in-out infinite;
+    .dino-float { animation: dinoFloat 4s ease-in-out infinite; }
+
+    /* Glow effects */
+    .glow-emerald { box-shadow: 0 0 30px rgba(16, 185, 129, 0.15); }
+    .glow-emerald-strong { box-shadow: 0 0 50px rgba(16, 185, 129, 0.25), 0 0 100px rgba(16, 185, 129, 0.1); }
+    .text-glow-emerald { text-shadow: 0 0 40px rgba(16, 185, 129, 0.3); }
+    .glow-gold { box-shadow: 0 0 30px rgba(234, 179, 8, 0.15); }
+
+    /* Fade-in on scroll */
+    .fade-in { opacity: 0; transform: translateY(30px); transition: opacity 0.7s ease, transform 0.7s ease; }
+    .fade-in.visible { opacity: 1; transform: translateY(0); }
+
+    /* Card hover */
+    .card-hover { transition: all 0.2s ease; border: 1px solid #27272a; }
+    .card-hover:hover { border-color: rgba(16, 185, 129, 0.5); box-shadow: 0 0 25px rgba(16, 185, 129, 0.08); }
+
+    /* Gradient text */
+    .gradient-text {
+      background: linear-gradient(135deg, #10b981 0%, #8b5cf6 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
-    /* Typing animation */
-    @keyframes typing {
-      from { width: 0; }
-      to { width: 100%; }
+    /* Terminal */
+    .terminal-scrollbar::-webkit-scrollbar { height: 4px; }
+    .terminal-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 2px; }
+
+    /* FAQ */
+    .faq-answer { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+    .faq-answer.open { max-height: 300px; }
+
+    /* Nav transition */
+    nav { transition: background-color 0.2s ease, backdrop-filter 0.2s ease; }
+
+    /* Pulse ring */
+    @keyframes pulseRing {
+      0% { transform: scale(0.9); opacity: 0.6; }
+      100% { transform: scale(1.4); opacity: 0; }
     }
-    @keyframes blink-caret {
-      from, to { border-color: transparent; }
-      50% { border-color: #10b981; }
-    }
-    .typing-line {
-      overflow: hidden;
-      white-space: nowrap;
-      border-right: 3px solid #10b981;
-      animation: typing 2s steps(40, end) forwards, blink-caret 0.75s step-end infinite;
-      width: 0;
-    }
-    .typing-line.active {
-      animation: typing 2s steps(40, end) forwards, blink-caret 0.75s step-end infinite;
+    .pulse-ring::before {
+      content: ''; position: absolute; inset: -8px; border-radius: 50%;
+      border: 2px solid #10b981; animation: pulseRing 2s ease-out infinite;
     }
 
-    /* Scroll-triggered fade-in */
-    .fade-in-up {
-      opacity: 0;
-      transform: translateY(30px);
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
-    .fade-in-up.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    /* Comparison table */
+    .comparison-check { color: #10b981; }
+    .comparison-x { color: #ef4444; }
+    .comparison-partial { color: #eab308; }
 
-    /* Card hover effects */
-    .brutal-card {
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    /* Subtle grid background */
+    .grid-bg {
+      background-image: radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0);
+      background-size: 40px 40px;
     }
-    .brutal-card:hover {
-      transform: translate(-4px, -4px);
-      box-shadow: 12px 12px 0 #000;
-    }
-
-    /* Pricing card tilt */
-    .pricing-card {
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    .pricing-card:hover {
-      transform: translateY(-8px) rotate(-1deg);
-      box-shadow: 12px 12px 0 #000;
-    }
-    .pricing-card.featured:hover {
-      transform: translateY(-12px) rotate(1deg);
-      box-shadow: 16px 16px 0 #10b981;
-    }
-
-    /* Button hover */
-    .brutal-btn {
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }
-    .brutal-btn:hover {
-      transform: translate(-2px, -2px);
-      box-shadow: 6px 6px 0 #000;
-    }
-    .brutal-btn:active {
-      transform: translate(2px, 2px);
-      box-shadow: 2px 2px 0 #000;
-    }
-
-    /* FAQ accordion */
-    .faq-answer {
-      max-height: 0;
-      overflow: hidden;
-      transition: max-height 0.3s ease;
-    }
-    .faq-item.open .faq-answer {
-      max-height: 300px;
-    }
-    .faq-item.open .faq-chevron {
-      transform: rotate(180deg);
-    }
-    .faq-chevron {
-      transition: transform 0.3s ease;
-    }
-
-    /* Code block toggle */
-    .code-demo {
-      transition: opacity 0.3s ease, max-height 0.3s ease;
-    }
-
-    /* Mobile menu */
-    .mobile-menu {
-      transform: translateX(100%);
-      transition: transform 0.3s ease;
-    }
-    .mobile-menu.open {
-      transform: translateX(0);
-    }
-
-    /* Stagger children animation */
-    .stagger-children > * {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.4s ease, transform 0.4s ease;
-    }
-    .stagger-children.visible > *:nth-child(1) { transition-delay: 0.05s; }
-    .stagger-children.visible > *:nth-child(2) { transition-delay: 0.1s; }
-    .stagger-children.visible > *:nth-child(3) { transition-delay: 0.15s; }
-    .stagger-children.visible > *:nth-child(4) { transition-delay: 0.2s; }
-    .stagger-children.visible > *:nth-child(5) { transition-delay: 0.25s; }
-    .stagger-children.visible > *:nth-child(6) { transition-delay: 0.3s; }
-    .stagger-children.visible > *:nth-child(7) { transition-delay: 0.35s; }
-    .stagger-children.visible > *:nth-child(8) { transition-delay: 0.4s; }
-    .stagger-children.visible > *:nth-child(9) { transition-delay: 0.45s; }
-    .stagger-children.visible > *:nth-child(10) { transition-delay: 0.5s; }
-    .stagger-children.visible > * {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    /* Scrollbar for code blocks */
-    .code-scroll::-webkit-scrollbar { height: 6px; }
-    .code-scroll::-webkit-scrollbar-track { background: #161b22; }
-    .code-scroll::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
-
-    /* Copy button feedback */
-    .copy-btn.copied { background: #10b981 !important; color: #fff !important; }
   </style>
 </head>
-<body class="bg-cream font-sans text-brutal antialiased">
+<body class="antialiased">
 
-  <!-- ============ NAVIGATION ============ -->
-  <nav id="navbar" class="fixed top-0 left-0 right-0 z-50 bg-white border-b-[3px] border-brutal">
+  <!-- ═══════════════════ NAV ═══════════════════ -->
+  <nav id="mainNav" class="fixed top-0 left-0 right-0 z-50 border-b border-transparent">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Logo -->
-        <a href="#" class="flex items-center gap-2 font-black text-xl">
+        <a href="#" class="flex items-center gap-2 text-lg font-bold tracking-tight">
           <span class="text-2xl">🦖</span>
-          <span>openrappter</span>
+          <span class="text-[#fafafa]">openrappter</span>
         </a>
-        <!-- Desktop Links -->
-        <div class="hidden md:flex items-center gap-8">
-          <a href="#features" class="font-bold hover:text-accent transition-colors">Features</a>
-          <a href="#demo" class="font-bold hover:text-accent transition-colors">Demo</a>
-          <a href="#pricing" class="font-bold hover:text-accent transition-colors">Pricing</a>
-          <a href="docs.html" class="font-bold hover:text-accent transition-colors">Docs</a>
-          <a href="#hero" class="brutal-btn inline-block bg-accent text-white font-bold px-5 py-2 border-[3px] border-brutal rounded-brutal shadow-brutal-sm">
-            Install Free
+
+        <!-- Desktop links -->
+        <div class="hidden md:flex items-center gap-8 text-sm text-[#a1a1aa]">
+          <a href="#how-it-works" class="hover:text-[#fafafa] transition-colors duration-200">How It Works</a>
+          <a href="#features" class="hover:text-[#fafafa] transition-colors duration-200">Features</a>
+          <a href="#agents" class="hover:text-[#fafafa] transition-colors duration-200">Agents</a>
+          <a href="#pricing" class="hover:text-[#fafafa] transition-colors duration-200">Pricing</a>
+          <a href="docs.html" class="hover:text-[#fafafa] transition-colors duration-200">Docs</a>
+        </div>
+
+        <!-- Desktop CTAs -->
+        <div class="hidden md:flex items-center gap-3">
+          <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="inline-flex items-center gap-2 px-4 py-2 bg-[#10b981] text-[#09090b] text-sm font-semibold rounded-lg hover:bg-[#059669] transition-all duration-200">
+            Download for Mac
+          </a>
+          <a href="https://github.com/kody-w/openrappter" target="_blank" class="inline-flex items-center gap-2 px-4 py-2 border border-[#27272a] text-[#a1a1aa] text-sm font-medium rounded-lg hover:border-[#fafafa] hover:text-[#fafafa] transition-all duration-200">
+            View on GitHub
           </a>
         </div>
-        <!-- Mobile Hamburger -->
-        <button id="menu-toggle" class="md:hidden flex flex-col gap-1.5 p-2" aria-label="Toggle menu">
-          <span class="block w-6 h-[3px] bg-brutal rounded"></span>
-          <span class="block w-6 h-[3px] bg-brutal rounded"></span>
-          <span class="block w-6 h-[3px] bg-brutal rounded"></span>
+
+        <!-- Mobile hamburger -->
+        <button id="mobileMenuBtn" class="md:hidden p-2 text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path id="menuIcon" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
         </button>
       </div>
     </div>
-    <!-- Mobile Menu -->
-    <div id="mobile-menu" class="mobile-menu fixed top-0 right-0 w-72 h-full bg-white border-l-[3px] border-brutal z-50 p-8 flex flex-col gap-6 md:hidden">
-      <button id="menu-close" class="self-end text-3xl font-bold" aria-label="Close menu">&times;</button>
-      <a href="#features" class="font-bold text-lg" onclick="closeMobileMenu()">Features</a>
-      <a href="#demo" class="font-bold text-lg" onclick="closeMobileMenu()">Demo</a>
-      <a href="#pricing" class="font-bold text-lg" onclick="closeMobileMenu()">Pricing</a>
-      <a href="docs.html" class="font-bold text-lg" onclick="closeMobileMenu()">Docs</a>
-      <a href="#hero" class="brutal-btn block text-center bg-accent text-white font-bold px-5 py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm" onclick="closeMobileMenu()">
-        Install Free
-      </a>
+
+    <!-- Mobile menu -->
+    <div id="mobileMenu" class="hidden md:hidden border-t border-[#27272a] bg-[#09090b]/95 backdrop-blur-xl">
+      <div class="px-4 py-4 space-y-3">
+        <a href="#how-it-works" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">How It Works</a>
+        <a href="#features" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Features</a>
+        <a href="#agents" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Agents</a>
+        <a href="#pricing" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Pricing</a>
+        <a href="docs.html" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Docs</a>
+        <div class="pt-3 space-y-2 border-t border-[#27272a]">
+          <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="block text-center px-4 py-2 bg-[#10b981] text-[#09090b] text-sm font-semibold rounded-lg">Download for Mac</a>
+          <a href="https://github.com/kody-w/openrappter" target="_blank" class="block text-center px-4 py-2 border border-[#27272a] text-[#a1a1aa] text-sm rounded-lg">View on GitHub</a>
+        </div>
+      </div>
     </div>
   </nav>
 
-  <!-- ============ HERO ============ -->
-  <section id="hero" class="min-h-screen flex items-center pt-20 pb-16 px-4 relative overflow-hidden">
-    <div class="max-w-7xl mx-auto w-full">
-      <div class="grid lg:grid-cols-2 gap-12 items-center">
-        <!-- Left: Copy -->
-        <div class="fade-in-up">
-          <h1 class="text-5xl sm:text-6xl lg:text-7xl font-black leading-[1.05] tracking-tight mb-6">
-            Your AI Agent.<br>
-            Your Digital Twin.
-            <span class="inline-block">🦖</span>
-          </h1>
-          <p class="text-xl sm:text-2xl text-gray-700 mb-8 max-w-xl leading-relaxed">
-            Starts as a rappter — becomes more of yourself over time.
-            <strong>Local-first AI agents</strong> powered by your existing GitHub Copilot subscription.
-          </p>
+  <!-- ═══════════════════ HERO ═══════════════════ -->
+  <section class="min-h-screen flex items-center justify-center relative overflow-hidden">
+    <!-- Subtle radial glow -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[#10b981]/5 rounded-full blur-[120px] pointer-events-none"></div>
 
-          <!-- Install CTA -->
-          <div class="bg-editor rounded-brutal-lg border-[3px] border-brutal shadow-brutal p-4 sm:p-6 mb-6 max-w-xl">
-            <div class="flex items-center justify-between mb-3">
-              <div class="flex gap-2">
-                <span class="w-3 h-3 rounded-full bg-red-500"></span>
-                <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
-                <span class="w-3 h-3 rounded-full bg-green-500"></span>
-              </div>
-              <button onclick="copyInstall(this)" class="copy-btn text-xs font-mono text-gray-400 hover:text-white border border-gray-600 rounded px-2 py-1 transition-colors">
-                Copy
-              </button>
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 text-center pt-24 pb-16 relative z-10">
+      <!-- Animated Dino -->
+      <div class="dino-float text-8xl sm:text-9xl mb-8 inline-block select-none" aria-hidden="true">🦖</div>
+
+      <h1 class="text-4xl sm:text-5xl md:text-7xl font-black tracking-tight leading-[1.1] mb-6">
+        Meet Your <span class="gradient-text">Digital Twin</span>
+      </h1>
+
+      <p class="text-lg sm:text-xl text-[#a1a1aa] max-w-2xl mx-auto mb-10 leading-relaxed">
+        An AI that lives on your Mac, learns everything about you, and becomes more of yourself over time.
+        It remembers. It automates. It evolves.
+      </p>
+
+      <!-- CTAs -->
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8">
+        <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="inline-flex items-center gap-2 px-8 py-3.5 bg-[#10b981] text-[#09090b] font-bold rounded-xl text-lg hover:bg-[#059669] transition-all duration-200 glow-emerald hover:glow-emerald-strong">
+          Download for Mac
+          <span class="text-base">→</span>
+        </a>
+        <a href="#terminal" class="inline-flex items-center gap-2 px-8 py-3.5 border border-[#27272a] text-[#a1a1aa] font-medium rounded-xl hover:border-[#fafafa] hover:text-[#fafafa] transition-all duration-200">
+          Install via Terminal
+        </a>
+      </div>
+
+      <!-- Trust line -->
+      <p class="text-sm text-[#71717a] mb-4">
+        Free &amp; open source&ensp;•&ensp;Your data stays on your device&ensp;•&ensp;No accounts required
+      </p>
+
+      <!-- Newsletter -->
+      <a href="https://rappter.beehiiv.com/" target="_blank" class="inline-flex items-center gap-1.5 text-sm text-[#10b981] hover:text-[#34d399] transition-colors duration-200">
+        Get updates →
+        <span class="text-[#71717a]">rappter.beehiiv.com</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ HOW IT WORKS ═══════════════════ -->
+  <section id="how-it-works" class="py-24 sm:py-32 relative">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">How It Works</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Three steps. No terminal. No setup headaches.</p>
+      </div>
+
+      <div class="grid md:grid-cols-3 gap-8">
+        <!-- Step 1 -->
+        <div class="fade-in text-center">
+          <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-[#10b981]/10 border border-[#10b981]/20 flex items-center justify-center text-3xl">📥</div>
+          <div class="text-xs font-mono text-[#10b981] tracking-widest uppercase mb-2">Step 1</div>
+          <h3 class="text-xl font-bold mb-3">Install</h3>
+          <p class="text-[#a1a1aa] leading-relaxed">Download the app. A 🦖 appears in your menu bar. Click it.</p>
+          <div class="mt-6 mx-auto w-48 h-8 rounded-lg bg-[#18181b] border border-[#27272a] flex items-center px-3 gap-2">
+            <div class="flex gap-1">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#ef4444]/60"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-[#eab308]/60"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-[#22c55e]/60"></span>
             </div>
-            <code class="font-mono text-accent text-sm sm:text-base block code-scroll overflow-x-auto">
-              <span class="text-gray-500">$</span> curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
-            </code>
-          </div>
-
-          <!-- Secondary CTA -->
-          <div class="flex flex-wrap gap-4 mb-10">
-            <a href="https://rappter.com" target="_blank" class="brutal-btn inline-flex items-center gap-2 bg-accent text-white font-bold px-7 py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-lg">
-              Get Your Digital Twin →
-            </a>
-            <a href="https://github.com/kody-w/openrappter" target="_blank" class="brutal-btn inline-flex items-center gap-2 bg-white font-bold px-7 py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-lg">
-              ⭐ GitHub
-            </a>
-          </div>
-
-          <!-- Trust Badges -->
-          <div class="flex flex-wrap gap-3">
-            <span class="inline-flex items-center gap-2 bg-white font-bold px-4 py-2 border-[3px] border-brutal rounded-brutal text-sm shadow-brutal-sm">✅ 2,800+ Tests</span>
-            <span class="inline-flex items-center gap-2 bg-white font-bold px-4 py-2 border-[3px] border-brutal rounded-brutal text-sm shadow-brutal-sm">🤖 22 Agents</span>
-            <span class="inline-flex items-center gap-2 bg-white font-bold px-4 py-2 border-[3px] border-brutal rounded-brutal text-sm shadow-brutal-sm">📜 MIT Licensed</span>
-            <span class="inline-flex items-center gap-2 bg-white font-bold px-4 py-2 border-[3px] border-brutal rounded-brutal text-sm shadow-brutal-sm">🖥 macOS + Linux</span>
-          </div>
-
-          <!-- Newsletter -->
-          <div class="mt-10 max-w-xl">
-            <p class="font-bold text-sm mb-2 text-gray-600 uppercase tracking-wider">📬 Get updates &amp; tips</p>
-            <div class="bg-white border-[3px] border-brutal rounded-brutal p-3 shadow-brutal-sm">
-              <iframe data-tally-src="https://tally.so/embed/3y9bb0?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1" width="100%" height="52" frameborder="0" title="Newsletter signup"></iframe>
-            </div>
+            <span class="ml-auto text-sm">🦖</span>
           </div>
         </div>
 
-        <!-- Right: Animated Dino -->
-        <div class="hidden lg:flex items-center justify-center">
-          <div class="dino-container relative">
-            <div class="bg-white border-[4px] border-brutal rounded-brutal-lg shadow-brutal-lg p-12 text-center">
-              <div class="dino-body select-none" aria-hidden="true">🦖</div>
-              <p class="mt-4 font-black text-2xl">Hi, I'm your rappter.</p>
-              <p class="text-gray-500 font-mono text-sm mt-2">I learn. I evolve. I become you.</p>
-              <div class="mt-6 flex justify-center gap-1">
-                <span class="w-2 h-2 bg-accent rounded-full animate-pulse"></span>
-                <span class="w-2 h-2 bg-accent rounded-full animate-pulse" style="animation-delay:.2s"></span>
-                <span class="w-2 h-2 bg-accent rounded-full animate-pulse" style="animation-delay:.4s"></span>
-              </div>
-            </div>
+        <!-- Step 2 -->
+        <div class="fade-in text-center" style="transition-delay: 0.1s;">
+          <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-[#8b5cf6]/10 border border-[#8b5cf6]/20 flex items-center justify-center text-3xl">💬</div>
+          <div class="text-xs font-mono text-[#8b5cf6] tracking-widest uppercase mb-2">Step 2</div>
+          <h3 class="text-xl font-bold mb-3">Talk</h3>
+          <p class="text-[#a1a1aa] leading-relaxed">Chat with your rappter. Tell it about yourself. It remembers everything.</p>
+          <div class="mt-6 mx-auto w-56 rounded-lg bg-[#18181b] border border-[#27272a] p-3 text-left text-xs text-[#a1a1aa] space-y-2">
+            <div class="bg-[#111113] rounded-md px-2 py-1.5"><span class="text-[#71717a]">You:</span> I prefer dark mode everywhere</div>
+            <div class="bg-[#10b981]/10 rounded-md px-2 py-1.5 text-[#10b981]">🦖 Remembered! I'll keep that in mind.</div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="fade-in text-center" style="transition-delay: 0.2s;">
+          <div class="w-16 h-16 mx-auto mb-6 rounded-2xl bg-[#f59e0b]/10 border border-[#f59e0b]/20 flex items-center justify-center text-3xl">🧬</div>
+          <div class="text-xs font-mono text-[#f59e0b] tracking-widest uppercase mb-2">Step 3</div>
+          <h3 class="text-xl font-bold mb-3">Evolve</h3>
+          <p class="text-[#a1a1aa] leading-relaxed">Over days and weeks, it learns your patterns, preferences, and voice. It becomes your Twin.</p>
+          <div class="mt-6 mx-auto w-48 flex items-end justify-center gap-1.5">
+            <div class="w-4 h-4 rounded-sm bg-[#10b981]/20"></div>
+            <div class="w-4 h-6 rounded-sm bg-[#10b981]/30"></div>
+            <div class="w-4 h-10 rounded-sm bg-[#10b981]/40"></div>
+            <div class="w-4 h-14 rounded-sm bg-[#10b981]/60"></div>
+            <div class="w-4 h-20 rounded-sm bg-[#10b981]/80"></div>
+            <div class="w-4 h-24 rounded-sm bg-[#10b981]"></div>
+            <span class="text-xs text-[#71717a] ml-2 pb-0.5">memory</span>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ FEATURES ============ -->
-  <section id="features" class="min-h-screen py-24 px-4 bg-white">
-    <div class="max-w-7xl mx-auto">
-      <div class="text-center mb-16 fade-in-up">
-        <h2 class="text-4xl sm:text-5xl font-black mb-4">Everything Your Twin Needs 🧬</h2>
-        <p class="text-xl text-gray-600 max-w-2xl mx-auto">22 agents, persistent memory, self-evolution — all running locally on your machine.</p>
+  <!-- ═══════════════════ BENEFITS (NON-TECHNICAL) ═══════════════════ -->
+  <section id="features" class="py-24 sm:py-32 relative grid-bg">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">What Your Twin Can Do</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Not features. Superpowers — in plain English.</p>
       </div>
 
-      <!-- Feature Grid -->
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 stagger-children mb-20">
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <!-- Card 1 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🧠</div>
-          <h3 class="font-black text-lg mb-2">Persistent Memory</h3>
-          <p class="text-gray-600 text-sm">Remembers everything across sessions. Your context, preferences, history.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6">
+          <div class="text-3xl mb-4">🧠</div>
+          <h3 class="font-bold mb-2">Remembers Everything</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Tell it once, it knows forever. Preferences, contacts, decisions, context.</p>
         </div>
         <!-- Card 2 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🦖</div>
-          <h3 class="font-black text-lg mb-2">Dino Tamagotchi</h3>
-          <p class="text-gray-600 text-sm">Animated pet dinosaur in your menu bar. Feed it, teach it, watch it grow.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.05s;">
+          <div class="text-3xl mb-4">📅</div>
+          <h3 class="font-bold mb-2">Morning Briefings</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Every morning: weather, calendar, priorities — spoken aloud or as a notification.</p>
         </div>
         <!-- Card 3 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">👻</div>
-          <h3 class="font-black text-lg mb-2">Soul Templates</h3>
-          <p class="text-gray-600 text-sm">10 prebuilt personas — coder, researcher, ops, oracle, and more.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.1s;">
+          <div class="text-3xl mb-4">💬</div>
+          <h3 class="font-bold mb-2">Works Everywhere</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Chat in the menu bar, on Telegram, Slack, Discord — wherever you already are.</p>
         </div>
         <!-- Card 4 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🧬</div>
-          <h3 class="font-black text-lg mb-2">Self-Evolving</h3>
-          <p class="text-gray-600 text-sm">Ouroboros rewrites its own code across 5 generations of evolution.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.15s;">
+          <div class="text-3xl mb-4">🔔</div>
+          <h3 class="font-bold mb-2">Proactive Tips</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">It teaches you what it can do. One tip per day for 30 days. Click the notification to try it.</p>
         </div>
         <!-- Card 5 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">⏱</div>
-          <h3 class="font-black text-lg mb-2">Background Daemon</h3>
-          <p class="text-gray-600 text-sm">Cron jobs, Telegram bot, gateway — always alive, always working.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.2s;">
+          <div class="text-3xl mb-4">🌙</div>
+          <h3 class="font-bold mb-2">Dreams At Night</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">While you sleep, it consolidates its memory. Deduplicates. Prunes. Wakes up sharper.</p>
         </div>
         <!-- Card 6 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🧹</div>
-          <h3 class="font-black text-lg mb-2">Dream Mode</h3>
-          <p class="text-gray-600 text-sm">Nightly memory consolidation, dedup, and pruning. Keeps your twin lean.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.25s;">
+          <div class="text-3xl mb-4">🔄</div>
+          <h3 class="font-bold mb-2">Updates Itself</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">New features arrive automatically. No manual updates, no app store.</p>
         </div>
         <!-- Card 7 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">📬</div>
-          <h3 class="font-black text-lg mb-2">30-Day Tips</h3>
-          <p class="text-gray-600 text-sm">Daily notification teaching one feature. Master openrappter in a month.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.3s;">
+          <div class="text-3xl mb-4">🏠</div>
+          <h3 class="font-bold mb-2">Your Data, Your Device</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Nothing leaves your machine. No cloud. No accounts. Truly private.</p>
         </div>
         <!-- Card 8 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🔄</div>
-          <h3 class="font-black text-lg mb-2">Self-Updating</h3>
-          <p class="text-gray-600 text-sm">Checks GitHub, pulls updates, rebuilds itself. Always up to date.</p>
-        </div>
-        <!-- Card 9 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">🤖</div>
-          <h3 class="font-black text-lg mb-2">22 Agents</h3>
-          <p class="text-gray-600 text-sm">Shell, Web, Git, Code Review, TTS, Hacker News, and many more.</p>
-        </div>
-        <!-- Card 10 -->
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="text-4xl mb-3">💬</div>
-          <h3 class="font-black text-lg mb-2">15+ Channels</h3>
-          <p class="text-gray-600 text-sm">Telegram, Slack, Discord, Signal, iMessage, Teams — talk anywhere.</p>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.35s;">
+          <div class="text-3xl mb-4">🎭</div>
+          <h3 class="font-bold mb-2">Multiple Personalities</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Need a researcher? A coder? An ops engineer? Switch personas in one click.</p>
         </div>
       </div>
+    </div>
+  </section>
 
-      <!-- Live Code Toggle -->
-      <div class="max-w-3xl mx-auto fade-in-up">
-        <div class="flex items-center justify-between mb-4">
-          <h3 class="font-black text-2xl">Live Code Preview</h3>
-          <button id="code-toggle" class="brutal-btn bg-accent text-white font-bold px-5 py-2 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-sm" onclick="toggleCodeDemo()">
-            Show Terminal ▼
+  <!-- ═══════════════════ TERMINAL DEMO ═══════════════════ -->
+  <section id="terminal" class="py-24 sm:py-32 relative">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-12 fade-in">
+        <p class="text-sm font-mono text-[#10b981] tracking-widest uppercase mb-3">For Developers</p>
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">Built for everyone.<br><span class="text-[#a1a1aa]">Engineered for developers.</span></h2>
+      </div>
+
+      <!-- Terminal -->
+      <div class="fade-in rounded-2xl overflow-hidden border border-[#27272a] bg-[#111113]">
+        <!-- Terminal chrome -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-[#27272a] bg-[#0a0a0b]">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-[#ef4444]/70"></span>
+            <span class="w-3 h-3 rounded-full bg-[#eab308]/70"></span>
+            <span class="w-3 h-3 rounded-full bg-[#22c55e]/70"></span>
+          </div>
+          <!-- Tabs -->
+          <div class="flex gap-1">
+            <button id="tabGettingStarted" onclick="switchTerminalTab('getting-started')" class="terminal-tab px-3 py-1 text-xs font-mono rounded-md transition-all duration-200 bg-[#18181b] text-[#fafafa]">Getting Started</button>
+            <button id="tabPowerFeatures" onclick="switchTerminalTab('power-features')" class="terminal-tab px-3 py-1 text-xs font-mono rounded-md transition-all duration-200 text-[#71717a] hover:text-[#a1a1aa]">Power Features</button>
+          </div>
+          <!-- Copy button -->
+          <button id="copyBtn" onclick="copyInstallCmd()" class="text-xs text-[#71717a] hover:text-[#fafafa] transition-colors duration-200 font-mono flex items-center gap-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/></svg>
+            <span id="copyText">Copy</span>
           </button>
         </div>
-        <div id="code-demo" class="code-demo bg-editor rounded-brutal-lg border-[3px] border-brutal shadow-brutal overflow-hidden" style="max-height:0;opacity:0;">
-          <div class="p-6 font-mono text-sm sm:text-base">
-            <div class="flex items-center gap-2 mb-4">
-              <span class="w-3 h-3 rounded-full bg-red-500"></span>
-              <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
-              <span class="w-3 h-3 rounded-full bg-green-500"></span>
-              <span class="text-gray-500 text-xs ml-2">openrappter — terminal</span>
-            </div>
-            <div class="space-y-4">
-              <div>
-                <p class="text-gray-400"><span class="text-accent">$</span> <span class="text-white">openrappter "remember that I prefer dark mode"</span></p>
-                <p class="text-accent">🦖 Remembered: "prefer dark mode"</p>
-              </div>
-              <div>
-                <p class="text-gray-400"><span class="text-accent">$</span> <span class="text-white">openrappter --exec Dream "audit"</span></p>
-                <p class="text-accent">🦖 123 memories → 21 unique (83% bloat removed)</p>
-              </div>
-              <div>
-                <p class="text-gray-400"><span class="text-accent">$</span> <span class="text-white">openrappter --exec LearnNew "Create an agent that monitors my git repos"</span></p>
-                <p class="text-accent">🦖 Created and loaded agent 'GitMonitor'</p>
-              </div>
-            </div>
+
+        <!-- Tab content: Getting Started -->
+        <div id="content-getting-started" class="terminal-content p-6 overflow-x-auto terminal-scrollbar">
+          <pre class="font-mono text-sm leading-relaxed"><span class="text-[#71717a]"># One-line install</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span>
+<span class="text-[#a1a1aa]">Detecting environment...
+  Node.js 22.1.0 detected
+  Python 3.12 detected
+  Cloning openrappter...
+  Installed openrappter v1.9.1</span>
+
+<span class="text-[#71717a]"># Persistent memory</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">openrappter "remember I prefer async/await over promise chains"</span>
+<span class="text-[#a1a1aa]">  Remembered: coding preference saved to memory</span>
+
+<span class="text-[#71717a]"># Context-aware</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">openrappter "summarize what I worked on this week"</span>
+<span class="text-[#a1a1aa]">  This week you made 14 commits across 3 repos:
+    auth-refactor: Added JWT middleware
+    openrappter: Shipped v1.9.1
+    docs-site: Rewrote landing page</span></pre>
+        </div>
+
+        <!-- Tab content: Power Features -->
+        <div id="content-power-features" class="terminal-content p-6 overflow-x-auto terminal-scrollbar hidden">
+          <pre class="font-mono text-sm leading-relaxed"><span class="text-[#71717a]"># Dream Mode — 83% memory bloat removed</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">openrappter --exec Dream ""</span>
+<span class="text-[#a1a1aa]">  123 memories → 21 unique</span>
+
+<span class="text-[#71717a]"># Create agents from English</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">openrappter --exec LearnNew "Create an agent that monitors git repos"</span>
+<span class="text-[#a1a1aa]">  Created and loaded agent 'GitMonitor'</span>
+
+<span class="text-[#71717a]"># Self-update</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">openrappter --exec Update "check"</span>
+<span class="text-[#a1a1aa]">  Update available: 1.9.0 → 1.9.1</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ TECHNICAL FEATURES GRID ═══════════════════ -->
+  <section class="py-24 sm:py-32 relative grid-bg">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">Everything under the hood</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Serious infrastructure for serious builders.</p>
+      </div>
+
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">📦 Single File Agents</div>
+          <p class="text-sm text-[#a1a1aa]">Each agent is one file. No routing layers, no config files, no dependency injection. Read it, understand it, modify it.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🔑 Zero API Keys</div>
+          <p class="text-sm text-[#a1a1aa]">Works out of the box with Ollama. No OpenAI key required. Add keys later for GPT-4, Claude, Gemini, or Groq if you want.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🏠 Local-First</div>
+          <p class="text-sm text-[#a1a1aa]">Everything runs on your machine. Your data never leaves. Works offline with local models.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🧠 Persistent Memory</div>
+          <p class="text-sm text-[#a1a1aa]">SQLite-backed memory that survives restarts. Semantic search across all conversations.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🤖 5 LLM Providers</div>
+          <p class="text-sm text-[#a1a1aa]">Ollama, OpenAI, Anthropic, Google Gemini, Groq. Switch with one config change.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">📡 15+ Channels</div>
+          <p class="text-sm text-[#a1a1aa]">CLI, Telegram, Discord, Slack, iMessage, WhatsApp, REST API, WebSocket, and more.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🔌 WebSocket Gateway</div>
+          <p class="text-sm text-[#a1a1aa]">Real-time bidirectional communication. Build dashboards, mobile apps, or integrations.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🧩 Plugin System</div>
+          <p class="text-sm text-[#a1a1aa]">Drop a .js or .py file in the agents folder. It's live. Hot-reload included.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">⚡ Dual Runtime</div>
+          <p class="text-sm text-[#a1a1aa]">TypeScript for the framework. Python for AI/ML agents. Both first-class citizens.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🦖 Dino Tamagotchi</div>
+          <p class="text-sm text-[#a1a1aa]">Your agent has a personality. It evolves based on usage. Feed it knowledge, watch it grow.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">👤 Soul Templates</div>
+          <p class="text-sm text-[#a1a1aa]">Define personality, expertise, tone, and goals. Share templates on ClawHub.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🌙 Dream Mode</div>
+          <p class="text-sm text-[#a1a1aa]">Overnight memory consolidation. Deduplicates, prunes, and summarizes. Wakes up sharper.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">📬 30-Day Onboarding</div>
+          <p class="text-sm text-[#a1a1aa]">Daily tips delivered as notifications. One feature per day. Users learn by doing.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">🔄 Self-Updating</div>
+          <p class="text-sm text-[#a1a1aa]">Built-in update agent. Checks, downloads, and applies updates automatically.</p>
+        </div>
+        <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
+          <div class="text-xs font-mono text-[#10b981] mb-2">👻 Background Daemon</div>
+          <p class="text-sm text-[#a1a1aa]">Runs headless as a system service. Cron jobs, monitoring, automation — always on.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ AGENT REGISTRY ═══════════════════ -->
+  <section id="agents" class="py-24 sm:py-32 relative">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">22 agents, ready on day one</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Every agent is a single file. Read it, fork it, remix it.</p>
+      </div>
+
+      <!-- Core -->
+      <div class="mb-10 fade-in">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="px-2.5 py-0.5 text-xs font-mono font-semibold rounded-full bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20">Core</span>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🦖</span>
+            <div><div class="font-mono text-sm font-semibold">BasicAgent</div><p class="text-xs text-[#71717a] mt-1">Foundation for all agents. Chat, reason, respond.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🐚</span>
+            <div><div class="font-mono text-sm font-semibold">ShellAgent</div><p class="text-xs text-[#71717a] mt-1">Executes system commands safely with sandboxing.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🧠</span>
+            <div><div class="font-mono text-sm font-semibold">MemoryAgent</div><p class="text-xs text-[#71717a] mt-1">Store, search, and recall persistent memories.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🤖</span>
+            <div><div class="font-mono text-sm font-semibold">Assistant</div><p class="text-xs text-[#71717a] mt-1">All-in-one personal assistant with tools.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Intelligence -->
+      <div class="mb-10 fade-in">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="px-2.5 py-0.5 text-xs font-mono font-semibold rounded-full bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20">Intelligence</span>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🐍</span>
+            <div><div class="font-mono text-sm font-semibold">OuroborosAgent</div><p class="text-xs text-[#71717a] mt-1">Self-improving agent that rewrites itself.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🌐</span>
+            <div><div class="font-mono text-sm font-semibold">WebAgent</div><p class="text-xs text-[#71717a] mt-1">Fetches, parses, and summarizes web content.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🔍</span>
+            <div><div class="font-mono text-sm font-semibold">BrowserAgent</div><p class="text-xs text-[#71717a] mt-1">Full browser automation with Playwright.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">📰</span>
+            <div><div class="font-mono text-sm font-semibold">HackerNewsAgent</div><p class="text-xs text-[#71717a] mt-1">Curated tech news from Hacker News.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Communication -->
+      <div class="mb-10 fade-in">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="px-2.5 py-0.5 text-xs font-mono font-semibold rounded-full bg-[#8b5cf6]/10 text-[#8b5cf6] border border-[#8b5cf6]/20">Communication</span>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">✉️</span>
+            <div><div class="font-mono text-sm font-semibold">MessageAgent</div><p class="text-xs text-[#71717a] mt-1">Send messages across any connected channel.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🔊</span>
+            <div><div class="font-mono text-sm font-semibold">TTSAgent</div><p class="text-xs text-[#71717a] mt-1">Text-to-speech with multiple voice engines.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">📋</span>
+            <div><div class="font-mono text-sm font-semibold">SessionsAgent</div><p class="text-xs text-[#71717a] mt-1">Manages conversation sessions and context.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Automation -->
+      <div class="fade-in">
+        <div class="flex items-center gap-2 mb-4">
+          <span class="px-2.5 py-0.5 text-xs font-mono font-semibold rounded-full bg-[#f97316]/10 text-[#f97316] border border-[#f97316]/20">Automation</span>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">⏰</span>
+            <div><div class="font-mono text-sm font-semibold">CronAgent</div><p class="text-xs text-[#71717a] mt-1">Schedule recurring tasks with cron expressions.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🖼️</span>
+            <div><div class="font-mono text-sm font-semibold">ImageAgent</div><p class="text-xs text-[#71717a] mt-1">Generate and analyze images with AI models.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🌙</span>
+            <div><div class="font-mono text-sm font-semibold">DreamAgent</div><p class="text-xs text-[#71717a] mt-1">Overnight memory consolidation and pruning.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">💡</span>
+            <div><div class="font-mono text-sm font-semibold">DailyTipAgent</div><p class="text-xs text-[#71717a] mt-1">30-day onboarding, one tip at a time.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">🔄</span>
+            <div><div class="font-mono text-sm font-semibold">UpdateAgent</div><p class="text-xs text-[#71717a] mt-1">Self-updating: check, download, apply.</p></div>
+          </div>
+          <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
+            <span class="text-xl mt-0.5">☀️</span>
+            <div><div class="font-mono text-sm font-semibold">MorningBriefAgent</div><p class="text-xs text-[#71717a] mt-1">Daily briefing: weather, calendar, priorities.</p></div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ INTERACTIVE DEMO ============ -->
-  <section id="demo" class="min-h-screen py-24 px-4 bg-editor relative">
-    <div class="max-w-5xl mx-auto">
-      <div class="text-center mb-16 fade-in-up">
-        <h2 class="text-4xl sm:text-5xl font-black text-white mb-4">See It In Action 🎬</h2>
-        <p class="text-xl text-gray-400 max-w-2xl mx-auto">Watch openrappter learn, dream, and evolve in real time.</p>
+  <!-- ═══════════════════ COMPARISON TABLE ═══════════════════ -->
+  <section class="py-24 sm:py-32 relative grid-bg">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">openrappter vs. the rest</h2>
+        <p class="text-[#a1a1aa] text-lg">How we compare to other agent frameworks.</p>
       </div>
 
-      <!-- Terminal Demo -->
-      <div class="fade-in-up max-w-3xl mx-auto">
-        <div class="bg-[#161b22] rounded-brutal-lg border-[3px] border-gray-700 shadow-brutal-accent overflow-hidden">
-          <!-- Terminal header -->
-          <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 bg-[#0d1117]">
-            <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded-full bg-red-500"></span>
-              <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
-              <span class="w-3 h-3 rounded-full bg-green-500"></span>
-              <span class="text-gray-500 text-xs font-mono ml-3">~/.openrappter</span>
-            </div>
-            <button onclick="copyInstall(this)" class="copy-btn text-xs font-mono text-gray-400 hover:text-white border border-gray-600 rounded px-3 py-1 transition-colors">
-              Copy Install
-            </button>
-          </div>
-          <!-- Terminal body -->
-          <div class="p-6 font-mono text-sm sm:text-base min-h-[360px]" id="terminal-demo">
-            <div id="demo-output" class="space-y-1 text-gray-300"></div>
-            <div class="flex items-center mt-2">
-              <span class="text-accent mr-2">$</span>
-              <span id="demo-cursor" class="text-white"></span>
-              <span class="inline-block w-2 h-5 bg-accent animate-pulse ml-0.5"></span>
-            </div>
-          </div>
+      <div class="fade-in overflow-x-auto rounded-xl border border-[#27272a]">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-[#27272a] bg-[#111113]">
+              <th class="text-left px-5 py-3.5 font-semibold text-[#a1a1aa]">Feature</th>
+              <th class="text-center px-5 py-3.5 font-semibold text-[#10b981]">openrappter</th>
+              <th class="text-center px-5 py-3.5 font-semibold text-[#a1a1aa]">OpenClaw</th>
+              <th class="text-center px-5 py-3.5 font-semibold text-[#a1a1aa]">LangChain</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[#27272a]">
+            <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">API Keys Required</td>
+              <td class="px-5 py-3 text-center comparison-check">None (Ollama)</td>
+              <td class="px-5 py-3 text-center comparison-x">Required</td>
+              <td class="px-5 py-3 text-center comparison-x">Required</td>
+            </tr>
+            <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Cost to Start</td>
+              <td class="px-5 py-3 text-center comparison-check">$0</td>
+              <td class="px-5 py-3 text-center comparison-x">Pay per token</td>
+              <td class="px-5 py-3 text-center comparison-x">Pay per token</td>
+            </tr>
+            <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Privacy</td>
+              <td class="px-5 py-3 text-center comparison-check">100% local</td>
+              <td class="px-5 py-3 text-center comparison-x">Cloud only</td>
+              <td class="px-5 py-3 text-center comparison-partial">Depends</td>
+            </tr>
+            <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Setup Time</td>
+              <td class="px-5 py-3 text-center comparison-check">1 command</td>
+              <td class="px-5 py-3 text-center comparison-partial">~30 min</td>
+              <td class="px-5 py-3 text-center comparison-x">Hours</td>
+            </tr>
+            <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Persistent Memory</td>
+              <td class="px-5 py-3 text-center comparison-check">Built-in</td>
+              <td class="px-5 py-3 text-center comparison-x">No</td>
+              <td class="px-5 py-3 text-center comparison-partial">Add-on</td>
+            </tr>
+            <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Agent Registry</td>
+              <td class="px-5 py-3 text-center comparison-check">22 built-in</td>
+              <td class="px-5 py-3 text-center comparison-partial">Marketplace</td>
+              <td class="px-5 py-3 text-center comparison-x">DIY</td>
+            </tr>
+            <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Open Source</td>
+              <td class="px-5 py-3 text-center comparison-check">MIT</td>
+              <td class="px-5 py-3 text-center comparison-partial">Partial</td>
+              <td class="px-5 py-3 text-center comparison-check">MIT</td>
+            </tr>
+            <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Community Hub</td>
+              <td class="px-5 py-3 text-center comparison-check">ClawHub</td>
+              <td class="px-5 py-3 text-center comparison-partial">GPT Store</td>
+              <td class="px-5 py-3 text-center comparison-x">No</td>
+            </tr>
+            <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">Channels</td>
+              <td class="px-5 py-3 text-center comparison-check">15+</td>
+              <td class="px-5 py-3 text-center comparison-partial">API only</td>
+              <td class="px-5 py-3 text-center comparison-x">DIY</td>
+            </tr>
+            <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
+              <td class="px-5 py-3">WebSocket Gateway</td>
+              <td class="px-5 py-3 text-center comparison-check">Built-in</td>
+              <td class="px-5 py-3 text-center comparison-x">No</td>
+              <td class="px-5 py-3 text-center comparison-x">No</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ ARCHITECTURE ═══════════════════ -->
+  <section class="py-24 sm:py-32 relative">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6">
+      <div class="text-center mb-12 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">Data Sloshing Architecture</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Every agent follows the same lifecycle. No exceptions.</p>
+      </div>
+
+      <div class="fade-in rounded-2xl border border-[#27272a] bg-[#111113] p-8 sm:p-10">
+        <pre class="font-mono text-sm sm:text-base text-[#10b981] leading-loose overflow-x-auto"><code>execute(kwargs)
+  │
+  ├── slosh(query)         ── gather context
+  ├── merge upstream_slush ── chain data
+  ├── perform(kwargs)      ── your logic
+  └── extract data_slush   ── pass to next</code></pre>
+
+        <div class="mt-8 pt-8 border-t border-[#27272a]">
+          <p class="text-[#a1a1aa] text-sm leading-relaxed">
+            Every agent inherits <code class="font-mono text-[#10b981] bg-[#10b981]/10 px-1.5 py-0.5 rounded text-xs">execute()</code>, which handles the full lifecycle.
+            Override <code class="font-mono text-[#10b981] bg-[#10b981]/10 px-1.5 py-0.5 rounded text-xs">perform()</code> with your logic.
+            Data flows between agents through <code class="font-mono text-[#10b981] bg-[#10b981]/10 px-1.5 py-0.5 rounded text-xs">data_slush</code> — structured context that "sloshes" through the pipeline.
+            No orchestrator needed. Agents chain naturally.
+          </p>
         </div>
 
-        <!-- Onboarding Flow -->
-        <div class="mt-12 grid sm:grid-cols-3 gap-6 stagger-children">
-          <div class="bg-white border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm text-center">
-            <div class="text-4xl mb-3">1️⃣</div>
-            <h4 class="font-black mb-2">Install</h4>
-            <p class="text-gray-600 text-sm font-mono">curl ... | bash</p>
-            <p class="text-gray-500 text-xs mt-2">One command. Auto-detects your system.</p>
-          </div>
-          <div class="bg-white border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm text-center">
-            <div class="text-4xl mb-3">2️⃣</div>
-            <h4 class="font-black mb-2">Configure</h4>
-            <p class="text-gray-600 text-sm font-mono">openrappter setup</p>
-            <p class="text-gray-500 text-xs mt-2">Pick a soul, set your name, connect channels.</p>
-          </div>
-          <div class="bg-white border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm text-center">
-            <div class="text-4xl mb-3">3️⃣</div>
-            <h4 class="font-black mb-2">Evolve</h4>
-            <p class="text-gray-600 text-sm font-mono">openrappter chat</p>
-            <p class="text-gray-500 text-xs mt-2">Talk to it daily. It becomes you.</p>
-          </div>
+        <div class="mt-6">
+          <a href="architecture.html" class="inline-flex items-center gap-2 text-sm text-[#10b981] hover:text-[#34d399] font-medium transition-colors duration-200">
+            Explore Architecture →
+          </a>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ PRICING ============ -->
-  <section id="pricing" class="min-h-screen py-24 px-4 bg-cream">
-    <div class="max-w-7xl mx-auto">
-      <div class="text-center mb-16 fade-in-up">
-        <h2 class="text-4xl sm:text-6xl font-black mb-4">BUY YOUR DIGITAL TWIN</h2>
-        <p class="text-xl text-gray-600 max-w-2xl mx-auto">Starts as a rappter. Becomes more of yourself over time.</p>
+  <!-- ═══════════════════ PRICING ═══════════════════ -->
+  <section id="pricing" class="py-24 sm:py-32 relative overflow-hidden">
+    <!-- Green ambient glow -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#10b981]/5 rounded-full blur-[150px] pointer-events-none"></div>
+
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 relative z-10">
+      <div class="text-center mb-16 fade-in">
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">Your Digital Twin</h2>
+        <p class="text-[#a1a1aa] text-lg max-w-xl mx-auto">Starts as a rappter. Becomes more of yourself over time.</p>
       </div>
 
-      <!-- Pricing Cards -->
-      <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-8 mb-20 stagger-children">
-
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-20">
         <!-- Community -->
-        <div class="pricing-card bg-white border-[3px] border-brutal rounded-brutal-lg p-8 shadow-brutal flex flex-col">
-          <div class="mb-6">
-            <span class="inline-block bg-cream font-bold px-3 py-1 border-[2px] border-brutal rounded-brutal text-sm mb-3">Community</span>
-            <div class="text-4xl font-black">FREE</div>
-            <p class="text-gray-500 text-sm mt-1">forever</p>
-          </div>
-          <ul class="space-y-3 text-sm flex-1 mb-8">
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> openrappter open source</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> 22 agents, soul templates</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Dream mode, self-updating</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Community support via GitHub</li>
+        <div class="fade-in card-hover rounded-2xl bg-[#111113] p-6 flex flex-col">
+          <div class="text-xs font-mono text-[#71717a] tracking-widest uppercase mb-3">Community</div>
+          <h3 class="text-xl font-bold mb-1">Free forever</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Open source. 22 agents, full framework, no limits.</p>
+          <ul class="text-sm text-[#a1a1aa] space-y-2 mb-8 flex-1">
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Full agent framework</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> 22 built-in agents</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Community support</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> MIT License</li>
           </ul>
-          <button onclick="copyInstall(this)" class="brutal-btn w-full bg-white font-bold py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-center">
-            Install Free
-          </button>
+          <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="block text-center px-5 py-2.5 border border-[#27272a] text-[#fafafa] text-sm font-semibold rounded-xl hover:border-[#10b981] hover:text-[#10b981] transition-all duration-200">
+            Download Free
+          </a>
         </div>
 
-        <!-- Digital Twin Lease -->
-        <div class="pricing-card bg-white border-[3px] border-brutal rounded-brutal-lg p-8 shadow-brutal flex flex-col">
-          <div class="mb-6">
-            <span class="inline-block bg-accent/10 text-accent font-bold px-3 py-1 border-[2px] border-accent rounded-brutal text-sm mb-3">Digital Twin Lease</span>
-            <div class="text-4xl font-black">$2,000<span class="text-lg font-bold text-gray-500">/mo</span></div>
-          </div>
-          <ul class="space-y-3 text-sm flex-1 mb-8">
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Everything in Community</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Initial consultation + demo call</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Adapted to YOUR use case</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> We set it up, show you how</li>
-            <li class="flex items-start gap-2"><span class="text-gray-400">+</span> <span class="text-gray-500">Add'l services: $700/hr (min $2k)</span></li>
+        <!-- Digital Twin -->
+        <div class="fade-in card-hover rounded-2xl bg-[#111113] p-6 flex flex-col" style="transition-delay: 0.05s;">
+          <div class="text-xs font-mono text-[#8b5cf6] tracking-widest uppercase mb-3">Digital Twin</div>
+          <h3 class="text-xl font-bold mb-1">Built For You</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Initial consultation + demo. Adapted to YOUR use case.</p>
+          <ul class="text-sm text-[#a1a1aa] space-y-2 mb-8 flex-1">
+            <li class="flex items-center gap-2"><span class="text-[#8b5cf6]">✓</span> Personal consultation</li>
+            <li class="flex items-center gap-2"><span class="text-[#8b5cf6]">✓</span> Custom configuration</li>
+            <li class="flex items-center gap-2"><span class="text-[#8b5cf6]">✓</span> Tailored to your workflow</li>
+            <li class="flex items-center gap-2"><span class="text-[#8b5cf6]">✓</span> Live demo included</li>
           </ul>
-          <a href="https://rappter.com" target="_blank" class="brutal-btn w-full bg-accent text-white font-bold py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-center block">
+          <a href="https://rappter.com" target="_blank" class="block text-center px-5 py-2.5 border border-[#8b5cf6]/50 text-[#8b5cf6] text-sm font-semibold rounded-xl hover:bg-[#8b5cf6]/10 transition-all duration-200">
             Start Your Twin →
           </a>
         </div>
 
         <!-- White Glove (Featured) -->
-        <div class="pricing-card featured bg-brutal text-white border-[3px] border-accent rounded-brutal-lg p-8 shadow-brutal-accent flex flex-col relative">
-          <div class="absolute -top-4 left-1/2 -translate-x-1/2">
-            <span class="bg-accent text-white font-black px-4 py-1 border-[2px] border-brutal rounded-brutal text-sm">⭐ MOST POPULAR</span>
-          </div>
-          <div class="mb-6 mt-2">
-            <span class="inline-block bg-accent/20 text-accent font-bold px-3 py-1 border-[2px] border-accent rounded-brutal text-sm mb-3">White Glove</span>
-            <div class="text-4xl font-black">$20,000<span class="text-lg font-bold text-gray-400">/mo</span></div>
-          </div>
-          <ul class="space-y-3 text-sm flex-1 mb-8 text-gray-300">
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Everything in Digital Twin Lease</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Full white glove support for life</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Priority access, dedicated team</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Your rappter evolves with full backing</li>
+        <div class="fade-in rounded-2xl bg-[#111113] p-6 flex flex-col border-2 border-[#10b981]/50 glow-emerald relative" style="transition-delay: 0.1s;">
+          <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-[#10b981] text-[#09090b] text-xs font-bold rounded-full">POPULAR</div>
+          <div class="text-xs font-mono text-[#10b981] tracking-widest uppercase mb-3">White Glove</div>
+          <h3 class="text-xl font-bold mb-1">Full Partnership</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Dedicated support team. Continuous optimization.</p>
+          <ul class="text-sm text-[#a1a1aa] space-y-2 mb-8 flex-1">
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Dedicated support team</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Continuous optimization</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Priority feature requests</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Everything in Digital Twin</li>
           </ul>
-          <a href="https://rappter.com" target="_blank" class="brutal-btn w-full bg-accent text-white font-bold py-3 border-[3px] border-white rounded-brutal shadow-brutal-sm text-center block">
-            Contact Us →
+          <a href="https://rappter.com" target="_blank" class="block text-center px-5 py-2.5 bg-[#10b981] text-[#09090b] text-sm font-bold rounded-xl hover:bg-[#059669] transition-all duration-200">
+            Let's Talk →
           </a>
         </div>
 
         <!-- Own Your AI -->
-        <div class="pricing-card bg-white border-[3px] border-brutal rounded-brutal-lg p-8 shadow-brutal flex flex-col">
-          <div class="mb-6">
-            <span class="inline-block bg-yellow-100 text-yellow-800 font-bold px-3 py-1 border-[2px] border-yellow-600 rounded-brutal text-sm mb-3">🏠 Own Your AI</span>
-            <div class="text-3xl font-black">$100,000</div>
-            <p class="text-gray-500 text-sm mt-1">+ $20k/mo white glove</p>
-          </div>
-          <ul class="space-y-3 text-sm flex-1 mb-8">
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Full hardware + software purchase</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> AI lives on YOUR device — you own it</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Full maintenance with white glove</li>
-            <li class="flex items-start gap-2"><span class="text-accent font-bold">✓</span> Stop paying? You keep the AI.</li>
+        <div class="fade-in card-hover rounded-2xl bg-[#111113] p-6 flex flex-col" style="transition-delay: 0.15s; border-color: #eab30850;">
+          <div class="text-xs font-mono text-[#eab308] tracking-widest uppercase mb-3">Own Your AI</div>
+          <h3 class="text-xl font-bold mb-1">Total Ownership</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Hardware + software yours. Complete data sovereignty.</p>
+          <ul class="text-sm text-[#a1a1aa] space-y-2 mb-8 flex-1">
+            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Hardware included</li>
+            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Complete data sovereignty</li>
+            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Stop paying, keep everything</li>
+            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Everything in White Glove</li>
           </ul>
-          <a href="https://rappter.com" target="_blank" class="brutal-btn w-full bg-brutal text-white font-bold py-3 border-[3px] border-brutal rounded-brutal shadow-brutal-sm text-center block">
+          <a href="https://rappter.com" target="_blank" class="block text-center px-5 py-2.5 border border-[#eab308]/50 text-[#eab308] text-sm font-semibold rounded-xl hover:bg-[#eab308]/10 transition-all duration-200">
             Schedule Consultation →
           </a>
         </div>
       </div>
 
       <!-- FAQ -->
-      <div class="max-w-3xl mx-auto fade-in-up">
-        <h3 class="text-3xl font-black mb-8 text-center">FAQ</h3>
-        <div class="space-y-4" id="faq-container">
-          <div class="faq-item bg-white border-[3px] border-brutal rounded-brutal-lg shadow-brutal-sm overflow-hidden">
-            <button class="faq-toggle w-full flex items-center justify-between p-5 font-bold text-left text-lg" onclick="toggleFaq(this)">
-              What is a Digital Twin?
-              <span class="faq-chevron text-2xl">▾</span>
+      <div class="max-w-2xl mx-auto fade-in">
+        <h3 class="text-xl font-bold mb-6 text-center">Frequently Asked Questions</h3>
+
+        <div class="space-y-3">
+          <div class="border border-[#27272a] rounded-xl overflow-hidden bg-[#111113]">
+            <button onclick="toggleFaq(this)" class="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium hover:bg-[#18181b] transition-colors duration-200">
+              <span>What is a Digital Twin?</span>
+              <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="faq-answer px-5 pb-5">
-              <p class="text-gray-600">A Digital Twin is an AI agent that learns your preferences, communication style, decision-making patterns, and knowledge over time. It starts as a general-purpose rappter and gradually evolves to think and respond more like you — your own AI version of yourself.</p>
+            <div class="faq-answer">
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">A Digital Twin is an AI that learns your preferences, communication style, knowledge, and routines. Over time it becomes a reflection of you — capable of drafting emails in your voice, remembering context from months ago, and automating tasks the way you'd do them.</p>
             </div>
           </div>
-          <div class="faq-item bg-white border-[3px] border-brutal rounded-brutal-lg shadow-brutal-sm overflow-hidden">
-            <button class="faq-toggle w-full flex items-center justify-between p-5 font-bold text-left text-lg" onclick="toggleFaq(this)">
-              Can I cancel anytime?
-              <span class="faq-chevron text-2xl">▾</span>
+
+          <div class="border border-[#27272a] rounded-xl overflow-hidden bg-[#111113]">
+            <button onclick="toggleFaq(this)" class="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium hover:bg-[#18181b] transition-colors duration-200">
+              <span>What happens during the consultation?</span>
+              <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="faq-answer px-5 pb-5">
-              <p class="text-gray-600">Yes. All subscriptions are month-to-month with no long-term commitment. Cancel anytime. With the "Own Your AI" plan, if you stop paying the white glove fee, you keep the hardware and software — it's yours forever.</p>
+            <div class="faq-answer">
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">We learn about your workflow, tools, and goals. Then we configure your Digital Twin with the right agents, memory structure, and integrations. You get a live demo before committing to anything.</p>
             </div>
           </div>
-          <div class="faq-item bg-white border-[3px] border-brutal rounded-brutal-lg shadow-brutal-sm overflow-hidden">
-            <button class="faq-toggle w-full flex items-center justify-between p-5 font-bold text-left text-lg" onclick="toggleFaq(this)">
-              What happens if I stop paying White Glove?
-              <span class="faq-chevron text-2xl">▾</span>
+
+          <div class="border border-[#27272a] rounded-xl overflow-hidden bg-[#111113]">
+            <button onclick="toggleFaq(this)" class="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium hover:bg-[#18181b] transition-colors duration-200">
+              <span>Is my data private?</span>
+              <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="faq-answer px-5 pb-5">
-              <p class="text-gray-600">Your rappter keeps working. The open-source core is always free. You lose priority support and active evolution assistance, but your AI, memories, and customizations remain intact. You can always re-subscribe.</p>
+            <div class="faq-answer">
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">Yes. Everything runs locally on your machine. No data is sent to any cloud service. If you use local models (Ollama), nothing ever leaves your device. Even with cloud LLM providers, your memory stays on-device.</p>
             </div>
           </div>
-          <div class="faq-item bg-white border-[3px] border-brutal rounded-brutal-lg shadow-brutal-sm overflow-hidden">
-            <button class="faq-toggle w-full flex items-center justify-between p-5 font-bold text-left text-lg" onclick="toggleFaq(this)">
-              Is my data private?
-              <span class="faq-chevron text-2xl">▾</span>
+
+          <div class="border border-[#27272a] rounded-xl overflow-hidden bg-[#111113]">
+            <button onclick="toggleFaq(this)" class="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium hover:bg-[#18181b] transition-colors duration-200">
+              <span>What if I stop paying?</span>
+              <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="faq-answer px-5 pb-5">
-              <p class="text-gray-600">100%. openrappter is local-first. All memories, configs, and agent data live on YOUR machine. Nothing is sent to our servers. The AI runs through your own GitHub Copilot subscription — we never see your data.</p>
+            <div class="faq-answer">
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">You keep everything. The software, the data, the agents — it's all on your machine. The Community edition is free and open source forever. Paid tiers add support and customization, not lock-in.</p>
             </div>
           </div>
-          <div class="faq-item bg-white border-[3px] border-brutal rounded-brutal-lg shadow-brutal-sm overflow-hidden">
-            <button class="faq-toggle w-full flex items-center justify-between p-5 font-bold text-left text-lg" onclick="toggleFaq(this)">
-              What's included in the consultation?
-              <span class="faq-chevron text-2xl">▾</span>
+
+          <div class="border border-[#27272a] rounded-xl overflow-hidden bg-[#111113]">
+            <button onclick="toggleFaq(this)" class="w-full flex items-center justify-between px-5 py-4 text-left text-sm font-medium hover:bg-[#18181b] transition-colors duration-200">
+              <span>Can I try before committing?</span>
+              <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="faq-answer px-5 pb-5">
-              <p class="text-gray-600">A 1-hour deep dive into your workflow, goals, and use case. We then configure your Digital Twin with custom soul templates, agents, and integrations tailored to you. Followed by a demo call where we hand it off and teach you everything.</p>
+            <div class="faq-answer">
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">Absolutely. Download the free Community edition and use it as long as you want. The paid tiers are for people who want a fully customized, professionally configured Digital Twin.</p>
             </div>
           </div>
         </div>
@@ -627,286 +830,207 @@
     </div>
   </section>
 
-  <!-- ============ SOCIAL PROOF ============ -->
-  <section id="community" class="min-h-screen py-24 px-4 bg-white">
-    <div class="max-w-7xl mx-auto">
-      <div class="text-center mb-16 fade-in-up">
-        <h2 class="text-4xl sm:text-5xl font-black mb-4">Built by Developers, for Developers 🛠</h2>
-        <p class="text-xl text-gray-600 max-w-2xl mx-auto">Join a growing community of people building their Digital Twins.</p>
+  <!-- ═══════════════════ FINAL CTA ═══════════════════ -->
+  <section class="py-24 sm:py-32 relative overflow-hidden">
+    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-[#8b5cf6]/5 rounded-full blur-[120px] pointer-events-none"></div>
+
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 relative z-10">
+      <div class="text-center mb-14 fade-in">
+        <h2 class="text-3xl sm:text-5xl font-black mb-4">Ready to meet your Twin?</h2>
+        <p class="text-[#a1a1aa] text-lg">Choose your path.</p>
       </div>
 
-      <!-- GitHub Stats -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mb-16 stagger-children">
-        <div class="bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 text-center shadow-brutal-sm">
-          <div class="text-4xl font-black text-accent">⭐ 1.2k</div>
-          <p class="font-bold text-gray-600 mt-1">GitHub Stars</p>
-        </div>
-        <div class="bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 text-center shadow-brutal-sm">
-          <div class="text-4xl font-black text-accent">🍴 340</div>
-          <p class="font-bold text-gray-600 mt-1">Forks</p>
-        </div>
-        <div class="bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 text-center shadow-brutal-sm">
-          <div class="text-4xl font-black text-accent">👥 85</div>
-          <p class="font-bold text-gray-600 mt-1">Contributors</p>
-        </div>
-        <div class="bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 text-center shadow-brutal-sm">
-          <div class="text-4xl font-black text-accent">✅ 2.8k</div>
-          <p class="font-bold text-gray-600 mt-1">Tests Passing</p>
-        </div>
-      </div>
-
-      <!-- ROI Metrics -->
-      <div class="grid md:grid-cols-2 gap-8 mb-16 stagger-children">
-        <div class="brutal-card bg-accent/5 border-[3px] border-accent rounded-brutal-lg p-8 shadow-brutal-sm">
-          <div class="text-5xl font-black text-accent mb-2">83%</div>
-          <h4 class="font-black text-xl mb-2">Memory Bloat Reduction</h4>
-          <p class="text-gray-600">On first Dream run, openrappter deduplicates and prunes 83% of redundant memories — keeping your twin lean and fast.</p>
-        </div>
-        <div class="brutal-card bg-accent/5 border-[3px] border-accent rounded-brutal-lg p-8 shadow-brutal-sm">
-          <div class="text-5xl font-black text-accent mb-2">30</div>
-          <h4 class="font-black text-xl mb-2">Features in 30 Days</h4>
-          <p class="text-gray-600">Our onboarding tip system teaches you one powerful feature daily. By month's end, you're a power user.</p>
-        </div>
-      </div>
-
-      <!-- Testimonials -->
-      <div class="grid md:grid-cols-3 gap-8 mb-16 stagger-children">
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 bg-accent rounded-full border-[2px] border-brutal flex items-center justify-center text-white font-bold">M</div>
-            <div>
-              <p class="font-bold">Marcus R.</p>
-              <p class="text-gray-500 text-sm">Senior DevOps Engineer</p>
-            </div>
-          </div>
-          <p class="text-gray-700">"I set up openrappter on Friday. By Monday, it was drafting my PR reviews and Slack responses in my voice. Genuinely uncanny."</p>
-          <div class="mt-3 text-accent">★★★★★</div>
-        </div>
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 bg-purple-500 rounded-full border-[2px] border-brutal flex items-center justify-center text-white font-bold">S</div>
-            <div>
-              <p class="font-bold">Sarah K.</p>
-              <p class="text-gray-500 text-sm">Startup CTO</p>
-            </div>
-          </div>
-          <p class="text-gray-700">"Dream mode is magic. My memory store went from 4,000 entries to 680 clean, contextual memories. It's like a brain defrag."</p>
-          <div class="mt-3 text-accent">★★★★★</div>
-        </div>
-        <div class="brutal-card bg-cream border-[3px] border-brutal rounded-brutal-lg p-6 shadow-brutal-sm">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-10 h-10 bg-orange-500 rounded-full border-[2px] border-brutal flex items-center justify-center text-white font-bold">J</div>
-            <div>
-              <p class="font-bold">James T.</p>
-              <p class="text-gray-500 text-sm">Independent Researcher</p>
-            </div>
-          </div>
-          <p class="text-gray-700">"The Ouroboros evolution is insane — my rappter rewrote its own web scraping agent to be 3x faster after two generations."</p>
-          <div class="mt-3 text-accent">★★★★★</div>
-        </div>
-      </div>
-
-      <!-- Partner Logos Placeholder -->
-      <div class="fade-in-up">
-        <p class="text-center text-gray-400 font-bold text-sm uppercase tracking-widest mb-8">Integrations &amp; Partners</p>
-        <div class="flex flex-wrap justify-center items-center gap-8 opacity-40">
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">GitHub</div>
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">Telegram</div>
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">Slack</div>
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">Discord</div>
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">VS Code</div>
-          <div class="bg-gray-200 border-[2px] border-gray-300 rounded-brutal px-6 py-3 font-bold text-gray-500">Teams</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ FOOTER ============ -->
-  <footer class="bg-brutal text-white py-16 px-4 border-t-[4px] border-accent">
-    <div class="max-w-7xl mx-auto">
-      <div class="grid md:grid-cols-3 gap-12 mb-12">
-        <!-- Brand -->
-        <div>
-          <div class="flex items-center gap-2 font-black text-2xl mb-4">
-            <span class="text-3xl">🦖</span>
-            <span>openrappter</span>
-          </div>
-          <p class="text-gray-400 mb-6">Your AI Agent. Your Digital Twin. Local-first, open source, evolving.</p>
-          <a href="https://rappter.com" target="_blank" class="brutal-btn inline-block bg-accent text-white font-bold px-5 py-2 border-[3px] border-white rounded-brutal shadow-brutal-sm">
-            rappter.com →
+      <div class="grid sm:grid-cols-2 gap-6 mb-14">
+        <!-- Non-technical -->
+        <div class="fade-in card-hover rounded-2xl bg-[#111113] p-8 text-center">
+          <div class="text-4xl mb-4">🖥️</div>
+          <h3 class="text-lg font-bold mb-2">Non-technical?</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6">Download the Mac app. Click the 🦖. Start chatting.</p>
+          <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="inline-flex items-center gap-2 px-6 py-3 bg-[#10b981] text-[#09090b] font-bold rounded-xl hover:bg-[#059669] transition-all duration-200 glow-emerald">
+            Download for Mac →
           </a>
         </div>
+        <!-- Developer -->
+        <div class="fade-in card-hover rounded-2xl bg-[#111113] p-8 text-center" style="transition-delay: 0.1s;">
+          <div class="text-4xl mb-4">⚡</div>
+          <h3 class="text-lg font-bold mb-2">Developer?</h3>
+          <p class="text-sm text-[#a1a1aa] mb-6">One command. Full framework. Start building.</p>
+          <div class="bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto">
+            <span class="text-[#10b981]">$</span> curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
+          </div>
+        </div>
+      </div>
 
-        <!-- Links -->
+      <!-- Newsletter -->
+      <div class="text-center fade-in">
+        <p class="text-[#71717a] text-sm mb-3">Stay in the loop 🦖</p>
+        <a href="https://rappter.beehiiv.com/" target="_blank" class="inline-flex items-center gap-2 px-6 py-2.5 border border-[#27272a] text-[#a1a1aa] text-sm font-medium rounded-xl hover:border-[#10b981] hover:text-[#10b981] transition-all duration-200">
+          Subscribe to updates →
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ FOOTER ═══════════════════ -->
+  <footer class="border-t border-[#27272a] py-12">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
+        <!-- Brand -->
         <div>
-          <h4 class="font-black text-lg mb-4">Resources</h4>
-          <ul class="space-y-2 text-gray-400">
-            <li><a href="https://github.com/kody-w/openrappter" target="_blank" class="hover:text-accent transition-colors">GitHub</a></li>
-            <li><a href="docs.html" class="hover:text-accent transition-colors">Documentation</a></li>
-            <li><a href="architecture.html" class="hover:text-accent transition-colors">Architecture</a></li>
-            <li><a href="tutorial.html" class="hover:text-accent transition-colors">Tutorial</a></li>
-            <li><a href="changelog.html" class="hover:text-accent transition-colors">Changelog</a></li>
-            <li><a href="https://rappter.com" target="_blank" class="hover:text-accent transition-colors">RappterHub</a></li>
+          <div class="flex items-center gap-2 text-lg font-bold mb-3">
+            <span>🦖</span> openrappter
+          </div>
+          <p class="text-sm text-[#71717a] leading-relaxed">Your AI that becomes you. Free, open source, and private by default.</p>
+        </div>
+
+        <!-- Product -->
+        <div>
+          <h4 class="text-sm font-semibold text-[#a1a1aa] mb-3">Product</h4>
+          <ul class="space-y-2 text-sm text-[#71717a]">
+            <li><a href="https://github.com/kody-w/openrappter" target="_blank" class="hover:text-[#fafafa] transition-colors duration-200">GitHub</a></li>
+            <li><a href="docs.html" class="hover:text-[#fafafa] transition-colors duration-200">Docs</a></li>
+            <li><a href="architecture.html" class="hover:text-[#fafafa] transition-colors duration-200">Architecture</a></li>
+            <li><a href="tutorial.html" class="hover:text-[#fafafa] transition-colors duration-200">Tutorial</a></li>
           </ul>
         </div>
 
-        <!-- Newsletter -->
+        <!-- Resources -->
         <div>
-          <h4 class="font-black text-lg mb-4">Stay Updated</h4>
-          <p class="text-gray-400 mb-4">Get tips, updates, and early access to new features.</p>
-          <div class="bg-[#1a1a1a] border-[2px] border-gray-700 rounded-brutal p-3">
-            <iframe data-tally-src="https://tally.so/embed/3y9bb0?alignLeft=1&hideTitle=1&transparentBackground=1&dynamicHeight=1" width="100%" height="52" frameborder="0" title="Newsletter signup"></iframe>
-          </div>
+          <h4 class="text-sm font-semibold text-[#a1a1aa] mb-3">Resources</h4>
+          <ul class="space-y-2 text-sm text-[#71717a]">
+            <li><a href="changelog.html" class="hover:text-[#fafafa] transition-colors duration-200">Changelog</a></li>
+            <li><a href="https://rappter.com" target="_blank" class="hover:text-[#fafafa] transition-colors duration-200">rappter.com</a></li>
+            <li><a href="https://rappter.beehiiv.com/" target="_blank" class="hover:text-[#fafafa] transition-colors duration-200">Newsletter</a></li>
+          </ul>
+        </div>
+
+        <!-- Connect -->
+        <div>
+          <h4 class="text-sm font-semibold text-[#a1a1aa] mb-3">Connect</h4>
+          <ul class="space-y-2 text-sm text-[#71717a]">
+            <li><a href="https://github.com/kody-w/openrappter/releases?q=bar" class="hover:text-[#fafafa] transition-colors duration-200">Download for Mac</a></li>
+            <li><a href="https://github.com/kody-w/openrappter" target="_blank" class="hover:text-[#fafafa] transition-colors duration-200">Star on GitHub</a></li>
+          </ul>
         </div>
       </div>
 
-      <!-- Bottom -->
-      <div class="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <p class="text-gray-500 text-sm">Built with 🦖 by Kody W</p>
-        <p class="text-gray-500 text-sm">© 2024 openrappter · MIT License</p>
+      <div class="pt-8 border-t border-[#27272a] flex flex-col sm:flex-row items-center justify-between gap-4">
+        <p class="text-xs text-[#71717a]">Built with 🦖 by Kody W &ensp;•&ensp; © 2026</p>
+        <p class="text-xs text-[#71717a]">Free &amp; open source under MIT License</p>
       </div>
     </div>
   </footer>
 
-  <!-- ============ SCRIPTS ============ -->
+  <!-- ═══════════════════ JAVASCRIPT ═══════════════════ -->
   <script>
-    // Tally embed
-    var d=document,w="https://tally.so/widgets/embed.js",v=function(){"undefined"!=typeof Tally?Tally.loadEmbeds():d.querySelectorAll("iframe[data-tally-src]:not([src])").forEach((function(e){e.src=e.dataset.tallySrc}))};if("undefined"!=typeof Tally)v();else if(d.querySelector('script[src="'+w+'"]')==null){var s=d.createElement("script");s.src=w;s.onload=v;s.onerror=v;d.body.appendChild(s)}
-  </script>
-  <script>
-    // Mobile menu
-    const menuToggle = document.getElementById('menu-toggle');
-    const menuClose = document.getElementById('menu-close');
-    const mobileMenu = document.getElementById('mobile-menu');
-    menuToggle.addEventListener('click', () => mobileMenu.classList.add('open'));
-    menuClose.addEventListener('click', () => mobileMenu.classList.remove('open'));
-    function closeMobileMenu() { mobileMenu.classList.remove('open'); }
+    // 1. Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const menuIcon = document.getElementById('menuIcon');
+    let menuOpen = false;
 
-    // Intersection Observer for scroll animations
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
-        }
+    mobileMenuBtn.addEventListener('click', () => {
+      menuOpen = !menuOpen;
+      mobileMenu.classList.toggle('hidden');
+      menuIcon.setAttribute('d', menuOpen ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16');
+    });
+
+    // Close mobile menu on link click
+    mobileMenu.querySelectorAll('a[href^="#"]').forEach(link => {
+      link.addEventListener('click', () => {
+        mobileMenu.classList.add('hidden');
+        menuOpen = false;
+        menuIcon.setAttribute('d', 'M4 6h16M4 12h16M4 18h16');
       });
-    }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
-    document.querySelectorAll('.fade-in-up, .stagger-children').forEach(el => observer.observe(el));
+    });
 
-    // Copy install command
-    function copyInstall(btn) {
+    // 2. Copy install command to clipboard
+    function copyInstallCmd() {
       const cmd = 'curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash';
       navigator.clipboard.writeText(cmd).then(() => {
-        const orig = btn.textContent;
-        btn.textContent = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2000);
+        const copyText = document.getElementById('copyText');
+        copyText.textContent = 'Copied!';
+        setTimeout(() => { copyText.textContent = 'Copy'; }, 2000);
       });
     }
 
-    // Code demo toggle
-    function toggleCodeDemo() {
-      const demo = document.getElementById('code-demo');
-      const btn = document.getElementById('code-toggle');
-      if (demo.style.maxHeight === '0px') {
-        demo.style.maxHeight = '500px';
-        demo.style.opacity = '1';
-        btn.textContent = 'Hide Terminal ▲';
-      } else {
-        demo.style.maxHeight = '0px';
-        demo.style.opacity = '0';
-        btn.textContent = 'Show Terminal ▼';
-      }
+    // 3. Terminal tab switching
+    function switchTerminalTab(tab) {
+      document.querySelectorAll('.terminal-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.terminal-tab').forEach(el => {
+        el.classList.remove('bg-[#18181b]', 'text-[#fafafa]');
+        el.classList.add('text-[#71717a]');
+      });
+
+      document.getElementById('content-' + tab).classList.remove('hidden');
+      const activeBtn = tab === 'getting-started'
+        ? document.getElementById('tabGettingStarted')
+        : document.getElementById('tabPowerFeatures');
+      activeBtn.classList.add('bg-[#18181b]', 'text-[#fafafa]');
+      activeBtn.classList.remove('text-[#71717a]');
     }
 
-    // FAQ accordion
+    // 4. FAQ accordion
     function toggleFaq(btn) {
-      const item = btn.closest('.faq-item');
-      const wasOpen = item.classList.contains('open');
-      document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
-      if (!wasOpen) item.classList.add('open');
-    }
+      const answer = btn.nextElementSibling;
+      const chevron = btn.querySelector('.faq-chevron');
+      const isOpen = answer.classList.contains('open');
 
-    // Terminal typing demo
-    const demoCommands = [
-      {
-        cmd: 'openrappter "remember that I prefer dark mode"',
-        output: ['🦖 Remembered: "prefer dark mode"', '']
-      },
-      {
-        cmd: 'openrappter --exec Dream "audit"',
-        output: ['🦖 Auditing memories...', '🦖 123 memories → 21 unique (83% bloat removed)', '']
-      },
-      {
-        cmd: 'openrappter --exec LearnNew "Create an agent that monitors my git repos"',
-        output: ['🦖 Analyzing request...', '🦖 Building agent scaffold...', '🦖 Created and loaded agent \'GitMonitor\'', '']
-      }
-    ];
+      // Close all
+      document.querySelectorAll('.faq-answer').forEach(a => a.classList.remove('open'));
+      document.querySelectorAll('.faq-chevron').forEach(c => c.style.transform = '');
 
-    let demoIdx = 0;
-    const demoOutput = document.getElementById('demo-output');
-    const demoCursor = document.getElementById('demo-cursor');
-
-    function typeCommand(cmd, idx, cb) {
-      if (idx <= cmd.length) {
-        demoCursor.textContent = cmd.substring(0, idx);
-        setTimeout(() => typeCommand(cmd, idx + 1, cb), 35);
-      } else {
-        cb();
+      if (!isOpen) {
+        answer.classList.add('open');
+        chevron.style.transform = 'rotate(180deg)';
       }
     }
 
-    function showOutput(lines, idx, cb) {
-      if (idx < lines.length) {
-        const line = lines[idx];
-        if (line === '') {
-          setTimeout(() => showOutput(lines, idx + 1, cb), 300);
-          return;
-        }
-        const p = document.createElement('p');
-        p.className = line.startsWith('🦖') ? 'text-accent' : 'text-gray-400';
-        p.textContent = line;
-        demoOutput.appendChild(p);
-        setTimeout(() => showOutput(lines, idx + 1, cb), 400);
-      } else {
-        cb();
-      }
-    }
-
-    function runDemo() {
-      const { cmd, output } = demoCommands[demoIdx % demoCommands.length];
-      demoCursor.textContent = '';
-      typeCommand(cmd, 0, () => {
-        // Add the command line to output
-        const cmdLine = document.createElement('p');
-        cmdLine.innerHTML = '<span class="text-accent">$</span> <span class="text-white">' + cmd + '</span>';
-        demoOutput.appendChild(cmdLine);
-        demoCursor.textContent = '';
-        showOutput(output, 0, () => {
-          demoIdx++;
-          if (demoIdx < demoCommands.length * 2) {
-            setTimeout(runDemo, 1500);
-          } else {
-            // Reset and loop
-            setTimeout(() => {
-              demoOutput.innerHTML = '';
-              demoIdx = 0;
-              runDemo();
-            }, 3000);
-          }
-        });
-      });
-    }
-
-    // Start demo when section is visible
-    const demoObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
+    // 5. IntersectionObserver fade-in on scroll (staggered)
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry, i) => {
         if (entry.isIntersecting) {
-          runDemo();
-          demoObserver.disconnect();
+          const delay = parseFloat(entry.target.style.transitionDelay) || 0;
+          setTimeout(() => {
+            entry.target.classList.add('visible');
+          }, delay * 1000);
+          observer.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.3 });
-    demoObserver.observe(document.getElementById('terminal-demo'));
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+    // 6. Smooth scroll anchors
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function(e) {
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+
+    // 7. Nav opacity on scroll
+    const nav = document.getElementById('mainNav');
+    let lastScroll = 0;
+
+    window.addEventListener('scroll', () => {
+      const scrollY = window.scrollY;
+      if (scrollY > 50) {
+        nav.style.backgroundColor = 'rgba(9, 9, 11, 0.8)';
+        nav.style.backdropFilter = 'blur(20px)';
+        nav.style.WebkitBackdropFilter = 'blur(20px)';
+        nav.style.borderBottomColor = '#27272a';
+      } else {
+        nav.style.backgroundColor = 'transparent';
+        nav.style.backdropFilter = 'none';
+        nav.style.WebkitBackdropFilter = 'none';
+        nav.style.borderBottomColor = 'transparent';
+      }
+      lastScroll = scrollY;
+    }, { passive: true });
   </script>
 </body>
 </html>

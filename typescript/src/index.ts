@@ -212,10 +212,13 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     server.setCronService({
       list: () => cronService.listJobs().map(j => ({
         id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled,
+        command: j.message || '', agentId: j.agentId || '',
+        lastRun: j.lastRun || null, nextRun: j.nextRun || null,
       })),
       run: async (id: string) => { await cronService.executeJob(id, 'force'); },
       enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
       disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+      getRunLogs: (jobId?: string) => cronService.getRunLogs(jobId),
     });
     // Send cron job results to Telegram when connected
     const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';

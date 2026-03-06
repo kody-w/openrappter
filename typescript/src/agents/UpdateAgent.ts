@@ -9,6 +9,7 @@
 
 import { execSync } from 'child_process';
 import fs from 'fs/promises';
+import { readFileSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
@@ -71,7 +72,7 @@ export class UpdateAgent extends BasicAgent {
   private getLocalVersion(): string {
     try {
       const pkg = JSON.parse(
-        require('fs').readFileSync(path.join(this.tsDir, LOCAL_VERSION_FILE), 'utf-8'),
+        readFileSync(path.join(this.tsDir, LOCAL_VERSION_FILE), 'utf-8'),
       );
       return pkg.version || '0.0.0';
     } catch {
@@ -90,7 +91,7 @@ export class UpdateAgent extends BasicAgent {
     return new Promise((resolve) => {
       const options = {
         hostname: 'api.github.com',
-        path: `/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`,
+        path: `/repos/${REPO_OWNER}/${REPO_NAME}/releases?per_page=10`,
         method: 'GET',
         headers: {
           'User-Agent': 'openrappter-updater',
@@ -103,17 +104,21 @@ export class UpdateAgent extends BasicAgent {
         res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
         res.on('end', () => {
           try {
-            const release = JSON.parse(data);
-            if (!release.tag_name) { resolve(null); return; }
-            // Strip 'v' prefix from tag
-            const version = release.tag_name.replace(/^v/, '');
+            const releases = JSON.parse(data);
+            if (!Array.isArray(releases)) { resolve(null); return; }
+            // Find first non-bar, non-prerelease, non-draft release
+            const release = releases.find((r: Record<string, unknown>) =>
+              r.tag_name && !(r.tag_name as string).includes('-bar') && !r.draft && !r.prerelease
+            );
+            if (!release) { resolve(null); return; }
+            const version = (release.tag_name as string).replace(/^v/, '');
             resolve({
-              tag: release.tag_name,
+              tag: release.tag_name as string,
               version,
-              name: release.name || release.tag_name,
-              body: release.body || '',
-              published: release.published_at || '',
-              url: release.html_url || '',
+              name: (release.name as string) || release.tag_name as string,
+              body: (release.body as string) || '',
+              published: (release.published_at as string) || '',
+              url: (release.html_url as string) || '',
             });
           } catch {
             resolve(null);
@@ -148,16 +153,6 @@ export class UpdateAgent extends BasicAgent {
         status: 'error',
         message: 'Could not reach GitHub API. Check your internet connection.',
         local_version: local,
-      });
-    }
-
-    // Skip bar-only releases
-    if (latest.tag.includes('-bar')) {
-      return JSON.stringify({
-        status: 'up_to_date',
-        local_version: local,
-        latest_version: local,
-        message: 'You are on the latest version.',
       });
     }
 

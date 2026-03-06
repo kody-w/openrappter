@@ -101,6 +101,7 @@ export class GatewayServer {
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
+    getRunLogs?(jobId?: string): unknown[];
   };
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
@@ -208,6 +209,7 @@ export class GatewayServer {
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
+    getRunLogs?(jobId?: string): unknown[];
   }): void {
     this.cronService = service;
   }
@@ -824,6 +826,57 @@ export class GatewayServer {
       else await this.cronService.disable(params.jobId);
       return { enabled: params.enabled };
     }, { requiresAuth: true });
+
+    // ── Cron method aliases (menu bar app uses different names) ──
+    this.registerMethod('cron.create', async (params: Record<string, unknown>) => {
+      const job = { id: `cron_${randomUUID().slice(0, 8)}`, ...params };
+      this.cronStore.push(job);
+      this.saveCronStore();
+      return job;
+    }, { requiresAuth: true });
+    this.registerMethod('cron.delete', async (params: { jobId: string }) => {
+      this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== params.jobId);
+      this.saveCronStore();
+      return { removed: true };
+    }, { requiresAuth: true });
+    this.registerMethod('cron.trigger', async (params: { jobId: string }) => {
+      if (this.cronService) {
+        await this.cronService.run(params.jobId);
+        return { triggered: true };
+      }
+      throw new Error('No cron service configured');
+    }, { requiresAuth: true });
+    this.registerMethod('cron.pause', async (params: { jobId: string }) => {
+      if (this.cronService) { await this.cronService.disable(params.jobId); }
+      else {
+        const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId) as Record<string, unknown> | undefined;
+        if (job) { job.enabled = false; this.saveCronStore(); }
+      }
+      return { enabled: false };
+    }, { requiresAuth: true });
+    this.registerMethod('cron.resume', async (params: { jobId: string }) => {
+      if (this.cronService) { await this.cronService.enable(params.jobId); }
+      else {
+        const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId) as Record<string, unknown> | undefined;
+        if (job) { job.enabled = true; this.saveCronStore(); }
+      }
+      return { enabled: true };
+    }, { requiresAuth: true });
+    this.registerMethod('cron.get', async (params: { jobId: string }) => {
+      const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId);
+      if (!job) throw new Error(`Job not found: ${params.jobId}`);
+      return job;
+    });
+    this.registerMethod('cron.logs', async (params: Record<string, unknown>) => {
+      if (this.cronService) {
+        const svc = this.cronService as unknown as { getRunLogs?: (jobId?: string) => unknown[] };
+        if (svc.getRunLogs) {
+          const logs = svc.getRunLogs(params.jobId as string | undefined);
+          return { runs: logs };
+        }
+      }
+      return { runs: [] };
+    });
 
     // Connection methods
     this.registerMethod('connections.list', async () => {

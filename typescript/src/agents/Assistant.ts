@@ -161,12 +161,22 @@ export class Assistant {
 
         // Execute each tool call
         for (const tc of response.tool_calls) {
-          const result = await this.executeToolCall(tc);
-          history.push({
-            role: 'tool',
-            content: result,
-            tool_call_id: tc.id,
-          });
+          try {
+            const result = await this.executeToolCall(tc);
+            history.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: tc.id,
+            });
+          } catch (err) {
+            // Always push a tool response — even on error — to prevent
+            // "tool_call_id did not have response" API errors
+            history.push({
+              role: 'tool',
+              content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
+              tool_call_id: tc.id,
+            });
+          }
         }
 
         // Continue the loop — LLM may want to call more tools or produce final answer
@@ -313,12 +323,20 @@ export class Assistant {
         });
 
         for (const tc of assembledToolCalls) {
-          const result = await this.executeToolCall(tc);
-          history.push({
-            role: 'tool',
-            content: result,
-            tool_call_id: tc.id,
-          });
+          try {
+            const result = await this.executeToolCall(tc);
+            history.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: tc.id,
+            });
+          } catch (err) {
+            history.push({
+              role: 'tool',
+              content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
+              tool_call_id: tc.id,
+            });
+          }
         }
 
         continue;

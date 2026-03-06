@@ -210,8 +210,34 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         let response = try await connection.sendRequest(method: "cron.list")
         guard response.ok else { throw RpcClientError.decodingFailed("Failed to list cron jobs") }
         let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let jobs = try? JSONDecoder().decode([CronJob].self, from: data) {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let str = try? container.decode(String.self) {
+                let fmt = ISO8601DateFormatter()
+                fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                return fmt.date(from: str) ?? Date()
+            }
+            if let _ = try? container.decodeNil() { return Date.distantPast }
+            return Date()
+        }
+        if let jobs = try? decoder.decode([CronJob].self, from: data) {
             return jobs
+        }
+        // Fallback: manually parse each job, skipping fields that fail
+        if let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return array.compactMap { dict in
+                guard let id = dict["id"] as? String,
+                      let name = dict["name"] as? String,
+                      let schedule = dict["schedule"] as? String else { return nil }
+                return CronJob(
+                    id: id,
+                    name: name,
+                    schedule: schedule,
+                    command: (dict["command"] as? String) ?? (dict["message"] as? String) ?? "",
+                    enabled: (dict["enabled"] as? Bool) ?? true
+                )
+            }
         }
         return []
     }

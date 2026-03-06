@@ -414,8 +414,11 @@ program
     }
 
     if (options.daemon) {
-      const { port } = await startGatewayInProcess();
+      const webRoot = path.resolve(__dirname, '../ui/dist');
+      const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
+      const { port } = await startGatewayInProcess(hasWebUI ? { webRoot } : undefined);
       console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
+      if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
       console.log('Press Ctrl+C to stop\n');
       return;
     }

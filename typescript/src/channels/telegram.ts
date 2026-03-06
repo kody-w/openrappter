@@ -21,6 +21,7 @@ export class TelegramChannel extends BaseChannel {
   private config: TelegramConfig;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private offset = 0;
+  private isPolling = false;
   private botInfo: { id: number; username: string } | null = null;
 
   constructor(config: TelegramConfig) {
@@ -244,6 +245,8 @@ export class TelegramChannel extends BaseChannel {
   }
 
   private async pollUpdates(): Promise<void> {
+    if (this.isPolling) return; // prevent overlapping polls
+    this.isPolling = true;
     try {
       const result = await this.callApi('getUpdates', {
         offset: this.offset,
@@ -259,6 +262,8 @@ export class TelegramChannel extends BaseChannel {
       }
     } catch {
       // Polling errors are non-fatal
+    } finally {
+      this.isPolling = false;
     }
   }
 

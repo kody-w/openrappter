@@ -33,6 +33,8 @@ public struct ChatContainerView: View {
         VStack(spacing: 0) {
             panelHeader
             Divider()
+            quickActions
+            Divider()
 
             ChatMessageList(
                 messages: viewModel.chatViewModel.messages,
@@ -162,6 +164,54 @@ public struct ChatContainerView: View {
     private var chatInput: some View {
         ChatInputView(viewModel: viewModel)
             .padding(12)
+    }
+
+    // MARK: - Quick Actions
+
+    private var quickActions: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                quickActionButton(icon: "brain.head.profile", label: "Dream", color: .purple) {
+                    viewModel.chatViewModel.chatInput = "Run Dream mode — consolidate and clean up my memory"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionButton(icon: "sun.horizon.fill", label: "Brief", color: .orange) {
+                    viewModel.chatViewModel.chatInput = "Run my morning briefing — weather, calendar, priorities"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionButton(icon: "list.bullet.clipboard", label: "Status", color: .blue) {
+                    viewModel.chatViewModel.chatInput = "Show me the current status — what agents are loaded, how many memories, any cron jobs running"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionButton(icon: "brain", label: "Memory", color: .green) {
+                    viewModel.chatViewModel.chatInput = "List all my memories"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionButton(icon: "arrow.triangle.2.circlepath", label: "Update", color: .cyan) {
+                    viewModel.chatViewModel.chatInput = "Check if there are any updates available for openrappter"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionButton(icon: "newspaper", label: "HN", color: .red) {
+                    viewModel.chatViewModel.chatInput = "Get the top 5 Hacker News stories right now"; viewModel.chatViewModel.sendMessage()
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
+    }
+
+    private func quickActionButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .foregroundStyle(color)
+                Text(label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 48, height: 40)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Sessions Sidebar

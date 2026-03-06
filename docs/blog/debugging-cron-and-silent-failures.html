@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What Broke When We Shipped Cron Jobs (And What We Learned) — openrappter engineering</title>
+<meta name="description" content="Shipping a cron system that actually fires, debugging silent JSON decode failures in Swift, and why your tool_calls need try/catch.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { cream: '#fffdf7', accent: '#10b981', editor: '#0d1117' },
+    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Inter', 'system-ui', 'sans-serif'] }
+  }}
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-cream text-black font-sans">
+
+<nav class="sticky top-0 z-50 bg-white border-b-[3px] border-black px-6 py-4">
+  <div class="max-w-3xl mx-auto flex items-center justify-between">
+    <a href="../" class="text-xl font-black">🦖 openrappter</a>
+    <div class="flex items-center gap-4 text-sm font-semibold">
+      <a href="../" class="hover:text-accent">Home</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-accent">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<article class="max-w-3xl mx-auto px-6 py-16">
+
+  <div class="mb-12">
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <span class="inline-block px-3 py-1 border-2 border-black rounded-full text-xs font-bold bg-accent/10 text-accent">Engineering</span>
+      <span class="inline-block px-3 py-1 border-2 border-black rounded-full text-xs font-bold">March 6, 2026</span>
+    </div>
+    <h1 class="text-4xl md:text-5xl font-black leading-tight mb-6">
+      What Broke When We Shipped Cron Jobs<br>(And What We Learned)
+    </h1>
+    <p class="text-xl text-gray-600 leading-relaxed">
+      We built a cron system, a menu bar app, and 22 agents. Then we discovered that "it works on my machine" means nothing when the daemon runs at 3am and nobody's watching. Here are the real bugs and the real fixes.
+    </p>
+  </div>
+
+  <div class="prose prose-lg max-w-none text-gray-800 leading-relaxed">
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Silent Cron</h2>
+    <p>We wired a <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CronService</code> into the gateway daemon. It loaded jobs from <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">cron.json</code>, started a 60-second interval timer per job, and matched against cron expressions every tick. Clean code. Good tests. Shipped it.</p>
+    <p>Three days later: "Why aren't my crons firing?"</p>
+    <p>They <em>were</em> firing. The executor had <strong>zero logging</strong>. No <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">console.log</code>, no event emission, no trace. The daemon log showed "Cron started — 3 jobs scheduled" and then silence. For days.</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500">// Before: invisible</span>
+<span class="text-white">await cronService.start({</span>
+  <span class="text-white">execute: async (agentId, message) => {</span>
+    <span class="text-white">const agent = agents.get(agentId);</span>
+    <span class="text-white">return agent.execute({ query: message });</span>
+  <span class="text-white">},</span>
+<span class="text-white">});</span>
+
+<span class="text-gray-500">// After: one line that saved hours</span>
+<span class="text-white">execute: async (agentId, message) => {</span>
+  <span class="text-green-400">console.log(`🦖 Cron executing: agent=${agentId}`);</span>
+  <span class="text-white">// ... rest of executor</span>
+<span class="text-white">}</span>
+    </div>
+
+    <p><strong>Lesson:</strong> If a background process doesn't log its executions, it doesn't exist. The daemon's startup message was a lie — "3 jobs scheduled" told you nothing about whether they ever ran. Add execution logging <em>before</em> you ship, not after three days of "it works on my machine."</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Swift JSON Decoder Silent Failure</h2>
+    <p>The menu bar app had a cron jobs view. It called the gateway's <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">cron.list</code> RPC, decoded the response into <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">[CronJob]</code>, and displayed them. "No scheduled jobs" every time.</p>
+    <p>The gateway was returning 4 jobs. We verified with WebSocket. The data was there. The view was empty.</p>
+    <p>The culprit: <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try? JSONDecoder().decode(...)</code></p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500">// The gateway returns:</span>
+<span class="text-white">{ "id": "job_1", "name": "dream", "schedule": "0 3 * * *",</span>
+  <span class="text-white">"enabled": true, "lastRun": null, "nextRun": null }</span>
+
+<span class="text-gray-500">// The Swift model expects:</span>
+<span class="text-blue-400">struct</span> <span class="text-yellow-300">CronJob</span><span class="text-white">: Codable {</span>
+  <span class="text-blue-400">let</span> <span class="text-white">command: String</span>     <span class="text-red-400">// ← missing from JSON!</span>
+  <span class="text-blue-400">let</span> <span class="text-white">lastRun: Date?</span>      <span class="text-red-400">// ← null in JSON, Date? can't decode null</span>
+  <span class="text-blue-400">let</span> <span class="text-white">lastResult: CronResult?</span> <span class="text-red-400">// ← not in JSON at all</span>
+<span class="text-white">}</span>
+
+<span class="text-gray-500">// Result: try? silently returns nil → empty array → "No scheduled jobs"</span>
+    </div>
+
+    <p>Three separate issues, all silenced by <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try?</code>:</p>
+    <ol class="list-decimal list-inside space-y-2 my-4">
+      <li><strong>Missing field:</strong> The gateway didn't include <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">command</code> (it stored it as <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">message</code>)</li>
+      <li><strong>Null dates:</strong> Swift's <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">Date?</code> decoder can't handle JSON <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">null</code> without a custom strategy</li>
+      <li><strong>Missing optional:</strong> <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">lastResult</code> wasn't in the payload at all</li>
+    </ol>
+    <p>The fix was a manual JSON fallback parser that constructs <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CronJob</code> from raw dictionaries when <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">Codable</code> fails. Not pretty, but it works with any payload shape.</p>
+    <p><strong>Lesson:</strong> <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try?</code> in Swift is a footgun for API responses. You're telling the compiler "if decoding fails, return nil and don't tell me why." Use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try</code> + <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">catch</code> and log the decode error, or write a lenient fallback parser from the start.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The RPC Name Mismatch</h2>
+    <p>The menu bar app called <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">cron.create</code>. The gateway registered <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">cron.add</code>. "Server error."</p>
+    <p>The full mapping of mismatches:</p>
+
+    <div class="overflow-x-auto my-6">
+      <table class="w-full text-sm border-2 border-black">
+        <thead class="bg-black text-white">
+          <tr><th class="px-4 py-2 text-left">Swift client</th><th class="px-4 py-2 text-left">Gateway</th><th class="px-4 py-2 text-left">Result</th></tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">cron.create</td><td class="px-4 py-2 font-mono">cron.add</td><td class="px-4 py-2 text-red-600 font-bold">❌ method not found</td></tr>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">cron.delete</td><td class="px-4 py-2 font-mono">cron.remove</td><td class="px-4 py-2 text-red-600 font-bold">❌</td></tr>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">cron.trigger</td><td class="px-4 py-2 font-mono">cron.run</td><td class="px-4 py-2 text-red-600 font-bold">❌</td></tr>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">cron.pause</td><td class="px-4 py-2 font-mono">cron.enable(false)</td><td class="px-4 py-2 text-red-600 font-bold">❌</td></tr>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">cron.list</td><td class="px-4 py-2 font-mono">cron.list</td><td class="px-4 py-2 text-green-600 font-bold">✅</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The gateway was written first, the Swift client second. Nobody shared a spec. The fix was registering aliases on the gateway so both names work.</p>
+    <p><strong>Lesson:</strong> If you have a client and a server written in different languages, the RPC method names <em>will</em> diverge unless you generate them from a shared schema. An <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">rpc-methods.json</code> or OpenAPI spec is boring but prevents exactly this class of bug.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Tool Call That Broke the Conversation</h2>
+    <p>The Copilot API returned HTTP 400:</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-red-400 overflow-x-auto border-2 border-black">
+An assistant message with 'tool_calls' must be followed by tool
+messages responding to each 'tool_call_id'. The following
+tool_call_ids did not have response messages: call_z3zd7dhQ...
+    </div>
+
+    <p>The LLM asked to call two tools. The first one threw an error. The <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">for</code> loop broke. The second tool never got a response message. The next API call had an assistant message with two <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">tool_calls</code> but only one <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">tool</code> response. 400.</p>
+    <p>The fix is embarrassingly simple:</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-blue-400">for</span> <span class="text-white">(const tc of response.tool_calls) {</span>
+  <span class="text-blue-400">try</span> <span class="text-white">{</span>
+    <span class="text-white">const result = await executeToolCall(tc);</span>
+    <span class="text-white">history.push({ role: 'tool', content: result, tool_call_id: tc.id });</span>
+  <span class="text-white">}</span> <span class="text-blue-400">catch</span> <span class="text-white">(err) {</span>
+    <span class="text-green-400">// ALWAYS push a response — even on error</span>
+    <span class="text-white">history.push({ role: 'tool', content: \`Error: \${err.message}\`, tool_call_id: tc.id });</span>
+  <span class="text-white">}</span>
+<span class="text-white">}</span>
+    </div>
+
+    <p><strong>Lesson:</strong> When the LLM asks you to call N tools, you must respond to all N — even if some fail. The API contract doesn't care about your exceptions. We also added a sanitizer that strips orphaned <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">tool_calls</code> from assistant messages as a safety net.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The CheckedContinuation That Crashed on Wake</h2>
+    <p>The menu bar app crashed every time the MacBook woke from sleep. The crash report pointed to <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">_assertionFailure</code> in <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CheckedContinuation.resume(returning:)</code>.</p>
+    <p>The bug was in a network port check that used <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">NWConnection</code>:</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500">// The race:</span>
+<span class="text-white">connection.stateUpdateHandler = { state in</span>
+  <span class="text-blue-400">case</span> <span class="text-white">.ready: continuation.resume(returning: true)</span>  <span class="text-gray-500">// ← fires first</span>
+  <span class="text-blue-400">case</span> <span class="text-white">.cancelled: continuation.resume(returning: false)</span> <span class="text-gray-500">// ← fires AGAIN after cancel</span>
+<span class="text-white">}</span>
+
+<span class="text-gray-500">// The timeout also calls cancel:</span>
+<span class="text-white">DispatchQueue.asyncAfter(.now() + 1) { connection.cancel() }</span>
+<span class="text-gray-500">// cancel → .cancelled → resume() called twice → crash</span>
+    </div>
+
+    <p>Swift's <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CheckedContinuation</code> will trap (crash) if you resume it more than once. This is by design — it's "checked." The fix was a boolean guard to ensure only the first resume goes through.</p>
+    <p><strong>Lesson:</strong> Any time you combine <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">NWConnection</code> state handlers with timeouts, you have a double-resume race. Use a flag, or use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">withUnsafeContinuation</code> (which doesn't trap on double-resume, though it's still UB).</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Version That Was Always 0.0.0</h2>
+    <p>The UpdateAgent checked for new releases. It reported <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">local: 0.0.0, latest: 0.0.0</code>. Two bugs:</p>
+    <ol class="list-decimal list-inside space-y-2 my-4">
+      <li><code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">require('fs')</code> in an ESM module. The agent used CommonJS <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">require</code> to read <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">package.json</code> but the project compiles to ESM. Silent failure, fallback to <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">0.0.0</code>.</li>
+      <li>GitHub's <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">/releases/latest</code> returned the menu bar app release (<code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">v1.0.0-bar</code>) instead of the framework release (<code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">v1.9.1</code>). "Latest" means most recently published, not highest version.</li>
+    </ol>
+    <p><strong>Lesson:</strong> Don't mix <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">require()</code> and ESM <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">import</code> in the same project. And if you have multiple release tracks (framework + menu bar app), <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">/releases/latest</code> is the wrong endpoint — use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">/releases?per_page=10</code> and filter.</p>
+
+    <hr class="my-12 border-t-2 border-black">
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Pattern</h2>
+    <p>Every bug in this post has the same root cause: <strong>silent failure</strong>.</p>
+    <ul class="list-disc list-inside space-y-2 my-4">
+      <li>The cron executor didn't log → we didn't know it was running</li>
+      <li>Swift's <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try?</code> swallowed decode errors → we didn't know why the list was empty</li>
+      <li>The RPC returned "method not found" → the UI said "server error" with no details</li>
+      <li>The tool call loop broke silently → the API complained 3 messages later</li>
+      <li><code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">require('fs')</code> failed silently in ESM → version was <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">0.0.0</code></li>
+    </ul>
+    <p>The fix in every case was the same: <strong>make the failure loud</strong>. Add a log line. Replace <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try?</code> with <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try</code> + catch. Push an error response instead of breaking the loop. Use the import that actually works in your module system.</p>
+    <p>Background systems are especially dangerous because nobody's watching when they fail. If your daemon doesn't log every execution, your cron system is a prayer. If your decoder uses <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">try?</code> for API responses, your UI will lie to you.</p>
+    <p>Ship loud. Debug fast.</p>
+
+  </div>
+
+  <div class="mt-16 p-8 border-2 border-black rounded-2xl bg-white">
+    <h3 class="text-xl font-black mb-2">Stay in the loop 🦖</h3>
+    <p class="text-gray-600 mb-4">Engineering posts, release notes, and the occasional debugging war story.</p>
+    <a href="https://rappter.beehiiv.com/" target="_blank" class="inline-block bg-black text-white font-bold px-6 py-3 rounded-xl hover:bg-accent transition-colors">📬 Subscribe to Newsletter →</a>
+  </div>
+
+</article>
+
+<footer class="border-t-2 border-black bg-white px-6 py-8 mt-16">
+  <div class="max-w-3xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <span class="font-black">🦖 openrappter</span>
+    <div class="flex gap-6 text-sm font-semibold">
+      <a href="../" class="hover:text-accent">Home</a>
+      <a href="v1.9.1-release.html" class="hover:text-accent">v1.9.1 Release</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-accent">GitHub</a>
+      <a href="https://rappter.com" class="hover:text-accent">rappter.com</a>
+    </div>
+    <span class="text-sm text-gray-500">Built with 🦖 by <a href="https://github.com/kody-w" class="underline">Kody W</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

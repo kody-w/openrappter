@@ -187,9 +187,26 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     }
     await cronService.start({
       execute: async (agentId: string, message: string) => {
-        const agent = agents.get(agentId);
-        if (!agent) return `Agent not found: ${agentId}`;
-        return agent.execute({ query: message });
+        console.log(`${EMOJI} Cron executing: agent=${agentId} message="${message.slice(0, 60)}"`);
+        try {
+          // Use the main assistant for 'Assistant' agentId
+          if (agentId === 'Assistant' || agentId === NAME) {
+            const resp = await assistant.getResponse(message);
+            console.log(`${EMOJI} Cron done: agent=${agentId} result=${resp.content.slice(0, 80)}`);
+            return resp.content;
+          }
+          const agent = agents.get(agentId);
+          if (!agent) {
+            console.log(`${EMOJI} Cron error: Agent not found: ${agentId}`);
+            return `Agent not found: ${agentId}`;
+          }
+          const result = await agent.execute({ query: message });
+          console.log(`${EMOJI} Cron done: agent=${agentId} result=${result.slice(0, 80)}`);
+          return result;
+        } catch (err) {
+          console.error(`${EMOJI} Cron error: agent=${agentId}`, (err as Error).message);
+          throw err;
+        }
       },
     });
     server.setCronService({
@@ -199,6 +216,55 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       run: async (id: string) => { await cronService.executeJob(id, 'force'); },
       enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
       disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+    });
+    // Send cron job results to Telegram when connected
+    const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';
+    cronService.onEvent(async (event) => {
+      if (event.type !== 'job:executed' && event.type !== 'job:error') return;
+      if (telegram.getStatus() !== 'connected') return;
+      const job = cronService.getJob(event.jobId);
+      const jobName = job?.name || event.jobId;
+      const data = event.data as Record<string, string> | undefined;
+      let text: string;
+      if (event.type === 'job:executed') {
+        let result = (data?.result || 'No output') as string;
+        // Strip |||VOICE||| marker and everything after
+        const voiceIdx = result.indexOf('|||VOICE|||');
+        if (voiceIdx !== -1) result = result.slice(0, voiceIdx).trimEnd();
+        // Try to parse JSON results and extract human-readable content
+        let body = result;
+        try {
+          const parsed = JSON.parse(result);
+          if (parsed && typeof parsed === 'object') {
+            const parts: string[] = [];
+            if (parsed.briefing) parts.push(parsed.briefing);
+            else if (parsed.sections && typeof parsed.sections === 'object') {
+              for (const [key, val] of Object.entries(parsed.sections)) {
+                if (val && typeof val === 'string') parts.push(`**${key.charAt(0).toUpperCase() + key.slice(1)}:** ${val}`);
+              }
+            }
+            if (parsed.dream_log && typeof parsed.dream_log === 'object') {
+              const dl = parsed.dream_log;
+              parts.push('🧠 Dream cycle complete');
+              if (dl.total_after != null) parts.push(`Memories: ${dl.total_after}`);
+              if (dl.duplicates_found) parts.push(`Duplicates merged: ${dl.duplicates_found}`);
+              if (dl.stale_pruned) parts.push(`Stale pruned: ${dl.stale_pruned}`);
+            }
+            if (!parts.length && parsed.message) parts.push(parsed.message);
+            if (!parts.length && parsed.content) parts.push(parsed.content);
+            if (!parts.length && parsed.status) parts.push(`Status: ${parsed.status}`);
+            if (parts.length) body = parts.join('\n');
+          }
+        } catch { /* not JSON, use raw text */ }
+        body = body.replace(/\n{3,}/g, '\n\n').trim();
+        const preview = body.length > 800 ? body.slice(0, 800) + '…' : body;
+        text = `🦖 **Cron Job: ${jobName}** ✅\n\n${preview}`;
+      } else {
+        text = `🦖 **Cron Job: ${jobName}** ❌\n\nError: ${data?.error || 'Unknown error'}`;
+      }
+      try {
+        await channelRegistry.sendMessage({ channelId: 'telegram', conversationId: CRON_TELEGRAM_CHAT_ID, content: text });
+      } catch { /* non-fatal */ }
     });
     const jobCount = cronService.listEnabledJobs().length;
     if (jobCount > 0) log(`${EMOJI} Cron started — ${jobCount} jobs scheduled`);
@@ -348,8 +414,11 @@ program
     }
 
     if (options.daemon) {
-      const { port } = await startGatewayInProcess();
+      const webRoot = path.resolve(__dirname, '../ui/dist');
+      const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
+      const { port } = await startGatewayInProcess(hasWebUI ? { webRoot } : undefined);
       console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
+      if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
       console.log('Press Ctrl+C to stop\n');
       return;
     }

@@ -177,7 +177,9 @@ export class DailyTipAgent extends BasicAgent {
     if (query && !kwargs.action) {
       const q = query.toLowerCase().trim();
       if (q === 'preview' || q === 'all') action = 'preview';
-      else if (q.startsWith('send') || q.match(/^\d+$/)) {
+      else if (q.match(/^\d+$/)) {
+        action = 'send';
+      } else if (q.startsWith('send') && q.match(/\d+/)) {
         action = 'send';
       } else {
         action = 'tip';

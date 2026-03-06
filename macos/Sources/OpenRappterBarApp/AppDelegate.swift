@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ServiceManagement
 import OpenRappterBarLib
 
 // MARK: - App Delegate
@@ -22,6 +23,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         windowManager = ChatWindowManager(viewModel: viewModel, settingsViewModel: settingsViewModel)
         observeViewModel()
+        registerAsLoginItem()
 
         // Auto-start gateway if configured (starts process then connects)
         if settingsViewModel.settingsStore.autoStartGateway {
@@ -218,6 +220,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusItem() {
         // Update dino mood based on connection state
         dino.setConnectionState(connected: viewModel.connectionState == .connected)
+    }
+
+    // MARK: - Login Item (auto-start on boot)
+
+    /// Register the app as a Login Item so it launches automatically when the user logs in.
+    /// Uses SMAppService on macOS 13+ — silently succeeds if already registered.
+    private func registerAsLoginItem() {
+        let service = SMAppService.mainApp
+        if service.status != .enabled {
+            do {
+                try service.register()
+            } catch {
+                // Non-fatal — app still works, just won't auto-start on reboot
+                Log.app.warning("Could not register as login item: \(error.localizedDescription)")
+            }
+        }
     }
 
 }

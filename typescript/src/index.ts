@@ -117,7 +117,12 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
 
       const result = await assistant.getResponse(incoming.content, undefined, undefined, chatId);
-      const reply = result.content;
+      // Strip |||VOICE||| delimiter — only send the formatted part
+      let reply = result.content;
+      const voiceIdx = reply.indexOf('|||VOICE|||');
+      if (voiceIdx !== -1) {
+        reply = reply.substring(0, voiceIdx).trim();
+      }
 
       await telegram.send(incoming.conversationId!, {
         channel: 'telegram',
@@ -191,9 +196,16 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
         try {
           // Use the main assistant for 'Assistant' agentId
           if (agentId === 'Assistant' || agentId === NAME) {
-            const resp = await assistant.getResponse(message);
-            console.log(`${EMOJI} Cron done: agent=${agentId} result=${resp.content.slice(0, 80)}`);
-            return resp.content;
+            // Each cron job gets its own conversation key to prevent
+            // poisoned history from one job breaking others
+            const cronKey = `cron_${agentId}_${Date.now()}`;
+            const resp = await assistant.getResponse(message, undefined, undefined, cronKey);
+            // Strip voice delimiter from cron output
+            let content = resp.content;
+            const voiceIdx = content.indexOf('|||VOICE|||');
+            if (voiceIdx !== -1) content = content.substring(0, voiceIdx).trim();
+            console.log(`${EMOJI} Cron done: agent=${agentId} result=${content.slice(0, 80)}`);
+            return content;
           }
           const agent = agents.get(agentId);
           if (!agent) {

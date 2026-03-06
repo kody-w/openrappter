@@ -101,6 +101,7 @@ export class GatewayServer {
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
+    getRunLogs?(jobId?: string): unknown[];
   };
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
@@ -208,6 +209,7 @@ export class GatewayServer {
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
+    getRunLogs?(jobId?: string): unknown[];
   }): void {
     this.cronService = service;
   }
@@ -867,8 +869,11 @@ export class GatewayServer {
     });
     this.registerMethod('cron.logs', async (params: Record<string, unknown>) => {
       if (this.cronService) {
-        const svc = this.cronService as unknown as { getRecentRuns?: (limit?: number) => unknown[] };
-        if (svc.getRecentRuns) return { runs: svc.getRecentRuns(params.limit as number) };
+        const svc = this.cronService as unknown as { getRunLogs?: (jobId?: string) => unknown[] };
+        if (svc.getRunLogs) {
+          const logs = svc.getRunLogs(params.jobId as string | undefined);
+          return { runs: logs };
+        }
       }
       return { runs: [] };
     });

@@ -218,6 +218,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       run: async (id: string) => { await cronService.executeJob(id, 'force'); },
       enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
       disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+      getRunLogs: (jobId?: string) => cronService.getRunLogs(jobId),
     });
     // Send cron job results to Telegram when connected
     const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';

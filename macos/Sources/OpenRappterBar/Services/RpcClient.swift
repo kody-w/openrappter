@@ -307,12 +307,32 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         var params: [String: AnyCodable] = [:]
         if let jobId { params["jobId"] = AnyCodable(jobId) }
         let response = try await connection.sendRequest(method: "cron.logs", params: params.isEmpty ? nil : params)
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to get cron logs") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let logs = try? JSONDecoder().decode([CronExecutionLog].self, from: data) {
-            return logs
+        guard response.ok else { return [] }
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable(["runs": []]))
+
+        // Parse the {runs: [...]} wrapper
+        guard let wrapper = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let runs = wrapper["runs"] as? [[String: Any]] else { return [] }
+
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fmtBasic = ISO8601DateFormatter()
+
+        return runs.compactMap { dict in
+            guard let id = dict["id"] as? String,
+                  let jobId = dict["jobId"] as? String else { return nil }
+            let startedStr = dict["startedAt"] as? String ?? ""
+            let completedStr = dict["completedAt"] as? String
+            let timestamp = fmt.date(from: startedStr) ?? fmtBasic.date(from: startedStr) ?? Date()
+            let statusStr = dict["status"] as? String ?? "success"
+            let result: CronResult = statusStr == "error" ? .failure : (statusStr == "running" ? .skipped : .success)
+            let output = dict["result"] as? String ?? dict["error"] as? String
+            var duration: TimeInterval? = nil
+            if let completed = completedStr, let endDate = fmt.date(from: completed) ?? fmtBasic.date(from: completed) {
+                duration = endDate.timeIntervalSince(timestamp)
+            }
+            return CronExecutionLog(id: id, jobId: jobId, timestamp: timestamp, result: result, output: output, duration: duration)
         }
-        return []
     }
 
     // MARK: - Execution Approval Methods

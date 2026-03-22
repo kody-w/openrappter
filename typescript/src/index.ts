@@ -681,8 +681,54 @@ program
 
     // ── Telegram: skipped by default (add later with `openrappter onboard --telegram`) ──
     let telegramReady = false;
-    // Telegram is optional — not part of the core setup flow.
-    // Run `openrappter onboard --telegram` to add it later.
+
+    // ── iMessage channel (macOS only) ──
+    let imessageReady = false;
+    if (process.platform === 'darwin') {
+      const setupIMessage = await confirm({
+        message: 'Enable iMessage channel? (AI responds to texts via your Mac)',
+        initialValue: true,
+      });
+
+      if (!isCancel(setupIMessage) && setupIMessage) {
+        // Try to auto-detect from chat.db
+        let detectedId = '';
+        try {
+          const { stdout } = await execAsync(
+            `sqlite3 ~/Library/Messages/chat.db "SELECT DISTINCT chat_identifier FROM chat WHERE chat_identifier LIKE '%@%' OR chat_identifier LIKE '+%' ORDER BY ROWID DESC LIMIT 10"`,
+            { timeout: 5000 }
+          );
+          const ids = stdout.trim().split('\n').filter(Boolean);
+          if (ids.length > 0) {
+            log.info('Found iMessage addresses:');
+            for (const id of ids.slice(0, 5)) {
+              console.log(`    ${id}`);
+            }
+          }
+        } catch {
+          log.warn('Could not read Messages database — grant Full Disk Access to Terminal');
+          log.info('System Settings → Privacy & Security → Full Disk Access → add Terminal');
+        }
+
+        const imsgId = await text({
+          message: 'iMessage address to watch (phone +1... or email):',
+          placeholder: detectedId || 'rappter1@icloud.com',
+          validate: (val) => {
+            if (!val) return undefined;
+            if (!val.includes('@') && !val.startsWith('+')) {
+              return 'Enter an email or phone number starting with +';
+            }
+            return undefined;
+          },
+        });
+
+        if (!isCancel(imsgId) && imsgId && typeof imsgId === 'string' && imsgId.length > 0) {
+          env.IMESSAGE_SELF_ID = imsgId;
+          imessageReady = true;
+          log.success(`iMessage channel set to ${imsgId}`);
+        }
+      }
+    }
 
     // ── Step 2: Save & Verify ───────────────────────────────────────────────
     log.step('Step 2 of 3 — Saving configuration');
@@ -945,6 +991,7 @@ program
     const finalLines = [
       `Copilot:    ${copilotReady ? '✅ Ready' : '❌ Not configured'}`,
       `Telegram:   ${telegramReady ? '✅ Connected' : '⬚  Skipped'}`,
+      `iMessage:   ${imessageReady ? '✅ Watching ' + (env.IMESSAGE_SELF_ID || '') : '⬚  Skipped'}`,
       `Daemon:     ${daemonStarted ? '✅ Running on port ' + daemonPort : '⬚  Not started'}`,
       `Cron Jobs:  ${daemonStarted ? '✅ Scheduled' : '⬚  Waiting for daemon'}`,
       `Auto-start: ${process.platform === 'darwin' ? '✅ Installed (launchd)' : '⬚  Manual'}`,

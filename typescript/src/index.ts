@@ -467,7 +467,7 @@ program
     const config = await loadConfig();
 
     // ── Step 1: GitHub Copilot (device code OAuth — no gh CLI required) ────
-    log.step('Step 1 of 4 — GitHub Copilot');
+    log.step('Step 1 of 3 — GitHub Copilot');
 
     let copilotReady = false;
 
@@ -587,55 +587,13 @@ program
       }
     }
 
-    // ── Step 2: Telegram ────────────────────────────────────────────────────
-    log.step('Step 2 of 4 — Telegram');
-
-    const connectTelegram = await confirm({
-      message: 'Connect a Telegram bot?',
-      initialValue: false,
-    });
-    if (isCancel(connectTelegram)) { outro('Setup cancelled.'); process.exit(0); }
-
+    // ── Telegram: skipped by default (add later with `openrappter onboard --telegram`) ──
     let telegramReady = false;
-    if (connectTelegram) {
-      note(
-        'To connect Telegram you need a bot token from @BotFather:\n' +
-        '  1. Open Telegram → search @BotFather\n' +
-        '  2. Send /newbot and follow the prompts\n' +
-        '  3. Copy the token (looks like 123456:ABC-DEF…)',
-        'Telegram Bot'
-      );
+    // Telegram is optional — not part of the core setup flow.
+    // Run `openrappter onboard --telegram` to add it later.
 
-      const botToken = await password({
-        message: 'Paste your Telegram bot token:',
-        validate: (val) => {
-          if (!val) return 'Token is required';
-          if (!val.match(/^\d+:.+$/)) return 'Token should look like 123456:ABC-DEF…';
-          return undefined;
-        },
-      });
-      if (isCancel(botToken)) { outro('Setup cancelled.'); process.exit(0); }
-
-      if (botToken && typeof botToken === 'string') {
-        const s = spinner();
-        s.start('Validating token…');
-        const result = await validateTelegramToken(botToken);
-        if (result.valid) {
-          env.TELEGRAM_BOT_TOKEN = botToken;
-          telegramReady = true;
-          s.stop(`Connected! Bot: @${result.username}`);
-        } else {
-          s.stop(`Validation failed: ${result.error}`);
-          log.warn('Token saved anyway — you can fix it later in ~/.openrappter/.env');
-          env.TELEGRAM_BOT_TOKEN = botToken;
-        }
-      }
-    } else {
-      log.info('Skipped — run `openrappter onboard` anytime to add Telegram.');
-    }
-
-    // ── Step 3: Save & Verify ───────────────────────────────────────────────
-    log.step('Step 3 of 4 — Saving configuration');
+    // ── Step 2: Save & Verify ───────────────────────────────────────────────
+    log.step('Step 2 of 3 — Saving configuration');
 
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
@@ -669,7 +627,7 @@ program
     note(summaryLines.join('\n'), '📋 Setup Summary');
 
     // ── Step 4: Start daemon automatically ──────────────────────────────────
-    log.step('Step 4 of 4 — Starting background daemon');
+    log.step('Step 3 of 3 — Starting background daemon');
 
     let daemonStarted = false;
     const daemonPort = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);

@@ -104,11 +104,32 @@ public struct ChatContainerView: View {
             Spacer()
 
             if viewModel.connectionState == .disconnected {
-                Button("Connect") {
-                    viewModel.connectToGateway()
+                Button("Wake Up") {
+                    // Try to start the daemon, then connect
+                    Task {
+                        let process = Process()
+                        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                        process.arguments = ["-c", """
+                            kill -9 $(lsof -ti:18790) 2>/dev/null
+                            sleep 1
+                            if [ -f "$HOME/Desktop/restart-openrappter.sh" ]; then
+                                bash "$HOME/Desktop/restart-openrappter.sh" &
+                            elif command -v openrappter &>/dev/null; then
+                                openrappter --daemon &
+                            fi
+                        """]
+                        process.standardOutput = FileHandle.nullDevice
+                        process.standardError = FileHandle.nullDevice
+                        try? process.run()
+                        try? await Task.sleep(for: .seconds(4))
+                        await MainActor.run {
+                            viewModel.connectToGateway()
+                        }
+                    }
                 }
                 .controlSize(.mini)
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
             }
 
             // Toolbar buttons

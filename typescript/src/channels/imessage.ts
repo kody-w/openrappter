@@ -6,6 +6,9 @@
 import { EventEmitter } from 'events';
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type {
   IncomingMessage,
   OutgoingMessage,
@@ -362,6 +365,67 @@ export class IMessageChannel extends EventEmitter {
       headers['password'] = this.config.blueBubblesPassword;
     }
     return headers;
+  }
+
+  /**
+   * Generate a voice clip from text and send it as an iMessage audio attachment.
+   * Pipeline: macOS `say` → AIFF → ffmpeg → M4A → send via AppleScript
+   */
+  async sendVoiceClip(conversationId: string, text: string): Promise<boolean> {
+    if (process.platform !== 'darwin') return false;
+
+    const tmpDir = os.tmpdir();
+    const ts = Date.now();
+    const aiffPath = path.join(tmpDir, `openrappter-imsg-${ts}.aiff`);
+    const m4aPath = path.join(tmpDir, `openrappter-imsg-${ts}.m4a`);
+
+    try {
+      // Clean text for TTS
+      const cleaned = text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`]+`/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[#*_~>]/g, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/[📅🧠🦖❌✅🐊]/gu, '')
+        .replace(/"/g, '')
+        .replace(/'/g, '')
+        .replace(/\n+/g, '. ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 800);
+
+      if (cleaned.length < 5) return false;
+
+      // Generate AIFF with macOS say
+      await execAsync(`say -v Samantha -o "${aiffPath}" "${cleaned}"`, { timeout: 30000 });
+
+      // Convert to M4A (iMessage-native format)
+      await execAsync(
+        `ffmpeg -i "${aiffPath}" -c:a aac -b:a 64k -ar 22050 -ac 1 "${m4aPath}" -y -loglevel error`,
+        { timeout: 30000 }
+      );
+
+      // Send file via AppleScript
+      const script = `
+        tell application "Messages"
+          set targetService to 1st account whose service type = iMessage
+          set targetBuddy to participant "${conversationId}" of targetService
+          send POSIX file "${m4aPath}" to targetBuddy
+        end tell
+      `;
+      await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 15000 });
+      return true;
+    } catch (err) {
+      console.error('iMessage voice clip error:', (err as Error).message);
+      return false;
+    } finally {
+      // Cleanup temp files (delay for AppleScript to finish reading)
+      setTimeout(() => {
+        try { fs.unlinkSync(aiffPath); } catch {}
+        try { fs.unlinkSync(m4aPath); } catch {}
+      }, 10000);
+    }
   }
 
   /**

@@ -5,6 +5,7 @@
 
 import chalk from 'chalk';
 import readline from 'readline';
+import { exec } from 'child_process';
 import type { Assistant } from '../agents/Assistant.js';
 
 export interface InteractiveChatOptions {
@@ -67,14 +68,42 @@ export async function startInteractiveChat(opts: InteractiveChatOptions): Promis
 
       process.stdout.write(chalk.green(`\n${emoji}: `));
       try {
+        let fullResponse = '';
         const result = await assistant.getResponseStreaming(
           trimmed,
-          (delta) => process.stdout.write(delta),
+          (delta) => {
+            process.stdout.write(delta);
+            fullResponse += delta;
+          },
           conversationKey,
         );
         process.stdout.write('\n\n');
         for (const log of result.agentLogs) {
           console.log(chalk.dim(`  ${log}`));
+        }
+
+        // TTS: speak the response on macOS using `say`
+        if (process.platform === 'darwin' && fullResponse.length > 0) {
+          // Strip |||VOICE||| marker — use voice-specific text if present, otherwise the full response
+          let ttsText = fullResponse;
+          const voiceIdx = ttsText.indexOf('|||VOICE|||');
+          if (voiceIdx !== -1) {
+            ttsText = ttsText.substring(voiceIdx + 11).trim();
+          }
+          // Clean text for speech: remove markdown, URLs, code blocks
+          ttsText = ttsText
+            .replace(/```[\s\S]*?```/g, '') // code blocks
+            .replace(/`[^`]+`/g, '')        // inline code
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → text
+            .replace(/[#*_~>]/g, '')        // markdown chars
+            .replace(/https?:\/\/\S+/g, '') // URLs
+            .replace(/\n+/g, '. ')          // newlines → pauses
+            .trim()
+            .slice(0, 500);
+          if (ttsText.length > 5) {
+            const escaped = ttsText.replace(/"/g, '\\"');
+            exec(`say "${escaped}"`, { timeout: 30000 }, () => {});
+          }
         }
       } catch (err) {
         process.stdout.write('\n');

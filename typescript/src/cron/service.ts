@@ -273,15 +273,68 @@ export class CronService {
   }
 
   private scheduleJob(job: CronJob): void {
-    // Simple interval-based scheduling for now
-    // In production, use croner for proper cron expression handling
-    const intervalMs = 60000; // Check every minute
+    // Check every 60s but only execute if the cron expression matches the current minute
+    const intervalMs = 60000;
     const timer = setInterval(() => {
-      if (job.enabled) {
+      if (job.enabled && this.cronMatches(job.schedule)) {
         this.executeJob(job.id, 'force').catch(() => {});
       }
     }, intervalMs);
     this.timers.set(job.id, timer);
+  }
+
+  /** Check if a cron expression matches the current time (minute-level precision) */
+  private cronMatches(schedule: string): boolean {
+    const resolved = resolveSchedule(schedule);
+    const parts = resolved.split(' ').filter(p => p);
+    if (parts.length !== 5) return false;
+
+    const now = new Date();
+    const fields = [
+      now.getMinutes(),   // 0-59
+      now.getHours(),     // 0-23
+      now.getDate(),      // 1-31
+      now.getMonth() + 1, // 1-12
+      now.getDay(),       // 0-6 (Sunday=0)
+    ];
+
+    for (let i = 0; i < 5; i++) {
+      if (!this.fieldMatches(parts[i], fields[i])) return false;
+    }
+    return true;
+  }
+
+  /** Check if a single cron field matches a value */
+  private fieldMatches(pattern: string, value: number): boolean {
+    if (pattern === '*') return true;
+
+    // Handle step values: */5, 1-10/2
+    if (pattern.includes('/')) {
+      const [range, stepStr] = pattern.split('/');
+      const step = parseInt(stepStr, 10);
+      if (isNaN(step) || step <= 0) return false;
+      if (range === '*') return value % step === 0;
+      // Range with step: 1-30/5
+      if (range.includes('-')) {
+        const [start, end] = range.split('-').map(Number);
+        return value >= start && value <= end && (value - start) % step === 0;
+      }
+      return false;
+    }
+
+    // Handle lists: 1,3,5
+    if (pattern.includes(',')) {
+      return pattern.split(',').some(p => this.fieldMatches(p.trim(), value));
+    }
+
+    // Handle ranges: 1-5
+    if (pattern.includes('-')) {
+      const [start, end] = pattern.split('-').map(Number);
+      return value >= start && value <= end;
+    }
+
+    // Plain number
+    return parseInt(pattern, 10) === value;
   }
 
   private unscheduleJob(id: string): void {

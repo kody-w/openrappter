@@ -236,50 +236,76 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';
     cronService.onEvent(async (event) => {
       if (event.type !== 'job:executed' && event.type !== 'job:error') return;
-      if (telegram.getStatus() !== 'connected') return;
       const job = cronService.getJob(event.jobId);
       const jobName = job?.name || event.jobId;
       const data = event.data as Record<string, string> | undefined;
       let text: string;
+      let voiceText = '';
+
       if (event.type === 'job:executed') {
         let result = (data?.result || 'No output') as string;
-        // Strip |||VOICE||| marker and everything after
+
+        // Extract |||VOICE||| portion for TTS
         const voiceIdx = result.indexOf('|||VOICE|||');
-        if (voiceIdx !== -1) result = result.slice(0, voiceIdx).trimEnd();
+        if (voiceIdx !== -1) {
+          voiceText = result.substring(voiceIdx + 11).trim();
+          result = result.slice(0, voiceIdx).trimEnd();
+        }
+
         // Try to parse JSON results and extract human-readable content
         let body = result;
         try {
           const parsed = JSON.parse(result);
           if (parsed && typeof parsed === 'object') {
             const parts: string[] = [];
-            if (parsed.briefing) parts.push(parsed.briefing);
-            else if (parsed.sections && typeof parsed.sections === 'object') {
+            // Use voiceText from JSON if available
+            if (parsed.voiceText && !voiceText) voiceText = parsed.voiceText;
+            if (parsed.briefing) {
+              parts.push(parsed.briefing);
+              if (!voiceText) voiceText = parsed.briefing;
+            } else if (parsed.digest) {
+              parts.push(parsed.digest);
+              if (!voiceText) voiceText = parsed.digest;
+            } else if (parsed.sections && typeof parsed.sections === 'object') {
               for (const [key, val] of Object.entries(parsed.sections)) {
                 if (val && typeof val === 'string') parts.push(`**${key.charAt(0).toUpperCase() + key.slice(1)}:** ${val}`);
               }
             }
             if (parsed.dream_log && typeof parsed.dream_log === 'object') {
               const dl = parsed.dream_log;
-              parts.push('🧠 Dream cycle complete');
+              parts.push('Dream cycle complete');
               if (dl.total_after != null) parts.push(`Memories: ${dl.total_after}`);
               if (dl.duplicates_found) parts.push(`Duplicates merged: ${dl.duplicates_found}`);
               if (dl.stale_pruned) parts.push(`Stale pruned: ${dl.stale_pruned}`);
             }
-            if (!parts.length && parsed.message) parts.push(parsed.message);
-            if (!parts.length && parsed.content) parts.push(parsed.content);
+            if (!parts.length && parsed.message) { parts.push(parsed.message); if (!voiceText) voiceText = parsed.message; }
+            if (!parts.length && parsed.content) { parts.push(parsed.content); if (!voiceText) voiceText = parsed.content; }
             if (!parts.length && parsed.status) parts.push(`Status: ${parsed.status}`);
             if (parts.length) body = parts.join('\n');
           }
-        } catch { /* not JSON, use raw text */ }
+        } catch {
+          // Not JSON — use raw text for voice too
+          if (!voiceText) voiceText = result;
+        }
         body = body.replace(/\n{3,}/g, '\n\n').trim();
         const preview = body.length > 800 ? body.slice(0, 800) + '…' : body;
-        text = `🦖 **Cron Job: ${jobName}** ✅\n\n${preview}`;
+        text = `${EMOJI} **Cron Job: ${jobName}** ✅\n\n${preview}`;
       } else {
-        text = `🦖 **Cron Job: ${jobName}** ❌\n\nError: ${data?.error || 'Unknown error'}`;
+        text = `${EMOJI} **Cron Job: ${jobName}** ❌\n\nError: ${data?.error || 'Unknown error'}`;
       }
-      try {
-        await channelRegistry.sendMessage({ channelId: 'telegram', conversationId: CRON_TELEGRAM_CHAT_ID, content: text });
-      } catch { /* non-fatal */ }
+
+      // Send to Telegram if connected: text message + voice clip
+      if (telegram.getStatus() === 'connected') {
+        try {
+          // Send text message first
+          await channelRegistry.sendMessage({ channelId: 'telegram', conversationId: CRON_TELEGRAM_CHAT_ID, content: text });
+
+          // Send voice clip if we have voice text
+          if (voiceText && voiceText.length > 5) {
+            await telegram.sendVoiceClip(CRON_TELEGRAM_CHAT_ID, voiceText);
+          }
+        } catch { /* non-fatal */ }
+      }
     });
     const jobCount = cronService.listEnabledJobs().length;
     if (jobCount > 0) log(`${EMOJI} Cron started — ${jobCount} jobs scheduled`);
@@ -521,8 +547,24 @@ program
           const token = await deviceCodeLogin(
             (code, url) => {
               s.stop('Device code received');
+
+              // Copy code to clipboard on macOS so user can just paste
+              if (process.platform === 'darwin') {
+                execAsync(`echo -n "${code}" | pbcopy`).catch(() => {});
+              }
+
+              // Big, impossible-to-miss display
+              console.log('');
+              console.log(chalk.bgGreen.black.bold('  YOUR CODE  '));
+              console.log('');
+              console.log(chalk.bold.green(`    ${code}`));
+              console.log('');
+              console.log(chalk.dim(`  Copied to clipboard — paste it on the GitHub page.`));
+              console.log(chalk.dim(`  URL: ${url}`));
+              console.log('');
+
               note(
-                `Code:  ${code}\nURL:   ${url}\n\nEnter the code on GitHub to authorize.`,
+                `Code:  ${chalk.bold(code)}  (copied to clipboard)\nURL:   ${url}\n\nPaste the code on GitHub to authorize.`,
                 'GitHub Device Login'
               );
               // Try to open browser

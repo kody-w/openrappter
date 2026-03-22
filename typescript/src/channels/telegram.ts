@@ -6,6 +6,13 @@
 
 import { BaseChannel } from './base.js';
 import type { OutgoingMessage, IncomingMessage, Attachment } from './types.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export interface TelegramConfig {
   token: string;
@@ -150,6 +157,93 @@ export class TelegramChannel extends BaseChannel {
       await this.callApi('sendVideo', { ...base, video: att.url, caption: att.filename });
     } else if (att.url) {
       await this.callApi('sendDocument', { ...base, document: att.url, caption: att.filename });
+    }
+  }
+
+  /**
+   * Generate a voice clip from text and send it as a Telegram voice message.
+   * Pipeline: macOS `say` → AIFF → ffmpeg → OGG/Opus → sendVoice
+   */
+  async sendVoiceClip(chatId: string, text: string, caption?: string): Promise<boolean> {
+    if (this.status !== 'connected') return false;
+    if (process.platform !== 'darwin') return false;
+
+    const tmpDir = os.tmpdir();
+    const ts = Date.now();
+    const aiffPath = path.join(tmpDir, `openrappter-voice-${ts}.aiff`);
+    const oggPath = path.join(tmpDir, `openrappter-voice-${ts}.ogg`);
+
+    try {
+      // Clean text for TTS
+      const cleaned = text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`]+`/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[#*_~>]/g, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/[📅🧠🦖❌✅🐊]/gu, '')
+        .replace(/"/g, '')
+        .replace(/'/g, '')
+        .replace(/\n+/g, '. ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 800);
+
+      if (cleaned.length < 5) return false;
+
+      // Generate AIFF with macOS say
+      await execAsync(`say -v Samantha -o "${aiffPath}" "${cleaned}"`, { timeout: 30000 });
+
+      // Convert to OGG/Opus for Telegram voice messages
+      await execAsync(
+        `ffmpeg -i "${aiffPath}" -c:a libopus -b:a 48k -ar 24000 -ac 1 "${oggPath}" -y -loglevel error`,
+        { timeout: 30000 }
+      );
+
+      // Upload via multipart form data
+      const fileData = fs.readFileSync(oggPath);
+      const boundary = `----OpenRappterVoice${ts}`;
+      const parts: Buffer[] = [];
+
+      // chat_id field
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`
+      ));
+
+      // caption field (optional)
+      if (caption) {
+        parts.push(Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}\r\n`
+        ));
+      }
+
+      // voice file
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="voice"; filename="voice.ogg"\r\nContent-Type: audio/ogg\r\n\r\n`
+      ));
+      parts.push(fileData);
+      parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+      const body = Buffer.concat(parts);
+
+      const response = await fetch(
+        `${TELEGRAM_API}/bot${this.config.token}/sendVoice`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+          body,
+        }
+      );
+
+      const result = await response.json() as Record<string, unknown>;
+      return result.ok === true;
+    } catch (err) {
+      console.error('Voice clip error:', (err as Error).message);
+      return false;
+    } finally {
+      // Cleanup temp files
+      try { fs.unlinkSync(aiffPath); } catch {}
+      try { fs.unlinkSync(oggPath); } catch {}
     }
   }
 

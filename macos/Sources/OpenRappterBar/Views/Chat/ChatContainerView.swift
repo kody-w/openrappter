@@ -94,7 +94,7 @@ public struct ChatContainerView: View {
             HStack(spacing: 6) {
                 Text("🦖")
                     .font(.system(size: 16))
-                Text(viewModel.connectionState == .connected ? "OpenRappter Bar" : "Connecting...")
+                Text(viewModel.connectionState == .connected ? "OpenRappterBar" : "Connecting...")
                     .font(.system(size: 13, weight: .semibold))
                 Circle()
                     .fill(viewModel.statusColor)

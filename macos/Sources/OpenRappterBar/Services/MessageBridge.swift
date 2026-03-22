@@ -45,13 +45,20 @@ public class MessageBridge {
         log("Started — polling every 3s")
     }
     
+    private var pollCount = 0
     private func pollAndForward() async {
+        pollCount += 1
         let messages = MessageReader.readMessages(
             chatIdentifier: chatIdentifier,
             sinceTimestamp: lastReadTimestamp,
             limit: 5
         )
-        
+
+        // Log every 20 polls (~60s) or when messages found
+        if pollCount % 20 == 0 || !messages.isEmpty {
+            log("Poll #\(pollCount): \(messages.count) msgs, since=\(lastReadTimestamp)")
+        }
+
         for msg in messages {
             // Skip AI-sent messages
             let prefix = String(msg.text.prefix(20))
@@ -73,6 +80,8 @@ public class MessageBridge {
                 lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
                 continue
             }
+
+            log("📩 Message from \(msg.isFromMe ? "self" : "other"): \(msg.text.prefix(50))")
 
             // Strip the @rappter tag before forwarding
             let cleanText = msg.text

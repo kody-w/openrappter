@@ -196,7 +196,12 @@ export async function matchAndExecuteAgent(
     const agent = agents.get(bestMatch);
     if (agent) {
       try {
-        return await agent.execute({ query: message });
+        // Smart param injection based on agent + intent
+        const params: Record<string, unknown> = { query: message };
+        if (bestMatch === 'HackerNews') {
+          params.action = 'fetch'; // Default to fetch, not post
+        }
+        return await agent.execute(params);
       } catch (e) {
         return JSON.stringify({
           status: 'error',

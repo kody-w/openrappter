@@ -13,23 +13,36 @@ public class MessageBridge {
         self.chatIdentifier = chatIdentifier
     }
     
-    /// Start a tiny HTTP server on port 18791 that the daemon can query
-    public func start() {
-        guard MessageReader.canReadMessages() else {
-            print("[MessageBridge] No FDA access — bridge disabled")
-            return
+    private func log(_ msg: String) {
+        let line = "[MessageBridge] \(msg)\n"
+        print(line, terminator: "")
+        let logFile = NSHomeDirectory() + "/.openrappter/imessage-bridge.log"
+        if let handle = FileHandle(forWritingAtPath: logFile) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8) ?? Data())
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logFile, contents: line.data(using: .utf8))
         }
-        
-        // Simple polling: check for new messages every 3 seconds
-        // and forward them to the daemon via its RPC endpoint
+    }
+
+    public func start() {
+        let canRead = MessageReader.canReadMessages()
+        log("FDA check: \(canRead ? "YES" : "NO")")
+        log("Chat identifier: \(chatIdentifier)")
+
+        if !canRead {
+            log("WARNING: Neither FDA nor AppleScript available — bridge may not work")
+        }
+
         Task {
             while true {
                 try? await Task.sleep(for: .seconds(3))
                 await pollAndForward()
             }
         }
-        
-        print("[MessageBridge] Started for chat: \(chatIdentifier)")
+
+        log("Started — polling every 3s")
     }
     
     private func pollAndForward() async {

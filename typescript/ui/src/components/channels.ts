@@ -51,6 +51,13 @@ const SUPPORTED_CHANNELS: ChannelDefinition[] = [
     description: 'WhatsApp Web via Baileys with QR auth.',
     envVars: ['WHATSAPP_ENABLED'],
   },
+  {
+    type: 'imessage',
+    label: 'iMessage',
+    icon: '💬',
+    description: 'macOS self-chat — text your AI from iPhone, iPad, Watch.',
+    envVars: ['IMESSAGE_SELF_ID'],
+  },
 ];
 
 @customElement('openrappter-channels')

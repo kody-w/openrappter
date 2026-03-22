@@ -158,10 +158,9 @@ export class IMessageChannel extends EventEmitter {
    * Send via AppleScript
    */
   private async sendAppleScript(conversationId: string, message: OutgoingMessage): Promise<void> {
-    // Mark this timestamp so we don't process our own reply as input
-    const sendTs = String(Math.round(Date.now() / 1000));
-    this.sentByAI.add(sendTs);
-    // Clean old entries (keep last 20)
+    // Mark content prefix so we don't process our own reply as input
+    const contentPrefix = message.content.substring(0, 20);
+    this.sentByAI.add(contentPrefix);
     if (this.sentByAI.size > 20) {
       const arr = Array.from(this.sentByAI);
       this.sentByAI = new Set(arr.slice(-10));
@@ -219,80 +218,88 @@ export class IMessageChannel extends EventEmitter {
   }
 
   /**
-   * Poll for new messages via AppleScript
+   * Poll for new messages via AppleScript (no Full Disk Access needed)
    */
   private async pollAppleScriptMessages(): Promise<void> {
     if (!this.messageHandler) return;
 
     try {
-      // Query messages database directly (requires Full Disk Access)
-      // If selfChatId is set, also watch for self-sent messages in that chat
-      const selfFilter = this.config.selfChatId
-        ? `AND (m.is_from_me = 0 OR c.chat_identifier = '${this.config.selfChatId.replace(/'/g, "''")}')`
-        : `AND m.is_from_me = 0`;
-      const query = `
-        SELECT
-          m.guid,
-          m.text,
-          m.date / 1000000000 + 978307200 as timestamp,
-          m.is_from_me,
-          h.id as sender,
-          c.display_name,
-          c.chat_identifier
-        FROM message m
-        LEFT JOIN handle h ON m.handle_id = h.ROWID
-        LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-        LEFT JOIN chat c ON cmj.chat_id = c.ROWID
-        WHERE m.date / 1000000000 + 978307200 > ${this.lastMessageTime / 1000}
-          ${selfFilter}
-        ORDER BY m.date ASC
-        LIMIT 100
+      const chatId = this.config.selfChatId || '';
+      // Use AppleScript to read messages — bypasses FDA requirement
+      const script = `
+        tell application "Messages"
+          set output to ""
+          set allChats to every chat
+          repeat with aChat in allChats
+            try
+              set chatId to id of aChat
+              if chatId contains "${chatId}" then
+                set msgs to messages of aChat
+                set msgCount to count of msgs
+                if msgCount > 0 then
+                  set startIdx to msgCount - 4
+                  if startIdx < 1 then set startIdx to 1
+                  repeat with i from startIdx to msgCount
+                    set aMsg to item i of msgs
+                    set msgContent to content of aMsg
+                    set msgDate to date string of (date sent of aMsg)
+                    set msgTime to time string of (date sent of aMsg)
+                    set msgId to id of aMsg
+                    set senderName to "unknown"
+                    try
+                      set senderName to full name of sender of aMsg
+                    end try
+                    set fromMe to "0"
+                    try
+                      if sender of aMsg is missing value then set fromMe to "1"
+                    end try
+                    set output to output & msgId & "|||" & msgContent & "|||" & fromMe & "|||" & senderName & linefeed
+                  end repeat
+                end if
+              end if
+            end try
+          end repeat
+          return output
+        end tell
       `;
 
-      const dbPath = `${process.env.HOME}/Library/Messages/chat.db`;
-      const result = execSync(`sqlite3 -json "${dbPath}" "${query}"`, { encoding: 'utf-8' });
+      const { stdout } = await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 10000 });
+      if (!stdout.trim()) return;
 
-      if (!result.trim()) return;
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        const parts = line.split('|||');
+        if (parts.length < 3) continue;
 
-      const messages = JSON.parse(result) as Array<{
-        guid: string;
-        text: string;
-        timestamp: number;
-        is_from_me: number;
-        sender: string;
-        display_name: string | null;
-        chat_identifier: string;
-      }>;
-
-      for (const msg of messages) {
-        if (this.seenMessageIds.has(msg.guid)) continue;
-        this.seenMessageIds.add(msg.guid);
+        const [msgId, content, fromMe, senderName] = parts;
+        if (!msgId || !content) continue;
+        if (this.seenMessageIds.has(msgId)) continue;
+        this.seenMessageIds.add(msgId);
 
         // Skip messages sent by the AI (loop prevention)
-        const msgTs = String(Math.round(msg.timestamp));
-        if (msg.is_from_me && this.sentByAI.has(msgTs)) {
-          this.sentByAI.delete(msgTs);
-          this.lastMessageTime = Math.max(this.lastMessageTime, msg.timestamp * 1000);
-          continue;
+        if (fromMe === '1') {
+          // Check if this is a recent AI-sent message
+          const contentPrefix = content.substring(0, 20);
+          if (this.sentByAI.has(contentPrefix)) {
+            this.sentByAI.delete(contentPrefix);
+            continue;
+          }
         }
 
-        // For self-chat: treat is_from_me messages as user input
         const incoming: IncomingMessage = {
-          id: msg.guid,
+          id: msgId,
           channel: 'imessage',
-          conversationId: msg.chat_identifier,
-          sender: msg.is_from_me ? 'self' : (msg.sender || ''),
-          senderName: msg.is_from_me ? 'Kody' : (msg.display_name || msg.sender || 'unknown'),
-          content: msg.text || '',
-          timestamp: new Date(msg.timestamp * 1000).toISOString(),
+          conversationId: chatId,
+          sender: fromMe === '1' ? 'self' : (senderName || 'unknown'),
+          senderName: fromMe === '1' ? 'Kody' : (senderName || 'unknown'),
+          content: content,
+          timestamp: new Date().toISOString(),
           attachments: [],
           metadata: {
-            displayName: msg.display_name,
-            isSelfChat: msg.is_from_me === 1,
+            isSelfChat: fromMe === '1',
           },
         };
 
-        this.lastMessageTime = Math.max(this.lastMessageTime, msg.timestamp * 1000);
         this.messageHandler(incoming);
       }
 

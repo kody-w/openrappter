@@ -67,6 +67,9 @@ public final class AppViewModel {
     // Fleet & Mars live data
     public let fleetViewModel = FleetViewModel()
 
+    // iMessage bridge (reads messages via FDA, forwards to daemon)
+    public var messageBridge: MessageBridge?
+
     // Activity (legacy — kept for backwards compat with ActivityListView)
     public var activities: [ActivityItem] = []
 
@@ -155,6 +158,26 @@ public final class AppViewModel {
         Task { await sessionStore.load() }
         // Start fleet/Mars live polling
         fleetViewModel.startRefreshing()
+        // Start iMessage bridge if configured
+        if let imsgId = ProcessInfo.processInfo.environment["IMESSAGE_SELF_ID"], !imsgId.isEmpty {
+            let bridge = MessageBridge(chatIdentifier: imsgId)
+            self.messageBridge = bridge
+            bridge.start()
+        } else {
+            // Try reading from .env file
+            let envPath = NSHomeDirectory() + "/.openrappter/.env"
+            if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
+                for line in envContent.split(separator: "\n") {
+                    if line.hasPrefix("IMESSAGE_SELF_ID=") {
+                        let id = String(line.dropFirst("IMESSAGE_SELF_ID=".count))
+                        let bridge = MessageBridge(chatIdentifier: id)
+                        self.messageBridge = bridge
+                        bridge.start()
+                        break
+                    }
+                }
+            }
+        }
     }
 
     /// Detect a running gateway and connect to it automatically.

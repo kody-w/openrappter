@@ -24,6 +24,8 @@ export interface IMessageConfig extends ChannelConfig {
   blueBubblesUrl?: string;
   blueBubblesPassword?: string;
   pollInterval?: number;
+  /** iMessage ID (phone or email) to watch for self-chat messages */
+  selfChatId?: string;
 }
 
 interface BlueBubblesMessage {
@@ -55,6 +57,7 @@ export class IMessageChannel extends EventEmitter {
   private pollTimer?: NodeJS.Timeout;
   private lastMessageTime = Date.now();
   private seenMessageIds = new Set<string>();
+  private sentByAI = new Set<string>(); // Track AI-sent message timestamps to avoid loops
 
   constructor(config: IMessageConfig) {
     super();
@@ -155,6 +158,15 @@ export class IMessageChannel extends EventEmitter {
    * Send via AppleScript
    */
   private async sendAppleScript(conversationId: string, message: OutgoingMessage): Promise<void> {
+    // Mark this timestamp so we don't process our own reply as input
+    const sendTs = String(Math.round(Date.now() / 1000));
+    this.sentByAI.add(sendTs);
+    // Clean old entries (keep last 20)
+    if (this.sentByAI.size > 20) {
+      const arr = Array.from(this.sentByAI);
+      this.sentByAI = new Set(arr.slice(-10));
+    }
+
     // Escape special characters for AppleScript
     const escapedContent = message.content
       .replace(/\\/g, '\\\\')
@@ -214,6 +226,10 @@ export class IMessageChannel extends EventEmitter {
 
     try {
       // Query messages database directly (requires Full Disk Access)
+      // If selfChatId is set, also watch for self-sent messages in that chat
+      const selfFilter = this.config.selfChatId
+        ? `AND (m.is_from_me = 0 OR c.chat_identifier = '${this.config.selfChatId.replace(/'/g, "''")}')`
+        : `AND m.is_from_me = 0`;
       const query = `
         SELECT
           m.guid,
@@ -228,7 +244,7 @@ export class IMessageChannel extends EventEmitter {
         LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
         LEFT JOIN chat c ON cmj.chat_id = c.ROWID
         WHERE m.date / 1000000000 + 978307200 > ${this.lastMessageTime / 1000}
-          AND m.is_from_me = 0
+          ${selfFilter}
         ORDER BY m.date ASC
         LIMIT 100
       `;
@@ -252,16 +268,27 @@ export class IMessageChannel extends EventEmitter {
         if (this.seenMessageIds.has(msg.guid)) continue;
         this.seenMessageIds.add(msg.guid);
 
+        // Skip messages sent by the AI (loop prevention)
+        const msgTs = String(Math.round(msg.timestamp));
+        if (msg.is_from_me && this.sentByAI.has(msgTs)) {
+          this.sentByAI.delete(msgTs);
+          this.lastMessageTime = Math.max(this.lastMessageTime, msg.timestamp * 1000);
+          continue;
+        }
+
+        // For self-chat: treat is_from_me messages as user input
         const incoming: IncomingMessage = {
           id: msg.guid,
           channel: 'imessage',
           conversationId: msg.chat_identifier,
-          sender: msg.sender,
+          sender: msg.is_from_me ? 'self' : (msg.sender || ''),
+          senderName: msg.is_from_me ? 'Kody' : (msg.display_name || msg.sender || 'unknown'),
           content: msg.text || '',
           timestamp: new Date(msg.timestamp * 1000).toISOString(),
           attachments: [],
           metadata: {
             displayName: msg.display_name,
+            isSelfChat: msg.is_from_me === 1,
           },
         };
 

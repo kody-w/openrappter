@@ -110,6 +110,56 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   channelRegistry.register(new WhatsAppChannel({}));
   channelRegistry.register(new CLIChannel());
 
+  // ── iMessage channel (macOS self-chat) ──
+  const { IMessageChannel } = await import('./channels/imessage.js');
+  const imessageSelfId = process.env.IMESSAGE_SELF_ID || '';
+  const imessage = new IMessageChannel({
+    mode: 'applescript',
+    selfChatId: imessageSelfId || undefined,
+    pollInterval: 3000,
+  });
+
+  if (process.platform === 'darwin' && imessageSelfId) {
+    imessage.onMessage(async (incoming) => {
+      try {
+        const chatKey = `imessage_${incoming.conversationId || 'self'}`;
+        log(`${EMOJI} iMessage ← ${incoming.senderName}: ${incoming.content}`);
+
+        const result = await assistant.getResponse(incoming.content, undefined, undefined, chatKey);
+        let reply = result.content;
+        const voiceIdx = reply.indexOf('|||VOICE|||');
+        let voiceText = '';
+        if (voiceIdx !== -1) {
+          voiceText = reply.substring(voiceIdx + 11).trim();
+          reply = reply.substring(0, voiceIdx).trim();
+        }
+
+        // Send text reply
+        await imessage.send(incoming.conversationId!, {
+          channel: 'imessage',
+          content: `🦖 ${reply}`,
+        });
+
+        // Send voice clip if there's voice text
+        if (voiceText && voiceText.length > 5) {
+          await imessage.sendVoiceClip(incoming.conversationId!, voiceText);
+        }
+
+        log(`${EMOJI} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
+      } catch (err) {
+        console.error(`${EMOJI} iMessage reply error:`, (err as Error).message);
+      }
+    });
+
+    try {
+      await imessage.connect();
+      log(`${EMOJI} iMessage connected — watching self-chat (${imessageSelfId})`);
+    } catch (err) {
+      console.warn(`${EMOJI} iMessage connect failed:`, (err as Error).message);
+      console.warn(`${EMOJI} Tip: Grant Full Disk Access to Terminal/iTerm in System Settings → Privacy`);
+    }
+  }
+
   // Wire incoming messages → Assistant → reply for all message channels
   telegram.onMessage(async (incoming) => {
     try {
@@ -316,7 +366,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   // Override channels.list to include EventEmitter-based channels not in registry
   const extraChannels = [
     { id: 'signal', type: 'signal' },
-    { id: 'imessage', type: 'imessage' },
+    ...(imessageSelfId ? [] : [{ id: 'imessage', type: 'imessage' }]),
     { id: 'matrix', type: 'matrix' },
     { id: 'teams', type: 'teams' },
     { id: 'googlechat', type: 'googlechat' },

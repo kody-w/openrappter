@@ -336,15 +336,61 @@ export class GatewayServer {
   };
 
   private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    // CORS headers — allow local browser apps to connect (Amendment VII: Parent's Porch)
+    const corsHeaders: Record<string, string> = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    };
+
+    // Handle CORS preflight
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders);
+      res.end();
+      return;
+    }
+
     if (req.url === '/health' && req.method === 'GET') {
       const health = this.getHealthResponse();
-      res.writeHead(health.status === 'ok' ? 200 : 503, { 'Content-Type': 'application/json' });
+      res.writeHead(health.status === 'ok' ? 200 : 503, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify(health));
       return;
     }
     if (req.url === '/status' && req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
       res.end(JSON.stringify(this.getStatus()));
+      return;
+    }
+
+    // JSON-RPC over HTTP POST — allows browser games and local apps to call the gateway
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const parsed = JSON.parse(body);
+          if (parsed.jsonrpc === '2.0' && parsed.method) {
+            const method = this.methods.get(parsed.method);
+            if (method) {
+              const result = await method(parsed.params || {});
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result }));
+            } else {
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32601, message: `Method not found: ${parsed.method}` } }));
+            }
+          } else {
+            // Plain chat message (backwards compatible)
+            const chatMsg = parsed.message || parsed.query || body;
+            const status = this.getStatus();
+            res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify({ response: `Received: ${chatMsg}`, status }));
+          }
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
       return;
     }
 
@@ -354,7 +400,7 @@ export class GatewayServer {
       return;
     }
 
-    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
     res.end(JSON.stringify({ error: 'Not found' }));
   }
 

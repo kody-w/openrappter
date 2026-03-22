@@ -372,7 +372,7 @@ export class GatewayServer {
           if (parsed.jsonrpc === '2.0' && parsed.method) {
             const method = this.methods.get(parsed.method);
             if (method) {
-              const result = await method(parsed.params || {});
+              const result = await method.handler(parsed.params || {});
               res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
               res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result }));
             } else {

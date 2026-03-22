@@ -118,6 +118,11 @@ public struct ChatContainerView: View {
                 }
                 .help("New Chat")
 
+                Button { openWebUI() } label: {
+                    Image(systemName: "globe")
+                }
+                .help("Open Dashboard")
+
                 Button { showCronPopover.toggle() } label: {
                     Image(systemName: "clock")
                 }

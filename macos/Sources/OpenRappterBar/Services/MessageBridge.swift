@@ -66,9 +66,22 @@ public class MessageBridge {
                 lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
                 continue
             }
-            
+
+            // Only respond if message contains @rappter tag
+            let lower = msg.text.lowercased()
+            guard lower.contains("@rappter") || lower.contains("@rapp") else {
+                lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                continue
+            }
+
+            // Strip the @rappter tag before forwarding
+            let cleanText = msg.text
+                .replacingOccurrences(of: "@rappter", with: "", options: .caseInsensitive)
+                .replacingOccurrences(of: "@rapp", with: "", options: .caseInsensitive)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
             // Forward to daemon
-            await forwardToDaemon(text: msg.text, fromMe: msg.isFromMe, guid: msg.guid)
+            await forwardToDaemon(text: cleanText.isEmpty ? msg.text : cleanText, fromMe: msg.isFromMe, guid: msg.guid)
             lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
         }
     }

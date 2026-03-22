@@ -699,6 +699,35 @@ export class GatewayServer {
     this.registerMethod('ping', async () => ({ pong: Date.now() }));
     this.registerMethod('methods', async () => Array.from(this.methods.keys()));
 
+    // Fleet + Mars Barn status (fetched from GitHub CDN)
+    this.registerMethod('fleet.status', async () => {
+      try {
+        const [frameRes, statsRes] = await Promise.all([
+          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/frame_counter.json').then(r => r.json()).catch(() => null),
+          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/stats.json').then(r => r.json()).catch(() => null),
+        ]);
+        return {
+          frame: frameRes?.frame ?? 0,
+          total_posts: statsRes?.total_posts ?? 0,
+          total_comments: statsRes?.total_comments ?? 0,
+          online: !!frameRes,
+        };
+      } catch { return { frame: 0, online: false }; }
+    });
+
+    this.registerMethod('mars.status', async () => {
+      try {
+        const colony = await fetch('https://raw.githubusercontent.com/kody-w/mars-barn/main/state/colony.json').then(r => r.json()).catch(() => null);
+        return {
+          sol: colony?.sol ?? 0,
+          population: colony?.population ?? 0,
+          alive: colony?.alive ?? false,
+          name: colony?.name ?? 'Unknown',
+          online: !!colony,
+        };
+      } catch { return { sol: 0, online: false }; }
+    });
+
     // Agents
     this.registerMethod('agents.list', async () => this.agentList ? this.agentList() : []);
 

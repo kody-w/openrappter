@@ -47,7 +47,7 @@ public enum AppConstants {
     public static let panelWidth: CGFloat = 380
     public static let panelMinHeight: CGFloat = 420
     public static let panelMaxHeight: CGFloat = 700
-    public static let fullWindowWidth: CGFloat = 720
-    public static let fullWindowHeight: CGFloat = 520
-    public static let fullWindowSidebarWidth: CGFloat = 200
+    public static let fullWindowWidth: CGFloat = 820
+    public static let fullWindowHeight: CGFloat = 580
+    public static let fullWindowSidebarWidth: CGFloat = 220
 }

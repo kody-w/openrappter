@@ -30,23 +30,22 @@ public struct ChatMessageList: View {
                                 }
 
                                 ChatMessageView(message: message)
-
-                                if message.id != messages.last?.id {
-                                    Divider().padding(.leading, 36)
-                                }
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
 
                             // Streaming indicator
-                            if isStreaming && !streamingText.isEmpty {
+                            if isStreaming {
                                 StreamingIndicator(text: streamingText)
                                     .id("streaming")
+                                    .transition(.opacity)
                             }
 
                             // Anchor for scrolling
                             Color.clear
-                                .frame(height: 1)
+                                .frame(height: 8)
                                 .id("bottom")
                         }
+                        .padding(.vertical, 8)
                     }
                     .onChange(of: messages.count) {
                         scrollToBottom(proxy: proxy)
@@ -71,11 +70,15 @@ public struct ChatMessageList: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-            Text("No messages yet")
+        VStack(spacing: 12) {
+            Text("🦖")
+                .font(.system(size: 36))
+
+            Text("What's on your mind?")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Text("Try the quick actions above or type a message")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -92,16 +95,20 @@ public struct ChatMessageList: View {
     }
 
     private func dateSeparator(for date: Date) -> some View {
-        HStack {
-            VStack { Divider() }
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
             Text(date.formatted(date: .abbreviated, time: .omitted))
-                .font(.caption2)
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .fixedSize()
-            VStack { Divider() }
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(height: 0.5)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Scroll to Bottom
@@ -110,15 +117,12 @@ public struct ChatMessageList: View {
         Button {
             showScrollToBottom = false
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.down")
-                    .font(.caption2)
-                Text("Latest")
-                    .font(.caption2)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
+            Image(systemName: "chevron.down")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(.ultraThinMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
         }
         .buttonStyle(.borderless)
     }

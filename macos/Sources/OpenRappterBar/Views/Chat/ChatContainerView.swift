@@ -57,13 +57,16 @@ public struct ChatContainerView: View {
         NavigationSplitView {
             sessionsSidebar
                 .navigationSplitViewColumnWidth(
-                    min: 160,
-                    ideal: AppConstants.fullWindowSidebarWidth,
-                    max: 280
+                    min: 180,
+                    ideal: 220,
+                    max: 300
                 )
         } detail: {
             VStack(spacing: 0) {
                 windowHeader
+                Divider()
+                quickActions
+                    .padding(.vertical, 2)
                 Divider()
 
                 ChatMessageList(
@@ -76,8 +79,9 @@ public struct ChatContainerView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Divider()
                 chatInput
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
             }
         }
     }
@@ -85,8 +89,17 @@ public struct ChatContainerView: View {
     // MARK: - Panel Header
 
     private var panelHeader: some View {
-        HStack(spacing: 8) {
-            StatusBadge(state: viewModel.connectionState)
+        HStack(spacing: 6) {
+            // Dino + status
+            HStack(spacing: 6) {
+                Text("🦖")
+                    .font(.system(size: 16))
+                Text(viewModel.connectionState == .connected ? "OpenRappter" : "Connecting...")
+                    .font(.system(size: 13, weight: .semibold))
+                Circle()
+                    .fill(viewModel.statusColor)
+                    .frame(width: 6, height: 6)
+            }
 
             Spacer()
 
@@ -98,47 +111,32 @@ public struct ChatContainerView: View {
                 .buttonStyle(.bordered)
             }
 
-            Button {
-                viewModel.chatViewModel.newSession()
-            } label: {
-                Image(systemName: "square.and.pencil")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("New Chat")
-
-            Button {
-                openWebUI()
-            } label: {
-                Image(systemName: "globe")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Open Web UI")
-
-            Button {
-                showCronPopover.toggle()
-            } label: {
-                Image(systemName: "clock.arrow.2.circlepath")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Cron Jobs & Logs")
-            .popover(isPresented: $showCronPopover, arrowEdge: .bottom) {
-                CronSettingsView(viewModel: viewModel.cronViewModel)
-                    .frame(width: 380, height: 400)
-            }
-
-            if let onOpenFullWindow {
-                Button {
-                    onOpenFullWindow()
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.caption)
+            // Toolbar buttons
+            Group {
+                Button { viewModel.chatViewModel.newSession() } label: {
+                    Image(systemName: "square.and.pencil")
                 }
-                .buttonStyle(.borderless)
-                .help("Open in window")
+                .help("New Chat")
+
+                Button { showCronPopover.toggle() } label: {
+                    Image(systemName: "clock")
+                }
+                .help("Cron Jobs")
+                .popover(isPresented: $showCronPopover, arrowEdge: .bottom) {
+                    CronSettingsView(viewModel: viewModel.cronViewModel)
+                        .frame(width: 380, height: 400)
+                }
+
+                if let onOpenFullWindow {
+                    Button { onOpenFullWindow() } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    }
+                    .help("Open in window")
+                }
             }
+            .font(.system(size: 12))
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -148,12 +146,31 @@ public struct ChatContainerView: View {
 
     private var windowHeader: some View {
         HStack(spacing: 8) {
-            Image(systemName: viewModel.statusIcon)
-                .foregroundStyle(viewModel.statusColor)
-            Text(currentSessionTitle)
-                .font(.headline)
+            Text("🦖")
+                .font(.system(size: 18))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(currentSessionTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(viewModel.statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(viewModel.connectionState == .connected ? "Connected" : "Offline")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Spacer()
-            StatusBadge(state: viewModel.connectionState)
+
+            Button { viewModel.chatViewModel.newSession() } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("New Chat")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -171,45 +188,44 @@ public struct ChatContainerView: View {
     private var quickActions: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                quickActionButton(icon: "brain.head.profile", label: "Dream", color: .purple) {
-                    viewModel.chatViewModel.chatInput = "Run Dream mode — consolidate and clean up my memory"; viewModel.chatViewModel.sendMessage()
-                }
-                quickActionButton(icon: "sun.horizon.fill", label: "Brief", color: .orange) {
+                quickActionPill(icon: "sun.horizon.fill", label: "Brief", color: .orange) {
                     viewModel.chatViewModel.chatInput = "Run my morning briefing — weather, calendar, priorities"; viewModel.chatViewModel.sendMessage()
                 }
-                quickActionButton(icon: "list.bullet.clipboard", label: "Status", color: .blue) {
-                    viewModel.chatViewModel.chatInput = "Show me the current status — what agents are loaded, how many memories, any cron jobs running"; viewModel.chatViewModel.sendMessage()
-                }
-                quickActionButton(icon: "brain", label: "Memory", color: .green) {
+                quickActionPill(icon: "brain", label: "Memory", color: .green) {
                     viewModel.chatViewModel.chatInput = "List all my memories"; viewModel.chatViewModel.sendMessage()
                 }
-                quickActionButton(icon: "arrow.triangle.2.circlepath", label: "Update", color: .cyan) {
-                    viewModel.chatViewModel.chatInput = "Check if there are any updates available for openrappter"; viewModel.chatViewModel.sendMessage()
+                quickActionPill(icon: "brain.head.profile", label: "Dream", color: .purple) {
+                    viewModel.chatViewModel.chatInput = "Run Dream mode — consolidate and clean up my memory"; viewModel.chatViewModel.sendMessage()
                 }
-                quickActionButton(icon: "newspaper", label: "HN", color: .red) {
+                quickActionPill(icon: "chart.bar.fill", label: "Status", color: .blue) {
+                    viewModel.chatViewModel.chatInput = "Show me the current status — what agents are loaded, how many memories, any cron jobs running"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionPill(icon: "newspaper.fill", label: "News", color: .red) {
                     viewModel.chatViewModel.chatInput = "Get the top 5 Hacker News stories right now"; viewModel.chatViewModel.sendMessage()
+                }
+                quickActionPill(icon: "arrow.triangle.2.circlepath", label: "Update", color: .cyan) {
+                    viewModel.chatViewModel.chatInput = "Check if there are any updates available for openrappter"; viewModel.chatViewModel.sendMessage()
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
-        .background(.bar)
     }
 
-    private func quickActionButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func quickActionPill(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 3) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(color)
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.7))
             }
-            .frame(width: 48, height: 40)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary, lineWidth: 0.5))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.1))
+            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -218,49 +234,58 @@ public struct ChatContainerView: View {
 
     private var sessionsSidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Sidebar header
             HStack {
-                Text("Sessions")
-                    .font(.headline)
+                Text("Chats")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button {
                     viewModel.chatViewModel.newSession()
                 } label: {
-                    Image(systemName: "plus")
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
+                .help("New Chat")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
             Divider()
 
             if viewModel.sessionsViewModel.sessions.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.title3)
-                        .foregroundStyle(.tertiary)
-                    Text("No sessions")
+                VStack(spacing: 10) {
+                    Text("🦖")
+                        .font(.system(size: 28))
+                    Text("No chats yet")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(viewModel.sessionsViewModel.sessions) { session in
-                    SidebarSessionRow(
-                        session: session,
-                        isActive: session.sessionKey == viewModel.currentSessionKey
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.chatViewModel.switchToSession(sessionKey: session.sessionKey)
-                    }
-                    .contextMenu {
-                        Button("Delete", role: .destructive) {
-                            viewModel.sessionsViewModel.deleteSession(session)
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(viewModel.sessionsViewModel.sessions) { session in
+                            SidebarSessionRow(
+                                session: session,
+                                isActive: session.sessionKey == viewModel.currentSessionKey
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                viewModel.chatViewModel.switchToSession(sessionKey: session.sessionKey)
+                            }
+                            .contextMenu {
+                                Button("Delete", role: .destructive) {
+                                    viewModel.sessionsViewModel.deleteSession(session)
+                                }
+                            }
                         }
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
                 }
-                .listStyle(.sidebar)
             }
         }
     }
@@ -291,20 +316,52 @@ struct SidebarSessionRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(isActive ? Color.green : Color.clear)
-                .frame(width: 6, height: 6)
+            Image(systemName: "bubble.left.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary.opacity(0.5))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
-                    .font(.callout)
+                Text(sessionDisplayName)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .lineLimit(1)
-                Text("\(session.messageCount) messages")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 4) {
+                    Text("\(session.messageCount) msgs")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                    Text("·")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                    Text(session.updatedAt, style: .relative)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
             }
+
+            Spacer()
         }
-        .padding(.vertical, 2)
-        .background(isActive ? Color.accentColor.opacity(0.08) : Color.clear)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isActive ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+    }
+
+    private var sessionDisplayName: String {
+        if let title = session.title, !title.isEmpty {
+            return title
+        }
+        // Generate a friendlier name from the session key
+        let key = session.sessionKey
+        if key.hasPrefix("interactive_") || key.hasPrefix("session_") || key.hasPrefix("cron_") {
+            let prefix = key.hasPrefix("cron_") ? "Cron" : "Chat"
+            let dateStr = session.createdAt.formatted(date: .abbreviated, time: .shortened)
+            return "\(prefix) · \(dateStr)"
+        }
+        if key.hasPrefix("web-") {
+            return "Web · \(session.createdAt.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return "Chat · \(session.createdAt.formatted(date: .abbreviated, time: .shortened))"
     }
 }

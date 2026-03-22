@@ -10,81 +10,156 @@ public struct ChatMessageView: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: roleIcon)
-                .font(.caption)
-                .foregroundStyle(roleColor)
-                .frame(width: 16, alignment: .center)
-                .padding(.top, 2)
+        HStack(alignment: .bottom, spacing: 0) {
+            if message.role == .user {
+                Spacer(minLength: 40)
+                userBubble
+            } else if message.role == .assistant {
+                assistantBubble
+                Spacer(minLength: 40)
+            } else if message.role == .error {
+                errorBubble
+            } else {
+                systemMessage
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Text(roleLabel)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(roleColor)
-                    Spacer()
-                    Text(message.timestamp, style: .time)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+    // MARK: - User Bubble (right-aligned, blue)
 
-                // Render markdown for assistant messages, plain text for others
-                if message.role == .assistant,
-                   let attributed = try? AttributedString(
-                       markdown: message.content,
-                       options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                   ) {
+    private var userBubble: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(message.content)
+                .font(.callout)
+                .foregroundStyle(.white)
+                .textSelection(.enabled)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    LinearGradient(
+                        colors: [Color.blue, Color.blue.opacity(0.85)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(BubbleShape(isUser: true))
+
+            Text(message.timestamp, style: .time)
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .padding(.trailing, 4)
+        }
+    }
+
+    // MARK: - Assistant Bubble (left-aligned, material)
+
+    private var assistantBubble: some View {
+        HStack(alignment: .top, spacing: 6) {
+            // Dino avatar
+            Text("🦖")
+                .font(.system(size: 14))
+                .frame(width: 24, height: 24)
+                .background(Color.green.opacity(0.15))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Render markdown
+                if let attributed = try? AttributedString(
+                    markdown: message.content,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                ) {
                     Text(attributed)
                         .font(.callout)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(BubbleShape(isUser: false))
                 } else {
                     Text(message.content)
                         .font(.callout)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(BubbleShape(isUser: false))
                 }
+
+                Text(message.timestamp, style: .time)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 4)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(messageBackground)
     }
 
-    private var roleIcon: String {
-        switch message.role {
-        case .user: return "person.fill"
-        case .assistant: return "cpu"
-        case .system: return "info.circle"
-        case .error: return "exclamationmark.triangle.fill"
+    // MARK: - Error
+
+    private var errorBubble: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .frame(width: 24, height: 24)
+
+            Text(message.content)
+                .font(.callout)
+                .foregroundStyle(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var roleColor: Color {
-        switch message.role {
-        case .user: return .blue
-        case .assistant: return .green
-        case .system: return .secondary
-        case .error: return .red
-        }
-    }
+    // MARK: - System Message
 
-    private var roleLabel: String {
-        switch message.role {
-        case .user: return "You"
-        case .assistant: return "Assistant"
-        case .system: return "System"
-        case .error: return "Error"
-        }
+    private var systemMessage: some View {
+        Text(message.content)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
     }
+}
 
-    private var messageBackground: Color {
-        switch message.role {
-        case .user: return Color.primary.opacity(0.04)
-        case .assistant: return Color.primary.opacity(0.02)
-        case .system: return Color.clear
-        case .error: return Color.red.opacity(0.05)
+// MARK: - Bubble Shape
+
+struct BubbleShape: Shape {
+    let isUser: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius: CGFloat = 14
+        let tailSize: CGFloat = 4
+
+        var path = Path()
+
+        if isUser {
+            // User bubble: rounded with small tail on bottom-right
+            path.addRoundedRect(
+                in: CGRect(x: rect.minX, y: rect.minY, width: rect.width - tailSize, height: rect.height),
+                cornerSize: CGSize(width: radius, height: radius)
+            )
+            // Tail
+            path.move(to: CGPoint(x: rect.maxX - tailSize, y: rect.maxY - 8))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 2))
+            path.addLine(to: CGPoint(x: rect.maxX - tailSize - 6, y: rect.maxY))
+        } else {
+            // Assistant bubble: rounded with small tail on bottom-left
+            path.addRoundedRect(
+                in: CGRect(x: rect.minX + tailSize, y: rect.minY, width: rect.width - tailSize, height: rect.height),
+                cornerSize: CGSize(width: radius, height: radius)
+            )
+            // Tail
+            path.move(to: CGPoint(x: rect.minX + tailSize, y: rect.maxY - 8))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - 2))
+            path.addLine(to: CGPoint(x: rect.minX + tailSize + 6, y: rect.maxY))
         }
+
+        return path
     }
 }

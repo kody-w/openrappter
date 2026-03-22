@@ -64,6 +64,9 @@ public final class AppViewModel {
     public let cronViewModel = CronViewModel()
     public let approvalViewModel = ApprovalViewModel()
 
+    // Fleet & Mars live data
+    public let fleetViewModel = FleetViewModel()
+
     // Activity (legacy — kept for backwards compat with ActivityListView)
     public var activities: [ActivityItem] = []
 
@@ -150,6 +153,8 @@ public final class AppViewModel {
         self.processManager = ProcessManager()
         self.sessionStore = SessionStore()
         Task { await sessionStore.load() }
+        // Start fleet/Mars live polling
+        fleetViewModel.startRefreshing()
     }
 
     /// Detect a running gateway and connect to it automatically.

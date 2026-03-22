@@ -14,6 +14,10 @@ public struct StatusMenuView: View {
             statusHeader
             Divider()
 
+            // Fleet & Mars live status
+            MenuFleetSection(fleetVM: viewModel.fleetViewModel)
+            Divider()
+
             // Chat input
             ChatInputView(viewModel: viewModel)
                 .padding(12)

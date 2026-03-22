@@ -837,6 +837,60 @@ program
       }
     } catch { /* non-critical */ }
 
+    // ── Hatch: Install & launch menubar app (macOS only) ─────────────────
+    let menubarInstalled = false;
+    if (process.platform === 'darwin') {
+      const appPath = '/Applications/OpenRappter Bar.app';
+      const hasApp = fs.existsSync(appPath);
+
+      if (!hasApp) {
+        const installBar = await confirm({
+          message: 'Install the OpenRappter menu bar app? (animated dino in your menu bar)',
+          initialValue: true,
+        });
+
+        if (!isCancel(installBar) && installBar) {
+          const s = spinner();
+          s.start('Hatching into your menu bar…');
+          try {
+            const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
+            const tmpDmg = '/tmp/OpenRappter-Bar.dmg';
+            const mountPoint = '/tmp/openrappter-bar-mount';
+
+            // Download DMG
+            await execAsync(`curl -sL "${dmgUrl}" -o "${tmpDmg}"`, { timeout: 60000 });
+
+            // Mount, copy, unmount
+            await execAsync(`hdiutil attach "${tmpDmg}" -mountpoint "${mountPoint}" -nobrowse -quiet`, { timeout: 15000 });
+            await execAsync(`cp -R "${mountPoint}/OpenRappter Bar.app" "/Applications/"`, { timeout: 15000 });
+            await execAsync(`hdiutil detach "${mountPoint}" -quiet`, { timeout: 10000 });
+
+            // Cleanup
+            try { fs.unlinkSync(tmpDmg); } catch {}
+
+            // Remove quarantine so Gatekeeper doesn't block it
+            await execAsync(`xattr -rd com.apple.quarantine "/Applications/OpenRappter Bar.app"`, { timeout: 5000 }).catch(() => {});
+
+            // Launch it
+            await execAsync(`open "/Applications/OpenRappter Bar.app"`, { timeout: 5000 });
+
+            menubarInstalled = true;
+            s.stop('OpenRappter hatched into your menu bar! 🦖');
+          } catch (err) {
+            s.stop('Menu bar install failed — you can download it manually');
+            log.warn(`Error: ${(err as Error).message}`);
+            log.info('Download: https://github.com/kody-w/openrappter/releases/tag/v1.0.0-bar');
+          }
+        }
+      } else {
+        menubarInstalled = true;
+        // Make sure it's running
+        try {
+          await execAsync('pgrep -x "OpenRappter Bar" || open "/Applications/OpenRappter Bar.app"', { timeout: 5000 });
+        } catch {}
+      }
+    }
+
     // ── Final Summary ───────────────────────────────────────────────────────
     const finalLines = [
       `Copilot:    ${copilotReady ? '✅ Ready' : '❌ Not configured'}`,
@@ -845,6 +899,7 @@ program
       `Cron Jobs:  ${daemonStarted ? '✅ Scheduled' : '⬚  Waiting for daemon'}`,
       `Auto-start: ${process.platform === 'darwin' ? '✅ Installed (launchd)' : '⬚  Manual'}`,
       `Daily Tips: ✅ 30-day onboarding series at 9am`,
+      ...(menubarInstalled ? [`Menu Bar:   ✅ OpenRappter Bar running`] : []),
       '',
       `Chat:       openrappter "hello"`,
       `Status:     openrappter --status`,

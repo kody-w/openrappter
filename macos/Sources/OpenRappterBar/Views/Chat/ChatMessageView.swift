@@ -16,7 +16,7 @@ public struct ChatMessageView: View {
                 userBubble
             } else if message.role == .assistant {
                 assistantBubble
-                Spacer(minLength: 40)
+                Spacer(minLength: 20)
             } else if message.role == .error {
                 errorBubble
             } else {
@@ -44,7 +44,7 @@ public struct ChatMessageView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .clipShape(BubbleShape(isUser: true))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
             Text(message.timestamp, style: .time)
                 .font(.system(size: 9))
@@ -53,7 +53,7 @@ public struct ChatMessageView: View {
         }
     }
 
-    // MARK: - Assistant Bubble (left-aligned, material)
+    // MARK: - Assistant Bubble (left-aligned, rendered markdown)
 
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 6) {
@@ -65,27 +65,11 @@ public struct ChatMessageView: View {
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
-                // Render markdown
-                if let attributed = try? AttributedString(
-                    markdown: message.content,
-                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                ) {
-                    Text(attributed)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(BubbleShape(isUser: false))
-                } else {
-                    Text(message.content)
-                        .font(.callout)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.primary.opacity(0.06))
-                        .clipShape(BubbleShape(isUser: false))
-                }
+                MarkdownContentView(content: message.content)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.primary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 Text(message.timestamp, style: .time)
                     .font(.system(size: 9))
@@ -127,39 +111,165 @@ public struct ChatMessageView: View {
     }
 }
 
-// MARK: - Bubble Shape
+// MARK: - Markdown Content View
 
-struct BubbleShape: Shape {
-    let isUser: Bool
+/// Renders markdown content with proper heading, list, and code block support.
+struct MarkdownContentView: View {
+    let content: String
 
-    func path(in rect: CGRect) -> Path {
-        let radius: CGFloat = 14
-        let tailSize: CGFloat = 4
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(parseBlocks().enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .heading(let level, let text):
+                    Text(inlineMarkdown(text))
+                        .font(headingFont(level))
+                        .fontWeight(.semibold)
+                        .padding(.top, level == 1 ? 4 : 2)
 
-        var path = Path()
+                case .listItem(let text, let indent):
+                    HStack(alignment: .top, spacing: 4) {
+                        Text("•")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, CGFloat(indent) * 12)
+                        Text(inlineMarkdown(text))
+                            .font(.callout)
+                            .textSelection(.enabled)
+                    }
 
-        if isUser {
-            // User bubble: rounded with small tail on bottom-right
-            path.addRoundedRect(
-                in: CGRect(x: rect.minX, y: rect.minY, width: rect.width - tailSize, height: rect.height),
-                cornerSize: CGSize(width: radius, height: radius)
-            )
-            // Tail
-            path.move(to: CGPoint(x: rect.maxX - tailSize, y: rect.maxY - 8))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 2))
-            path.addLine(to: CGPoint(x: rect.maxX - tailSize - 6, y: rect.maxY))
-        } else {
-            // Assistant bubble: rounded with small tail on bottom-left
-            path.addRoundedRect(
-                in: CGRect(x: rect.minX + tailSize, y: rect.minY, width: rect.width - tailSize, height: rect.height),
-                cornerSize: CGSize(width: radius, height: radius)
-            )
-            // Tail
-            path.move(to: CGPoint(x: rect.minX + tailSize, y: rect.maxY - 8))
-            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - 2))
-            path.addLine(to: CGPoint(x: rect.minX + tailSize + 6, y: rect.maxY))
+                case .codeBlock(let code):
+                    Text(code)
+                        .font(.system(size: 11, design: .monospaced))
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.primary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                case .paragraph(let text):
+                    Text(inlineMarkdown(text))
+                        .font(.callout)
+                        .textSelection(.enabled)
+
+                case .divider:
+                    Divider()
+                        .padding(.vertical, 2)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Block Parser
+
+    private enum Block {
+        case heading(Int, String)
+        case listItem(String, Int)
+        case codeBlock(String)
+        case paragraph(String)
+        case divider
+    }
+
+    private func parseBlocks() -> [Block] {
+        var blocks: [Block] = []
+        let lines = content.components(separatedBy: "\n")
+        var inCodeBlock = false
+        var codeLines: [String] = []
+        var paragraphLines: [String] = []
+
+        func flushParagraph() {
+            let text = paragraphLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                blocks.append(.paragraph(text))
+            }
+            paragraphLines = []
         }
 
-        return path
+        for line in lines {
+            // Code block toggle
+            if line.hasPrefix("```") {
+                if inCodeBlock {
+                    blocks.append(.codeBlock(codeLines.joined(separator: "\n")))
+                    codeLines = []
+                    inCodeBlock = false
+                } else {
+                    flushParagraph()
+                    inCodeBlock = true
+                }
+                continue
+            }
+
+            if inCodeBlock {
+                codeLines.append(line)
+                continue
+            }
+
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Empty line — flush paragraph
+            if trimmed.isEmpty {
+                flushParagraph()
+                continue
+            }
+
+            // Divider
+            if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                flushParagraph()
+                blocks.append(.divider)
+                continue
+            }
+
+            // Headings: ### Text, ## Text, # Text
+            if trimmed.hasPrefix("#") {
+                let hashes = trimmed.prefix(while: { $0 == "#" })
+                let level = min(hashes.count, 3)
+                let rest = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
+                if !rest.isEmpty {
+                    flushParagraph()
+                    blocks.append(.heading(level, rest))
+                    continue
+                }
+            }
+
+            // List items: - text, * text, + text
+            if (trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ")) {
+                flushParagraph()
+                let indent = line.prefix(while: { $0 == " " || $0 == "\t" }).count / 2
+                let text = String(trimmed.dropFirst(2))
+                blocks.append(.listItem(text, indent))
+                continue
+            }
+
+            // Regular text
+            paragraphLines.append(trimmed)
+        }
+
+        // Flush remaining
+        if inCodeBlock && !codeLines.isEmpty {
+            blocks.append(.codeBlock(codeLines.joined(separator: "\n")))
+        }
+        flushParagraph()
+
+        return blocks
+    }
+
+    // MARK: - Inline Markdown
+
+    private func inlineMarkdown(_ text: String) -> AttributedString {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return AttributedString(text)
+    }
+
+    private func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: return .system(size: 16, weight: .bold)
+        case 2: return .system(size: 14, weight: .semibold)
+        default: return .system(size: 13, weight: .semibold)
+        }
     }
 }

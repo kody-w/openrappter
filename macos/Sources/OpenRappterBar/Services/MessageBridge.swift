@@ -1,4 +1,6 @@
 import Foundation
+import SQLite3
+import AppKit
 
 /// Bridge between the OpenRappter daemon and iMessage via the menubar app.
 /// The menubar app has FDA; the daemon doesn't. So the daemon asks the app
@@ -27,12 +29,22 @@ public class MessageBridge {
     }
 
     public func start() {
-        let canRead = MessageReader.canReadMessages()
-        log("FDA check: \(canRead ? "YES" : "NO")")
+        // Check if sqlite3 can actually read chat.db (the only reliable method)
+        let home = NSHomeDirectory()
+        let dbPath = "\(home)/Library/Messages/chat.db"
+        var testDb: OpaquePointer?
+        let hasFDA = sqlite3_open_v2(dbPath, &testDb, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
+        if hasFDA { sqlite3_close(testDb) }
+
+        log("FDA check: \(hasFDA ? "YES (sqlite3)" : "NO — need Full Disk Access")")
         log("Chat identifier: \(chatIdentifier)")
 
-        if !canRead {
-            log("WARNING: Neither FDA nor AppleScript available — bridge may not work")
+        if !hasFDA {
+            log("Opening System Settings for FDA grant...")
+            // Open FDA settings and show alert
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                NSWorkspace.shared.open(url)
+            }
         }
 
         Task {

@@ -1185,9 +1185,9 @@ choose_install_method() {
     local existing
     existing="$(detect_existing_install)"
 
-    # No existing install — default to npm
+    # No existing install — default to git (npm publish paused)
     if [[ "$existing" == "none" ]]; then
-        INSTALL_METHOD="npm"
+        INSTALL_METHOD="git"
         return 0
     fi
 
@@ -1201,10 +1201,10 @@ choose_install_method() {
     if [[ -n "$GUM" ]] && gum_is_tty; then
         ui_info "Existing $existing install detected"
         local choice
-        choice="$("$GUM" choose --header "Upgrade method:" "npm (recommended)" "git (current)" "Switch to npm" "Switch to git" </dev/tty)" || true
+        choice="$("$GUM" choose --header "Upgrade method:" "git (recommended)" "npm" "Switch to git" "Switch to npm" </dev/tty)" || true
         case "$choice" in
-            "npm (recommended)"|"Switch to npm") INSTALL_METHOD="npm" ;;
-            "git (current)"|"Switch to git") INSTALL_METHOD="git" ;;
+            "git (recommended)"|"Switch to git") INSTALL_METHOD="git" ;;
+            "npm"|"Switch to npm") INSTALL_METHOD="npm" ;;
             *) INSTALL_METHOD="$existing" ;;
         esac
     else
@@ -2327,6 +2327,7 @@ main() {
     if [[ "$INSTALL_METHOD" == "git" ]]; then
         ui_kv "Install dir" "$INSTALL_DIR"
         ui_kv "Command" "$bin_dir/$BIN_NAME"
+        ui_kv "Update" "cd $INSTALL_DIR && git pull && cd typescript && npm run build"
     else
         ui_kv "Method" "npm global"
         ui_kv "Update" "npm update -g openrappter"

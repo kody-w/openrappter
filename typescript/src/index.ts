@@ -514,6 +514,38 @@ program
       return;
     }
 
+    // Handle "bar" as a built-in command (not chat)
+    if (message === 'bar') {
+      if (process.platform !== 'darwin') {
+        console.log(`${EMOJI} The menu bar app is macOS only.`);
+        return;
+      }
+      const appPath = '/Applications/OpenRappter Bar.app';
+      if (fs.existsSync(appPath)) {
+        await execAsync(`pgrep -x OpenRappterBar || open "${appPath}"`).catch(() => {});
+        console.log(`\n${EMOJI} OpenRappter hatched into your menu bar!\n`);
+        return;
+      }
+      console.log(`\n${EMOJI} Hatching into your menu bar...\n`);
+      try {
+        const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
+        const tmpDmg = '/tmp/OpenRappter-Bar.dmg';
+        const mountPoint = '/tmp/openrappter-bar-mount';
+        await execAsync(`curl -sL "${dmgUrl}" -o "${tmpDmg}"`, { timeout: 60000 });
+        await execAsync(`hdiutil attach "${tmpDmg}" -mountpoint "${mountPoint}" -nobrowse -quiet`, { timeout: 15000 });
+        await execAsync(`cp -R "${mountPoint}/OpenRappter Bar.app" "/Applications/"`, { timeout: 15000 });
+        await execAsync(`hdiutil detach "${mountPoint}" -quiet`, { timeout: 10000 });
+        try { fs.unlinkSync(tmpDmg); } catch {}
+        await execAsync(`xattr -rd com.apple.quarantine "/Applications/OpenRappter Bar.app"`, { timeout: 5000 }).catch(() => {});
+        await execAsync(`open "/Applications/OpenRappter Bar.app"`, { timeout: 5000 });
+        console.log(`${EMOJI} OpenRappter hatched into your menu bar!`);
+      } catch (err) {
+        console.error(`${EMOJI} Install failed: ${(err as Error).message}`);
+        console.log(`${EMOJI} Download manually: https://github.com/kody-w/openrappter/releases/tag/v1.0.0-bar`);
+      }
+      return;
+    }
+
     if (message) {
       const response = await chat(message, registry);
       displayResult(response);
@@ -1022,15 +1054,12 @@ program
     const hasApp = fs.existsSync(appPath);
 
     if (hasApp) {
-      // Already installed — just launch it
-      console.log(`${EMOJI} Launching OpenRappter Bar...`);
-      await execAsync(`pgrep -x "OpenRappter Bar" && echo "Already running" || open "${appPath}"`);
-      console.log(`${EMOJI} OpenRappter Bar is running in your menu bar.`);
+      await execAsync(`pgrep -x OpenRappterBar || open "${appPath}"`).catch(() => {});
+      console.log(`\n${EMOJI} OpenRappter hatched into your menu bar!\n`);
       return;
     }
 
-    // Download and install
-    console.log(`${EMOJI} Installing OpenRappter Bar...`);
+    console.log(`\n${EMOJI} Hatching into your menu bar...\n`);
     try {
       const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
       const tmpDmg = '/tmp/OpenRappter-Bar.dmg';

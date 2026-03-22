@@ -366,18 +366,30 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   // Override channels.list to include EventEmitter-based channels not in registry
   const extraChannels = [
     { id: 'signal', type: 'signal' },
-    ...(imessageSelfId ? [] : [{ id: 'imessage', type: 'imessage' }]),
     { id: 'matrix', type: 'matrix' },
     { id: 'teams', type: 'teams' },
     { id: 'googlechat', type: 'googlechat' },
   ];
   server.registerMethod('channels.list', async () => {
     const live = channelRegistry.getStatusList();
+
+    // iMessage — show real status
+    const imessageEntry = {
+      id: 'imessage', type: 'imessage',
+      connected: imessage.connected,
+      configured: !!imessageSelfId,
+      running: imessage.connected,
+      messageCount: 0,
+      description: imessageSelfId
+        ? `Self-chat: ${imessageSelfId}`
+        : 'macOS only — set IMESSAGE_SELF_ID to enable',
+    };
+
     const extras = extraChannels.map(ch => ({
       id: ch.id, type: ch.type, connected: false, configured: false,
       running: false, messageCount: 0,
     }));
-    return [...live, ...extras];
+    return [...live, imessageEntry, ...extras];
   });
 
   // Register skills.list RPC method

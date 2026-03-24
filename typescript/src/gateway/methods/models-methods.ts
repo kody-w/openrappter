@@ -20,10 +20,6 @@ interface ProviderRegistry {
   }>;
 }
 
-interface ModelsMethodsDeps {
-  providerRegistry?: ProviderRegistry;
-}
-
 interface ModelInfo {
   id: string;
   provider: string;
@@ -31,11 +27,15 @@ interface ModelInfo {
   status: 'ready' | 'error' | 'disabled';
 }
 
+interface ModelsMethodsDeps {
+  providerRegistry?: ProviderRegistry;
+}
+
 export function registerModelsMethods(
   server: MethodRegistrar,
   deps?: ModelsMethodsDeps
 ): void {
-  // List all available models
+  // List all available models from registered providers
   server.registerMethod<void, { models: ModelInfo[] }>(
     'models.list',
     async () => {
@@ -62,4 +62,8 @@ export function registerModelsMethods(
       return { models };
     }
   );
+
+  // Note: models.get, models.set, and models.available are registered
+  // directly in index.ts where the Assistant instance is accessible.
+  // This file handles the provider-registry-based listing only.
 }

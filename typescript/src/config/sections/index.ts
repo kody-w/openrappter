@@ -15,3 +15,4 @@ export { loggingConfigSchema } from './logging.js';
 export { sessionConfigSchema } from './session.js';
 export { hooksConfigSchema } from './hooks.js';
 export { uiConfigSchema } from './ui.js';
+export { experimentalConfigSchema, experimentalFeatureDescriptions } from './experimental.js';

@@ -16,14 +16,36 @@ import {
 
 // ── Default models ───────────────────────────────────────────────────────────
 
+/**
+ * Known Copilot models (hardcoded fallback).
+ * The `models.available` RPC method also queries /v1/models at runtime
+ * to discover any additional models your subscription has access to.
+ *
+ * Availability varies by plan tier (Free / Pro / Business / Enterprise).
+ * Premium models consume monthly "premium request" allowances.
+ */
 export const COPILOT_DEFAULT_MODELS = [
-  'gpt-4o',
+  // GPT-4.1 family
   'gpt-4.1',
   'gpt-4.1-mini',
   'gpt-4.1-nano',
+  // GPT-4o family
+  'gpt-4o',
+  'gpt-4o-mini',
+  // Reasoning models
   'o1',
   'o1-mini',
+  'o3',
   'o3-mini',
+  'o4-mini',
+  // Claude (Copilot Pro / Business / Enterprise)
+  'claude-3.5-sonnet',
+  'claude-3.7-sonnet',
+  'claude-3.7-sonnet-thought',
+  'claude-sonnet-4',
+  // Gemini (Copilot Pro / Business / Enterprise)
+  'gemini-2.0-flash',
+  'gemini-2.5-pro',
 ] as const;
 
 export const COPILOT_DEFAULT_MODEL = 'gpt-4.1';

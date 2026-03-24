@@ -30,6 +30,32 @@ vi.mock('util', async (importOriginal) => {
   };
 });
 
+// Mock fs.readFileSync to prevent reading cached tokens from disk during tests
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      readFileSync: vi.fn().mockImplementation((...args: unknown[]) => {
+        const filePath = args[0] as string;
+        // Block reads to credentials and .env files — let other fs reads through
+        if (filePath.includes('github-token.json') || filePath.includes('.openrappter/.env')) {
+          throw new Error('ENOENT: no such file');
+        }
+        return actual.readFileSync(...(args as Parameters<typeof actual.readFileSync>));
+      }),
+    },
+    readFileSync: vi.fn().mockImplementation((...args: unknown[]) => {
+      const filePath = args[0] as string;
+      if (filePath.includes('github-token.json') || filePath.includes('.openrappter/.env')) {
+        throw new Error('ENOENT: no such file');
+      }
+      return actual.readFileSync(...(args as Parameters<typeof actual.readFileSync>));
+    }),
+  };
+});
+
 let savedEnv: NodeJS.ProcessEnv;
 
 beforeEach(() => {

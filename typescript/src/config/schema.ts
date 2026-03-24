@@ -17,6 +17,7 @@ import {
   sessionConfigSchema,
   hooksConfigSchema,
   uiConfigSchema,
+  experimentalConfigSchema,
 } from './sections/index.js';
 
 export const modelProviderSchema = z.enum([
@@ -98,6 +99,7 @@ export const openRappterConfigSchema = z.object({
   session: sessionConfigSchema.optional(),
   hooks: hooksConfigSchema.optional(),
   ui: uiConfigSchema.optional(),
+  experimental: experimentalConfigSchema.optional(),
 });
 
 export type ValidatedConfig = z.infer<typeof openRappterConfigSchema>;

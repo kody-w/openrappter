@@ -1201,10 +1201,10 @@ choose_install_method() {
     if [[ -n "$GUM" ]] && gum_is_tty; then
         ui_info "Existing $existing install detected"
         local choice
-        choice="$("$GUM" choose --header "Upgrade method:" "git (recommended)" "npm" "Switch to git" "Switch to npm" </dev/tty)" || true
+        choice="$("$GUM" choose --header "Install method:" "npm" "git" </dev/tty)" || true
         case "$choice" in
-            "git (recommended)"|"Switch to git") INSTALL_METHOD="git" ;;
-            "npm"|"Switch to npm") INSTALL_METHOD="npm" ;;
+            npm) INSTALL_METHOD="npm" ;;
+            git) INSTALL_METHOD="git" ;;
             *) INSTALL_METHOD="$existing" ;;
         esac
     else
@@ -1791,8 +1791,8 @@ install_gh_cli() {
 # Minimal JSON field extractor (no jq needed)
 parse_json_field() {
     local json="$1" field="$2"
-    # Handle both quoted string and numeric values
-    echo "$json" | sed 's/,/\n/g' | grep "\"${field}\"" | sed 's/.*"'"${field}"'"\s*:\s*//' | sed 's/^"//' | sed 's/".*$//' | sed 's/[[:space:]]*$//' | head -1
+    # Handle both quoted string and numeric values; strip trailing }, ], whitespace
+    echo "$json" | sed 's/,/\n/g' | grep "\"${field}\"" | sed 's/.*"'"${field}"'"\s*:\s*//' | sed 's/^"//' | sed 's/".*$//' | sed 's/[[:space:]}]*$//' | head -1
 }
 
 copilot_device_code_login() {
@@ -1811,7 +1811,7 @@ copilot_device_code_login() {
     expires_in="$(parse_json_field "$response" "expires_in")"
 
     if [[ -z "$user_code" || -z "$device_code" ]]; then
-        ui_error "Failed to get device code from GitHub"
+        ui_error "Failed to get device code from GitHub" >&2
         return 1
     fi
 
@@ -1819,17 +1819,17 @@ copilot_device_code_login() {
     interval="${interval:-5}"
     expires_in="${expires_in:-900}"
 
-    # 2. Display code to user
-    echo ""
+    # 2. Display code to user (stderr so subshell capture doesn't swallow it)
+    echo "" >&2
     if [[ -n "$GUM" ]]; then
         local code_display
         code_display="$(printf 'Enter code: %s\nURL: %s' "$user_code" "$verification_uri")"
-        "$GUM" style --border rounded --border-foreground "#10b981" --padding "1 2" --foreground "#00e5cc" --bold "$code_display"
+        "$GUM" style --border rounded --border-foreground "#10b981" --padding "1 2" --foreground "#00e5cc" --bold "$code_display" >&2
     else
-        echo -e "${SUCCESS}${BOLD}  Enter this code:  ${user_code}${NC}"
-        echo -e "${INFO}  Open: ${verification_uri}${NC}"
+        echo -e "${SUCCESS}${BOLD}  Enter this code:  ${user_code}${NC}" >&2
+        echo -e "${INFO}  Open: ${verification_uri}${NC}" >&2
     fi
-    echo ""
+    echo "" >&2
 
     # 3. Try to open browser
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -1838,7 +1838,7 @@ copilot_device_code_login() {
         xdg-open "$verification_uri" 2>/dev/null || true
     fi
 
-    ui_info "Waiting for GitHub authorization..."
+    ui_info "Waiting for GitHub authorization..." >&2
 
     # 4. Poll for token
     local deadline=$((SECONDS + expires_in))
@@ -1870,23 +1870,23 @@ copilot_device_code_login() {
                 wait_secs=$((wait_secs + 2))
                 ;;
             access_denied)
-                ui_error "GitHub login was cancelled"
+                ui_error "GitHub login was cancelled" >&2
                 return 1
                 ;;
             expired_token)
-                ui_error "Device code expired — please try again"
+                ui_error "Device code expired — please try again" >&2
                 return 1
                 ;;
             *)
                 if [[ -n "$error_field" ]]; then
-                    ui_error "GitHub device flow error: $error_field"
+                    ui_error "GitHub device flow error: $error_field" >&2
                     return 1
                 fi
                 ;;
         esac
     done
 
-    ui_error "Device code expired — please try again"
+    ui_error "Device code expired — please try again" >&2
     return 1
 }
 

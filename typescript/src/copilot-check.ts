@@ -44,21 +44,25 @@ export async function hasCopilotAvailable(): Promise<boolean> {
 
 /**
  * Resolve a GitHub token from (in priority order):
- * 1. Environment variables (COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN)
+ * 1. COPILOT_GITHUB_TOKEN env var (explicit Copilot token always wins)
  * 2. Cached credentials file (~/.openrappter/credentials/github-token.json)
- * 3. ~/.openrappter/.env file
- * 4. gh CLI token (fallback)
+ * 3. ~/.openrappter/.env file (saved by onboard/installer device code flow)
+ * 4. GH_TOKEN / GITHUB_TOKEN env vars (may be from gh CLI — different OAuth app)
+ * 5. gh CLI token (least preferred — usually doesn't have Copilot access)
+ *
+ * Note: Steps 2-3 are prioritized over generic env vars because the
+ * onboard/installer device code flow produces tokens with Copilot access,
+ * while GH_TOKEN/GITHUB_TOKEN from gh CLI typically do not.
  */
 export async function resolveGithubToken(): Promise<string | null> {
-  // 1. Environment variables
-  const envToken = process.env.COPILOT_GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (envToken) return envToken;
+  // 1. Explicit Copilot token always wins
+  if (process.env.COPILOT_GITHUB_TOKEN) return process.env.COPILOT_GITHUB_TOKEN;
 
   // 2. Cached credentials file (saved by device code flow or onboard)
   const cached = loadCachedGitHubToken();
   if (cached) return cached;
 
-  // 3. ~/.openrappter/.env file
+  // 3. ~/.openrappter/.env file (saved by installer/onboard — has Copilot access)
   try {
     const envFile = path.join(os.homedir(), '.openrappter', '.env');
     const data = fs.readFileSync(envFile, 'utf-8');
@@ -74,7 +78,11 @@ export async function resolveGithubToken(): Promise<string | null> {
     }
   } catch { /* no .env file */ }
 
-  // 4. gh CLI token (least preferred — may use different OAuth app)
+  // 4. Generic env vars (may not have Copilot access)
+  const envToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (envToken) return envToken;
+
+  // 5. gh CLI token (least preferred — usually different OAuth app)
   try {
     const { stdout } = await execAsync('gh auth token 2>/dev/null');
     if (stdout.trim()) return stdout.trim();

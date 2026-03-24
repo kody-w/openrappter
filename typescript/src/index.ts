@@ -1114,49 +1114,6 @@ program
     outro(`${EMOJI} You're all set! openrappter is running in the background.`);
   });
 
-// Bar command — install/launch the macOS menu bar app
-program
-  .command('bar')
-  .description('Install or launch the OpenRappter menu bar app (macOS)')
-  .action(async () => {
-    if (process.platform !== 'darwin') {
-      console.log(`${EMOJI} The menu bar app is macOS only.`);
-      return;
-    }
-
-    const appPath = '/Applications/OpenRappter Bar.app';
-    const hasApp = fs.existsSync(appPath);
-
-    if (hasApp) {
-      await execAsync(`pgrep -x OpenRappterBar || open "${appPath}"`).catch(() => {});
-      console.log(`\n${EMOJI} OpenRappter hatched into your menu bar!\n`);
-      return;
-    }
-
-    console.log(`\n${EMOJI} Hatching into your menu bar...\n`);
-    try {
-      const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
-      const tmpDmg = '/tmp/OpenRappter-Bar.dmg';
-      const mountPoint = '/tmp/openrappter-bar-mount';
-
-      console.log(`${EMOJI} Downloading...`);
-      await execAsync(`curl -sL "${dmgUrl}" -o "${tmpDmg}"`, { timeout: 60000 });
-
-      console.log(`${EMOJI} Installing to /Applications...`);
-      await execAsync(`hdiutil attach "${tmpDmg}" -mountpoint "${mountPoint}" -nobrowse -quiet`, { timeout: 15000 });
-      await execAsync(`cp -R "${mountPoint}/OpenRappter Bar.app" "/Applications/"`, { timeout: 15000 });
-      await execAsync(`hdiutil detach "${mountPoint}" -quiet`, { timeout: 10000 });
-      try { fs.unlinkSync(tmpDmg); } catch {}
-
-      await execAsync(`xattr -rd com.apple.quarantine "/Applications/OpenRappter Bar.app"`, { timeout: 5000 }).catch(() => {});
-      await execAsync(`open "/Applications/OpenRappter Bar.app"`, { timeout: 5000 });
-
-      console.log(`${EMOJI} OpenRappter hatched into your menu bar!`);
-    } catch (err) {
-      console.error(`${EMOJI} Install failed: ${(err as Error).message}`);
-      console.log(`${EMOJI} Download manually: https://github.com/kody-w/openrappter/releases/tag/v1.0.0-bar`);
-    }
-  });
 
 // Reset command
 program
@@ -1234,7 +1191,7 @@ async function statusCommand(): Promise<void> {
 // Interactive mode — direct-API chat with streaming (no gateway needed)
 async function interactiveMode(): Promise<void> {
   const agents = await registry.getAllAgents();
-  const githubToken = await resolveGithubToken();
+  const githubToken = await autoAuthIfNeeded();
 
   const { Assistant } = await import('./agents/Assistant.js');
   const assistant = new Assistant(agents, {

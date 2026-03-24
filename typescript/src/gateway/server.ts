@@ -703,13 +703,13 @@ export class GatewayServer {
     this.registerMethod('fleet.status', async () => {
       try {
         const [frameRes, statsRes] = await Promise.all([
-          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/frame_counter.json').then(r => r.json()).catch(() => null),
-          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/stats.json').then(r => r.json()).catch(() => null),
+          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/frame_counter.json').then(r => r.json()).catch(() => null) as Promise<Record<string, unknown> | null>,
+          fetch('https://raw.githubusercontent.com/kody-w/rappterbook/main/state/stats.json').then(r => r.json()).catch(() => null) as Promise<Record<string, unknown> | null>,
         ]);
         return {
-          frame: frameRes?.frame ?? 0,
-          total_posts: statsRes?.total_posts ?? 0,
-          total_comments: statsRes?.total_comments ?? 0,
+          frame: (frameRes as any)?.frame ?? 0,
+          total_posts: (statsRes as any)?.total_posts ?? 0,
+          total_comments: (statsRes as any)?.total_comments ?? 0,
           online: !!frameRes,
         };
       } catch { return { frame: 0, online: false }; }
@@ -717,12 +717,12 @@ export class GatewayServer {
 
     this.registerMethod('mars.status', async () => {
       try {
-        const colony = await fetch('https://raw.githubusercontent.com/kody-w/mars-barn/main/state/colony.json').then(r => r.json()).catch(() => null);
+        const colony = await fetch('https://raw.githubusercontent.com/kody-w/mars-barn/main/state/colony.json').then(r => r.json()).catch(() => null) as Record<string, unknown> | null;
         return {
-          sol: colony?.sol ?? 0,
-          population: colony?.population ?? 0,
-          alive: colony?.alive ?? false,
-          name: colony?.name ?? 'Unknown',
+          sol: (colony as any)?.sol ?? 0,
+          population: (colony as any)?.population ?? 0,
+          alive: (colony as any)?.alive ?? false,
+          name: (colony as any)?.name ?? 'Unknown',
           online: !!colony,
         };
       } catch { return { sol: 0, online: false }; }

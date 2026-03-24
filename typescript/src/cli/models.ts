@@ -9,7 +9,7 @@ const EMOJI = '🦖';
  * Falls back to the hardcoded list if the API isn't reachable.
  */
 async function discoverModels(): Promise<string[]> {
-  const models = [...COPILOT_DEFAULT_MODELS];
+  const models: string[] = [...COPILOT_DEFAULT_MODELS];
 
   try {
     const { resolveGithubToken } = await import('../copilot-check.js');

@@ -1909,18 +1909,20 @@ save_github_token_to_env() {
 
     # Update or create .env
     if [[ -f "$env_file" ]]; then
-        # Remove old GITHUB_TOKEN line if present
-        if grep -q "^GITHUB_TOKEN=" "$env_file" 2>/dev/null; then
+        # Remove old token lines if present
+        if grep -qE "^(GITHUB_TOKEN|COPILOT_GITHUB_TOKEN)=" "$env_file" 2>/dev/null; then
             local tmp_env
             tmp_env="$(mktempfile)"
-            grep -v "^GITHUB_TOKEN=" "$env_file" > "$tmp_env"
+            grep -vE "^(GITHUB_TOKEN|COPILOT_GITHUB_TOKEN)=" "$env_file" > "$tmp_env"
             mv "$tmp_env" "$env_file"
         fi
     else
         echo "# openrappter environment — managed by installer" > "$env_file"
         echo "" >> "$env_file"
     fi
-    echo "GITHUB_TOKEN=\"${github_token}\"" >> "$env_file"
+    # Save as COPILOT_GITHUB_TOKEN — checked first by resolveGithubToken(),
+    # won't be overridden by gh CLI's GITHUB_TOKEN in the environment
+    echo "COPILOT_GITHUB_TOKEN=\"${github_token}\"" >> "$env_file"
     ui_success "GitHub token saved (from $token_source)"
 }
 

@@ -4,6 +4,7 @@
  * Uses the `sharp` library for all operations.
  */
 
+// @ts-ignore — sharp is an optional dependency
 import sharp from 'sharp';
 
 export type ImageFormat = 'jpeg' | 'webp' | 'png';

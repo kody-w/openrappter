@@ -433,7 +433,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
   server.registerMethod('models.available', async () => {
     // Start with the known Copilot models
-    const models = [...COPILOT_DEFAULT_MODELS];
+    const models: string[] = [...COPILOT_DEFAULT_MODELS];
 
     // Try to discover models from the API if we have a valid token
     try {

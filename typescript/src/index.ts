@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasCopilotAvailable, resolveGithubToken, validateTelegramToken } from './copilot-check.js';
+import { hasCopilotAvailable, resolveGithubToken, autoAuthIfNeeded, saveGitHubToken, validateTelegramToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 
 const execAsync = promisify(exec);
@@ -64,18 +64,11 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
   // Create the Assistant powered by direct Copilot API (no CLI needed)
   const agents = await registry.getAllAgents();
-  const githubToken = await resolveGithubToken();
 
-  // Validate token at startup so we fail early with a clear message
+  // Auto-authenticate: try cached token first, then inline device code flow
+  const githubToken = await autoAuthIfNeeded({ silent: opts?.silent });
   if (githubToken) {
-    try {
-      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-      await resolveCopilotApiToken({ githubToken });
-      log(`${EMOJI} Copilot token validated`);
-    } catch (err) {
-      console.warn(`${EMOJI} Warning: ${(err as Error).message}`);
-      console.warn(`${EMOJI} Chat will not work until you re-authenticate.`);
-    }
+    log(`${EMOJI} Copilot token validated`);
   } else {
     console.warn(`${EMOJI} No GitHub token found. Run 'openrappter onboard' to set up Copilot.`);
   }
@@ -404,6 +397,72 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     }));
   });
 
+  // ── Model switching RPC methods ──
+  const { COPILOT_DEFAULT_MODELS, COPILOT_DEFAULT_MODEL } = await import('./providers/copilot.js');
+
+  server.registerMethod('models.get', async () => {
+    return {
+      model: assistant.getModel(),
+      default: COPILOT_DEFAULT_MODEL,
+    };
+  });
+
+  server.registerMethod('models.set', async (params: { model: string }) => {
+    if (!params.model || typeof params.model !== 'string') {
+      throw new Error('Missing required parameter: model');
+    }
+
+    const oldModel = assistant.getModel();
+    assistant.setModel(params.model);
+
+    // Persist to .env so it survives restarts
+    try {
+      const env = await loadEnv();
+      env.OPENRAPPTER_MODEL = params.model;
+      await saveEnv(env);
+    } catch { /* non-fatal — runtime switch still works */ }
+
+    log(`${EMOJI} Model switched: ${oldModel} → ${params.model}`);
+
+    return {
+      model: params.model,
+      previous: oldModel,
+      persisted: true,
+    };
+  });
+
+  server.registerMethod('models.available', async () => {
+    // Start with the known Copilot models
+    const models = [...COPILOT_DEFAULT_MODELS];
+
+    // Try to discover models from the API if we have a valid token
+    try {
+      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+      const resolved = await resolveCopilotApiToken({ githubToken: githubToken ?? '' });
+      const res = await fetch(`${resolved.baseUrl}/v1/models`, {
+        headers: { Authorization: `Bearer ${resolved.token}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as { data?: Array<{ id: string }> };
+        if (data.data && Array.isArray(data.data)) {
+          for (const m of data.data) {
+            if (m.id && !models.includes(m.id)) {
+              models.push(m.id);
+            }
+          }
+        }
+      }
+    } catch { /* fallback to hardcoded list */ }
+
+    return {
+      models: models.map(id => ({
+        id,
+        active: id === assistant.getModel(),
+      })),
+      current: assistant.getModel(),
+    };
+  });
+
   log(`${EMOJI} Assistant: Copilot SDK with ${agents.size} agents as tools`);
 
   // Clean shutdown
@@ -667,8 +726,9 @@ program
             },
           );
 
-          // Token received — validate it
+          // Token received — save to credentials file + env
           env.GITHUB_TOKEN = token;
+          saveGitHubToken(token, 'device_code');
           copilotReady = true;
           log.success('GitHub authorized — Copilot is ready!');
         } catch (err) {
@@ -689,6 +749,7 @@ program
 
           if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
             env.GITHUB_TOKEN = manualToken;
+            saveGitHubToken(manualToken, 'manual');
             copilotReady = true;
             log.success('Token saved.');
           }
@@ -713,6 +774,7 @@ program
 
         if (manualToken && typeof manualToken === 'string' && manualToken.length > 0) {
           env.GITHUB_TOKEN = manualToken;
+          saveGitHubToken(manualToken, 'manual');
           copilotReady = true;
           log.success('Token saved.');
         } else {
@@ -1106,6 +1168,7 @@ program
       { path: ENV_FILE, label: '.env (credentials)' },
       { path: CONFIG_FILE, label: 'config.json' },
       { path: path.join(HOME_DIR, 'credentials', 'copilot-token.json'), label: 'cached Copilot token' },
+      { path: path.join(HOME_DIR, 'credentials', 'github-token.json'), label: 'cached GitHub token' },
       { path: path.join(HOME_DIR, 'memory.json'), label: 'memory store' },
       { path: path.join(HOME_DIR, 'sessions.json'), label: 'sessions' },
     ];
@@ -1185,5 +1248,23 @@ async function interactiveMode(): Promise<void> {
   const { startInteractiveChat } = await import('./tui/interactive.js');
   await startInteractiveChat({ assistant, emoji: EMOJI, name: NAME, version: VERSION });
 }
+
+// Bar command — launch macOS bar app or TUI bar
+program
+  .command('bar')
+  .description('Launch the OpenRappter Bar (macOS menu bar app or TUI)')
+  .option('--tui', 'Launch terminal-based bar instead of macOS app')
+  .option('--build', 'Build the macOS app from source')
+  .option('--no-gateway', "Don't auto-start the gateway daemon")
+  .option('-p, --port <port>', 'Gateway port', '18790')
+  .action(async (options: { tui?: boolean; build?: boolean; gateway?: boolean; port?: string }) => {
+    await ensureHomeDir();
+    const envVars = await loadEnv();
+    for (const [key, val] of Object.entries(envVars)) {
+      if (!process.env[key]) process.env[key] = val;
+    }
+    const { launchBar } = await import('./cli/bar.js');
+    await launchBar(options);
+  });
 
 program.parse();

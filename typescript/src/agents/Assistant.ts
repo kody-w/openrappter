@@ -83,6 +83,16 @@ export class Assistant {
     this.agents = agents;
   }
 
+  /** Get the current model ID */
+  getModel(): string {
+    return this.config.model ?? COPILOT_DEFAULT_MODEL;
+  }
+
+  /** Hot-swap the model without restarting. Takes effect on the next message. */
+  setModel(model: string): void {
+    this.config.model = model;
+  }
+
   /**
    * Main entry point — send a message and get a response.
    *

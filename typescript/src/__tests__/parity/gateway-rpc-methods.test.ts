@@ -475,8 +475,10 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('status')).toBe(true);
       expect(groups.has('health')).toBe(true);
       expect(groups.has('rappter')).toBe(true);
+      expect(groups.has('experimental')).toBe(true);
+      expect(groups.has('voice')).toBe(true);
 
-      expect(groups.size).toBe(19);
+      expect(groups.size).toBe(21);
     });
 
     it('chat group should have expected methods', () => {

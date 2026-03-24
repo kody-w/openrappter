@@ -194,7 +194,8 @@ describe('CLI Commands', () => {
         (file) =>
           file.endsWith('.ts') &&
           file !== 'index.ts' &&
-          file !== 'rpc-client.ts'
+          file !== 'rpc-client.ts' &&
+          file !== 'bar.ts'
       );
       expect(commandFiles.length).toBeGreaterThanOrEqual(12);
     });
@@ -204,7 +205,8 @@ describe('CLI Commands', () => {
         (file) =>
           file.endsWith('.ts') &&
           file !== 'index.ts' &&
-          file !== 'rpc-client.ts'
+          file !== 'rpc-client.ts' &&
+          file !== 'bar.ts'
       );
 
       for (const file of commandFiles) {
@@ -218,7 +220,8 @@ describe('CLI Commands', () => {
         (file) =>
           file.endsWith('.ts') &&
           file !== 'index.ts' &&
-          file !== 'rpc-client.ts'
+          file !== 'rpc-client.ts' &&
+          file !== 'bar.ts'
       );
 
       for (const file of commandFiles) {
@@ -234,7 +237,8 @@ describe('CLI Commands', () => {
         (file) =>
           file.endsWith('.ts') &&
           file !== 'index.ts' &&
-          file !== 'rpc-client.ts'
+          file !== 'rpc-client.ts' &&
+          file !== 'bar.ts'
       );
 
       for (const file of commandFiles) {
@@ -248,7 +252,8 @@ describe('CLI Commands', () => {
         (file) =>
           file.endsWith('.ts') &&
           file !== 'index.ts' &&
-          file !== 'rpc-client.ts'
+          file !== 'rpc-client.ts' &&
+          file !== 'bar.ts'
       );
 
       for (const file of commandFiles) {

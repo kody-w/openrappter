@@ -6,6 +6,16 @@
     Installs OpenRappter (local-first AI agent framework) on Windows.
     Handles Node.js detection/install, npm global install, Copilot auth,
     gateway brainstem startup, and home directory setup.
+
+    INSTALL (run directly in PowerShell — do NOT wrap in powershell -c):
+      irm https://kody-w.github.io/openrappter/install.ps1 | iex
+
+    If execution policy blocks it:
+      Set-ExecutionPolicy Bypass -Scope Process -Force; irm https://kody-w.github.io/openrappter/install.ps1 | iex
+
+    From Command Prompt (cmd.exe):
+      powershell -ExecutionPolicy Bypass -NoProfile -Command "iex (irm 'https://kody-w.github.io/openrappter/install.ps1')"
+
 .PARAMETER Method
     Install method: "npm" (default) or "git"
 .PARAMETER NoPrompt
@@ -847,6 +857,13 @@ try {
 } catch {
     Write-Host ""
     Write-Err "Installation failed: $_"
+    Write-Host ""
+    Write-Info "If you see 'Access is denied', run this command directly in PowerShell:"
+    Write-Host ""
+    Write-Host "  irm https://kody-w.github.io/openrappter/install.ps1 | iex" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Info "If execution policy blocks it, run this first:"
+    Write-Host "  Set-ExecutionPolicy Bypass -Scope Process -Force" -ForegroundColor DarkGray
     Write-Host ""
     Write-Info "If this keeps happening, please file an issue:"
     Write-Info "https://github.com/kody-w/openrappter/issues"

@@ -21,12 +21,20 @@
 
 ## Install in One Line
 
+**macOS / Linux / WSL:**
 ```bash
-# Works everywhere. Installs everything. You're welcome. 🦖
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
 ```
 
-Works on macOS, Linux & WSL. Installs Node.js (if needed), clones the repo, builds both runtimes, and creates the `openrappter` command. Done.
+**Windows (PowerShell):**
+```powershell
+irm https://kody-w.github.io/openrappter/install.ps1 | iex
+```
+
+> If execution policy blocks the command, prefix it with:
+> `Set-ExecutionPolicy Bypass -Scope Process -Force;`
+
+Works on macOS, Linux, WSL & Windows. Installs Node.js (if needed), clones the repo, builds both runtimes, and creates the `openrappter` command. Done.
 
 Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git && cd openrappter && ./quickstart.sh`
 

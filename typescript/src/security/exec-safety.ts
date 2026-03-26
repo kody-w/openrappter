@@ -4,6 +4,8 @@
  * approval workflow, and audit logging.
  */
 
+import path from 'path';
+
 export interface SafetyCheckResult {
   safe: boolean;
   binary: string;
@@ -242,7 +244,7 @@ export class ExecSafety {
     for (const part of parts) {
       if (!part.includes('=')) {
         // Return just the base name (no path components)
-        return part.split('/').pop() ?? part;
+        return path.basename(part);
       }
     }
     return parts[0] ?? '';

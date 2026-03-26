@@ -66,7 +66,7 @@ export async function resolveGithubToken(): Promise<string | null> {
   try {
     const envFile = path.join(os.homedir(), '.openrappter', '.env');
     const data = fs.readFileSync(envFile, 'utf-8');
-    for (const line of data.split('\n')) {
+    for (const line of data.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (trimmed.startsWith('GITHUB_TOKEN=')) {
         let val = trimmed.slice('GITHUB_TOKEN='.length).trim();

@@ -25,7 +25,7 @@
  */
 
 import { readdir, readFile, lstat } from 'fs/promises';
-import { resolve, join } from 'path';
+import { resolve, join, sep } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { extractManifestFromPackageJson } from './manifest.js';
@@ -47,7 +47,7 @@ export function isContainedPath(base: string, target: string): boolean {
   // Must start with base + separator, or be exactly equal
   return (
     resolvedTarget === resolvedBase ||
-    resolvedTarget.startsWith(resolvedBase + '/')
+    resolvedTarget.startsWith(resolvedBase + sep)
   );
 }
 

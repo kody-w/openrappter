@@ -14,7 +14,7 @@ export async function loadEnv(filePath: string = ENV_FILE): Promise<Record<strin
   try {
     const data = await fs.readFile(filePath, 'utf-8');
     const env: Record<string, string> = {};
-    for (const line of data.split('\n')) {
+    for (const line of data.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
       const eqIdx = trimmed.indexOf('=');

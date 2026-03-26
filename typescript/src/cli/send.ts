@@ -10,6 +10,7 @@
  */
 
 import type { Command } from 'commander';
+import path from 'path';
 import { RpcClient } from './rpc-client.js';
 import { promises as fs } from 'fs';
 
@@ -60,7 +61,7 @@ export function registerSendCommand(program: Command): void {
         let attachment: { name: string; data: string; encoding: string } | undefined;
         if (options.file) {
           const data = await fs.readFile(options.file);
-          const name = options.file.split('/').pop() ?? 'attachment';
+          const name = path.basename(options.file) ?? 'attachment';
           attachment = {
             name,
             data: data.toString('base64'),

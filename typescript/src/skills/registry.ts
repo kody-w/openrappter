@@ -432,7 +432,7 @@ export class SkillsRegistry {
       const yaml = match[1];
       const result: Record<string, unknown> = {};
 
-      const lines = yaml.split('\n');
+      const lines = yaml.split(/\r?\n/);
       let currentKey: string | null = null;
       let currentValue: unknown[] | null = null;
 

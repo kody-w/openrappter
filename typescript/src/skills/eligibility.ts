@@ -44,8 +44,9 @@ export interface EligibilityResult {
  * Check if a binary exists on $PATH
  */
 export function hasBinary(bin: string): boolean {
+  const cmd = process.platform === 'win32' ? `where ${bin}` : `command -v ${bin}`;
   try {
-    execSync(`command -v ${bin}`, { stdio: 'ignore' });
+    execSync(cmd, { stdio: 'ignore' });
     return true;
   } catch {
     return false;

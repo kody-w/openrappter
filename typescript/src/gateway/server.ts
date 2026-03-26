@@ -1016,7 +1016,7 @@ export class GatewayServer {
     // Read existing env file
     try {
       const data = await fs.promises.readFile(envFile, 'utf-8');
-      for (const line of data.split('\n')) {
+      for (const line of data.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
         const eqIdx = trimmed.indexOf('=');

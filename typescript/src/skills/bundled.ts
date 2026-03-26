@@ -164,7 +164,7 @@ export async function listBundledSkills(
 export function parseBundledFrontmatter(
   content: string
 ): { frontmatter: Record<string, unknown>; body: string } {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  const match = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content };
 
   const frontmatterText = match[1];
@@ -172,7 +172,8 @@ export function parseBundledFrontmatter(
   const frontmatter: Record<string, unknown> = {};
 
   for (const line of frontmatterText.split('\n')) {
-    const kvMatch = line.match(/^(\w+):\s*(.+)$/);
+    const cleaned = line.replace(/\r$/, '');
+    const kvMatch = cleaned.match(/^(\w+):\s*(.+)$/);
     if (kvMatch) {
       const [, key, value] = kvMatch;
       if (key === 'metadata') {

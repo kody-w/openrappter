@@ -97,7 +97,7 @@ const SKILL_CATEGORIES: Record<string, string> = {
  * Simple frontmatter parser for tests (avoids importing bundled.ts → clawhub.ts → agents)
  */
 function parseFrontmatter(content: string): { frontmatter: Record<string, unknown>; body: string } {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  const match = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n([\s\S]*)$/);
   if (!match) return { frontmatter: {}, body: content };
 
   const frontmatterText = match[1];
@@ -105,7 +105,8 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
   const frontmatter: Record<string, unknown> = {};
 
   for (const line of frontmatterText.split('\n')) {
-    const kvMatch = line.match(/^(\w+):\s*(.+)$/);
+    const cleaned = line.replace(/\r$/, '');
+    const kvMatch = cleaned.match(/^(\w+):\s*(.+)$/);
     if (kvMatch) {
       const [, key, value] = kvMatch;
       if (key === 'metadata') {
@@ -275,7 +276,9 @@ describe('Built-in Skills', () => {
   describe('Eligibility System', () => {
     describe('hasBinary', () => {
       it('should find common system binaries', () => {
-        expect(hasBinary('ls')).toBe(true);
+        // 'ls' on Unix, 'cmd' on Windows — both guaranteed to exist
+        const bin = process.platform === 'win32' ? 'cmd' : 'ls';
+        expect(hasBinary(bin)).toBe(true);
       });
 
       it('should return false for non-existent binaries', () => {
@@ -662,15 +665,15 @@ describe('Built-in Skills', () => {
     it('should have standard frontmatter delimiters in all skills', () => {
       for (const skill of EXPECTED_SKILLS) {
         const content = readFileSync(join(SKILLS_DIR, skill, 'SKILL.md'), 'utf8');
-        expect(content.startsWith('---\n'), `${skill} should start with ---`).toBe(true);
-        expect(content.includes('\n---\n'), `${skill} should have closing ---`).toBe(true);
+        expect(content.startsWith('---\n') || content.startsWith('---\r\n'), `${skill} should start with ---`).toBe(true);
+        expect(content.includes('\n---\n') || content.includes('\n---\r\n'), `${skill} should have closing ---`).toBe(true);
       }
     });
 
     it('should have valid JSON metadata in all skills', () => {
       for (const skill of EXPECTED_SKILLS) {
         const content = readFileSync(join(SKILLS_DIR, skill, 'SKILL.md'), 'utf8');
-        const metadataLine = content.split('\n').find((l) => l.startsWith('metadata:'));
+        const metadataLine = content.split('\n').map(l => l.replace(/\r$/, '')).find((l) => l.startsWith('metadata:'));
         expect(metadataLine, `${skill} should have metadata line`).toBeTruthy();
 
         const jsonStr = metadataLine!.replace(/^metadata:\s*/, '');

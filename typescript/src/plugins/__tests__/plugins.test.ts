@@ -10,6 +10,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import path from 'path';
+import os from 'os';
 
 // ---------------------------------------------------------------------------
 // Manifest validation tests
@@ -350,27 +352,32 @@ describe('Plugin Loader', () => {
     });
 
     it('should reject absolute paths outside the plugin dir (path containment)', async () => {
-      const loader = loaderModule.createSecurePluginLoader({ pluginDir: '/safe/plugins' });
+      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
+      const outsidePath = path.resolve(os.tmpdir(), 'etc', 'passwd');
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
       // A path that escapes the plugin directory should be rejected
-      await expect(loader.loadPluginFromPath('/etc/passwd')).rejects.toThrow();
+      await expect(loader.loadPluginFromPath(outsidePath)).rejects.toThrow();
     });
 
     it('should reject paths with directory traversal sequences', async () => {
-      const loader = loaderModule.createSecurePluginLoader({ pluginDir: '/safe/plugins' });
+      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
+      const traversalPath = path.join(pluginDir, '..', '..', '..', 'etc', 'shadow');
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
       await expect(
-        loader.loadPluginFromPath('/safe/plugins/../../../etc/shadow')
+        loader.loadPluginFromPath(traversalPath)
       ).rejects.toThrow();
     });
 
     it('should return null for a path that does not exist', async () => {
-      const loader = loaderModule.createSecurePluginLoader({ pluginDir: '/safe/plugins' });
-      const result = await loader.loadPluginFromPath('/safe/plugins/nonexistent-plugin');
+      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
+      const result = await loader.loadPluginFromPath(path.join(pluginDir, 'nonexistent-plugin'));
       expect(result).toBeNull();
     });
 
     it('discoverPlugins should return an empty array when dir does not exist', async () => {
       const loader = loaderModule.createSecurePluginLoader({
-        pluginDir: '/tmp/openrappter-test-nonexistent-12345',
+        pluginDir: path.resolve(os.tmpdir(), 'openrappter-test-nonexistent-12345'),
       });
       const plugins = await loader.discoverPlugins();
       expect(Array.isArray(plugins)).toBe(true);
@@ -384,7 +391,7 @@ describe('Plugin Loader', () => {
       if ('isSymlink' in loaderModule) {
         const fn = (loaderModule as Record<string, unknown>).isSymlink as (p: string) => Promise<boolean>;
         // Non-existent path should not throw, should return false
-        const result = await fn('/tmp/definitely-not-a-symlink-xyz');
+        const result = await fn(path.resolve(os.tmpdir(), 'definitely-not-a-symlink-xyz'));
         expect(typeof result).toBe('boolean');
       } else {
         // If not exported, the security is internal — pass
@@ -400,10 +407,11 @@ describe('Plugin Loader', () => {
           base: string,
           target: string
         ) => boolean;
-        expect(fn('/safe/plugins', '/safe/plugins/my-plugin')).toBe(true);
-        expect(fn('/safe/plugins', '/safe/plugins/my-plugin/sub')).toBe(true);
-        expect(fn('/safe/plugins', '/etc/passwd')).toBe(false);
-        expect(fn('/safe/plugins', '/safe/plugins/../../../etc')).toBe(false);
+        const base = path.resolve(os.tmpdir(), 'safe', 'plugins');
+        expect(fn(base, path.join(base, 'my-plugin'))).toBe(true);
+        expect(fn(base, path.join(base, 'my-plugin', 'sub'))).toBe(true);
+        expect(fn(base, path.resolve(os.tmpdir(), 'etc', 'passwd'))).toBe(false);
+        expect(fn(base, path.join(base, '..', '..', '..', 'etc'))).toBe(false);
       } else {
         // Security is internal — that's fine
         expect(true).toBe(true);

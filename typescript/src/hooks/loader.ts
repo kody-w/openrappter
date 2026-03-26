@@ -63,7 +63,8 @@ const CODE_BLOCK_RE = /```(?:typescript|javascript|ts|js)\r?\n([\s\S]*?)```/;
 function parseSimpleYaml(text: string): Record<string, string | number> {
   const result: Record<string, string | number> = {};
   for (const line of text.split('\n')) {
-    const m = line.match(/^(\w[\w-]*):\s*(.+)$/);
+    const cleaned = line.replace(/\r$/, '');
+    const m = cleaned.match(/^(\w[\w-]*):\s*(.+)$/);
     if (m) {
       const [, key, raw] = m;
       const trimmed = raw.trim();

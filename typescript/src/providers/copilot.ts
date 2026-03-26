@@ -98,7 +98,7 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
       const { done, value: chunk } = await reader.read();
       if (done) break;
       buffer += decoder.decode(chunk, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
       for (const line of lines) {
         const trimmed = line.trim();

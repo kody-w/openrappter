@@ -11,6 +11,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
@@ -155,7 +156,7 @@ export class ShellAgent extends BasicAgent {
     }
 
     try {
-      const resolvedPath = path.resolve(filePath.replace(/^~/, process.env.HOME || ''));
+      const resolvedPath = path.resolve(filePath.replace(/^~/, os.homedir()));
       const stats = await fs.stat(resolvedPath);
 
       if (stats.isDirectory()) {
@@ -190,7 +191,7 @@ export class ShellAgent extends BasicAgent {
     }
 
     try {
-      const resolvedPath = path.resolve(filePath.replace(/^~/, process.env.HOME || ''));
+      const resolvedPath = path.resolve(filePath.replace(/^~/, os.homedir()));
       await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
       await fs.writeFile(resolvedPath, content);
 
@@ -207,7 +208,7 @@ export class ShellAgent extends BasicAgent {
 
   private async listDirectory(dirPath: string = '.'): Promise<string> {
     try {
-      const resolvedPath = path.resolve(dirPath.replace(/^~/, process.env.HOME || ''));
+      const resolvedPath = path.resolve(dirPath.replace(/^~/, os.homedir()));
       const stats = await fs.stat(resolvedPath);
 
       if (!stats.isDirectory()) {

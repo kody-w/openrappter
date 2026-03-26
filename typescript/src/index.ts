@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
@@ -939,7 +940,7 @@ program
 
     // Install launchd agent (macOS) so daemon survives reboots
     if (process.platform === 'darwin') {
-      const plistPath = path.join(process.env.HOME ?? '', 'Library', 'LaunchAgents', 'com.openrappter.daemon.plist');
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.openrappter.daemon.plist');
       try {
         const nodeBin = process.execPath;
         const indexPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.js');
@@ -970,7 +971,7 @@ program
         <key>PATH</key>
         <string>${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}</string>
         <key>HOME</key>
-        <string>${process.env.HOME ?? ''}</string>
+        <string>${os.homedir()}</string>
     </dict>
 </dict>
 </plist>`;

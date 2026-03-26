@@ -30,7 +30,7 @@ export async function parseSkillFile(filePath: string): Promise<ClawHubSkill | n
     // Parse YAML frontmatter
     const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
     if (fmMatch) {
-      for (const line of fmMatch[1].split('\n')) {
+      for (const line of fmMatch[1].split(/\r?\n/)) {
         const kvMatch = line.match(/^(\w+):\s*(.+)$/);
         if (kvMatch) {
           const [, key, value] = kvMatch;

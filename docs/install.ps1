@@ -51,7 +51,16 @@ function Invoke-Npm {
     param([Parameter(ValueFromRemainingArguments)][string[]]$Args_)
     $npmExe = Join-Path (Split-Path (Get-Command node).Source) "npm.cmd"
     if (-not (Test-Path $npmExe)) { $npmExe = "npm.cmd" }
-    & cmd /c $npmExe @Args_ 2>&1
+    # Merge stderr and filter out ErrorRecords so warnings don't become exceptions
+    $output = & cmd /c $npmExe @Args_ 2>&1
+    foreach ($line in $output) {
+        if ($line -is [System.Management.Automation.ErrorRecord]) {
+            # Emit as plain string (npm warnings are not fatal)
+            $line.ToString()
+        } else {
+            $line
+        }
+    }
 }
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -278,15 +287,19 @@ function Install-ViaNpm {
     # Set SHARP_IGNORE_GLOBAL_LIBVIPS to prevent native module download issues
     $env:SHARP_IGNORE_GLOBAL_LIBVIPS = "1"
 
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
-        Invoke-Npm install -g $pkg | ForEach-Object { Write-Info $_ }
+        Invoke-Npm install -g $pkg | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
     } catch {
         Write-Warn "npm install failed. Retrying..."
-        Invoke-Npm install -g $pkg --no-optional | ForEach-Object { Write-Info $_ }
+        Invoke-Npm install -g $pkg --omit=optional | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed after retry"
         }
+    } finally {
+        $ErrorActionPreference = $prevEAP
     }
 
     # Verify
@@ -341,13 +354,13 @@ function Install-ViaGit {
     }
 
     # Create launcher script in a PATH-accessible location
-    $binDir = Join-Path $env:USERPROFILE ".openrappter" "bin"
+    $binDir = Join-Path (Join-Path $env:USERPROFILE ".openrappter") "bin"
     if (-not (Test-Path $binDir)) {
         New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     }
 
     $launcherPath = Join-Path $binDir "openrappter.cmd"
-    $distIndex = Join-Path $tsDir "dist" "index.js"
+    $distIndex = Join-Path (Join-Path $tsDir "dist") "index.js"
     @"
 @echo off
 node "$distIndex" %*
@@ -597,7 +610,7 @@ function Start-GatewayBrainstem {
     try {
         # Start gateway in background
         $proc = Start-Process -FilePath "node" `
-            -ArgumentList @((Join-Path (Split-Path $openrappterBin.Source) ".." "dist" "index.js"), "gateway") `
+            -ArgumentList @((Join-Path (Join-Path (Join-Path (Split-Path $openrappterBin.Source) "..") "dist") "index.js"), "gateway") `
             -WindowStyle Hidden `
             -PassThru `
             -ErrorAction Stop
@@ -769,9 +782,9 @@ function Main {
         $verOutput = & openrappter --version 2>$null
         if ($verOutput) { $installedVersion = $verOutput.Trim() }
     } catch {}
-    if (-not $installedVersion -and (Test-Path (Join-Path $InstallDir "typescript" "package.json"))) {
+    if (-not $installedVersion -and (Test-Path (Join-Path (Join-Path $InstallDir "typescript") "package.json"))) {
         try {
-            $pkg = Get-Content (Join-Path $InstallDir "typescript" "package.json") | ConvertFrom-Json
+            $pkg = Get-Content (Join-Path (Join-Path $InstallDir "typescript") "package.json") | ConvertFrom-Json
             $installedVersion = $pkg.version
         } catch {}
     }

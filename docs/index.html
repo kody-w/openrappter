@@ -350,11 +350,9 @@
 
         <!-- Tab content: Getting Started -->
         <div id="content-getting-started" class="terminal-content p-6 overflow-x-auto terminal-scrollbar">
-          <pre class="font-mono text-sm leading-relaxed"><span class="text-[#71717a]"># One-line install (macOS / Linux)</span>
-<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span>
-
-<span class="text-[#71717a]"># One-line install (Windows — works from cmd or PowerShell)</span>
-<span class="text-[#10b981]">></span> <span class="text-[#fafafa]">powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"</span>
+          <pre class="font-mono text-sm leading-relaxed"><span id="install-unix" class="install-platform"><span class="text-[#71717a]"># One-line install</span>
+<span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span></span><span id="install-win" class="install-platform" style="display:none"><span class="text-[#71717a]"># One-line install</span>
+<span class="text-[#10b981]">></span> <span class="text-[#fafafa]">powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"</span></span>
 <span class="text-[#a1a1aa]">Detecting environment...
   Node.js 22.1.0 detected
   Installing openrappter...
@@ -858,14 +856,13 @@
           <div class="text-4xl mb-4">⚡</div>
           <h3 class="text-lg font-bold mb-2">Developer?</h3>
           <p class="text-sm text-[#a1a1aa] mb-6">One command. Full framework. Start building.</p>
-          <div class="bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto mb-2">
-            <span class="text-[#71717a] text-xs">macOS / Linux:</span><br/>
+          <div id="cta-unix" class="install-platform bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto">
             <span class="text-[#10b981]">$</span> curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
           </div>
-          <div class="bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto">
-            <span class="text-[#71717a] text-xs">Windows:</span><br/>
+          <div id="cta-win" class="install-platform bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto" style="display:none">
             <span class="text-[#10b981]">></span> powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"
           </div>
+          <button onclick="togglePlatform()" class="text-xs text-[#71717a] hover:text-[#a1a1aa] mt-2 transition-colors" id="platform-toggle">Show Windows command</button>
         </div>
       </div>
 
@@ -931,6 +928,28 @@
 
   <!-- ═══════════════════ JAVASCRIPT ═══════════════════ -->
   <script>
+    // 0. Platform detection — show the right install command
+    (function() {
+      const isWin = navigator.platform.indexOf('Win') > -1 || navigator.userAgent.indexOf('Windows') > -1;
+      if (isWin) {
+        document.querySelectorAll('#install-unix, #cta-unix').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('#install-win, #cta-win').forEach(el => el.style.display = '');
+        const tog = document.getElementById('platform-toggle');
+        if (tog) tog.textContent = 'Show macOS / Linux command';
+      }
+    })();
+
+    let _platformFlipped = false;
+    function togglePlatform() {
+      _platformFlipped = !_platformFlipped;
+      const isWin = navigator.platform.indexOf('Win') > -1 || navigator.userAgent.indexOf('Windows') > -1;
+      const showWin = isWin ? !_platformFlipped : _platformFlipped;
+      document.querySelectorAll('#install-unix, #cta-unix').forEach(el => el.style.display = showWin ? 'none' : '');
+      document.querySelectorAll('#install-win, #cta-win').forEach(el => el.style.display = showWin ? '' : 'none');
+      const tog = document.getElementById('platform-toggle');
+      if (tog) tog.textContent = showWin ? 'Show macOS / Linux command' : 'Show Windows command';
+    }
+
     // 1. Mobile menu toggle
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
     const mobileMenu = document.getElementById('mobileMenu');

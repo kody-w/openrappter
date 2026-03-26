@@ -353,8 +353,8 @@
           <pre class="font-mono text-sm leading-relaxed"><span class="text-[#71717a]"># One-line install (macOS / Linux)</span>
 <span class="text-[#10b981]">$</span> <span class="text-[#fafafa]">curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash</span>
 
-<span class="text-[#71717a]"># One-line install (Windows PowerShell)</span>
-<span class="text-[#10b981]">></span> <span class="text-[#fafafa]">irm https://kody-w.github.io/openrappter/install.ps1 | iex</span>
+<span class="text-[#71717a]"># One-line install (Windows — works from cmd or PowerShell)</span>
+<span class="text-[#10b981]">></span> <span class="text-[#fafafa]">powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"</span>
 <span class="text-[#a1a1aa]">Detecting environment...
   Node.js 22.1.0 detected
   Installing openrappter...
@@ -863,8 +863,8 @@
             <span class="text-[#10b981]">$</span> curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash
           </div>
           <div class="bg-[#09090b] border border-[#27272a] rounded-lg px-4 py-3 font-mono text-sm text-[#a1a1aa] text-left overflow-x-auto">
-            <span class="text-[#71717a] text-xs">Windows PowerShell:</span><br/>
-            <span class="text-[#10b981]">></span> irm https://kody-w.github.io/openrappter/install.ps1 | iex
+            <span class="text-[#71717a] text-xs">Windows:</span><br/>
+            <span class="text-[#10b981]">></span> powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"
           </div>
         </div>
       </div>
@@ -956,7 +956,7 @@
     function copyInstallCmd() {
       const isWindows = navigator.platform.indexOf('Win') > -1 || navigator.userAgent.indexOf('Windows') > -1;
       const cmd = isWindows
-        ? 'irm https://kody-w.github.io/openrappter/install.ps1 | iex'
+        ? 'powershell -c "irm https://kody-w.github.io/openrappter/install.ps1 | iex"'
         : 'curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash';
       navigator.clipboard.writeText(cmd).then(() => {
         const copyText = document.getElementById('copyText');

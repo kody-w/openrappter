@@ -14,7 +14,7 @@ public struct StatusMenuView: View {
             statusHeader
             Divider()
 
-            // Fleet & Mars live status
+            // Fleet live status
             MenuFleetSection(fleetVM: viewModel.fleetViewModel)
             Divider()
 

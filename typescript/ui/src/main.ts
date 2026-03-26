@@ -14,6 +14,7 @@ import './components/devices.js';
 import './components/agents.js';
 import './components/skills.js';
 import './components/showcase.js';
+import './components/accounts.js';
 import './components/presence.js';
 import './components/debug.js';
 

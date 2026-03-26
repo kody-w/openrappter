@@ -64,7 +64,7 @@ public final class AppViewModel {
     public let cronViewModel = CronViewModel()
     public let approvalViewModel = ApprovalViewModel()
 
-    // Fleet & Mars live data
+    // Fleet live data
     public let fleetViewModel = FleetViewModel()
 
     // iMessage bridge (reads messages via FDA, forwards to daemon)
@@ -156,7 +156,7 @@ public final class AppViewModel {
         self.processManager = ProcessManager()
         self.sessionStore = SessionStore()
         Task { await sessionStore.load() }
-        // Start fleet/Mars live polling
+        // Start fleet live polling
         fleetViewModel.startRefreshing()
         // Start iMessage bridge if configured
         if let imsgId = ProcessInfo.processInfo.environment["IMESSAGE_SELF_ID"], !imsgId.isEmpty {

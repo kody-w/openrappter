@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Menu Fleet Section
 
-/// Shows live fleet status, Mars Barn data, and quick actions in the menu dropdown.
+/// Shows live fleet status and quick actions in the menu dropdown.
 public struct MenuFleetSection: View {
     @Bindable var fleetVM: FleetViewModel
 
@@ -15,13 +15,6 @@ public struct MenuFleetSection: View {
             // Fleet status
             fleetStatusRow
             statsRow
-
-            Divider()
-                .padding(.horizontal, 12)
-
-            // Mars Barn
-            marsStatusRow
-            marsButton
 
             Divider()
                 .padding(.horizontal, 12)
@@ -74,51 +67,6 @@ public struct MenuFleetSection: View {
                     .padding(.leading, 13)  // align with text after dot
             }
         }
-    }
-
-    // MARK: - Mars Barn
-
-    private var marsStatusRow: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(fleetVM.marsOnline ? Color.red : Color.gray)
-                .frame(width: 7, height: 7)
-
-            if fleetVM.marsOnline {
-                Text("Mars: Sol \(fleetVM.marsSol) | Pop \(fleetVM.marsPopulation)")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            } else {
-                Text("Mars: Offline")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Text("Mars Barn")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 12)
-    }
-
-    private var marsButton: some View {
-        Button {
-            if let url = URL(string: "http://localhost:9091/game.html") {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "gamecontroller.fill")
-                    .font(.caption2)
-                Text("Open Game")
-                    .font(.caption2)
-            }
-        }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 12)
-        .padding(.leading, 13)
     }
 
     // MARK: - Quick Actions

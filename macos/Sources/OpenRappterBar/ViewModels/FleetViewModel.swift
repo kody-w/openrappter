@@ -16,14 +16,6 @@ struct StatsResponse: Decodable, Sendable {
     let last_updated: String?
 }
 
-struct ColonyResponse: Decodable, Sendable {
-    let name: String?
-    let sol: Int?
-    let population: Int?
-    let power_kwh: Double?
-    let water_liters: Double?
-}
-
 // MARK: - Fleet ViewModel
 
 @Observable
@@ -37,17 +29,11 @@ public final class FleetViewModel {
     public var fleetOnline: Bool = false
     public var lastFrameTime: Date?
 
-    // Mars Barn state
-    public var marsSol: Int = 0
-    public var marsPopulation: Int = 0
-    public var marsOnline: Bool = false
-
     // Redline detection
     public var isRedline: Bool = false
 
     // Errors (silent — just set online=false)
     public var fleetError: String?
-    public var marsError: String?
 
     // Frame history for redline calculation
     private var frameHistory: [(frame: Int, time: Date)] = []
@@ -58,7 +44,6 @@ public final class FleetViewModel {
 
     private let frameCounterURL = URL(string: "https://raw.githubusercontent.com/kody-w/rappterbook/main/state/frame_counter.json")!
     private let statsURL = URL(string: "https://raw.githubusercontent.com/kody-w/rappterbook/main/state/stats.json")!
-    private let colonyURL = URL(string: "https://raw.githubusercontent.com/kody-w/mars-barn/main/state/colony.json")!
 
     // MARK: - Lifecycle
 
@@ -68,13 +53,13 @@ public final class FleetViewModel {
     public func startRefreshing() {
         stopRefreshing()
         // Fetch immediately
-        Task { await fetchAll() }
+        Task { await fetchFleet() }
         // Then every 60 seconds
         refreshTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { break }
-                await fetchAll()
+                await fetchFleet()
             }
         }
     }
@@ -86,13 +71,6 @@ public final class FleetViewModel {
     }
 
     // MARK: - Fetch
-
-    private func fetchAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.fetchFleet() }
-            group.addTask { await self.fetchMars() }
-        }
-    }
 
     private func fetchFleet() async {
         do {
@@ -120,25 +98,6 @@ public final class FleetViewModel {
             await MainActor.run {
                 self.fleetOnline = false
                 self.fleetError = error.localizedDescription
-            }
-        }
-    }
-
-    private func fetchMars() async {
-        do {
-            let data = try await fetchJSON(from: colonyURL)
-            let colony = try JSONDecoder().decode(ColonyResponse.self, from: data)
-
-            await MainActor.run {
-                self.marsSol = colony.sol ?? 0
-                self.marsPopulation = colony.population ?? 0
-                self.marsOnline = true
-                self.marsError = nil
-            }
-        } catch {
-            await MainActor.run {
-                self.marsOnline = false
-                self.marsError = error.localizedDescription
             }
         }
     }

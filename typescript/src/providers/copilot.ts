@@ -114,6 +114,22 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
   }
 }
 
+// ── 429 Retry Config ─────────────────────────────────────────────────────────
+
+const RATE_LIMIT_MAX_RETRIES = 3;
+const RATE_LIMIT_BASE_DELAY_MS = 2_000;
+const RATE_LIMIT_MAX_DELAY_MS = 60_000;
+
+/** Parse Retry-After header (seconds or HTTP-date) into ms to wait. */
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (!Number.isNaN(seconds) && seconds > 0) return seconds * 1000;
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.max(date - Date.now(), 0);
+  return null;
+}
+
 // ── Provider ─────────────────────────────────────────────────────────────────
 
 export class CopilotProvider implements LLMProvider {
@@ -158,6 +174,37 @@ export class CopilotProvider implements LLMProvider {
     return this.resolvedToken;
   }
 
+  /**
+   * Fetch with automatic retry on 429 (rate-limit / quota exceeded).
+   * Respects the Retry-After header when present; falls back to
+   * exponential backoff with jitter.
+   */
+  private async fetchWithRateRetry(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+      const res = await fetch(url, init);
+
+      if (res.status !== 429) return res;
+
+      // Last attempt — don't wait, just surface the error
+      if (attempt === RATE_LIMIT_MAX_RETRIES) return res;
+
+      const retryMs =
+        parseRetryAfter(res.headers.get('Retry-After')) ??
+        Math.min(
+          RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1_000,
+          RATE_LIMIT_MAX_DELAY_MS,
+        );
+
+      await new Promise((r) => setTimeout(r, retryMs));
+    }
+
+    // unreachable, but satisfies tsc
+    throw new Error('Rate-limit retry loop exited unexpectedly');
+  }
+
   async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
     const { token, baseUrl } = await this.ensureToken();
     const model = options?.model ?? COPILOT_DEFAULT_MODEL;
@@ -191,13 +238,12 @@ export class CopilotProvider implements LLMProvider {
 
     const url = `${baseUrl}/chat/completions`;
 
-    const res = await fetch(url, {
+    const res = await this.fetchWithRateRetry(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json',
-        // Copilot API requires recognized editor headers
         'Editor-Version': 'vscode/1.96.2',
         'User-Agent': 'GitHubCopilotChat/0.26.7',
       },
@@ -264,7 +310,7 @@ export class CopilotProvider implements LLMProvider {
 
     const url = `${baseUrl}/chat/completions`;
 
-    const res = await fetch(url, {
+    const res = await this.fetchWithRateRetry(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

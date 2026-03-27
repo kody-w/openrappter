@@ -16,6 +16,8 @@
 
 import chalk from 'chalk';
 import readline from 'readline';
+import { LispyVM, STRATEGIES } from './lispy.js';
+import type { LispAction } from './lispy.js';
 
 export interface TuiBarOptions {
   port?: number;
@@ -186,9 +188,6 @@ const PONG = {
   BALL_MAX: 1.4,
   BALL_INC: 0.04,
   WIN_SCORE: 5,
-  AI_SPEED: 0.55,
-  AI_REACTION: 1.8,
-  AI_MISS: 0.06,
 } as const;
 
 interface PongState {
@@ -201,9 +200,12 @@ interface PongState {
   winner: null | 1 | 2;
   running: boolean;
   input: { up: boolean; down: boolean };
+  aiVm: LispyVM;
 }
 
 function createPongState(fieldW: number, fieldH: number): PongState {
+  const vm = new LispyVM();
+  vm.setStrategy(STRATEGIES.predictor);
   return {
     ball: { x: fieldW / 2, y: fieldH / 2, vx: PONG.BALL_SPEED, vy: PONG.BALL_SPEED * 0.6 },
     p1: { y: fieldH / 2 - PONG.PADDLE_H / 2, score: 0 },
@@ -214,13 +216,14 @@ function createPongState(fieldW: number, fieldH: number): PongState {
     winner: null,
     running: true,
     input: { up: false, down: false },
+    aiVm: vm,
   };
 }
 
 function pongTick(ps: PongState): void {
   if (!ps.running || ps.winner || ps.countdown > 0) return;
 
-  const { PADDLE_H, PADDLE_OFFSET, BALL_INC, BALL_MAX, WIN_SCORE, AI_SPEED, AI_REACTION, AI_MISS } = PONG;
+  const { PADDLE_H, PADDLE_OFFSET, BALL_INC, BALL_MAX, WIN_SCORE } = PONG;
 
   // Player paddle
   if (ps.input.up) ps.p1.y = Math.max(0, ps.p1.y - 1);
@@ -228,18 +231,25 @@ function pongTick(ps: PongState): void {
   ps.input.up = false;
   ps.input.down = false;
 
-  // AI paddle
-  const aiCenter = ps.p2.y + PADDLE_H / 2;
-  const diff = ps.ball.y - aiCenter;
-  if (ps.ball.vx > 0 && Math.random() > AI_MISS) {
-    if (Math.abs(diff) > AI_REACTION) {
-      ps.p2.y += diff > 0 ? AI_SPEED : -AI_SPEED;
-    }
-  } else {
-    const mid = ps.fieldH / 2 - PADDLE_H / 2;
-    ps.p2.y += (mid - ps.p2.y) * 0.02;
+  // AI paddle — driven by lispy VM
+  const aiAction: LispAction = ps.aiVm.tick({
+    'ball-x': ps.ball.x,
+    'ball-y': ps.ball.y,
+    'ball-vx': ps.ball.vx,
+    'ball-vy': ps.ball.vy,
+    'paddle-y': ps.p2.y,
+    'paddle-center': ps.p2.y + PADDLE_H / 2,
+    'paddle-x': ps.fieldW - PADDLE_OFFSET - 1,
+    'opponent-y': ps.p1.y,
+    'field-w': ps.fieldW,
+    'field-h': ps.fieldH,
+    'paddle-h': PADDLE_H,
+  });
+  if (aiAction.direction === 'up') {
+    ps.p2.y = Math.max(0, ps.p2.y - aiAction.speed);
+  } else if (aiAction.direction === 'down') {
+    ps.p2.y = Math.min(ps.fieldH - PADDLE_H, ps.p2.y + aiAction.speed);
   }
-  ps.p2.y = Math.max(0, Math.min(ps.fieldH - PADDLE_H, ps.p2.y));
 
   // Ball
   ps.ball.x += ps.ball.vx;

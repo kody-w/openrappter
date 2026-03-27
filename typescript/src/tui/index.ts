@@ -2,6 +2,8 @@ import { TuiGatewayClient } from './gateway-client.js';
 
 export { ZenScreen, ansi, box, visibleLength, padEnd } from './zen-screen.js';
 export type { ZenScreenConfig, FrameCallback } from './zen-screen.js';
+export { LispyVM, STRATEGIES } from './lispy.js';
+export type { LispAction } from './lispy.js';
 
 export interface TuiOptions {
   port?: number;

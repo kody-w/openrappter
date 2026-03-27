@@ -18,6 +18,8 @@ import chalk from 'chalk';
 import readline from 'readline';
 import { LispyVM, STRATEGIES } from './lispy.js';
 import type { LispAction } from './lispy.js';
+import { LispyCoach } from './lispy-coach.js';
+import type { GameSituation } from './lispy-coach.js';
 import { globalPeerStream } from '../gateway/peer-stream.js';
 
 export interface TuiBarOptions {

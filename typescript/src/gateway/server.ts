@@ -26,6 +26,7 @@ import type {
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
+import { registerAuthMethods } from './methods/auth-methods.js';
 import type { RappterManager } from './rappter-manager.js';
 
 const DEFAULT_PORT = 18790;
@@ -80,6 +81,9 @@ export class GatewayServer {
 
   // Rappter multi-soul manager
   private rappterManager?: RappterManager;
+
+  // Callback to update the running Copilot provider token after auth.login
+  private onAuthTokenUpdate?: (token: string) => void;
 
   // External handlers
   private agentHandler?: (
@@ -190,6 +194,14 @@ export class GatewayServer {
     handler: (request: AgentRequest, stream?: StreamCallback) => Promise<AgentResponse>
   ): void {
     this.agentHandler = handler;
+  }
+
+  /**
+   * Register a callback invoked when auth.login or auth.switch provides a new token.
+   * Use this to update the running Copilot provider without a restart.
+   */
+  setAuthTokenCallback(cb: (token: string) => void): void {
+    this.onAuthTokenUpdate = cb;
   }
 
   setChannelRegistry(registry: {
@@ -473,6 +485,7 @@ export class GatewayServer {
         storage: true,
         channels: !!this.channelRegistry,
         agents: !!this.agentHandler,
+        copilot: !!this.onAuthTokenUpdate,
       },
     };
   }
@@ -949,6 +962,11 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+
+    // Auth profile methods (device-code login, switch, remove)
+    registerAuthMethods(this, {
+      onAuthTokenUpdate: (token: string) => this.onAuthTokenUpdate?.(token),
+    });
 
     // Rappter multi-soul methods
     if (this.rappterManager) {

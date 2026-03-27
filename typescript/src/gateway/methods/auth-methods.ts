@@ -71,6 +71,13 @@ export function registerAuthMethods(
 ): void {
   const store = new AuthProfileStore();
 
+  // If a profile already exists, notify the caller so the provider can use it
+  const onTokenUpdate = _deps?.onAuthTokenUpdate as ((token: string) => void) | undefined;
+  const existingProfile = store.get('copilot');
+  if (existingProfile?.token && onTokenUpdate) {
+    onTokenUpdate(existingProfile.token);
+  }
+
   // ── auth.profiles — list all saved profiles ────────────────────────────────
   server.registerMethod<void, ProfileInfo[]>('auth.profiles', async () => {
     const profiles = store.list('copilot');
@@ -137,6 +144,9 @@ export function registerAuthMethods(
               token,
               default: true,
             });
+
+            // Notify the running provider so it picks up the new token
+            if (onTokenUpdate) onTokenUpdate(token);
           }
         })
         .catch((err) => {
@@ -193,6 +203,10 @@ export function registerAuthMethods(
     'auth.switch',
     async (params) => {
       const ok = store.setDefault('copilot', params.id);
+      if (ok && onTokenUpdate) {
+        const profile = store.get('copilot', params.id);
+        if (profile?.token) onTokenUpdate(profile.token);
+      }
       return { ok };
     }
   );

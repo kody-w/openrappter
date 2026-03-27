@@ -143,6 +143,15 @@ export class CopilotProvider implements LLMProvider {
     this.githubToken = options?.githubToken ?? null;
   }
 
+  /**
+   * Update the GitHub token at runtime (e.g. after device-code login).
+   * Clears the cached Copilot API token so the next call re-exchanges.
+   */
+  setGithubToken(token: string): void {
+    this.githubToken = token;
+    this.resolvedToken = null;
+  }
+
   /** Resolve the GitHub token from constructor, env, or gh CLI */
   private getGithubToken(): string | null {
     if (this.githubToken) return this.githubToken;

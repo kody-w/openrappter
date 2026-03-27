@@ -26,13 +26,14 @@ interface TuiState {
   connected: boolean;
   agents: Array<{ id: string; type: string; description?: string }>;
   uptime: number;
-  view: 'chat' | 'agents' | 'experimental' | 'status';
+  view: 'chat' | 'agents' | 'pong' | 'experimental' | 'status';
   chatHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   experimentalFeatures: Record<string, boolean>;
+  pong: PongState | null;
 }
 
 const EMOJI = '🦖';
-const VIEWS = ['chat', 'agents', 'experimental', 'status'] as const;
+const VIEWS = ['chat', 'agents', 'pong', 'experimental', 'status'] as const;
 
 function clearScreen(): void {
   process.stdout.write('\x1B[2J\x1B[H');
@@ -171,7 +172,165 @@ function renderStatusView(state: TuiState, width: number): string[] {
   lines.push('  Tab       Switch view');
   lines.push('  Enter     Send message (chat view)');
   lines.push('  1-4       Toggle feature (experimental view)');
+  lines.push('  W/S       Move paddle (pong view)');
   lines.push('  q         Quit');
+  return lines;
+}
+
+// ── Pong Mini-Game (inline, zero deps) ──────────────────────────────────────
+
+const PONG = {
+  PADDLE_H: 4,
+  PADDLE_OFFSET: 1,
+  BALL_SPEED: 0.5,
+  BALL_MAX: 1.4,
+  BALL_INC: 0.04,
+  WIN_SCORE: 5,
+  AI_SPEED: 0.55,
+  AI_REACTION: 1.8,
+  AI_MISS: 0.06,
+} as const;
+
+interface PongState {
+  ball: { x: number; y: number; vx: number; vy: number };
+  p1: { y: number; score: number };
+  p2: { y: number; score: number };
+  fieldW: number;
+  fieldH: number;
+  countdown: number;
+  winner: null | 1 | 2;
+  running: boolean;
+  input: { up: boolean; down: boolean };
+}
+
+function createPongState(fieldW: number, fieldH: number): PongState {
+  return {
+    ball: { x: fieldW / 2, y: fieldH / 2, vx: PONG.BALL_SPEED, vy: PONG.BALL_SPEED * 0.6 },
+    p1: { y: fieldH / 2 - PONG.PADDLE_H / 2, score: 0 },
+    p2: { y: fieldH / 2 - PONG.PADDLE_H / 2, score: 0 },
+    fieldW,
+    fieldH,
+    countdown: 3,
+    winner: null,
+    running: true,
+    input: { up: false, down: false },
+  };
+}
+
+function pongTick(ps: PongState): void {
+  if (!ps.running || ps.winner || ps.countdown > 0) return;
+
+  const { PADDLE_H, PADDLE_OFFSET, BALL_INC, BALL_MAX, WIN_SCORE, AI_SPEED, AI_REACTION, AI_MISS } = PONG;
+
+  // Player paddle
+  if (ps.input.up) ps.p1.y = Math.max(0, ps.p1.y - 1);
+  if (ps.input.down) ps.p1.y = Math.min(ps.fieldH - PADDLE_H, ps.p1.y + 1);
+  ps.input.up = false;
+  ps.input.down = false;
+
+  // AI paddle
+  const aiCenter = ps.p2.y + PADDLE_H / 2;
+  const diff = ps.ball.y - aiCenter;
+  if (ps.ball.vx > 0 && Math.random() > AI_MISS) {
+    if (Math.abs(diff) > AI_REACTION) {
+      ps.p2.y += diff > 0 ? AI_SPEED : -AI_SPEED;
+    }
+  } else {
+    const mid = ps.fieldH / 2 - PADDLE_H / 2;
+    ps.p2.y += (mid - ps.p2.y) * 0.02;
+  }
+  ps.p2.y = Math.max(0, Math.min(ps.fieldH - PADDLE_H, ps.p2.y));
+
+  // Ball
+  ps.ball.x += ps.ball.vx;
+  ps.ball.y += ps.ball.vy;
+
+  // Bounce top/bottom
+  if (ps.ball.y <= 0) { ps.ball.y = 0; ps.ball.vy = Math.abs(ps.ball.vy); }
+  if (ps.ball.y >= ps.fieldH - 1) { ps.ball.y = ps.fieldH - 1; ps.ball.vy = -Math.abs(ps.ball.vy); }
+
+  // Left paddle hit
+  if (
+    ps.ball.x <= PADDLE_OFFSET + 1 && ps.ball.x >= PADDLE_OFFSET &&
+    ps.ball.y >= ps.p1.y && ps.ball.y < ps.p1.y + PADDLE_H
+  ) {
+    ps.ball.vx = Math.abs(ps.ball.vx);
+    ps.ball.vy = ((ps.ball.y - ps.p1.y) / PADDLE_H - 0.5) * 1.4;
+    const sign = ps.ball.vx > 0 ? 1 : -1;
+    ps.ball.vx = sign * Math.min(Math.abs(ps.ball.vx) + BALL_INC, BALL_MAX);
+  }
+
+  // Right paddle hit
+  if (
+    ps.ball.x >= ps.fieldW - PADDLE_OFFSET - 2 && ps.ball.x <= ps.fieldW - PADDLE_OFFSET - 1 &&
+    ps.ball.y >= ps.p2.y && ps.ball.y < ps.p2.y + PADDLE_H
+  ) {
+    ps.ball.vx = -Math.abs(ps.ball.vx);
+    ps.ball.vy = ((ps.ball.y - ps.p2.y) / PADDLE_H - 0.5) * 1.4;
+    const sign = ps.ball.vx > 0 ? 1 : -1;
+    ps.ball.vx = sign * Math.min(Math.abs(ps.ball.vx) + BALL_INC, BALL_MAX);
+  }
+
+  // Score
+  if (ps.ball.x < 0) {
+    ps.p2.score++;
+    if (ps.p2.score >= WIN_SCORE) { ps.winner = 2; return; }
+    ps.ball.x = ps.fieldW / 2; ps.ball.y = ps.fieldH / 2;
+    ps.ball.vx = PONG.BALL_SPEED; ps.ball.vy = (Math.random() - 0.5) * PONG.BALL_SPEED;
+  }
+  if (ps.ball.x > ps.fieldW - 1) {
+    ps.p1.score++;
+    if (ps.p1.score >= WIN_SCORE) { ps.winner = 1; return; }
+    ps.ball.x = ps.fieldW / 2; ps.ball.y = ps.fieldH / 2;
+    ps.ball.vx = -PONG.BALL_SPEED; ps.ball.vy = (Math.random() - 0.5) * PONG.BALL_SPEED;
+  }
+}
+
+function renderPongView(ps: PongState, width: number, height: number): string[] {
+  const lines: string[] = [];
+  const fw = Math.min(width - 6, ps.fieldW);
+  const fh = Math.min(height - 2, ps.fieldH);
+
+  // Score header
+  const scoreLeft = `${EMOJI} You: ${ps.p1.score}`;
+  const scoreRight = `AI: ${ps.p2.score} 🤖`;
+  const scorePad = Math.max(1, fw - scoreLeft.length - scoreRight.length - 2);
+  lines.push(chalk.green(scoreLeft) + ' '.repeat(scorePad) + chalk.red(scoreRight));
+
+  // Field
+  for (let row = 0; row < fh; row++) {
+    let line = '';
+    for (let col = 0; col < fw; col++) {
+      const isP1 = col === PONG.PADDLE_OFFSET && row >= Math.round(ps.p1.y) && row < Math.round(ps.p1.y) + PONG.PADDLE_H;
+      const isP2 = col === fw - PONG.PADDLE_OFFSET - 1 && row >= Math.round(ps.p2.y) && row < Math.round(ps.p2.y) + PONG.PADDLE_H;
+      const isBall = Math.round(ps.ball.x) === col && Math.round(ps.ball.y) === row;
+      const isNet = col === Math.floor(fw / 2);
+
+      if (isBall) {
+        line += chalk.yellow('●');
+      } else if (isP1) {
+        line += chalk.green('█');
+      } else if (isP2) {
+        line += chalk.red('█');
+      } else if (isNet) {
+        line += row % 2 === 0 ? chalk.dim('│') : ' ';
+      } else {
+        line += ' ';
+      }
+    }
+    lines.push(line);
+  }
+
+  // Status message
+  if (ps.winner) {
+    const msg = ps.winner === 1 ? '🏆 You win!' : '🤖 AI wins!';
+    lines.push(chalk.bold.yellow(`${msg}  Press R to rematch`));
+  } else if (ps.countdown > 0) {
+    lines.push(chalk.bold.cyan(`Starting in ${ps.countdown}...`));
+  } else {
+    lines.push(chalk.dim('W/↑ up · S/↓ down · 🧘 breathe between rallies'));
+  }
+
   return lines;
 }
 
@@ -193,6 +352,13 @@ function render(state: TuiState): void {
       break;
     case 'agents':
       content = renderAgentsView(state, cols);
+      break;
+    case 'pong':
+      if (state.pong) {
+        content = renderPongView(state.pong, cols, contentHeight);
+      } else {
+        content = [chalk.dim('Initializing pong...')];
+      }
       break;
     case 'experimental':
       content = renderExperimentalView(state, cols);
@@ -235,6 +401,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       repetitionDetection: false,
       vipAnswer: false,
     },
+    pong: null,
   };
 
   // Try to connect to gateway
@@ -287,6 +454,14 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
   // Refresh display
   const renderInterval = setInterval(() => render(state), 2000);
 
+  // Pong game tick (60fps when active)
+  const pongInterval = setInterval(() => {
+    if (state.view === 'pong' && state.pong) {
+      pongTick(state.pong);
+      render(state);
+    }
+  }, 1000 / 30); // 30fps — smooth enough inside the bar
+
   // Handle resize
   process.stdout.on('resize', () => render(state));
 
@@ -299,6 +474,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       console.log(`${EMOJI} OpenRappter TUI Bar closed.`);
       clearInterval(uptimeInterval);
       clearInterval(renderInterval);
+      clearInterval(pongInterval);
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       client?.disconnect();
       process.exit(0);
@@ -309,8 +485,46 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       const idx = VIEWS.indexOf(state.view);
       state.view = VIEWS[(idx + 1) % VIEWS.length];
       inputBuffer = '';
+
+      // Initialize pong when entering the view
+      if (state.view === 'pong' && !state.pong) {
+        const { cols } = getTermSize();
+        const fw = Math.min(cols - 8, 70);
+        const fh = 16;
+        state.pong = createPongState(fw, fh);
+        // Countdown timer
+        let cd = 3;
+        const cdTimer = setInterval(() => {
+          cd--;
+          if (state.pong) state.pong.countdown = cd;
+          if (cd <= 0) clearInterval(cdTimer);
+        }, 1000);
+      }
+
       render(state);
       return;
+    }
+
+    // Pong view — game controls
+    if (state.view === 'pong' && state.pong) {
+      if ((key === 'w' || key === 'W') || key === '\x1b[A') {
+        state.pong.input.up = true;
+        return;
+      }
+      if ((key === 's' || key === 'S') || key === '\x1b[B') {
+        state.pong.input.down = true;
+        return;
+      }
+      if (key === 'r' || key === 'R') {
+        if (state.pong.winner) {
+          const { cols } = getTermSize();
+          const fw = Math.min(cols - 8, 70);
+          state.pong = createPongState(fw, 16);
+          state.pong.countdown = 0; // instant rematch
+        }
+        return;
+      }
+      return; // swallow other keys in pong view
     }
 
     // Experimental view — number keys toggle features

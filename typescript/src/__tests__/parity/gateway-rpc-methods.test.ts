@@ -479,8 +479,9 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('voice')).toBe(true);
       expect(groups.has('auth')).toBe(true);
       expect(groups.has('zen')).toBe(true);
+      expect(groups.has('backup')).toBe(true);
 
-      expect(groups.size).toBe(23);
+      expect(groups.size).toBe(24);
     });
 
     it('chat group should have expected methods', () => {
@@ -625,8 +626,8 @@ describe('Gateway RPC Methods', () => {
         (info) => info.requiresAuth
       ).length;
 
-      // rappter.summon, rappter.load, rappter.unload, rappter.reload, rappter.load-template require auth
-      expect(authRequiredCount).toBe(5);
+      // rappter.summon, rappter.load, rappter.unload, rappter.reload, rappter.load-template, backup.delete require auth
+      expect(authRequiredCount).toBe(6);
     });
   });
 });

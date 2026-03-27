@@ -23,6 +23,7 @@ import { registerRappterMethods } from './rappter-methods.js';
 import { registerExperimentalMethods } from './experimental-methods.js';
 import { registerAuthMethods } from './auth-methods.js';
 import { registerZenMethods } from './zen-methods.js';
+import { registerBackupMethods } from './backup-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -62,6 +63,7 @@ export function registerAllMethods(
   registerExperimentalMethods(server, deps);
   registerAuthMethods(server, deps);
   registerZenMethods(server, deps);
+  registerBackupMethods(server, deps);
 }
 
 // Re-export individual registration functions
@@ -87,4 +89,5 @@ export {
   registerExperimentalMethods,
   registerAuthMethods,
   registerZenMethods,
+  registerBackupMethods,
 };

@@ -27,6 +27,7 @@ import { RPC_ERROR, GatewayEvents } from './types.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
+import { registerBackupMethods } from './methods/backup-methods.js';
 import type { RappterManager } from './rappter-manager.js';
 
 const DEFAULT_PORT = 18790;
@@ -967,6 +968,9 @@ export class GatewayServer {
     registerAuthMethods(this, {
       onAuthTokenUpdate: (token: string) => this.onAuthTokenUpdate?.(token),
     });
+
+    // Backup & restore methods
+    registerBackupMethods(this);
 
     // Rappter multi-soul methods
     if (this.rappterManager) {

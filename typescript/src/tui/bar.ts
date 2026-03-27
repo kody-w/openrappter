@@ -18,6 +18,7 @@ import chalk from 'chalk';
 import readline from 'readline';
 import { LispyVM, STRATEGIES } from './lispy.js';
 import type { LispAction } from './lispy.js';
+import { globalPeerStream } from '../gateway/peer-stream.js';
 
 export interface TuiBarOptions {
   port?: number;
@@ -464,13 +465,17 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
   // Refresh display
   const renderInterval = setInterval(() => render(state), 2000);
 
-  // Pong game tick (60fps when active)
+  // Pong game tick (30fps when active)
   const pongInterval = setInterval(() => {
     if (state.view === 'pong' && state.pong) {
       pongTick(state.pong);
       render(state);
+      // Broadcast frame to web viewers
+      const { cols } = getTermSize();
+      const pongLines = renderPongView(state.pong, cols, cols - 4);
+      globalPeerStream.pushFrame('bar-pong', pongLines.join('\n'));
     }
-  }, 1000 / 30); // 30fps — smooth enough inside the bar
+  }, 1000 / 30);
 
   // Handle resize
   process.stdout.on('resize', () => render(state));
@@ -485,6 +490,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       clearInterval(uptimeInterval);
       clearInterval(renderInterval);
       clearInterval(pongInterval);
+      globalPeerStream.endSession('bar-pong');
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       client?.disconnect();
       process.exit(0);
@@ -502,6 +508,8 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
         const fw = Math.min(cols - 8, 70);
         const fh = 16;
         state.pong = createPongState(fw, fh);
+        // Start streaming session for web viewers
+        globalPeerStream.createSession('bar-pong', 'Pong — You vs AI');
         // Countdown timer
         let cd = 3;
         const cdTimer = setInterval(() => {

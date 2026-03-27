@@ -4,6 +4,7 @@ export { registerCronCommand } from './cron.js';
 export { registerSkillsCommand } from './skills.js';
 export { registerSessionsCommand } from './sessions.js';
 export { registerChannelsCommand } from './channels.js';
+export { registerChannelCommand } from './channel.js';
 export { registerAgentsCommand } from './agents.js';
 export { registerSendCommand } from './send.js';
 export { registerModelsCommand } from './models.js';

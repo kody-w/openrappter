@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zen Pong — When Your AI Plays Pong While You Wait</title>
+<meta name="description" content="We built a Lisp VM that runs at 60fps inside a terminal game, a digital twin release system, and a philosophy: your tools should care about your mental health.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        'neo-green': '#10b981',
+        'neo-purple': '#8b5cf6',
+        'neo-blue': '#3b82f6',
+        'neo-orange': '#f59e0b',
+        'neo-cyan': '#06b6d4',
+        'neo-yellow': '#eab308',
+        'neo-bg': '#fffdf7',
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      }
+    }
+  }
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  .neo-border { border: 3px solid #000; }
+  .neo-shadow { box-shadow: 6px 6px 0 #000; }
+  .neo-shadow-sm { box-shadow: 4px 4px 0 #000; }
+  .neo-shadow:hover { box-shadow: 2px 2px 0 #000; transform: translate(4px, 4px); }
+  .code-block { background: #0d1117; color: #e6edf3; border: 3px solid #000; }
+  .tag { display: inline-block; padding: 2px 10px; border: 2px solid #000; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .dojo-screenshot { border: 3px solid #000; box-shadow: 8px 8px 0 #000; border-radius: 8px; }
+</style>
+</head>
+<body class="bg-neo-bg text-black font-sans">
+
+<!-- Nav -->
+<nav class="sticky top-0 z-50 bg-white border-b-[3px] border-black px-6 py-4">
+  <div class="max-w-4xl mx-auto flex items-center justify-between">
+    <a href="../" class="text-xl font-black">🦖 openrappter</a>
+    <div class="flex items-center gap-4">
+      <a href="../" class="text-sm font-semibold hover:text-neo-green">← Back to Home</a>
+      <a href="https://github.com/kody-w/openrappter" class="text-sm font-semibold hover:text-neo-green">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<article class="max-w-4xl mx-auto px-6 py-16">
+
+  <!-- Header -->
+  <div class="mb-12">
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <span class="tag bg-neo-green/10 text-neo-green border-neo-green">Engineering</span>
+      <span class="tag bg-neo-cyan/10 text-neo-cyan border-neo-cyan">Digital Twin</span>
+      <span class="tag">March 27, 2026</span>
+    </div>
+    <h1 class="text-5xl md:text-6xl font-black leading-tight mb-6">
+      Zen Pong 🏓<br>
+      <span class="text-neo-green">When Your AI Plays Pong</span><br>
+      While You Wait
+    </h1>
+    <p class="text-xl text-gray-600 leading-relaxed max-w-2xl">
+      We built a Lisp VM that runs at 60fps inside a terminal game, a digital twin release system, and a philosophy: your developer tools should care about your mental health.
+    </p>
+  </div>
+
+  <!-- Screenshot -->
+  <div class="mb-16">
+    <img src="dojo-screenshot.png" alt="Pong Dojo — two AI rappters playing pong in the browser, score 4-1, with zen quote visible" class="dojo-screenshot w-full">
+    <p class="text-sm text-gray-500 mt-3 text-center">
+      The Pong Dojo: rappterL vs rappterR, streamed from TUI to browser in real time. "🧘 the ball knows where to go."
+    </p>
+  </div>
+
+  <!-- The Problem -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-4">The Problem: Dead Air</h2>
+    <p class="text-lg leading-relaxed mb-4">
+      Every developer knows the feeling. You hit <code class="font-mono bg-gray-100 px-2 py-0.5 neo-border text-sm">npm run build</code> and stare at a blank terminal for 45 seconds. You deploy to staging and watch a progress bar crawl. You wait for an API response that's taking forever because someone's Lambda is cold-starting.
+    </p>
+    <p class="text-lg leading-relaxed mb-4">
+      That dead air is bad for you. Your brain context-switches to Twitter. You lose flow state. You come back 20 minutes later having forgotten what you were doing.
+    </p>
+    <div class="bg-neo-orange/10 neo-border p-6 neo-shadow-sm mb-4">
+      <p class="font-bold text-lg">Our thesis: the wait is the product.</p>
+      <p class="text-gray-700 mt-2">If your tool makes people wait, the waiting experience is part of your UX. You own it. Make it good.</p>
+    </div>
+  </section>
+
+  <!-- The Solution -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-4">The Solution: Forced Meditation via Pong</h2>
+    <p class="text-lg leading-relaxed mb-4">
+      When openrappter is doing something that takes a while — building, deploying, fetching, thinking — it drops you into <strong>Zen Pong</strong>. Two AI rappters (🦖) play each other in a terminal pong game while you watch and breathe.
+    </p>
+    <p class="text-lg leading-relaxed mb-4">
+      You don't play. You <em>observe</em>. The ball bounces. The paddles track. Zen quotes rotate at the bottom. Your build finishes and you're back, calm and focused.
+    </p>
+    <p class="text-lg leading-relaxed">
+      For really long tasks, we hand you the paddle. W/S to play. You vs AI. It's built into the openrappter bar — Tab to the pong view and go.
+    </p>
+  </section>
+
+  <!-- Architecture -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-6">How We Built It</h2>
+
+    <!-- Layer 1 -->
+    <div class="neo-border p-6 neo-shadow-sm mb-6 bg-white">
+      <h3 class="text-xl font-black mb-2">🧱 Layer 1: ZenScreen Base Class</h3>
+      <p class="mb-3">The Steve Jobs layer. One opinionated base class that manages terminal lifecycle, tick loop, buffered ANSI rendering, and input routing. Subclass 5 methods, get everything else free.</p>
+      <div class="code-block p-4 rounded font-mono text-sm overflow-x-auto">
+<span class="text-gray-500">// That's it. Five methods. The framework handles the rest.</span>
+<span class="text-neo-purple">abstract</span> createState(): T;
+<span class="text-neo-purple">abstract</span> update(state: T): <span class="text-neo-blue">void</span>;
+<span class="text-neo-purple">abstract</span> renderHeader(state: T): <span class="text-neo-blue">string</span>;
+<span class="text-neo-purple">abstract</span> renderContent(state: T): <span class="text-neo-blue">string[]</span>;
+<span class="text-neo-purple">abstract</span> renderFooter(state: T): <span class="text-neo-blue">string</span>;
+      </div>
+    </div>
+
+    <!-- Layer 2 -->
+    <div class="neo-border p-6 neo-shadow-sm mb-6 bg-white">
+      <h3 class="text-xl font-black mb-2">🧠 Layer 2: Lispy — A Lisp VM at 60fps</h3>
+      <p class="mb-3">Here's the insight: the AI paddle needs to react every frame. You can't round-trip to an LLM at 60fps. But a tiny Lisp VM running locally is instant. The LLM writes a <strong>strategy</strong> once — a single s-expression — and the VM executes it every tick with zero latency.</p>
+      <div class="code-block p-4 rounded font-mono text-sm overflow-x-auto">
+<span class="text-gray-500">;; LLM writes this nano-prompt ONCE</span>
+<span class="text-gray-500">;; VM executes it 60 times per second</span>
+(<span class="text-neo-purple">let</span> ((target (<span class="text-neo-green">predict-y</span> paddle-x ball-x ball-y
+                       ball-vx ball-vy field-h)))
+  (<span class="text-neo-purple">if</span> (> (<span class="text-neo-green">abs</span> (- target paddle-center)) 1.0)
+      (<span class="text-neo-purple">if</span> (> target paddle-center)
+          (<span class="text-neo-green">move</span> <span class="text-neo-orange">:down</span> 0.8)
+          (<span class="text-neo-green">move</span> <span class="text-neo-orange">:up</span> 0.8))
+      (<span class="text-neo-green">move</span> <span class="text-neo-orange">:none</span> 0)))
+      </div>
+      <p class="mt-3 text-gray-600 text-sm">The LLM is the <strong>coach</strong>. The VM is the <strong>athlete</strong>. Intelligence at authoring time, speed at runtime.</p>
+    </div>
+
+    <!-- Layer 3 -->
+    <div class="neo-border p-6 neo-shadow-sm mb-6 bg-white">
+      <h3 class="text-xl font-black mb-2">📡 Layer 3: TUI → Browser Streaming</h3>
+      <p class="mb-3">Every frame the game renders is an ANSI string. We capture it, broadcast it over WebSocket, and a single-file HTML page (the <strong>Pong Dojo</strong>) converts ANSI escape codes to styled HTML spans in real time. Non-technical users see the same game in their browser.</p>
+      <div class="code-block p-4 rounded font-mono text-sm overflow-x-auto">
+Terminal (ANSI) → PeerStreamManager → Gateway WebSocket
+    → dojo.html (ANSI→HTML) → Browser renders at 30fps
+      </div>
+    </div>
+
+    <!-- Layer 4 -->
+    <div class="neo-border p-6 neo-shadow-sm mb-6 bg-white">
+      <h3 class="text-xl font-black mb-2">🔀 Layer 4: Digital Twin Release Channels</h3>
+      <p class="mb-3">All of this shipped on a feature branch. We built a channel system — like Chrome Stable vs Canary — so experimental features don't touch production:</p>
+      <div class="code-block p-4 rounded font-mono text-sm overflow-x-auto">
+<span class="text-gray-500"># Flip to the experiment</span>
+$ openrappter channel switch experimental feat/zen-pong
+
+<span class="text-gray-500"># Back to production</span>
+$ openrappter channel switch stable
+
+<span class="text-gray-500"># Validated? Promote to production.</span>
+$ openrappter channel promote --enable
+$ openrappter channel promote --count 2
+      </div>
+      <p class="mt-3 text-gray-600 text-sm">The experimental branch is a full digital twin. Changes flow back to production only when you explicitly promote them.</p>
+    </div>
+  </section>
+
+  <!-- The Stack -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-6">The Full Stack</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full neo-border text-sm">
+        <thead>
+          <tr class="bg-black text-white">
+            <th class="text-left p-3 font-bold">Component</th>
+            <th class="text-left p-3 font-bold">What</th>
+            <th class="text-left p-3 font-bold">Latency</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-t-2 border-black"><td class="p-3 font-mono font-bold">Bar Pong</td><td class="p-3">Playable mini-game in TUI. Tab to it, W/S to play.</td><td class="p-3 text-neo-green font-bold">Zero</td></tr>
+          <tr class="border-t-2 border-black bg-gray-50"><td class="p-3 font-mono font-bold">Lispy VM</td><td class="p-3">Tiny Lisp interpreter. 4 preset AI strategies.</td><td class="p-3 text-neo-green font-bold">Zero</td></tr>
+          <tr class="border-t-2 border-black"><td class="p-3 font-mono font-bold">ZenScreen</td><td class="p-3">Reusable base class for ambient TUI screens.</td><td class="p-3 text-gray-400">N/A</td></tr>
+          <tr class="border-t-2 border-black bg-gray-50"><td class="p-3 font-mono font-bold">Zen Mode</td><td class="p-3"><code class="font-mono">node pong.js zen</code> — full-screen AI vs AI.</td><td class="p-3 text-neo-green font-bold">Zero</td></tr>
+          <tr class="border-t-2 border-black"><td class="p-3 font-mono font-bold">PeerStream</td><td class="p-3">ANSI frame capture + WebSocket broadcast.</td><td class="p-3 text-neo-orange font-bold">~33ms</td></tr>
+          <tr class="border-t-2 border-black bg-gray-50"><td class="p-3 font-mono font-bold">Pong Dojo</td><td class="p-3">Single HTML file, ANSI→HTML, no build step.</td><td class="p-3 text-neo-orange font-bold">~33ms</td></tr>
+          <tr class="border-t-2 border-black"><td class="p-3 font-mono font-bold">PongAgent</td><td class="p-3">Framework agent. TS + Python, auto-discovered.</td><td class="p-3 text-neo-green font-bold">Zero</td></tr>
+          <tr class="border-t-2 border-black bg-gray-50"><td class="p-3 font-mono font-bold">Channels</td><td class="p-3">stable/experimental digital twin with gated promote.</td><td class="p-3 text-gray-400">N/A</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- The Philosophy -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-4">The Philosophy</h2>
+    <p class="text-lg leading-relaxed mb-4">
+      This isn't a gimmick. It's a design principle.
+    </p>
+    <p class="text-lg leading-relaxed mb-4">
+      Every moment your user spends waiting is a moment you're responsible for. You can show them a spinner. You can show them a progress bar. Or you can give them something that makes the wait <em>better than not waiting</em>.
+    </p>
+
+    <div class="bg-neo-green/5 neo-border p-8 neo-shadow mb-6">
+      <p class="text-2xl font-black mb-2">🧘 "the ball knows where to go"</p>
+      <p class="text-gray-600">One of 13 rotating zen quotes. Appears while two AI rappters play each other. You watch. You breathe. Your build finishes.</p>
+    </div>
+
+    <p class="text-lg leading-relaxed mb-4">
+      The hardcoded game in the bar TUI <strong>cannot lag</strong>. It's pure math — addition and comparison on a setInterval. No network calls, no async, no garbage collection pauses. When your API is down and your deploy is hanging, the pong game keeps running perfectly. That's the point.
+    </p>
+    <p class="text-lg leading-relaxed">
+      And the Lispy VM pattern — LLM writes strategy, VM executes at 60fps — that's reusable far beyond pong. Any time you need an AI to control something in real time, you need this separation: intelligence at authoring time, speed at runtime.
+    </p>
+  </section>
+
+  <!-- Try It -->
+  <section class="mb-16">
+    <h2 class="text-3xl font-black mb-6">Try It</h2>
+    <div class="code-block p-6 rounded font-mono text-sm neo-shadow overflow-x-auto">
+<span class="text-gray-500"># Watch two AI rappters play (full-screen zen mode)</span>
+$ <span class="text-neo-green">git clone</span> -b feat/zen-pong https://github.com/kody-w/openrappter.git
+$ <span class="text-neo-green">node</span> pong.js zen
+
+<span class="text-gray-500"># Play in the bar TUI (Tab to pong, W/S to move)</span>
+$ <span class="text-neo-green">cd</span> typescript && npm install && npm run build
+$ <span class="text-neo-green">node</span> dist/index.js bar --tui
+
+<span class="text-gray-500"># Watch in the browser (non-technical users)</span>
+<span class="text-gray-500"># Start the dojo server, open http://localhost:4141</span>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <div class="border-t-[3px] border-black pt-8 mt-16">
+    <p class="text-gray-500 text-sm">
+      Built with 🧘 by the openrappter team. Branch: <code class="font-mono">feat/zen-pong</code>. Tests: 2899 passing. Main: untouched.
+    </p>
+    <p class="text-gray-400 text-sm mt-2">
+      March 27, 2026 · Digital Twin Engineering Blog
+    </p>
+  </div>
+
+</article>
+</body>
+</html>

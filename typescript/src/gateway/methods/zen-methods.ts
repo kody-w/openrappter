@@ -5,7 +5,7 @@
  *   zen.sessions        — List active zen streaming sessions
  *   zen.subscribe       — Subscribe to a session (get frames via events)
  *   zen.unsubscribe     — Stop receiving frames
- *   zen.lastFrame       — Get latest frame (for late joiners)
+ *   zen.lastframe       — Get latest frame (for late joiners)
  */
 
 import { globalPeerStream } from '../peer-stream.js';

@@ -221,6 +221,12 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     };
   });
 
+  // Wire auth profile token updates → live provider refresh (no restart needed)
+  server.setAuthTokenCallback((token) => {
+    assistant.setGithubToken(token);
+    log(`${EMOJI} Copilot token updated from profile store`);
+  });
+
   await server.start();
 
   // ── Cron Service — load jobs and start scheduler ──

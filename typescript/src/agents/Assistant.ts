@@ -83,6 +83,12 @@ export class Assistant {
     this.agents = agents;
   }
 
+  /** Update the GitHub token at runtime (e.g. after device-code login) */
+  setGithubToken(token: string): void {
+    this.config.githubToken = token;
+    this.provider.setGithubToken(token);
+  }
+
   /** Get the current model ID */
   getModel(): string {
     return this.config.model ?? COPILOT_DEFAULT_MODEL;

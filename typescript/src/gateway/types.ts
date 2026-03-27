@@ -221,5 +221,6 @@ export interface HealthResponse {
     storage?: boolean;
     channels?: boolean;
     agents?: boolean;
+    copilot?: boolean;
   };
 }

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏓 Pong Dojo — Live TUI</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c8c8;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+  h1 { font-size: 1.3rem; color: #4ade80; margin-bottom: 0.25rem; }
+  .sub { font-size: 0.8rem; color: #555; margin-bottom: 1.5rem; }
+  .terminal {
+    background: #0d0d11;
+    border: 1px solid #2a2a3a;
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.3;
+    white-space: pre;
+    overflow: hidden;
+    min-width: 660px;
+    min-height: 420px;
+    box-shadow: 0 0 40px rgba(74, 222, 128, 0.05);
+  }
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 660px;
+    margin-top: 0.75rem;
+    font-size: 0.7rem;
+    color: #444;
+  }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+  .dot.live { background: #4ade80; }
+  .dot.off { background: #555; }
+  #wsurl {
+    background: #111;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #aaa;
+    padding: 4px 10px;
+    font-family: monospace;
+    font-size: 0.75rem;
+    width: 320px;
+    margin-bottom: 1rem;
+  }
+  button {
+    background: #1a1a2e;
+    border: 1px solid #4ade80;
+    color: #4ade80;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+  }
+  button:hover { background: #4ade80; color: #0a0a0f; }
+</style>
+</head>
+<body>
+
+<h1>🏓 Pong Dojo</h1>
+<div class="sub">read-only TUI viewer · connects to openrappter gateway</div>
+
+<input id="wsurl" value="ws://127.0.0.1:18790" placeholder="Gateway WebSocket URL" />
+<button id="connectBtn" onclick="toggle()">Connect</button>
+
+<div class="terminal" id="screen"></div>
+
+<div class="status-bar">
+  <span><span class="dot off" id="dot"></span> <span id="connStatus">disconnected</span></span>
+  <span id="frameCount">0 frames</span>
+</div>
+
+<script>
+// ── ANSI → HTML converter ───────────────────────────────────────────────
+// Maps SGR codes to CSS. Handles color, bold, dim, reset.
+const FG = {
+  '30':'#000','31':'#f87171','32':'#4ade80','33':'#fbbf24',
+  '34':'#60a5fa','35':'#c084fc','36':'#22d3ee','37':'#d1d5db',
+  '90':'#6b7280','91':'#fca5a5','92':'#86efac','93':'#fde68a',
+  '94':'#93c5fd','95':'#d8b4fe','96':'#67e8f9','97':'#f3f4f6',
+};
+
+function ansiToHtml(raw) {
+  // Escape HTML entities
+  let s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Strip cursor/screen control codes
+  s = s.replace(/\x1b\[\?25[hl]/g, '');
+  s = s.replace(/\x1b\[2J/g, '');
+  s = s.replace(/\x1b\[\d+;\d+H/g, '');
+  s = s.replace(/\x1b\[H/g, '');
+  // Convert SGR codes to spans
+  s = s.replace(/\x1b\[([0-9;]*)m/g, function(_, codes) {
+    if (!codes || codes === '0') return '</span>';
+    const parts = codes.split(';');
+    const styles = [];
+    for (const c of parts) {
+      if (c === '1') styles.push('font-weight:bold');
+      else if (c === '2') styles.push('opacity:0.5');
+      else if (c === '3') styles.push('font-style:italic');
+      else if (FG[c]) styles.push('color:' + FG[c]);
+    }
+    return styles.length ? '<span style="' + styles.join(';') + '">' : '';
+  });
+  return s;
+}
+
+// ── Gateway WebSocket connection ────────────────────────────────────────
+// Uses the openrappter gateway frame protocol:
+//   Send: { id, type: 'req', method, params }
+//   Recv: { type: 'res', id, result } or { type: 'event', event, payload }
+
+let ws = null;
+let reqId = 0;
+let frames = 0;
+let connected = false;
+
+const screen = document.getElementById('screen');
+const dot = document.getElementById('dot');
+const connStatus = document.getElementById('connStatus');
+const frameCount = document.getElementById('frameCount');
+const connectBtn = document.getElementById('connectBtn');
+
+function setConnected(v) {
+  connected = v;
+  dot.className = 'dot ' + (v ? 'live' : 'off');
+  connStatus.textContent = v ? 'live' : 'disconnected';
+  connectBtn.textContent = v ? 'Disconnect' : 'Connect';
+}
+
+function send(method, params) {
+  if (!ws || ws.readyState !== 1) return;
+  reqId++;
+  ws.send(JSON.stringify({ id: String(reqId), type: 'req', method, params: params || {} }));
+}
+
+function toggle() {
+  if (connected) {
+    ws.close();
+    return;
+  }
+  const url = document.getElementById('wsurl').value.trim();
+  screen.textContent = 'Connecting to ' + url + '...';
+
+  ws = new WebSocket(url);
+
+  ws.onopen = function() {
+    setConnected(true);
+    screen.textContent = 'Connected. Waiting for zen session...';
+    // Subscribe to zen frame events
+    send('zen.sessions');
+  };
+
+  ws.onmessage = function(evt) {
+    let msg;
+    try { msg = JSON.parse(evt.data); } catch { return; }
+
+    // Response to zen.sessions → subscribe to first one
+    if (msg.type === 'res' && msg.result && msg.result.sessions) {
+      const sessions = msg.result.sessions;
+      if (sessions.length > 0) {
+        send('zen.subscribe', { sessionId: sessions[0].id });
+        screen.textContent = 'Subscribed to: ' + sessions[0].name;
+      } else {
+        screen.textContent = 'No active zen sessions.\n\nStart one:\n  openrappter bar --tui  →  Tab to pong\n  node pong.js zen';
+      }
+      return;
+    }
+
+    // Response to zen.subscribe → show last frame if available
+    if (msg.type === 'res' && msg.result && msg.result.subscribed) {
+      if (msg.result.lastFrame) {
+        screen.innerHTML = ansiToHtml(msg.result.lastFrame);
+        frames++;
+        frameCount.textContent = frames + ' frames';
+      }
+      return;
+    }
+
+    // Live frame event
+    if (msg.type === 'event' && msg.event === 'zen.frame') {
+      screen.innerHTML = ansiToHtml(msg.payload.frame);
+      frames++;
+      frameCount.textContent = frames + ' frames';
+      return;
+    }
+  };
+
+  ws.onclose = function() {
+    setConnected(false);
+    screen.textContent += '\n\nDisconnected.';
+  };
+
+  ws.onerror = function() {
+    setConnected(false);
+    screen.textContent = 'Connection failed.\n\nMake sure the gateway is running:\n  openrappter --daemon';
+  };
+}
+</script>
+</body>
+</html>

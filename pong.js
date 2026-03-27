@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // ═══════════════════════════════════════════════════════════════════════════
-//  🏓  PONG — Multiplayer Terminal Pong
+//  🏓  PONG — Terminal Pong (Solo & Multiplayer)
 //
 //  Usage:
-//    node pong.js host [port]        ← Start as Player 1 (left paddle)
-//    node pong.js join <ip> [port]   ← Join as Player 2 (right paddle)
+//    node pong.js solo [easy|medium|hard]  ← Play vs computer AI
+//    node pong.js host [port]              ← Start as Player 1 (left paddle)
+//    node pong.js join <ip> [port]         ← Join as Player 2 (right paddle)
 //
 //  Controls:
 //    W / ↑   Move paddle up
 //    S / ↓   Move paddle down
 //    Q       Quit
+//    R       Rematch (after game ends)
 //
 //  Zero dependencies — just Node.js.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -449,24 +451,186 @@ function cleanup(server) {
   process.exit(0);
 }
 
+// ── ZEN MODE (Autonomous AI vs AI spectator) ───────────────────────────────
+const ZEN_QUOTES = [
+  'breathe in... breathe out...',
+  'the ball knows where to go',
+  'watch the rhythm, not the score',
+  'you are not your build errors',
+  'let the rappters play',
+  'nothing to do. nowhere to be.',
+  'the deploy will finish when it finishes',
+  'observe without attachment',
+  'each rally is a tiny meditation',
+  'the terminal is your garden',
+  'patience is a feature, not a bug',
+  'be the ball',
+  'your code is compiling. you are enough.',
+];
+
+function runZen() {
+  let state = createState();
+  let quoteIdx = Math.floor(Math.random() * ZEN_QUOTES.length);
+  let quoteTick = 0;
+  const QUOTE_INTERVAL = 60 * 6; // rotate quote every ~6 seconds
+
+  // Two AI personalities — slightly different so rallies feel organic
+  const leftAI  = { speed: 0.72, reactionZone: 1.8, missChance: 0.06, drift: 0.025 };
+  const rightAI = { speed: 0.68, reactionZone: 2.0, missChance: 0.07, drift: 0.020 };
+
+  clear();
+  hide();
+
+  // Countdown
+  let cd = 3;
+  state.countdown = cd;
+  const cdTimer = setInterval(() => {
+    cd--;
+    state.countdown = cd;
+    if (cd <= 0) clearInterval(cdTimer);
+  }, 1000);
+
+  // Only input: Q to quit
+  setupInput((key) => {
+    if (key === 'q' || key === 'Q' || key === '\x03') cleanup();
+  });
+
+  function moveAI(paddle, ai, ballHeadingToward) {
+    const center = paddle.y + PADDLE_H / 2;
+    const diff = state.ball.y - center;
+
+    if (ballHeadingToward) {
+      if (Math.random() > ai.missChance) {
+        if (Math.abs(diff) > ai.reactionZone) {
+          paddle.y += (diff > 0 ? ai.speed : -ai.speed);
+        }
+      }
+    } else {
+      // Lazily drift toward center
+      const mid = HEIGHT / 2 - PADDLE_H / 2;
+      paddle.y += (mid - paddle.y) * ai.drift;
+    }
+    paddle.y = Math.max(0, Math.min(HEIGHT - PADDLE_H, paddle.y));
+  }
+
+  // Game loop
+  setInterval(() => {
+    if (state.running && !state.winner && state.countdown <= 0) {
+      moveAI(state.p1, leftAI,  state.ball.vx < 0);
+      moveAI(state.p2, rightAI, state.ball.vx > 0);
+    }
+
+    tick(state, { up: false, down: false }, { up: false, down: false });
+
+    // Auto-rematch after a win
+    if (state.winner) {
+      setTimeout(() => {
+        state = createState();
+        state.countdown = 0; // no countdown on rematch
+      }, 2500);
+      state.running = false; // freeze until rematch
+    }
+
+    // Rotate zen quote
+    quoteTick++;
+    if (quoteTick >= QUOTE_INTERVAL) {
+      quoteTick = 0;
+      quoteIdx = (quoteIdx + 1) % ZEN_QUOTES.length;
+    }
+
+    renderZen(state, ZEN_QUOTES[quoteIdx]);
+  }, TICK_MS);
+}
+
+function renderZen(state, quote) {
+  let buf = '';
+  buf += `${CSI}H`;
+
+  const fw = WIDTH + 2;
+
+  // Header: rappter names + score
+  const scoreText = ` ${state.p1.score}  ·  ${state.p2.score} `;
+  const titleText = ' 🦖 rappterL  vs  rappterR 🦖 ';
+  const pad = fw - scoreText.length - titleText.length;
+  buf += moveTo(0, 0);
+  buf += green(titleText) + ' '.repeat(Math.max(0, pad)) + bold(white(scoreText));
+
+  // Top border
+  buf += moveTo(0, 1);
+  buf += dim('┌' + '─'.repeat(WIDTH) + '┐');
+
+  // Field rows
+  for (let row = 0; row < HEIGHT; row++) {
+    buf += moveTo(0, row + 2);
+    let line = '';
+    for (let col = 0; col < WIDTH; col++) {
+      const isP1 = col === PADDLE_X_OFFSET && row >= state.p1.y && row < state.p1.y + PADDLE_H;
+      const isP2 = col === WIDTH - PADDLE_X_OFFSET - 1 && row >= state.p2.y && row < state.p2.y + PADDLE_H;
+      const isBall = Math.round(state.ball.x) === col && Math.round(state.ball.y) === row;
+      const isCenter = col === Math.floor(WIDTH / 2);
+
+      if (isBall) {
+        line += yellow('●');
+      } else if (isP1) {
+        line += green('█');
+      } else if (isP2) {
+        line += cyan('█');
+      } else if (isCenter) {
+        line += dim(row % 2 === 0 ? '│' : ' ');
+      } else {
+        line += ' ';
+      }
+    }
+    buf += dim('│') + line + dim('│');
+  }
+
+  // Bottom border
+  buf += moveTo(0, HEIGHT + 2);
+  buf += dim('└' + '─'.repeat(WIDTH) + '┘');
+
+  // Zen quote line
+  buf += moveTo(0, HEIGHT + 3);
+  buf += ' '.repeat(fw);
+  buf += moveTo(0, HEIGHT + 3);
+  if (state.winner) {
+    const winMsg = state.winner === 1 ? '🦖 rappterL takes the round!' : '🦖 rappterR takes the round!';
+    buf += bold(yellow(`  ${winMsg}`));
+  } else if (state.countdown > 0) {
+    buf += bold(cyan(`  Starting in ${state.countdown}...`));
+  } else {
+    buf += dim(`  🧘 ${quote}`);
+  }
+
+  // Hint line
+  buf += moveTo(0, HEIGHT + 4);
+  buf += ' '.repeat(fw);
+  buf += moveTo(0, HEIGHT + 4);
+  buf += dim('  Q = quit · just watch and breathe');
+
+  process.stdout.write(buf);
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────────
 const mode = process.argv[2];
 
-if (!mode || (mode !== 'host' && mode !== 'join')) {
+if (!mode || !['host', 'join', 'zen'].includes(mode)) {
   console.log('');
-  console.log(bold('  🏓  PONG — Multiplayer Terminal Pong'));
+  console.log(bold('  🏓  PONG — Terminal Pong'));
   console.log(dim('  ─────────────────────────────────────'));
   console.log('');
+  console.log(`  ${bold('Zen mode:')}       ${cyan('node pong.js zen')}       ${dim('← watch two AIs play while you breathe')}`);
   console.log(`  ${bold('Host a game:')}    ${cyan('node pong.js host [port]')}`);
   console.log(`  ${bold('Join a game:')}    ${cyan('node pong.js join <ip> [port]')}`);
   console.log('');
   console.log(dim(`  Default port: ${PORT}`));
-  console.log(dim('  First to 7 wins. W/S or ↑/↓ to move. Q to quit.'));
+  console.log(dim('  First to 7 wins. Q to quit.'));
   console.log('');
   process.exit(0);
 }
 
-if (mode === 'host') {
+if (mode === 'zen') {
+  runZen();
+} else if (mode === 'host') {
   runHost();
 } else if (mode === 'join') {
   const host = process.argv[3];
@@ -474,6 +638,5 @@ if (mode === 'host') {
     console.error(red('  Error: specify host IP — node pong.js join <ip> [port]'));
     process.exit(1);
   }
-  // If port is arg[4], it's already handled by PORT const
   runClient(host);
 }

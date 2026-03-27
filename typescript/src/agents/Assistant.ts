@@ -312,7 +312,7 @@ export class Assistant {
           break; // Success — exit retry loop
         } catch (err) {
           lastError = err as Error;
-          if (attempt < maxRetries && lastError.message.includes('fetch failed')) {
+          if (attempt < maxRetries && (lastError.message.includes('fetch failed') || lastError.message.includes('HTTP 429'))) {
             // Transient network error — wait briefly and retry
             await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
             fullContent = '';

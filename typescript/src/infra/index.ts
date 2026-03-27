@@ -7,3 +7,4 @@ export * from './provider-usage.js';
 export * from './diagnostic.js';
 export * from './ssrf.js';
 export * from './os-info.js';
+export * from './backup.js';

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { LispyVM, STRATEGIES } from '../../tui/lispy.js';
-import type { LispAction } from '../../tui/lispy.js';
 
 // ── Helper ──────────────────────────────────────────────────────────────────
 
@@ -278,7 +277,7 @@ describe('LispyVM', () => {
       const vm = new LispyVM();
       const state = makeState();
 
-      for (const [name, source] of Object.entries(STRATEGIES)) {
+      for (const [, source] of Object.entries(STRATEGIES)) {
         vm.setStrategy(source);
         const action = vm.tick(state);
         expect(action).toHaveProperty('direction');

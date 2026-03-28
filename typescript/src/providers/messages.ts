@@ -41,6 +41,7 @@ export function sanitizeMessages<T extends { role: string; content?: string | nu
       const validCalls = msg.tool_calls.filter(tc => respondedIds.has(tc.id));
       if (validCalls.length === 0) {
         // All tool_calls are orphaned — strip them entirely
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { tool_calls, ...rest } = msg as Record<string, unknown>;
         return rest as T;
       }

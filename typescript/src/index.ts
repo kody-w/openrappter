@@ -1,5 +1,5 @@
 import { program } from 'commander';
-import { intro, outro, text, select, note, spinner, confirm, password, isCancel, log } from '@clack/prompts';
+import { intro, outro, text, select, note, spinner, confirm, isCancel, log } from '@clack/prompts';
 import chalk from 'chalk';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasCopilotAvailable, resolveGithubToken, autoAuthIfNeeded, saveGitHubToken, validateTelegramToken } from './copilot-check.js';
+import { hasCopilotAvailable, autoAuthIfNeeded, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 
 const execAsync = promisify(exec);
@@ -793,7 +793,7 @@ program
     }
 
     // ── Telegram: skipped by default (add later with `openrappter onboard --telegram`) ──
-    let telegramReady = false;
+    const telegramReady = false;
 
     // ── iMessage channel (macOS only) ──
     let imessageReady = false;
@@ -805,7 +805,7 @@ program
 
       if (!isCancel(setupIMessage) && setupIMessage) {
         // Try to auto-detect from chat.db
-        let detectedId = '';
+        const detectedId = '';
         try {
           const { stdout } = await execAsync(
             `sqlite3 ~/Library/Messages/chat.db "SELECT DISTINCT chat_identifier FROM chat WHERE chat_identifier LIKE '%@%' OR chat_identifier LIKE '+%' ORDER BY ROWID DESC LIMIT 10"`,

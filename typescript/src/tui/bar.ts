@@ -15,7 +15,6 @@
  */
 
 import chalk from 'chalk';
-import readline from 'readline';
 import { LispyVM, STRATEGIES } from './lispy.js';
 import type { LispAction } from './lispy.js';
 import { LispyCoach } from './lispy-coach.js';
@@ -137,7 +136,7 @@ function renderAgentsView(state: TuiState, width: number): string[] {
   return lines;
 }
 
-function renderExperimentalView(state: TuiState, width: number): string[] {
+function renderExperimentalView(state: TuiState, _width: number): string[] {
   const lines: string[] = [];
   lines.push(chalk.yellow('⚠️  EXPERIMENTAL: Subject to change. Use at your own risk.'));
   lines.push('');
@@ -161,7 +160,7 @@ function renderExperimentalView(state: TuiState, width: number): string[] {
   return lines;
 }
 
-function renderStatusView(state: TuiState, width: number): string[] {
+function renderStatusView(state: TuiState, _width: number): string[] {
   const lines: string[] = [];
   lines.push(chalk.bold('Gateway'));
   lines.push(`  Status:   ${state.connected ? chalk.green('Connected') : chalk.red('Disconnected')}`);

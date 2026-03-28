@@ -7,7 +7,7 @@ import {
   experimentalConfigSchema,
   experimentalFeatureDescriptions,
 } from '../../config/sections/experimental.js';
-import { openRappterConfigSchema, validateConfig } from '../../config/schema.js';
+import { validateConfig } from '../../config/schema.js';
 
 describe('experimentalConfigSchema', () => {
   it('parses empty object with defaults', () => {

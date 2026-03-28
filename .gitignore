@@ -18,3 +18,6 @@ __pycache__/
 .venv/
 # Misc
 ObsidianVault/
+
+# Local user data (stays on machine, not in repo)
+memory.json

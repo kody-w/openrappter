@@ -92,8 +92,7 @@ export class PongAgent extends BasicAgent {
         message: `Pong ${action} session ended. Hope you enjoyed the break! 🧘`,
         data_slush: { game_mode: action, mental_health_break: true },
       });
-    } catch (err) {
-      // User quit with Q or Ctrl+C — that's normal
+    } catch {
       return JSON.stringify({
         status: 'success',
         message: 'Pong session ended. Back to work! 🦖',

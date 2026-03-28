@@ -144,6 +144,7 @@ export function templateToConfig(
   template: SoulTemplate,
   overrides?: Partial<RappterSoulConfig>,
 ): RappterSoulConfig {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { templateId, category, tagline, ...config } = template;
   return {
     id: overrides?.id ?? templateId,

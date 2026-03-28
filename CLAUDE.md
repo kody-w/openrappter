@@ -6,6 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Make a plan, write test cases, build the application, run those tests until the application passes, then publish to the public repo and let the user know when they can test.
 
+## Git Worktree Etiquette
+
+Multiple Claude Code sessions may run concurrently using git worktrees. Be a good neighbor:
+
+- **Never modify the main worktree from a child worktree.** Each worktree has its own working directory — stay in yours.
+- **Clean up after yourself.** When your task is done and changes are merged (or abandoned), remove the worktree with `git worktree remove <path>`. Don't leave stale worktrees behind.
+- **Don't force-delete worktrees with uncommitted changes.** If a worktree has uncommitted work, investigate before removing it — it may belong to another session.
+- **Use unique branch names.** Name branches descriptively (e.g., `fix/imessage-file-transfer`) so other sessions can tell what's in progress.
+- **Don't rebase or reset shared branches from a worktree.** If `main` is checked out elsewhere, don't force-push or rewrite its history.
+- **Ignore `.claude/worktrees/` in git status.** These are ephemeral and managed by Claude Code — don't commit, delete, or modify them manually.
+- **Lock long-running worktrees.** Use `git worktree lock <path>` if your task will take multiple sessions, so garbage collection doesn't prune it.
+
 ## Project Overview
 
 OpenRappter is a local-first AI agent framework with parallel implementations in **TypeScript** and **Python**. It provides agent orchestration with built-in "data sloshing" (implicit context enrichment), a skills system via ClawHub, memory persistence, multi-channel messaging, and a WebSocket gateway. The `openclaw/` directory is a copy of a competitor's repo tracked as a reference — ignore submodule pointer drift in git status.

@@ -63,6 +63,13 @@ function saveCachedToken(cachePath: string, token: CachedCopilotToken): void {
   }
 }
 
+/** Delete the on-disk cached Copilot API token so the next call re-exchanges */
+export function clearCachedCopilotToken(cachePath?: string): void {
+  try {
+    fs.unlinkSync(cachePath ?? getDefaultCachePath());
+  } catch { /* file may not exist */ }
+}
+
 function isTokenUsable(cache: CachedCopilotToken, now = Date.now()): boolean {
   return cache.expiresAt - now > TOKEN_SAFETY_MARGIN_MS;
 }

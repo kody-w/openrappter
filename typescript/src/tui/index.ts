@@ -4,6 +4,10 @@ export { ZenScreen, ansi, box, visibleLength, padEnd } from './zen-screen.js';
 export type { ZenScreenConfig, FrameCallback } from './zen-screen.js';
 export { LispyVM, STRATEGIES } from './lispy.js';
 export type { LispAction } from './lispy.js';
+export { LispyCoach } from './lispy-coach.js';
+export type { GameSituation, LLMCaller } from './lispy-coach.js';
+export { createAquariumState, aquariumTick, renderAquariumView } from './aquarium.js';
+export type { AquariumState } from './aquarium.js';
 
 export interface TuiOptions {
   port?: number;

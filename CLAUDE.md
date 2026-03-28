@@ -12,9 +12,13 @@ OpenRappter is a local-first AI agent framework with parallel implementations in
 
 ## Repository Layout
 
-- `typescript/` — TypeScript/Node.js package (v1.9.1, ES modules, Node >=20)
-- `python/` — Python package (mirrors TypeScript agent architecture)
+- `typescript/` — TypeScript/Node.js package (v1.9.3, ES modules, Node >=20)
+- `python/` — Python package (>=3.10, mirrors TypeScript agent architecture)
 - `openclaw/` — Competitor repo copy (reference only, ignore submodule drift)
+- `docs/` — Documentation
+- `macos/` — macOS-specific implementation
+- `openrappter-obsidian/` — Obsidian plugin
+- `tests/` — Cross-runtime test suite
 
 ## Build & Test Commands
 
@@ -33,6 +37,17 @@ npm run format       # prettier --write .
 Run a single test file:
 ```bash
 cd typescript && npx vitest run src/path/to/file.test.ts
+```
+
+### Python (`python/`)
+```bash
+cd python
+pip install -e .                    # Install in editable mode
+pip install -e ".[dev]"             # Install with dev deps (pytest, pytest-cov)
+openrappter --status                # Verify CLI works
+openrappter --list-agents           # List discovered agents
+pytest                              # Run tests
+pytest tests/path/to/test_file.py   # Run a single test file
 ```
 
 ### OpenClaw (`openclaw/`)
@@ -446,94 +461,7 @@ The TypeScript constructor accepts an optional `agentsDir` parameter (defaults t
 
 All paths relative to `typescript/`. Tests at `src/__tests__/parity/`. Run all: `npx vitest run src/__tests__/parity/showcase-*.test.ts`.
 
-### 1. The Architect — LearnNewAgent + AgentGraph DAG
-
-Runtime-created agents (DataValidator, Transformer, Reporter) wired into an AgentGraph. Reporter depends on both upstream nodes and receives merged `upstream_slush = { validate: {...}, transform: {...} }`. Demonstrates DAG wiring, topological execution order, multi-upstream slush merging, and error propagation (skip dependents / stopOnError).
-
-### 2. Ouroboros Accelerator — AgentChain + Code Review
-
-AgentChain: `evolve` step (EvolutionAgent) → `review` step (ReviewAgent). A transform function extracts `evolved_source` from the evolution result and passes it as `content` to the review step. Demonstrates chain transforms, data_slush propagation through steps, and stopOnError behavior.
-
-### 3. Swarm Debugger — BroadcastManager (race) + Fix Agent
-
-Three debug agents (LogAnalyzer, StackTraceParser, ErrorCategorizer) with different delays race via `BroadcastManager` in `race` mode. The fastest responder's `data_slush` is forwarded as `upstream_slush` to a FixSuggestionAgent. Key API: `broadcast(groupId, message, executor)` where executor is `(agentId, msg) => agent.execute({query: msg})`.
-
-### 4. Mirror Test — AgentGraph Parallel Comparison
-
-Two sentiment analysis agents (SentimentA, SentimentB) run as parallel AgentGraph roots. A ComparatorAgent depends on both, receiving `upstream_slush = { sentimentA: {...}, sentimentB: {...} }`. Compares sentiment labels for parity and computes confidence delta between implementations.
-
-### 5. Watchmaker's Tournament — Competing Agents + Evaluator
-
-Three CompetitorAgents run in parallel with no dependencies. A TournamentEvaluatorAgent depends on all three, reads `this.context.upstream_slush` with all competitors' slush, sorts by quality score, and picks the winner. Tests verify ranking order, tie handling, and skip-on-failure behavior.
-
-### 6. Living Dashboard — Tracer → Dashboard → MCP Self-Monitoring
-
-AgentChain runs demo agents (HealthCheck, Metrics, Report). AgentTracer captures spans via `onSpanComplete` callback → feeds `DashboardHandler.addTrace()`. A DashboardQueryAgent reads traces from the dashboard and is registered on McpServer. MCP `tools/call` queries the dashboard — the system monitors itself. Full loop: chain → tracer → dashboard → MCP query.
-
-### 7. Infinite Regression — SubAgent Depth Limits + Loop Detection
-
-Demonstrates SubAgentManager safety mechanisms:
-- **Depth limits**: `canInvoke(agentId, depth)` returns false when `depth >= maxDepth`
-- **Loop detection**: `context.history.slice(-10).filter(c => c.targetAgentId === id).length >= 3` triggers error
-- **Blocked/allowed agents**: allowlist and blocklist enforcement
-- Tests manually accumulate `SubAgentCall` records in `context.history` to simulate sequential sub-agent invocations (since `invoke()` creates child contexts without mutating the parent)
-
-### 8. Code Archaeologist — AgentGraph Fan-out / Fan-in
-
-Three analysis agents (GitHistoryAgent, DependencyAnalyzerAgent, ComplexityScorerAgent) run as parallel graph roots. A SynthesisAgent depends on all three and receives merged `upstream_slush` keyed by node name. Cross-references git hotspots with complexity risky files to identify priority refactoring targets.
-
-### 9. Agent Compiler — PipelineAgent Conditional Steps
-
-PipelineAgent with a conditional step triggered by `data_slush` values:
-- InputParserAgent emits `data_slush.needs_new_agent = true/false`
-- Conditional step: `{ field: 'needs_new_agent', equals: true }` (evaluated by `PipelineAgent.evaluateCondition()`)
-- If true, runs AgentCreatorAgent (simulating LearnNewAgent), then DynamicExecutorAgent
-- Tests verify conditional fires/skips, `exists` condition checks, data_slush threading, and end-to-end pipeline completion
-
-### 10. Doppelganger — AgentTracer + Clone Comparison
-
-Traces a TextProcessorAgent (deterministic word count / longest word / reverse) via `startSpan`/`endSpan` with `recordIO: true`. Extracts trace to build a description for creating a "clone" agent. Both original and clone run on the same input, then a ComparisonAgent checks field-by-field equality. Tests verify trace IO capture, duration recording, identical clone output, and divergence detection.
-
-### 11. The Inception Stack — Recursive Agent Meta-Creation
-
-Agents writing agents writing agents, 3 levels deep. Each level's `perform()` creates and invokes the next level — true recursive meta-creation inside perform, not external orchestration:
-- **DreamArchitectAgent (Level 1)**: Sets up SubAgentManager(`maxDepth: 4`), creates DreamBuilder, invokes it via manager
-- **DreamBuilderAgent (Level 2)**: Creates DreamExtractor inside `perform()`, invokes it via SubAgentManager
-- **DreamExtractorAgent (Level 3 — Limbo)**: Innermost. Deterministic extraction (char count, vowel count, totem)
-
-A shared `agents` map (closure) is populated by each level before invoking the next. SubAgentManager tracks depth (0→1→2) and blocks when `maxDepth` exceeded. AgentTracer captures nested parent-child spans. Data slush bubbles up: Level 3 result nested inside Level 2 nested inside Level 1, with each level's `source_agent` preserved.
-
-### 12. Data Sloshing Deep Dive — Full Slosh Pipeline
-
-Tests the complete data sloshing pipeline in BasicAgent. An inline `SloshTestAgent` captures `this.context` in perform(). Tests cover: default slosh populating all 5 signal categories (temporal, query_signals, memory_echoes, behavioral, priors), SloshFilter include/exclude zeroing categories, SloshPrivacy redact (deletes paths) and obfuscate (replaces with `[obfuscated:hash]`), SloshDebug capturing 4 stages (post-slosh, post-filter, post-privacy, post-perform), signal feedback loop accumulating utility scores with auto-suppress at threshold, getSignal() dot-notation with defaults, and breadcrumb LIFO accumulation.
-
-### 13. Memory Recall — MemoryManager FTS + Chunking
-
-Tests MemoryManager and chunker utilities directly (no agents). Covers overlapping window chunking (verifying overlap between adjacent chunks), short content staying as a single chunk, add content with chunk creation via getStatus(), FTS search returning relevant results with score > 0, source filtering in search, snippet generation highlighting query terms, and clear/remove lifecycle operations.
-
-### 14. Channel Switchboard — ChannelRegistry Routing
-
-Tests ChannelRegistry with inline MockChannel extending BaseChannel. Covers registering multiple channels and listing names, getting channel by name, connectAll() setting connected=true on all channels, sendMessage() routing to the correct channel, onMessage handler firing on emitMessage, status tracking with getStatusList(), and disconnectAll() disconnecting all channels.
-
-### 15. Config Hotswap — Config Utilities
-
-Pure function tests on config utilities (no agents). Covers JSON5 parsing with comments and trailing commas via parseConfigContent(), validating correct config (success: true), rejecting invalid config with error details, deep merging two configs preserving all sections via mergeConfigs(), environment variable substitution (${VAR}) via substituteEnvVars(), handling missing env vars, and JSON Schema export including all config sections.
-
-### 16. Persistence Vault — In-Memory SQLite Storage
-
-Tests the full StorageAdapter interface via `createStorageAdapter({ type: 'memory' })`. Covers session save/get/delete lifecycle, session filtering by channelId, memory chunk save and retrieval, cron job and log persistence, config KV set/get/getAll operations, sequential multi-operation workflows, in-memory initialization without file path, and close/reinitialize confirming data isolation.
-
-### 17. Healing Loop — SelfHealingCronAgent
-
-Tests the self-healing cron agent with MockWebAgent, MockShellAgent, and MockMessageAgent injected via `setAgents()`. Covers setup creating job config with data_slush, healthy check returning health_status='healthy' and action_taken='none', unhealthy-to-restart-to-recovery path (restarted=true, recovered=true, action_taken='restarted_recovered'), persistent failure path (restart doesn't help, action_taken='restarted_still_down'), status tracking uptime percentage, history recording all checks, teardown removing job, and data_slush always including action_taken.
-
-### 18. Authorization Fortress — ApprovalManager
-
-Tests ApprovalManager directly (no agents). Covers deny policy blocking all tool calls, full policy allowing all, allowlist with allowedTools, priority ordering (higher wins), scoped rules by channel and agent, blocked patterns via regex, request/approve flow with pending request creation and approval, and request/reject flow with reason and cleanup verification.
-
-### 19. Stream Weaver — StreamManager
-
-Tests StreamManager directly (no agents). Covers creating an active session, pushing text blocks, pushing multiple block types (text, tool_call, thinking), delta accumulation via pushDelta building content incrementally, subscriber notification on pushBlock, unsubscribe cleanup, complete/error marking session lifecycle, and active sessions count tracking.
+Each demo's detailed behavior is documented in its test file and example source. Read the specific `showcase-*.test.ts` file for implementation details of any demo.
 
 ## UX Principles
 

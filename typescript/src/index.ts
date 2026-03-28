@@ -141,7 +141,19 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
         log(`${EMOJI} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
       } catch (err) {
-        console.error(`${EMOJI} iMessage reply error:`, (err as Error).message);
+        const errMsg = (err as Error).message || 'Unknown error';
+        console.error(`${EMOJI} iMessage reply error:`, errMsg);
+        // Send a friendly error reply instead of leaving the user hanging
+        try {
+          const isAuthError = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Copilot');
+          const reply = isAuthError
+            ? 'My brain is offline — GitHub token needs a refresh. I\'ll try to sort it out.'
+            : 'Something went wrong processing that. Try again in a moment.';
+          await imessage.send(incoming.conversationId!, {
+            channel: 'imessage',
+            content: `${EMOJI} ${reply}`,
+          });
+        } catch { /* don't loop on send failure */ }
       }
     });
 

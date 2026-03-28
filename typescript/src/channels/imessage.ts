@@ -273,6 +273,11 @@ export class IMessageChannel extends EventEmitter {
 
         const [msgId, content, fromMe, senderName] = parts;
         if (!msgId || !content) continue;
+
+        // Skip file transfer / attachment messages — AppleScript returns internal
+        // attribute names (e.g. kIMFileTransferGUIDAttributeName) instead of text
+        if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) continue;
+
         if (this.seenMessageIds.has(msgId)) continue;
         this.seenMessageIds.add(msgId);
 

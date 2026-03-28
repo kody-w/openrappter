@@ -42,6 +42,8 @@ export interface ChatOptions {
   temperature?: number;
   max_tokens?: number;
   stream?: boolean;
+  /** Internal: prevents infinite retry loops on auth errors */
+  _isRetry?: boolean;
 }
 
 export interface StreamDelta {

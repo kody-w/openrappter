@@ -11,6 +11,7 @@
 import type { LLMProvider, Message, ChatOptions, ProviderResponse, Tool, ToolCall, StreamDelta } from './types.js';
 import {
   resolveCopilotApiToken,
+  clearCachedCopilotToken,
   type ResolvedCopilotToken,
 } from './copilot-token.js';
 
@@ -165,6 +166,12 @@ export class CopilotProvider implements LLMProvider {
     );
   }
 
+  /** Invalidate the cached Copilot API token so the next call re-exchanges */
+  invalidateToken(): void {
+    this.resolvedToken = null;
+    clearCachedCopilotToken();
+  }
+
   /** Get a valid Copilot API token, exchanging if needed */
   private async ensureToken(): Promise<ResolvedCopilotToken> {
     // Return cached token if still valid
@@ -261,6 +268,13 @@ export class CopilotProvider implements LLMProvider {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
+      // On auth errors, invalidate the cached Copilot token and retry once.
+      // The GitHub token may still be valid — just the short-lived Copilot API
+      // token expired or was revoked server-side.
+      if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
+        this.invalidateToken();
+        return this.chat(messages, { ...options, _isRetry: true } as ChatOptions);
+      }
       throw new Error(`Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ''}`);
     }
 
@@ -333,6 +347,11 @@ export class CopilotProvider implements LLMProvider {
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
+      if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
+        this.invalidateToken();
+        yield* this.chatStream(messages, { ...options, _isRetry: true } as ChatOptions);
+        return;
+      }
       throw new Error(`Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ''}`);
     }
 

@@ -21,6 +21,8 @@ import type { LispAction } from './lispy.js';
 import { LispyCoach } from './lispy-coach.js';
 import type { GameSituation } from './lispy-coach.js';
 import { globalPeerStream } from '../gateway/peer-stream.js';
+import { createAquariumState, aquariumTick, renderAquariumView } from './aquarium.js';
+import type { AquariumState } from './aquarium.js';
 
 export interface TuiBarOptions {
   port?: number;
@@ -31,14 +33,15 @@ interface TuiState {
   connected: boolean;
   agents: Array<{ id: string; type: string; description?: string }>;
   uptime: number;
-  view: 'chat' | 'agents' | 'pong' | 'experimental' | 'status';
+  view: 'chat' | 'agents' | 'pong' | 'aquarium' | 'experimental' | 'status';
   chatHistory: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
   experimentalFeatures: Record<string, boolean>;
   pong: PongState | null;
+  aquarium: AquariumState | null;
 }
 
 const EMOJI = '🦖';
-const VIEWS = ['chat', 'agents', 'pong', 'experimental', 'status'] as const;
+const VIEWS = ['chat', 'agents', 'pong', 'aquarium', 'experimental', 'status'] as const;
 
 function clearScreen(): void {
   process.stdout.write('\x1B[2J\x1B[H');
@@ -393,6 +396,13 @@ function render(state: TuiState): void {
         content = [chalk.dim('Initializing pong...')];
       }
       break;
+    case 'aquarium':
+      if (state.aquarium) {
+        content = renderAquariumView(state.aquarium, cols, contentHeight);
+      } else {
+        content = [chalk.dim('Filling the tank...')];
+      }
+      break;
     case 'experimental':
       content = renderExperimentalView(state, cols);
       break;
@@ -435,6 +445,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       vipAnswer: false,
     },
     pong: null,
+    aquarium: null,
   };
 
   // Try to connect to gateway
@@ -492,10 +503,16 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
     if (state.view === 'pong' && state.pong) {
       pongTick(state.pong);
       render(state);
-      // Broadcast frame to web viewers
       const { cols } = getTermSize();
       const pongLines = renderPongView(state.pong, cols, cols - 4);
       globalPeerStream.pushFrame('bar-pong', pongLines.join('\n'));
+    }
+    if (state.view === 'aquarium' && state.aquarium) {
+      aquariumTick(state.aquarium);
+      render(state);
+      const { cols } = getTermSize();
+      const aquaLines = renderAquariumView(state.aquarium, cols, cols - 4);
+      globalPeerStream.pushFrame('bar-aquarium', aquaLines.join('\n'));
     }
   }, 1000 / 30);
 
@@ -513,6 +530,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       clearInterval(renderInterval);
       clearInterval(pongInterval);
       globalPeerStream.endSession('bar-pong');
+      globalPeerStream.endSession('bar-aquarium');
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       client?.disconnect();
       process.exit(0);
@@ -539,6 +557,15 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
           if (state.pong) state.pong.countdown = cd;
           if (cd <= 0) clearInterval(cdTimer);
         }, 1000);
+      }
+
+      // Initialize aquarium when entering the view
+      if (state.view === 'aquarium' && !state.aquarium) {
+        const { cols } = getTermSize();
+        const fw = Math.min(cols - 8, 70);
+        const fh = 16;
+        state.aquarium = createAquariumState(fw, fh);
+        globalPeerStream.createSession('bar-aquarium', 'Zen Aquarium');
       }
 
       render(state);

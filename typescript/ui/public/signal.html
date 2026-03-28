@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RappterSignal</title>
+<style>
+  :root {
+    --bg: #0a0e14; --surface: #12171f; --surface2: #1a2030; --surface3: #222d3d;
+    --border: #2a3545; --text: #e0e6ed; --muted: #6b7a8d; --dim: #4a5568;
+    --accent: #00d4aa; --accent2: #00b894; --accent-dim: rgba(0,212,170,0.1);
+    --blue: #4fc3f7; --orange: #ffb74d; --red: #ef5350; --green: #66bb6a;
+    --purple: #b39ddb;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
+
+  /* App shell */
+  .app { display: flex; height: 100vh; }
+
+  /* Sidebar */
+  .sidebar { width: 320px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-brand { padding: 20px; border-bottom: 1px solid var(--border); }
+  .sidebar-brand h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+  .sidebar-brand h1 span { color: var(--accent); }
+  .sidebar-brand .tagline { font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .sidebar-actions { padding: 12px 16px; display: flex; gap: 8px; }
+  .sidebar-actions .btn { flex: 1; }
+
+  .channel-list { flex: 1; overflow-y: auto; }
+  .channel-item { padding: 14px 20px; cursor: pointer; border-bottom: 1px solid rgba(42,53,69,0.5); transition: background 0.15s; }
+  .channel-item:hover { background: var(--surface2); }
+  .channel-item.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+  .channel-item .name { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .channel-item .name .lock { color: var(--accent); font-size: 12px; }
+  .channel-item .preview { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .channel-item .meta { font-size: 10px; color: var(--dim); margin-top: 3px; display: flex; gap: 8px; }
+
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 10px; color: var(--dim); text-align: center; }
+
+  /* Chat area */
+  .chat { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
+  .chat-header { padding: 16px 24px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; }
+  .chat-header .info { flex: 1; }
+  .chat-header .title { font-size: 16px; font-weight: 600; }
+  .chat-header .subtitle { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .chat-header .badges { display: flex; gap: 6px; }
+  .badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; font-weight: 600; letter-spacing: 0.3px; }
+  .badge.e2e { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,212,170,0.3); }
+  .badge.pii { background: rgba(79,195,247,0.1); color: var(--blue); border: 1px solid rgba(79,195,247,0.3); }
+  .badge.hmac { background: rgba(179,157,219,0.1); color: var(--purple); border: 1px solid rgba(179,157,219,0.3); }
+  .badge.edge { background: rgba(255,183,77,0.1); color: var(--orange); border: 1px solid rgba(255,183,77,0.3); }
+  .chat-header .actions { display: flex; gap: 6px; }
+
+  /* Messages */
+  .messages { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 6px; }
+  .msg { max-width: 70%; padding: 10px 14px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .msg.them { background: var(--surface2); align-self: flex-start; border: 1px solid var(--border); }
+  .msg.me { background: linear-gradient(135deg, #0d3d30, #0a2e25); align-self: flex-end; border: 1px solid rgba(0,212,170,0.2); }
+  .msg .sender { font-size: 11px; font-weight: 700; margin-bottom: 3px; }
+  .msg.them .sender { color: var(--blue); }
+  .msg.me .sender { color: var(--accent); }
+  .msg .text { word-wrap: break-word; white-space: pre-wrap; }
+  .msg .footer { font-size: 10px; color: var(--dim); margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .msg .status { font-size: 11px; }
+  .msg .status.instant { color: var(--blue); }
+  .msg .status.syncing { color: var(--orange); }
+  .msg .status.delivered { color: var(--green); }
+  .msg .status.failed { color: var(--red); }
+  .msg .pii-badge { font-size: 9px; color: var(--blue); background: rgba(79,195,247,0.1); padding: 1px 5px; border-radius: 4px; }
+
+  .system-msg { text-align: center; font-size: 12px; color: var(--dim); padding: 8px; }
+
+  /* Input */
+  .input-area { padding: 16px 24px; background: var(--surface); border-top: 1px solid var(--border); }
+  .persona-row { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; }
+  .persona-row label { font-size: 11px; color: var(--muted); }
+  .persona-chip { padding: 4px 10px; border-radius: 16px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); transition: all 0.15s; }
+  .persona-chip.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+  .persona-chip:hover { border-color: var(--accent); }
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+  .input-row textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 16px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; max-height: 120px; transition: border-color 0.15s; }
+  .input-row textarea:focus { outline: none; border-color: var(--accent); }
+  .input-row textarea::placeholder { color: var(--dim); }
+  .send-btn { background: var(--accent); color: var(--bg); border: none; border-radius: var(--radius-sm); padding: 12px 24px; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn:disabled { opacity: 0.3; }
+  .input-extras { display: flex; gap: 12px; margin-top: 8px; font-size: 10px; color: var(--dim); }
+
+  /* Buttons */
+  .btn { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 14px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.accent { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+  .btn.accent:hover { opacity: 0.85; }
+
+  /* Empty state */
+  .empty { display: flex; align-items: center; justify-content: center; flex: 1; flex-direction: column; gap: 16px; }
+  .empty .icon { font-size: 64px; opacity: 0.3; }
+  .empty .title { font-size: 18px; font-weight: 600; color: var(--muted); }
+  .empty .desc { font-size: 13px; color: var(--dim); max-width: 360px; text-align: center; line-height: 1.6; }
+
+  /* Modals */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 460px; max-width: 90vw; }
+  .modal h2 { font-size: 18px; margin-bottom: 6px; }
+  .modal .desc { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+  .modal label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .modal input, .modal textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text); font-size: 13px; margin-bottom: 14px; font-family: inherit; }
+  .modal input:focus, .modal textarea:focus { outline: none; border-color: var(--accent); }
+  .modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-brand">
+      <h1>Rappter<span>Signal</span></h1>
+      <div class="tagline">E2E encrypted &middot; PII-stripped &middot; Edge-synced</div>
+    </div>
+    <div class="sidebar-actions">
+      <button class="btn accent" onclick="showModal('new')">+ New Channel</button>
+      <button class="btn" onclick="showModal('import')">Import</button>
+    </div>
+    <div class="channel-list" id="channels"></div>
+    <div class="sidebar-footer">
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+        <span class="dot" id="ws-dot" style="width:6px;height:6px;border-radius:50%;background:var(--red);display:inline-block;"></span>
+        <span id="ws-label">Connecting...</span>
+      </div>
+      <div style="margin-top:4px;">AES-256-GCM &middot; HMAC-SHA256 &middot; Zero PII in transit</div>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div class="chat" id="chat">
+    <div class="empty" id="empty-state">
+      <div class="icon">🔐</div>
+      <div class="title">RappterSignal</div>
+      <div class="desc">
+        End-to-end encrypted messaging for humans and AI agents.
+        PII is stripped before encryption and never leaves your device.
+        Messages sync over static files — no server, no platform lock-in.
+      </div>
+      <button class="btn accent" onclick="showModal('new')" style="margin-top:8px;">Create your first channel</button>
+    </div>
+
+    <div id="active-chat" style="display:none;flex:1;display:flex;flex-direction:column;">
+      <div class="chat-header">
+        <div class="info">
+          <div class="title" id="ch-title"></div>
+          <div class="subtitle" id="ch-subtitle"></div>
+        </div>
+        <div class="badges">
+          <span class="badge e2e">E2E</span>
+          <span class="badge pii">PII-FREE</span>
+          <span class="badge hmac">SIGNED</span>
+          <span class="badge edge">EDGE</span>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="showKey()">🔑</button>
+          <button class="btn" onclick="exportChannel()">📤</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="system-msg">🔐 Messages are end-to-end encrypted. PII is stripped before encryption.</div>
+      </div>
+
+      <div class="input-area">
+        <div class="persona-row">
+          <label>Send as:</label>
+          <div id="persona-chips"></div>
+        </div>
+        <div class="input-row">
+          <textarea id="msg-input" placeholder="Type a message..." rows="1"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"
+            oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+          <button class="send-btn" onclick="send()">Send</button>
+        </div>
+        <div class="input-extras">
+          <span>⚡ Instant in twin</span>
+          <span>📤 Syncs to iMessage</span>
+          <span>🔒 PII stripped before encryption</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Channel Modal -->
+<div class="modal-overlay" id="modal-new">
+  <div class="modal">
+    <h2>New Encrypted Channel</h2>
+    <div class="desc">Create a private channel. Only people with the key can read messages.</div>
+    <label>Channel Name</label>
+    <input type="text" id="new-name" placeholder="e.g. OpenRappter Arena">
+    <label>Participants</label>
+    <input type="text" id="new-participants" placeholder="Rex, Nova, Kody (comma-separated)">
+    <div class="btn-row">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn accent" onclick="createChannel()">Create Channel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-overlay" id="modal-import">
+  <div class="modal">
+    <h2>Import Channel</h2>
+    <div class="desc">Paste an egg.json key or exported channel to join.</div>
+    <label>Egg / Export JSON</label>
+    <textarea id="import-json" rows="5" placeholder='Paste egg.json or channel export...'></textarea>
+    <label>Key (auto-filled from egg)</label>
+    <input type="text" id="import-key" placeholder="Base64 key">
+    <div class="btn-row">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn accent" onclick="importChannel()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Key Modal -->
+<div class="modal-overlay" id="modal-key">
+  <div class="modal">
+    <h2>🔑 Channel Key</h2>
+    <div class="desc">Share this egg to invite others. Anyone with the key can read all messages in this channel.</div>
+    <textarea id="key-json" rows="6" readonly style="font-family:'SF Mono',monospace;font-size:11px;"></textarea>
+    <div class="btn-row">
+      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('key-json').value)">Copy</button>
+      <button class="btn" onclick="closeModals()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws, rpcId = 0, rpcCb = {}, channels = [], activeId = null;
+let activePersona = { name: 'Kody', emoji: '🦖' };
+const personas = [
+  { name: 'Kody', emoji: '🦖' },
+  { name: 'Rex', emoji: '🦕' },
+  { name: 'Nova', emoji: '🌟' },
+];
+
+function connect() {
+  ws = new WebSocket('ws://127.0.0.1:18790');
+  ws.onopen = () => { qs('#ws-dot').style.background='var(--green)'; qs('#ws-label').textContent='Connected'; load(); };
+  ws.onclose = () => { qs('#ws-dot').style.background='var(--red)'; qs('#ws-label').textContent='Reconnecting...'; setTimeout(connect, 3000); };
+  ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    if (d.id && rpcCb[d.id]) { rpcCb[d.id](d); delete rpcCb[d.id]; }
+    if (d.method === 'twin.message' && d.params?.message?.conversationId === activeId) appendMsg(d.params.message);
+    if (d.method === 'twin.status') updateStatus(d.params.messageId, d.params.status);
+  };
+}
+
+function rpc(method, params = {}) {
+  return new Promise((res, rej) => {
+    const id = ++rpcId;
+    rpcCb[id] = d => d.error ? rej(new Error(d.error.message)) : res(d.result);
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    setTimeout(() => { if (rpcCb[id]) { delete rpcCb[id]; rej(new Error('timeout')); } }, 15000);
+  });
+}
+
+async function load() {
+  try {
+    const r = await rpc('twin.conversations');
+    channels = r.conversations || [];
+    renderChannels();
+  } catch {}
+}
+
+function renderChannels() {
+  const el = qs('#channels');
+  if (!channels.length) { el.innerHTML = '<div style="padding:20px;color:var(--dim);font-size:13px;text-align:center;">No channels yet</div>'; return; }
+  el.innerHTML = channels.map(c => `
+    <div class="channel-item ${c.id===activeId?'active':''}" onclick="openChannel('${c.id}')">
+      <div class="name"><span class="lock">🔒</span> ${esc(c.name)}</div>
+      <div class="preview">${c.participants.join(', ')}</div>
+      <div class="meta"><span>${c.messageCount} messages</span></div>
+    </div>
+  `).join('');
+}
+
+async function openChannel(id) {
+  activeId = id;
+  const c = channels.find(x => x.id === id);
+  if (!c) return;
+  qs('#empty-state').style.display = 'none';
+  qs('#active-chat').style.display = 'flex';
+  qs('#ch-title').textContent = c.name;
+  qs('#ch-subtitle').textContent = c.participants.join(' · ');
+  renderPersonas();
+  renderChannels();
+  try {
+    const r = await rpc('twin.history', { conversationId: id, limit: 200 });
+    qs('#messages').innerHTML = '<div class="system-msg">🔐 Messages are end-to-end encrypted. PII is stripped before encryption.</div>';
+    (r.messages || []).forEach(appendMsg);
+  } catch {}
+}
+
+function appendMsg(m) {
+  const el = qs('#messages');
+  const isMe = m.sender === activePersona.name;
+  const icons = { instant: '⚡', syncing: '📤', delivered: '✅', failed: '❌' };
+  const hasPII = (m.content || '').includes('[P:');
+  const d = document.createElement('div');
+  d.className = `msg ${isMe ? 'me' : 'them'}`;
+  d.id = `m-${m.id}`;
+  d.innerHTML = `
+    <div class="sender">${m.senderEmoji||''} ${esc(m.sender)}</div>
+    <div class="text">${esc(m.content)}</div>
+    <div class="footer">
+      ${new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
+      <span class="status ${m.status}">${icons[m.status]||''}</span>
+      ${hasPII ? '<span class="pii-badge">PII-stripped</span>' : ''}
+    </div>`;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateStatus(id, status) {
+  const el = document.getElementById(`m-${id}`);
+  if (!el) return;
+  const s = el.querySelector('.status');
+  if (s) { s.className = `status ${status}`; s.textContent = {instant:'⚡',syncing:'📤',delivered:'✅',failed:'❌'}[status]||''; }
+}
+
+async function send() {
+  const input = qs('#msg-input');
+  const content = input.value.trim();
+  if (!content || !activeId) return;
+  input.value = ''; input.style.height = 'auto';
+  try { await rpc('twin.send', { conversationId: activeId, sender: activePersona.name, senderEmoji: activePersona.emoji, content, syncToIMessage: true }); } catch(e) { console.error(e); }
+}
+
+function renderPersonas() {
+  qs('#persona-chips').innerHTML = personas.map(p =>
+    `<div class="persona-chip ${p.name===activePersona.name?'active':''}" onclick="activePersona={name:'${p.name}',emoji:'${p.emoji}'};renderPersonas();">${p.emoji} ${p.name}</div>`
+  ).join('');
+}
+
+async function createChannel() {
+  const name = qs('#new-name').value.trim() || 'New Channel';
+  const parts = qs('#new-participants').value.split(',').map(s=>s.trim()).filter(Boolean);
+  try {
+    const r = await rpc('twin.create', { name, participants: parts });
+    closeModals(); await load(); openChannel(r.id);
+  } catch(e) { alert(e.message); }
+}
+
+async function importChannel() {
+  const raw = qs('#import-json').value.trim();
+  let key = qs('#import-key').value.trim();
+  try {
+    const data = JSON.parse(raw);
+    if (data._type === 'openrappter-twin-key') {
+      key = data.key;
+      const r = await rpc('twin.create', { name: data.name||'Imported', participants: data.participants||[], key });
+      closeModals(); await load(); openChannel(r.id); return;
+    }
+    const r = await rpc('twin.import', { data, key });
+    closeModals(); await load(); openChannel(r.id);
+  } catch(e) { alert(e.message); }
+}
+
+async function showKey() {
+  if (!activeId) return;
+  const egg = await rpc('twin.egg', { conversationId: activeId });
+  qs('#key-json').value = JSON.stringify(egg, null, 2);
+  showModal('key');
+}
+
+async function exportChannel() {
+  if (!activeId) return;
+  const data = await rpc('twin.export', { conversationId: activeId });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `rappsignal-${activeId}.json`; a.click();
+}
+
+function showModal(name) { qs(`#modal-${name}`).classList.add('show'); }
+function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show')); }
+function qs(s) { return document.querySelector(s); }
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+connect();
+</script>
+</body>
+</html>

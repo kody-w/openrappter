@@ -26,6 +26,14 @@ const tuiBarDefaults = {
   showExperimentalPanel: true,
 };
 
+const iMessageTwinDefaults = {
+  enabled: false,
+  allowedContacts: [] as string[],
+  maxMessagesPerHour: 10,
+  pollInterval: 3000,
+  useSqlite: true,
+};
+
 export const experimentalConfigSchema = z.object({
   /** Master toggle — disables all experimental features when false */
   enabled: z.boolean().default(false),
@@ -55,6 +63,19 @@ export const experimentalConfigSchema = z.object({
     vipAnswerMode: z.boolean().default(true),
   }).default(voiceModeDefaults),
 
+  /** iMessage Digital Twin — send/receive iMessages as the user */
+  iMessageTwin: z.object({
+    enabled: z.boolean().default(false),
+    /** Comma-separated emails/phones the AI is allowed to message */
+    allowedContacts: z.array(z.string()).default([]),
+    /** Max outbound iMessages per hour (rate limit) */
+    maxMessagesPerHour: z.number().min(1).max(100).default(10),
+    /** Poll interval in ms for incoming messages */
+    pollInterval: z.number().min(1000).max(30000).default(3000),
+    /** Prefer sqlite3 polling over AppleScript (requires FDA) */
+    useSqlite: z.boolean().default(true),
+  }).default(iMessageTwinDefaults),
+
   /** TUI-based OpenRappter Bar */
   tuiBar: z.object({
     enabled: z.boolean().default(false),
@@ -75,6 +96,11 @@ export const experimentalFeatureDescriptions: Record<string, { name: string; des
     name: 'Local Voice Mode',
     description: 'On-device speech-to-text using Whisper/Vosk. No audio leaves your machine.',
     risk: 'Requires ~1GB model download. CPU-intensive during transcription.',
+  },
+  iMessageTwin: {
+    name: 'iMessage Digital Twin',
+    description: 'AI sends and receives iMessages as you. Auto-replies to allowed contacts via macOS Messages.',
+    risk: 'Sends real iMessages from your account. Requires macOS + Full Disk Access for sqlite polling.',
   },
   tuiBar: {
     name: 'TUI Bar',

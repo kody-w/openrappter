@@ -223,8 +223,6 @@ export class DreamAgent extends BasicAgent {
       await this.saveMemory(memory);
     }
 
-    const remaining = Object.keys(memory).length - (dryRun ? 0 : 0);
-
     return JSON.stringify({
       status: 'success',
       action: dryRun ? 'audit' : 'dream',

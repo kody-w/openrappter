@@ -135,15 +135,15 @@ export abstract class ZenScreen<T extends Record<string, unknown>> {
   // ── Optional overrides ──────────────────────────────────────────────────
 
   /** Handle a keypress. Only called if config.interactive = true. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   protected handleInput(_key: string, _state: T): void {}
 
   /** Called once before first render. Setup animations, timers, etc. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   protected onStart(_state: T): void {}
 
   /** Called once on cleanup. Tear down anything you set up. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   protected onStop(_state: T): void {}
 
   // ── PeerJS frame hook ─────────────────────────────────────────────────

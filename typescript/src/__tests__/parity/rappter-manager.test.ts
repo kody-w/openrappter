@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RappterSoul, RappterManager } from '../../gateway/rappter-manager.js';
-import type { RappterSoulConfig, SummonResult, RappterSoulInfo, RappterSoulStatus } from '../../gateway/rappter-manager.js';
+import { RappterManager } from '../../gateway/rappter-manager.js';
+import type { RappterSoulConfig, SummonResult } from '../../gateway/rappter-manager.js';
 import { registerRappterMethods } from '../../gateway/methods/rappter-methods.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata } from '../../agents/types.js';

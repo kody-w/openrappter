@@ -5,7 +5,7 @@
  * Native macOS channel — the most important local channel.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Mock the channel internals for testing without actual Messages.app
 describe('iMessage Channel Protocol', () => {

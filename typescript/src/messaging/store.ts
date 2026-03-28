@@ -115,7 +115,8 @@ export class EncryptedMessageStore {
   async init(): Promise<void> {
     if (this.dbPath) {
       try {
-        const Database = (await import('better-sqlite3')).default;
+        const mod = await import('better-sqlite3');
+        const Database = mod.default as any;
         this.db = new Database(this.dbPath);
         this.db.pragma('journal_mode = WAL');
         this.createTables();

@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Menu Fleet Section
 
 /// Shows live fleet status and quick actions in the menu dropdown.
+@MainActor
 public struct MenuFleetSection: View {
     @Bindable var fleetVM: FleetViewModel
 

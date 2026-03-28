@@ -146,12 +146,15 @@ export async function resolveCopilotApiToken(params: {
     };
   }
 
-  // 2. Exchange token
+  // 2. Exchange token — editor headers required for Enterprise/Business Copilot
   const res = await fetchImpl(COPILOT_TOKEN_URL, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',
-      'Authorization': `Bearer ${params.githubToken}`,
+      'Authorization': `token ${params.githubToken}`,
+      'Editor-Version': 'vscode/1.96.2',
+      'Editor-Plugin-Version': 'copilot/1.250.0',
+      'User-Agent': 'GithubCopilot/1.250.0',
     },
   });
 

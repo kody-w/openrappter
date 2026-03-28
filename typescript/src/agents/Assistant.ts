@@ -297,17 +297,18 @@ export class Assistant {
             if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
                 const existing = toolCallAccumulator.get(tc.index);
-                if (!existing) {
+                if (!existing && tc.id) {
+                  // Only create a new tool call entry when we have an ID
                   toolCallAccumulator.set(tc.index, {
-                    id: tc.id ?? '',
+                    id: tc.id,
                     type: 'function',
                     function: {
                       name: tc.function?.name ?? '',
                       arguments: tc.function?.arguments ?? '',
                     },
                   });
-                } else {
-                  if (tc.id) existing.id = tc.id;
+                } else if (existing) {
+                  if (tc.id && !existing.id) existing.id = tc.id;
                   if (tc.function?.name) existing.function.name += tc.function.name;
                   if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
                 }
@@ -329,7 +330,7 @@ export class Assistant {
         }
       }
 
-      const assembledToolCalls = Array.from(toolCallAccumulator.values());
+      const assembledToolCalls = Array.from(toolCallAccumulator.values()).filter(tc => tc.id?.trim() !== '');
 
       if (assembledToolCalls.length > 0) {
         history.push({

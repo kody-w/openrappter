@@ -389,16 +389,16 @@ export class IMessageChannel extends EventEmitter {
       const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
 
       const query = `
-        SELECT m.rowid, m.text, m.is_from_me, c.chat_identifier,
-               COALESCE(h.id, '') as sender_id, c.display_name, c.style
+        SELECT m.rowid, COALESCE(m.text, '') as text, m.is_from_me, c.chat_identifier,
+               COALESCE(h.id, '') as sender_id, c.display_name, c.style,
+               (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.rowid) as attach_count
         FROM message m
         JOIN chat_message_join cmj ON cmj.message_id = m.rowid
         JOIN chat c ON c.rowid = cmj.chat_id
         LEFT JOIN handle h ON m.handle_id = h.rowid
         WHERE m.rowid > ${this.lastMessageRowId}
           AND (${chatFilter})
-          AND m.text IS NOT NULL
-          AND m.text != ''
+          AND (m.text IS NOT NULL AND m.text != '' OR EXISTS (SELECT 1 FROM message_attachment_join maj WHERE maj.message_id = m.rowid))
         ORDER BY m.rowid ASC
         LIMIT 20
       `.replace(/\n/g, ' ');
@@ -415,10 +415,17 @@ export class IMessageChannel extends EventEmitter {
         const parts = line.split('|||');
         if (parts.length < 5) continue;
 
-        const [rowIdStr, content, isFromMeStr, chatIdentifier, senderId, displayName, styleStr] = parts;
+        const [rowIdStr, rawContent, isFromMeStr, chatIdentifier, senderId, displayName, styleStr, attachCountStr] = parts;
         const rowId = parseInt(rowIdStr, 10);
         const isFromMe = isFromMeStr === '1';
         const isGroupChat = styleStr === '43' || watchGroups.includes(chatIdentifier);
+        const attachCount = parseInt(attachCountStr || '0', 10);
+
+        // Build content: use text if available, otherwise describe the attachment
+        let content = rawContent || '';
+        if (!content && attachCount > 0) {
+          content = `[Sent ${attachCount} image${attachCount > 1 ? 's' : ''}/attachment${attachCount > 1 ? 's' : ''}]`;
+        }
 
         if (!content || !rowId) continue;
 
@@ -463,6 +470,8 @@ export class IMessageChannel extends EventEmitter {
             chatIdentifier,
             displayName: displayName || undefined,
             rowId,
+            hasAttachments: attachCount > 0,
+            attachmentCount: attachCount,
           },
         };
 

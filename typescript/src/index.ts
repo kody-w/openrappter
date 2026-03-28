@@ -104,12 +104,15 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   channelRegistry.register(new WhatsAppChannel({}));
   channelRegistry.register(new CLIChannel());
 
-  // ── iMessage channel (macOS self-chat) ──
+  // ── iMessage channel (macOS — self-chat + contacts) ──
   const { IMessageChannel } = await import('./channels/imessage.js');
   const imessageSelfId = process.env.IMESSAGE_SELF_ID || '';
+  const imessageAllowedContacts = (process.env.IMESSAGE_ALLOWED_CONTACTS || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
   const imessage = new IMessageChannel({
     mode: 'applescript',
     selfChatId: imessageSelfId || undefined,
+    watchContacts: imessageAllowedContacts,
     pollInterval: 3000,
   });
 
@@ -159,7 +162,8 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
     try {
       await imessage.connect();
-      log(`${EMOJI} iMessage connected — watching self-chat (${imessageSelfId})`);
+      const watchList = [imessageSelfId, ...imessageAllowedContacts].filter(Boolean);
+      log(`${EMOJI} iMessage connected — watching: ${watchList.join(', ')}`);
     } catch (err) {
       console.warn(`${EMOJI} iMessage connect failed:`, (err as Error).message);
       console.warn(`${EMOJI} Tip: Grant Full Disk Access to Terminal/iTerm in System Settings → Privacy`);
@@ -851,6 +855,16 @@ program
           env.IMESSAGE_SELF_ID = imsgId;
           imessageReady = true;
           log.success(`iMessage channel set to ${imsgId}`);
+
+          // Ask for allowed outbound contacts (digital twin sends)
+          const allowedContacts = await text({
+            message: 'Allowed iMessage recipients for AI to send to (comma-separated, or blank to skip):',
+            placeholder: 'rappter1@icloud.com, +15551234567',
+          });
+          if (!isCancel(allowedContacts) && allowedContacts && typeof allowedContacts === 'string' && allowedContacts.trim().length > 0) {
+            env.IMESSAGE_ALLOWED_CONTACTS = allowedContacts.trim();
+            log.success(`iMessage allowed contacts: ${allowedContacts.trim()}`);
+          }
         }
       }
     }

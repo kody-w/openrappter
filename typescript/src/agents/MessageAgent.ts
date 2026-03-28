@@ -8,15 +8,24 @@
  */
 
 import { BasicAgent } from './BasicAgent.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import type { AgentMetadata } from './types.js';
+
+const execAsync = promisify(exec);
 
 export class MessageAgent extends BasicAgent {
   private channelRegistry: any = null;
+  private static MAX_IMESSAGES_PER_HOUR = 10;
+  private iMessageSendTimes: number[] = [];
 
   constructor(channelRegistry?: any) {
     const metadata: AgentMetadata = {
       name: 'Message',
-      description: 'Send messages and manage multi-channel communication. Supports Slack, Discord, Telegram, Signal, iMessage, and more.',
+      description:
+        'Send messages to people via iMessage, Telegram, Slack, Discord, and more. ' +
+        'For iMessage, use channelId "imessage" and set recipient to the person\'s email or phone number (e.g. "rappter1@icloud.com" or "+15551234567"). ' +
+        'For Telegram, use channelId "telegram" with the chat ID.',
       parameters: {
         type: 'object',
         properties: {
@@ -27,11 +36,15 @@ export class MessageAgent extends BasicAgent {
           },
           channelId: {
             type: 'string',
-            description: "Channel ID for the message (for 'send' and 'channel_status' actions).",
+            description: "Channel ID for the message (for 'send' and 'channel_status' actions). Use 'imessage' for iMessage.",
+          },
+          recipient: {
+            type: 'string',
+            description: "Recipient identifier — email or phone for iMessage, chat ID for Telegram. Alias for conversationId.",
           },
           conversationId: {
             type: 'string',
-            description: "Conversation or thread ID (for 'send' action).",
+            description: "Conversation or thread ID (for 'send' action). For iMessage, this is the recipient's email or phone.",
           },
           content: {
             type: 'string',
@@ -48,7 +61,7 @@ export class MessageAgent extends BasicAgent {
   async perform(kwargs: Record<string, unknown>): Promise<string> {
     const action = kwargs.action as string | undefined;
     const channelId = kwargs.channelId as string | undefined;
-    const conversationId = kwargs.conversationId as string | undefined;
+    const conversationId = (kwargs.recipient as string) || (kwargs.conversationId as string) || undefined;
     const content = kwargs.content as string | undefined;
 
     if (!action) {
@@ -109,8 +122,12 @@ export class MessageAgent extends BasicAgent {
       }
     }
 
-    // Fallback: send directly via Telegram API (interactive mode)
-    if (channelId.toLowerCase().includes('telegram') || channelId.toLowerCase() === 'tg') {
+    // Fallback: send directly via platform APIs (interactive mode)
+    const ch = channelId.toLowerCase();
+    if (ch === 'imessage' || ch === 'imsg') {
+      return this.sendIMessageDirect(conversationId, content);
+    }
+    if (ch.includes('telegram') || ch === 'tg') {
       return this.sendTelegramDirect(conversationId, content);
     }
 
@@ -118,7 +135,7 @@ export class MessageAgent extends BasicAgent {
       status: 'error',
       message: this.channelRegistry
         ? `Channel not found: ${channelId}`
-        : 'Channel registry not available. For Telegram, use channelId "telegram".',
+        : 'Channel registry not available. Use channelId "imessage" or "telegram" for direct send.',
     });
   }
 
@@ -166,6 +183,71 @@ export class MessageAgent extends BasicAgent {
     });
   }
 
+  private async sendIMessageDirect(recipient: string, content: string): Promise<string> {
+    if (process.platform !== 'darwin') {
+      return JSON.stringify({ status: 'error', message: 'iMessage is only available on macOS' });
+    }
+
+    // Allowed contacts check (deny-by-default: empty list = nobody)
+    const allowed = (process.env.IMESSAGE_ALLOWED_CONTACTS || '')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (allowed.length === 0) {
+      return JSON.stringify({
+        status: 'error',
+        message: 'No allowed iMessage contacts configured. Set IMESSAGE_ALLOWED_CONTACTS in .env (comma-separated emails/phones).',
+      });
+    }
+    if (!allowed.includes(recipient.toLowerCase())) {
+      return JSON.stringify({
+        status: 'error',
+        message: `Recipient "${recipient}" is not in the allowed contacts list. Allowed: ${allowed.join(', ')}`,
+      });
+    }
+
+    // Rate limiting
+    const now = Date.now();
+    this.iMessageSendTimes = this.iMessageSendTimes.filter(t => now - t < 3_600_000);
+    if (this.iMessageSendTimes.length >= MessageAgent.MAX_IMESSAGES_PER_HOUR) {
+      return JSON.stringify({
+        status: 'error',
+        message: `Rate limit: max ${MessageAgent.MAX_IMESSAGES_PER_HOUR} iMessages per hour`,
+      });
+    }
+
+    // Send via AppleScript
+    const escapedContent = content
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n');
+
+    const script = `
+      tell application "Messages"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant "${recipient}" of targetService
+        send "${escapedContent}" to targetBuddy
+      end tell
+    `;
+
+    try {
+      await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 15000 });
+      this.iMessageSendTimes.push(now);
+      return JSON.stringify({
+        status: 'success',
+        action: 'send',
+        channelId: 'imessage',
+        recipient,
+        message: 'iMessage sent successfully',
+      });
+    } catch (error) {
+      return JSON.stringify({
+        status: 'error',
+        message: `Failed to send iMessage: ${(error as Error).message}`,
+      });
+    }
+  }
+
   private listChannels(): string {
     if (this.channelRegistry) {
       const channels = this.channelRegistry.listChannels();
@@ -179,6 +261,9 @@ export class MessageAgent extends BasicAgent {
 
     // No registry — report what's available via env tokens
     const available: Array<{ id: string; type: string; configured: boolean }> = [];
+    if (process.platform === 'darwin' && process.env.IMESSAGE_ALLOWED_CONTACTS) {
+      available.push({ id: 'imessage', type: 'imessage', configured: true });
+    }
     if (process.env.TELEGRAM_BOT_TOKEN) {
       available.push({ id: 'telegram', type: 'telegram', configured: true });
     }

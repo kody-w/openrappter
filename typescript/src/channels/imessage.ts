@@ -26,6 +26,8 @@ export interface IMessageConfig extends ChannelConfig {
   pollInterval?: number;
   /** iMessage ID (phone or email) to watch for self-chat messages */
   selfChatId?: string;
+  /** Additional iMessage IDs (emails/phones) to watch for incoming messages */
+  watchContacts?: string[];
 }
 
 interface BlueBubblesMessage {
@@ -56,8 +58,10 @@ export class IMessageChannel extends EventEmitter {
   private isConnected = false;
   private pollTimer?: NodeJS.Timeout;
   private lastMessageTime = Date.now();
+  private lastMessageRowId = 0; // For sqlite polling — track last seen rowid
   private seenMessageIds = new Set<string>();
   private sentByAI = new Set<string>(); // Track AI-sent message timestamps to avoid loops
+  private useSqlite = false; // Whether sqlite3 FDA-based polling is available
 
   constructor(config: IMessageConfig) {
     super();
@@ -101,12 +105,32 @@ export class IMessageChannel extends EventEmitter {
   }
 
   /**
-   * Connect using AppleScript polling
+   * Connect using AppleScript polling (with sqlite upgrade if FDA available)
    */
   private async connectAppleScript(): Promise<void> {
-    // Start polling for new messages
+    // Detect if sqlite3 can read the Messages database (requires Full Disk Access)
+    try {
+      const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
+      const { stdout } = await execAsync(
+        `sqlite3 "${dbPath}" "SELECT MAX(rowid) FROM message" 2>/dev/null`,
+        { timeout: 3000 },
+      );
+      const maxRowId = parseInt(stdout.trim(), 10);
+      if (maxRowId > 0) {
+        this.useSqlite = true;
+        this.lastMessageRowId = maxRowId;
+        console.log(`iMessage: using sqlite poller (FDA available, starting from rowid ${maxRowId})`);
+      }
+    } catch {
+      // No FDA — fall back to AppleScript
+      console.log('iMessage: using AppleScript poller (no FDA)');
+    }
+
     this.lastMessageTime = Date.now();
-    this.pollTimer = setInterval(() => this.pollAppleScriptMessages(), this.config.pollInterval!);
+    const pollFn = this.useSqlite
+      ? () => this.pollSqliteMessages()
+      : () => this.pollAppleScriptMessages();
+    this.pollTimer = setInterval(pollFn, this.config.pollInterval!);
   }
 
   /**
@@ -224,7 +248,17 @@ export class IMessageChannel extends EventEmitter {
     if (!this.messageHandler) return;
 
     try {
-      const chatId = this.config.selfChatId || '';
+      const selfId = this.config.selfChatId || '';
+      const watchIds = this.config.watchContacts || [];
+      // Build list of chat identifiers to watch: self-chat + allowed contacts
+      const allWatchIds = [selfId, ...watchIds].filter(Boolean);
+      if (allWatchIds.length === 0) return;
+
+      // Build AppleScript condition: chatId contains "x" or chatId contains "y"
+      const matchCondition = allWatchIds
+        .map(id => `chatId contains "${id}"`)
+        .join(' or ');
+
       // Use AppleScript to read messages — bypasses FDA requirement
       const script = `
         tell application "Messages"
@@ -233,7 +267,7 @@ export class IMessageChannel extends EventEmitter {
           repeat with aChat in allChats
             try
               set chatId to id of aChat
-              if chatId contains "${chatId}" then
+              if ${matchCondition} then
                 set msgs to messages of aChat
                 set msgCount to count of msgs
                 if msgCount > 0 then
@@ -253,7 +287,7 @@ export class IMessageChannel extends EventEmitter {
                     try
                       if sender of aMsg is missing value then set fromMe to "1"
                     end try
-                    set output to output & msgId & "|||" & msgContent & "|||" & fromMe & "|||" & senderName & linefeed
+                    set output to output & chatId & "|||" & msgId & "|||" & msgContent & "|||" & fromMe & "|||" & senderName & linefeed
                   end repeat
                 end if
               end if
@@ -269,9 +303,9 @@ export class IMessageChannel extends EventEmitter {
       const lines = stdout.trim().split('\n').filter(Boolean);
       for (const line of lines) {
         const parts = line.split('|||');
-        if (parts.length < 3) continue;
+        if (parts.length < 4) continue;
 
-        const [msgId, content, fromMe, senderName] = parts;
+        const [chatIdentifier, msgId, content, fromMe, senderName] = parts;
         if (!msgId || !content) continue;
 
         // Skip file transfer / attachment messages — AppleScript returns internal
@@ -281,27 +315,35 @@ export class IMessageChannel extends EventEmitter {
         if (this.seenMessageIds.has(msgId)) continue;
         this.seenMessageIds.add(msgId);
 
+        // Determine if this is the self-chat or a contact chat
+        const isSelfChat = selfId && chatIdentifier.includes(selfId);
+
         // Skip messages sent by the AI (loop prevention)
         if (fromMe === '1') {
-          // Check if this is a recent AI-sent message
           const contentPrefix = content.substring(0, 20);
           if (this.sentByAI.has(contentPrefix)) {
             this.sentByAI.delete(contentPrefix);
             continue;
           }
+          // In contact chats, skip all fromMe messages (those are our replies)
+          if (!isSelfChat) continue;
         }
+
+        // Figure out the conversationId — for contact chats, extract the contact's address
+        const contactId = allWatchIds.find(id => chatIdentifier.includes(id)) || chatIdentifier;
 
         const incoming: IncomingMessage = {
           id: msgId,
           channel: 'imessage',
-          conversationId: chatId,
+          conversationId: contactId,
           sender: fromMe === '1' ? 'self' : (senderName || 'unknown'),
           senderName: fromMe === '1' ? 'Kody' : (senderName || 'unknown'),
           content: content,
           timestamp: new Date().toISOString(),
           attachments: [],
           metadata: {
-            isSelfChat: fromMe === '1',
+            isSelfChat: !!isSelfChat,
+            chatIdentifier,
           },
         };
 
@@ -316,6 +358,102 @@ export class IMessageChannel extends EventEmitter {
     } catch (error) {
       // Silently ignore polling errors
       console.debug('iMessage poll error:', (error as Error).message);
+    }
+  }
+
+  /**
+   * Poll for new messages via sqlite3 (requires Full Disk Access)
+   * More reliable than AppleScript — reads directly from chat.db
+   */
+  private async pollSqliteMessages(): Promise<void> {
+    if (!this.messageHandler) return;
+
+    try {
+      const selfId = this.config.selfChatId || '';
+      const watchIds = this.config.watchContacts || [];
+      const allWatchIds = [selfId, ...watchIds].filter(Boolean);
+      if (allWatchIds.length === 0) return;
+
+      // Build WHERE clause for watched contacts
+      const chatFilter = allWatchIds.map(id => `c.chat_identifier = '${id.replace(/'/g, "''")}'`).join(' OR ');
+      const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
+
+      const query = `
+        SELECT m.rowid, m.text, m.is_from_me, c.chat_identifier,
+               COALESCE(h.id, '') as sender_id
+        FROM message m
+        JOIN chat_message_join cmj ON cmj.message_id = m.rowid
+        JOIN chat c ON c.rowid = cmj.chat_id
+        LEFT JOIN handle h ON m.handle_id = h.rowid
+        WHERE m.rowid > ${this.lastMessageRowId}
+          AND (${chatFilter})
+          AND m.text IS NOT NULL
+          AND m.text != ''
+        ORDER BY m.rowid ASC
+        LIMIT 20
+      `.replace(/\n/g, ' ');
+
+      const { stdout } = await execAsync(
+        `sqlite3 -separator '|||' "${dbPath}" "${query.replace(/"/g, '\\"')}"`,
+        { timeout: 5000 },
+      );
+
+      if (!stdout.trim()) return;
+
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        const parts = line.split('|||');
+        if (parts.length < 4) continue;
+
+        const [rowIdStr, content, isFromMeStr, chatIdentifier, senderId] = parts;
+        const rowId = parseInt(rowIdStr, 10);
+        const isFromMe = isFromMeStr === '1';
+
+        if (!content || !rowId) continue;
+
+        // Update high-water mark
+        if (rowId > this.lastMessageRowId) {
+          this.lastMessageRowId = rowId;
+        }
+
+        // Skip file transfer metadata
+        if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) continue;
+
+        // Determine if this is the self-chat
+        const isSelfChat = selfId && chatIdentifier === selfId;
+
+        // In contact chats, skip our own outbound messages (loop prevention)
+        if (isFromMe && !isSelfChat) continue;
+
+        // In self-chat, skip AI-sent messages
+        if (isFromMe && isSelfChat) {
+          const contentPrefix = content.substring(0, 20);
+          if (this.sentByAI.has(contentPrefix)) {
+            this.sentByAI.delete(contentPrefix);
+            continue;
+          }
+        }
+
+        const incoming: IncomingMessage = {
+          id: `sqlite-${rowId}`,
+          channel: 'imessage',
+          conversationId: chatIdentifier,
+          sender: isFromMe ? 'self' : (senderId || 'unknown'),
+          senderName: isFromMe ? 'Kody' : (senderId || 'unknown'),
+          content,
+          timestamp: new Date().toISOString(),
+          attachments: [],
+          metadata: {
+            isSelfChat: !!isSelfChat,
+            chatIdentifier,
+            rowId,
+          },
+        };
+
+        this.messageHandler(incoming);
+      }
+    } catch (error) {
+      console.debug('iMessage sqlite poll error:', (error as Error).message);
     }
   }
 

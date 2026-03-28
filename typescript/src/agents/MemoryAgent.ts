@@ -160,6 +160,20 @@ export class MemoryAgent extends BasicAgent {
     }
 
     const memory = await this.loadMemory();
+
+    // Deduplicate: skip if an identical or very similar message already exists
+    const normalised = cleanMessage.toLowerCase().trim();
+    for (const entry of Object.values(memory)) {
+      if (entry.message.toLowerCase().trim() === normalised) {
+        return JSON.stringify({
+          status: 'success',
+          message: `Already remembered: "${entry.message}"`,
+          theme: entry.theme,
+          duplicate: true,
+        });
+      }
+    }
+
     const id = randomUUID().replace(/-/g, '').slice(0, 12);
     const key = `mem_${Date.now()}`;
     const now = new Date();

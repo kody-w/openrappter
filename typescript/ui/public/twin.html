@@ -3,286 +3,447 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenRappter — Digital Twin Relay</title>
+<title>OpenRappter — Digital Twin</title>
 <style>
-  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --orange: #d29922; }
+  :root { --bg: #0d1117; --surface: #161b22; --surface2: #1c2128; --border: #30363d; --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --orange: #d29922; --red: #f85149; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
-  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
-  .header h1 { font-size: 18px; font-weight: 600; }
-  .header .status { font-size: 12px; color: var(--muted); margin-left: auto; }
-  .header .status.connected { color: var(--green); }
-  .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; }
 
-  /* Setup panel */
-  .setup { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
-  .setup h2 { font-size: 15px; margin-bottom: 12px; color: var(--accent); }
-  .setup label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  .setup input, .setup textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 14px; margin-bottom: 12px; font-family: inherit; }
-  .setup textarea { resize: vertical; min-height: 60px; }
-  .setup .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
-  .setup .btn:hover { opacity: 0.9; }
+  /* Header */
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .header h1 { font-size: 16px; font-weight: 600; }
+  .header .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .header .dot.on { background: var(--green); }
+  .header .status { font-size: 12px; color: var(--muted); }
+  .header .actions { margin-left: auto; display: flex; gap: 8px; }
+  .btn { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* Layout */
+  .layout { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .sidebar-header h2 { font-size: 13px; font-weight: 600; }
+  .convo-list { flex: 1; overflow-y: auto; }
+  .convo-item { padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .convo-item:hover { background: var(--surface2); }
+  .convo-item.active { background: var(--surface2); border-left: 2px solid var(--accent); }
+  .convo-item .name { font-size: 13px; font-weight: 600; }
+  .convo-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
   /* Chat area */
-  .chat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
-  .chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
-  .messages { padding: 16px; max-height: 500px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
-  .msg.incoming { background: var(--bg); align-self: flex-start; border: 1px solid var(--border); }
-  .msg.outgoing { background: #1a3a5c; align-self: flex-end; border: 1px solid #264a6e; }
-  .msg .sender { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-  .msg .copy-btn { font-size: 11px; color: var(--accent); cursor: pointer; float: right; margin-left: 8px; }
-  .msg .copy-btn:hover { text-decoration: underline; }
-  .msg .content { white-space: pre-wrap; }
+  .chat-area { flex: 1; display: flex; flex-direction: column; }
+  .chat-header { padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: 10px; }
+  .chat-header .title { font-size: 14px; font-weight: 600; }
+  .chat-header .participants { font-size: 11px; color: var(--muted); }
+  .chat-header .key-btn { margin-left: auto; }
 
-  /* Input area */
-  .input-area { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-  .input-area textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; min-height: 44px; }
-  .input-area .send-btn { background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; cursor: pointer; white-space: nowrap; }
-  .input-area .send-btn:hover { opacity: 0.9; }
+  /* Messages */
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.5; position: relative; }
+  .msg.them { background: var(--surface); align-self: flex-start; border: 1px solid var(--border); }
+  .msg.me { background: #1a3a5c; align-self: flex-end; }
+  .msg .sender { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+  .msg .text { white-space: pre-wrap; word-wrap: break-word; }
+  .msg .time { font-size: 10px; color: var(--muted); margin-top: 4px; display: flex; align-items: center; gap: 4px; }
+  .msg .status-icon { font-size: 10px; }
+  .msg .status-icon.instant { color: var(--accent); }
+  .msg .status-icon.syncing { color: var(--orange); }
+  .msg .status-icon.delivered { color: var(--green); }
+  .msg .status-icon.failed { color: var(--red); }
 
-  /* Persona cards */
-  .personas { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .persona-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
-  .persona-card .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-  .persona-card .desc { font-size: 12px; color: var(--muted); }
+  /* Input */
+  .input-bar { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface); display: flex; gap: 8px; align-items: flex-end; }
+  .input-bar textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; max-height: 120px; }
+  .input-bar textarea:focus { outline: none; border-color: var(--accent); }
+  .send-btn { background: var(--green); color: #fff; border: none; border-radius: 10px; padding: 10px 20px; font-size: 14px; cursor: pointer; font-weight: 600; }
+  .send-btn:hover { opacity: 0.9; }
+  .send-btn:disabled { opacity: 0.4; cursor: default; }
 
-  /* Pending queue */
-  .queue { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
-  .queue h3 { font-size: 14px; margin-bottom: 10px; color: var(--orange); }
-  .queue-item { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px; }
-  .queue-item .text { flex: 1; font-size: 13px; white-space: pre-wrap; }
-  .queue-item .actions { display: flex; flex-direction: column; gap: 4px; }
-  .queue-item .actions button { font-size: 11px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; background: var(--surface); color: var(--text); }
-  .queue-item .actions .copy { color: var(--accent); border-color: var(--accent); }
-  .queue-item .actions .done { color: var(--green); border-color: var(--green); }
-  .empty { color: var(--muted); font-size: 13px; font-style: italic; }
+  /* Persona picker */
+  .persona-bar { padding: 8px 20px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; }
+  .persona-chip { padding: 4px 10px; border-radius: 20px; font-size: 12px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); }
+  .persona-chip.active { border-color: var(--accent); background: #1a3a5c; }
+  .persona-chip:hover { border-color: var(--accent); }
+
+  /* Modals */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-overlay.show { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 420px; max-width: 90vw; }
+  .modal h2 { font-size: 16px; margin-bottom: 16px; }
+  .modal label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .modal input, .modal textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; margin-bottom: 12px; font-family: inherit; }
+  .modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+  .empty-state { display: flex; align-items: center; justify-content: center; flex: 1; color: var(--muted); font-size: 14px; flex-direction: column; gap: 8px; }
+
+  /* iMessage sync indicator */
+  .sync-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .sync-badge.active { background: #1a3a2c; color: var(--green); border-color: var(--green); }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <span style="font-size: 24px;">🦖</span>
-  <h1>Digital Twin Relay</h1>
-  <div class="status" id="status">Disconnected</div>
+  <span style="font-size: 20px;">🦖</span>
+  <h1>Digital Twin</h1>
+  <div class="dot" id="ws-dot"></div>
+  <div class="status" id="ws-status">Connecting...</div>
+  <span class="sync-badge" id="imsg-sync">iMessage: off</span>
+  <div class="actions">
+    <button class="btn" onclick="showNewConvo()">+ New Channel</button>
+    <button class="btn" onclick="showImport()">Import</button>
+  </div>
 </div>
 
-<div class="container">
-
-  <!-- Setup -->
-  <div class="setup" id="setup-panel">
-    <h2>Step 1: Group Chat Setup</h2>
-    <label>Group Chat Name (so we can find it in Messages DB)</label>
-    <input type="text" id="group-name" placeholder="OpenRappter Arena" value="OpenRappter Arena">
-    <label>Gateway URL</label>
-    <input type="text" id="gateway-url" value="ws://127.0.0.1:18790">
-    <button class="btn" id="connect-btn" onclick="connectGateway()">Connect</button>
-    <button class="btn" style="background: var(--green); margin-left: 8px;" onclick="findGroupChat()">Find Group Chat</button>
-    <div id="group-info" style="margin-top: 10px; font-size: 13px; color: var(--muted);"></div>
+<div class="layout">
+  <!-- Sidebar: conversations -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Channels</h2>
+    </div>
+    <div class="convo-list" id="convo-list"></div>
   </div>
 
-  <!-- Personas -->
-  <div class="personas" id="personas"></div>
-
-  <!-- Pending messages to copy into iMessage -->
-  <div class="queue" id="queue-panel" style="display: none;">
-    <h3>Outgoing — Copy these into the group chat</h3>
-    <div id="queue-items"></div>
-  </div>
-
-  <!-- Chat log -->
-  <div class="chat">
-    <div class="chat-header">Group Chat Log</div>
-    <div class="messages" id="messages"></div>
-    <div class="input-area">
-      <textarea id="input" placeholder="Paste an incoming group chat message here (format: sender: message)" rows="2"></textarea>
-      <button class="send-btn" onclick="submitMessage()">Send to AI</button>
+  <!-- Chat -->
+  <div class="chat-area" id="chat-area">
+    <div class="empty-state" id="empty-state">
+      <div style="font-size: 40px;">🔐</div>
+      <div>Create or select an encrypted channel</div>
+      <div style="font-size: 12px;">Messages are AES-256-GCM encrypted. Only key holders can read.</div>
+    </div>
+    <div id="active-chat" style="display:none; flex:1; display:flex; flex-direction:column;">
+      <div class="chat-header">
+        <div>
+          <div class="title" id="chat-title"></div>
+          <div class="participants" id="chat-participants"></div>
+        </div>
+        <button class="btn key-btn" onclick="showKey()">🔑 Key</button>
+        <button class="btn" onclick="exportConvo()">Export</button>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="persona-bar" id="persona-bar"></div>
+      <div class="input-bar">
+        <textarea id="msg-input" placeholder="Type a message..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+        <button class="send-btn" onclick="sendMessage()">Send</button>
+      </div>
     </div>
   </div>
+</div>
 
+<!-- New conversation modal -->
+<div class="modal-overlay" id="new-convo-modal">
+  <div class="modal">
+    <h2>New Encrypted Channel</h2>
+    <label>Channel Name</label>
+    <input type="text" id="new-convo-name" placeholder="OpenRappter Arena">
+    <label>Participants (comma-separated)</label>
+    <input type="text" id="new-convo-participants" placeholder="Rex, Nova, Kody">
+    <label>Sync to iMessage group chat? (paste chat_identifier)</label>
+    <input type="text" id="new-convo-imsg" placeholder="Optional — leave blank for twin-only">
+    <div class="btn-row">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn primary" onclick="createConvo()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import modal -->
+<div class="modal-overlay" id="import-modal">
+  <div class="modal">
+    <h2>Import Encrypted Channel</h2>
+    <label>Paste egg.json or exported channel JSON</label>
+    <textarea id="import-data" rows="6" placeholder='{"_type": "openrappter-twin-key", ...}'></textarea>
+    <label>Decryption Key (base64, from egg.json)</label>
+    <input type="text" id="import-key" placeholder="Auto-filled from egg.json">
+    <div class="btn-row">
+      <button class="btn" onclick="closeModals()">Cancel</button>
+      <button class="btn primary" onclick="importConvo()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Key modal -->
+<div class="modal-overlay" id="key-modal">
+  <div class="modal">
+    <h2>🔑 Channel Key</h2>
+    <p style="font-size: 12px; color: var(--muted); margin-bottom: 12px;">Share this key to let others join. Anyone with the key can read all messages.</p>
+    <textarea id="key-display" rows="4" readonly style="font-family: monospace; font-size: 11px;"></textarea>
+    <div class="btn-row">
+      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('key-display').value)">Copy Egg</button>
+      <button class="btn" onclick="closeModals()">Close</button>
+    </div>
+  </div>
 </div>
 
 <script>
+// ── State ──
 let ws = null;
-let personas = [];
-let pendingQueue = [];
-let groupChatId = '';
-
-// Load personas from env config format
-const DEFAULT_PERSONAS = [
-  { contact: 'rappter2@icloud.com', name: 'Rex', emoji: '🦕', description: 'a witty dinosaur AI who loves puns and gives surprisingly good advice' },
-  { contact: 'rappter1@icloud.com', name: 'Nova', emoji: '🌟', description: 'a curious and creative AI stargazer who speaks in metaphors' },
+let rpcId = 0;
+let rpcCallbacks = {};
+let conversations = [];
+let activeConvoId = null;
+let activePersona = { name: 'Kody', emoji: '🦖' };
+let personas = [
+  { name: 'Kody', emoji: '🦖' },
+  { name: 'Rex', emoji: '🦕' },
+  { name: 'Nova', emoji: '🌟' },
 ];
 
-function init() {
-  personas = DEFAULT_PERSONAS;
-  renderPersonas();
+// ── WebSocket ──
+function connect() {
+  const url = 'ws://127.0.0.1:18790';
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    document.getElementById('ws-dot').classList.add('on');
+    document.getElementById('ws-status').textContent = 'Connected';
+    loadConversations();
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-dot').classList.remove('on');
+    document.getElementById('ws-status').textContent = 'Disconnected';
+    setTimeout(connect, 3000);
+  };
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      // RPC response
+      if (data.id && rpcCallbacks[data.id]) {
+        rpcCallbacks[data.id](data.result, data.error);
+        delete rpcCallbacks[data.id];
+        return;
+      }
+      // Event push
+      if (data.method === 'twin.message' && data.params?.message) {
+        const msg = data.params.message;
+        if (msg.conversationId === activeConvoId) {
+          appendMessage(msg);
+        }
+        // Update sidebar
+        loadConversations();
+      }
+      if (data.method === 'twin.status' && data.params) {
+        updateMessageStatus(data.params.messageId, data.params.status);
+      }
+    } catch {}
+  };
 }
 
-function renderPersonas() {
-  const el = document.getElementById('personas');
-  el.innerHTML = personas.map(p => `
-    <div class="persona-card">
-      <div class="name">${p.emoji} ${p.name}</div>
-      <div class="desc">${p.description}</div>
+function rpc(method, params) {
+  return new Promise((resolve, reject) => {
+    const id = ++rpcId;
+    rpcCallbacks[id] = (result, error) => {
+      if (error) reject(new Error(error.message || 'RPC error'));
+      else resolve(result);
+    };
+    ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+    // Timeout
+    setTimeout(() => {
+      if (rpcCallbacks[id]) {
+        delete rpcCallbacks[id];
+        reject(new Error('RPC timeout'));
+      }
+    }, 15000);
+  });
+}
+
+// ── Conversations ──
+async function loadConversations() {
+  try {
+    const res = await rpc('twin.conversations', {});
+    conversations = res.conversations || [];
+    renderSidebar();
+  } catch {}
+}
+
+function renderSidebar() {
+  const el = document.getElementById('convo-list');
+  if (conversations.length === 0) {
+    el.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px;">No channels yet</div>';
+    return;
+  }
+  el.innerHTML = conversations.map(c => `
+    <div class="convo-item ${c.id === activeConvoId ? 'active' : ''}" onclick="selectConvo('${c.id}')">
+      <div class="name">🔐 ${esc(c.name)}</div>
+      <div class="meta">${c.participants.join(', ')} · ${c.messageCount} msgs</div>
     </div>
   `).join('');
 }
 
-function addMessage(sender, content, type = 'incoming') {
+async function selectConvo(id) {
+  activeConvoId = id;
+  const convo = conversations.find(c => c.id === id);
+  if (!convo) return;
+
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('active-chat').style.display = 'flex';
+  document.getElementById('chat-title').textContent = convo.name;
+  document.getElementById('chat-participants').textContent = convo.participants.join(', ');
+
+  renderPersonaBar();
+  renderSidebar();
+
+  // Load messages
+  try {
+    const res = await rpc('twin.history', { conversationId: id, limit: 100 });
+    const el = document.getElementById('messages');
+    el.innerHTML = '';
+    for (const msg of res.messages || []) {
+      appendMessage(msg);
+    }
+  } catch (e) {
+    console.error('Failed to load messages:', e);
+  }
+}
+
+function renderPersonaBar() {
+  const el = document.getElementById('persona-bar');
+  el.innerHTML = '<span style="font-size:11px;color:var(--muted);">Send as:</span> ' +
+    personas.map(p => `
+      <div class="persona-chip ${p.name === activePersona.name ? 'active' : ''}"
+           onclick="activePersona={name:'${p.name}',emoji:'${p.emoji}'};renderPersonaBar();">
+        ${p.emoji} ${p.name}
+      </div>
+    `).join('');
+}
+
+// ── Messages ──
+function appendMessage(msg) {
   const el = document.getElementById('messages');
+  const isMe = msg.sender === activePersona.name || msg.sender === 'Kody';
+  const statusIcons = { instant: '⚡', syncing: '📤', delivered: '✅', failed: '❌' };
   const div = document.createElement('div');
-  div.className = `msg ${type}`;
+  div.className = `msg ${isMe ? 'me' : 'them'}`;
+  div.id = `msg-${msg.id}`;
   div.innerHTML = `
-    <div class="sender">${sender}</div>
-    <div class="content">${escapeHtml(content)}</div>
-    ${type === 'outgoing' ? `<span class="copy-btn" onclick="copyText(this, '${escapeAttr(content)}')">copy</span>` : ''}
+    <div class="sender">${msg.senderEmoji || ''} ${esc(msg.sender)}</div>
+    <div class="text">${esc(msg.content)}</div>
+    <div class="time">
+      ${new Date(msg.timestamp).toLocaleTimeString()}
+      <span class="status-icon ${msg.status}">${statusIcons[msg.status] || ''}</span>
+    </div>
   `;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
 
-function addToQueue(persona, content) {
-  const fullMsg = `${persona.emoji} ${persona.name}: ${content}`;
-  pendingQueue.push({ persona, content: fullMsg, id: Date.now() });
-  renderQueue();
-}
-
-function renderQueue() {
-  const panel = document.getElementById('queue-panel');
-  const items = document.getElementById('queue-items');
-  if (pendingQueue.length === 0) {
-    panel.style.display = 'none';
-    return;
+function updateMessageStatus(msgId, status) {
+  const el = document.getElementById(`msg-${msgId}`);
+  if (!el) return;
+  const icon = el.querySelector('.status-icon');
+  if (icon) {
+    const icons = { instant: '⚡', syncing: '📤', delivered: '✅', failed: '❌' };
+    icon.textContent = icons[status] || '';
+    icon.className = `status-icon ${status}`;
   }
-  panel.style.display = 'block';
-  items.innerHTML = pendingQueue.map((q, i) => `
-    <div class="queue-item">
-      <div class="text">${escapeHtml(q.content)}</div>
-      <div class="actions">
-        <button class="copy" onclick="copyQueueItem(${i})">Copy</button>
-        <button class="done" onclick="markSent(${i})">Sent</button>
-      </div>
-    </div>
-  `).join('');
 }
 
-function copyQueueItem(idx) {
-  navigator.clipboard.writeText(pendingQueue[idx].content);
-}
-
-function markSent(idx) {
-  const item = pendingQueue.splice(idx, 1)[0];
-  addMessage(item.persona?.name || 'AI', item.content, 'outgoing');
-  renderQueue();
-}
-
-async function submitMessage() {
-  const input = document.getElementById('input');
-  const raw = input.value.trim();
-  if (!raw) return;
+async function sendMessage() {
+  const input = document.getElementById('msg-input');
+  const content = input.value.trim();
+  if (!content || !activeConvoId) return;
   input.value = '';
 
-  // Parse "sender: message" format or just treat as message
-  let sender = 'unknown';
-  let content = raw;
-  const colonIdx = raw.indexOf(':');
-  if (colonIdx > 0 && colonIdx < 30) {
-    sender = raw.substring(0, colonIdx).trim();
-    content = raw.substring(colonIdx + 1).trim();
-  }
-
-  addMessage(sender, content, 'incoming');
-
-  // Pick next persona (round robin)
-  const personaIdx = Math.floor(Math.random() * personas.length);
-  const persona = personas[personaIdx];
-
-  // Call gateway to get response
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    const id = Date.now();
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      id,
-      method: 'agent.chat',
-      params: {
-        message: `[Group chat message from ${sender}]: ${content}`,
-        conversationKey: `twin_group_${persona.name}`,
-      },
-    }));
-
-    // Response handled in ws.onmessage
-    ws._pendingPersona = persona;
-  } else {
-    // No gateway — just queue a placeholder
-    addToQueue(persona, `(Gateway offline — type a response for ${persona.name})`);
-  }
-}
-
-function connectGateway() {
-  const url = document.getElementById('gateway-url').value;
   try {
-    ws = new WebSocket(url);
-    ws.onopen = () => {
-      document.getElementById('status').textContent = 'Connected';
-      document.getElementById('status').className = 'status connected';
-    };
-    ws.onclose = () => {
-      document.getElementById('status').textContent = 'Disconnected';
-      document.getElementById('status').className = 'status';
-    };
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        if (data.result?.content) {
-          const persona = ws._pendingPersona || personas[0];
-          addToQueue(persona, data.result.content);
-        }
-      } catch {}
-    };
+    await rpc('twin.send', {
+      conversationId: activeConvoId,
+      sender: activePersona.name,
+      senderEmoji: activePersona.emoji,
+      content,
+      syncToIMessage: true,
+    });
   } catch (e) {
-    document.getElementById('group-info').textContent = 'Connection failed: ' + e.message;
+    console.error('Send failed:', e);
   }
 }
 
-async function findGroupChat() {
-  const name = document.getElementById('group-name').value.trim();
-  const info = document.getElementById('group-info');
-  info.textContent = 'Looking for group chat...';
+// ── Modals ──
+function showNewConvo() {
+  document.getElementById('new-convo-modal').classList.add('show');
+}
 
-  // This calls the gateway to query the Messages DB
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    // Use shell agent to query sqlite
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      id: 'find-group',
-      method: 'agents.execute',
-      params: {
-        agentName: 'Shell',
-        kwargs: {
-          action: 'bash',
-          command: `sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier, display_name FROM chat WHERE display_name LIKE '%${name}%' OR chat_identifier LIKE '%${name}%' LIMIT 5"`,
-        },
-      },
-    }));
-    info.textContent = 'Query sent — check results in the chat log.';
-  } else {
-    info.innerHTML = `
-      <strong>Manual setup:</strong> Create a group chat in Messages with rappter1 & rappter2, name it "${name}",
-      then run this in Terminal:<br>
-      <code style="background:#0d1117;padding:4px 8px;border-radius:4px;font-size:12px;">
-        sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier FROM chat WHERE display_name = '${name}'"
-      </code><br>
-      Paste the chat_identifier below, then add it to your .env as IMESSAGE_GROUP_CHATS=&lt;id&gt;
-    `;
+function showImport() {
+  document.getElementById('import-modal').classList.add('show');
+}
+
+function showKey() {
+  if (!activeConvoId) return;
+  rpc('twin.egg', { conversationId: activeConvoId }).then(egg => {
+    document.getElementById('key-display').value = JSON.stringify(egg, null, 2);
+    document.getElementById('key-modal').classList.add('show');
+  });
+}
+
+function closeModals() {
+  document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('show'));
+}
+
+async function createConvo() {
+  const name = document.getElementById('new-convo-name').value.trim() || 'New Channel';
+  const parts = document.getElementById('new-convo-participants').value.split(',').map(s => s.trim()).filter(Boolean);
+  try {
+    const res = await rpc('twin.create', { name, participants: parts });
+    closeModals();
+    await loadConversations();
+    selectConvo(res.id);
+  } catch (e) {
+    alert('Failed: ' + e.message);
   }
 }
 
-function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function escapeAttr(s) { return s.replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
-function copyText(el, text) { navigator.clipboard.writeText(text); el.textContent = 'copied!'; setTimeout(() => el.textContent = 'copy', 1500); }
+async function importConvo() {
+  const raw = document.getElementById('import-data').value.trim();
+  let key = document.getElementById('import-key').value.trim();
+  try {
+    const data = JSON.parse(raw);
+    // If it's an egg (key exchange), auto-fill the key
+    if (data._type === 'openrappter-twin-key') {
+      key = data.key;
+      // Need to fetch the exported data separately — for now just create with key
+      const res = await rpc('twin.create', {
+        name: data.name || 'Imported',
+        participants: data.participants || [],
+        key: data.key,
+      });
+      closeModals();
+      await loadConversations();
+      selectConvo(res.id);
+      return;
+    }
+    // Full channel import
+    const res = await rpc('twin.import', { data, key });
+    closeModals();
+    await loadConversations();
+    selectConvo(res.id);
+  } catch (e) {
+    alert('Import failed: ' + e.message);
+  }
+}
 
-init();
+async function exportConvo() {
+  if (!activeConvoId) return;
+  try {
+    const data = await rpc('twin.export', { conversationId: activeConvoId });
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `twin-${activeConvoId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+  }
+}
+
+// ── Utils ──
+function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Init ──
+connect();
 </script>
 </body>
 </html>

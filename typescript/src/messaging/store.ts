@@ -10,6 +10,7 @@
  */
 
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from 'crypto';
+import { doubleEncrypt, doubleDecrypt } from './ephemeral.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,8 @@ export interface EncryptedBlob {
   senderEmoji?: string;
   timestamp: string;
   status: string;
+  /** Ephemeral key nonce (for double encryption / forward secrecy) */
+  nonce?: string;
 }
 
 export interface Conversation {
@@ -63,6 +66,8 @@ export interface ConversationExport {
 export interface StoreOptions {
   /** Path to SQLite database. Omit for in-memory only. */
   dbPath?: string;
+  /** Use ephemeral double-encryption (forward secrecy). Default: true */
+  doubleEncrypt?: boolean;
 }
 
 // ── Encryption helpers ───────────────────────────────────────────────────────
@@ -107,9 +112,11 @@ export class EncryptedMessageStore {
   private keys = new Map<string, Buffer>(); // conversationId → key
   private db: any = null;
   private dbPath?: string;
+  private useDoubleEncrypt: boolean;
 
   constructor(options?: StoreOptions) {
     this.dbPath = options?.dbPath;
+    this.useDoubleEncrypt = options?.doubleEncrypt ?? true;
   }
 
   async init(): Promise<void> {
@@ -231,7 +238,25 @@ export class EncryptedMessageStore {
       content: message.content,
       metadata: message.metadata,
     });
-    const { encrypted, iv, authTag } = encrypt(plaintext, key);
+    const keyBase64 = key.toString('base64');
+
+    let encrypted: string, iv: string, authTag: string;
+    let nonce: string | undefined;
+
+    if (this.useDoubleEncrypt) {
+      // Double encryption: ephemeral key (inner) + conversation key (outer)
+      const envelope = doubleEncrypt(plaintext, keyBase64);
+      encrypted = envelope.outer;
+      iv = envelope.outerIv;
+      authTag = envelope.outerTag;
+      nonce = envelope.nonce;
+    } else {
+      // Single layer encryption (backward compat)
+      const result = encrypt(plaintext, key);
+      encrypted = result.encrypted;
+      iv = result.iv;
+      authTag = result.authTag;
+    }
 
     const blob: EncryptedBlob = {
       id,
@@ -243,6 +268,7 @@ export class EncryptedMessageStore {
       senderEmoji: message.senderEmoji,
       timestamp,
       status,
+      nonce,
     };
 
     // Store
@@ -295,8 +321,22 @@ export class EncryptedMessageStore {
       blobs = blobs.slice(-options.limit);
     }
 
+    const keyBase64 = key.toString('base64');
+
     return blobs.map(blob => {
-      const plaintext = decrypt(blob.encrypted, blob.iv, blob.authTag, key);
+      let plaintext: string;
+
+      if (blob.nonce) {
+        // Double-encrypted: use doubleDecrypt
+        plaintext = doubleDecrypt(
+          { outer: blob.encrypted, outerIv: blob.iv, outerTag: blob.authTag, nonce: blob.nonce },
+          keyBase64,
+        );
+      } else {
+        // Single-layer (legacy or doubleEncrypt=false)
+        plaintext = decrypt(blob.encrypted, blob.iv, blob.authTag, key);
+      }
+
       const { content, metadata } = JSON.parse(plaintext);
       return {
         id: blob.id,

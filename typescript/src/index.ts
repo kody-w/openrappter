@@ -47,6 +47,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   const { TelegramChannel } = await import('./channels/telegram.js');
   const { DiscordChannel } = await import('./channels/discord.js');
   const { WhatsAppChannel } = await import('./channels/whatsapp.js');
+  const { getOrCreateStore } = await import('./gateway/methods/twin-methods.js');
   const { SlackChannel } = await import('./channels/slack.js');
   const { CLIChannel } = await import('./channels/cli.js');
   const { listBundledSkills } = await import('./skills/bundled.js');
@@ -214,6 +215,26 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
         }
 
         log(`${activeEmoji} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
+
+        // Persist to twin store for RappterSignal UI
+        try {
+          const twinStore = getOrCreateStore();
+          // Ingest incoming message
+          twinStore.addMessage(incoming.conversationId!, {
+            sender: incoming.senderName || incoming.sender,
+            content: incoming.content,
+            status: 'delivered',
+            metadata: { source: 'imessage', ...(incoming.metadata as Record<string, unknown> || {}) },
+          });
+          // Ingest AI reply
+          twinStore.addMessage(incoming.conversationId!, {
+            sender: personaName || 'Rappter',
+            senderEmoji: activeEmoji,
+            content: reply,
+            status: 'delivered',
+            metadata: { source: 'imessage-reply' },
+          });
+        } catch { /* twin store persistence is best-effort */ }
       } catch (err) {
         const errMsg = (err as Error).message || 'Unknown error';
         console.error(`${EMOJI} iMessage reply error:`, errMsg);

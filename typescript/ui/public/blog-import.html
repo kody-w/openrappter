@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blog Post Importer — kodyw.com + rappter.com</title>
+<style>
+  :root { --bg: #0a0e14; --surface: #12171f; --border: #2a3545; --text: #e0e6ed; --muted: #6b7a8d; --accent: #00d4aa; --green: #66bb6a; --orange: #ffb74d; --red: #ef5350; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, sans-serif; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .tagline { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin-bottom: 12px; color: var(--accent); }
+  .card h3 { font-size: 14px; margin-bottom: 8px; }
+  .step { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px; }
+  .step-num { background: var(--accent); color: var(--bg); width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .step-body { flex: 1; }
+  .step-body p { font-size: 14px; line-height: 1.6; }
+  .step-body code { background: rgba(0,212,170,0.1); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  .step-body .url { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 6px; display: block; color: var(--accent); cursor: pointer; }
+  .btn { background: var(--accent); color: var(--bg); border: none; border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .btn:hover { opacity: 0.85; }
+  .btn.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn.secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .post-list { display: flex; flex-direction: column; gap: 10px; }
+  .post-item { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; align-items: center; gap: 12px; }
+  .post-item .info { flex: 1; }
+  .post-item .title { font-size: 14px; font-weight: 600; }
+  .post-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .post-item .status { font-size: 11px; padding: 3px 8px; border-radius: 10px; font-weight: 600; }
+  .post-item .status.ready { background: rgba(0,212,170,0.1); color: var(--accent); }
+  .post-item .status.done { background: rgba(102,187,106,0.1); color: var(--green); }
+  .post-item .status.error { background: rgba(239,83,80,0.1); color: var(--red); }
+  .bookmarklet-box { background: var(--bg); border: 2px dashed var(--accent); border-radius: 8px; padding: 16px; text-align: center; margin: 12px 0; }
+  .bookmarklet-box a { display: inline-block; background: var(--accent); color: var(--bg); padding: 10px 24px; border-radius: 8px; font-weight: 700; font-size: 14px; text-decoration: none; }
+  .bookmarklet-box p { font-size: 11px; color: var(--muted); margin-top: 8px; }
+  textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; color: var(--text); font-family: monospace; font-size: 12px; resize: vertical; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab { padding: 8px 16px; border-radius: 8px 8px 0 0; border: 1px solid var(--border); border-bottom: none; cursor: pointer; font-size: 13px; background: var(--bg); color: var(--muted); }
+  .tab.active { background: var(--surface); color: var(--accent); border-color: var(--accent); }
+  .site-section { display: none; }
+  .site-section.active { display: block; }
+  .divider { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+</style>
+</head>
+<body>
+
+<h1>🦖 Blog Post Importer</h1>
+<div class="tagline">Import RappterSignal thought leadership posts to kodyw.com (WordPress) and rappter.com (GoDaddy)</div>
+
+<!-- Site Tabs -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('wp')">kodyw.com (WordPress)</div>
+  <div class="tab" onclick="switchTab('gd')">rappter.com (GoDaddy)</div>
+</div>
+
+<!-- ═══════════════ WORDPRESS (kodyw.com) ═══════════════ -->
+<div class="site-section active" id="tab-wp">
+
+  <div class="card">
+    <h2>Step 1: Log in to WordPress</h2>
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <p>Open your WordPress admin in a new tab:</p>
+        <a class="url" href="https://kodyw.com/wp-admin/" target="_blank">https://kodyw.com/wp-admin/</a>
+        <p style="margin-top:8px;font-size:12px;color:var(--muted);">Log in with your username and password. Keep this tab open.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Step 2: Drag this bookmarklet to your bookmarks bar</h2>
+    <div class="bookmarklet-box" id="wp-bookmarklet-box">
+      <!-- Bookmarklet will be generated by JS -->
+    </div>
+    <p style="font-size:12px;color:var(--muted);">Or: copy the code below and create a bookmark manually with this as the URL.</p>
+    <textarea id="wp-bookmarklet-code" rows="3" readonly></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Step 3: Click the bookmarklet on your WordPress admin page</h2>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <p>While on <code>kodyw.com/wp-admin/</code>, click the "Import Posts" bookmarklet. It will use the WordPress REST API to create all 4 posts as drafts.</p>
+        <p style="margin-top:8px;font-size:12px;color:var(--muted);">Posts are created as <strong>drafts</strong> — review and publish when ready.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Posts to Import</h2>
+    <div class="post-list" id="wp-posts"></div>
+    <hr class="divider">
+    <button class="btn" onclick="wpImportDirect()" style="margin-top:8px;">Import via REST API (if logged in)</button>
+    <span id="wp-status" style="margin-left:12px;font-size:12px;color:var(--muted);"></span>
+  </div>
+
+  <div class="card">
+    <h2>Alternative: Manual Copy</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">If the bookmarklet doesn't work, click each post below to copy the HTML, then paste into a new WordPress post.</p>
+    <div id="wp-manual-posts"></div>
+  </div>
+</div>
+
+<!-- ═══════════════ GODADDY (rappter.com) ═══════════════ -->
+<div class="site-section" id="tab-gd">
+
+  <div class="card">
+    <h2>rappter.com — GoDaddy Website Builder</h2>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">GoDaddy's builder doesn't have a REST API. Here's how to add blog posts:</p>
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <p>Log in to GoDaddy:</p>
+        <a class="url" href="https://www.godaddy.com/websites/website-builder" target="_blank">https://www.godaddy.com/websites/website-builder</a>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <p>Open your rappter.com site editor → <strong>Add Section</strong> → <strong>Blog</strong></p>
+        <p style="margin-top:4px;font-size:12px;color:var(--muted);">If you haven't enabled the blog feature yet, it'll prompt you to create one.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <p>For each post below, click <strong>Copy HTML</strong>, then create a new blog post in GoDaddy and paste the content.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">💡</div>
+      <div class="step-body">
+        <p><strong>Recommended:</strong> Migrate rappter.com to WordPress (via GoDaddy's WordPress hosting option) to unlock the REST API and automate publishing. Then use the WordPress import tab above.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Posts to Import</h2>
+    <div id="gd-posts"></div>
+  </div>
+</div>
+
+<script>
+// ── Blog post data (raw GitHub URLs + embedded content) ──
+const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/kody-w/openrappter/main/docs/blog';
+
+const POSTS = [
+  {
+    slug: 'ai-2-0-the-moment-agents-stopped-asking-permission',
+    title: 'AI 2.0: The Moment Agents Stopped Asking Permission',
+    file: 'ai-2-0-the-moment-agents-stopped-asking-permission.md',
+    category: 'Thought Leadership',
+    order: 1,
+  },
+  {
+    slug: 'why-ai-messaging-needs-three-layers-of-privacy',
+    title: 'Why AI Messaging Needs Three Layers of Privacy (Not Just Encryption)',
+    file: 'why-ai-messaging-needs-three-layers-of-privacy.md',
+    category: 'Technical',
+    order: 2,
+  },
+  {
+    slug: 'the-end-of-server-dependent-messaging',
+    title: 'The End of Server-Dependent Messaging',
+    file: 'the-end-of-server-dependent-messaging.md',
+    category: 'Technical',
+    order: 3,
+  },
+  {
+    slug: 'every-app-is-a-digital-twin',
+    title: 'Every App Is a Digital Twin',
+    file: 'every-app-is-a-digital-twin.md',
+    category: 'Vision',
+    order: 4,
+  },
+];
+
+// ── Simple markdown to HTML (good enough for blog posts) ──
+function md2html(md) {
+  return md
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^\- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, (m) => '<ul>' + m + '</ul>')
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    .replace(/^---$/gm, '<hr>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/^(?!<[hulo]|<li|<hr)(.+)$/gm, '<p>$1</p>')
+    .replace(/<p><\/p>/g, '');
+}
+
+// ── Fetch markdown from GitHub raw ──
+async function fetchPost(post) {
+  const url = `${GITHUB_RAW_BASE}/${post.file}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
+  let md = await res.text();
+  // Strip the title line (first # heading) since WP has its own title field
+  md = md.replace(/^# .+\n+/, '');
+  // Strip the author/date italic line
+  md = md.replace(/^\*Kody Wildfeuer.+\*\n*/m, '');
+  return md;
+}
+
+// ── WordPress REST API import ──
+async function wpCreatePost(post, html) {
+  const res = await fetch('/wp-json/wp/v2/posts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin', // uses the logged-in cookie
+    body: JSON.stringify({
+      title: post.title,
+      content: html,
+      status: 'draft',
+      slug: post.slug,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`WP API error ${res.status}: ${err}`);
+  }
+  return res.json();
+}
+
+// ── Direct import (run from this page, relies on WP cookie) ──
+async function wpImportDirect() {
+  const status = document.getElementById('wp-status');
+  status.textContent = 'Importing...';
+
+  for (const post of POSTS) {
+    const el = document.getElementById(`wp-post-${post.slug}`);
+    try {
+      const md = await fetchPost(post);
+      const html = md2html(md);
+      // Try REST API (works if we're on kodyw.com or have CORS)
+      const result = await wpCreatePost(post, html);
+      if (el) { el.querySelector('.status').className = 'status done'; el.querySelector('.status').textContent = 'Draft created'; }
+    } catch (e) {
+      if (el) { el.querySelector('.status').className = 'status error'; el.querySelector('.status').textContent = e.message.slice(0, 60); }
+    }
+  }
+  status.textContent = 'Done! Check your WordPress drafts.';
+}
+
+// ── Generate bookmarklet ──
+function generateBookmarklet() {
+  // This bookmarklet runs ON kodyw.com/wp-admin, fetches posts from GitHub, creates via REST API
+  const code = `javascript:void((async()=>{const B='${GITHUB_RAW_BASE}';const P=${JSON.stringify(POSTS.map(p=>({s:p.slug,t:p.title,f:p.file})))};const md2h=s=>s.replace(/^#+ .+\\n+/,'').replace(/^\\*Kody.+\\*\\n*/m,'').replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/\\*\\*(.+?)\\*\\*/g,'<strong>$1</strong>').replace(/\\*(.+?)\\*/g,'<em>$1</em>').replace(/\`([^\`]+)\`/g,'<code>$1</code>').replace(/\\n\\n/g,'</p><p>');let n=0;for(const p of P){try{const r=await fetch(B+'/'+p.f);const md=await r.text();const h=md2h(md);const res=await fetch('/wp-json/wp/v2/posts',{method:'POST',headers:{'Content-Type':'application/json','X-WP-Nonce':wpApiSettings?.nonce||''},credentials:'same-origin',body:JSON.stringify({title:p.t,content:h,status:'draft',slug:p.s})});if(res.ok)n++;else alert('Failed: '+p.t)}catch(e){alert('Error: '+e.message)}}alert(n+' posts imported as drafts!')})())`;
+
+  const box = document.getElementById('wp-bookmarklet-box');
+  box.innerHTML = `<a href="${code}" onclick="return false;" title="Drag this to your bookmarks bar">📝 Import Posts to kodyw.com</a><p>Drag this link to your bookmarks bar, then click it while on kodyw.com/wp-admin</p>`;
+  document.getElementById('wp-bookmarklet-code').value = code;
+}
+
+// ── Render post lists ──
+function renderPosts() {
+  const wpList = document.getElementById('wp-posts');
+  const wpManual = document.getElementById('wp-manual-posts');
+  const gdList = document.getElementById('gd-posts');
+
+  for (const post of POSTS) {
+    const rawUrl = `${GITHUB_RAW_BASE}/${post.file}`;
+
+    // WordPress auto-import list
+    wpList.innerHTML += `
+      <div class="post-item" id="wp-post-${post.slug}">
+        <div class="info">
+          <div class="title">${post.title}</div>
+          <div class="meta">${post.category} · ${post.slug}</div>
+        </div>
+        <span class="status ready">Ready</span>
+      </div>`;
+
+    // WordPress manual copy
+    wpManual.innerHTML += `
+      <div class="post-item">
+        <div class="info">
+          <div class="title">${post.title}</div>
+          <div class="meta"><a href="${rawUrl}" target="_blank" style="color:var(--accent);">View raw markdown</a></div>
+        </div>
+        <button class="btn secondary" onclick="copyPost('${post.slug}')">Copy HTML</button>
+      </div>`;
+
+    // GoDaddy manual list
+    gdList.innerHTML += `
+      <div class="post-item">
+        <div class="info">
+          <div class="title">${post.title}</div>
+          <div class="meta">${post.category}</div>
+        </div>
+        <button class="btn secondary" onclick="copyPost('${post.slug}')">Copy HTML</button>
+        <button class="btn secondary" onclick="window.open('${rawUrl}','_blank')">View Raw</button>
+      </div>`;
+  }
+}
+
+// ── Copy post HTML to clipboard ──
+async function copyPost(slug) {
+  const post = POSTS.find(p => p.slug === slug);
+  if (!post) return;
+  try {
+    const md = await fetchPost(post);
+    const html = md2html(md);
+    await navigator.clipboard.writeText(html);
+    alert(`Copied "${post.title}" HTML to clipboard! Paste into your post editor.`);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ── Tab switching ──
+function switchTab(id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.site-section').forEach(s => s.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById(`tab-${id}`).classList.add('active');
+}
+
+// ── Init ──
+renderPosts();
+generateBookmarklet();
+</script>
+</body>
+</html>

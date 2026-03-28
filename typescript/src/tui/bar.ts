@@ -204,11 +204,13 @@ interface PongState {
   running: boolean;
   input: { up: boolean; down: boolean };
   aiVm: LispyVM;
+  aiCoach: LispyCoach;
 }
 
 function createPongState(fieldW: number, fieldH: number): PongState {
   const vm = new LispyVM();
   vm.setStrategy(STRATEGIES.predictor);
+  const coach = new LispyCoach(vm);
   return {
     ball: { x: fieldW / 2, y: fieldH / 2, vx: PONG.BALL_SPEED, vy: PONG.BALL_SPEED * 0.6 },
     p1: { y: fieldH / 2 - PONG.PADDLE_H / 2, score: 0 },
@@ -220,6 +222,7 @@ function createPongState(fieldW: number, fieldH: number): PongState {
     running: true,
     input: { up: false, down: false },
     aiVm: vm,
+    aiCoach: coach,
   };
 }
 
@@ -290,12 +293,29 @@ function pongTick(ps: PongState): void {
     if (ps.p2.score >= WIN_SCORE) { ps.winner = 2; return; }
     ps.ball.x = ps.fieldW / 2; ps.ball.y = ps.fieldH / 2;
     ps.ball.vx = PONG.BALL_SPEED; ps.ball.vy = (Math.random() - 0.5) * PONG.BALL_SPEED;
+    restrategize(ps);
   }
   if (ps.ball.x > ps.fieldW - 1) {
     ps.p1.score++;
     if (ps.p1.score >= WIN_SCORE) { ps.winner = 1; return; }
     ps.ball.x = ps.fieldW / 2; ps.ball.y = ps.fieldH / 2;
     ps.ball.vx = -PONG.BALL_SPEED; ps.ball.vy = (Math.random() - 0.5) * PONG.BALL_SPEED;
+    restrategize(ps);
+  }
+}
+
+function restrategize(ps: PongState): void {
+  const situation: GameSituation = {
+    myScore: ps.p2.score,
+    opponentScore: ps.p1.score,
+    ballSpeed: Math.abs(ps.ball.vx),
+    rallyLength: 0,
+    currentStrategy: ps.aiVm.getStrategy(),
+    side: 'right',
+  };
+  if (ps.aiCoach.shouldRestrategize(situation)) {
+    // Fire and forget — coach runs async, VM keeps using current strategy until swap
+    ps.aiCoach.strategize(situation).catch(() => {});
   }
 }
 

@@ -109,20 +109,91 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   const imessageSelfId = process.env.IMESSAGE_SELF_ID || '';
   const imessageAllowedContacts = (process.env.IMESSAGE_ALLOWED_CONTACTS || '')
     .split(',').map(s => s.trim()).filter(Boolean);
+  const imessageGroupChats = (process.env.IMESSAGE_GROUP_CHATS || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
   const imessage = new IMessageChannel({
     mode: 'applescript',
     selfChatId: imessageSelfId || undefined,
     watchContacts: imessageAllowedContacts,
+    watchGroups: imessageGroupChats,
     pollInterval: 3000,
   });
+
+  // ── iMessage persona routing ──
+  // IMESSAGE_PERSONAS format: "contact:name:emoji:description, ..."
+  // e.g. "rappter2@icloud.com:Rex:🦕:a witty dinosaur companion, rappter1@icloud.com:Nova:🌟:a curious stargazer AI"
+  // Contacts without a persona use the default assistant.
+  const personaAssistants = new Map<string, { assistant: InstanceType<typeof Assistant>; emoji: string }>();
+  const personaConfig = process.env.IMESSAGE_PERSONAS || '';
+  if (personaConfig) {
+    for (const entry of personaConfig.split(/,\s*/)) {
+      const [contact, pName, pEmoji, ...descParts] = entry.split(':');
+      if (!contact || !pName) continue;
+      const pDesc = descParts.join(':') || `a unique AI persona named ${pName}`;
+      const pAssistant = new Assistant(agents, {
+        name: pName,
+        description: pDesc,
+        model: process.env.OPENRAPPTER_MODEL,
+        githubToken: githubToken ?? undefined,
+        workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
+      });
+      personaAssistants.set(contact.toLowerCase(), { assistant: pAssistant, emoji: pEmoji || '🤖' });
+      log(`${EMOJI} iMessage persona: ${pEmoji || '🤖'} ${pName} → ${contact}`);
+    }
+  }
+
+  // Track which persona responds next in group chats (round-robin)
+  let groupPersonaIndex = 0;
+  const personaList = Array.from(personaAssistants.entries()); // [[contact, {assistant, emoji}], ...]
 
   if (process.platform === 'darwin' && imessageSelfId) {
     imessage.onMessage(async (incoming) => {
       try {
-        const chatKey = `imessage_${incoming.conversationId || 'self'}`;
-        log(`${EMOJI} iMessage ← ${incoming.senderName}: ${incoming.content}`);
+        const contactKey = (incoming.conversationId || '').toLowerCase();
+        const isGroupChat = !!(incoming.metadata as any)?.isGroupChat;
+        const senderKey = (incoming.sender || '').toLowerCase();
 
-        const result = await assistant.getResponse(incoming.content, undefined, undefined, chatKey);
+        let activeAssistant: InstanceType<typeof Assistant>;
+        let activeEmoji: string;
+        let personaName = '';
+
+        if (isGroupChat && personaList.length > 0) {
+          // Group chat: rotate personas so they take turns
+          const [, persona] = personaList[groupPersonaIndex % personaList.length];
+          activeAssistant = persona.assistant;
+          activeEmoji = persona.emoji;
+          personaName = (activeAssistant as any).config?.name || '';
+          groupPersonaIndex++;
+
+          // Use per-persona chat key so each persona has its own memory in the group
+          const chatKey = `imessage_group_${incoming.conversationId}_${personaName}`;
+          log(`${activeEmoji} iMessage [group] ← ${incoming.senderName}: ${incoming.content}`);
+
+          // Give the persona context about who said what
+          const groupPrompt = `[Group chat message from ${incoming.senderName || incoming.sender}]: ${incoming.content}`;
+          const result = await activeAssistant.getResponse(groupPrompt, undefined, undefined, chatKey);
+          let reply = result.content;
+          const voiceIdx = reply.indexOf('|||VOICE|||');
+          if (voiceIdx !== -1) reply = reply.substring(0, voiceIdx).trim();
+
+          await imessage.send(incoming.conversationId!, {
+            channel: 'imessage',
+            content: `${activeEmoji} ${personaName}: ${reply}`,
+          });
+
+          log(`${activeEmoji} iMessage [group] → ${personaName}: ${reply.slice(0, 80)}...`);
+          return;
+        }
+
+        // 1:1 chat: pick persona by contact or default
+        const chatKey = `imessage_${incoming.conversationId || 'self'}`;
+        const persona = personaAssistants.get(contactKey);
+        activeAssistant = persona?.assistant ?? assistant;
+        activeEmoji = persona?.emoji ?? EMOJI;
+
+        log(`${activeEmoji} iMessage ← ${incoming.senderName}: ${incoming.content}`);
+
+        const result = await activeAssistant.getResponse(incoming.content, undefined, undefined, chatKey);
         let reply = result.content;
         const voiceIdx = reply.indexOf('|||VOICE|||');
         let voiceText = '';
@@ -134,7 +205,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
         // Send text reply
         await imessage.send(incoming.conversationId!, {
           channel: 'imessage',
-          content: `🦖 ${reply}`,
+          content: `${activeEmoji} ${reply}`,
         });
 
         // Send voice clip if there's voice text
@@ -142,7 +213,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
           await imessage.sendVoiceClip(incoming.conversationId!, voiceText);
         }
 
-        log(`${EMOJI} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
+        log(`${activeEmoji} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
       } catch (err) {
         const errMsg = (err as Error).message || 'Unknown error';
         console.error(`${EMOJI} iMessage reply error:`, errMsg);

@@ -28,6 +28,8 @@ export interface IMessageConfig extends ChannelConfig {
   selfChatId?: string;
   /** Additional iMessage IDs (emails/phones) to watch for incoming messages */
   watchContacts?: string[];
+  /** Group chat identifiers to watch (from chat.db chat_identifier column) */
+  watchGroups?: string[];
 }
 
 interface BlueBubblesMessage {
@@ -371,16 +373,24 @@ export class IMessageChannel extends EventEmitter {
     try {
       const selfId = this.config.selfChatId || '';
       const watchIds = this.config.watchContacts || [];
+      const watchGroups = this.config.watchGroups || [];
       const allWatchIds = [selfId, ...watchIds].filter(Boolean);
-      if (allWatchIds.length === 0) return;
+      if (allWatchIds.length === 0 && watchGroups.length === 0) return;
 
-      // Build WHERE clause for watched contacts
-      const chatFilter = allWatchIds.map(id => `c.chat_identifier = '${id.replace(/'/g, "''")}'`).join(' OR ');
+      // Build WHERE clause for watched contacts + group chats
+      const conditions: string[] = [];
+      for (const id of allWatchIds) {
+        conditions.push(`c.chat_identifier = '${id.replace(/'/g, "''")}'`);
+      }
+      for (const gid of watchGroups) {
+        conditions.push(`c.chat_identifier = '${gid.replace(/'/g, "''")}'`);
+      }
+      const chatFilter = conditions.join(' OR ');
       const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
 
       const query = `
         SELECT m.rowid, m.text, m.is_from_me, c.chat_identifier,
-               COALESCE(h.id, '') as sender_id
+               COALESCE(h.id, '') as sender_id, c.display_name, c.style
         FROM message m
         JOIN chat_message_join cmj ON cmj.message_id = m.rowid
         JOIN chat c ON c.rowid = cmj.chat_id
@@ -403,11 +413,12 @@ export class IMessageChannel extends EventEmitter {
       const lines = stdout.trim().split('\n').filter(Boolean);
       for (const line of lines) {
         const parts = line.split('|||');
-        if (parts.length < 4) continue;
+        if (parts.length < 5) continue;
 
-        const [rowIdStr, content, isFromMeStr, chatIdentifier, senderId] = parts;
+        const [rowIdStr, content, isFromMeStr, chatIdentifier, senderId, displayName, styleStr] = parts;
         const rowId = parseInt(rowIdStr, 10);
         const isFromMe = isFromMeStr === '1';
+        const isGroupChat = styleStr === '43' || watchGroups.includes(chatIdentifier);
 
         if (!content || !rowId) continue;
 
@@ -420,16 +431,19 @@ export class IMessageChannel extends EventEmitter {
         if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) continue;
 
         // Determine if this is the self-chat
-        const isSelfChat = selfId && chatIdentifier === selfId;
+        const isSelfChat = !isGroupChat && selfId && chatIdentifier === selfId;
 
-        // In contact chats, skip our own outbound messages (loop prevention)
-        if (isFromMe && !isSelfChat) continue;
-
-        // In self-chat, skip AI-sent messages
-        if (isFromMe && isSelfChat) {
-          const contentPrefix = content.substring(0, 20);
-          if (this.sentByAI.has(contentPrefix)) {
-            this.sentByAI.delete(contentPrefix);
+        // Skip our own outbound messages (loop prevention)
+        if (isFromMe) {
+          if (isSelfChat) {
+            // In self-chat, skip known AI-sent messages
+            const contentPrefix = content.substring(0, 20);
+            if (this.sentByAI.has(contentPrefix)) {
+              this.sentByAI.delete(contentPrefix);
+              continue;
+            }
+          } else {
+            // In contact chats and group chats, always skip fromMe
             continue;
           }
         }
@@ -445,7 +459,9 @@ export class IMessageChannel extends EventEmitter {
           attachments: [],
           metadata: {
             isSelfChat: !!isSelfChat,
+            isGroupChat,
             chatIdentifier,
+            displayName: displayName || undefined,
             rowId,
           },
         };

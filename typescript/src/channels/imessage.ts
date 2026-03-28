@@ -434,8 +434,13 @@ export class IMessageChannel extends EventEmitter {
           this.lastMessageRowId = rowId;
         }
 
-        // Replace file transfer metadata with attachment description
-        if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) {
+        // Replace file transfer metadata or object replacement char with attachment description
+        const isAttachmentPlaceholder = content.includes('kIMFileTransfer')
+          || content.includes('kIMBaseWritingDirection')
+          || content === '\ufffc'
+          || content.trim() === '\ufffc'
+          || (content.length <= 2 && attachCount > 0);
+        if (isAttachmentPlaceholder) {
           content = attachCount > 0
             ? `[Sent ${attachCount} image${attachCount > 1 ? 's' : ''}/attachment${attachCount > 1 ? 's' : ''}]`
             : '[Sent an attachment]';

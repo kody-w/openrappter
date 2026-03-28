@@ -434,8 +434,12 @@ export class IMessageChannel extends EventEmitter {
           this.lastMessageRowId = rowId;
         }
 
-        // Skip file transfer metadata
-        if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) continue;
+        // Replace file transfer metadata with attachment description
+        if (content.includes('kIMFileTransfer') || content.includes('kIMBaseWritingDirection')) {
+          content = attachCount > 0
+            ? `[Sent ${attachCount} image${attachCount > 1 ? 's' : ''}/attachment${attachCount > 1 ? 's' : ''}]`
+            : '[Sent an attachment]';
+        }
 
         // Determine if this is the self-chat
         const isSelfChat = !isGroupChat && selfId && chatIdentifier === selfId;

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git Worktrees for AI Agents — How We Run 5 Claude Sessions Without Destroying Each Other</title>
+<meta name="description" content="When multiple AI agents share a repo, git worktrees keep them from stepping on each other. Here's how we do it at OpenRappter, and the rules we learned the hard way.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { cream: '#fffdf7', accent: '#10b981', editor: '#0d1117' },
+    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Inter', 'system-ui', 'sans-serif'] }
+  }}
+}
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body class="bg-cream text-black font-sans">
+
+<nav class="sticky top-0 z-50 bg-white border-b-[3px] border-black px-6 py-4">
+  <div class="max-w-3xl mx-auto flex items-center justify-between">
+    <a href="../" class="text-xl font-black">🦖 openrappter</a>
+    <div class="flex items-center gap-4 text-sm font-semibold">
+      <a href="../" class="hover:text-accent">Home</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-accent">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<article class="max-w-3xl mx-auto px-6 py-16">
+
+  <div class="mb-12">
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <span class="inline-block px-3 py-1 border-2 border-black rounded-full text-xs font-bold bg-accent/10 text-accent">Engineering</span>
+      <span class="inline-block px-3 py-1 border-2 border-black rounded-full text-xs font-bold bg-purple-500/10 text-purple-600 border-purple-600">AI Agents</span>
+      <span class="inline-block px-3 py-1 border-2 border-black rounded-full text-xs font-bold">March 28, 2026</span>
+    </div>
+    <h1 class="text-4xl md:text-5xl font-black leading-tight mb-6">
+      Git Worktrees for AI Agents
+    </h1>
+    <p class="text-xl text-gray-600 leading-relaxed">
+      We run 5 Claude Code sessions in parallel on the same repo. They review PRs, run tests, clean up worktrees, and write blog posts &mdash; all at the same time, without merge conflicts. The secret is <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree</code> and a set of rules we wrote after things went wrong.
+    </p>
+  </div>
+
+  <div class="prose prose-lg max-w-none text-gray-800 leading-relaxed">
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Problem: One Repo, Many Brains</h2>
+    <p>OpenRappter has a TypeScript runtime, a Python mirror, a Swift menu bar app, 20 showcase demos, and 1200+ tests. When you're iterating fast, you want multiple things happening at once: fix a CI failure while reviewing a PR while running the test suite while writing docs.</p>
+    <p>With human developers, you'd each clone the repo. But AI agents spawned from the same Claude Code session share a single working directory. If Agent A checks out a branch to review a PR while Agent B is running tests on <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">main</code>, you get this:</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-red-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500"># Agent A (reviewing PR)</span>
+<span class="text-white">$ git checkout fix/streaming-bug</span>
+
+<span class="text-gray-500"># Agent B (running tests on main, 2 seconds later)</span>
+<span class="text-white">$ npm test</span>
+<span class="text-red-400">FAIL — 47 tests broken</span>
+<span class="text-gray-500"># B is now testing A's branch, not main</span>
+    </div>
+
+    <p>The working directory is shared state. Shared mutable state is the root of all evil. You know this.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Fix: <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree</code></h2>
+    <p>Git worktrees let you check out the same repo to multiple directories simultaneously. Each worktree has its own working directory, its own <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">HEAD</code>, its own index. But they share the same <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">.git</code> object store, so creating one is nearly instant &mdash; no clone, no network, no disk copy.</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500"># Create a worktree for Agent A to review the PR</span>
+<span class="text-white">$ git worktree add .claude/worktrees/pr-review fix/streaming-bug</span>
+
+<span class="text-gray-500"># Agent A works here:</span>
+<span class="text-white">$ cd .claude/worktrees/pr-review && npm test</span>
+
+<span class="text-gray-500"># Meanwhile, Agent B stays in the main worktree:</span>
+<span class="text-white">$ npm test  # still on main, unaffected</span>
+    </div>
+
+    <p>Claude Code has this built in. When you spawn a sub-agent with <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">isolation: "worktree"</code>, it automatically creates a temporary worktree, runs the agent there, and cleans up when it's done. The agent gets a full copy of the repo without touching anyone else's files.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Rules We Learned the Hard Way</h2>
+    <p>Worktrees solve the isolation problem, but they introduce new ones. After a few weeks of running parallel agents, we wrote these rules into our <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CLAUDE.md</code>:</p>
+
+    <div class="bg-white border-2 border-black rounded-2xl p-6 my-8">
+      <h3 class="text-lg font-black mb-4">The 7 Rules of Worktree Etiquette</h3>
+      <ol class="list-decimal list-inside space-y-4">
+        <li><strong>Never modify the main worktree from a child.</strong> Each worktree has its own working directory &mdash; stay in yours. An agent in a worktree that writes to <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">../../src/index.ts</code> just corrupted someone else's session.</li>
+        <li><strong>Clean up after yourself.</strong> When your task is done, <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree remove &lt;path&gt;</code>. Stale worktrees accumulate and confuse future sessions.</li>
+        <li><strong>Don't force-delete worktrees with uncommitted changes.</strong> If a worktree has dirty state, it might belong to another running session. Investigate first.</li>
+        <li><strong>Use unique branch names.</strong> <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">fix/imessage-file-transfer</code> tells everyone what's in progress. <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">temp-branch</code> tells nobody anything.</li>
+        <li><strong>Don't rebase shared branches from a worktree.</strong> If <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">main</code> is checked out in the primary worktree, force-pushing it from a child will ruin everyone's day.</li>
+        <li><strong>Ignore <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">.claude/worktrees/</code> in git status.</strong> These are ephemeral. Don't commit them, don't delete them manually, don't get anxious about them showing up as untracked.</li>
+        <li><strong>Lock long-running worktrees.</strong> Use <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree lock &lt;path&gt;</code> if a task spans multiple sessions, so garbage collection doesn't prune it mid-work.</li>
+      </ol>
+    </div>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">What It Looks Like in Practice</h2>
+    <p>Here's what we did today. One commit needed to go out, CI needed checking, a PR needed reviewing, and stale worktrees needed cleanup. Instead of doing them sequentially, we spawned three agents in parallel:</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm overflow-x-auto border-2 border-black">
+<span class="text-gray-500">// Main conversation (orchestrator)</span>
+<span class="text-green-400">Agent 1</span> <span class="text-white">→ worktree → review PR #10 (read-only)</span>
+<span class="text-blue-400">Agent 2</span> <span class="text-white">→ worktree → run full test suite (npm test)</span>
+<span class="text-yellow-300">Agent 3</span> <span class="text-white">→ worktree → check stale worktrees + openclaw state</span>
+<span class="text-purple-400">Main</span>    <span class="text-white">→ stays on main → writes this blog post</span>
+
+<span class="text-gray-500">// All running simultaneously. No conflicts.</span>
+<span class="text-gray-500">// Each agent gets a full repo copy in ~1 second.</span>
+    </div>
+
+    <p>When they finish, the orchestrator collects the results, acts on them, and the worktrees auto-cleanup if no changes were made. If an agent <em>did</em> make changes (say, a fix), the worktree sticks around with a named branch you can merge.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">Why Not Just Clone?</h2>
+    <p>Cloning works but it's wasteful:</p>
+
+    <div class="overflow-x-auto my-6">
+      <table class="w-full text-sm border-2 border-black">
+        <thead class="bg-black text-white">
+          <tr><th class="px-4 py-2 text-left">Approach</th><th class="px-4 py-2 text-left">Time</th><th class="px-4 py-2 text-left">Disk</th><th class="px-4 py-2 text-left">Shared history</th></tr>
+        </thead>
+        <tbody>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">git clone</td><td class="px-4 py-2">10-30s</td><td class="px-4 py-2">Full copy</td><td class="px-4 py-2 text-red-600 font-bold">No</td></tr>
+          <tr class="border-t border-gray-200"><td class="px-4 py-2 font-mono">git worktree add</td><td class="px-4 py-2">&lt;1s</td><td class="px-4 py-2">Just working files</td><td class="px-4 py-2 text-green-600 font-bold">Yes</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Worktrees share the object store, so all branches, tags, and reflog are instantly available. An agent in a worktree can <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git log main</code> without fetching. It can create a branch and push it. And when it's done, removing the worktree is just deleting a directory and a pointer &mdash; the objects stay in the shared store.</p>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Gotchas</h2>
+
+    <h3 class="text-xl font-black mt-8 mb-3">You can't check out the same branch in two worktrees</h3>
+    <p>Git won't let you. If <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">main</code> is checked out in the primary worktree, a child worktree can't also check out <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">main</code>. It has to use a detached HEAD or a new branch. Claude Code handles this by creating ephemeral branches like <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">claude/worktree-abc123</code>.</p>
+
+    <h3 class="text-xl font-black mt-8 mb-3"><code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">node_modules</code> isn't shared</h3>
+    <p>Each worktree gets its own working directory, which means <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">node_modules/</code> doesn't exist in a fresh worktree. The agent needs to run <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">npm ci</code> before running tests. We accept this cost (~15s) because the alternative &mdash; symlinks or shared <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">node_modules</code> &mdash; causes more problems than it solves.</p>
+
+    <h3 class="text-xl font-black mt-8 mb-3">Stale worktrees are invisible clutter</h3>
+    <p>If an agent crashes or the user kills the session, the worktree stays behind. <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree list</code> will show orphans. Run <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">git worktree prune</code> periodically, or have your cleanup agent do it.</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-white">$ git worktree list</span>
+<span class="text-green-400">/Users/kody/Projects/openrappter            7b582d1 [main]</span>
+<span class="text-yellow-300">/tmp/claude-501/.../worktree-abc   (detached HEAD)</span>  <span class="text-gray-500">← active agent</span>
+<span class="text-yellow-300">/tmp/claude-501/.../worktree-def   (detached HEAD)</span>  <span class="text-gray-500">← active agent</span>
+<span class="text-red-400">.claude/worktrees/fix-install-bugs  abc1234 [fix/install-bugs]</span>  <span class="text-gray-500">← stale?</span>
+
+<span class="text-white">$ git worktree remove .claude/worktrees/fix-install-bugs</span>
+<span class="text-green-400">Removed.</span>
+    </div>
+
+    <h2 class="text-2xl font-black mt-12 mb-4">Teaching It to Your AI</h2>
+    <p>The real trick isn't using worktrees &mdash; it's making sure every agent <em>knows</em> about the rules. We put our worktree etiquette directly in <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CLAUDE.md</code> at the repo root. Claude Code reads this file at the start of every conversation. The rules become part of the agent's operating instructions.</p>
+
+    <div class="bg-editor rounded-xl p-5 my-6 font-mono text-sm text-green-400 overflow-x-auto border-2 border-black">
+<span class="text-gray-500"># CLAUDE.md (excerpt)</span>
+
+<span class="text-blue-400">## Git Worktree Etiquette</span>
+
+<span class="text-white">Multiple Claude Code sessions may run concurrently using git worktrees.</span>
+<span class="text-white">Be a good neighbor:</span>
+
+<span class="text-white">- Never modify the main worktree from a child worktree.</span>
+<span class="text-white">- Clean up after yourself.</span>
+<span class="text-white">- Don't force-delete worktrees with uncommitted changes.</span>
+<span class="text-white">- Use unique branch names.</span>
+<span class="text-white">- Don't rebase or reset shared branches from a worktree.</span>
+<span class="text-white">- Ignore .claude/worktrees/ in git status.</span>
+<span class="text-white">- Lock long-running worktrees.</span>
+    </div>
+
+    <p>This is the same pattern we use for everything: tell the AI once, in the right file, and it applies the rule to every future session. No reminders needed.</p>
+
+    <hr class="my-12 border-t-2 border-black">
+
+    <h2 class="text-2xl font-black mt-12 mb-4">The Takeaway</h2>
+    <p>Git worktrees are a 10-year-old feature that becomes essential the moment you have more than one AI agent working on your repo. The setup is trivial:</p>
+    <ol class="list-decimal list-inside space-y-2 my-4">
+      <li>Spawn agents with <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">isolation: "worktree"</code></li>
+      <li>Put the rules in <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">CLAUDE.md</code></li>
+      <li>Clean up when you're done</li>
+    </ol>
+    <p>The agents get full repo access without stepping on each other. The main worktree stays clean. And the orchestrator can launch as many parallel tasks as it needs &mdash; PR reviews, test runs, builds, research &mdash; without worrying about shared state.</p>
+    <p>Be a good neighbor. Your worktrees will thank you.</p>
+
+  </div>
+
+  <div class="mt-16 p-8 border-2 border-black rounded-2xl bg-white">
+    <h3 class="text-xl font-black mb-2">Stay in the loop 🦖</h3>
+    <p class="text-gray-600 mb-4">Engineering posts, release notes, and the occasional debugging war story.</p>
+    <a href="https://rappter.beehiiv.com/" target="_blank" class="inline-block bg-black text-white font-bold px-6 py-3 rounded-xl hover:bg-accent transition-colors">📬 Subscribe to Newsletter →</a>
+  </div>
+
+</article>
+
+<footer class="border-t-2 border-black bg-white px-6 py-8 mt-16">
+  <div class="max-w-3xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <span class="font-black">🦖 openrappter</span>
+    <div class="flex gap-6 text-sm font-semibold">
+      <a href="../" class="hover:text-accent">Home</a>
+      <a href="zen-pong.html" class="hover:text-accent">Zen Pong</a>
+      <a href="debugging-cron-and-silent-failures.html" class="hover:text-accent">Debugging Cron</a>
+      <a href="https://github.com/kody-w/openrappter" class="hover:text-accent">GitHub</a>
+      <a href="https://rappter.com" class="hover:text-accent">rappter.com</a>
+    </div>
+    <span class="text-sm text-gray-500">Built with 🦖 by <a href="https://github.com/kody-w" class="underline">Kody W</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

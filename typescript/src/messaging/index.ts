@@ -22,3 +22,6 @@ export type { EdgeManifest, EdgeChannelMeta, EdgeChannelFile, SignedBlob, EdgeSy
 
 export { doubleEncrypt, doubleDecrypt, verifyEnvelope, deriveEphemeralKey, generateNonce, keyFingerprint } from './ephemeral.js';
 export type { EphemeralEnvelope, DoubleEnvelope } from './ephemeral.js';
+
+export { generatePlatformKeyPair, platformSign, platformVerify, hashEncrypted, communitySig, isVerified, keyIdFromPublic } from './platform-key.js';
+export type { PlatformKeyPair, PlatformSignature, VerificationResult } from './platform-key.js';

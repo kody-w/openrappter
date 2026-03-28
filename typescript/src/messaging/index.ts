@@ -19,3 +19,6 @@ export type { PIIMap, StrippedResult, PIIVaultEntry } from './pii.js';
 
 export { EdgePublisher, EdgePuller, signBlob, verifyBlob, signChannel, verifyChannel } from './edge-sync.js';
 export type { EdgeManifest, EdgeChannelMeta, EdgeChannelFile, SignedBlob, EdgeSyncConfig } from './edge-sync.js';
+
+export { doubleEncrypt, doubleDecrypt, verifyEnvelope, deriveEphemeralKey, generateNonce, keyFingerprint } from './ephemeral.js';
+export type { EphemeralEnvelope, DoubleEnvelope } from './ephemeral.js';

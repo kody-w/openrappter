@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenRappter — Digital Twin Relay</title>
+<style>
+  :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #c9d1d9; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --orange: #d29922; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+  .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .status { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .header .status.connected { color: var(--green); }
+  .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+
+  /* Setup panel */
+  .setup { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .setup h2 { font-size: 15px; margin-bottom: 12px; color: var(--accent); }
+  .setup label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .setup input, .setup textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 14px; margin-bottom: 12px; font-family: inherit; }
+  .setup textarea { resize: vertical; min-height: 60px; }
+  .setup .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  .setup .btn:hover { opacity: 0.9; }
+
+  /* Chat area */
+  .chat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+  .chat-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; font-weight: 600; }
+  .messages { padding: 16px; max-height: 500px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
+  .msg.incoming { background: var(--bg); align-self: flex-start; border: 1px solid var(--border); }
+  .msg.outgoing { background: #1a3a5c; align-self: flex-end; border: 1px solid #264a6e; }
+  .msg .sender { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .msg .copy-btn { font-size: 11px; color: var(--accent); cursor: pointer; float: right; margin-left: 8px; }
+  .msg .copy-btn:hover { text-decoration: underline; }
+  .msg .content { white-space: pre-wrap; }
+
+  /* Input area */
+  .input-area { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .input-area textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: var(--text); font-size: 14px; font-family: inherit; resize: none; min-height: 44px; }
+  .input-area .send-btn { background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .input-area .send-btn:hover { opacity: 0.9; }
+
+  /* Persona cards */
+  .personas { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .persona-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .persona-card .name { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .persona-card .desc { font-size: 12px; color: var(--muted); }
+
+  /* Pending queue */
+  .queue { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  .queue h3 { font-size: 14px; margin-bottom: 10px; color: var(--orange); }
+  .queue-item { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; align-items: flex-start; gap: 10px; }
+  .queue-item .text { flex: 1; font-size: 13px; white-space: pre-wrap; }
+  .queue-item .actions { display: flex; flex-direction: column; gap: 4px; }
+  .queue-item .actions button { font-size: 11px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; background: var(--surface); color: var(--text); }
+  .queue-item .actions .copy { color: var(--accent); border-color: var(--accent); }
+  .queue-item .actions .done { color: var(--green); border-color: var(--green); }
+  .empty { color: var(--muted); font-size: 13px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span style="font-size: 24px;">🦖</span>
+  <h1>Digital Twin Relay</h1>
+  <div class="status" id="status">Disconnected</div>
+</div>
+
+<div class="container">
+
+  <!-- Setup -->
+  <div class="setup" id="setup-panel">
+    <h2>Step 1: Group Chat Setup</h2>
+    <label>Group Chat Name (so we can find it in Messages DB)</label>
+    <input type="text" id="group-name" placeholder="OpenRappter Arena" value="OpenRappter Arena">
+    <label>Gateway URL</label>
+    <input type="text" id="gateway-url" value="ws://127.0.0.1:18790">
+    <button class="btn" id="connect-btn" onclick="connectGateway()">Connect</button>
+    <button class="btn" style="background: var(--green); margin-left: 8px;" onclick="findGroupChat()">Find Group Chat</button>
+    <div id="group-info" style="margin-top: 10px; font-size: 13px; color: var(--muted);"></div>
+  </div>
+
+  <!-- Personas -->
+  <div class="personas" id="personas"></div>
+
+  <!-- Pending messages to copy into iMessage -->
+  <div class="queue" id="queue-panel" style="display: none;">
+    <h3>Outgoing — Copy these into the group chat</h3>
+    <div id="queue-items"></div>
+  </div>
+
+  <!-- Chat log -->
+  <div class="chat">
+    <div class="chat-header">Group Chat Log</div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <textarea id="input" placeholder="Paste an incoming group chat message here (format: sender: message)" rows="2"></textarea>
+      <button class="send-btn" onclick="submitMessage()">Send to AI</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let ws = null;
+let personas = [];
+let pendingQueue = [];
+let groupChatId = '';
+
+// Load personas from env config format
+const DEFAULT_PERSONAS = [
+  { contact: 'rappter2@icloud.com', name: 'Rex', emoji: '🦕', description: 'a witty dinosaur AI who loves puns and gives surprisingly good advice' },
+  { contact: 'rappter1@icloud.com', name: 'Nova', emoji: '🌟', description: 'a curious and creative AI stargazer who speaks in metaphors' },
+];
+
+function init() {
+  personas = DEFAULT_PERSONAS;
+  renderPersonas();
+}
+
+function renderPersonas() {
+  const el = document.getElementById('personas');
+  el.innerHTML = personas.map(p => `
+    <div class="persona-card">
+      <div class="name">${p.emoji} ${p.name}</div>
+      <div class="desc">${p.description}</div>
+    </div>
+  `).join('');
+}
+
+function addMessage(sender, content, type = 'incoming') {
+  const el = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = `msg ${type}`;
+  div.innerHTML = `
+    <div class="sender">${sender}</div>
+    <div class="content">${escapeHtml(content)}</div>
+    ${type === 'outgoing' ? `<span class="copy-btn" onclick="copyText(this, '${escapeAttr(content)}')">copy</span>` : ''}
+  `;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function addToQueue(persona, content) {
+  const fullMsg = `${persona.emoji} ${persona.name}: ${content}`;
+  pendingQueue.push({ persona, content: fullMsg, id: Date.now() });
+  renderQueue();
+}
+
+function renderQueue() {
+  const panel = document.getElementById('queue-panel');
+  const items = document.getElementById('queue-items');
+  if (pendingQueue.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  items.innerHTML = pendingQueue.map((q, i) => `
+    <div class="queue-item">
+      <div class="text">${escapeHtml(q.content)}</div>
+      <div class="actions">
+        <button class="copy" onclick="copyQueueItem(${i})">Copy</button>
+        <button class="done" onclick="markSent(${i})">Sent</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function copyQueueItem(idx) {
+  navigator.clipboard.writeText(pendingQueue[idx].content);
+}
+
+function markSent(idx) {
+  const item = pendingQueue.splice(idx, 1)[0];
+  addMessage(item.persona?.name || 'AI', item.content, 'outgoing');
+  renderQueue();
+}
+
+async function submitMessage() {
+  const input = document.getElementById('input');
+  const raw = input.value.trim();
+  if (!raw) return;
+  input.value = '';
+
+  // Parse "sender: message" format or just treat as message
+  let sender = 'unknown';
+  let content = raw;
+  const colonIdx = raw.indexOf(':');
+  if (colonIdx > 0 && colonIdx < 30) {
+    sender = raw.substring(0, colonIdx).trim();
+    content = raw.substring(colonIdx + 1).trim();
+  }
+
+  addMessage(sender, content, 'incoming');
+
+  // Pick next persona (round robin)
+  const personaIdx = Math.floor(Math.random() * personas.length);
+  const persona = personas[personaIdx];
+
+  // Call gateway to get response
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const id = Date.now();
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      method: 'agent.chat',
+      params: {
+        message: `[Group chat message from ${sender}]: ${content}`,
+        conversationKey: `twin_group_${persona.name}`,
+      },
+    }));
+
+    // Response handled in ws.onmessage
+    ws._pendingPersona = persona;
+  } else {
+    // No gateway — just queue a placeholder
+    addToQueue(persona, `(Gateway offline — type a response for ${persona.name})`);
+  }
+}
+
+function connectGateway() {
+  const url = document.getElementById('gateway-url').value;
+  try {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      document.getElementById('status').textContent = 'Connected';
+      document.getElementById('status').className = 'status connected';
+    };
+    ws.onclose = () => {
+      document.getElementById('status').textContent = 'Disconnected';
+      document.getElementById('status').className = 'status';
+    };
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        if (data.result?.content) {
+          const persona = ws._pendingPersona || personas[0];
+          addToQueue(persona, data.result.content);
+        }
+      } catch {}
+    };
+  } catch (e) {
+    document.getElementById('group-info').textContent = 'Connection failed: ' + e.message;
+  }
+}
+
+async function findGroupChat() {
+  const name = document.getElementById('group-name').value.trim();
+  const info = document.getElementById('group-info');
+  info.textContent = 'Looking for group chat...';
+
+  // This calls the gateway to query the Messages DB
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    // Use shell agent to query sqlite
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'find-group',
+      method: 'agents.execute',
+      params: {
+        agentName: 'Shell',
+        kwargs: {
+          action: 'bash',
+          command: `sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier, display_name FROM chat WHERE display_name LIKE '%${name}%' OR chat_identifier LIKE '%${name}%' LIMIT 5"`,
+        },
+      },
+    }));
+    info.textContent = 'Query sent — check results in the chat log.';
+  } else {
+    info.innerHTML = `
+      <strong>Manual setup:</strong> Create a group chat in Messages with rappter1 & rappter2, name it "${name}",
+      then run this in Terminal:<br>
+      <code style="background:#0d1117;padding:4px 8px;border-radius:4px;font-size:12px;">
+        sqlite3 ~/Library/Messages/chat.db "SELECT chat_identifier FROM chat WHERE display_name = '${name}'"
+      </code><br>
+      Paste the chat_identifier below, then add it to your .env as IMESSAGE_GROUP_CHATS=&lt;id&gt;
+    `;
+  }
+}
+
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeAttr(s) { return s.replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function copyText(el, text) { navigator.clipboard.writeText(text); el.textContent = 'copied!'; setTimeout(() => el.textContent = 'copy', 1500); }
+
+init();
+</script>
+</body>
+</html>

@@ -3,16 +3,24 @@ import SQLite3
 import AppKit
 
 /// Bridge between the OpenRappter daemon and iMessage via the menubar app.
-/// The menubar app has FDA; the daemon doesn't. So the daemon asks the app
-/// to read messages via a local HTTP endpoint.
+/// The menubar app has FDA; the daemon doesn't. So the bridge reads messages
+/// directly via SQLite and forwards them to the daemon for AI processing.
 @MainActor
 public class MessageBridge {
     private var lastReadTimestamp: Double = Date().timeIntervalSince1970
     private var sentByAI: Set<String> = []
-    private let chatIdentifier: String
+    private let selfId: String
+    private let watchContacts: [String]
     
-    public init(chatIdentifier: String) {
-        self.chatIdentifier = chatIdentifier
+    /// Per-conversation real-time mode toggle.
+    /// When a message starts with @, toggle real-time mode for that chat.
+    /// Real-time ON → respond to every message.
+    /// Real-time OFF → only respond to @ messages.
+    private var realtimeMode: [String: Bool] = [:]
+    
+    public init(selfId: String, watchContacts: [String] = []) {
+        self.selfId = selfId
+        self.watchContacts = watchContacts
     }
     
     private func log(_ msg: String) {
@@ -29,19 +37,18 @@ public class MessageBridge {
     }
 
     public func start() {
-        // Check if sqlite3 can actually read chat.db (the only reliable method)
         let home = NSHomeDirectory()
         let dbPath = "\(home)/Library/Messages/chat.db"
         var testDb: OpaquePointer?
         let hasFDA = sqlite3_open_v2(dbPath, &testDb, SQLITE_OPEN_READONLY, nil) == SQLITE_OK
         if hasFDA { sqlite3_close(testDb) }
 
-        log("FDA check: \(hasFDA ? "YES (sqlite3)" : "NO — need Full Disk Access")")
-        log("Chat identifier: \(chatIdentifier)")
+        log("FDA check: \(hasFDA ? "YES ✅" : "NO — need Full Disk Access")")
+        log("Self ID: \(selfId)")
+        log("Watch contacts: \(watchContacts.joined(separator: ", "))")
 
         if !hasFDA {
             log("Opening System Settings for FDA grant...")
-            // Open FDA settings and show alert
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                 NSWorkspace.shared.open(url)
             }
@@ -60,56 +67,84 @@ public class MessageBridge {
     private var pollCount = 0
     private func pollAndForward() async {
         pollCount += 1
-        let messages = MessageReader.readMessages(
-            chatIdentifier: chatIdentifier,
-            sinceTimestamp: lastReadTimestamp,
-            limit: 5
-        )
-
-        // Log every 20 polls (~60s) or when messages found
-        if pollCount % 20 == 0 || !messages.isEmpty {
-            log("Poll #\(pollCount): \(messages.count) msgs, since=\(lastReadTimestamp)")
-        }
-
-        for msg in messages {
-            // Skip AI-sent messages
-            let prefix = String(msg.text.prefix(20))
-            if msg.isFromMe && sentByAI.contains(prefix) {
-                sentByAI.remove(prefix)
-                lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
-                continue
-            }
+        
+        // Poll all watched chats: self + allowed contacts
+        let allIds = ([selfId] + watchContacts).filter { !$0.isEmpty }
+        
+        for chatId in allIds {
+            let messages = MessageReader.readMessages(
+                chatIdentifier: chatId,
+                sinceTimestamp: lastReadTimestamp,
+                limit: 5
+            )
             
-            // Skip if it starts with the AI prefix (our own response)
-            if msg.text.hasPrefix("🦖") {
-                lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
-                continue
+            if pollCount % 20 == 0 && chatId == allIds.first {
+                log("Poll #\(pollCount): checking \(allIds.count) chats, since=\(lastReadTimestamp)")
             }
 
-            // Only respond if message contains @rappter tag
-            let lower = msg.text.lowercased()
-            guard lower.contains("@rappter") || lower.contains("@rapp") else {
+            for msg in messages {
+                // Skip AI-sent messages
+                let prefix = String(msg.text.prefix(20))
+                if msg.isFromMe && sentByAI.contains(prefix) {
+                    sentByAI.remove(prefix)
+                    lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                    continue
+                }
+                
+                // Skip our own responses (emoji prefix)
+                if msg.text.hasPrefix("🦖") {
+                    lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                    continue
+                }
+                
+                // Skip from-me messages that aren't self-chat
+                if msg.isFromMe && chatId != selfId {
+                    lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                    continue
+                }
+
+                let content = msg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isAtMessage = content.hasPrefix("@")
+                let wasRealtime = realtimeMode[chatId] ?? false
+                
+                if isAtMessage {
+                    if wasRealtime {
+                        // Exit real-time mode
+                        realtimeMode[chatId] = false
+                        log("💬 [\(chatId)] real-time chat OFF")
+                        sendMessage("🦖 Real-time chat ended. Send @ to start again.", to: chatId)
+                        lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                        continue
+                    } else {
+                        // Enter real-time mode
+                        realtimeMode[chatId] = true
+                        log("💬 [\(chatId)] real-time chat ON")
+                        // Strip @ and process the message
+                        let cleaned = String(content.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let text = cleaned.isEmpty ? "Hey" : cleaned
+                        log("📩 [\(chatId)] \(msg.isFromMe ? "self" : msg.sender): \(text.prefix(80))")
+                        await forwardToDaemon(text: text, chatId: chatId, fromMe: msg.isFromMe, guid: msg.guid)
+                        lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                        continue
+                    }
+                }
+                
+                if !wasRealtime {
+                    // Not in real-time and no @ prefix — skip
+                    lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
+                    continue
+                }
+                
+                // Real-time mode: forward everything
+                log("📩 [\(chatId)] \(msg.isFromMe ? "self" : msg.sender): \(content.prefix(80))")
+                await forwardToDaemon(text: content, chatId: chatId, fromMe: msg.isFromMe, guid: msg.guid)
                 lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
-                continue
             }
-
-            log("📩 Message from \(msg.isFromMe ? "self" : "other"): \(msg.text.prefix(50))")
-
-            // Strip the @rappter tag before forwarding
-            let cleanText = msg.text
-                .replacingOccurrences(of: "@rappter", with: "", options: .caseInsensitive)
-                .replacingOccurrences(of: "@rapp", with: "", options: .caseInsensitive)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            // Forward to daemon
-            await forwardToDaemon(text: cleanText.isEmpty ? msg.text : cleanText, fromMe: msg.isFromMe, guid: msg.guid)
-            lastReadTimestamp = max(lastReadTimestamp, msg.timestamp)
         }
     }
     
-    private func forwardToDaemon(text: String, fromMe: Bool, guid: String) async {
-        // Call the daemon's chat endpoint and get a response
-        guard let url = URL(string: "http://127.0.0.1:18790/rpc") else { return }
+    private func forwardToDaemon(text: String, chatId: String, fromMe: Bool, guid: String) async {
+        guard let url = URL(string: "http://127.0.0.1:\(AppConstants.defaultPort)/rpc") else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -120,7 +155,7 @@ public class MessageBridge {
             "method": "chat.send",
             "params": [
                 "message": text,
-                "sessionId": "imessage_self"
+                "sessionId": "imessage_\(chatId)"
             ],
             "id": 1
         ]
@@ -132,23 +167,22 @@ public class MessageBridge {
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let result = json["result"] as? [String: Any],
                let content = result["content"] as? String {
-                // Strip |||VOICE||| if present
                 var reply = content
                 if let voiceIdx = reply.range(of: "|||VOICE|||") {
                     reply = String(reply[..<voiceIdx.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
                 }
                 
-                // Send reply via iMessage
                 let replyText = "🦖 \(reply)"
                 sentByAI.insert(String(replyText.prefix(20)))
-                sendMessage(replyText)
+                sendMessage(replyText, to: chatId)
+                log("🦖 → [\(chatId)]: \(reply.prefix(80))")
             }
         } catch {
-            print("[MessageBridge] Daemon call failed: \(error)")
+            log("Daemon call failed: \(error)")
         }
     }
     
-    private func sendMessage(_ text: String) {
+    private func sendMessage(_ text: String, to chatId: String) {
         let escaped = text
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -157,7 +191,7 @@ public class MessageBridge {
         let script = """
         tell application "Messages"
             set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant "\(chatIdentifier)" of targetService
+            set targetBuddy to participant "\(chatId)" of targetService
             send "\(escaped)" to targetBuddy
         end tell
         """

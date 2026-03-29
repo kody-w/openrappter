@@ -52,7 +52,13 @@ public class MessageBridge {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                 NSWorkspace.shared.open(url)
             }
+            return // Don't start polling without FDA
         }
+
+        // Signal the Node daemon to disable its own iMessage poller
+        let flagPath = NSHomeDirectory() + "/.openrappter/bridge-active"
+        FileManager.default.createFile(atPath: flagPath, contents: Data())
+        log("Bridge flag written — daemon iMessage poller will yield")
 
         Task {
             while true {
@@ -149,13 +155,16 @@ public class MessageBridge {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
         
+        // Use the sync "agent" RPC method (not chat.send which is async)
         let rpc: [String: Any] = [
             "jsonrpc": "2.0",
-            "method": "chat.send",
+            "method": "agent",
             "params": [
                 "message": text,
-                "sessionId": "imessage_\(chatId)"
+                "sessionId": "imessage_\(chatId)",
+                "channelId": "imessage"
             ],
             "id": 1
         ]

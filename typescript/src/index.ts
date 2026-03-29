@@ -760,8 +760,11 @@ program
     const env = await loadEnv();
     const config = await loadConfig();
 
+    const isMac = process.platform === 'darwin';
+    const totalSteps = isMac ? 4 : 3;
+
     // ── Step 1: GitHub Copilot (device code OAuth — no gh CLI required) ────
-    log.step('Step 1 of 3 — GitHub Copilot');
+    log.step(`Step 1 of ${totalSteps} — GitHub Copilot`);
 
     let copilotReady = false;
 
@@ -905,7 +908,8 @@ program
 
     // ── iMessage channel (macOS only) ──
     let imessageReady = false;
-    if (process.platform === 'darwin') {
+    if (isMac) {
+      log.step(`Step 2 of ${totalSteps} — iMessage Channel`);
       const setupIMessage = await confirm({
         message: 'Enable iMessage channel? (AI responds to texts via your Mac)',
         initialValue: true,
@@ -961,8 +965,8 @@ program
       }
     }
 
-    // ── Step 2: Save & Verify ───────────────────────────────────────────────
-    log.step('Step 2 of 3 — Saving configuration');
+    // ── Step N: Save & Verify ───────────────────────────────────────────────
+    log.step(`Step ${isMac ? 3 : 2} of ${totalSteps} — Saving configuration`);
 
     // Bug 2 fix: wrap saves in try/catch with specific error messages
     const savedKeys = Object.keys(env);
@@ -988,6 +992,7 @@ program
     // ── Summary ─────────────────────────────────────────────────────────────
     const summaryLines = [
       `Copilot:  ${copilotReady ? '✅ Connected' : '❌ Not configured'}`,
+      ...(isMac ? [`iMessage: ${imessageReady ? '✅ Connected' : '⬚  Not configured'}`] : []),
       `Telegram: ${telegramReady ? '✅ Connected' : '⬚  Not configured'}`,
       '',
       `Config:   ${CONFIG_FILE}`,
@@ -995,8 +1000,8 @@ program
     ];
     note(summaryLines.join('\n'), '📋 Setup Summary');
 
-    // ── Step 4: Start daemon automatically ──────────────────────────────────
-    log.step('Step 3 of 3 — Starting background daemon');
+    // ── Step N: Start daemon automatically ──────────────────────────────────
+    log.step(`Step ${totalSteps} of ${totalSteps} — Starting background daemon`);
 
     let daemonStarted = false;
     const daemonPort = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);

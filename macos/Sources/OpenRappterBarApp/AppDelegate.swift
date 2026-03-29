@@ -153,6 +153,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Re-authenticate (visible when auth might be stale)
+        menu.addItem(NSMenuItem(title: "🔑 Re-authenticate GitHub", action: #selector(menuReauth), keyEquivalent: "r"))
+
         // Settings
         let settingsMenuItem = NSMenuItem(title: "Settings...", action: #selector(menuOpenSettings), keyEquivalent: ",")
         menu.addItem(settingsMenuItem)
@@ -204,6 +207,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuOpenSettings() {
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
+    @objc private func menuReauth() {
+        // Start device code re-auth flow and restart gateway after
+        settingsViewModel.accountViewModel.authService.login()
+        
+        // Show the chat panel so user can see the auth code
+        windowManager.showPanel(relativeTo: statusItem.button)
+        
+        // After auth completes, restart gateway to pick up new token
+        Task {
+            // Wait for auth to complete (poll state)
+            while settingsViewModel.accountViewModel.authService.authState == .authenticating {
+                try? await Task.sleep(for: .seconds(1))
+            }
+            if settingsViewModel.accountViewModel.authService.authState == .authenticated {
+                settingsViewModel.accountViewModel.restartGatewayAfterAuth()
+            }
+        }
     }
 
     @objc private func menuQuit() {

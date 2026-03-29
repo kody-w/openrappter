@@ -147,12 +147,45 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   let groupPersonaIndex = 0;
   const personaList = Array.from(personaAssistants.entries()); // [[contact, {assistant, emoji}], ...]
 
+  // Real-time chat mode: per-conversation toggle via @ prefix
+  // @ message → enter real-time mode (respond to everything)
+  // Another @ message → exit real-time mode (go silent until next @)
+  const realtimeChatMode = new Map<string, boolean>();
+
   if (process.platform === 'darwin' && imessageSelfId) {
     imessage.onMessage(async (incoming) => {
       try {
         const contactKey = (incoming.conversationId || '').toLowerCase();
         const isGroupChat = !!(incoming.metadata as any)?.isGroupChat;
         const senderKey = (incoming.sender || '').toLowerCase();
+        const rawContent = (incoming.content || '').trim();
+
+        // ── @ toggle: real-time chat mode ──
+        const isAtMessage = rawContent.startsWith('@');
+        const convId = incoming.conversationId || contactKey;
+        const wasRealtime = realtimeChatMode.get(convId) ?? false;
+
+        if (isAtMessage) {
+          if (wasRealtime) {
+            // Exit real-time mode
+            realtimeChatMode.set(convId, false);
+            log(`${EMOJI} iMessage [${convId}] real-time chat OFF`);
+            await imessage.send(convId, {
+              channel: 'imessage',
+              content: `${EMOJI} Real-time chat ended. Send @ to start again.`,
+            });
+            return;
+          } else {
+            // Enter real-time mode — strip the @ and process the message
+            realtimeChatMode.set(convId, true);
+            incoming.content = rawContent.slice(1).trim() || 'Hey';
+            log(`${EMOJI} iMessage [${convId}] real-time chat ON`);
+          }
+        } else if (!wasRealtime) {
+          // Not in real-time mode and no @ prefix → ignore
+          log(`${EMOJI} iMessage [${convId}] skipped (not in real-time mode — send @ to start)`);
+          return;
+        }
 
         let activeAssistant: InstanceType<typeof Assistant>;
         let activeEmoji: string;

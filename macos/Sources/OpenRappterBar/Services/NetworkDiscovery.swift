@@ -84,23 +84,24 @@ public final class NetworkDiscovery {
         )
 
         return await withCheckedContinuation { continuation in
-            // Guard against double-resume (timeout + state change race)
-            let resumed = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-            resumed.initialize(to: false)
+            let lock = NSLock()
+            var resumed = false
 
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     connection.cancel()
-                    if !resumed.pointee {
-                        resumed.pointee = true
-                        continuation.resume(returning: true)
-                    }
+                    lock.lock()
+                    let shouldResume = !resumed
+                    resumed = true
+                    lock.unlock()
+                    if shouldResume { continuation.resume(returning: true) }
                 case .failed, .cancelled:
-                    if !resumed.pointee {
-                        resumed.pointee = true
-                        continuation.resume(returning: false)
-                    }
+                    lock.lock()
+                    let shouldResume = !resumed
+                    resumed = true
+                    lock.unlock()
+                    if shouldResume { continuation.resume(returning: false) }
                 default:
                     break
                 }
@@ -110,12 +111,11 @@ public final class NetworkDiscovery {
             // Timeout after 1 second
             DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                 connection.cancel()
-                if !resumed.pointee {
-                    resumed.pointee = true
-                    continuation.resume(returning: false)
-                }
-                resumed.deinitialize(count: 1)
-                resumed.deallocate()
+                lock.lock()
+                let shouldResume = !resumed
+                resumed = true
+                lock.unlock()
+                if shouldResume { continuation.resume(returning: false) }
             }
         }
     }

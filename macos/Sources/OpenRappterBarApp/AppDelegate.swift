@@ -2,6 +2,27 @@ import AppKit
 import SwiftUI
 import ServiceManagement
 import OpenRappterBarLib
+import os
+
+// MARK: - Crash Telemetry
+
+/// Writes crash/exception info to ~/.openrappter/crash.log for easy debugging.
+private func setupCrashTelemetry() {
+    // NSExceptionHandler via ObjC-compatible approach
+    // Use NSSetUncaughtExceptionHandler with a global function (no captures)
+    NSSetUncaughtExceptionHandler(crashHandler)
+}
+
+private func crashHandler(_ exception: NSException) {
+    let logPath = NSHomeDirectory() + "/.openrappter/crash.log"
+    let msg = """
+    [\(ISO8601DateFormatter().string(from: Date()))] CRASH: Uncaught NSException
+    Name: \(exception.name.rawValue)
+    Reason: \(exception.reason ?? "unknown")
+    Stack:\n\(exception.callStackSymbols.joined(separator: "\n"))
+    """
+    try? msg.write(toFile: logPath, atomically: true, encoding: .utf8)
+}
 
 // MARK: - App Delegate
 
@@ -20,6 +41,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        setupCrashTelemetry()
+        
+        // Log launch for debugging
+        let logPath = NSHomeDirectory() + "/.openrappter/menubar.log"
+        let launchMsg = "[\(ISO8601DateFormatter().string(from: Date()))] OpenRappterBar launched (PID \(ProcessInfo.processInfo.processIdentifier))\n"
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            handle.seekToEndOfFile()
+            handle.write(launchMsg.data(using: .utf8) ?? Data())
+            handle.closeFile()
+        } else {
+            FileManager.default.createFile(atPath: logPath, contents: launchMsg.data(using: .utf8))
+        }
+
         setupStatusItem()
         windowManager = ChatWindowManager(viewModel: viewModel, settingsViewModel: settingsViewModel)
         observeViewModel()

@@ -154,13 +154,23 @@ export class IMessageChannel extends EventEmitter {
 
     // Check if menu bar bridge is handling iMessage (has FDA + reads content directly)
     const bridgeFlagPath = path.join(os.homedir(), '.openrappter', 'bridge-active');
-    if (fs.existsSync(bridgeFlagPath)) {
+    const isBridgeRunning = () => {
+      if (!fs.existsSync(bridgeFlagPath)) return false;
+      // Verify the menu bar app is actually running (flag can be stale after crash)
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('pgrep -x "OpenRappterBar" 2>/dev/null', { timeout: 2000 }).toString().trim();
+        return out.length > 0;
+      } catch { return false; }
+    };
+
+    if (isBridgeRunning()) {
       console.log('iMessage: menu bar bridge is active — daemon poller yielding');
-      // Still set up the timer but make it a no-op; bridge handles reads + @ toggle
       this.pollTimer = setInterval(() => {
-        // Periodically re-check if bridge is still active
-        if (!fs.existsSync(bridgeFlagPath)) {
-          console.log('iMessage: bridge flag removed — daemon resuming polling');
+        if (!isBridgeRunning()) {
+          console.log('iMessage: bridge no longer running — daemon resuming polling');
+          // Clean up stale flag
+          try { fs.unlinkSync(bridgeFlagPath); } catch {}
           if (this.pollTimer) clearInterval(this.pollTimer);
           const fn = this.useSqlite
             ? () => this.pollSqliteMessages()
@@ -169,8 +179,12 @@ export class IMessageChannel extends EventEmitter {
               : () => this.pollAppleScriptMessages();
           this.pollTimer = setInterval(fn, this.config.pollInterval!);
         }
-      }, 10000); // Check every 10s
+      }, 10000);
       return;
+    } else if (fs.existsSync(bridgeFlagPath)) {
+      // Stale flag from crashed bridge — clean up
+      try { fs.unlinkSync(bridgeFlagPath); } catch {}
+      console.log('iMessage: cleaned up stale bridge flag');
     }
 
     const pollFn = this.useSqlite

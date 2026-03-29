@@ -150,7 +150,11 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   // Real-time chat mode: per-conversation toggle via @ prefix
   // @ message → enter real-time mode (respond to everything)
   // Another @ message → exit real-time mode (go silent until next @)
+  // Default: allowed contacts start in real-time mode (they opted in via config)
   const realtimeChatMode = new Map<string, boolean>();
+  for (const contact of imessageAllowedContacts) {
+    if (contact) realtimeChatMode.set(contact.toLowerCase(), true);
+  }
 
   if (process.platform === 'darwin' && imessageSelfId) {
     imessage.onMessage(async (incoming) => {

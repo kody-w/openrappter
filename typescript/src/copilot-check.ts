@@ -98,12 +98,16 @@ export async function resolveGithubToken(): Promise<string | null> {
     const data = fs.readFileSync(envFile, 'utf-8');
     for (const line of data.split(/\r?\n/)) {
       const trimmed = line.trim();
-      if (trimmed.startsWith('GITHUB_TOKEN=')) {
-        let val = trimmed.slice('GITHUB_TOKEN='.length).trim();
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-          val = val.slice(1, -1);
+      // install.sh saves as COPILOT_GITHUB_TOKEN; onboard may save as GITHUB_TOKEN
+      const prefixes = ['COPILOT_GITHUB_TOKEN=', 'GITHUB_TOKEN='];
+      for (const prefix of prefixes) {
+        if (trimmed.startsWith(prefix)) {
+          let val = trimmed.slice(prefix.length).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (val.length > 0) return val;
         }
-        if (val.length > 0) return val;
       }
     }
   } catch { /* no .env file */ }

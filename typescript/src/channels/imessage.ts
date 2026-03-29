@@ -151,6 +151,28 @@ export class IMessageChannel extends EventEmitter {
     }
 
     this.lastMessageTime = Date.now();
+
+    // Check if menu bar bridge is handling iMessage (has FDA + reads content directly)
+    const bridgeFlagPath = path.join(os.homedir(), '.openrappter', 'bridge-active');
+    if (fs.existsSync(bridgeFlagPath)) {
+      console.log('iMessage: menu bar bridge is active — daemon poller yielding');
+      // Still set up the timer but make it a no-op; bridge handles reads + @ toggle
+      this.pollTimer = setInterval(() => {
+        // Periodically re-check if bridge is still active
+        if (!fs.existsSync(bridgeFlagPath)) {
+          console.log('iMessage: bridge flag removed — daemon resuming polling');
+          if (this.pollTimer) clearInterval(this.pollTimer);
+          const fn = this.useSqlite
+            ? () => this.pollSqliteMessages()
+            : (this.lastWalSize > 0)
+              ? () => this.pollWalMutation()
+              : () => this.pollAppleScriptMessages();
+          this.pollTimer = setInterval(fn, this.config.pollInterval!);
+        }
+      }, 10000); // Check every 10s
+      return;
+    }
+
     const pollFn = this.useSqlite
       ? () => this.pollSqliteMessages()
       : (this.lastWalSize > 0)

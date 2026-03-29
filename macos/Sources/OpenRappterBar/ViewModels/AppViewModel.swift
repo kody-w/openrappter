@@ -158,26 +158,8 @@ public final class AppViewModel {
         Task { await sessionStore.load() }
         // Start fleet live polling
         fleetViewModel.startRefreshing()
-        // Start iMessage bridge if configured
-        if let imsgId = ProcessInfo.processInfo.environment["IMESSAGE_SELF_ID"], !imsgId.isEmpty {
-            let bridge = MessageBridge(chatIdentifier: imsgId)
-            self.messageBridge = bridge
-            bridge.start()
-        } else {
-            // Try reading from .env file
-            let envPath = NSHomeDirectory() + "/.openrappter/.env"
-            if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
-                for line in envContent.split(separator: "\n") {
-                    if line.hasPrefix("IMESSAGE_SELF_ID=") {
-                        let id = String(line.dropFirst("IMESSAGE_SELF_ID=".count))
-                        let bridge = MessageBridge(chatIdentifier: id)
-                        self.messageBridge = bridge
-                        bridge.start()
-                        break
-                    }
-                }
-            }
-        }
+        // Start iMessage bridge if configured — reads self ID + allowed contacts
+        startMessageBridge()
     }
 
     /// Detect a running gateway and connect to it automatically.
@@ -379,5 +361,35 @@ public final class AppViewModel {
         if seconds < 60 { return "\(seconds)s" }
         if seconds < 3600 { return "\(seconds / 60)m" }
         return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
+    }
+
+    // MARK: - iMessage Bridge
+
+    private func startMessageBridge() {
+        let envPath = NSHomeDirectory() + "/.openrappter/.env"
+        var selfId = ProcessInfo.processInfo.environment["IMESSAGE_SELF_ID"] ?? ""
+        var contacts: [String] = []
+
+        // Read from .env if not in environment
+        if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
+            for line in envContent.split(separator: "\n") {
+                let l = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+                if l.hasPrefix("IMESSAGE_SELF_ID=") && selfId.isEmpty {
+                    selfId = l.replacingOccurrences(of: "IMESSAGE_SELF_ID=", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                }
+                if l.hasPrefix("IMESSAGE_ALLOWED_CONTACTS=") {
+                    let raw = l.replacingOccurrences(of: "IMESSAGE_ALLOWED_CONTACTS=", with: "")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                    contacts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                }
+            }
+        }
+
+        guard !selfId.isEmpty else { return }
+
+        let bridge = MessageBridge(selfId: selfId, watchContacts: contacts)
+        self.messageBridge = bridge
+        bridge.start()
     }
 }

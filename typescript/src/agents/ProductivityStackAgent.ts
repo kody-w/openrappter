@@ -12,7 +12,7 @@ class ReportAssemblerAgent extends BasicAgent {
     super('ReportAssembler', metadata);
   }
   async perform(_kwargs: Record<string, unknown>): Promise<string> {
-    const upstream = (this.context.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
+    const upstream = (this.context?.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
     const docScan = upstream['docScan'] ?? {};
     const hnPipeline = upstream['hnPipeline'] ?? {};
     const notesIntake = upstream['notesIntake'] ?? {};
@@ -35,7 +35,7 @@ class ReportStorageAgent extends BasicAgent {
     this.memoryAgent = memoryAgent || new MemoryAgent();
   }
   async perform(_kwargs: Record<string, unknown>): Promise<string> {
-    const upstream = (this.context.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
+    const upstream = (this.context?.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
     const reportSlush = upstream['report'] ?? {};
     const summary = (reportSlush['summary'] as string) || 'Productivity report (no summary)';
     const result = await this.memoryAgent.execute({ action: 'remember', message: `Productivity Report: ${summary}`, theme: 'productivity_report', tags: ['productivity', 'daily'], importance: 3 });

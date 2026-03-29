@@ -21,7 +21,7 @@ class MockNotesIntakeAgent extends BasicAgent {
 class MockReportAssemblerAgent extends BasicAgent {
   constructor() { super('ReportAssembler', { name: 'ReportAssembler', description: 'Assembles report', parameters: { type: 'object', properties: {}, required: [] } } as AgentMetadata); }
   async perform(): Promise<string> {
-    const upstream = (this.context.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
+    const upstream = (this.context?.upstream_slush ?? {}) as Record<string, Record<string, unknown>>;
     const d = upstream['docScan'] ?? {}, h = upstream['hnPipeline'] ?? {}, n = upstream['notesIntake'] ?? {};
     const report = { workspace: { total_files: d['total_files'] ?? 0, todo_count: d['todo_count'] ?? 0 }, hacker_news: { highlight_count: h['highlight_count'] ?? 0, top_highlight: h['top_highlight'] ?? null }, notes: { action_item_count: n['action_item_count'] ?? 0, high_urgency_count: n['high_urgency_count'] ?? 0 } };
     const summary = `${report.workspace.total_files} files scanned, ${report.workspace.todo_count} TODOs found. ${report.hacker_news.highlight_count} HN highlights. ${report.notes.action_item_count} action items (${report.notes.high_urgency_count} urgent).`;

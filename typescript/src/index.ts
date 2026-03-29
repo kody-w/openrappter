@@ -299,11 +299,87 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       } catch (err) {
         const errMsg = (err as Error).message || 'Unknown error';
         console.error(`${EMOJI} iMessage reply error:`, errMsg);
-        // Send a friendly error reply instead of leaving the user hanging
+
+        const isAuthError = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Copilot');
+        if (isAuthError) {
+          // ── Self-healing: auto-refresh token, or send device code via iMessage ──
+          try {
+            log(`${EMOJI} Auth error detected — attempting auto-refresh…`);
+
+            // Step 1: Clear cached Copilot API token and retry
+            const { clearCachedCopilotToken } = await import('./providers/copilot-token.js');
+            clearCachedCopilotToken();
+
+            // Step 2: Try to re-resolve and validate the GitHub token
+            const { resolveGithubToken } = await import('./copilot-check.js');
+            const refreshedToken = await resolveGithubToken();
+
+            if (refreshedToken) {
+              const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+              try {
+                await resolveCopilotApiToken({ githubToken: refreshedToken });
+                log(`${EMOJI} Token auto-refreshed — retrying message…`);
+                // Retry the AI call using default assistant
+                const retryResult = await assistant.getResponse(
+                  incoming.content, undefined, undefined,
+                  `imessage_${incoming.conversationId || 'self'}`
+                );
+                let retryReply = retryResult.content;
+                const vi = retryReply.indexOf('|||VOICE|||');
+                if (vi !== -1) retryReply = retryReply.substring(0, vi).trim();
+                await imessage.send(incoming.conversationId!, {
+                  channel: 'imessage',
+                  content: `${EMOJI} ${retryReply}`,
+                });
+                log(`${EMOJI} iMessage → ${incoming.conversationId}: (retry) ${retryReply.slice(0, 80)}…`);
+                return; // Success — skip error message
+              } catch {
+                log(`${EMOJI} Token refresh failed — falling back to device code flow`);
+              }
+            }
+
+            // Step 3: GitHub token is dead — start device code flow via iMessage
+            const { deviceCodeLogin } = await import('./providers/copilot-auth.js');
+            await imessage.send(incoming.conversationId!, {
+              channel: 'imessage',
+              content: `${EMOJI} My GitHub token expired. Starting re-auth — I'll send you a code to enter on GitHub…`,
+            });
+
+            const newToken = await deviceCodeLogin((code, url) => {
+              // Send the device code via iMessage so the user can auth from their phone
+              imessage.send(incoming.conversationId!, {
+                channel: 'imessage',
+                content: `${EMOJI} 🔑 Auth needed!\n\nGo to: ${url}\nEnter code: ${code}\n\nI'll wake back up once you authorize.`,
+              }).catch(() => {});
+              log(`${EMOJI} Device code sent via iMessage: ${code}`);
+            });
+
+            // Save the new token everywhere
+            const { saveGitHubToken } = await import('./copilot-check.js');
+            saveGitHubToken(newToken, 'device_code');
+            const { loadEnv, saveEnv } = await import('./env.js');
+            const envData = await loadEnv();
+            envData.GITHUB_TOKEN = newToken;
+            envData.COPILOT_GITHUB_TOKEN = newToken;
+            await saveEnv(envData);
+            process.env.GITHUB_TOKEN = newToken;
+            process.env.COPILOT_GITHUB_TOKEN = newToken;
+
+            await imessage.send(incoming.conversationId!, {
+              channel: 'imessage',
+              content: `${EMOJI} ✅ Re-authenticated! I'm back online. What were you saying?`,
+            });
+            log(`${EMOJI} Token refreshed via iMessage device code flow`);
+            return;
+          } catch (refreshErr) {
+            console.error(`${EMOJI} Auto-refresh failed:`, (refreshErr as Error).message);
+          }
+        }
+
+        // Fallback: send error message
         try {
-          const isAuthError = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Copilot');
           const reply = isAuthError
-            ? 'My brain is offline — GitHub token needs a refresh. I\'ll try to sort it out.'
+            ? 'My brain is offline — I tried to auto-fix but couldn\'t. Run `openrappter onboard` on your Mac to re-auth.'
             : 'Something went wrong processing that. Try again in a moment.';
           await imessage.send(incoming.conversationId!, {
             channel: 'imessage',

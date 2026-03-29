@@ -64,6 +64,9 @@ export class IMessageChannel extends EventEmitter {
   private seenMessageIds = new Set<string>();
   private sentByAI = new Set<string>(); // Track AI-sent message timestamps to avoid loops
   private useSqlite = false; // Whether sqlite3 FDA-based polling is available
+  private lastWalSize = 0; // WAL file size for mutation detection
+  private lastWalMtime = 0; // WAL file mtime for mutation detection
+  private lastLogMessageId = 0; // Last messageID seen in imagent logs
 
   constructor(config: IMessageConfig) {
     super();
@@ -110,9 +113,11 @@ export class IMessageChannel extends EventEmitter {
    * Connect using AppleScript polling (with sqlite upgrade if FDA available)
    */
   private async connectAppleScript(): Promise<void> {
+    const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
+    const walPath = dbPath + '-wal';
+
     // Detect if sqlite3 can read the Messages database (requires Full Disk Access)
     try {
-      const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
       const { stdout } = await execAsync(
         `sqlite3 "${dbPath}" "SELECT MAX(rowid) FROM message" 2>/dev/null`,
         { timeout: 3000 },
@@ -124,14 +129,33 @@ export class IMessageChannel extends EventEmitter {
         console.log(`iMessage: using sqlite poller (FDA available, starting from rowid ${maxRowId})`);
       }
     } catch {
-      // No FDA — fall back to AppleScript
-      console.log('iMessage: using AppleScript poller (no FDA)');
+      // No FDA — check if WAL stat-based mutation detection works
+      try {
+        const walStats = fs.statSync(walPath);
+        this.lastWalSize = walStats.size;
+        this.lastWalMtime = walStats.mtimeMs;
+        // Seed the last log messageID so we don't replay old messages
+        try {
+          const { stdout: logOut } = await execAsync(
+            `log show --predicate 'process == "imagent"' --last 10s --info 2>/dev/null | grep -o 'messageID: [0-9]*' | tail -1`,
+            { timeout: 5000 },
+          );
+          const match = logOut.trim().match(/messageID: (\d+)/);
+          if (match) this.lastLogMessageId = parseInt(match[1], 10);
+        } catch { /* no recent logs */ }
+        console.log(`iMessage: using WAL mutation poller (no FDA, wal size ${this.lastWalSize})`);
+      } catch {
+        // Can't even stat WAL — fall back to legacy AppleScript
+        console.log('iMessage: using AppleScript poller (no FDA)');
+      }
     }
 
     this.lastMessageTime = Date.now();
     const pollFn = this.useSqlite
       ? () => this.pollSqliteMessages()
-      : () => this.pollAppleScriptMessages();
+      : (this.lastWalSize > 0)
+        ? () => this.pollWalMutation()
+        : () => this.pollAppleScriptMessages();
     this.pollTimer = setInterval(pollFn, this.config.pollInterval!);
   }
 
@@ -241,6 +265,130 @@ export class IMessageChannel extends EventEmitter {
    */
   onMessage(handler: (message: IncomingMessage) => void | Promise<void>): void {
     this.messageHandler = handler;
+  }
+
+  /**
+   * Poll for new messages via WAL file mutation detection + system log parsing.
+   * Works on macOS 26+ where AppleScript `messages of chat` is broken and
+   * sqlite3 requires Full Disk Access.
+   *
+   * Strategy:
+   * 1. stat() the WAL file — if size/mtime changed, a write occurred
+   * 2. Parse `log show` for imagent entries with new messageIDs
+   * 3. Extract direction (from-me), timestamp, and any available metadata
+   * 4. If FDA becomes available mid-session, auto-upgrade to sqlite poller
+   */
+  private async pollWalMutation(): Promise<void> {
+    if (!this.messageHandler) return;
+
+    try {
+      const walPath = path.join(os.homedir(), 'Library/Messages/chat.db-wal');
+
+      // Check WAL file for size/mtime mutation
+      let walStats: fs.Stats;
+      try {
+        walStats = fs.statSync(walPath);
+      } catch {
+        return; // WAL file gone — db might be checkpointing
+      }
+
+      const sizeChanged = walStats.size !== this.lastWalSize;
+      const mtimeChanged = walStats.mtimeMs !== this.lastWalMtime;
+
+      if (!sizeChanged && !mtimeChanged) return; // No mutation
+
+      this.lastWalSize = walStats.size;
+      this.lastWalMtime = walStats.mtimeMs;
+
+      // Mutation detected — check if FDA became available (auto-upgrade)
+      try {
+        const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
+        const { stdout } = await execAsync(
+          `sqlite3 "${dbPath}" "SELECT MAX(rowid) FROM message" 2>/dev/null`,
+          { timeout: 3000 },
+        );
+        const maxRowId = parseInt(stdout.trim(), 10);
+        if (maxRowId > 0) {
+          // FDA granted! Upgrade to sqlite poller
+          this.useSqlite = true;
+          this.lastMessageRowId = maxRowId;
+          console.log('iMessage: FDA detected — upgrading to sqlite poller');
+          if (this.pollTimer) clearInterval(this.pollTimer);
+          this.pollTimer = setInterval(() => this.pollSqliteMessages(), this.config.pollInterval!);
+          return;
+        }
+      } catch { /* still no FDA */ }
+
+      // Parse imagent log for new incoming messages
+      const selfId = this.config.selfChatId || '';
+      const watchIds = this.config.watchContacts || [];
+      const allWatchIds = [selfId, ...watchIds].filter(Boolean);
+
+      const { stdout: logOut } = await execAsync(
+        `log show --predicate 'process == "imagent"' --last 10s --info 2>/dev/null | grep "from-me: NO" | grep "messageID:"`,
+        { timeout: 5000 },
+      );
+
+      if (!logOut.trim()) return;
+
+      for (const line of logOut.trim().split('\n')) {
+        // Extract messageID
+        const idMatch = line.match(/messageID:\s*(\d+)/);
+        if (!idMatch) continue;
+        const messageId = parseInt(idMatch[1], 10);
+
+        // Skip already-seen or pre-startup messages
+        if (messageId <= this.lastLogMessageId) continue;
+        if (messageId === 0) continue; // Placeholder entries
+        this.lastLogMessageId = messageId;
+
+        // Extract timestamp from log line (first field)
+        const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        const timestamp = tsMatch ? new Date(tsMatch[1]).toISOString() : new Date().toISOString();
+
+        // We detected an incoming message but can't read its content without FDA.
+        // Emit with a placeholder that the handler can act on.
+        // Try one more time to get content via sqlite (in case FDA was just granted):
+        let content = '[New iMessage received — grant Full Disk Access to Terminal for content]';
+        let conversationId = allWatchIds[0] || 'unknown';
+
+        try {
+          const dbPath = path.join(os.homedir(), 'Library/Messages/chat.db');
+          const { stdout: msgOut } = await execAsync(
+            `sqlite3 "${dbPath}" "SELECT COALESCE(m.text,''), c.chat_identifier FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.rowid JOIN chat c ON c.rowid = cmj.chat_id WHERE m.rowid = ${messageId}" 2>/dev/null`,
+            { timeout: 3000 },
+          );
+          if (msgOut.trim()) {
+            const parts = msgOut.trim().split('|');
+            if (parts[0]) content = parts[0];
+            if (parts[1]) {
+              const chatId = parts[1];
+              conversationId = allWatchIds.find(id => chatId.includes(id)) || chatId;
+            }
+          }
+        } catch { /* no FDA — use placeholder content */ }
+
+        const incoming: IncomingMessage = {
+          id: `log-${messageId}`,
+          channel: 'imessage',
+          conversationId,
+          sender: 'contact',
+          senderName: 'Contact',
+          content,
+          timestamp,
+          attachments: [],
+          metadata: {
+            isSelfChat: false,
+            walMutation: true,
+            messageId,
+          },
+        };
+
+        this.messageHandler(incoming);
+      }
+    } catch {
+      // Log parsing failed — silently skip this poll cycle
+    }
   }
 
   /**

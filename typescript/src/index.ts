@@ -159,13 +159,23 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
         const isGroupChat = !!(incoming.metadata as any)?.isGroupChat;
         const senderKey = (incoming.sender || '').toLowerCase();
         const rawContent = (incoming.content || '').trim();
+        const isWalPlaceholder = !!(incoming.metadata as any)?.walMutation
+          && rawContent.startsWith('[New iMessage');
 
         // ── @ toggle: real-time chat mode ──
-        const isAtMessage = rawContent.startsWith('@');
+        // WAL poller can't read content → auto-respond to everything
+        const isAtMessage = !isWalPlaceholder && rawContent.startsWith('@');
         const convId = incoming.conversationId || contactKey;
         const wasRealtime = realtimeChatMode.get(convId) ?? false;
 
-        if (isAtMessage) {
+        if (isWalPlaceholder) {
+          // WAL mode: always respond (can't filter by content)
+          // Menu bar bridge handles @ toggle when FDA is available
+          if (!wasRealtime) {
+            realtimeChatMode.set(convId, true);
+            log(`${EMOJI} iMessage [${convId}] WAL mode — auto real-time`);
+          }
+        } else if (isAtMessage) {
           if (wasRealtime) {
             // Exit real-time mode
             realtimeChatMode.set(convId, false);

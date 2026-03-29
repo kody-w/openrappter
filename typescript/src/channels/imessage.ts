@@ -320,12 +320,15 @@ export class IMessageChannel extends EventEmitter {
       } catch { /* still no FDA */ }
 
       // Parse imagent log for new incoming messages
+      // The log contains rich metadata even though content is <private>:
+      //   messageID, from-me, read, delivered, finished, date-read, audio, flags
       const selfId = this.config.selfChatId || '';
       const watchIds = this.config.watchContacts || [];
       const allWatchIds = [selfId, ...watchIds].filter(Boolean);
 
+      // Look for stored/built messages that are incoming and finished
       const { stdout: logOut } = await execAsync(
-        `log show --predicate 'process == "imagent"' --last 10s --info 2>/dev/null | grep "from-me: NO" | grep "messageID:"`,
+        `log show --predicate 'process == "imagent"' --last 10s --info 2>/dev/null | grep "from-me: NO" | grep "finished: YES" | grep "messageID:"`,
         { timeout: 5000 },
       );
 
@@ -336,20 +339,30 @@ export class IMessageChannel extends EventEmitter {
         const idMatch = line.match(/messageID:\s*(\d+)/);
         if (!idMatch) continue;
         const messageId = parseInt(idMatch[1], 10);
-
-        // Skip already-seen or pre-startup messages
-        if (messageId <= this.lastLogMessageId) continue;
         if (messageId === 0) continue; // Placeholder entries
+
+        // Skip already-seen messages
+        if (messageId <= this.lastLogMessageId) continue;
+
+        // Extract read/delivered status from the log line
+        const isRead = /\bread: YES\b/.test(line);
+        const isDelivered = /\bdelivered: YES\b/.test(line);
+        const isAudio = /\baudio: YES\b/.test(line);
+        const dateReadMatch = line.match(/date-read:'([\d.]+)'/);
+        const dateRead = dateReadMatch ? parseFloat(dateReadMatch[1]) : 0;
+
+        // Skip lines that are just read-receipt updates (date-read changed but
+        // we already emitted this messageID as a new message)
+        if (isRead && this.seenMessageIds.has(`log-${messageId}`)) continue;
+
         this.lastLogMessageId = messageId;
 
         // Extract timestamp from log line (first field)
         const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
         const timestamp = tsMatch ? new Date(tsMatch[1]).toISOString() : new Date().toISOString();
 
-        // We detected an incoming message but can't read its content without FDA.
-        // Emit with a placeholder that the handler can act on.
-        // Try one more time to get content via sqlite (in case FDA was just granted):
-        let content = '[New iMessage received — grant Full Disk Access to Terminal for content]';
+        // Try to read content via sqlite (in case FDA was just granted)
+        let content = '[New iMessage received — grant Full Disk Access to read message content]';
         let conversationId = allWatchIds[0] || 'unknown';
 
         try {
@@ -368,8 +381,11 @@ export class IMessageChannel extends EventEmitter {
           }
         } catch { /* no FDA — use placeholder content */ }
 
+        const msgKey = `log-${messageId}`;
+        this.seenMessageIds.add(msgKey);
+
         const incoming: IncomingMessage = {
-          id: `log-${messageId}`,
+          id: msgKey,
           channel: 'imessage',
           conversationId,
           sender: 'contact',
@@ -381,10 +397,20 @@ export class IMessageChannel extends EventEmitter {
             isSelfChat: false,
             walMutation: true,
             messageId,
+            read: isRead,
+            delivered: isDelivered,
+            audio: isAudio,
+            dateRead: dateRead > 0 ? dateRead : undefined,
           },
         };
 
         this.messageHandler(incoming);
+      }
+
+      // Limit seen messages set size
+      if (this.seenMessageIds.size > 1000) {
+        const arr = Array.from(this.seenMessageIds);
+        this.seenMessageIds = new Set(arr.slice(-500));
       }
     } catch {
       // Log parsing failed — silently skip this poll cycle

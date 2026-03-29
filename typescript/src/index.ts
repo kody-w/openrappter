@@ -194,7 +194,21 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
         log(`${activeEmoji} iMessage ← ${incoming.senderName}: ${incoming.content}`);
 
-        const result = await activeAssistant.getResponse(incoming.content, undefined, undefined, chatKey);
+        // Build context-enriched prompt — include read status and metadata hints
+        const meta = (incoming.metadata || {}) as Record<string, unknown>;
+        let prompt = incoming.content;
+        if (meta.walMutation) {
+          // WAL poller mode: content may be placeholder, enrich with available signals
+          const hints: string[] = [];
+          if (meta.read) hints.push('message has been read');
+          if (meta.delivered) hints.push('message was delivered');
+          if (meta.audio) hints.push('message is an audio clip');
+          if (hints.length > 0) {
+            prompt += `\n[Signal: ${hints.join(', ')}]`;
+          }
+        }
+
+        const result = await activeAssistant.getResponse(prompt, undefined, undefined, chatKey);
         let reply = result.content;
         const voiceIdx = reply.indexOf('|||VOICE|||');
         let voiceText = '';

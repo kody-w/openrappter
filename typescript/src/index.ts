@@ -968,35 +968,40 @@ program
     if (isMac) {
       log.step(`Step 2 of ${totalSteps} — iMessage Channel`);
       const setupIMessage = await confirm({
-        message: 'Enable iMessage channel? (AI responds to texts via your Mac)',
+        message: 'Enable iMessage channel? (AI responds to your texts via this Mac)',
         initialValue: true,
       });
 
       if (!isCancel(setupIMessage) && setupIMessage) {
-        // Try to auto-detect from chat.db
-        const detectedId = '';
+        // Try to auto-detect iMessage addresses from chat.db
+        let detectedIds: string[] = [];
+        let selfEmail = '';
         try {
           const { stdout } = await execAsync(
             `sqlite3 ~/Library/Messages/chat.db "SELECT DISTINCT chat_identifier FROM chat WHERE chat_identifier LIKE '%@%' OR chat_identifier LIKE '+%' ORDER BY ROWID DESC LIMIT 10"`,
             { timeout: 5000 }
           );
-          const ids = stdout.trim().split('\n').filter(Boolean);
-          if (ids.length > 0) {
-            log.info('Found iMessage addresses:');
-            for (const id of ids.slice(0, 5)) {
+          detectedIds = stdout.trim().split('\n').filter(Boolean);
+          if (detectedIds.length > 0) {
+            log.info('Found iMessage conversations:');
+            for (const id of detectedIds.slice(0, 5)) {
               console.log(`    ${id}`);
             }
+            // Prefer an @icloud.com or @me.com email as self ID
+            selfEmail = detectedIds.find(id => id.includes('@icloud.com') || id.includes('@me.com')) || detectedIds[0];
           }
         } catch {
-          log.warn('Could not read Messages database — grant Full Disk Access to Terminal');
+          log.warn('Could not read Messages database — grant Full Disk Access for auto-detection');
           log.info('System Settings → Privacy & Security → Full Disk Access → add Terminal');
         }
 
+        // Ask for the user's own iMessage ID (Apple ID email or phone)
         const imsgId = await text({
-          message: 'iMessage address to watch (phone +1... or email):',
-          placeholder: detectedId || 'rappter1@icloud.com',
+          message: 'Your iMessage ID (Apple ID email or phone number):',
+          initialValue: selfEmail,
+          placeholder: 'you@icloud.com',
           validate: (val) => {
-            if (!val) return undefined;
+            if (!val) return 'An iMessage ID is required — enter your Apple ID email or phone';
             if (!val.includes('@') && !val.startsWith('+')) {
               return 'Enter an email or phone number starting with +';
             }
@@ -1007,17 +1012,26 @@ program
         if (!isCancel(imsgId) && imsgId && typeof imsgId === 'string' && imsgId.length > 0) {
           env.IMESSAGE_SELF_ID = imsgId;
           imessageReady = true;
-          log.success(`iMessage channel set to ${imsgId}`);
+          log.success(`iMessage self ID set to ${imsgId}`);
 
-          // Ask for allowed outbound contacts (digital twin sends)
+          // Ask which contacts should trigger AI responses
+          // Pre-fill with detected phone numbers/contacts (excluding self)
+          const otherContacts = detectedIds
+            .filter(id => id !== imsgId && (id.startsWith('+') || !id.includes('@icloud.com')))
+            .slice(0, 3)
+            .join(', ');
+
           const allowedContacts = await text({
-            message: 'Allowed iMessage recipients for AI to send to (comma-separated, or blank to skip):',
-            placeholder: 'rappter1@icloud.com, +15551234567',
+            message: 'Which contacts should the AI respond to? (comma-separated phones/emails):',
+            initialValue: otherContacts,
+            placeholder: '+15551234567, friend@icloud.com',
           });
           if (!isCancel(allowedContacts) && allowedContacts && typeof allowedContacts === 'string' && allowedContacts.trim().length > 0) {
             env.IMESSAGE_ALLOWED_CONTACTS = allowedContacts.trim();
-            log.success(`iMessage allowed contacts: ${allowedContacts.trim()}`);
+            log.success(`AI will respond to: ${allowedContacts.trim()}`);
           }
+
+          log.info('Contacts can send @ to start real-time chat, and @ again to stop.');
         }
       }
     }

@@ -81,16 +81,21 @@ export async function hasCopilotAvailable(): Promise<boolean> {
  * while GH_TOKEN/GITHUB_TOKEN from gh CLI typically do not.
  */
 export async function resolveGithubToken(): Promise<string | null> {
+  // Collect all candidate tokens in priority order, validate the first one that works
+  const candidates: { token: string; source: string }[] = [];
+
   // 1. Explicit Copilot token always wins
-  if (process.env.COPILOT_GITHUB_TOKEN) return process.env.COPILOT_GITHUB_TOKEN;
+  if (process.env.COPILOT_GITHUB_TOKEN) {
+    candidates.push({ token: process.env.COPILOT_GITHUB_TOKEN, source: 'env:COPILOT_GITHUB_TOKEN' });
+  }
 
   // 2. Cached credentials file (saved by device code flow or onboard)
   const cached = loadCachedGitHubToken();
-  if (cached) return cached;
+  if (cached) candidates.push({ token: cached, source: 'credentials' });
 
   // 3. Auth profiles store (saved by auth.login RPC or web UI device-code flow)
   const profileToken = loadAuthProfileToken();
-  if (profileToken) return profileToken;
+  if (profileToken) candidates.push({ token: profileToken, source: 'auth-profile' });
 
   // 4. ~/.openrappter/.env file (saved by installer/onboard — has Copilot access)
   try {
@@ -98,7 +103,6 @@ export async function resolveGithubToken(): Promise<string | null> {
     const data = fs.readFileSync(envFile, 'utf-8');
     for (const line of data.split(/\r?\n/)) {
       const trimmed = line.trim();
-      // install.sh saves as COPILOT_GITHUB_TOKEN; onboard may save as GITHUB_TOKEN
       const prefixes = ['COPILOT_GITHUB_TOKEN=', 'GITHUB_TOKEN='];
       for (const prefix of prefixes) {
         if (trimmed.startsWith(prefix)) {
@@ -106,7 +110,9 @@ export async function resolveGithubToken(): Promise<string | null> {
           if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
             val = val.slice(1, -1);
           }
-          if (val.length > 0) return val;
+          if (val.length > 0) {
+            candidates.push({ token: val, source: `env-file:${prefix.replace('=', '')}` });
+          }
         }
       }
     }
@@ -114,15 +120,39 @@ export async function resolveGithubToken(): Promise<string | null> {
 
   // 5. Generic env vars (may not have Copilot access)
   const envToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (envToken) return envToken;
+  if (envToken) candidates.push({ token: envToken, source: 'env:GH_TOKEN|GITHUB_TOKEN' });
 
   // 6. gh CLI token (least preferred — usually different OAuth app)
   try {
     const { stdout } = await execAsync('gh auth token 2>/dev/null');
-    if (stdout.trim()) return stdout.trim();
+    if (stdout.trim()) candidates.push({ token: stdout.trim(), source: 'gh-cli' });
   } catch { /* gh not available */ }
 
-  return null;
+  // Deduplicate by token value, preserving priority order
+  const seen = new Set<string>();
+  const unique = candidates.filter(c => {
+    if (seen.has(c.token)) return false;
+    seen.add(c.token);
+    return true;
+  });
+
+  // Try each candidate — validate with Copilot API, return first that works
+  for (const candidate of unique) {
+    try {
+      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+      await resolveCopilotApiToken({ githubToken: candidate.token });
+      // This token works — sync it to all sources so they stay consistent
+      if (candidate.source !== 'credentials') {
+        saveGitHubToken(candidate.token, 'device_code');
+      }
+      return candidate.token;
+    } catch {
+      // Token doesn't work with Copilot — try next
+    }
+  }
+
+  // No working token found
+  return unique.length > 0 ? unique[0].token : null;
 }
 
 /**

@@ -12,11 +12,13 @@ public struct ChatContainerView: View {
     @State private var showCronPopover = false
     let isCompact: Bool
     var onOpenFullWindow: (() -> Void)?
+    var onReauth: (() -> Void)?
 
-    public init(viewModel: AppViewModel, isCompact: Bool = true, onOpenFullWindow: (() -> Void)? = nil) {
+    public init(viewModel: AppViewModel, isCompact: Bool = true, onOpenFullWindow: (() -> Void)? = nil, onReauth: (() -> Void)? = nil) {
         self.viewModel = viewModel
         self.isCompact = isCompact
         self.onOpenFullWindow = onOpenFullWindow
+        self.onReauth = onReauth
     }
 
     public var body: some View {
@@ -42,7 +44,8 @@ public struct ChatContainerView: View {
                 isStreaming: {
                     if case .streaming = viewModel.chatViewModel.chatState { return true }
                     return false
-                }()
+                }(),
+                onReauth: onReauth
             )
             .frame(minHeight: 200, maxHeight: .infinity)
 
@@ -75,7 +78,8 @@ public struct ChatContainerView: View {
                     isStreaming: {
                         if case .streaming = viewModel.chatViewModel.chatState { return true }
                         return false
-                    }()
+                    }(),
+                    onReauth: onReauth
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 

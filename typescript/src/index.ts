@@ -851,7 +851,7 @@ program
       }
       console.log(`\n${EMOJI} Hatching into your menu bar...\n`);
       try {
-        const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
+        const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.8.0-bar/OpenRappter-Bar-1.8.0.dmg';
         const tmpDmg = '/tmp/OpenRappter-Bar.dmg';
         const mountPoint = '/tmp/openrappter-bar-mount';
         await execAsync(`curl -sL "${dmgUrl}" -o "${tmpDmg}"`, { timeout: 60000 });
@@ -864,7 +864,7 @@ program
         console.log(`${EMOJI} OpenRappter hatched into your menu bar!`);
       } catch (err) {
         console.error(`${EMOJI} Install failed: ${(err as Error).message}`);
-        console.log(`${EMOJI} Download manually: https://github.com/kody-w/openrappter/releases/tag/v1.0.0-bar`);
+        console.log(`${EMOJI} Download manually: https://github.com/kody-w/openrappter/releases/tag/v1.8.0-bar`);
       }
       return;
     }
@@ -1336,7 +1336,7 @@ program
           const s = spinner();
           s.start('Hatching into your menu bar…');
           try {
-            const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.0.0-bar/OpenRappter-Bar-1.0.0.dmg';
+            const dmgUrl = 'https://github.com/kody-w/openrappter/releases/download/v1.8.0-bar/OpenRappter-Bar-1.8.0.dmg';
             const tmpDmg = '/tmp/OpenRappter-Bar.dmg';
             const mountPoint = '/tmp/openrappter-bar-mount';
 
@@ -1362,7 +1362,7 @@ program
           } catch (err) {
             s.stop('Menu bar install failed — you can download it manually');
             log.warn(`Error: ${(err as Error).message}`);
-            log.info('Download: https://github.com/kody-w/openrappter/releases/tag/v1.0.0-bar');
+            log.info('Download: https://github.com/kody-w/openrappter/releases/tag/v1.8.0-bar');
           }
         }
       } else {

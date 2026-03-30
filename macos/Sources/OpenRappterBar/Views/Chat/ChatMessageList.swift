@@ -6,13 +6,15 @@ public struct ChatMessageList: View {
     let messages: [ChatMessage]
     let streamingText: String
     let isStreaming: Bool
+    var onReauth: (() -> Void)?
 
     @State private var showScrollToBottom = false
 
-    public init(messages: [ChatMessage], streamingText: String = "", isStreaming: Bool = false) {
+    public init(messages: [ChatMessage], streamingText: String = "", isStreaming: Bool = false, onReauth: (() -> Void)? = nil) {
         self.messages = messages
         self.streamingText = streamingText
         self.isStreaming = isStreaming
+        self.onReauth = onReauth
     }
 
     public var body: some View {
@@ -29,7 +31,7 @@ public struct ChatMessageList: View {
                                     dateSeparator(for: message.timestamp)
                                 }
 
-                                ChatMessageView(message: message)
+                                ChatMessageView(message: message, onReauth: onReauth)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
 

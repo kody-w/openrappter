@@ -4,9 +4,11 @@ import SwiftUI
 
 public struct ChatMessageView: View {
     let message: ChatMessage
+    var onReauth: (() -> Void)?
 
-    public init(message: ChatMessage) {
+    public init(message: ChatMessage, onReauth: (() -> Void)? = nil) {
         self.message = message
+        self.onReauth = onReauth
     }
 
     public var body: some View {
@@ -82,20 +84,35 @@ public struct ChatMessageView: View {
     // MARK: - Error
 
     private var errorBubble: some View {
-        HStack(alignment: .top, spacing: 6) {
+        let isAuthError = message.content.contains("401") || message.content.contains("403")
+            || message.content.contains("Copilot") || message.content.contains("token")
+
+        return HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.red)
                 .frame(width: 24, height: 24)
 
-            Text(message.content)
-                .font(.callout)
-                .foregroundStyle(.red)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.red.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(message.content)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                if isAuthError, let onReauth {
+                    Button(action: onReauth) {
+                        Label("Re-authenticate GitHub", systemImage: "key.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

@@ -210,19 +210,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuReauth() {
-        // Start device code re-auth flow and restart gateway after
-        settingsViewModel.accountViewModel.authService.login()
+        let auth = settingsViewModel.accountViewModel.authService
+        auth.login()
         
-        // Show the chat panel so user can see the auth code
+        // Show the chat panel so user sees the code
         windowManager.showPanel(relativeTo: statusItem.button)
         
-        // After auth completes, restart gateway to pick up new token
+        // Post the code into chat and restart after auth
         Task {
-            // Wait for auth to complete (poll state)
-            while settingsViewModel.accountViewModel.authService.authState == .authenticating {
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(0.5))
+                if !auth.userCode.isEmpty { break }
+            }
+            if !auth.userCode.isEmpty {
+                viewModel.chatViewModel.addSystemMessage(
+                    "🔑 Go to \(auth.verificationURL) and enter code: **\(auth.userCode)**"
+                )
+            }
+            while auth.authState == .authenticating {
                 try? await Task.sleep(for: .seconds(1))
             }
-            if settingsViewModel.accountViewModel.authService.authState == .authenticated {
+            if auth.authState == .authenticated {
+                viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
                 settingsViewModel.accountViewModel.restartGatewayAfterAuth()
             }
         }

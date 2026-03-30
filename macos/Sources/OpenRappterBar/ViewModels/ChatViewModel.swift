@@ -185,6 +185,16 @@ public final class ChatViewModel {
         chatState = .idle
     }
 
+    /// Add a system message to the current chat (for auth prompts, status updates, etc.)
+    public func addSystemMessage(_ content: String) {
+        let msg = ChatMessage(
+            role: .system,
+            content: content,
+            sessionKey: currentSessionKey ?? "system"
+        )
+        messages.append(msg)
+    }
+
     // MARK: - Private
 
     private func parseGatewayMessage(_ data: [String: Any], sessionKey: String) -> ChatMessage? {

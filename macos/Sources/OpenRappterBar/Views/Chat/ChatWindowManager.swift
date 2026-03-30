@@ -40,6 +40,41 @@ public final class ChatWindowManager {
         self.settingsViewModel = settingsViewModel
     }
 
+    /// Re-auth handler: starts device code flow, shows code in chat, restarts gateway
+    private func handleReauth() {
+        let auth = settingsViewModel.accountViewModel.authService
+
+        // Post the code into the chat so the user can see it
+        auth.login()
+
+        // Watch for the code to appear and post it into chat
+        Task {
+            // Wait for device code to be populated
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(0.5))
+                if !auth.userCode.isEmpty { break }
+            }
+
+            if !auth.userCode.isEmpty {
+                viewModel.chatViewModel.addSystemMessage(
+                    "🔑 Go to \(auth.verificationURL) and enter code: **\(auth.userCode)**"
+                )
+            }
+
+            // Wait for auth to complete
+            while auth.authState == .authenticating {
+                try? await Task.sleep(for: .seconds(1))
+            }
+
+            if auth.authState == .authenticated {
+                viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
+                settingsViewModel.accountViewModel.restartGatewayAfterAuth()
+            } else if let error = auth.error {
+                viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
+            }
+        }
+    }
+
     /// Call this before releasing the window manager to clean up monitors.
     public func tearDown() {
         removeGlobalMonitor()
@@ -128,7 +163,8 @@ public final class ChatWindowManager {
                     let chatView = ChatContainerView(
                         viewModel: self.viewModel,
                         isCompact: true,
-                        onOpenFullWindow: { [weak self] in self?.openFullWindow() }
+                        onOpenFullWindow: { [weak self] in self?.openFullWindow() },
+                        onReauth: { [weak self] in self?.handleReauth() }
                     )
                     panel.contentView = NSHostingView(rootView: chatView)
                     // Reconnect to gateway since daemon was just started
@@ -145,6 +181,9 @@ public final class ChatWindowManager {
                     isCompact: true,
                     onOpenFullWindow: { [weak self] in
                         self?.openFullWindow()
+                    },
+                    onReauth: { [weak self] in
+                        self?.handleReauth()
                     }
                 )
             )
@@ -187,7 +226,8 @@ public final class ChatWindowManager {
 
         let contentView = ChatContainerView(
             viewModel: viewModel,
-            isCompact: false
+            isCompact: false,
+            onReauth: { [weak self] in self?.handleReauth() }
         )
         window.contentView = NSHostingView(rootView: contentView)
 

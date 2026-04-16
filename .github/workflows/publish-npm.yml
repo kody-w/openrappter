@@ -28,7 +28,9 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Upgrade npm (Trusted Publishing requires npm >= 11.5.1)
-        run: npm install -g npm@latest
+        run: |
+          npm install -g npm@11.5.1
+          npm --version
 
       - name: Install dependencies
         working-directory: typescript

@@ -17,7 +17,7 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { execSync } from 'child_process';
 import { createHash } from 'crypto';
 import { join } from 'path';
@@ -256,30 +256,33 @@ export const EVOLVED_DIR = join(HOME_DIR, 'evolved');
 
 function fixImports(source: string): string {
   let result = source;
-  // Fix the BasicAgent import to absolute path
+  // ESM imports of absolute paths must use file:// URLs (Windows-safe: handles backslashes).
+  const basicAgentImportSpec = pathToFileURL(BASIC_AGENT_PATH).href;
+  const envModuleImportSpec = pathToFileURL(ENV_MODULE_PATH).href;
+  // Fix the BasicAgent import to absolute file:// URL
   result = result.replace(
     /from ['"]\.\/BasicAgent\.js['"]/,
-    `from '${BASIC_AGENT_PATH}'`,
+    `from ${JSON.stringify(basicAgentImportSpec)}`,
   );
-  // Freeze the BASIC_AGENT_PATH constant so generated files don't need import.meta.url
+  // Freeze the BASIC_AGENT_PATH constant (filesystem path) so generated files don't need import.meta.url
   result = result.replace(
     /const BASIC_AGENT_PATH = .+;/,
-    `const BASIC_AGENT_PATH = '${BASIC_AGENT_PATH}';`,
+    `const BASIC_AGENT_PATH = ${JSON.stringify(BASIC_AGENT_PATH)};`,
   );
-  // Fix the env.js import to absolute path
+  // Fix the env.js import to absolute file:// URL
   result = result.replace(
     /from ['"]\.\.\/env\.js['"]/,
-    `from '${ENV_MODULE_PATH}'`,
+    `from ${JSON.stringify(envModuleImportSpec)}`,
   );
-  // Freeze the ENV_MODULE_PATH constant so generated files don't need import.meta.url
+  // Freeze the ENV_MODULE_PATH constant (filesystem path) so generated files don't need import.meta.url
   result = result.replace(
     /const ENV_MODULE_PATH = .+;/,
-    `const ENV_MODULE_PATH = '${ENV_MODULE_PATH}';`,
+    `const ENV_MODULE_PATH = ${JSON.stringify(ENV_MODULE_PATH)};`,
   );
   // Freeze EVOLVED_DIR so generated files don't re-resolve
   result = result.replace(
     /export const EVOLVED_DIR = .+;/,
-    `export const EVOLVED_DIR = '${EVOLVED_DIR}';`,
+    `export const EVOLVED_DIR = ${JSON.stringify(EVOLVED_DIR)};`,
   );
   return result;
 }
@@ -977,7 +980,7 @@ export class OuroborosAgent extends BasicAgent {
             `Gen 0: reading own source (${selfSource.split('\n').length} lines)`,
           );
 
-          const gen5Module = await import(`${gen5Path}?t=${Date.now()}`);
+          const gen5Module = await import(pathToFileURL(gen5Path).href + `?t=${Date.now()}`);
           const Gen5Class = gen5Module.OuroborosGen5Agent;
           const gen5Agent = new Gen5Class(this.workDir);
           gen5Agent.evolutionLog.push(...this.evolutionLog);
@@ -1008,7 +1011,7 @@ export class OuroborosAgent extends BasicAgent {
     );
 
     // Hot-load and execute next generation
-    const nextModule = await import(`${nextPath}?t=${Date.now()}`);
+    const nextModule = await import(pathToFileURL(nextPath).href + `?t=${Date.now()}`);
     const NextClass = nextModule[nextName];
     const nextAgent = new NextClass(this.workDir);
     nextAgent.evolutionLog.push(...this.evolutionLog);

@@ -35,7 +35,7 @@ export class AgentRegistry {
       for (const file of agentFiles) {
         try {
           const modulePath = path.join(this.agentsDir, file);
-          const mod = await import(modulePath);
+          const mod = await import(pathToFileURL(modulePath).href);
           for (const exportName of Object.keys(mod)) {
             const ExportedClass = mod[exportName];
             if (

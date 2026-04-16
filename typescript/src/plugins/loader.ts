@@ -28,6 +28,7 @@ import { readdir, readFile, lstat } from 'fs/promises';
 import { resolve, join, sep } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { pathToFileURL } from 'url';
 import { extractManifestFromPackageJson } from './manifest.js';
 import type { PluginManifest } from './manifest.js';
 
@@ -172,7 +173,7 @@ export class SecurePluginLoader {
 
     let module: Record<string, unknown>;
     try {
-      module = (await import(entryPath)) as Record<string, unknown>;
+      module = (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>;
     } catch (err) {
       throw new Error(
         `Failed to import plugin "${manifest.name}" from "${entryPath}": ${(err as Error).message}`

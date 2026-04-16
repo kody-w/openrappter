@@ -480,8 +480,10 @@ describe('Gateway RPC Methods', () => {
       expect(groups.has('auth')).toBe(true);
       expect(groups.has('zen')).toBe(true);
       expect(groups.has('backup')).toBe(true);
+      expect(groups.has('twin')).toBe(true);
+      expect(groups.has('edge')).toBe(true);
 
-      expect(groups.size).toBe(24);
+      expect(groups.size).toBe(26);
     });
 
     it('chat group should have expected methods', () => {

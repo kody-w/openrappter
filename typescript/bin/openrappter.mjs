@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
@@ -12,8 +12,8 @@ const distPath = join(__dirname, '..', 'dist', 'index.js');
 const srcPath = join(__dirname, '..', 'src', 'index.ts');
 
 if (existsSync(distPath)) {
-  // Production: run compiled JS
-  import(distPath);
+  // Production: run compiled JS (use file:// URL for Windows ESM compatibility)
+  import(pathToFileURL(distPath).href);
 } else if (existsSync(srcPath)) {
   // Development: use tsx
   const tsx = spawn('npx', ['tsx', srcPath, ...process.argv.slice(2)], {

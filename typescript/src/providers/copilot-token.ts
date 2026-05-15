@@ -170,8 +170,7 @@ export async function resolveCopilotApiToken(params: {
     if (res.status === 404 || res.status === 401 || res.status === 403) {
       throw new Error(
         `GitHub token does not have Copilot API access (HTTP ${res.status}). ` +
-        `The token may be from the gh CLI which uses a different OAuth app. ` +
-        `Run 'openrappter onboard' to authenticate with the Copilot device code flow.`
+        `Sign in with a GitHub account that has Copilot enabled.`
       );
     }
     throw new Error(`Copilot token exchange failed: HTTP ${res.status}${body ? ` — ${body}` : ''}`);

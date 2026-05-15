@@ -17,6 +17,14 @@ public final class ChatViewModel {
     private var rpcClient: RpcClient?
     private var sessionStore: SessionStore?
 
+    /// Called when the gateway reports a GitHub/Copilot auth failure. The host
+    /// should kick off the device-code flow inline (no manual button click).
+    public var onAuthRequired: (() -> Void)?
+
+    /// Guard so we only auto-trigger reauth once per failing burst, not on every
+    /// retry until the device-code flow completes.
+    private var isAutoReauthing: Bool = false
+
     // MARK: - Computed
 
     public var canSend: Bool {
@@ -132,14 +140,43 @@ public final class ChatViewModel {
         case .error:
             let errorMsg = payload.errorMessage ?? "Unknown error"
             chatState = .error(errorMsg)
+            streamingText = ""
+
+            if isCopilotAuthError(errorMsg), let trigger = onAuthRequired {
+                // Inline auth flow: skip the raw error bubble, show a friendly
+                // status line, and kick off the device-code flow ourselves.
+                if !isAutoReauthing {
+                    isAutoReauthing = true
+                    addSystemMessage("🔑 GitHub Copilot needs re-authentication — starting sign-in…")
+                    trigger()
+                }
+                return
+            }
+
             let msg = ChatMessage(
                 role: .error,
                 content: "Agent error: \(errorMsg)",
                 sessionKey: payload.sessionKey
             )
             messages.append(msg)
-            streamingText = ""
         }
+    }
+
+    /// Reset the auto-reauth latch once the host knows the device-code flow has
+    /// resolved (success or failure), so a later failure can trigger it again.
+    public func authFlowFinished() {
+        isAutoReauthing = false
+    }
+
+    /// True for the gateway's Copilot 401/403 errors. Matches the exact phrase
+    /// from `resolveCopilotApiToken` plus a generic fallback for related cases.
+    private func isCopilotAuthError(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        if lowered.contains("copilot api access") { return true }
+        if lowered.contains("copilot") && (lowered.contains("401") || lowered.contains("403")) {
+            return true
+        }
+        return false
     }
 
     // MARK: - Session Switching

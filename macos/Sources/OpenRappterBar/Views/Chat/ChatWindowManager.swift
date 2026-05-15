@@ -38,6 +38,13 @@ public final class ChatWindowManager {
     public init(viewModel: AppViewModel, settingsViewModel: SettingsViewModel) {
         self.viewModel = viewModel
         self.settingsViewModel = settingsViewModel
+
+        // Auto-trigger the device-code flow whenever the gateway reports a
+        // Copilot auth failure — no manual button click required.
+        viewModel.chatViewModel.onAuthRequired = { [weak self] in
+            guard let self else { return }
+            self.handleReauth()
+        }
     }
 
     /// Re-auth handler: starts device code flow, shows code in chat, restarts gateway
@@ -72,6 +79,8 @@ public final class ChatWindowManager {
             } else if let error = auth.error {
                 viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
             }
+
+            viewModel.chatViewModel.authFlowFinished()
         }
     }
 

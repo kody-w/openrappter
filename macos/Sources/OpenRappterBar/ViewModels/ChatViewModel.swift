@@ -151,16 +151,17 @@ public final class ChatViewModel {
             if isCopilotAuthError(errorMsg), let trigger = onAuthRequired {
                 chatState = .idle
 
-                // If we *just* completed an auth flow and Copilot still rejects
-                // the token, looping won't help — the account either doesn't
-                // have Copilot enabled or the OAuth app isn't authorized.
+                // If a Copilot 401 still arrives shortly after a successful
+                // device-code flow, retrying the same flow won't change
+                // anything — surface the gateway error so the user (or we)
+                // can diagnose it instead of looping.
                 if let last = lastAuthCompletedAt,
                    Date().timeIntervalSince(last) < Self.postAuthDiagnosticWindow {
                     lastAuthCompletedAt = nil
                     addSystemMessage(
-                        "⚠️ Signed in, but this GitHub account doesn't have Copilot access. "
-                        + "Activate Copilot at https://github.com/settings/copilot or sign in with a different account "
-                        + "(menu bar → 🔑 Re-authenticate GitHub)."
+                        "⚠️ Re-auth succeeded but Copilot still rejected the token. "
+                        + "Try again in a moment, or use the menu bar → 🔑 Re-authenticate GitHub "
+                        + "to switch accounts. (\(errorMsg))"
                     )
                     return
                 }

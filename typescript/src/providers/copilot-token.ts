@@ -94,7 +94,11 @@ export function deriveCopilotApiBaseUrl(token: string): string {
 
 // ── Token response parsing ───────────────────────────────────────────────────
 
-function parseCopilotTokenResponse(value: unknown): { token: string; expiresAt: number } {
+function parseCopilotTokenResponse(value: unknown): {
+  token: string;
+  expiresAt: number;
+  apiEndpoint?: string;
+} {
   if (!value || typeof value !== 'object') {
     throw new Error('Unexpected response from GitHub Copilot token endpoint');
   }
@@ -121,7 +125,31 @@ function parseCopilotTokenResponse(value: unknown): { token: string; expiresAt: 
     throw new Error('Copilot token response missing expires_at');
   }
 
-  return { token, expiresAt: expiresAtMs };
+  // The exchange response includes an `endpoints` object with the canonical
+  // API URL for this account (e.g. enterprise tenants get a routed host).
+  // Prefer it over parsing `proxy-ep` from the token string.
+  let apiEndpoint: string | undefined;
+  const endpoints = rec.endpoints;
+  if (endpoints && typeof endpoints === 'object') {
+    const api = (endpoints as Record<string, unknown>).api;
+    if (typeof api === 'string' && api.length > 0) {
+      apiEndpoint = api;
+    }
+  }
+
+  return { token, expiresAt: expiresAtMs, apiEndpoint };
+}
+
+/**
+ * GitHub Copilot's token exchange accepts two auth header prefixes:
+ *   - `token <ghu_…>` for user device-code tokens
+ *   - `Bearer <token>` for Enterprise/SAML SSO / PAT-derived tokens
+ *
+ * Always sending `token` rejects Enterprise tokens with HTTP 401. Mirror
+ * RAPP's brainstem heuristic: `token` only for ghu_-prefixed values.
+ */
+function authHeaderForGithubToken(token: string): string {
+  return token.startsWith('ghu_') ? `token ${token}` : `Bearer ${token}`;
 }
 
 // ── Main resolver ────────────────────────────────────────────────────────────
@@ -153,15 +181,17 @@ export async function resolveCopilotApiToken(params: {
     };
   }
 
-  // 2. Exchange token — editor headers required for Enterprise/Business Copilot
+  // 2. Exchange token — editor headers required for Enterprise/Business Copilot.
+  // Match the User-Agent/Editor-Plugin-Version that RAPP brainstem uses
+  // (known-good against Copilot Enterprise tenants).
   const res = await fetchImpl(COPILOT_TOKEN_URL, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',
-      'Authorization': `token ${params.githubToken}`,
-      'Editor-Version': 'vscode/1.96.2',
-      'Editor-Plugin-Version': 'copilot/1.250.0',
-      'User-Agent': 'GithubCopilot/1.250.0',
+      'Authorization': authHeaderForGithubToken(params.githubToken),
+      'Editor-Version': 'vscode/1.95.0',
+      'Editor-Plugin-Version': 'copilot/1.0.0',
+      'User-Agent': 'GitHubCopilotChat/0.22.2024',
     },
   });
 
@@ -190,6 +220,8 @@ export async function resolveCopilotApiToken(params: {
     token: payload.token,
     expiresAt: payload.expiresAt,
     source: `fetched:${COPILOT_TOKEN_URL}`,
-    baseUrl: deriveCopilotApiBaseUrl(payload.token),
+    // Prefer the endpoint from the JSON response (handles Enterprise tenants
+    // with routed hosts), fall back to parsing the token's `proxy-ep` field.
+    baseUrl: parsed.apiEndpoint ?? deriveCopilotApiBaseUrl(payload.token),
   };
 }

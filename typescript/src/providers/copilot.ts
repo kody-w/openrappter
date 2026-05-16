@@ -260,8 +260,9 @@ export class CopilotProvider implements LLMProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json',
-        'Editor-Version': 'vscode/1.96.2',
-        'User-Agent': 'GitHubCopilotChat/0.26.7',
+        'Editor-Version': 'vscode/1.95.0',
+        'User-Agent': 'GitHubCopilotChat/0.22.2024',
+        'Copilot-Integration-Id': 'vscode-chat',
       },
       body: JSON.stringify(body),
     });
@@ -339,8 +340,9 @@ export class CopilotProvider implements LLMProvider {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'Accept': 'text/event-stream',
-        'Editor-Version': 'vscode/1.96.2',
-        'User-Agent': 'GitHubCopilotChat/0.26.7',
+        'Editor-Version': 'vscode/1.95.0',
+        'User-Agent': 'GitHubCopilotChat/0.22.2024',
+        'Copilot-Integration-Id': 'vscode-chat',
       },
       body: JSON.stringify(body),
     });

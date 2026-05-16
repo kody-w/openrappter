@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-bar'   # macOS bar releases don't bump the npm package
   workflow_dispatch:
     inputs:
       dry_run:

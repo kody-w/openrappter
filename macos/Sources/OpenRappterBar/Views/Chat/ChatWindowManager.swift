@@ -63,8 +63,14 @@ public final class ChatWindowManager {
             }
 
             if !auth.userCode.isEmpty {
+                // Copy the code so the user can paste it after the panel
+                // dismisses on focus loss.
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(auth.userCode, forType: .string)
+
                 viewModel.chatViewModel.addSystemMessage(
-                    "🔑 Go to \(auth.verificationURL) and enter code: **\(auth.userCode)**"
+                    "🔑 Code **\(auth.userCode)** copied to clipboard. Paste it at \(auth.verificationURL)"
                 )
             }
 

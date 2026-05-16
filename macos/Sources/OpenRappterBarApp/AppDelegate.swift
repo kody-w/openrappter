@@ -223,8 +223,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !auth.userCode.isEmpty { break }
             }
             if !auth.userCode.isEmpty {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(auth.userCode, forType: .string)
+
                 viewModel.chatViewModel.addSystemMessage(
-                    "🔑 Go to \(auth.verificationURL) and enter code: **\(auth.userCode)**"
+                    "🔑 Code **\(auth.userCode)** copied to clipboard. Paste it at \(auth.verificationURL)"
                 )
             }
             while auth.authState == .authenticating {

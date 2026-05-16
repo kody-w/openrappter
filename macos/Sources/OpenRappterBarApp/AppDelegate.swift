@@ -238,6 +238,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
                 settingsViewModel.accountViewModel.restartGatewayAfterAuth()
             }
+            viewModel.chatViewModel.authFlowFinished(succeeded: auth.authState == .authenticated)
         }
     }
 

@@ -25,6 +25,13 @@ public final class ChatViewModel {
     /// retry until the device-code flow completes.
     private var isAutoReauthing: Bool = false
 
+    /// Timestamp of the last completed reauth attempt. If a Copilot 401 arrives
+    /// shortly after, the new token also lacks Copilot access (account doesn't
+    /// have it enabled / OAuth app not authorized) — auto-retry would loop, so
+    /// we surface a diagnostic instead.
+    private var lastAuthCompletedAt: Date?
+    private static let postAuthDiagnosticWindow: TimeInterval = 120 // seconds
+
     // MARK: - Computed
 
     public var canSend: Bool {
@@ -142,10 +149,23 @@ public final class ChatViewModel {
             streamingText = ""
 
             if isCopilotAuthError(errorMsg), let trigger = onAuthRequired {
-                // Inline auth flow: skip the raw error bubble *and* the input
-                // banner, show a friendly status line, and kick off the
-                // device-code flow ourselves.
                 chatState = .idle
+
+                // If we *just* completed an auth flow and Copilot still rejects
+                // the token, looping won't help — the account either doesn't
+                // have Copilot enabled or the OAuth app isn't authorized.
+                if let last = lastAuthCompletedAt,
+                   Date().timeIntervalSince(last) < Self.postAuthDiagnosticWindow {
+                    lastAuthCompletedAt = nil
+                    addSystemMessage(
+                        "⚠️ Signed in, but this GitHub account doesn't have Copilot access. "
+                        + "Activate Copilot at https://github.com/settings/copilot or sign in with a different account "
+                        + "(menu bar → 🔑 Re-authenticate GitHub)."
+                    )
+                    return
+                }
+
+                // First-time auth-required: kick off the device-code flow.
                 if !isAutoReauthing {
                     isAutoReauthing = true
                     addSystemMessage("🔑 GitHub Copilot needs re-authentication — starting sign-in…")
@@ -165,9 +185,13 @@ public final class ChatViewModel {
     }
 
     /// Reset the auto-reauth latch once the host knows the device-code flow has
-    /// resolved (success or failure), so a later failure can trigger it again.
-    public func authFlowFinished() {
+    /// resolved. If it succeeded, mark the timestamp so a follow-up Copilot 401
+    /// surfaces a diagnostic instead of looping the device-code flow.
+    public func authFlowFinished(succeeded: Bool = false) {
         isAutoReauthing = false
+        if succeeded {
+            lastAuthCompletedAt = Date()
+        }
     }
 
     /// True for the gateway's Copilot 401/403 errors. Matches the exact phrase

@@ -139,12 +139,13 @@ public final class ChatViewModel {
 
         case .error:
             let errorMsg = payload.errorMessage ?? "Unknown error"
-            chatState = .error(errorMsg)
             streamingText = ""
 
             if isCopilotAuthError(errorMsg), let trigger = onAuthRequired {
-                // Inline auth flow: skip the raw error bubble, show a friendly
-                // status line, and kick off the device-code flow ourselves.
+                // Inline auth flow: skip the raw error bubble *and* the input
+                // banner, show a friendly status line, and kick off the
+                // device-code flow ourselves.
+                chatState = .idle
                 if !isAutoReauthing {
                     isAutoReauthing = true
                     addSystemMessage("🔑 GitHub Copilot needs re-authentication — starting sign-in…")
@@ -153,6 +154,7 @@ public final class ChatViewModel {
                 return
             }
 
+            chatState = .error(errorMsg)
             let msg = ChatMessage(
                 role: .error,
                 content: "Agent error: \(errorMsg)",

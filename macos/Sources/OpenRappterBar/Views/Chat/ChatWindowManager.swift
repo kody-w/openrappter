@@ -86,7 +86,7 @@ public final class ChatWindowManager {
                 viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
             }
 
-            viewModel.chatViewModel.authFlowFinished()
+            viewModel.chatViewModel.authFlowFinished(succeeded: auth.authState == .authenticated)
         }
     }
 

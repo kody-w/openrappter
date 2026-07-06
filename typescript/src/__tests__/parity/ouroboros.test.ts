@@ -283,6 +283,10 @@ describe('OuroborosAgent Parity', () => {
       expect(ws.unique_words).toBeGreaterThan(0);
       expect(ws.avg_word_length).toBeGreaterThan(0);
       expect(ws.most_frequent).toBeDefined();
+      expect(ws.entropy as number).toBeGreaterThan(2.0);
+      // Mostly-unique natural text — Simpson's index should be near 1
+      expect(ws.simpson_diversity as number).toBeGreaterThan(0.9);
+      expect(ws.simpson_diversity as number).toBeLessThanOrEqual(1);
     });
 
     it('should have caesar cipher with roundtrip', () => {
@@ -492,33 +496,39 @@ describe('OuroborosAgent Parity', () => {
 
   describe('capability scoring', () => {
     it('should pass all checks for complete word stats', () => {
-      const ws = { word_count: 50, unique_words: 30, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5], entropy: 4.2 };
+      const ws = { word_count: 50, unique_words: 30, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5], entropy: 4.2, simpson_diversity: 0.95 };
       const result = checkWordStats(ws);
       expect(result.quality).toBe(100);
       expect(result.checks).toHaveLength(6);
       expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
-    it('should pass has_diversity when ratio is exactly 0.5', () => {
-      const ws = { word_count: 10, unique_words: 5, avg_word_length: 4.0, most_frequent: [1, 2, 3, 4, 5], entropy: 2.2 };
+    it('should pass has_diversity at exactly the Simpson threshold (inclusive boundary)', () => {
+      const ws = { word_count: 10, unique_words: 5, avg_word_length: 4.0, most_frequent: [1, 2, 3, 4, 5], entropy: 2.2, simpson_diversity: 0.7 };
       const result = checkWordStats(ws);
-      // has_words: 10>=3 ✓, has_diversity: 5/10=0.5 (>=0.5) ✓, balanced_length: ✓, frequency_depth: 5>=3 ✓, substantial_input: 10>=10 ✓, lexical_entropy: 2.2>=2.0 ✓
+      // has_words ✓, has_diversity: 0.7 >= 0.7 ✓, balanced_length ✓, frequency_depth ✓, substantial_input ✓, lexical_entropy ✓
       expect(result.quality).toBe(100);
       const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
       expect(diversityCheck?.passed).toBe(true);
     });
 
-    it('should fail has_diversity when ratio is below 0.5', () => {
-      const ws = { word_count: 10, unique_words: 4, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
+    it('should fail has_diversity below the Simpson threshold (repetition-dominated text)', () => {
+      const ws = { word_count: 10, unique_words: 4, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2, simpson_diversity: 0.42 };
       const result = checkWordStats(ws);
-      // has_words: ✓, has_diversity: 4/10=0.4 (<0.5) ✗, balanced_length: ✓, frequency_depth: ✓, substantial_input: ✓, lexical_entropy: ✓
+      // has_words ✓, has_diversity: 0.42 < 0.7 ✗, balanced_length ✓, frequency_depth ✓, substantial_input ✓, lexical_entropy ✓
       expect(result.quality).toBe(83);
       const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
       expect(diversityCheck?.passed).toBe(false);
     });
 
+    it('should fail has_diversity when simpson_diversity is missing (legacy output)', () => {
+      const ws = { word_count: 10, unique_words: 9, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
+      const result = checkWordStats(ws);
+      expect(result.checks.find(c => c.name === 'has_diversity')?.passed).toBe(false);
+    });
+
     it('should fail has_words for fewer than 3 words', () => {
-      const ws = { word_count: 2, unique_words: 2, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
+      const ws = { word_count: 2, unique_words: 2, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2, simpson_diversity: 0.9 };
       const result = checkWordStats(ws);
       // has_words: 2<3 ✗, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 2<10 ✗, lexical_entropy: ✓
       expect(result.quality).toBe(67);
@@ -527,13 +537,14 @@ describe('OuroborosAgent Parity', () => {
     });
 
     it('should fail substantial_input for fewer than 10 words', () => {
-      const ws = { word_count: 7, unique_words: 6, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
+      const ws = { word_count: 7, unique_words: 6, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2, simpson_diversity: 0.9 };
       const result = checkWordStats(ws);
       // has_words: ✓, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 7<10 ✗, lexical_entropy: ✓
       expect(result.quality).toBe(83);
       const substantialCheck = result.checks.find(c => c.name === 'substantial_input');
       expect(substantialCheck?.passed).toBe(false);
     });
+
 
     it('should pass lexical_entropy at exactly H=2.0 and fail below', () => {
       const base = { word_count: 20, unique_words: 15, avg_word_length: 4.0, most_frequent: [1, 2, 3] };

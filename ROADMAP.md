@@ -127,7 +127,7 @@ _Extending the existing deterministic scoring system._
 - [ ] Pattern quality scoring (well-formedness validation, density, false-positive penalty)
 - [x] Character-level cipher verification (every character shifted by expected amount)
 - [ ] Reflection method cross-validation (compare declared methods against prototype chain)
-- [ ] Simpson's Diversity Index replacing simple unique/total ratio
+- [x] Simpson's Diversity Index replacing simple unique/total ratio (threshold D >= 0.7, inclusive)
 
 **Cross-capability intelligence:**
 - [ ] Correlation matrix across capability scores over history

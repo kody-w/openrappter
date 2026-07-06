@@ -326,5 +326,16 @@ describe('Soul Config Persistence', () => {
       await server.call('rappter.load', { config: soulConfig('rpc-load-persist'), persist: true });
       expect(await store.load('rpc-load-persist')).toBeDefined();
     });
+
+    it('rappter.create builds a soul from a description and persists it', async () => {
+      const result = await server.call<unknown, { soul: { id: string; name: string } }>('rappter.create', {
+        description: 'summarize weekly metrics into a report',
+        persist: true,
+      });
+      expect(result.soul.name).toBe('SummarizeWeekly');
+      expect(result.soul.id).toBe('summarize-weekly');
+      const persisted = await store.load('summarize-weekly');
+      expect(persisted?.systemPrompt).toContain('You are SummarizeWeekly.');
+    });
   });
 });

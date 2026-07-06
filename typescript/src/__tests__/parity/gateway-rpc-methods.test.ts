@@ -628,10 +628,10 @@ describe('Gateway RPC Methods', () => {
         (info) => info.requiresAuth
       ).length;
 
-      // rappter.summon, rappter.load, rappter.unload, rappter.reload,
-      // rappter.load-template, rappter.save, rappter.restore, rappter.forget,
-      // backup.delete require auth
-      expect(authRequiredCount).toBe(9);
+      // rappter.summon, rappter.create, rappter.load, rappter.unload,
+      // rappter.reload, rappter.load-template, rappter.save, rappter.restore,
+      // rappter.forget, backup.delete require auth
+      expect(authRequiredCount).toBe(10);
     });
   });
 });

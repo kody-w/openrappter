@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { RappterManager } from '../../gateway/rappter-manager.js';
+import { RappterManager, RappterSoul } from '../../gateway/rappter-manager.js';
 import type { RappterSoulConfig, SummonResult } from '../../gateway/rappter-manager.js';
 import { registerRappterMethods } from '../../gateway/methods/rappter-methods.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
@@ -446,6 +446,108 @@ describe('Multi-Rappter Gateway', () => {
 
       const bare = await manager.loadSoul(defaultConfig('without-prompt'));
       expect(bare.getStatus().systemPrompt).toBeUndefined();
+    });
+  });
+
+  // ── Soul-to-Soul Communication (4 tests) ──
+
+  describe('Soul-to-soul communication', () => {
+    interface SoulHandle {
+      id: string;
+      chain: string[];
+      summon: (ids: string[], msg: string, mode?: 'single' | 'all' | 'race' | 'chain') => Promise<SummonResult>;
+    }
+
+    class SummonerAgent extends BasicAgent {
+      private targets: string[];
+
+      constructor(name: string, targets: string[]) {
+        const metadata: AgentMetadata = {
+          name,
+          description: `Summons ${targets.join(',')}`,
+          parameters: { type: 'object', properties: {}, required: [] },
+        };
+        super(name, metadata);
+        this.targets = targets;
+      }
+
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        const soul = kwargs._soul as SoulHandle;
+        const summonResult = await soul.summon(this.targets, `from ${soul.id}`);
+        return JSON.stringify({ status: 'success', summon_result: summonResult });
+      }
+    }
+
+    class EchoAgent extends BasicAgent {
+      constructor() {
+        const metadata: AgentMetadata = {
+          name: 'Echo',
+          description: 'Echoes',
+          parameters: { type: 'object', properties: {}, required: [] },
+        };
+        super('Echo', metadata);
+      }
+
+      async perform(kwargs: Record<string, unknown>): Promise<string> {
+        return JSON.stringify({ status: 'success', echoed: kwargs.query });
+      }
+    }
+
+    it('an agent in one soul can summon a sibling soul through the manager', async () => {
+      const pool = new Map<string, BasicAgent>([
+        ['SummonB', new SummonerAgent('SummonB', ['b'])],
+        ['Echo', new EchoAgent()],
+      ]);
+      const m = new RappterManager(pool);
+      await m.loadSoul({ id: 'a', name: 'A', description: 'caller', agents: ['SummonB'] });
+      await m.loadSoul({ id: 'b', name: 'B', description: 'callee', agents: ['Echo'] });
+
+      const result = await m.summon({ rappterIds: ['a'], message: 'go', mode: 'single' });
+      const outer = JSON.parse(result.results[0].result);
+      const nested = outer.agentResults.SummonB.summon_result as SummonResult;
+      expect(nested.error).toBeUndefined();
+      expect(nested.results[0].soulId).toBe('b');
+      const echoed = JSON.parse(nested.results[0].result);
+      expect(echoed.agentResults.Echo.echoed).toBe('from a');
+    });
+
+    it('blocks summon cycles (a → b → a)', async () => {
+      const pool = new Map<string, BasicAgent>([
+        ['SummonB', new SummonerAgent('SummonB', ['b'])],
+        ['SummonA', new SummonerAgent('SummonA', ['a'])],
+      ]);
+      const m = new RappterManager(pool);
+      await m.loadSoul({ id: 'a', name: 'A', description: 'caller', agents: ['SummonB'] });
+      await m.loadSoul({ id: 'b', name: 'B', description: 'bouncer', agents: ['SummonA'] });
+
+      const result = await m.summon({ rappterIds: ['a'], message: 'go', mode: 'single' });
+      expect(result.results[0].result).toContain('Summon cycle blocked');
+    });
+
+    it('enforces the max summon depth', async () => {
+      const pool = new Map<string, BasicAgent>([
+        ['SummonB', new SummonerAgent('SummonB', ['b'])],
+        ['SummonC', new SummonerAgent('SummonC', ['c'])],
+        ['SummonD', new SummonerAgent('SummonD', ['d'])],
+        ['Echo', new EchoAgent()],
+      ]);
+      const m = new RappterManager(pool);
+      await m.loadSoul({ id: 'a', name: 'A', description: 'd1', agents: ['SummonB'] });
+      await m.loadSoul({ id: 'b', name: 'B', description: 'd2', agents: ['SummonC'] });
+      await m.loadSoul({ id: 'c', name: 'C', description: 'd3', agents: ['SummonD'] });
+      await m.loadSoul({ id: 'd', name: 'D', description: 'd4', agents: ['Echo'] });
+
+      const result = await m.summon({ rappterIds: ['a'], message: 'go', mode: 'single' });
+      expect(result.results[0].result).toContain('Summon depth exceeded');
+    });
+
+    it('summon is unavailable for souls loaded without a manager', async () => {
+      const soul = await RappterSoul.load(
+        { id: 'lone', name: 'Lone', description: 'no manager' },
+        { agents: new Map([['SummonB', new SummonerAgent('SummonB', ['b'])]]) },
+      );
+      const result = await soul.invoke('go');
+      expect(result.result).toContain('Soul-to-soul summon unavailable');
     });
   });
 

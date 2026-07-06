@@ -55,7 +55,7 @@ _Finish what's started. Close gaps. Make it production-worthy._
 - [ ] Dashboard page for soul management (list, load, unload, summon)
 - [x] `rappter.create` RPC — create souls from natural language descriptions via LearnNewAgent patterns
 - [x] Soul templates — prebuilt configurations ("researcher", "coder", "ops", "analyst")
-- [ ] Soul-to-soul communication — souls can summon other souls
+- [x] Soul-to-soul communication — souls can summon other souls (kwargs `_soul.summon` handle with cycle + depth guards)
 
 ### 1.3 Observability & Operations
 

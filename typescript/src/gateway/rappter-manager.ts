@@ -148,27 +148,37 @@ async function withAgentLock<T>(agent: BasicAgent, fn: () => Promise<T>): Promis
 
 // ── RappterSoul ──────────────────────────────────────────────────────────────
 
+/** Callback a soul uses to summon sibling souls through its manager. */
+export type SoulSummoner = (params: SummonParams, chain: string[]) => Promise<SummonResult>;
+
+/** Maximum soul-to-soul summon nesting (root invoke = depth 1). */
+export const MAX_SOUL_SUMMON_DEPTH = 3;
+
 export class RappterSoul {
   readonly id: string;
   readonly config: RappterSoulConfig;
   private agents: Map<string, BasicAgent>;
+  private summoner?: SoulSummoner;
   private _loadedAt: number;
   private _invocationCount: number = 0;
 
-  private constructor(config: RappterSoulConfig, agents: Map<string, BasicAgent>) {
+  private constructor(config: RappterSoulConfig, agents: Map<string, BasicAgent>, summoner?: SoulSummoner) {
     this.id = config.id;
     this.config = config;
     this.agents = agents;
+    this.summoner = summoner;
     this._loadedAt = Date.now();
   }
 
   /**
    * Load a soul from config + a default agent pool.
    * Applies whitelist/blacklist filtering to produce the soul's agent set.
+   * The optional summoner enables soul-to-soul communication via the manager.
    */
   static async load(
     config: RappterSoulConfig,
     defaults: { agents: Map<string, BasicAgent> },
+    summoner?: SoulSummoner,
   ): Promise<RappterSoul> {
     let agentMap = new Map(defaults.agents);
 
@@ -187,7 +197,7 @@ export class RappterSoul {
       }
     }
 
-    return new RappterSoul(config, agentMap);
+    return new RappterSoul(config, agentMap, summoner);
   }
 
   /**
@@ -207,15 +217,45 @@ export class RappterSoul {
   }
 
   /**
+   * Build the soul-to-soul handle agents receive as kwargs._soul.
+   * The chain carries every ancestor soul id, so cycles and runaway
+   * depth are blocked before they reach the manager.
+   */
+  private buildSoulHandle(chain: string[]) {
+    return {
+      id: this.id,
+      chain,
+      summon: async (
+        rappterIds: string[],
+        message: string,
+        mode: SummonParams['mode'] = 'single',
+      ): Promise<SummonResult> => {
+        if (!this.summoner) {
+          return { mode, results: [], totalDurationMs: 0, error: 'Soul-to-soul summon unavailable (no manager)' };
+        }
+        const cycle = rappterIds.filter((id) => chain.includes(id));
+        if (cycle.length > 0) {
+          return { mode, results: [], totalDurationMs: 0, error: `Summon cycle blocked: ${cycle.join(', ')} already in chain [${chain.join(' → ')}]` };
+        }
+        if (chain.length >= MAX_SOUL_SUMMON_DEPTH) {
+          return { mode, results: [], totalDurationMs: 0, error: `Summon depth exceeded (max ${MAX_SOUL_SUMMON_DEPTH}): [${chain.join(' → ')}]` };
+        }
+        return this.summoner({ rappterIds, message, mode }, chain);
+      },
+    };
+  }
+
+  /**
    * Core async function — this IS the rappter.
    * Invokes agents with the given message and returns the result.
    *
    * Note: agents from the default pool are shared instances across souls, so
    * identity injection is per-invocation (via upstream_slush), not per-agent.
    */
-  async invoke(message: string, _options?: { sessionId?: string }): Promise<RappterInvokeResult> {
+  async invoke(message: string, options?: { sessionId?: string; chain?: string[] }): Promise<RappterInvokeResult> {
     this._invocationCount++;
     const start = Date.now();
+    const chain = [...(options?.chain ?? []), this.id];
 
     try {
       // Route to the first available agent and execute
@@ -231,12 +271,14 @@ export class RappterSoul {
       }
 
       // Execute all agents and collect results, injecting this soul's identity
+      // and a _soul handle for soul-to-soul summons
       const results: Record<string, unknown> = {};
       for (const [name, agent] of agentEntries) {
         const agentResult = await withAgentLock(agent, () =>
           agent.execute({
             query: message,
             upstream_slush: { soul_identity: this.identity },
+            _soul: this.buildSoulHandle(chain),
           }),
         );
         try {
@@ -323,7 +365,11 @@ export class RappterManager {
       throw new Error(`Soul already loaded: ${config.id}`);
     }
 
-    const soul = await RappterSoul.load(config, { agents: this.defaultAgents });
+    const soul = await RappterSoul.load(
+      config,
+      { agents: this.defaultAgents },
+      (params, chain) => this.summonInternal(params, chain),
+    );
     this.souls.set(config.id, soul);
 
     if (options?.persist) {
@@ -485,6 +531,14 @@ export class RappterManager {
    * - chain: sequential, each rappter's output becomes the next's input
    */
   async summon(params: SummonParams): Promise<SummonResult> {
+    return this.summonInternal(params, []);
+  }
+
+  /**
+   * Summon with an ancestry chain — soul-to-soul calls pass the caller's
+   * chain so nested invocations inherit cycle/depth protection.
+   */
+  private async summonInternal(params: SummonParams, chain: string[]): Promise<SummonResult> {
     const start = Date.now();
     const { rappterIds, message, mode, sessionId } = params;
 
@@ -501,13 +555,13 @@ export class RappterManager {
 
     switch (mode) {
       case 'single':
-        return this.summonSingle(rappterIds[0], message, sessionId, start);
+        return this.summonSingle(rappterIds[0], message, sessionId, start, chain);
       case 'all':
-        return this.summonAll(rappterIds, message, sessionId, start);
+        return this.summonAll(rappterIds, message, sessionId, start, chain);
       case 'race':
-        return this.summonRace(rappterIds, message, sessionId, start);
+        return this.summonRace(rappterIds, message, sessionId, start, chain);
       case 'chain':
-        return this.summonChain(rappterIds, message, sessionId, start);
+        return this.summonChain(rappterIds, message, sessionId, start, chain);
       default:
         return {
           mode,
@@ -523,9 +577,10 @@ export class RappterManager {
     message: string,
     sessionId: string | undefined,
     start: number,
+    chain: string[] = [],
   ): Promise<SummonResult> {
     const soul = this.souls.get(soulId)!;
-    const result = await soul.invoke(message, { sessionId });
+    const result = await soul.invoke(message, { sessionId, chain });
     return {
       mode: 'single',
       results: [result],
@@ -538,10 +593,11 @@ export class RappterManager {
     message: string,
     sessionId: string | undefined,
     start: number,
+    chain: string[] = [],
   ): Promise<SummonResult> {
     const promises = rappterIds.map((id) => {
       const soul = this.souls.get(id)!;
-      return soul.invoke(message, { sessionId });
+      return soul.invoke(message, { sessionId, chain });
     });
 
     const results = await Promise.all(promises);
@@ -557,10 +613,11 @@ export class RappterManager {
     message: string,
     sessionId: string | undefined,
     start: number,
+    chain: string[] = [],
   ): Promise<SummonResult> {
     const promises = rappterIds.map((id) => {
       const soul = this.souls.get(id)!;
-      return soul.invoke(message, { sessionId });
+      return soul.invoke(message, { sessionId, chain });
     });
 
     const winner = await Promise.race(promises);
@@ -583,13 +640,14 @@ export class RappterManager {
     message: string,
     sessionId: string | undefined,
     start: number,
+    chain: string[] = [],
   ): Promise<SummonResult> {
     const results: RappterInvokeResult[] = [];
     let currentMessage = message;
 
     for (const id of rappterIds) {
       const soul = this.souls.get(id)!;
-      const result = await soul.invoke(currentMessage, { sessionId });
+      const result = await soul.invoke(currentMessage, { sessionId, chain });
       results.push(result);
 
       if (result.error) break;

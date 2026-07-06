@@ -125,7 +125,7 @@ _Extending the existing deterministic scoring system._
 **Graduated scoring:**
 - [ ] Weighted sentiment words (intensity tiers: "good" = 0.5, "amazing" = 1.0)
 - [ ] Pattern quality scoring (well-formedness validation, density, false-positive penalty)
-- [ ] Character-level cipher verification (every character shifted by expected amount)
+- [x] Character-level cipher verification (every character shifted by expected amount)
 - [ ] Reflection method cross-validation (compare declared methods against prototype chain)
 - [ ] Simpson's Diversity Index replacing simple unique/total ratio
 

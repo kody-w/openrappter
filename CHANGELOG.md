@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Input difficulty scoring** (Roadmap 2.5, completes the quick-wins block) — `scoreInputDifficulty(input)` rates per capability whether the input gives it a fair chance (word/unique-word minimums, alphabetic content, pattern categories present, sentiment-bearing words), with reasons listing exactly what's missing; `EvolutionReport` now carries `input_difficulty` so a weak capability score can be attributed to unfair input instead of a broken capability. 8 new tests.
+
 - **Per-capability trajectory tracking with confidence gating** (Roadmap 2.5) — `EvolutionLineage` now includes `capability_trajectories`: an independent regression slope per capability, where a direction (improving/declining) is only reported when `|slope| > 2 × standard error` with 3+ data points — noisy histories read as stable instead of falsely trending. New `computeCapabilityTrajectories()` export; shared `linearRegression()` helper now backs the overall trajectory too.
 
 ### Fixed

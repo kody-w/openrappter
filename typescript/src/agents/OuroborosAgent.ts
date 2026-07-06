@@ -100,6 +100,14 @@ export interface EvolutionLineage {
   capability_trajectories: CapabilityTrajectory[];
 }
 
+export interface InputDifficulty {
+  capability: string;
+  /** Whether the input gives this capability a fair chance at a high score */
+  fair: boolean;
+  /** What the input lacks, when unfair */
+  reasons: string[];
+}
+
 export interface EvolutionReport {
   capabilities: CapabilityScore[];
   overall_quality: number; // 0-100
@@ -107,6 +115,8 @@ export interface EvolutionReport {
   formatted: string;
   judge_mode: 'deterministic' | 'hybrid';
   lineage: EvolutionLineage | null;
+  /** Per-capability fairness of the input — distinguishes "capability broken" from "unfair input" */
+  input_difficulty: InputDifficulty[];
 }
 
 // Shared sentiment vocabulary — single source of truth for both the generated
@@ -508,6 +518,48 @@ export function checkReflection(r: Record<string, unknown> | undefined): { quali
   return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
+/**
+ * Score how fair the input is to each capability, so a weak score can be
+ * attributed to the right cause: a capability that got no material to work
+ * with (unfair input) is not the same as a broken capability. Thresholds
+ * mirror the corresponding check thresholds.
+ */
+export function scoreInputDifficulty(input: string): InputDifficulty[] {
+  const words = input.toLowerCase().match(/\b[a-z]+\b/g) ?? [];
+  const unique = new Set(words);
+
+  const wordStatsReasons: string[] = [];
+  if (words.length < 10) wordStatsReasons.push(`only ${words.length} words (substantial_input needs 10)`);
+  // lexical_entropy H >= 2.0 requires at least 4 distinct words (log2(4) = 2)
+  if (unique.size < 4) wordStatsReasons.push(`only ${unique.size} unique words (entropy >= 2.0 needs 4+)`);
+
+  const cipherReasons: string[] = [];
+  if (!/[a-zA-Z]/.test(input)) cipherReasons.push('no alphabetic characters to shift');
+
+  const patternReasons: string[] = [];
+  if (!/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(input)) patternReasons.push('no emails');
+  if (!/https?:\/\/[^\s)]+/.test(input)) patternReasons.push('no urls');
+  if (!/\b\d+\.?\d*\b/.test(input)) patternReasons.push('no numbers');
+  if (!/\d{4}-\d{2}-\d{2}/.test(input)) patternReasons.push('no dates');
+
+  const sentimentWordCount = words.filter(
+    w => SENTIMENT_POSITIVE_WORDS.includes(w) || SENTIMENT_NEGATIVE_WORDS.includes(w),
+  ).length;
+  const sentimentReasons: string[] = [];
+  if (sentimentWordCount < 2) {
+    sentimentReasons.push(`only ${sentimentWordCount} sentiment-bearing words (sufficient_evidence needs 2)`);
+  }
+
+  return [
+    { capability: 'Word Statistics', fair: wordStatsReasons.length === 0, reasons: wordStatsReasons },
+    { capability: 'Caesar Cipher', fair: cipherReasons.length === 0, reasons: cipherReasons },
+    { capability: 'Pattern Detection', fair: patternReasons.length === 0, reasons: patternReasons },
+    { capability: 'Sentiment Heuristic', fair: sentimentReasons.length === 0, reasons: sentimentReasons },
+    // Reflection inspects the agent itself — the input can't be unfair to it
+    { capability: 'Self-Reflection', fair: true, reasons: [] },
+  ];
+}
+
 export function computeTrends(priorRuns: LineageRunSummary[]): CapabilityTrend[] {
   const capNames = ['Word Statistics', 'Caesar Cipher', 'Pattern Detection', 'Sentiment Heuristic', 'Self-Reflection'];
   const trends: CapabilityTrend[] = [];
@@ -823,6 +875,7 @@ export async function assessEvolution(
     formatted,
     judge_mode: judgeMode,
     lineage,
+    input_difficulty: scoreInputDifficulty(input),
   };
 }
 

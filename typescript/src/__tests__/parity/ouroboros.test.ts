@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import {
   OuroborosAgent, EVOLUTION_CATALOG, EVOLVED_DIR,
   assessEvolution, checkWordStats, checkCaesarCipher, checkPatterns,
-  checkSentiment, checkReflection, countNegatedSentimentWords, computeCapabilityTrajectories, loadLineageLog, saveLineageLog, computeTrends,
+  checkSentiment, checkReflection, countNegatedSentimentWords, computeCapabilityTrajectories, scoreInputDifficulty, loadLineageLog, saveLineageLog, computeTrends,
 } from '../../agents/OuroborosAgent.js';
 import type { EvolutionReport, LineageRunSummary } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
@@ -846,6 +846,71 @@ describe('OuroborosAgent Parity', () => {
       expect(capturedPrompt).toContain('Trajectory');
       // Should detect declining (100→95→90→current ~90, steep enough for negative trajectory)
       expect(capturedPrompt.toLowerCase()).toContain('declining');
+    });
+  });
+
+  describe('input difficulty scoring', () => {
+    it('rates rich input as fair for all capabilities', () => {
+      const input = 'The amazing wonderful fox jumped over seven lazy dogs today. ' +
+        'Email test@example.com or visit https://example.com by 2026-01-15, item 42.';
+      const difficulty = scoreInputDifficulty(input);
+      expect(difficulty).toHaveLength(5);
+      for (const d of difficulty) {
+        expect(d.fair).toBe(true);
+        expect(d.reasons).toEqual([]);
+      }
+    });
+
+    it('flags short input as unfair to word statistics', () => {
+      const difficulty = scoreInputDifficulty('great amazing fox');
+      const wordStats = difficulty.find(d => d.capability === 'Word Statistics')!;
+      expect(wordStats.fair).toBe(false);
+      expect(wordStats.reasons.join(' ')).toContain('3 words');
+    });
+
+    it('flags repetitive input as unfair to entropy even when long enough', () => {
+      const difficulty = scoreInputDifficulty('go go go go go stop stop stop stop stop');
+      const wordStats = difficulty.find(d => d.capability === 'Word Statistics')!;
+      expect(wordStats.fair).toBe(false);
+      expect(wordStats.reasons.join(' ')).toContain('unique words');
+    });
+
+    it('flags non-alphabetic input as unfair to the cipher', () => {
+      const difficulty = scoreInputDifficulty('123 456 789');
+      const cipher = difficulty.find(d => d.capability === 'Caesar Cipher')!;
+      expect(cipher.fair).toBe(false);
+      expect(cipher.reasons).toEqual(['no alphabetic characters to shift']);
+    });
+
+    it('lists exactly the missing pattern categories', () => {
+      const difficulty = scoreInputDifficulty('Email test@example.com with item 42 today');
+      const patterns = difficulty.find(d => d.capability === 'Pattern Detection')!;
+      expect(patterns.fair).toBe(false);
+      expect(patterns.reasons).toEqual(['no urls', 'no dates']);
+    });
+
+    it('flags sentiment-free input as unfair to the sentiment heuristic', () => {
+      const difficulty = scoreInputDifficulty('the quick brown fox jumps over the lazy sleeping dog');
+      const sentiment = difficulty.find(d => d.capability === 'Sentiment Heuristic')!;
+      expect(sentiment.fair).toBe(false);
+      expect(sentiment.reasons.join(' ')).toContain('0 sentiment-bearing words');
+    });
+
+    it('always rates reflection as fair (input-independent)', () => {
+      for (const input of ['', '123', 'x']) {
+        const reflection = scoreInputDifficulty(input).find(d => d.capability === 'Self-Reflection')!;
+        expect(reflection.fair).toBe(true);
+      }
+    });
+
+    it('includes input_difficulty in the assessEvolution report', async () => {
+      const report = await assessEvolution('12345', {
+        wordStats: { word_count: 0, unique_words: 0, avg_word_length: 0, most_frequent: [] },
+      });
+      expect(report.input_difficulty).toHaveLength(5);
+      const wordStats = report.input_difficulty.find(d => d.capability === 'Word Statistics')!;
+      // Weak word-stats score on numeric input is attributable to unfair input
+      expect(wordStats.fair).toBe(false);
     });
   });
 

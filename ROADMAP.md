@@ -120,7 +120,7 @@ _Extending the existing deterministic scoring system._
 - [x] Negation handling in `checkSentiment` (2-token window: "not good" flips polarity)
 - [x] Per-capability trajectory tracking (independent slope per capability in `computeTrajectory`)
 - [x] Confidence intervals on trajectory (require slope > 2x standard error)
-- [ ] Input difficulty scoring (distinguish "capability broken" from "unfair input")
+- [x] Input difficulty scoring (distinguish "capability broken" from "unfair input")
 
 **Graduated scoring:**
 - [ ] Weighted sentiment words (intensity tiers: "good" = 0.5, "amazing" = 1.0)

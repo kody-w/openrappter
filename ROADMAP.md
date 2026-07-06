@@ -51,7 +51,7 @@ _Finish what's started. Close gaps. Make it production-worthy._
 
 - [x] Soul config persistence — save/load from `~/.openrappter/souls/*.json` (SoulStore + `rappter.save/persisted/restore/forget` RPC)
 - [ ] Soul-specific conversation history (isolated sessions per soul)
-- [ ] Soul identity injection — system prompt and personality per soul
+- [x] Soul identity injection — system prompt and personality per soul (injected as `upstream_slush.soul_identity` on every agent invocation)
 - [ ] Dashboard page for soul management (list, load, unload, summon)
 - [ ] `rappter.create` RPC — create souls from natural language descriptions via LearnNewAgent patterns
 - [x] Soul templates — prebuilt configurations ("researcher", "coder", "ops", "analyst")

@@ -50,6 +50,21 @@ export interface RappterSoulStatus {
   loadedAt: number;
   invocationCount: number;
   model?: string;
+  systemPrompt?: string;
+}
+
+/**
+ * Identity payload injected into every agent invocation via data sloshing.
+ * Agents read it from context: getSignal is per-slosh, so use
+ * `this.context.upstream_slush.soul_identity` (snake_case keys).
+ */
+export interface SoulIdentity {
+  soul_id: string;
+  soul_name: string;
+  description: string;
+  emoji?: string;
+  system_prompt?: string;
+  model?: string;
 }
 
 export interface RappterSoulInfo {
@@ -142,8 +157,27 @@ export class RappterSoul {
   }
 
   /**
+   * The soul's identity payload, injected into every agent invocation as
+   * `upstream_slush.soul_identity` so agents can adapt behavior per soul.
+   */
+  get identity(): SoulIdentity {
+    const identity: SoulIdentity = {
+      soul_id: this.id,
+      soul_name: this.config.name,
+      description: this.config.description,
+    };
+    if (this.config.emoji) identity.emoji = this.config.emoji;
+    if (this.config.systemPrompt) identity.system_prompt = this.config.systemPrompt;
+    if (this.config.model) identity.model = this.config.model;
+    return identity;
+  }
+
+  /**
    * Core async function — this IS the rappter.
    * Invokes agents with the given message and returns the result.
+   *
+   * Note: agents from the default pool are shared instances across souls, so
+   * identity injection is per-invocation (via upstream_slush), not per-agent.
    */
   async invoke(message: string, _options?: { sessionId?: string }): Promise<RappterInvokeResult> {
     this._invocationCount++;
@@ -162,10 +196,13 @@ export class RappterSoul {
         };
       }
 
-      // Execute all agents and collect results
+      // Execute all agents and collect results, injecting this soul's identity
       const results: Record<string, unknown> = {};
       for (const [name, agent] of agentEntries) {
-        const agentResult = await agent.execute({ query: message });
+        const agentResult = await agent.execute({
+          query: message,
+          upstream_slush: { soul_identity: this.identity },
+        });
         try {
           results[name] = JSON.parse(agentResult);
         } catch {
@@ -212,6 +249,7 @@ export class RappterSoul {
       loadedAt: this._loadedAt,
       invocationCount: this._invocationCount,
       model: this.config.model,
+      systemPrompt: this.config.systemPrompt,
     };
   }
 

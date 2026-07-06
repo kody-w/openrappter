@@ -325,6 +325,93 @@ describe('Multi-Rappter Gateway', () => {
     });
   });
 
+  // ── Soul Identity Injection (4 tests) ──
+
+  describe('Soul identity injection', () => {
+    class ContextCaptureAgent extends BasicAgent {
+      captured: Array<Record<string, unknown>> = [];
+
+      constructor(name: string) {
+        const metadata: AgentMetadata = {
+          name,
+          description: `Capture agent ${name}`,
+          parameters: { type: 'object', properties: {}, required: [] },
+        };
+        super(name, metadata);
+      }
+
+      async perform(): Promise<string> {
+        const upstream = this.context?.upstream_slush ?? {};
+        this.captured.push(JSON.parse(JSON.stringify(upstream)));
+        return JSON.stringify({ status: 'success', agent: this.name });
+      }
+    }
+
+    it('injects soul_identity into agent context via upstream_slush', async () => {
+      const capture = new ContextCaptureAgent('Capture');
+      const m = new RappterManager(new Map([['Capture', capture]]));
+      await m.loadSoul({
+        id: 'persona',
+        name: 'Persona',
+        description: 'A soul with identity',
+        emoji: '🎭',
+        systemPrompt: 'You are terse.',
+        model: 'claude-sonnet-5',
+      });
+
+      await m.summon({ rappterIds: ['persona'], message: 'hi', mode: 'single' });
+
+      expect(capture.captured).toHaveLength(1);
+      const identity = capture.captured[0].soul_identity as Record<string, unknown>;
+      expect(identity.soul_id).toBe('persona');
+      expect(identity.soul_name).toBe('Persona');
+      expect(identity.description).toBe('A soul with identity');
+      expect(identity.emoji).toBe('🎭');
+      expect(identity.system_prompt).toBe('You are terse.');
+      expect(identity.model).toBe('claude-sonnet-5');
+    });
+
+    it('omits optional identity fields when unset', async () => {
+      const capture = new ContextCaptureAgent('Capture');
+      const m = new RappterManager(new Map([['Capture', capture]]));
+      await m.loadSoul({ id: 'plain', name: 'Plain', description: 'No extras' });
+
+      await m.summon({ rappterIds: ['plain'], message: 'hi', mode: 'single' });
+
+      const identity = capture.captured[0].soul_identity as Record<string, unknown>;
+      expect(identity.soul_id).toBe('plain');
+      expect(identity.soul_name).toBe('Plain');
+      expect('system_prompt' in identity).toBe(false);
+      expect('emoji' in identity).toBe(false);
+      expect('model' in identity).toBe(false);
+    });
+
+    it('each soul in a chain injects its own identity', async () => {
+      const capture = new ContextCaptureAgent('Capture');
+      const m = new RappterManager(new Map([['Capture', capture]]));
+      await m.loadSoul({ id: 'first', name: 'First', description: 'Chain head', systemPrompt: 'Be first.' });
+      await m.loadSoul({ id: 'second', name: 'Second', description: 'Chain tail', systemPrompt: 'Be second.' });
+
+      await m.summon({ rappterIds: ['first', 'second'], message: 'go', mode: 'chain' });
+
+      expect(capture.captured).toHaveLength(2);
+      const ids = capture.captured.map((c) => (c.soul_identity as Record<string, unknown>).soul_id);
+      expect(ids).toEqual(['first', 'second']);
+      const prompts = capture.captured.map((c) => (c.soul_identity as Record<string, unknown>).system_prompt);
+      expect(prompts).toEqual(['Be first.', 'Be second.']);
+    });
+
+    it('getStatus exposes systemPrompt', async () => {
+      const soul = await manager.loadSoul(
+        defaultConfig('with-prompt', { systemPrompt: 'You are a pirate.' }),
+      );
+      expect(soul.getStatus().systemPrompt).toBe('You are a pirate.');
+
+      const bare = await manager.loadSoul(defaultConfig('without-prompt'));
+      expect(bare.getStatus().systemPrompt).toBeUndefined();
+    });
+  });
+
   // ── RPC Integration (2 tests) ──
 
   describe('RPC integration', () => {

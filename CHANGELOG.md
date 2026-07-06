@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Soul identity injection** (Roadmap 1.2) — a soul's identity (id, name, description, emoji, systemPrompt, model) now flows into every agent invocation via data sloshing as `upstream_slush.soul_identity`; previously `systemPrompt` and `model` were stored on the config but never used
+  - New `SoulIdentity` type; `RappterSoul.identity` getter; `RappterSoulStatus` now includes `systemPrompt`
+  - In chain mode each soul injects its own identity; optional fields are omitted when unset
+  - 4 new tests in `rappter-manager.test.ts` (suite now 3081 tests)
+
 - **OuroborosAgent scoring quick wins** (Roadmap 2.5) — two capability-assessment upgrades
   - Lexical entropy: generated `wordStats()` now reports Shannon entropy over the word frequency distribution; `checkWordStats` gains a `lexical_entropy` check (threshold H >= 2.0), making trivially repetitive input fail
   - Negation handling: generated `analyzeSentiment()` flips polarity for sentiment words preceded by a negator within a 2-token window ("not good" scores negative) and reports flipped words in `negated`; `checkSentiment(s, inputText)` gains a `negation_handled` check that independently recomputes expected flips from the input

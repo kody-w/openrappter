@@ -6,9 +6,8 @@
  */
 
 import { EncryptedMessageStore } from '../../messaging/store.js';
-import type { TwinMessage } from '../../messaging/store.js';
 import { PIIStripper, PIIVault } from '../../messaging/pii.js';
-import { EdgePublisher, signBlob, verifyBlob } from '../../messaging/edge-sync.js';
+import { EdgePublisher } from '../../messaging/edge-sync.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(

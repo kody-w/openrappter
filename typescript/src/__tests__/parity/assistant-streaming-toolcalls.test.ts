@@ -8,7 +8,7 @@
  * 4. The tool-call loop correctly handles partial streaming deltas
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { Assistant } from '../../agents/Assistant.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { StreamDelta } from '../../providers/types.js';

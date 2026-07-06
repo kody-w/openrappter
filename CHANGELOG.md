@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OuroborosAgent scoring quick wins** (Roadmap 2.5) — two capability-assessment upgrades
+  - Lexical entropy: generated `wordStats()` now reports Shannon entropy over the word frequency distribution; `checkWordStats` gains a `lexical_entropy` check (threshold H >= 2.0), making trivially repetitive input fail
+  - Negation handling: generated `analyzeSentiment()` flips polarity for sentiment words preceded by a negator within a 2-token window ("not good" scores negative) and reports flipped words in `negated`; `checkSentiment(s, inputText)` gains a `negation_handled` check that independently recomputes expected flips from the input
+  - Shared sentiment vocabulary (`SENTIMENT_POSITIVE_WORDS`, `SENTIMENT_NEGATIVE_WORDS`, `SENTIMENT_NEGATORS`) exported as single source of truth for generated agents and the judge
+  - Denominators: word stats 5 → 6 checks, sentiment 4 → 5 checks; ouroboros suite 81 → 86 tests
+
+### Fixed
+
+- All 8 outstanding ESLint warnings (unused imports/variables in `twin-methods.ts`, `pii.ts`, `index.ts`, and 2 test files) — lint is now warning-free
+
 - **Soul config persistence hardening** (Roadmap 1.2) — persistence is now backed by a dedicated `SoulStore` (`gateway/soul-store.ts`) with filename-safe ID validation (blocks path traversal via `saveSoulConfig`), config shape validation on load, corrupt-file tolerance, and an injectable souls directory for tests
   - `RappterManager` persistence methods (`saveSoul`, `saveSoulConfig`, `deleteSavedSoul`, `listSavedSouls`, `loadSavedSouls`) now delegate to `SoulStore`; new `restoreSouls()` reports restored/skipped/failed IDs; `loadSoul` gains a `persist` option
   - 4 new RPC methods: `rappter.save`, `rappter.persisted`, `rappter.restore`, `rappter.forget` (save/restore/forget require auth)

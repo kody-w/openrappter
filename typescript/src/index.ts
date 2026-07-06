@@ -173,7 +173,6 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       try {
         const contactKey = (incoming.conversationId || '').toLowerCase();
         const isGroupChat = !!(incoming.metadata as any)?.isGroupChat;
-        const senderKey = (incoming.sender || '').toLowerCase();
         const rawContent = (incoming.content || '').trim();
         const isWalPlaceholder = !!(incoming.metadata as any)?.walMutation
           && rawContent.startsWith('[New iMessage');

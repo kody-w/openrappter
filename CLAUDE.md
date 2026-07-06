@@ -359,6 +359,10 @@ Sentiment quality measures detection accuracy, not tonal range. Pure positive te
 
 Caesar cipher checks are inherently pass/fail (roundtrip either works or doesn't). Pattern detection checks measure breadth across categories. Reflection checks validate correctness. Don't add graduated thresholds where binary is the right model.
 
+### Independent recomputation for behavior checks
+
+When a check validates analyzer behavior (not just output shape), the judge recomputes the expectation from the input independently. `negation_handled` in `checkSentiment(s, inputText)` recounts negated sentiment words (2-token negator window, e.g. "not good" flips polarity) via the shared `countNegatedSentimentWords()` and compares against the analyzer's reported `negated` list — flips either match expectation or they don't. Shared vocabulary (`SENTIMENT_POSITIVE_WORDS`, `SENTIMENT_NEGATIVE_WORDS`, `SENTIMENT_NEGATORS`) is the single source of truth, interpolated into generated agent source. Similarly, `lexical_entropy` in `checkWordStats` requires the capability to report Shannon entropy over the word frequency distribution with threshold `H >= 2.0` (at least 4 effective word choices).
+
 ### Quality = (passed checks / total checks) * 100
 
 Each check contributes equal weight. Adding a new check changes the denominator for all scores in that capability. When adding checks, verify downstream tests and integration expectations still hold.

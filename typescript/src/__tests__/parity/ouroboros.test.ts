@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import {
   OuroborosAgent, EVOLUTION_CATALOG, EVOLVED_DIR,
   assessEvolution, checkWordStats, checkCaesarCipher, checkPatterns,
-  checkSentiment, checkReflection, loadLineageLog, saveLineageLog, computeTrends,
+  checkSentiment, checkReflection, countNegatedSentimentWords, loadLineageLog, saveLineageLog, computeTrends,
 } from '../../agents/OuroborosAgent.js';
 import type { EvolutionReport, LineageRunSummary } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
@@ -492,47 +492,62 @@ describe('OuroborosAgent Parity', () => {
 
   describe('capability scoring', () => {
     it('should pass all checks for complete word stats', () => {
-      const ws = { word_count: 50, unique_words: 30, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5] };
+      const ws = { word_count: 50, unique_words: 30, avg_word_length: 5.0, most_frequent: [1, 2, 3, 4, 5], entropy: 4.2 };
       const result = checkWordStats(ws);
       expect(result.quality).toBe(100);
-      expect(result.checks).toHaveLength(5);
+      expect(result.checks).toHaveLength(6);
       expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
     it('should pass has_diversity when ratio is exactly 0.5', () => {
-      const ws = { word_count: 10, unique_words: 5, avg_word_length: 4.0, most_frequent: [1, 2, 3, 4, 5] };
+      const ws = { word_count: 10, unique_words: 5, avg_word_length: 4.0, most_frequent: [1, 2, 3, 4, 5], entropy: 2.2 };
       const result = checkWordStats(ws);
-      // has_words: 10>=3 ✓, has_diversity: 5/10=0.5 (>=0.5) ✓, balanced_length: ✓, frequency_depth: 5>=3 ✓, substantial_input: 10>=10 ✓
+      // has_words: 10>=3 ✓, has_diversity: 5/10=0.5 (>=0.5) ✓, balanced_length: ✓, frequency_depth: 5>=3 ✓, substantial_input: 10>=10 ✓, lexical_entropy: 2.2>=2.0 ✓
       expect(result.quality).toBe(100);
       const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
       expect(diversityCheck?.passed).toBe(true);
     });
 
     it('should fail has_diversity when ratio is below 0.5', () => {
-      const ws = { word_count: 10, unique_words: 4, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const ws = { word_count: 10, unique_words: 4, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
       const result = checkWordStats(ws);
-      // has_words: ✓, has_diversity: 4/10=0.4 (<0.5) ✗, balanced_length: ✓, frequency_depth: ✓, substantial_input: ✓
-      expect(result.quality).toBe(80);
+      // has_words: ✓, has_diversity: 4/10=0.4 (<0.5) ✗, balanced_length: ✓, frequency_depth: ✓, substantial_input: ✓, lexical_entropy: ✓
+      expect(result.quality).toBe(83);
       const diversityCheck = result.checks.find(c => c.name === 'has_diversity');
       expect(diversityCheck?.passed).toBe(false);
     });
 
     it('should fail has_words for fewer than 3 words', () => {
-      const ws = { word_count: 2, unique_words: 2, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const ws = { word_count: 2, unique_words: 2, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
       const result = checkWordStats(ws);
-      // has_words: 2<3 ✗, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 2<10 ✗
-      expect(result.quality).toBe(60);
+      // has_words: 2<3 ✗, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 2<10 ✗, lexical_entropy: ✓
+      expect(result.quality).toBe(67);
       const wordsCheck = result.checks.find(c => c.name === 'has_words');
       expect(wordsCheck?.passed).toBe(false);
     });
 
     it('should fail substantial_input for fewer than 10 words', () => {
-      const ws = { word_count: 7, unique_words: 6, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const ws = { word_count: 7, unique_words: 6, avg_word_length: 4.0, most_frequent: [1, 2, 3], entropy: 2.2 };
       const result = checkWordStats(ws);
-      // has_words: ✓, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 7<10 ✗
-      expect(result.quality).toBe(80);
+      // has_words: ✓, has_diversity: ✓, balanced_length: ✓, frequency_depth: ✓, substantial_input: 7<10 ✗, lexical_entropy: ✓
+      expect(result.quality).toBe(83);
       const substantialCheck = result.checks.find(c => c.name === 'substantial_input');
       expect(substantialCheck?.passed).toBe(false);
+    });
+
+    it('should pass lexical_entropy at exactly H=2.0 and fail below', () => {
+      const base = { word_count: 20, unique_words: 15, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const atThreshold = checkWordStats({ ...base, entropy: 2.0 });
+      expect(atThreshold.checks.find(c => c.name === 'lexical_entropy')?.passed).toBe(true);
+
+      const below = checkWordStats({ ...base, entropy: 1.9 });
+      expect(below.checks.find(c => c.name === 'lexical_entropy')?.passed).toBe(false);
+    });
+
+    it('should fail lexical_entropy when entropy is missing (repetitive or legacy output)', () => {
+      const ws = { word_count: 20, unique_words: 15, avg_word_length: 4.0, most_frequent: [1, 2, 3] };
+      const result = checkWordStats(ws);
+      expect(result.checks.find(c => c.name === 'lexical_entropy')?.passed).toBe(false);
     });
 
     it('should pass balanced_length for avg 5.0', () => {
@@ -580,9 +595,9 @@ describe('OuroborosAgent Parity', () => {
     });
 
     it('should pass all checks for positive input with sufficient words', () => {
-      const s = { score: 1.0, label: 'positive', positive: ['great', 'good'], negative: [] };
-      const result = checkSentiment(s);
-      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 2>=2 ✓, has_confidence: ✓
+      const s = { score: 1.0, label: 'positive', positive: ['great', 'good'], negative: [], negated: [] };
+      const result = checkSentiment(s, 'great and good stuff');
+      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 2>=2 ✓, has_confidence: ✓, negation_handled: 0=0 ✓
       expect(result.quality).toBe(100);
       const evidenceCheck = result.checks.find(c => c.name === 'sufficient_evidence');
       expect(evidenceCheck?.passed).toBe(true);
@@ -591,17 +606,45 @@ describe('OuroborosAgent Parity', () => {
     it('should fail sufficient_evidence with only 1 sentiment word', () => {
       const s = { score: 1.0, label: 'positive', positive: ['great'], negative: [] };
       const result = checkSentiment(s);
-      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 1<2 ✗, has_confidence: ✓
-      expect(result.quality).toBe(75);
+      // detected_sentiment: ✓, found_words: ✓, sufficient_evidence: 1<2 ✗, has_confidence: ✓, negation_handled: 0=0 ✓
+      expect(result.quality).toBe(80);
       const evidenceCheck = result.checks.find(c => c.name === 'sufficient_evidence');
       expect(evidenceCheck?.passed).toBe(false);
     });
 
-    it('should give quality 0 for neutral sentiment with no words', () => {
+    it('should give quality 20 for neutral sentiment with no words (only vacuous negation check passes)', () => {
       const s = { score: 0, label: 'neutral', positive: [], negative: [] };
       const result = checkSentiment(s);
-      expect(result.quality).toBe(0);
-      expect(result.checks.every(c => !c.passed)).toBe(true);
+      expect(result.quality).toBe(20);
+      const failed = result.checks.filter(c => !c.passed).map(c => c.name);
+      expect(failed).toEqual(['detected_sentiment', 'found_words', 'sufficient_evidence', 'has_confidence']);
+    });
+
+    it('should pass negation_handled when reported flips match the input', () => {
+      // "not good" — analyzer flipped 'good' to negative and reported it
+      const s = { score: -1.0, label: 'negative', positive: [], negative: ['good', 'terrible'], negated: ['good'] };
+      const result = checkSentiment(s, 'this is not good and quite terrible');
+      const negationCheck = result.checks.find(c => c.name === 'negation_handled');
+      expect(negationCheck?.passed).toBe(true);
+      expect(result.quality).toBe(100);
+    });
+
+    it('should fail negation_handled when the analyzer missed a flip', () => {
+      // Input contains "not good" but the analyzer reported no negations
+      const s = { score: 1.0, label: 'positive', positive: ['good', 'great'], negative: [] };
+      const result = checkSentiment(s, 'not good but great');
+      const negationCheck = result.checks.find(c => c.name === 'negation_handled');
+      expect(negationCheck?.passed).toBe(false);
+      expect(result.quality).toBe(80);
+    });
+
+    it('should count negated sentiment words with a 2-token window', () => {
+      expect(countNegatedSentimentWords('not good')).toBe(1);
+      expect(countNegatedSentimentWords('never really great')).toBe(1); // negator 2 tokens back
+      expect(countNegatedSentimentWords('good and great')).toBe(0);
+      expect(countNegatedSentimentWords('not so bad')).toBe(1);
+      expect(countNegatedSentimentWords('the food was not good and never great')).toBe(2);
+      expect(countNegatedSentimentWords('')).toBe(0);
     });
 
     it('should pass all checks for correct Gen 5 reflection', () => {

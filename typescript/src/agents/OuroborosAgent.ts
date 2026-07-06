@@ -99,6 +99,25 @@ export interface EvolutionReport {
   lineage: EvolutionLineage | null;
 }
 
+// Shared sentiment vocabulary — single source of truth for both the generated
+// analyzeSentiment() capability and the checkSentiment() judge.
+export const SENTIMENT_POSITIVE_WORDS = ['good','great','excellent','amazing','wonderful','fantastic','love','happy','best','brilliant','perfect','beautiful','awesome'];
+export const SENTIMENT_NEGATIVE_WORDS = ['bad','terrible','awful','horrible','worst','hate','ugly','stupid','boring','poor','broken','fail','error'];
+export const SENTIMENT_NEGATORS = ['not','no','never','neither','nor','hardly','barely','cannot'];
+
+/** Count sentiment words preceded by a negator within a 2-token window ("not good", "never really great"). */
+export function countNegatedSentimentWords(text: string): number {
+  const words = text.toLowerCase().match(/\b[a-z]+\b/g) ?? [];
+  let count = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (!SENTIMENT_POSITIVE_WORDS.includes(words[i]) && !SENTIMENT_NEGATIVE_WORDS.includes(words[i])) continue;
+    if ((i >= 1 && SENTIMENT_NEGATORS.includes(words[i - 1])) || (i >= 2 && SENTIMENT_NEGATORS.includes(words[i - 2]))) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export const EVOLUTION_CATALOG: EvolutionEntry[] = [
   // Gen 0 → 1: Word Statistics
   {
@@ -112,11 +131,17 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     for (const w of words) freq[w] = (freq[w] ?? 0) + 1;
     const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     const avgLen = words.length ? words.reduce((s, w) => s + w.length, 0) / words.length : 0;
+    let entropy = 0;
+    for (const count of Object.values(freq)) {
+      const p = count / words.length;
+      entropy -= p * Math.log2(p);
+    }
     return {
       word_count: words.length,
       unique_words: Object.keys(freq).length,
       avg_word_length: Math.round(avgLen * 100) / 100,
       most_frequent: sorted.slice(0, 5).map(([w, c]) => ({ word: w, count: c })),
+      entropy: Math.round(entropy * 100) / 100,
     };
   }`;
       const capability = `    capabilityResults.wordStats = this.wordStats(inputText);`;
@@ -168,19 +193,30 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
   // Gen 3 → 4: Sentiment Heuristic
   {
     name: 'Sentiment Heuristic',
-    description: 'Adds analyzeSentiment() — positive/negative word scoring (-1 to 1)',
+    description: 'Adds analyzeSentiment() — positive/negative word scoring (-1 to 1) with 2-token negation handling',
     apply: (source, nextGen) => {
       const method = `
   analyzeSentiment(text) {
-    const positiveWords = ['good','great','excellent','amazing','wonderful','fantastic','love','happy','best','brilliant','perfect','beautiful','awesome'];
-    const negativeWords = ['bad','terrible','awful','horrible','worst','hate','ugly','stupid','boring','poor','broken','fail','error'];
+    const positiveWords = ${JSON.stringify(SENTIMENT_POSITIVE_WORDS)};
+    const negativeWords = ${JSON.stringify(SENTIMENT_NEGATIVE_WORDS)};
+    const negators = ${JSON.stringify(SENTIMENT_NEGATORS)};
     const words = text.toLowerCase().match(/\\b[a-z]+\\b/g) ?? [];
-    const pos = words.filter(w => positiveWords.includes(w));
-    const neg = words.filter(w => negativeWords.includes(w));
+    const pos = [];
+    const neg = [];
+    const negated = [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      const isPositive = positiveWords.includes(w);
+      if (!isPositive && !negativeWords.includes(w)) continue;
+      // 2-token negation window: "not good" / "never really great" flips polarity
+      const flipped = (i >= 1 && negators.includes(words[i - 1])) || (i >= 2 && negators.includes(words[i - 2]));
+      if (flipped) negated.push(w);
+      if (isPositive !== flipped) pos.push(w); else neg.push(w);
+    }
     const total = pos.length + neg.length;
     const score = total === 0 ? 0 : Math.round(((pos.length - neg.length) / total) * 100) / 100;
     const label = score > 0.2 ? 'positive' : score < -0.2 ? 'negative' : 'neutral';
-    return { score, label, positive: pos, negative: neg };
+    return { score, label, positive: pos, negative: neg, negated };
   }`;
       const capability = `    capabilityResults.sentiment = this.analyzeSentiment(inputText);`;
       return spliceEvolution(source, nextGen, method, capability);
@@ -376,6 +412,7 @@ export function checkWordStats(ws: Record<string, unknown> | undefined): { quali
   const unique = (ws.unique_words as number) ?? 0;
   const avgLen = (ws.avg_word_length as number) ?? 0;
   const freq = (ws.most_frequent as unknown[]) ?? [];
+  const entropy = (ws.entropy as number) ?? 0;
 
   const checks: Check[] = [
     { name: 'has_words', passed: wordCount >= 3, detail: `word_count=${wordCount}` },
@@ -383,6 +420,9 @@ export function checkWordStats(ws: Record<string, unknown> | undefined): { quali
     { name: 'balanced_length', passed: avgLen >= 3 && avgLen <= 7, detail: `avg_length=${avgLen}` },
     { name: 'frequency_depth', passed: freq.length >= 3, detail: `freq_entries=${freq.length}` },
     { name: 'substantial_input', passed: wordCount >= 10, detail: `word_count=${wordCount}` },
+    // Shannon entropy over the word frequency distribution; H >= 2.0 needs
+    // at least 4 effective word choices, so trivially repetitive input fails
+    { name: 'lexical_entropy', passed: entropy >= 2.0, detail: `entropy=${entropy}` },
   ];
   const passed = checks.filter(c => c.passed).length;
   return { quality: Math.round((passed / checks.length) * 100), checks };
@@ -419,18 +459,23 @@ export function checkPatterns(p: Record<string, unknown> | undefined): { quality
   return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
-export function checkSentiment(s: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
+export function checkSentiment(s: Record<string, unknown> | undefined, inputText: string = ''): { quality: number; checks: Check[] } {
   if (!s) return { quality: 0, checks: [] };
   const label = (s.label as string) ?? 'neutral';
   const pos = (s.positive as unknown[]) ?? [];
   const neg = (s.negative as unknown[]) ?? [];
   const score = (s.score as number) ?? 0;
+  const negated = (s.negated as unknown[]) ?? [];
+  // Independently recompute expected polarity flips from the input; pass/fail
+  // like the cipher roundtrip — flips either match expectation or they don't
+  const expectedNegations = countNegatedSentimentWords(inputText);
 
   const checks: Check[] = [
     { name: 'detected_sentiment', passed: label !== 'neutral', detail: `label=${label}` },
     { name: 'found_words', passed: (pos.length + neg.length) > 0, detail: `total=${pos.length + neg.length}` },
     { name: 'sufficient_evidence', passed: (pos.length + neg.length) >= 2, detail: `sentiment_words=${pos.length + neg.length}` },
     { name: 'has_confidence', passed: Math.abs(score) > 0.2, detail: `abs_score=${Math.abs(score)}` },
+    { name: 'negation_handled', passed: negated.length === expectedNegations, detail: `flipped=${negated.length} expected=${expectedNegations}` },
   ];
   const passed = checks.filter(c => c.passed).length;
   return { quality: Math.round((passed / checks.length) * 100), checks };
@@ -696,7 +741,7 @@ export async function assessEvolution(
     checkWordStats(caps.wordStats as Record<string, unknown> | undefined),
     checkCaesarCipher(caps.caesarCipher as Record<string, unknown> | undefined, input),
     checkPatterns(caps.patterns as Record<string, unknown> | undefined),
-    checkSentiment(caps.sentiment as Record<string, unknown> | undefined),
+    checkSentiment(caps.sentiment as Record<string, unknown> | undefined, input),
     checkReflection(caps.reflection as Record<string, unknown> | undefined),
   ];
 

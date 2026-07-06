@@ -401,6 +401,43 @@ describe('Multi-Rappter Gateway', () => {
       expect(prompts).toEqual(['Be first.', 'Be second.']);
     });
 
+    it('parallel summons on shared agent instances see their own soul identity (no context clobbering)', async () => {
+      // Souls from the default pool share agent instances. BasicAgent.execute
+      // stores context on the instance, so unserialized parallel invokes
+      // would let the second soul's context overwrite the first's before
+      // its perform() reads it.
+      class SlowCaptureAgent extends BasicAgent {
+        captured: string[] = [];
+
+        constructor() {
+          const metadata: AgentMetadata = {
+            name: 'SlowCapture',
+            description: 'Sleeps inside perform, then reads soul identity from context',
+            parameters: { type: 'object', properties: {}, required: [] },
+          };
+          super('SlowCapture', metadata);
+        }
+
+        async perform(): Promise<string> {
+          await new Promise((r) => setTimeout(r, 25));
+          const identity = this.context?.upstream_slush?.soul_identity as
+            | Record<string, unknown>
+            | undefined;
+          this.captured.push(String(identity?.soul_id));
+          return JSON.stringify({ status: 'success' });
+        }
+      }
+
+      const shared = new SlowCaptureAgent();
+      const m = new RappterManager(new Map([['SlowCapture', shared]]));
+      await m.loadSoul({ id: 'soul-a', name: 'A', description: 'First soul' });
+      await m.loadSoul({ id: 'soul-b', name: 'B', description: 'Second soul' });
+
+      await m.summon({ rappterIds: ['soul-a', 'soul-b'], message: 'go', mode: 'all' });
+
+      expect(shared.captured.sort()).toEqual(['soul-a', 'soul-b']);
+    });
+
     it('getStatus exposes systemPrompt', async () => {
       const soul = await manager.loadSoul(
         defaultConfig('with-prompt', { systemPrompt: 'You are a pirate.' }),

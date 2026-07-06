@@ -11,7 +11,7 @@ import { tmpdir } from 'os';
 import {
   OuroborosAgent, EVOLUTION_CATALOG, EVOLVED_DIR,
   assessEvolution, checkWordStats, checkCaesarCipher, checkPatterns,
-  checkSentiment, checkReflection, countNegatedSentimentWords, loadLineageLog, saveLineageLog, computeTrends,
+  checkSentiment, checkReflection, countNegatedSentimentWords, computeCapabilityTrajectories, loadLineageLog, saveLineageLog, computeTrends,
 } from '../../agents/OuroborosAgent.js';
 import type { EvolutionReport, LineageRunSummary } from '../../agents/OuroborosAgent.js';
 import type { LLMProvider, ProviderResponse } from '../../providers/types.js';
@@ -846,6 +846,86 @@ describe('OuroborosAgent Parity', () => {
       expect(capturedPrompt).toContain('Trajectory');
       // Should detect declining (100→95→90→current ~90, steep enough for negative trajectory)
       expect(capturedPrompt.toLowerCase()).toContain('declining');
+    });
+  });
+
+  describe('per-capability trajectories', () => {
+    const mkRun = (n: number, levels: number[]): LineageRunSummary => ({
+      run_number: n,
+      timestamp: '',
+      input_hash: String(n),
+      overall_quality: Math.round(levels.reduce((s, q) => s + q, 0) / levels.length),
+      status: 'developing',
+      level_qualities: levels,
+      level_statuses: levels.map(() => 'developing'),
+    });
+
+    it('computes an independent slope per capability', () => {
+      // Capability 0 rises steeply, capability 1 falls, the rest stay flat
+      const runs = [
+        mkRun(1, [10, 90, 50, 50, 50]),
+        mkRun(2, [30, 70, 50, 50, 50]),
+        mkRun(3, [50, 50, 50, 50, 50]),
+        mkRun(4, [70, 30, 50, 50, 50]),
+      ];
+      const trajectories = computeCapabilityTrajectories(runs);
+      expect(trajectories).toHaveLength(5);
+      expect(trajectories[0].slope).toBe(20);
+      expect(trajectories[0].direction).toBe('improving');
+      expect(trajectories[0].significant).toBe(true);
+      expect(trajectories[1].slope).toBe(-20);
+      expect(trajectories[1].direction).toBe('declining');
+      expect(trajectories[2].slope).toBe(0);
+      expect(trajectories[2].direction).toBe('stable');
+    });
+
+    it('gates direction on confidence: noisy history reads as stable', () => {
+      // Zigzag with a tiny net slope — high standard error, not significant
+      const runs = [
+        mkRun(1, [50, 50, 50, 50, 50]),
+        mkRun(2, [90, 50, 50, 50, 50]),
+        mkRun(3, [20, 50, 50, 50, 50]),
+        mkRun(4, [85, 50, 50, 50, 50]),
+        mkRun(5, [30, 50, 50, 50, 50]),
+      ];
+      const trajectories = computeCapabilityTrajectories(runs);
+      expect(trajectories[0].significant).toBe(false);
+      expect(trajectories[0].direction).toBe('stable');
+    });
+
+    it('never reports a direction with fewer than 3 data points', () => {
+      const runs = [mkRun(1, [10, 10, 10, 10, 10]), mkRun(2, [90, 90, 90, 90, 90])];
+      const trajectories = computeCapabilityTrajectories(runs);
+      for (const t of trajectories) {
+        expect(t.significant).toBe(false);
+        expect(t.direction).toBe('stable');
+        expect(t.std_error).toBe(-1);
+      }
+    });
+
+    it('includes capability_trajectories in lineage from assessEvolution', async () => {
+      const sampleCaps: Record<string, unknown> = {
+        wordStats: { word_count: 15, unique_words: 12, avg_word_length: 4.5, most_frequent: [{ word: 'the', count: 3 }], entropy: 3.1 },
+        caesarCipher: { encrypted: 'Gur nznmvat sbk', decrypted: 'The amazing fox' },
+        patterns: { emails: ['test@example.com'], urls: [], numbers: [], dates: [] },
+        sentiment: { score: 1.0, label: 'positive', positive: ['amazing', 'great'], negative: [] },
+        reflection: { generation: 5, className: 'OuroborosGen5Agent', capabilities: [], capability_count: 8, identity: 'I am Gen5' },
+      };
+      const priorRuns = [
+        mkRun(1, [20, 20, 20, 20, 20]),
+        mkRun(2, [40, 40, 40, 40, 40]),
+        mkRun(3, [60, 60, 60, 60, 60]),
+      ];
+
+      const report = await assessEvolution('The amazing fox', sampleCaps, undefined, priorRuns);
+      expect(report.lineage).not.toBeNull();
+      const trajectories = report.lineage!.capability_trajectories;
+      expect(trajectories).toHaveLength(5);
+      for (const t of trajectories) {
+        expect(typeof t.slope).toBe('number');
+        expect(typeof t.significant).toBe('boolean');
+        expect(['improving', 'declining', 'stable']).toContain(t.direction);
+      }
     });
   });
 

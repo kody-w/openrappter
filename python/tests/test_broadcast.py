@@ -109,7 +109,7 @@ class TestBroadcastErrors:
     def test_broadcast_raises_when_group_not_found(self):
         mgr = BroadcastManager()
         with pytest.raises(ValueError, match="not found"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.broadcast("missing-group", "hello", success_executor)
             )
 
@@ -122,7 +122,7 @@ class TestBroadcastAll:
     def test_all_mode_sends_to_every_agent(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2", "a3"], mode="all"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", success_executor)
         )
         assert set(result["results"].keys()) == {"a1", "a2", "a3"}
@@ -130,7 +130,7 @@ class TestBroadcastAll:
     def test_all_mode_all_succeeded_true_when_no_errors(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="all"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", success_executor)
         )
         assert result["allSucceeded"] is True
@@ -140,7 +140,7 @@ class TestBroadcastAll:
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="all"))
         executor = make_selective_executor(failing_ids={"a2"})
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", executor)
         )
         assert result["allSucceeded"] is False
@@ -149,7 +149,7 @@ class TestBroadcastAll:
     def test_all_mode_any_succeeded_false_when_all_fail(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="all"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", failure_executor)
         )
         assert result["anySucceeded"] is False
@@ -157,7 +157,7 @@ class TestBroadcastAll:
     def test_all_mode_first_response_set(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="all"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", success_executor)
         )
         assert result["firstResponse"] is not None
@@ -166,7 +166,7 @@ class TestBroadcastAll:
     def test_all_mode_group_id_in_result(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("my-group", ["a1"], mode="all"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("my-group", "ping", success_executor)
         )
         assert result["groupId"] == "my-group"
@@ -180,7 +180,7 @@ class TestBroadcastRace:
     def test_race_mode_returns_first_response(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="race"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", success_executor)
         )
         assert result["anySucceeded"] is True
@@ -189,7 +189,7 @@ class TestBroadcastRace:
     def test_race_mode_any_succeeded_false_when_all_fail(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="race"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", failure_executor)
         )
         assert result["anySucceeded"] is False
@@ -197,7 +197,7 @@ class TestBroadcastRace:
     def test_race_mode_group_id_in_result(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("race-group", ["a1", "a2"], mode="race"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("race-group", "ping", success_executor)
         )
         assert result["groupId"] == "race-group"
@@ -220,7 +220,7 @@ class TestBroadcastFallback:
 
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2", "a3"], mode="fallback"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", tracking_executor)
         )
         # a3 should never be called because a2 succeeded
@@ -233,7 +233,7 @@ class TestBroadcastFallback:
         executor = make_selective_executor(failing_ids={"a1"})
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="fallback"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", executor)
         )
         assert result["allSucceeded"] is False
@@ -241,7 +241,7 @@ class TestBroadcastFallback:
     def test_fallback_any_succeeded_false_when_all_fail(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="fallback"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", failure_executor)
         )
         assert result["anySucceeded"] is False
@@ -261,7 +261,7 @@ class TestBroadcastFallback:
 
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="fallback"))
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.broadcast("g1", "ping", slush_executor)
         )
         # a1 is called with None, a2 with potential slush (may be None depending on error shape)
@@ -276,7 +276,7 @@ class TestBroadcastUnknownMode:
     def test_unknown_mode_treated_as_all(self):
         mgr = BroadcastManager()
         mgr.create_group(make_group("g1", ["a1", "a2"], mode="mystery"))
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.broadcast("g1", "ping", success_executor)
         )
         # Both agents should be called (same as 'all')

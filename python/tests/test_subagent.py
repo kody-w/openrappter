@@ -120,14 +120,14 @@ class TestInvoke:
         mgr = SubAgentManager()
         ctx = make_root_context()
         with pytest.raises(RuntimeError, match="No agent executor"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
 
     def test_invoke_returns_result(self):
         mgr = make_manager()
         ctx = make_root_context()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert result["agentId"] == "agent-a"
@@ -138,7 +138,7 @@ class TestInvoke:
         mgr.set_executor(simple_executor)
         ctx = {**make_root_context(), "depth": 2}
         with pytest.raises(RuntimeError, match="Cannot invoke"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
 
@@ -147,14 +147,14 @@ class TestInvoke:
         mgr.set_executor(simple_executor)
         ctx = make_root_context()
         with pytest.raises(RuntimeError, match="Cannot invoke"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("forbidden", "hello", ctx)
             )
 
     def test_invoke_records_call_history(self):
         mgr = make_manager()
         ctx = make_root_context()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         history = mgr.get_call_history()
@@ -171,7 +171,7 @@ class TestInvoke:
         mgr = SubAgentManager()
         mgr.set_executor(depth_tracking_executor)
         ctx = {**make_root_context(), "depth": 0}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert received_depths == [1]
@@ -181,14 +181,14 @@ class TestInvoke:
         mgr.set_executor(failing_executor)
         ctx = make_root_context()
         with pytest.raises(RuntimeError, match="failed deliberately"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
 
     def test_invoke_call_removed_from_active_after_completion(self):
         mgr = make_manager()
         ctx = make_root_context()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert mgr.get_active_calls() == []
@@ -208,7 +208,7 @@ class TestLoopDetection:
         ]
         ctx = {**make_root_context(), "history": history}
         with pytest.raises(RuntimeError, match="Recursive loop"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
 
@@ -221,7 +221,7 @@ class TestLoopDetection:
         ]
         ctx = {**make_root_context(), "history": history}
         # agent-a has 0 occurrences in history, so should be fine
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert result["agentId"] == "agent-a"
@@ -234,7 +234,7 @@ class TestLoopDetection:
         history = [{"targetAgentId": "agent-a", "depth": i} for i in range(2)]
         ctx = {**make_root_context(), "history": history}
         # 2 occurrences is fine (threshold is >= 3)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert result is not None
@@ -249,7 +249,7 @@ class TestDataSlushForwarding:
         mgr = SubAgentManager()
         mgr.set_executor(slush_executor)
         ctx = make_root_context()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert ctx.get("lastSlush") == {"from_agent": "agent-a", "value": 42}
@@ -264,7 +264,7 @@ class TestDataSlushForwarding:
         mgr = SubAgentManager()
         mgr.set_executor(capturing_executor)
         ctx = {**make_root_context(), "lastSlush": {"some": "data"}}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             mgr.invoke("agent-a", "hello", ctx)
         )
         assert received_slush[0] == {"some": "data"}
@@ -294,7 +294,7 @@ class TestHandleToolCall:
     def test_handle_tool_call_invokes_agent(self):
         mgr = make_manager()
         ctx = make_root_context()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             mgr.handle_tool_call("invoke_agent-a", {"message": "do it"}, ctx)
         )
         assert result["agentId"] == "agent-a"
@@ -303,7 +303,7 @@ class TestHandleToolCall:
         mgr = make_manager()
         ctx = make_root_context()
         with pytest.raises(ValueError, match="Invalid sub-agent tool name"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.handle_tool_call("bad_name", {"message": "x"}, ctx)
             )
 
@@ -338,7 +338,7 @@ class TestCallTracking:
         mgr = make_manager()
         ctx = make_root_context()
         for _ in range(5):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
         history = mgr.get_call_history(limit=3)
@@ -349,7 +349,7 @@ class TestCallTracking:
         mgr.set_executor(failing_executor)
         ctx = make_root_context()
         try:
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 mgr.invoke("agent-a", "hello", ctx)
             )
         except RuntimeError:

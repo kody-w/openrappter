@@ -41,7 +41,7 @@ class TestDepthLimits:
         ctx = manager.create_context("RecursiveCreator")
         ctx["depth"] = 3
         with pytest.raises(RuntimeError, match="Cannot invoke agent LearnNew"):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("LearnNew", "create agent", ctx))
+            asyncio.run(manager.invoke("LearnNew", "create agent", ctx))
 
     def test_increment_depth_on_child_context(self):
         manager = SubAgentManager({"maxDepth": 5})
@@ -54,7 +54,7 @@ class TestDepthLimits:
         manager.set_executor(executor)
         ctx = manager.create_context("Parent")
         assert ctx["depth"] == 0
-        asyncio.get_event_loop().run_until_complete(manager.invoke("ChildAgent", "do work", ctx))
+        asyncio.run(manager.invoke("ChildAgent", "do work", ctx))
         assert captured_depth[0] == 1
 
     def test_track_nested_depth_across_invocations(self):
@@ -67,14 +67,14 @@ class TestDepthLimits:
 
         manager.set_executor(executor)
         ctx = manager.create_context("Root")
-        asyncio.get_event_loop().run_until_complete(manager.invoke("Agent1", "step 1", ctx))
+        asyncio.run(manager.invoke("Agent1", "step 1", ctx))
 
         ctx2 = dict(ctx)
         ctx2["depth"] = 2
         ctx2["callId"] = "call_2"
         ctx2["parentAgentId"] = "Agent1"
         ctx2["history"] = list(ctx["history"])
-        asyncio.get_event_loop().run_until_complete(manager.invoke("Agent2", "step 2", ctx2))
+        asyncio.run(manager.invoke("Agent2", "step 2", ctx2))
         assert depths == [1, 3]
 
 
@@ -91,7 +91,7 @@ class TestLoopDetection:
         push_call(ctx, "LearnNew")
         push_call(ctx, "LearnNew")
         with pytest.raises(RuntimeError, match="loop detected"):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("LearnNew", "call 4", ctx))
+            asyncio.run(manager.invoke("LearnNew", "call 4", ctx))
 
     def test_allow_different_agents_without_loop(self):
         manager = SubAgentManager({"maxDepth": 10})
@@ -104,7 +104,7 @@ class TestLoopDetection:
         push_call(ctx, "AgentA")
         push_call(ctx, "AgentB")
         push_call(ctx, "AgentC")
-        result = asyncio.get_event_loop().run_until_complete(manager.invoke("AgentA", "task 4", ctx))
+        result = asyncio.run(manager.invoke("AgentA", "task 4", ctx))
         assert result is not None
 
     def test_detect_loops_within_sliding_window(self):
@@ -122,7 +122,7 @@ class TestLoopDetection:
         push_call(ctx, "Target")
         push_call(ctx, "Target")
         with pytest.raises(RuntimeError, match="loop detected"):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("Target", "msg", ctx))
+            asyncio.run(manager.invoke("Target", "msg", ctx))
 
 
 class TestBlockedAgents:
@@ -149,8 +149,8 @@ class TestCallHistory:
 
         manager.set_executor(executor)
         ctx = manager.create_context("Root")
-        asyncio.get_event_loop().run_until_complete(manager.invoke("AgentA", "task 1", ctx))
-        asyncio.get_event_loop().run_until_complete(manager.invoke("AgentB", "task 2", ctx))
+        asyncio.run(manager.invoke("AgentA", "task 1", ctx))
+        asyncio.run(manager.invoke("AgentB", "task 2", ctx))
         history = manager.get_call_history()
         assert len(history) == 2
         assert history[0]["targetAgentId"] == "AgentA"
@@ -166,7 +166,7 @@ class TestCallHistory:
         manager.set_executor(executor)
         ctx = manager.create_context("Root")
         with pytest.raises(RuntimeError):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("CrashAgent", "do work", ctx))
+            asyncio.run(manager.invoke("CrashAgent", "do work", ctx))
         history = manager.get_call_history()
         assert len(history) == 1
         assert history[0]["status"] == "error"
@@ -178,4 +178,4 @@ class TestGracefulFailure:
         manager = SubAgentManager({"maxDepth": 5})
         ctx = manager.create_context("Root")
         with pytest.raises(RuntimeError, match="No agent executor configured"):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("Agent", "msg", ctx))
+            asyncio.run(manager.invoke("Agent", "msg", ctx))

@@ -87,7 +87,7 @@ def create_inception_agents():
             builder = DreamBuilderAgent()
             agents["DreamBuilder"] = builder
             ctx = manager.create_context("DreamArchitect")
-            inner_result = asyncio.get_event_loop().run_until_complete(manager.invoke("DreamBuilder", dream_seed, ctx))
+            inner_result = asyncio.run(manager.invoke("DreamBuilder", dream_seed, ctx))
             inner = inner_result if isinstance(inner_result, dict) else json.loads(inner_result)
             return json.dumps({
                 "status": "success",
@@ -184,7 +184,7 @@ class TestSubAgentDepthTracking:
         builder = DreamBuilderAgent()
         agents["DreamBuilder"] = builder
         ctx = manager.create_context("TestRoot")
-        asyncio.get_event_loop().run_until_complete(manager.invoke("DreamBuilder", "test", ctx))
+        asyncio.run(manager.invoke("DreamBuilder", "test", ctx))
         assert depths == [1, 2]
 
     def test_blocks_when_max_depth_exceeded(self):
@@ -195,14 +195,14 @@ class TestSubAgentDepthTracking:
 
         manager.set_executor(executor)
         ctx = manager.create_context("DreamArchitect")
-        asyncio.get_event_loop().run_until_complete(manager.invoke("DreamBuilder", "test", ctx))
+        asyncio.run(manager.invoke("DreamBuilder", "test", ctx))
         deep_ctx = dict(ctx)
         deep_ctx["depth"] = 1
         deep_ctx["callId"] = "deep"
         deep_ctx["parentAgentId"] = "DreamBuilder"
         deep_ctx["history"] = list(ctx["history"])
         with pytest.raises(RuntimeError, match="Cannot invoke agent DreamExtractor"):
-            asyncio.get_event_loop().run_until_complete(manager.invoke("DreamExtractor", "test", deep_ctx))
+            asyncio.run(manager.invoke("DreamExtractor", "test", deep_ctx))
 
     def test_allows_all_3_levels_with_sufficient_depth(self):
         _, _, _, DreamArchitectAgent = create_inception_agents()

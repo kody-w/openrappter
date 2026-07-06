@@ -87,7 +87,7 @@ class TestRaceMode:
             result_str = agent.execute(query=message)
             return json.loads(result_str)
 
-        result = asyncio.get_event_loop().run_until_complete(mgr.broadcast("debug-swarm", "NullPointerException in auth", executor))
+        result = asyncio.run(mgr.broadcast("debug-swarm", "NullPointerException in auth", executor))
         assert result["anySucceeded"] is True
         assert result["firstResponse"] is not None
 
@@ -101,7 +101,7 @@ class TestRaceMode:
             result_str = agent.execute(query=message)
             return json.loads(result_str)
 
-        result = asyncio.get_event_loop().run_until_complete(mgr.broadcast("debug-all", "Diagnose error", executor))
+        result = asyncio.run(mgr.broadcast("debug-all", "Diagnose error", executor))
         assert result["allSucceeded"] is True
         assert len(result["results"]) == 3
 
@@ -117,7 +117,7 @@ class TestWinnerSlushForwarding:
             result_str = agent.execute(query=message)
             return json.loads(result_str)
 
-        race_result = asyncio.get_event_loop().run_until_complete(mgr.broadcast("debug-swarm", "Auth error", executor))
+        race_result = asyncio.run(mgr.broadcast("debug-swarm", "Auth error", executor))
         winner_result = race_result["firstResponse"]["result"]
         winner_slush = winner_result.get("data_slush", {})
 
@@ -134,7 +134,7 @@ class TestErrorHandling:
         async def executor(agent_id, message, upstream_slush=None):
             return {"status": "success"}
         with pytest.raises(ValueError, match="not found"):
-            asyncio.get_event_loop().run_until_complete(mgr.broadcast("nonexistent", "test", executor))
+            asyncio.run(mgr.broadcast("nonexistent", "test", executor))
 
     def test_race_with_single_agent(self):
         agents = _make_agents()
@@ -144,5 +144,5 @@ class TestErrorHandling:
         async def executor(agent_id, message, upstream_slush=None):
             return json.loads(agents[agent_id].execute(query=message))
 
-        result = asyncio.get_event_loop().run_until_complete(mgr.broadcast("single", "test", executor))
+        result = asyncio.run(mgr.broadcast("single", "test", executor))
         assert result["anySucceeded"] is True

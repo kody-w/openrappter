@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Soul config persistence hardening** (Roadmap 1.2) — persistence is now backed by a dedicated `SoulStore` (`gateway/soul-store.ts`) with filename-safe ID validation (blocks path traversal via `saveSoulConfig`), config shape validation on load, corrupt-file tolerance, and an injectable souls directory for tests
+  - `RappterManager` persistence methods (`saveSoul`, `saveSoulConfig`, `deleteSavedSoul`, `listSavedSouls`, `loadSavedSouls`) now delegate to `SoulStore`; new `restoreSouls()` reports restored/skipped/failed IDs; `loadSoul` gains a `persist` option
+  - 4 new RPC methods: `rappter.save`, `rappter.persisted`, `rappter.restore`, `rappter.forget` (save/restore/forget require auth)
+  - Gateway startup restores all persisted souls after loading the default soul
+  - `soul-store.test.ts` — 27 new tests (store, manager integration, RPC end-to-end)
+
 ## [1.9.1] - 2026-02-22
 
 ### Added

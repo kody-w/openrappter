@@ -83,15 +83,27 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
   });
 
-  // Set up RappterManager — multi-soul brainstem
+  // Set up RappterManager — multi-soul brainstem with persisted souls
   const { RappterManager } = await import('./gateway/rappter-manager.js');
-  const rappterManager = new RappterManager(agents);
+  const { SoulStore } = await import('./gateway/soul-store.js');
+  const rappterManager = new RappterManager(agents, new SoulStore());
   await rappterManager.loadSoul({
     id: 'default',
     name: NAME,
     description: 'Default rappter soul — backward-compatible assistant',
     emoji: EMOJI,
   });
+  try {
+    const restored = await rappterManager.restoreSouls();
+    if (restored.restored.length > 0) {
+      log(`${EMOJI} Restored ${restored.restored.length} persisted soul(s): ${restored.restored.join(', ')}`);
+    }
+    for (const failure of restored.errors) {
+      console.warn(`${EMOJI} Failed to restore soul '${failure.id}': ${failure.error}`);
+    }
+  } catch (err) {
+    console.warn(`${EMOJI} Soul restore skipped: ${(err as Error).message}`);
+  }
   server.setRappterManager(rappterManager);
 
   // Set up channel registry — register all channels so they appear in the UI

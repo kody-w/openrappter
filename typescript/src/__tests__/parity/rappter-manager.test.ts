@@ -328,7 +328,7 @@ describe('Multi-Rappter Gateway', () => {
   // ── RPC Integration (2 tests) ──
 
   describe('RPC integration', () => {
-    it('registers all 6 rappter methods on server', () => {
+    it('registers all 12 rappter methods on server', () => {
       const server = new MockServer();
       registerRappterMethods(server, { rappterManager: manager });
 
@@ -339,6 +339,12 @@ describe('Multi-Rappter Gateway', () => {
         'rappter.unload',
         'rappter.reload',
         'rappter.status',
+        'rappter.templates',
+        'rappter.load-template',
+        'rappter.save',
+        'rappter.persisted',
+        'rappter.restore',
+        'rappter.forget',
       ];
       for (const method of expectedMethods) {
         expect(server.methods.has(method)).toBe(true);

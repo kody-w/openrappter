@@ -2,7 +2,7 @@
  * Rappter RPC methods — soul lifecycle + multi-rappter summon via gateway
  */
 
-import type { RappterManager, RappterSoulConfig, SummonParams, SummonResult, RappterSoulInfo, RappterSoulStatus } from '../rappter-manager.js';
+import type { RappterManager, RappterSoulConfig, SummonParams, SummonResult, RappterSoulInfo, RappterSoulStatus, RestoreSoulsResult } from '../rappter-manager.js';
 import type { SoulTemplate } from '../soul-templates/index.js';
 
 interface MethodRegistrar {
@@ -42,12 +42,12 @@ export function registerRappterMethods(
     { requiresAuth: true },
   );
 
-  // Load a new soul
-  server.registerMethod<{ config: RappterSoulConfig }, { soul: RappterSoulInfo }>(
+  // Load a new soul (persist: true also saves the config to ~/.openrappter/souls/)
+  server.registerMethod<{ config: RappterSoulConfig; persist?: boolean }, { soul: RappterSoulInfo }>(
     'rappter.load',
     async (params) => {
       const manager = getManager();
-      const soul = await manager.loadSoul(params.config);
+      const soul = await manager.loadSoul(params.config, { persist: params.persist });
       const status = soul.getStatus();
       return {
         soul: {
@@ -135,6 +135,49 @@ export function registerRappterMethods(
           agentCount: status.agentCount,
         },
       };
+    },
+    { requiresAuth: true },
+  );
+
+  // ── Soul Persistence ──
+
+  // Persist a loaded soul's config to disk
+  server.registerMethod<{ rappterId: string }, { saved: boolean; path: string }>(
+    'rappter.save',
+    async (params) => {
+      const manager = getManager();
+      const path = await manager.saveSoul(params.rappterId);
+      return { saved: true, path };
+    },
+    { requiresAuth: true },
+  );
+
+  // List persisted soul configs on disk
+  server.registerMethod<void, { configs: RappterSoulConfig[] }>(
+    'rappter.persisted',
+    async () => {
+      const manager = getManager();
+      return { configs: await manager.listSavedSouls() };
+    },
+  );
+
+  // Load all persisted souls into the manager
+  server.registerMethod<void, RestoreSoulsResult>(
+    'rappter.restore',
+    async () => {
+      const manager = getManager();
+      return manager.restoreSouls();
+    },
+    { requiresAuth: true },
+  );
+
+  // Delete a soul's persisted config (loaded soul stays loaded)
+  server.registerMethod<{ rappterId: string }, { forgotten: boolean }>(
+    'rappter.forget',
+    async (params) => {
+      const manager = getManager();
+      const forgotten = await manager.deleteSavedSoul(params.rappterId);
+      return { forgotten };
     },
     { requiresAuth: true },
   );

@@ -25,6 +25,8 @@ jobs:
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # vitest (esbuild) does not type-check — tsc is the only gate for type errors
+      - run: npm run build
       - run: npm test
 
   macos-menu-bar:

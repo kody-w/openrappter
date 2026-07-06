@@ -449,16 +449,52 @@ describe('Multi-Rappter Gateway', () => {
     });
   });
 
+  // ── Soul Creation from Natural Language (5 tests) ──
+
+  describe('createSoul', () => {
+    it('creates and loads a soul with an inferred name and kebab-case id', async () => {
+      const soul = await manager.createSoul('research papers and summarize key findings');
+      expect(soul.config.name).toBe('ResearchPapers');
+      expect(soul.id).toBe('research-papers');
+      expect(manager.getSoul('research-papers')).toBeDefined();
+      expect(soul.agentCount).toBe(3); // default pool
+    });
+
+    it('explicit name wins over inference', async () => {
+      const soul = await manager.createSoul('do many things', { name: 'Ops' });
+      expect(soul.config.name).toBe('Ops');
+      expect(soul.id).toBe('ops');
+    });
+
+    it('derives a systemPrompt so identity injection carries the persona', async () => {
+      const soul = await manager.createSoul('triage bugs ruthlessly', { name: 'Triager' });
+      expect(soul.config.systemPrompt).toBe('You are Triager. triage bugs ruthlessly');
+      expect(soul.identity.system_prompt).toBe('You are Triager. triage bugs ruthlessly');
+    });
+
+    it('suffixes the id on collision', async () => {
+      const first = await manager.createSoul('watch the deploys', { name: 'Watcher' });
+      const second = await manager.createSoul('watch the tests', { name: 'Watcher' });
+      expect(first.id).toBe('watcher');
+      expect(second.id).toBe('watcher-2');
+    });
+
+    it('rejects an empty description', async () => {
+      await expect(manager.createSoul('   ')).rejects.toThrow('requires a description');
+    });
+  });
+
   // ── RPC Integration (2 tests) ──
 
   describe('RPC integration', () => {
-    it('registers all 12 rappter methods on server', () => {
+    it('registers all 13 rappter methods on server', () => {
       const server = new MockServer();
       registerRappterMethods(server, { rappterManager: manager });
 
       const expectedMethods = [
         'rappter.list',
         'rappter.summon',
+        'rappter.create',
         'rappter.load',
         'rappter.unload',
         'rappter.reload',

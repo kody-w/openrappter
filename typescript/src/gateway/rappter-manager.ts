@@ -112,6 +112,23 @@ export interface RestoreSoulsResult {
   errors: Array<{ id: string; error: string }>;
 }
 
+// ── Soul creation from natural language ─────────────────────────────────────
+
+const SOUL_NAME_STOP_WORDS = new Set([
+  'that', 'this', 'with', 'from', 'agent', 'create', 'make', 'want', 'should',
+  'would', 'could', 'the', 'and', 'for', 'to', 'of', 'in', 'on', 'be', 'is',
+  'are', 'was', 'has', 'have', 'will', 'can', 'you', 'your', 'my', 'me', 'we',
+  'our', 'us', 'about', 'like', 'into', 'when', 'then', 'them', 'they',
+]);
+
+/** Infer a CamelCase soul name from a description (LearnNewAgent naming convention). */
+export function inferSoulName(description: string): string {
+  const words = description.toLowerCase().match(/[a-z]+/g) ?? [];
+  const keywords = words.filter(w => w.length > 3 && !SOUL_NAME_STOP_WORDS.has(w)).slice(0, 2);
+  if (keywords.length === 0) return 'CustomSoul';
+  return keywords.map(w => w[0].toUpperCase() + w.slice(1)).join('');
+}
+
 // ── Shared-agent serialization ──────────────────────────────────────────────
 //
 // Souls built from the default pool share agent instances, and
@@ -375,6 +392,40 @@ export class RappterManager {
   }
 
   // ── Persistence (backed by SoulStore, default ~/.openrappter/souls/) ──
+
+  /**
+   * Create and load a soul from a natural-language description.
+   * Name is inferred from the description unless given; the id is the
+   * kebab-case name (suffixed -2..-9 on collision); a systemPrompt is
+   * derived so identity injection carries the persona to agents.
+   */
+  async createSoul(
+    description: string,
+    options?: { name?: string; emoji?: string; persist?: boolean; agents?: string[]; systemPrompt?: string },
+  ): Promise<RappterSoul> {
+    if (!description?.trim()) throw new Error('createSoul requires a description');
+
+    const name = options?.name?.trim() || inferSoulName(description);
+    const baseId = name
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'soul';
+    let id = baseId;
+    for (let n = 2; this.souls.has(id) && n <= 9; n++) id = `${baseId}-${n}`;
+    if (this.souls.has(id)) throw new Error(`Soul id space exhausted for: ${baseId}`);
+
+    const config: RappterSoulConfig = {
+      id,
+      name,
+      description: description.trim(),
+      systemPrompt: options?.systemPrompt ?? `You are ${name}. ${description.trim()}`,
+    };
+    if (options?.emoji) config.emoji = options.emoji;
+    if (options?.agents) config.agents = options.agents;
+
+    return this.loadSoul(config, { persist: options?.persist });
+  }
 
   /** Save a loaded soul's config to disk for persistence across restarts */
   async saveSoul(soulId: string): Promise<string> {

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`rappter.create` RPC** (Roadmap 1.2) — create and load a soul from a natural-language description: name inferred via LearnNewAgent's keyword convention (explicit name wins), kebab-case id with collision suffixing, and an auto-derived `systemPrompt` so identity injection carries the persona to agents; `persist: true` saves the config. `RappterManager.createSoul()` + 6 new tests; rappter RPC surface now 13 methods.
+
+### Added
+
 - **RAPP brainstem drop-in compliance harness** (`python/tests/test_brainstem_compliance.py`) — proves every `*_agent.py` in `python/openrappter/agents/` runs when dropped into a rapp-installer brainstem (kody-w/rapp-installer, per rapp-spine). Replicates the kernel's `_load_agent_from_file` contract in a clean subprocess per agent: kernel `BasicAgent` (vendored verbatim as a fixture), import shims exactly as the brainstem registers them, zero-arg instantiation, registration by `instance.name`, and `to_tool()` for the /chat loop. Unshimmed `openrappter.*` imports fail exactly as they would in a real brainstem (validated with a negative control). Result: **12/12 agent files compliant**; 13 new tests.
 
 - **Input difficulty scoring** (Roadmap 2.5, completes the quick-wins block) — `scoreInputDifficulty(input)` rates per capability whether the input gives it a fair chance (word/unique-word minimums, alphabetic content, pattern categories present, sentiment-bearing words), with reasons listing exactly what's missing; `EvolutionReport` now carries `input_difficulty` so a weak capability score can be attributed to unfair input instead of a broken capability. 8 new tests.

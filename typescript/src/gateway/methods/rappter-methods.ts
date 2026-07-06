@@ -139,6 +139,33 @@ export function registerRappterMethods(
     { requiresAuth: true },
   );
 
+  // Create a soul from a natural-language description
+  server.registerMethod<
+    { description: string; name?: string; emoji?: string; persist?: boolean },
+    { soul: RappterSoulInfo }
+  >(
+    'rappter.create',
+    async (params) => {
+      const manager = getManager();
+      const soul = await manager.createSoul(params.description, {
+        name: params.name,
+        emoji: params.emoji,
+        persist: params.persist,
+      });
+      const status = soul.getStatus();
+      return {
+        soul: {
+          id: status.id,
+          name: status.name,
+          description: status.description,
+          emoji: status.emoji,
+          agentCount: status.agentCount,
+        },
+      };
+    },
+    { requiresAuth: true },
+  );
+
   // ── Soul Persistence ──
 
   // Persist a loaded soul's config to disk

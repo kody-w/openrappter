@@ -448,15 +448,37 @@ export function checkWordStats(ws: Record<string, unknown> | undefined): { quali
   return { quality: Math.round((passed / checks.length) * 100), checks };
 }
 
+/** ROT-N a single character, preserving case; non-alphabetic characters pass through. */
+function rotChar(ch: string, shift: number): string {
+  if (!/[a-zA-Z]/.test(ch)) return ch;
+  const base = ch >= 'a' ? 97 : 65;
+  return String.fromCharCode(((ch.charCodeAt(0) - base + shift) % 26) + base);
+}
+
 export function checkCaesarCipher(cc: Record<string, unknown> | undefined, inputText: string): { quality: number; checks: Check[] } {
   if (!cc) return { quality: 0, checks: [] };
   const encrypted = (cc.encrypted as string) ?? '';
   const decrypted = (cc.decrypted as string) ?? '';
 
+  // Character-level verification: every character must be shifted by exactly
+  // the expected amount (ROT13) — a transform that merely roundtrips (e.g. a
+  // string reversal) is not a Caesar cipher and must fail here.
+  let shiftedCorrectly = 0;
+  let alphaCount = 0;
+  if (encrypted.length === inputText.length) {
+    for (let i = 0; i < inputText.length; i++) {
+      if (/[a-zA-Z]/.test(inputText[i])) alphaCount++;
+      if (encrypted[i] === rotChar(inputText[i], 13)) shiftedCorrectly++;
+    }
+  }
+  const charShiftValid =
+    encrypted.length === inputText.length && alphaCount > 0 && shiftedCorrectly === inputText.length;
+
   const checks: Check[] = [
     { name: 'produced_output', passed: encrypted.length > 0, detail: `encrypted_length=${encrypted.length}` },
     { name: 'roundtrip_intact', passed: decrypted === inputText, detail: `match=${decrypted === inputText}` },
     { name: 'transformed', passed: encrypted !== inputText, detail: `different=${encrypted !== inputText}` },
+    { name: 'char_shift_valid', passed: charShiftValid, detail: `shifted=${shiftedCorrectly}/${inputText.length} alpha=${alphaCount}` },
   ];
   const passed = checks.filter(c => c.passed).length;
   return { quality: Math.round((passed / checks.length) * 100), checks };

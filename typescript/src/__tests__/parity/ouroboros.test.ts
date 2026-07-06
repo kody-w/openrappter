@@ -568,7 +568,7 @@ describe('OuroborosAgent Parity', () => {
       const cc = { encrypted: 'uryyb jbeyq', decrypted: 'hello world' };
       const result = checkCaesarCipher(cc, input);
       expect(result.quality).toBe(100);
-      expect(result.checks).toHaveLength(3);
+      expect(result.checks).toHaveLength(4);
       expect(result.checks.every(c => c.passed)).toBe(true);
     });
 
@@ -576,6 +576,33 @@ describe('OuroborosAgent Parity', () => {
       const result = checkCaesarCipher(undefined, 'test');
       expect(result.quality).toBe(0);
       expect(result.checks).toHaveLength(0);
+    });
+
+    it('should fail char_shift_valid for a transform that roundtrips without shifting', () => {
+      // A string reversal "roundtrips" but is not a Caesar cipher
+      const input = 'hello world';
+      const cc = { encrypted: 'dlrow olleh', decrypted: 'hello world' };
+      const result = checkCaesarCipher(cc, input);
+      const charCheck = result.checks.find(c => c.name === 'char_shift_valid');
+      expect(charCheck?.passed).toBe(false);
+      expect(result.quality).toBe(75); // produced_output ✓, roundtrip ✓, transformed ✓, char_shift ✗
+    });
+
+    it('should fail char_shift_valid on length mismatch or a single wrong character', () => {
+      const truncated = checkCaesarCipher({ encrypted: 'uryyb', decrypted: 'hello world' }, 'hello world');
+      expect(truncated.checks.find(c => c.name === 'char_shift_valid')?.passed).toBe(false);
+
+      // One character off (last char should be 'q' for ROT13 of 'd')
+      const oneOff = checkCaesarCipher({ encrypted: 'uryyb jbeyd', decrypted: 'hello world' }, 'hello world');
+      expect(oneOff.checks.find(c => c.name === 'char_shift_valid')?.passed).toBe(false);
+    });
+
+    it('should preserve case and pass punctuation through in char verification', () => {
+      const input = 'Hello, World!';
+      const cc = { encrypted: 'Uryyb, Jbeyq!', decrypted: 'Hello, World!' };
+      const result = checkCaesarCipher(cc, input);
+      expect(result.checks.find(c => c.name === 'char_shift_valid')?.passed).toBe(true);
+      expect(result.quality).toBe(100);
     });
 
     it('should pass all checks when all 4 pattern categories found', () => {

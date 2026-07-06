@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Character-level cipher verification** (Roadmap 2.5 graduated scoring) — `checkCaesarCipher` gains a `char_shift_valid` check that verifies every character is shifted by exactly ROT13 (case preserved, punctuation passed through); a transform that merely roundtrips (e.g. string reversal) now fails. Cipher denominator 3 → 4 checks; 3 new tests.
+
+### Added
+
 - **Soul-to-soul communication** (Roadmap 1.2) — agents invoked through a soul now receive a `_soul` handle in kwargs (`{ id, chain, summon(rappterIds, message, mode) }`) that summons sibling souls through the manager. An ancestry chain rides every nested invocation: summon cycles (a → b → a) are blocked, depth is capped at `MAX_SOUL_SUMMON_DEPTH` (3), and souls loaded without a manager degrade gracefully. 4 new tests.
 
 ### Added

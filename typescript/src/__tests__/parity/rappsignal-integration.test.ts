@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { EncryptedMessageStore } from '../../messaging/store.js';
 import { PIIStripper, PIIVault } from '../../messaging/pii.js';
 import { EdgePublisher, verifyBlob, verifyChannel } from '../../messaging/edge-sync.js';
-import { doubleDecrypt, keyFingerprint } from '../../messaging/ephemeral.js';
+import { keyFingerprint } from '../../messaging/ephemeral.js';
 
 describe('RappterSignal Integration — Full Pipeline', () => {
   it('twin.send → PII strip → double encrypt → store → sign → publish → verify → decrypt → reattach', () => {

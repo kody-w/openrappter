@@ -30,9 +30,6 @@ const PII_PATTERNS: Array<{ type: string; regex: RegExp }> = [
   { type: 'appleid', regex: /\b[a-zA-Z0-9._%+\-]+@(?:icloud|me|mac)\.com\b/g },
 ];
 
-// Known names — populated per conversation from participants + detected names
-const NAME_PATTERN = /\b[A-Z][a-z]{2,15}\b/g;
-
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface PIIMap {
@@ -82,7 +79,7 @@ export class PIIStripper {
     // Track what we've already replaced to avoid double-tokenizing
     const replaced = new Map<string, string>(); // original → token
 
-    const replaceMatch = (match: string, type: string): string => {
+    const replaceMatch = (match: string, _type: string): string => {
       if (replaced.has(match)) return replaced.get(match)!;
       counter++;
       const token = `[P:${counter}]`;

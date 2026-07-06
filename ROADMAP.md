@@ -116,8 +116,8 @@ _Make agents smarter and more autonomous._
 _Extending the existing deterministic scoring system._
 
 **Quick wins:**
-- [ ] Lexical entropy in `checkWordStats` (Shannon entropy, threshold H >= 2.0)
-- [ ] Negation handling in `checkSentiment` (2-token window: "not good" flips polarity)
+- [x] Lexical entropy in `checkWordStats` (Shannon entropy, threshold H >= 2.0)
+- [x] Negation handling in `checkSentiment` (2-token window: "not good" flips polarity)
 - [ ] Per-capability trajectory tracking (independent slope per capability in `computeTrajectory`)
 - [ ] Confidence intervals on trajectory (require slope > 2x standard error)
 - [ ] Input difficulty scoring (distinguish "capability broken" from "unfair input")

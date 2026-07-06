@@ -145,10 +145,7 @@ def test_agent_files_discovered():
     assert len(files) >= 12, f"expected at least 12 agent files, found {len(files)}"
 
 
-@pytest.mark.parametrize("filepath", agent_files(), ids=lambda f: os.path.basename(f))
-def test_agent_is_brainstem_compliant(filepath):
-    result = load_like_brainstem(filepath)
-
+def assert_compliant(result):
     assert result["error"] is None, (
         f"{result['file']} failed to load under the brainstem contract:\n"
         f"{result.get('traceback', result['error'])}"
@@ -165,3 +162,36 @@ def test_agent_is_brainstem_compliant(filepath):
         assert agent["tool_name"] == agent["name"], (
             f"{ctx}: to_tool() name mismatch ({agent['tool_name']} != {agent['name']})"
         )
+
+
+@pytest.mark.parametrize("filepath", agent_files(), ids=lambda f: os.path.basename(f))
+def test_agent_is_brainstem_compliant(filepath):
+    assert_compliant(load_like_brainstem(filepath))
+
+
+# ── LearnNewAgent output: runtime-generated agents must comply too ──
+
+def generate_agent(tmp_path, description, name=""):
+    """Generate an agent file into tmp_path via LearnNewAgent (the real generator)."""
+    from openrappter.agents.learn_new_agent import LearnNewAgent
+
+    generator = LearnNewAgent()
+    generator.agents_dir = tmp_path
+    result = json.loads(generator.perform(action="create", description=description, name=name))
+    assert result["status"] == "success", f"generation failed: {result}"
+    files = list(tmp_path.glob("*_agent.py"))
+    assert len(files) == 1, f"expected exactly one generated file, found {files}"
+    return str(files[0])
+
+
+def test_generated_agent_is_brainstem_compliant(tmp_path):
+    filepath = generate_agent(tmp_path, "count the words in a piece of text", name="WordCounter")
+    result = load_like_brainstem(filepath)
+    assert_compliant(result)
+    assert result["agents"][0]["name"] == "WordCounter"
+
+
+def test_generated_agent_with_extra_imports_is_brainstem_compliant(tmp_path):
+    # Keywords trigger the generator's extra-imports and extra-params paths
+    filepath = generate_agent(tmp_path, "fetch data from a web url and save it to a file")
+    assert_compliant(load_like_brainstem(filepath))

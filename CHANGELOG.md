@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-capability trajectory tracking with confidence gating** (Roadmap 2.5) — `EvolutionLineage` now includes `capability_trajectories`: an independent regression slope per capability, where a direction (improving/declining) is only reported when `|slope| > 2 × standard error` with 3+ data points — noisy histories read as stable instead of falsely trending. New `computeCapabilityTrajectories()` export; shared `linearRegression()` helper now backs the overall trajectory too.
+
+### Fixed
+
+- **Shared-agent context clobbering in parallel summons** — souls built from the default pool share agent instances, and `BasicAgent.execute()` stores per-invocation context on the instance; parallel `all`/`race` summons let one soul's context (including `soul_identity`) overwrite another's mid-invocation. Executions are now serialized per agent instance inside `RappterSoul.invoke` (distinct agents still run fully parallel).
+
 - **Soul identity injection** (Roadmap 1.2) — a soul's identity (id, name, description, emoji, systemPrompt, model) now flows into every agent invocation via data sloshing as `upstream_slush.soul_identity`; previously `systemPrompt` and `model` were stored on the config but never used
   - New `SoulIdentity` type; `RappterSoul.identity` getter; `RappterSoulStatus` now includes `systemPrompt`
   - In chain mode each soul injects its own identity; optional fields are omitted when unset

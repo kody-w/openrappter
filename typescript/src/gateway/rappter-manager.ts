@@ -112,6 +112,23 @@ export interface RestoreSoulsResult {
   errors: Array<{ id: string; error: string }>;
 }
 
+// ── Shared-agent serialization ──────────────────────────────────────────────
+//
+// Souls built from the default pool share agent instances, and
+// BasicAgent.execute() stores per-invocation context on the instance.
+// Parallel summons (all/race) would let one soul's context overwrite
+// another's mid-invocation, so executions are serialized per instance.
+// Distinct agents still run fully in parallel.
+
+const agentLocks = new WeakMap<BasicAgent, Promise<unknown>>();
+
+async function withAgentLock<T>(agent: BasicAgent, fn: () => Promise<T>): Promise<T> {
+  const prev = agentLocks.get(agent) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  agentLocks.set(agent, next.then(() => undefined, () => undefined));
+  return next;
+}
+
 // ── RappterSoul ──────────────────────────────────────────────────────────────
 
 export class RappterSoul {
@@ -199,10 +216,12 @@ export class RappterSoul {
       // Execute all agents and collect results, injecting this soul's identity
       const results: Record<string, unknown> = {};
       for (const [name, agent] of agentEntries) {
-        const agentResult = await agent.execute({
-          query: message,
-          upstream_slush: { soul_identity: this.identity },
-        });
+        const agentResult = await withAgentLock(agent, () =>
+          agent.execute({
+            query: message,
+            upstream_slush: { soul_identity: this.identity },
+          }),
+        );
         try {
           results[name] = JSON.parse(agentResult);
         } catch {

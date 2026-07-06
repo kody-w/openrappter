@@ -79,6 +79,14 @@ export interface LineageRunSummary {
   level_statuses: string[];
 }
 
+export interface CapabilityTrajectory {
+  capability: string;
+  slope: number; // quality points per run
+  std_error: number; // standard error of the slope; -1 when insufficient data (< 3 runs)
+  significant: boolean; // |slope| > 2 * std_error, requires 3+ data points
+  direction: 'improving' | 'declining' | 'stable';
+}
+
 export interface EvolutionLineage {
   run_number: number;
   prior_quality: number | null;
@@ -88,6 +96,8 @@ export interface EvolutionLineage {
   cumulative_runs: number;
   history: LineageRunSummary[];
   trajectory: number; // slope of quality over history (-100 to 100)
+  /** Independent regression per capability, confidence-gated */
+  capability_trajectories: CapabilityTrajectory[];
 }
 
 export interface EvolutionReport {
@@ -586,21 +596,65 @@ function formatReport(capabilities: CapabilityScore[], overall: ReturnType<typeo
   return lines.join('\n');
 }
 
-function computeTrajectory(runs: LineageRunSummary[]): number {
-  if (runs.length < 2) return 0;
-  // Simple linear regression slope on overall_quality
-  const n = runs.length;
+/** Simple linear regression over evenly spaced values (x = run index). */
+function linearRegression(values: number[]): { slope: number; stdError: number } {
+  const n = values.length;
+  if (n < 2) return { slope: 0, stdError: 0 };
+
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
   for (let i = 0; i < n; i++) {
     sumX += i;
-    sumY += runs[i].overall_quality;
-    sumXY += i * runs[i].overall_quality;
+    sumY += values[i];
+    sumXY += i * values[i];
     sumX2 += i * i;
   }
   const denom = n * sumX2 - sumX * sumX;
-  if (denom === 0) return 0;
+  if (denom === 0) return { slope: 0, stdError: 0 };
   const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+
+  // Standard error of the slope: sqrt((SSE / (n-2)) / Σ(x - x̄)²)
+  if (n < 3) return { slope, stdError: Infinity };
+  let sse = 0;
+  const meanX = sumX / n;
+  let sxx = 0;
+  for (let i = 0; i < n; i++) {
+    const residual = values[i] - (intercept + slope * i);
+    sse += residual * residual;
+    sxx += (i - meanX) * (i - meanX);
+  }
+  const stdError = Math.sqrt(sse / (n - 2) / sxx);
+  return { slope, stdError };
+}
+
+function computeTrajectory(runs: LineageRunSummary[]): number {
+  if (runs.length < 2) return 0;
+  const { slope } = linearRegression(runs.map(r => r.overall_quality));
   return clamp(Math.round(slope * 10) / 10, -100, 100);
+}
+
+/**
+ * Independent trajectory per capability with confidence gating: a slope only
+ * counts as a direction when |slope| > 2 * standard error (and 3+ data points),
+ * so noisy histories read as stable instead of falsely improving/declining.
+ */
+export function computeCapabilityTrajectories(runs: LineageRunSummary[]): CapabilityTrajectory[] {
+  const capNames = ['Word Statistics', 'Caesar Cipher', 'Pattern Detection', 'Sentiment Heuristic', 'Self-Reflection'];
+  return capNames.map((capability, idx) => {
+    const series = runs.map(r => r.level_qualities[idx] ?? 0);
+    const { slope, stdError } = linearRegression(series);
+    const rounded = clamp(Math.round(slope * 10) / 10, -100, 100);
+    const significant = runs.length >= 3 && Number.isFinite(stdError) && Math.abs(slope) > 2 * stdError;
+    const direction: CapabilityTrajectory['direction'] =
+      significant && rounded > 0 ? 'improving' : significant && rounded < 0 ? 'declining' : 'stable';
+    return {
+      capability,
+      slope: rounded,
+      std_error: Number.isFinite(stdError) ? Math.round(stdError * 100) / 100 : -1,
+      significant,
+      direction,
+    };
+  });
 }
 
 function computeLineage(
@@ -619,13 +673,15 @@ function computeLineage(
     return { capability: cap.capability, quality_delta: cap.quality - priorQuality, status_change: statusChange };
   });
 
-  const trajectory = computeTrajectory([
+  // Include current run as a synthetic entry for trajectory calculation
+  const runsWithCurrent: LineageRunSummary[] = [
     ...priorRuns,
-    // Include current run as a synthetic entry for trajectory calculation
     { run_number: latest.run_number + 1, timestamp: '', input_hash: '',
       overall_quality: overall.overallQuality, status: overall.status,
       level_qualities: capabilities.map(c => c.quality), level_statuses: capabilities.map(c => c.status) },
-  ]);
+  ];
+  const trajectory = computeTrajectory(runsWithCurrent);
+  const capabilityTrajectories = computeCapabilityTrajectories(runsWithCurrent);
 
   // Trend: with 3+ data points use trajectory, otherwise use simple delta
   let trend: EvolutionLineage['trend'];
@@ -647,6 +703,7 @@ function computeLineage(
     cumulative_runs: latest.run_number + 1,
     history: priorRuns,
     trajectory,
+    capability_trajectories: capabilityTrajectories,
   };
 }
 

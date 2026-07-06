@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Soul-to-soul communication** (Roadmap 1.2) — agents invoked through a soul now receive a `_soul` handle in kwargs (`{ id, chain, summon(rappterIds, message, mode) }`) that summons sibling souls through the manager. An ancestry chain rides every nested invocation: summon cycles (a → b → a) are blocked, depth is capped at `MAX_SOUL_SUMMON_DEPTH` (3), and souls loaded without a manager degrade gracefully. 4 new tests.
+
+### Added
+
 - **`rappter.create` RPC** (Roadmap 1.2) — create and load a soul from a natural-language description: name inferred via LearnNewAgent's keyword convention (explicit name wins), kebab-case id with collision suffixing, and an auto-derived `systemPrompt` so identity injection carries the persona to agents; `persist: true` saves the config. `RappterManager.createSoul()` + 6 new tests; rappter RPC surface now 13 methods.
 
 ### Added

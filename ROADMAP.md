@@ -49,7 +49,7 @@ _Finish what's started. Close gaps. Make it production-worthy._
 
 ### 1.2 Rappter Multi-Soul Expansion
 
-- [x] Soul config persistence — save/load from `~/.openrappter/souls/*.json`
+- [x] Soul config persistence — save/load from `~/.openrappter/souls/*.json` (SoulStore + `rappter.save/persisted/restore/forget` RPC)
 - [ ] Soul-specific conversation history (isolated sessions per soul)
 - [ ] Soul identity injection — system prompt and personality per soul
 - [ ] Dashboard page for soul management (list, load, unload, summon)

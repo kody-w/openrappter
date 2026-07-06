@@ -94,6 +94,7 @@ try:
     spec = importlib.util.spec_from_file_location(mod_name, filepath)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    import inspect
     for attr in dir(mod):
         cls = getattr(mod, attr)
         if (
@@ -104,6 +105,24 @@ try:
         ):
             instance = cls()  # kernel instantiates with zero args
             tool = instance.to_tool()
+
+            # The kernel calls agent.perform(**function_args) where the LLM may
+            # send anything from NO args up to EVERY key declared in the
+            # agent's own parameters schema. The signature must bind at both
+            # extremes without raising.
+            sig = inspect.signature(instance.perform)
+            properties = instance.metadata.get("parameters", {}).get("properties", {})
+            try:
+                sig.bind()
+                binds_empty = True
+            except TypeError as e:
+                binds_empty = f"{e}"
+            try:
+                sig.bind(**{key: None for key in properties})
+                binds_declared = True
+            except TypeError as e:
+                binds_declared = f"{e}"
+
             result["agents"].append({
                 "name": instance.name,
                 "class": attr,
@@ -111,6 +130,8 @@ try:
                 "description": instance.metadata.get("description", ""),
                 "has_parameters": isinstance(instance.metadata.get("parameters"), dict),
                 "perform_callable": callable(getattr(instance, "perform", None)),
+                "binds_empty": binds_empty,
+                "binds_declared": binds_declared,
                 "tool_name": tool.get("function", {}).get("name"),
             })
 except Exception as e:
@@ -159,6 +180,14 @@ def assert_compliant(result):
         assert agent["description"], f"{ctx}: metadata has no description"
         assert agent["has_parameters"], f"{ctx}: metadata has no parameters schema"
         assert agent["perform_callable"], f"{ctx}: perform is not callable"
+        assert agent["binds_empty"] is True, (
+            f"{ctx}: perform() must accept a call with no kwargs "
+            f"(the LLM may send none): {agent['binds_empty']}"
+        )
+        assert agent["binds_declared"] is True, (
+            f"{ctx}: perform() must accept every key declared in its own "
+            f"parameters schema: {agent['binds_declared']}"
+        )
         assert agent["tool_name"] == agent["name"], (
             f"{ctx}: to_tool() name mismatch ({agent['tool_name']} != {agent['name']})"
         )

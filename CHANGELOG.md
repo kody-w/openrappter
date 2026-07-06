@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Simpson's Diversity Index** (Roadmap 2.5 graduated scoring) — generated `wordStats()` now reports `simpson_diversity` (1 − Σn(n−1)/N(N−1)) and `checkWordStats`'s `has_diversity` check uses it (threshold D >= 0.7, inclusive) instead of the raw unique/total ratio — repetition is weighted by frequency, so one dominant word is penalized even when many words are unique. E2E evolution test asserts the real generated capability emits valid entropy and Simpson values.
+
+### Added
+
 - **Character-level cipher verification** (Roadmap 2.5 graduated scoring) — `checkCaesarCipher` gains a `char_shift_valid` check that verifies every character is shifted by exactly ROT13 (case preserved, punctuation passed through); a transform that merely roundtrips (e.g. string reversal) now fails. Cipher denominator 3 → 4 checks; 3 new tests.
 
 ### Added

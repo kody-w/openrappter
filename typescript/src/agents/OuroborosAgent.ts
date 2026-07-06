@@ -156,12 +156,17 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
       const p = count / words.length;
       entropy -= p * Math.log2(p);
     }
+    // Simpson's Diversity Index: 1 - sum(n(n-1)) / (N(N-1))
+    let simpsonSum = 0;
+    for (const count of Object.values(freq)) simpsonSum += count * (count - 1);
+    const simpson = words.length > 1 ? 1 - simpsonSum / (words.length * (words.length - 1)) : 0;
     return {
       word_count: words.length,
       unique_words: Object.keys(freq).length,
       avg_word_length: Math.round(avgLen * 100) / 100,
       most_frequent: sorted.slice(0, 5).map(([w, c]) => ({ word: w, count: c })),
       entropy: Math.round(entropy * 100) / 100,
+      simpson_diversity: Math.round(simpson * 1000) / 1000,
     };
   }`;
       const capability = `    capabilityResults.wordStats = this.wordStats(inputText);`;
@@ -429,14 +434,17 @@ function statusFromQuality(quality: number): 'strong' | 'developing' | 'weak' {
 export function checkWordStats(ws: Record<string, unknown> | undefined): { quality: number; checks: Check[] } {
   if (!ws) return { quality: 0, checks: [] };
   const wordCount = (ws.word_count as number) ?? 0;
-  const unique = (ws.unique_words as number) ?? 0;
   const avgLen = (ws.avg_word_length as number) ?? 0;
   const freq = (ws.most_frequent as unknown[]) ?? [];
   const entropy = (ws.entropy as number) ?? 0;
+  const simpson = (ws.simpson_diversity as number) ?? 0;
 
   const checks: Check[] = [
     { name: 'has_words', passed: wordCount >= 3, detail: `word_count=${wordCount}` },
-    { name: 'has_diversity', passed: wordCount > 0 && (unique / wordCount) >= 0.5, detail: `unique_ratio=${wordCount > 0 ? (unique / wordCount).toFixed(2) : '0'}` },
+    // Simpson's Diversity Index (1 - Σn(n-1)/N(N-1)) replaces the raw
+    // unique/total ratio: it weights repetition by frequency, so one word
+    // dominating a long text is penalized even when many words are unique
+    { name: 'has_diversity', passed: simpson >= 0.7, detail: `simpson=${simpson}` },
     { name: 'balanced_length', passed: avgLen >= 3 && avgLen <= 7, detail: `avg_length=${avgLen}` },
     { name: 'frequency_depth', passed: freq.length >= 3, detail: `freq_entries=${freq.length}` },
     { name: 'substantial_input', passed: wordCount >= 10, detail: `word_count=${wordCount}` },

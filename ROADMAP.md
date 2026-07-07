@@ -123,7 +123,7 @@ _Extending the existing deterministic scoring system._
 - [x] Input difficulty scoring (distinguish "capability broken" from "unfair input")
 
 **Graduated scoring:**
-- [ ] Weighted sentiment words (intensity tiers: "good" = 0.5, "amazing" = 1.0)
+- [x] Weighted sentiment words (intensity tiers: "good" = 0.5, "amazing" = 1.0)
 - [ ] Pattern quality scoring (well-formedness validation, density, false-positive penalty)
 - [x] Character-level cipher verification (every character shifted by expected amount)
 - [ ] Reflection method cross-validation (compare declared methods against prototype chain)

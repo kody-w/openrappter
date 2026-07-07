@@ -676,6 +676,40 @@ describe('OuroborosAgent Parity', () => {
       expect(result.quality).toBe(80);
     });
 
+    it('generated analyzeSentiment applies intensity weights (executed, not recomputed)', () => {
+      // Extract the REAL generated method from the catalog output and run it
+      const gen4 = EVOLUTION_CATALOG[3].apply(getAgentSource(), 4);
+      // lastIndexOf: the first occurrence is the unevaluated template inside
+      // the catalog source; the spliced (interpolated) copy comes later
+      const start = gen4.lastIndexOf('analyzeSentiment(text) {');
+      expect(start).toBeGreaterThan(-1);
+      let depth = 0, end = start;
+      for (let i = gen4.indexOf('{', start); i < gen4.length; i++) {
+        if (gen4[i] === '{') depth++;
+        if (gen4[i] === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+      }
+      const analyze = new Function(`return function ${gen4.slice(start, end)}`)() as (text: string) => {
+        score: number; label: string; positive: string[]; negative: string[]; negated: string[];
+      };
+
+      // "amazing" (1.0) outweighs "bad" (-0.5): equal counts, positive verdict
+      const mixed = analyze('amazing but bad');
+      expect(mixed.score).toBeCloseTo(0.33, 2);
+      expect(mixed.label).toBe('positive');
+
+      // Equal tiers cancel exactly
+      expect(analyze('good but bad').label).toBe('neutral');
+
+      // Three milds (+1.5) barely offset one strong (-1.0): 0.5/2.5 = 0.2 → not > 0.2
+      expect(analyze('good good good but terrible').label).toBe('neutral');
+
+      // Negation flips the weighted contribution
+      const negatedResult = analyze('not amazing');
+      expect(negatedResult.negated).toEqual(['amazing']);
+      expect(negatedResult.label).toBe('negative');
+      expect(negatedResult.score).toBe(-1);
+    });
+
     it('should count negated sentiment words with a 2-token window', () => {
       expect(countNegatedSentimentWords('not good')).toBe(1);
       expect(countNegatedSentimentWords('never really great')).toBe(1); // negator 2 tokens back

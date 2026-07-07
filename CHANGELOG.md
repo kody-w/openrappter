@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **OpenRappter Brainstem** (`python/openrappter/brainstem.py`, `python -m openrappter.brainstem`) — the local-device-first rappter: a stdlib-only (zero-dependency) HTTP server wire-compatible with the RAPP brainstem kernel so all training transfers. Same routes (`/chat`, `/health`, `/agents`, `/agents/import`, `/agents/export/<f>`, DELETE `/agents/<f>`, `/version`, `/models`), same JSON envelopes, same single-file agent contract with kernel-parity import shims (`agents.basic_agent` / `basic_agent` → OpenRappter's BasicAgent — the exact mirror of how the RAPP kernel shims `openrappter.agents.basic_agent`). Packaged OpenRappter agents form the default pool; user drop-ins in `~/.openrappter/brainstem/agents/` hot-load per request and override by name. `/chat` runs the Copilot tool loop (same token-exchange handshake as the kernel; `GITHUB_TOKEN` or `gh auth token`). Default port 7072 (`PORT=7071` for full drop-in). 8 wire-parity tests including a RAPP-authored agent dropping in unchanged and a full tool-loop round; verified live end-to-end with real Copilot on claude-sonnet-5. Also fixes a 30s `socket.getfqdn()` reverse-DNS hang per server bind on macOS.
+
+### Added
+
 - **Weighted sentiment words** (Roadmap 2.5 graduated scoring) — `SENTIMENT_WORD_WEIGHTS` intensity tiers (mild 0.5 / strong 1.0; flat word lists now derive from the map, preserving membership for the negation counter and input-difficulty scorer); generated `analyzeSentiment()` scores by weight, so "amazing" moves the needle twice as far as "good" and three milds barely offset one strong. Behavioral test executes the actual generated method (brace-extracted from catalog output), not a recomputation.
 
 ### Added

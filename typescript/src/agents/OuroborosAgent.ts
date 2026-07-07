@@ -121,8 +121,22 @@ export interface EvolutionReport {
 
 // Shared sentiment vocabulary — single source of truth for both the generated
 // analyzeSentiment() capability and the checkSentiment() judge.
-export const SENTIMENT_POSITIVE_WORDS = ['good','great','excellent','amazing','wonderful','fantastic','love','happy','best','brilliant','perfect','beautiful','awesome'];
-export const SENTIMENT_NEGATIVE_WORDS = ['bad','terrible','awful','horrible','worst','hate','ugly','stupid','boring','poor','broken','fail','error'];
+// Intensity tiers: mild words weigh 0.5, strong words 1.0 — "amazing" moves
+// the score twice as far as "good".
+export const SENTIMENT_WORD_WEIGHTS: Record<string, number> = {
+  // positive — mild
+  good: 0.5, great: 0.5, happy: 0.5,
+  // positive — strong
+  excellent: 1.0, amazing: 1.0, wonderful: 1.0, fantastic: 1.0, love: 1.0,
+  best: 1.0, brilliant: 1.0, perfect: 1.0, beautiful: 1.0, awesome: 1.0,
+  // negative — mild
+  bad: -0.5, poor: -0.5, boring: -0.5, ugly: -0.5, stupid: -0.5,
+  broken: -0.5, fail: -0.5, error: -0.5,
+  // negative — strong
+  terrible: -1.0, awful: -1.0, horrible: -1.0, worst: -1.0, hate: -1.0,
+};
+export const SENTIMENT_POSITIVE_WORDS = Object.keys(SENTIMENT_WORD_WEIGHTS).filter(w => SENTIMENT_WORD_WEIGHTS[w] > 0);
+export const SENTIMENT_NEGATIVE_WORDS = Object.keys(SENTIMENT_WORD_WEIGHTS).filter(w => SENTIMENT_WORD_WEIGHTS[w] < 0);
 export const SENTIMENT_NEGATORS = ['not','no','never','neither','nor','hardly','barely','cannot'];
 
 /** Count sentiment words preceded by a negator within a 2-token window ("not good", "never really great"). */
@@ -222,24 +236,27 @@ export const EVOLUTION_CATALOG: EvolutionEntry[] = [
     apply: (source, nextGen) => {
       const method = `
   analyzeSentiment(text) {
-    const positiveWords = ${JSON.stringify(SENTIMENT_POSITIVE_WORDS)};
-    const negativeWords = ${JSON.stringify(SENTIMENT_NEGATIVE_WORDS)};
+    const wordWeights = ${JSON.stringify(SENTIMENT_WORD_WEIGHTS)};
     const negators = ${JSON.stringify(SENTIMENT_NEGATORS)};
     const words = text.toLowerCase().match(/\\b[a-z]+\\b/g) ?? [];
     const pos = [];
     const neg = [];
     const negated = [];
+    let weightSum = 0;
+    let weightTotal = 0;
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      const isPositive = positiveWords.includes(w);
-      if (!isPositive && !negativeWords.includes(w)) continue;
+      let weight = wordWeights[w];
+      if (weight === undefined) continue;
       // 2-token negation window: "not good" / "never really great" flips polarity
       const flipped = (i >= 1 && negators.includes(words[i - 1])) || (i >= 2 && negators.includes(words[i - 2]));
-      if (flipped) negated.push(w);
-      if (isPositive !== flipped) pos.push(w); else neg.push(w);
+      if (flipped) { negated.push(w); weight = -weight; }
+      if (weight > 0) pos.push(w); else neg.push(w);
+      weightSum += weight;
+      weightTotal += Math.abs(weight);
     }
-    const total = pos.length + neg.length;
-    const score = total === 0 ? 0 : Math.round(((pos.length - neg.length) / total) * 100) / 100;
+    // Intensity-weighted score: "amazing" (1.0) moves it twice as far as "good" (0.5)
+    const score = weightTotal === 0 ? 0 : Math.round((weightSum / weightTotal) * 100) / 100;
     const label = score > 0.2 ? 'positive' : score < -0.2 ? 'negative' : 'neutral';
     return { score, label, positive: pos, negative: neg, negated };
   }`;

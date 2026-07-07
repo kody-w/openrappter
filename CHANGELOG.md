@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Weighted sentiment words** (Roadmap 2.5 graduated scoring) — `SENTIMENT_WORD_WEIGHTS` intensity tiers (mild 0.5 / strong 1.0; flat word lists now derive from the map, preserving membership for the negation counter and input-difficulty scorer); generated `analyzeSentiment()` scores by weight, so "amazing" moves the needle twice as far as "good" and three milds barely offset one strong. Behavioral test executes the actual generated method (brace-extracted from catalog output), not a recomputation.
+
+### Added
+
 - **Simpson's Diversity Index** (Roadmap 2.5 graduated scoring) — generated `wordStats()` now reports `simpson_diversity` (1 − Σn(n−1)/N(N−1)) and `checkWordStats`'s `has_diversity` check uses it (threshold D >= 0.7, inclusive) instead of the raw unique/total ratio — repetition is weighted by frequency, so one dominant word is penalized even when many words are unique. E2E evolution test asserts the real generated capability emits valid entropy and Simpson values.
 
 ### Added

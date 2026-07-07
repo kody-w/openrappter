@@ -57,6 +57,19 @@ _Finish what's started. Close gaps. Make it production-worthy._
 - [x] Soul templates — prebuilt configurations ("researcher", "coder", "ops", "analyst")
 - [x] Soul-to-soul communication — souls can summon other souls (kwargs `_soul.summon` handle with cycle + depth guards)
 
+### 1.5 OpenRappter Brainstem (local-device-first rappter)
+
+_A stdlib-only, wire-compatible mirror of the RAPP brainstem kernel — training transfers both ways._
+
+- [x] Kernel-parity HTTP surface (`/chat`, `/health`, `/agents`, import/export/delete, `/version`, `/models`)
+- [x] Kernel-parity agent loading (single-file contract, mirrored import shims, hot drop-ins override packaged pool)
+- [x] Copilot tool loop with the kernel's token-exchange handshake
+- [x] Device-code auth parity: `POST /login` → `/login/poll` → persisted `.copilot_token` (kernel JSON format, legacy fallback), gho_ CLI tokens skipped, session cache with expiry buffer
+- [ ] Interactive login verified end-to-end in a browser (needs a human at the keyboard)
+- [ ] Background poll thread + `/login/switch` (kernel has both; ours polls client-side)
+- [ ] Copilot session disk cache surviving restarts (kernel `.copilot_session`)
+- [ ] `openrappter-brainstem` console script entry point + one-liner installer story
+
 ### 1.3 Observability & Operations
 
 - [ ] Cost attribution — per-agent and per-soul LLM spend tracking

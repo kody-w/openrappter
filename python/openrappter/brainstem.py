@@ -188,28 +188,79 @@ def load_soul():
         return "You are OpenRappter, a helpful local-first AI assistant."
 
 
-# ── Copilot (same handshake the RAPP kernel uses) ────────────────────────────
+# ── Auth — mirrors the RAPP kernel's device-code flow exactly ────────────────
+#
+# GitHub Copilot GitHub App client ID — produces ghu_ tokens that work with
+# the Copilot exchange API. (gh CLI's gho_ OAuth tokens get 404 and are skipped,
+# same as the kernel.)
+COPILOT_CLIENT_ID = "Iv1.b507a08c87ecfe98"
+COPILOT_TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
 
-_copilot_cache = {"token": None, "endpoint": None}
+_copilot_cache = {"token": None, "endpoint": None, "expires_at": 0}
+_pending_login = None
+_login_result = {}
+
+
+def _token_file():
+    return Path(BRAINSTEM_HOME) / ".copilot_token"
+
+
+def _read_token_file():
+    """Kernel format: JSON {access_token, refresh_token?}; legacy plain text supported."""
+    try:
+        raw = _token_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    if raw.startswith("{"):
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return None
+    return {"access_token": raw}
+
+
+def _save_token_file(data):
+    Path(BRAINSTEM_HOME).mkdir(parents=True, exist_ok=True)
+    _token_file().write_text(json.dumps(data), encoding="utf-8")
+
+
+def _http_form(url, data, timeout=15):
+    req = urllib.request.Request(
+        url,
+        data="&".join(f"{k}={v}" for k, v in data.items()).encode(),
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def _github_token():
+    """Env → saved token file → gh CLI (ghu_ only — gho_ tokens can't exchange)."""
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         return token.strip()
+    saved = _read_token_file()
+    if saved and saved.get("access_token"):
+        return saved["access_token"]
     try:
         out = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10)
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
+        cli = out.stdout.strip() if out.returncode == 0 else ""
+        if cli.startswith("ghu_"):
+            return cli
     except (OSError, subprocess.SubprocessError):
         pass
     return None
 
 
 def copilot_session():
-    """Exchange a GitHub token for a Copilot API token + endpoint.
-    Auth-header prefix and endpoint discovery match the RAPP kernel."""
-    if _copilot_cache["token"]:
+    """Short-lived Copilot API token + endpoint, cached with a 60s expiry
+    buffer like the kernel; re-exchanged from the GitHub token when stale."""
+    import time
+
+    if _copilot_cache["token"] and time.time() < _copilot_cache["expires_at"] - 60:
         return _copilot_cache
     gh = _github_token()
     if not gh:
@@ -217,9 +268,10 @@ def copilot_session():
     prefix = "token" if gh.startswith("ghu_") else "Bearer"
     try:
         status, data = _http_json(
-            "https://api.github.com/copilot_internal/v2/token",
+            COPILOT_TOKEN_URL,
             headers={
                 "Authorization": f"{prefix} {gh}",
+                "Accept": "application/json",
                 "Editor-Version": "vscode/1.95.0",
                 "Editor-Plugin-Version": "copilot/1.0.0",
                 "User-Agent": "GitHubCopilotChat/0.22.2024",
@@ -232,7 +284,65 @@ def copilot_session():
         return None
     _copilot_cache["token"] = data.get("token")
     _copilot_cache["endpoint"] = (data.get("endpoints") or {}).get("api", "https://api.githubcopilot.com")
+    _copilot_cache["expires_at"] = data.get("expires_at") or 0
     return _copilot_cache
+
+
+# ── Device-code login (kernel routes: /login, /login/poll, /login/status) ────
+
+
+def start_device_login():
+    """Begin the GitHub device-code flow. Returns {user_code, verification_uri}."""
+    global _pending_login, _login_result
+    import time
+
+    if _pending_login and time.time() < _pending_login.get("expires_at", 0):
+        return {"user_code": _pending_login["user_code"],
+                "verification_uri": _pending_login["verification_uri"]}
+
+    _login_result = {}
+    data = _http_form("https://github.com/login/device/code", {"client_id": COPILOT_CLIENT_ID})
+    _pending_login = {
+        "device_code": data["device_code"],
+        "user_code": data["user_code"],
+        "verification_uri": data["verification_uri"],
+        "interval": data.get("interval", 5),
+        "expires_at": time.time() + data.get("expires_in", 900),
+    }
+    return {"user_code": data["user_code"], "verification_uri": data["verification_uri"]}
+
+
+def poll_device_login():
+    """One poll of the device-code grant. Persists the token on success."""
+    global _pending_login, _login_result
+    if not _pending_login:
+        return {"status": "idle"}
+    data = _http_form("https://github.com/login/oauth/access_token", {
+        "client_id": COPILOT_CLIENT_ID,
+        "device_code": _pending_login["device_code"],
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+    })
+    if data.get("access_token"):
+        _save_token_file({"access_token": data["access_token"],
+                          "refresh_token": data.get("refresh_token", "")})
+        _pending_login = None
+        _login_result = {"status": "success"}
+        _copilot_cache["token"] = None  # force fresh exchange with the new token
+        return _login_result
+    error = data.get("error", "authorization_pending")
+    if error in ("authorization_pending", "slow_down"):
+        return {"status": "pending"}
+    _pending_login = None
+    _login_result = {"status": "error", "error": error}
+    return _login_result
+
+
+def login_status():
+    return {
+        "authenticated": copilot_session() is not None,
+        "pending": _pending_login is not None,
+        "token_file": str(_token_file()),
+    }
 
 
 def llm_chat(messages, tools):
@@ -341,6 +451,8 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             })
         elif self.path == "/version":
             self._send(200, {"version": __version__})
+        elif self.path == "/login/status":
+            self._send(200, login_status())
         elif self.path == "/models":
             self._send(200, {"models": [MODEL], "active": MODEL})
         elif self.path == "/agents":
@@ -393,6 +505,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 return self._send(200, run_chat(user_input, history, session_id))
             except Exception as e:  # noqa: BLE001
                 return self._send(503, {"error": str(e), "session_id": session_id})
+
+        if self.path == "/login":
+            try:
+                return self._send(200, start_device_login())
+            except Exception as e:  # noqa: BLE001
+                return self._send(503, {"error": f"Could not start device login: {e}"})
+
+        if self.path == "/login/poll":
+            try:
+                return self._send(200, poll_device_login())
+            except Exception as e:  # noqa: BLE001
+                return self._send(503, {"error": f"Login poll failed: {e}"})
 
         if self.path == "/agents/import":
             content_type = self.headers.get("Content-Type", "")

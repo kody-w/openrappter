@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dual-use binary classification** (RAI hardening, closes audit must-fix #3's mechanism) — `exec-safety.ts` now tags network-fetch/install/arbitrary-exec/permission binaries (`curl`, `wget`, `pip`, `npm`, `npx`, `yarn`, `pnpm`, `node`, `python`, `tsx`, `chmod`, `chown`) via `DUAL_USE_BINS`; every `SafetyCheckResult` carries `dualUse` + `requiresApproval` so an approval layer can gate them (still `safe` under the default policy — backward-compatible). New opt-in `ExecSafety({ strictDefaults: true })` starts from the safe set minus dual-use binaries, so they return `safe: false, requiresApproval: true` unless explicitly re-added. Injection detection still precedes classification (a `curl … | sh` is blocked, not merely gated). `isDualUse()` helper; 6 new tests (suite 3109 → 3115).
+
+### Added
+
 - **Brainstem device-code auth** (kernel parity) — `POST /login` starts the GitHub device flow (same `COPILOT_CLIENT_ID` GitHub App as the RAPP kernel, producing `ghu_` tokens), `POST /login/poll` captures and persists the token in the kernel's `.copilot_token` JSON format (legacy plain-text reads supported), `GET /login/status` reports state. Token resolution: env → saved file → gh CLI (`gho_` OAuth tokens skipped — they 404 on the Copilot exchange, same lesson the kernel encodes). Copilot session now caches with `expires_at` + 60s buffer and re-exchanges when stale. 5 new auth-parity tests (Python suite 655 → 660).
 
 ### Added

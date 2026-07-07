@@ -12,6 +12,19 @@ export interface SafetyCheckResult {
   reason?: string;
   /** Set when injection patterns are detected */
   injectionType?: string;
+  /**
+   * True for binaries that can fetch, install, or execute arbitrary code, or
+   * change file permissions/ownership (curl, wget, pip, npm, node, chmod, …).
+   * They may still be `safe` under the default policy, but an approval layer
+   * should gate them — a benign-looking `curl … | sh` is arbitrary RCE.
+   */
+  dualUse?: boolean;
+  /**
+   * True when the caller should require explicit human approval before running
+   * this command: any dual-use binary, or (in strict mode) one not on the
+   * safe list. Distinct from `safe: false`, which means "blocked outright".
+   */
+  requiresApproval?: boolean;
 }
 
 export interface AuditEntry {
@@ -44,6 +57,24 @@ const DEFAULT_SAFE_BINS = new Set([
   'yarn', 'pnpm', 'npx', 'tsc', 'tsx', 'vitest',
 ]);
 
+/**
+ * Dual-use binaries: on the safe list, but each can fetch, install, or execute
+ * arbitrary code, or alter permissions/ownership. Under the default policy they
+ * are `safe: true` (backward-compatible) but flagged `requiresApproval` so an
+ * approval layer can gate them. Under `strictDefaults`, any dual-use binary not
+ * explicitly added to the safe list is treated as needing approval, not auto-run.
+ */
+export const DUAL_USE_BINS = new Set([
+  // Network fetch (arbitrary download → execute)
+  'curl', 'wget',
+  // Package install (supply-chain + arbitrary install scripts)
+  'pip', 'pip3', 'npm', 'npx', 'yarn', 'pnpm',
+  // Arbitrary code execution
+  'node', 'python', 'python3', 'tsx',
+  // Privilege / permission changes
+  'chmod', 'chown',
+]);
+
 // Injection detection patterns
 // ORDER MATTERS: more specific patterns must come before general ones
 // (e.g. || before |, && checked separately)
@@ -67,13 +98,32 @@ const INJECTION_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
   { pattern: /[\r\n]/, type: 'newline-injection' },
 ];
 
+export interface ExecSafetyOptions {
+  /**
+   * When true, dual-use binaries are not auto-safe unless explicitly added to
+   * the safe list: they return `safe: false, requiresApproval: true` so they
+   * route to approval instead of running. Default false (backward-compatible).
+   */
+  strictDefaults?: boolean;
+}
+
 export class ExecSafety {
   private safeBins: Set<string>;
+  private strictDefaults: boolean;
   private auditLog: AuditEntry[] = [];
   private pendingApprovals = new Map<string, PendingApproval>();
 
-  constructor(safeBins?: Iterable<string>) {
-    this.safeBins = safeBins ? new Set(safeBins) : new Set(DEFAULT_SAFE_BINS);
+  constructor(safeBins?: Iterable<string>, options?: ExecSafetyOptions) {
+    this.strictDefaults = options?.strictDefaults ?? false;
+    if (safeBins) {
+      this.safeBins = new Set(safeBins);
+    } else if (this.strictDefaults) {
+      // Strict defaults start from the safe set MINUS the dual-use binaries,
+      // so curl/npm/chmod/… must be re-added explicitly to auto-run.
+      this.safeBins = new Set([...DEFAULT_SAFE_BINS].filter((b) => !DUAL_USE_BINS.has(b)));
+    } else {
+      this.safeBins = new Set(DEFAULT_SAFE_BINS);
+    }
   }
 
   /**
@@ -97,8 +147,23 @@ export class ExecSafety {
       }
     }
 
+    const dualUse = DUAL_USE_BINS.has(binary);
+
     // Check if binary is in safe list
     if (!this.safeBins.has(binary)) {
+      // In strict mode a dual-use binary not explicitly whitelisted routes to
+      // approval rather than an outright block — it's known, just gated.
+      if (dualUse && this.strictDefaults) {
+        const result: SafetyCheckResult = {
+          safe: false,
+          binary,
+          dualUse: true,
+          requiresApproval: true,
+          reason: `Dual-use binary '${binary}' requires explicit approval (strict defaults)`,
+        };
+        this.recordAudit(cmd, binary, result, 'pending');
+        return result;
+      }
       const result: SafetyCheckResult = {
         safe: false,
         binary,
@@ -108,9 +173,18 @@ export class ExecSafety {
       return result;
     }
 
-    const result: SafetyCheckResult = { safe: true, binary };
+    // On the safe list. Dual-use binaries stay `safe` for backward compatibility
+    // but are flagged so an approval layer can gate them.
+    const result: SafetyCheckResult = dualUse
+      ? { safe: true, binary, dualUse: true, requiresApproval: true }
+      : { safe: true, binary };
     this.recordAudit(cmd, binary, result, 'allowed');
     return result;
+  }
+
+  /** True if the binary can fetch, install, or execute arbitrary code, or change permissions. */
+  isDualUse(bin: string): boolean {
+    return DUAL_USE_BINS.has(bin);
   }
 
   /**
@@ -268,6 +342,6 @@ export class ExecSafety {
   }
 }
 
-export function createExecSafety(safeBins?: Iterable<string>): ExecSafety {
-  return new ExecSafety(safeBins);
+export function createExecSafety(safeBins?: Iterable<string>, options?: ExecSafetyOptions): ExecSafety {
+  return new ExecSafety(safeBins, options);
 }

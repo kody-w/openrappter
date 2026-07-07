@@ -175,3 +175,100 @@ def test_chat_surfaces_llm_unavailability_as_json(server, monkeypatch):
     status, body = post_json(f"{server}/chat", {"user_input": "hello"})
     assert status == 503
     assert "error" in body
+
+
+# ── Auth parity with the kernel's device-code flow ──
+
+
+def test_device_login_flow_persists_token(server, tmp_path, monkeypatch):
+    """POST /login starts the flow; /login/poll captures and persists the token
+    in the kernel's JSON token-file format."""
+    responses = iter([
+        {"device_code": "dc123", "user_code": "ABCD-1234",
+         "verification_uri": "https://github.com/login/device", "interval": 5, "expires_in": 900},
+        {"error": "authorization_pending"},
+        {"access_token": "ghu_testtoken123", "refresh_token": "ghr_refresh456"},
+    ])
+    monkeypatch.setattr(brainstem, "_http_form", lambda url, data, timeout=15: next(responses))
+
+    status, started = post_json(f"{server}/login", {})
+    assert status == 200
+    assert started["user_code"] == "ABCD-1234"
+    assert "verification_uri" in started
+
+    _, pending = post_json(f"{server}/login/poll", {})
+    assert pending["status"] == "pending"
+
+    _, done = post_json(f"{server}/login/poll", {})
+    assert done["status"] == "success"
+
+    saved = json.loads((tmp_path / ".copilot_token").read_text())
+    assert saved["access_token"] == "ghu_testtoken123"
+    assert saved["refresh_token"] == "ghr_refresh456"
+
+
+def test_login_status_envelope(server):
+    _, status_body = get_json(f"{server}/login/status")
+    assert set(status_body) >= {"authenticated", "pending", "token_file"}
+    assert status_body["authenticated"] is False
+
+
+def test_github_token_resolution_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(brainstem, "BRAINSTEM_HOME", tmp_path)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    # 1. Saved token file (kernel JSON format) wins over gh CLI
+    (tmp_path / ".copilot_token").write_text(json.dumps({"access_token": "ghu_fromfile"}))
+    assert brainstem._github_token() == "ghu_fromfile"
+
+    # 2. Legacy plain-text token file format still reads
+    (tmp_path / ".copilot_token").write_text("ghu_legacyplain")
+    assert brainstem._github_token() == "ghu_legacyplain"
+
+    # 3. Env var wins over the file
+    monkeypatch.setenv("GITHUB_TOKEN", "ghu_fromenv")
+    assert brainstem._github_token() == "ghu_fromenv"
+
+
+def test_gh_cli_gho_tokens_are_skipped(tmp_path, monkeypatch):
+    """gho_ OAuth tokens 404 on the Copilot exchange — the kernel skips them
+    and so do we."""
+    monkeypatch.setattr(brainstem, "BRAINSTEM_HOME", tmp_path)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    class FakeProc:
+        returncode = 0
+        stdout = "gho_clitoken\n"
+
+    monkeypatch.setattr(brainstem.subprocess, "run", lambda *a, **k: FakeProc())
+    assert brainstem._github_token() is None
+
+
+def test_copilot_session_refreshes_when_expired(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setattr(brainstem, "BRAINSTEM_HOME", tmp_path)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghu_x")
+    exchanges = {"n": 0}
+
+    def fake_exchange(url, headers, payload=None, timeout=60):
+        exchanges["n"] += 1
+        return 200, {"token": f"cop_{exchanges['n']}",
+                     "endpoints": {"api": "https://api.example"},
+                     "expires_at": time.time() + 1800}
+
+    monkeypatch.setattr(brainstem, "_http_json", fake_exchange)
+    brainstem._copilot_cache.update({"token": None, "endpoint": None, "expires_at": 0})
+
+    first = brainstem.copilot_session()
+    assert first["token"] == "cop_1"
+    # Warm cache: no second exchange
+    assert brainstem.copilot_session()["token"] == "cop_1"
+    assert exchanges["n"] == 1
+    # Expire it (inside the 60s buffer) — next call re-exchanges
+    brainstem._copilot_cache["expires_at"] = time.time() + 30
+    assert brainstem.copilot_session()["token"] == "cop_2"
+    assert exchanges["n"] == 2
+    brainstem._copilot_cache.update({"token": None, "endpoint": None, "expires_at": 0})

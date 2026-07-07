@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Brainstem device-code auth** (kernel parity) — `POST /login` starts the GitHub device flow (same `COPILOT_CLIENT_ID` GitHub App as the RAPP kernel, producing `ghu_` tokens), `POST /login/poll` captures and persists the token in the kernel's `.copilot_token` JSON format (legacy plain-text reads supported), `GET /login/status` reports state. Token resolution: env → saved file → gh CLI (`gho_` OAuth tokens skipped — they 404 on the Copilot exchange, same lesson the kernel encodes). Copilot session now caches with `expires_at` + 60s buffer and re-exchanges when stale. 5 new auth-parity tests (Python suite 655 → 660).
+
+### Added
+
 - **OpenRappter Brainstem** (`python/openrappter/brainstem.py`, `python -m openrappter.brainstem`) — the local-device-first rappter: a stdlib-only (zero-dependency) HTTP server wire-compatible with the RAPP brainstem kernel so all training transfers. Same routes (`/chat`, `/health`, `/agents`, `/agents/import`, `/agents/export/<f>`, DELETE `/agents/<f>`, `/version`, `/models`), same JSON envelopes, same single-file agent contract with kernel-parity import shims (`agents.basic_agent` / `basic_agent` → OpenRappter's BasicAgent — the exact mirror of how the RAPP kernel shims `openrappter.agents.basic_agent`). Packaged OpenRappter agents form the default pool; user drop-ins in `~/.openrappter/brainstem/agents/` hot-load per request and override by name. `/chat` runs the Copilot tool loop (same token-exchange handshake as the kernel; `GITHUB_TOKEN` or `gh auth token`). Default port 7072 (`PORT=7071` for full drop-in). 8 wire-parity tests including a RAPP-authored agent dropping in unchanged and a full tool-loop round; verified live end-to-end with real Copilot on claude-sonnet-5. Also fixes a 30s `socket.getfqdn()` reverse-DNS hang per server bind on macOS.
 
 ### Added

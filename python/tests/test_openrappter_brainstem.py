@@ -449,6 +449,52 @@ def test_github_token_reuses_openrappter_consumer_profile(tmp_path, monkeypatch)
     assert brainstem._github_token() == "ghu_consumer_profile"
 
 
+def test_copilot_session_uses_direct_capi_for_modern_oauth(monkeypatch):
+    monkeypatch.setattr(brainstem, "_github_token", lambda: "gho_modern")
+    monkeypatch.setattr(
+        brainstem,
+        "_http_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("modern OAuth must not use the legacy exchange")
+        ),
+    )
+    brainstem._copilot_cache.update(
+        {"token": None, "endpoint": None, "expires_at": 0}
+    )
+    session = brainstem.copilot_session()
+    assert session["token"] == "gho_modern"
+    assert session["direct_capi"] is True
+    assert session["endpoint"] == "https://api.enterprise.githubcopilot.com"
+
+
+def test_direct_capi_chat_uses_supported_model_and_body(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        brainstem,
+        "copilot_session",
+        lambda: {
+            "token": "gho_modern",
+            "endpoint": "https://api.enterprise.githubcopilot.com",
+            "expires_at": 9999999999,
+            "direct_capi": True,
+        },
+    )
+
+    def fake_http(url, headers, payload=None, timeout=60):
+        captured["url"] = url
+        captured["payload"] = payload
+        return 200, {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+        }
+
+    monkeypatch.setattr(brainstem, "_http_json", fake_http)
+    reply = brainstem.llm_chat([{"role": "user", "content": "hello"}], [])
+    assert reply["content"] == "ok"
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["payload"]["model"] == "gpt-4o"
+    assert "max_tokens" not in captured["payload"]
+
+
 def test_copilot_session_refreshes_when_expired(tmp_path, monkeypatch):
     import time
 

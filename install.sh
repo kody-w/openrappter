@@ -1498,42 +1498,43 @@ install_git() {
 }
 
 # ── Python (optional) ──────────────────────────────────────
-get_python_version() {
-    local cmd=""
-    if command -v python3 &>/dev/null; then
-        cmd="python3"
-    elif command -v python &>/dev/null; then
-        cmd="python"
-    fi
+python_cmd_meets_min() {
+    local cmd="$1"
+    local ver major minor
 
+    command -v "$cmd" &>/dev/null || return 1
+    ver="$("$cmd" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+    major="${ver%%.*}"
+    minor="${ver#*.}"
+
+    [[ "$major" -ge 3 ]] 2>/dev/null && [[ "$minor" -ge "$MIN_PYTHON_MINOR" ]] 2>/dev/null
+}
+
+get_python_cmd() {
+    local cmd
+    # Check generic shims first, then versioned binaries commonly installed by
+    # Homebrew/pyenv when the system python3 is older than our minimum.
+    for cmd in python3 python3.14 python3.13 python3.12 python3.11 python3.10 python; do
+        if python_cmd_meets_min "$cmd"; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    echo ""
+}
+
+get_python_version() {
+    local cmd
+    cmd="$(get_python_cmd)"
     if [[ -n "$cmd" ]]; then
-        $cmd --version 2>&1 | sed 's/Python //' | head -1
+        "$cmd" --version 2>&1 | sed 's/Python //' | head -1
     else
         echo "0.0.0"
     fi
 }
 
 check_python_meets_min() {
-    local ver
-    ver="$(get_python_version)"
-    local major minor
-    major="$(echo "$ver" | cut -d. -f1)"
-    minor="$(echo "$ver" | cut -d. -f2)"
-
-    if [[ "$major" -ge 3 ]] 2>/dev/null && [[ "$minor" -ge "$MIN_PYTHON_MINOR" ]] 2>/dev/null; then
-        return 0
-    fi
-    return 1
-}
-
-get_python_cmd() {
-    if command -v python3 &>/dev/null; then
-        echo "python3"
-    elif command -v python &>/dev/null; then
-        echo "python"
-    else
-        echo ""
-    fi
+    [[ -n "$(get_python_cmd)" ]]
 }
 
 # ── PATH Management ────────────────────────────────────────

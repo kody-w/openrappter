@@ -14,11 +14,15 @@ import path from 'path';
 import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
+import { ExecSafety } from '../security/exec-safety.js';
 
 const execAsync = promisify(exec);
 
 export class ShellAgent extends BasicAgent {
-  constructor() {
+  /** Enforces injection detection, safe-binary allowlisting, and approval tokens. */
+  private execSafety: ExecSafety;
+
+  constructor(execSafety?: ExecSafety) {
     const metadata: AgentMetadata = {
       name: 'Shell',
       description: 'Executes shell commands and file operations. Use this to run commands, read files, write files, or list directories.',
@@ -46,11 +50,21 @@ export class ShellAgent extends BasicAgent {
             type: 'string',
             description: 'Natural language query that may contain the command or path.',
           },
+          approval_id: {
+            type: 'string',
+            description: 'Single-use approval token id obtained after a blocked command was reviewed and approved. Must match the exact command it was issued for.',
+          },
         },
         required: [],
       },
     };
     super('Shell', metadata);
+    this.execSafety = execSafety ?? new ExecSafety();
+  }
+
+  /** Access to the underlying safety engine, e.g. for reviewing/resolving approval tokens. */
+  getExecSafety(): ExecSafety {
+    return this.execSafety;
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -59,6 +73,7 @@ export class ShellAgent extends BasicAgent {
     let filePath = kwargs.path as string | undefined;
     const content = kwargs.content as string | undefined;
     const query = kwargs.query as string | undefined;
+    const approvalId = kwargs.approval_id as string | undefined;
 
     // Try to infer action from query if not specified
     if (!action && query) {
@@ -69,7 +84,7 @@ export class ShellAgent extends BasicAgent {
     }
 
     if (action === 'bash' || (command && !action)) {
-      return this.executeBash(command || query || '');
+      return this.executeBash(command || query || '', approvalId);
     } else if (action === 'read') {
       return this.readFile(filePath || query || '');
     } else if (action === 'write') {
@@ -79,7 +94,7 @@ export class ShellAgent extends BasicAgent {
     } else {
       // Default: try as bash command
       if (query) {
-        return this.executeBash(query);
+        return this.executeBash(query, approvalId);
       }
       return JSON.stringify({
         status: 'error',
@@ -117,9 +132,36 @@ export class ShellAgent extends BasicAgent {
     return { action: 'bash', command: query };
   }
 
-  private async executeBash(command: string): Promise<string> {
+  private async executeBash(command: string, approvalId?: string): Promise<string> {
     if (!command) {
       return JSON.stringify({ status: 'error', message: 'No command provided' });
+    }
+
+    const normalized = this.execSafety.normalizeCommand(command);
+    const safety = this.execSafety.checkCommand(normalized);
+
+    if (!safety.safe) {
+      if (approvalId) {
+        const consumed = this.execSafety.consumeApprovalToken(approvalId, normalized);
+        if (!consumed.ok) {
+          return JSON.stringify({
+            status: 'error',
+            message: `Command blocked: ${safety.reason}. Approval rejected: ${consumed.reason}`,
+            blocked: true,
+            approval_id: approvalId,
+          });
+        }
+        // Approval verified and consumed (single-use) — fall through to execution.
+      } else {
+        const token = this.execSafety.issueApprovalToken(normalized);
+        return JSON.stringify({
+          status: 'error',
+          message: `Command blocked by safety policy: ${safety.reason}. Request approval and retry with the same command plus approval_id.`,
+          blocked: true,
+          approval_required: true,
+          approval_id: token.id,
+        });
+      }
     }
 
     try {

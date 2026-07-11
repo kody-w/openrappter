@@ -50,6 +50,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   const { getOrCreateStore } = await import('./gateway/methods/twin-methods.js');
   const { SlackChannel } = await import('./channels/slack.js');
   const { CLIChannel } = await import('./channels/cli.js');
+  const { IMessageProxyChannel } = await import('./channels/imessage-proxy.js');
   const { listBundledSkills } = await import('./skills/bundled.js');
 
   const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
@@ -116,6 +117,8 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   channelRegistry.register(new SlackChannel('slack', 'slack', { botToken: process.env.SLACK_BOT_TOKEN || '', appToken: process.env.SLACK_APP_TOKEN || '' }));
   channelRegistry.register(new WhatsAppChannel({}));
   channelRegistry.register(new CLIChannel());
+  const imessageProxy = new IMessageProxyChannel(HOME_DIR);
+  channelRegistry.register(imessageProxy);
 
   // ── iMessage channel (macOS — self-chat + contacts) ──
   const { IMessageChannel } = await import('./channels/imessage.js');
@@ -168,7 +171,14 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     if (contact) realtimeChatMode.set(contact.toLowerCase(), true);
   }
 
-  if (process.platform === 'darwin' && imessageSelfId) {
+  // The in-process SQLite/AppleScript poller is retained temporarily for source
+  // migration only and cannot be activated in production.
+  const legacyIMessageEnabled = false;
+  if (
+    legacyIMessageEnabled &&
+    process.platform === 'darwin'
+    && imessageSelfId
+  ) {
     imessage.onMessage(async (incoming) => {
       try {
         const contactKey = (incoming.conversationId || '').toLowerCase();
@@ -627,25 +637,12 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     { id: 'googlechat', type: 'googlechat' },
   ];
   server.registerMethod('channels.list', async () => {
-    const live = channelRegistry.getStatusList();
-
-    // iMessage — show real status
-    const imessageEntry = {
-      id: 'imessage', type: 'imessage',
-      connected: imessage.connected,
-      configured: !!imessageSelfId,
-      running: imessage.connected,
-      messageCount: 0,
-      description: imessageSelfId
-        ? `Self-chat: ${imessageSelfId}`
-        : 'macOS only — set IMESSAGE_SELF_ID to enable',
-    };
-
     const extras = extraChannels.map(ch => ({
       id: ch.id, type: ch.type, connected: false, configured: false,
       running: false, messageCount: 0,
     }));
-    return [...live, imessageEntry, ...extras];
+    imessageProxy.refreshStatus();
+    return [...channelRegistry.getStatusList(), ...extras];
   });
 
   // Register skills.list RPC method

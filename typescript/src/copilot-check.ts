@@ -55,9 +55,9 @@ function loadAuthProfileToken(): string | null {
 /** Save a GitHub token to the credentials file */
 export function saveGitHubToken(token: string, source: CachedGitHubToken['source']): void {
   try {
-    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true });
+    fs.mkdirSync(CREDENTIALS_DIR, { recursive: true, mode: 0o700 });
     const payload: CachedGitHubToken = { token, savedAt: Date.now(), source };
-    fs.writeFileSync(GITHUB_TOKEN_FILE, JSON.stringify(payload, null, 2));
+    fs.writeFileSync(GITHUB_TOKEN_FILE, JSON.stringify(payload, null, 2), { mode: 0o600 });
   } catch { /* non-fatal */ }
 }
 
@@ -151,8 +151,9 @@ export async function resolveGithubToken(): Promise<string | null> {
     }
   }
 
-  // No working token found
-  return unique.length > 0 ? unique[0].token : null;
+  // Every discovered token failed the Copilot exchange. Returning one would
+  // trap callers in a permanent 401 loop instead of triggering re-auth.
+  return null;
 }
 
 /**

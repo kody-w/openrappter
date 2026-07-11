@@ -67,9 +67,6 @@ public final class AppViewModel {
     // Fleet live data
     public let fleetViewModel = FleetViewModel()
 
-    // iMessage bridge (reads messages via FDA, forwards to daemon)
-    public var messageBridge: MessageBridge?
-
     // Activity (legacy — kept for backwards compat with ActivityListView)
     public var activities: [ActivityItem] = []
 
@@ -159,7 +156,6 @@ public final class AppViewModel {
         // Start fleet live polling
         fleetViewModel.startRefreshing()
         // Start iMessage bridge if configured — reads self ID + allowed contacts
-        startMessageBridge()
     }
 
     /// Detect a running gateway and connect to it automatically.
@@ -363,33 +359,4 @@ public final class AppViewModel {
         return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
     }
 
-    // MARK: - iMessage Bridge
-
-    private func startMessageBridge() {
-        let envPath = NSHomeDirectory() + "/.openrappter/.env"
-        var selfId = ProcessInfo.processInfo.environment["IMESSAGE_SELF_ID"] ?? ""
-        var contacts: [String] = []
-
-        // Read from .env if not in environment
-        if let envContent = try? String(contentsOfFile: envPath, encoding: .utf8) {
-            for line in envContent.split(separator: "\n") {
-                let l = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-                if l.hasPrefix("IMESSAGE_SELF_ID=") && selfId.isEmpty {
-                    selfId = l.replacingOccurrences(of: "IMESSAGE_SELF_ID=", with: "")
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                }
-                if l.hasPrefix("IMESSAGE_ALLOWED_CONTACTS=") {
-                    let raw = l.replacingOccurrences(of: "IMESSAGE_ALLOWED_CONTACTS=", with: "")
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                    contacts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-                }
-            }
-        }
-
-        guard !selfId.isEmpty else { return }
-
-        let bridge = MessageBridge(selfId: selfId, watchContacts: contacts)
-        self.messageBridge = bridge
-        bridge.start()
-    }
 }

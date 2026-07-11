@@ -2,6 +2,8 @@
  * System status and health RPC methods
  */
 
+import { VERSION } from '../../version.js';
+
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
     name: string,
@@ -50,7 +52,7 @@ export function registerSystemMethods(
         port: 0,
         connections: 0,
         uptime: Math.floor(process.uptime() * 1000),
-        version: '1.9.1',
+        version: VERSION,
         startedAt,
       };
     }
@@ -65,7 +67,7 @@ export function registerSystemMethods(
       }
       return {
         status: 'ok',
-        version: '1.9.1',
+        version: VERSION,
         uptime: Math.floor(process.uptime() * 1000),
         timestamp: Date.now(),
         checks: {},

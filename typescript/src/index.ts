@@ -12,10 +12,10 @@ import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasCopilotAvailable, autoAuthIfNeeded, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
+import { VERSION } from './version.js';
 
 const execAsync = promisify(exec);
 
-const VERSION = '1.9.1';
 const EMOJI = '🦖';
 const NAME = 'openrappter';
 

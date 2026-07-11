@@ -21,11 +21,17 @@ import subprocess
 from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
-from openrappter.security.exec_safety import ExecSafety
+
+try:
+    from openrappter.security.exec_safety import ExecSafety
+except ModuleNotFoundError:
+    # The brainstem loads single-file agents in isolation. Keep non-shell
+    # actions discoverable there, but fail closed if the safety module is absent.
+    ExecSafety = None
 
 
 class ShellAgent(BasicAgent):
-    def __init__(self, exec_safety: ExecSafety = None):
+    def __init__(self, exec_safety=None):
         self.name = 'Shell'
         self.metadata = {
             "name": self.name,
@@ -64,9 +70,13 @@ class ShellAgent(BasicAgent):
         }
         super().__init__(name=self.name, metadata=self.metadata)
         # Enforces injection detection, safe-binary allowlisting, and approval tokens.
-        self._exec_safety = exec_safety if exec_safety is not None else ExecSafety()
+        self._exec_safety = (
+            exec_safety
+            if exec_safety is not None
+            else (ExecSafety() if ExecSafety is not None else None)
+        )
 
-    def get_exec_safety(self) -> ExecSafety:
+    def get_exec_safety(self):
         """Access to the underlying safety engine, e.g. to review/resolve approval tokens."""
         return self._exec_safety
 
@@ -134,16 +144,24 @@ class ShellAgent(BasicAgent):
                 "message": "No command provided"
             })
 
+        if self._exec_safety is None:
+            return json.dumps({
+                "status": "error",
+                "message": "Shell execution is unavailable because the safety module could not be loaded",
+                "blocked": True,
+            })
+
         normalized = self._exec_safety.normalize_command(command)
         safety = self._exec_safety.check_command(normalized)
 
-        if not safety.safe:
+        if not safety.safe or safety.requires_approval:
+            reason = safety.reason or f"Dual-use binary '{safety.binary}' requires explicit approval"
             if approval_id:
                 consumed = self._exec_safety.consume_approval_token(approval_id, normalized)
                 if not consumed.ok:
                     return json.dumps({
                         "status": "error",
-                        "message": f"Command blocked: {safety.reason}. Approval rejected: {consumed.reason}",
+                        "message": f"Command blocked: {reason}. Approval rejected: {consumed.reason}",
                         "blocked": True,
                         "approval_id": approval_id
                     })
@@ -152,7 +170,7 @@ class ShellAgent(BasicAgent):
                 token = self._exec_safety.issue_approval_token(normalized)
                 return json.dumps({
                     "status": "error",
-                    "message": f"Command blocked by safety policy: {safety.reason}. "
+                    "message": f"Command blocked by safety policy: {reason}. "
                                "Request approval and retry with the same command plus approval_id.",
                     "blocked": True,
                     "approval_required": True,

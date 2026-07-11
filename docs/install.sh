@@ -383,6 +383,51 @@ ui_celebrate() {
     fi
 }
 
+# Numpad-friendly menu: type a number to choose (no arrow keys needed)
+# Usage: ui_choose "Header text" "Option A" "Option B" ...
+# Returns: selected option text on stdout
+# Supports gum as visual upgrade, falls back to pure bash numpad input
+ui_choose() {
+    local header="$1"
+    shift
+    local options=("$@")
+    local count=${#options[@]}
+
+    if [[ "$count" -eq 0 ]]; then
+        return 1
+    fi
+
+    # Single option — auto-select
+    if [[ "$count" -eq 1 ]]; then
+        echo "${options[0]}"
+        return 0
+    fi
+
+    # Display header and numbered options
+    echo "" >&2
+    echo -e "${ACCENT}${BOLD}${header}${NC}" >&2
+    echo "" >&2
+    for i in "${!options[@]}"; do
+        local num=$((i + 1))
+        echo -e "  ${CYAN}${BOLD}${num}${NC}  ${options[$i]}" >&2
+    done
+    echo "" >&2
+
+    # Read numpad input
+    while true; do
+        echo -n -e "${MUTED}Enter number [1-${count}]:${NC} " >&2
+        local input
+        read -r input </dev/tty 2>/dev/null || read -r input
+        # Strip whitespace
+        input="${input// /}"
+        if [[ "$input" =~ ^[0-9]+$ ]] && (( input >= 1 && input <= count )); then
+            echo "${options[$((input - 1))]}"
+            return 0
+        fi
+        echo -e "${WARN}  Please enter a number between 1 and ${count}${NC}" >&2
+    done
+}
+
 is_shell_function() {
     local name="${1:-}"
     [[ -n "$name" ]] && declare -F "$name" >/dev/null 2>&1
@@ -1201,14 +1246,14 @@ choose_install_method() {
     if [[ -n "$GUM" ]] && gum_is_tty; then
         ui_info "Existing $existing install detected"
         local choice
-        choice="$("$GUM" choose --header "Install method:" "npm" "git" </dev/tty)" || true
+        choice="$(ui_choose "Install method:" "npm" "git")" || true
         case "$choice" in
             npm) INSTALL_METHOD="npm" ;;
             git) INSTALL_METHOD="git" ;;
             *) INSTALL_METHOD="$existing" ;;
         esac
     else
-        # No gum, default to matching existing
+        # No TTY, default to matching existing
         INSTALL_METHOD="$existing"
         ui_info "Existing $existing install detected, upgrading in-place"
     fi
@@ -1379,7 +1424,7 @@ detect_and_restart_gateway() {
 
     if [[ -n "$GUM" ]] && gum_is_tty; then
         local choice
-        choice="$("$GUM" choose --header "Restart gateway daemon?" "Yes (recommended)" "No" </dev/tty)" || true
+        choice="$(ui_choose "Restart gateway daemon?" "Yes (recommended)" "No")" || true
         if [[ "$choice" == "Yes (recommended)" ]]; then
             kill "$pid" 2>/dev/null || true
             sleep 1

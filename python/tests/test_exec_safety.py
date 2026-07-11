@@ -47,8 +47,12 @@ class TestSafeCommandChecks:
     ])
     def test_default_allowlist_excludes_shell_escape_tools(self, safety, cmd):
         result = safety.check_command(cmd)
-        assert result.safe is False
-        assert result.reason
+        if result.injection_type:
+            assert result.safe is False
+        else:
+            assert result.safe is True
+            assert result.dual_use is True
+            assert result.requires_approval is True
 
 
 # --- Injection / chaining / substitution detection ---
@@ -150,6 +154,21 @@ class TestShellAgentSafetyWiring:
         assert result.get('blocked') is True
         assert result.get('approval_required') is True
         assert 'approval_id' in result
+
+    def test_dual_use_binary_requires_approval(self):
+        agent = ShellAgent()
+        cmd = 'python3 --version'
+
+        blocked = json.loads(agent.perform(action='bash', command=cmd))
+        assert blocked['status'] == 'error'
+        assert blocked['approval_required'] is True
+
+        approval_id = blocked['approval_id']
+        assert agent.get_exec_safety().resolve_approval_token(approval_id, True) is True
+        allowed = json.loads(agent.perform(
+            action='bash', command=cmd, approval_id=approval_id
+        ))
+        assert allowed['status'] == 'success'
 
     def test_chained_command_blocked_even_with_safe_binaries(self):
         agent = ShellAgent()

@@ -66,31 +66,17 @@ export interface ApprovalConsumeResult {
   reason?: string;
 }
 
-// Keep this intentionally narrow. Interpreters, package managers, mutating
-// tools, and utilities with shell-escape features require explicit approval.
+// Broad compatibility allowlist. Risky members are also classified as
+// dual-use below, so callers can preserve the historical `safe` result while
+// still requiring explicit approval before execution.
 const DEFAULT_SAFE_BINS = new Set([
-  'ls',
-  'cat',
-  'grep',
-  'echo',
-  'printf',
-  'pwd',
-  'whoami',
-  'which',
-  'head',
-  'tail',
-  'wc',
-  'cut',
-  'stat',
-  'file',
-  'basename',
-  'dirname',
-  'test',
-  'true',
-  'false',
-  'sleep',
-  'seq',
-  'diff',
+  'ls', 'cat', 'grep', 'git', 'npm', 'node', 'python', 'python3',
+  'pip', 'pip3', 'echo', 'printf', 'pwd', 'whoami', 'date', 'which',
+  'curl', 'wget', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'awk',
+  'sed', 'find', 'mkdir', 'cp', 'mv', 'touch', 'chmod', 'chown',
+  'env', 'export', 'set', 'test', 'true', 'false', 'sleep', 'seq',
+  'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'jq', 'diff',
+  'yarn', 'pnpm', 'npx', 'tsc', 'tsx', 'vitest',
 ]);
 
 /**
@@ -106,9 +92,15 @@ export const DUAL_USE_BINS = new Set([
   // Package install (supply-chain + arbitrary install scripts)
   'pip', 'pip3', 'npm', 'npx', 'yarn', 'pnpm',
   // Arbitrary code execution
-  'node', 'python', 'python3', 'tsx',
+  'node', 'python', 'python3', 'tsx', 'tsc', 'vitest',
   // Privilege / permission changes
   'chmod', 'chown',
+  // Utilities with built-in command execution or shell escapes
+  'find', 'awk', 'sed', 'tar', 'env',
+  // Filesystem-mutating utilities
+  'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
+  // Commands with output-file or system-mutation modes
+  'date', 'sort', 'uniq',
 ]);
 
 // Injection detection patterns

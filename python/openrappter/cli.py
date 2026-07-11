@@ -34,6 +34,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
+from openrappter import __version__
+
 # Package root for agent discovery
 PACKAGE_ROOT = Path(__file__).parent
 
@@ -609,7 +611,7 @@ class Orchestrator:
     def __init__(self):
         self.registry = AgentRegistry()
         self.assistant = None
-        self.version = "1.9.1"
+        self.version = __version__
         self.emoji = "🦖"
         self.name = "openrappter"
     

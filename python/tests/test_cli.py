@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 class TestVersion:
     def test_package_version(self):
         from openrappter import __version__
-        assert __version__ == "1.9.1"
+        assert __version__ == "1.9.8"
 
     def test_cli_version_matches(self):
         """Verify cli.py version matches package version."""
@@ -20,7 +20,7 @@ class TestVersion:
         # Read the version from cli.py source to avoid importing the full CLI
         cli_path = Path(__file__).parent.parent / "openrappter" / "cli.py"
         content = cli_path.read_text()
-        assert f'self.version = "{__version__}"' in content
+        assert 'self.version = __version__' in content
 
 
 # --- Agent discovery ---

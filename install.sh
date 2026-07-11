@@ -2064,12 +2064,14 @@ install_via_git() {
     if [[ "$is_upgrade" == "true" ]]; then
         ui_info "Updating existing git installation..."
         cd "$INSTALL_DIR"
-        if [[ -z "$(git -C "$INSTALL_DIR" status --porcelain 2>/dev/null || true)" ]]; then
-            run_quiet_step "Updating repository" git -C "$INSTALL_DIR" pull --rebase || true
+        # Runtime state intentionally lives beside the checkout and is
+        # untracked. Only tracked edits should prevent a safe fast-forward.
+        if [[ -z "$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)" ]]; then
+            run_quiet_step "Updating repository" git -C "$INSTALL_DIR" pull --ff-only
+            ui_success "Updated to latest"
         else
-            ui_info "Repo has local changes; skipping git pull"
+            ui_warn "Repo has tracked local changes; skipping git pull"
         fi
-        ui_success "Updated to latest"
     else
         if [[ -d "$INSTALL_DIR" ]]; then
             ui_warn "$INSTALL_DIR exists but is not a git repo — backing up"

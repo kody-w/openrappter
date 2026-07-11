@@ -9,6 +9,7 @@ import re
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -212,6 +213,16 @@ class IMessageService:
                 self._dropped_count += 1
                 return "outbound_echo"
 
+            age = self._message_age_seconds(parsed.get("created_at"))
+            if (
+                age is not None
+                and age > 15 * 60
+                and self.state.retry_attempts(guid) == 0
+            ):
+                self.state.mark_decision(rowid, guid, "stale_backlog")
+                self._dropped_count += 1
+                return "stale_backlog"
+
             allowed, reason = self._authorize(parsed, conversation)
             if not allowed:
                 self.state.mark_decision(rowid, guid, reason)
@@ -387,6 +398,7 @@ class IMessageService:
             "chat_id": chat_id,
             "chat_guid": chat_guid,
             "chat_identifier": str(raw.get("chat_identifier") or "").strip(),
+            "created_at": str(raw.get("created_at") or "").strip(),
             "participants": participants,
         }
 
@@ -611,6 +623,18 @@ class IMessageService:
         if isinstance(value, int) and value in (0, 1):
             return bool(value)
         raise IMessageServiceError(f"incoming {field} must be boolean")
+
+    @staticmethod
+    def _message_age_seconds(value: object) -> float | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
 
     def _publish_status(self, lifecycle: str) -> None:
         current = self.status()

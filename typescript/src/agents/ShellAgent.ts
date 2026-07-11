@@ -140,13 +140,14 @@ export class ShellAgent extends BasicAgent {
     const normalized = this.execSafety.normalizeCommand(command);
     const safety = this.execSafety.checkCommand(normalized);
 
-    if (!safety.safe) {
+    if (!safety.safe || safety.requiresApproval) {
+      const reason = safety.reason ?? `Dual-use binary '${safety.binary}' requires explicit approval`;
       if (approvalId) {
         const consumed = this.execSafety.consumeApprovalToken(approvalId, normalized);
         if (!consumed.ok) {
           return JSON.stringify({
             status: 'error',
-            message: `Command blocked: ${safety.reason}. Approval rejected: ${consumed.reason}`,
+            message: `Command blocked: ${reason}. Approval rejected: ${consumed.reason}`,
             blocked: true,
             approval_id: approvalId,
           });
@@ -156,7 +157,7 @@ export class ShellAgent extends BasicAgent {
         const token = this.execSafety.issueApprovalToken(normalized);
         return JSON.stringify({
           status: 'error',
-          message: `Command blocked by safety policy: ${safety.reason}. Request approval and retry with the same command plus approval_id.`,
+          message: `Command blocked by safety policy: ${reason}. Request approval and retry with the same command plus approval_id.`,
           blocked: true,
           approval_required: true,
           approval_id: token.id,

@@ -85,6 +85,22 @@ describe('ShellAgent — safety wiring', () => {
   });
 
   describe('approval token issuance, resolution, and use', () => {
+    it('requires approval for a dual-use binary even when classification is safe', async () => {
+      const agent = new ShellAgent();
+      const cmd = 'node --version';
+
+      const blocked = JSON.parse(await agent.execute({ action: 'bash', command: cmd }));
+      expect(blocked.status).toBe('error');
+      expect(blocked.approval_required).toBe(true);
+
+      const approvalId = blocked.approval_id as string;
+      expect(agent.getExecSafety().resolveApprovalToken(approvalId, true)).toBe(true);
+      const allowed = JSON.parse(
+        await agent.execute({ action: 'bash', command: cmd, approval_id: approvalId })
+      );
+      expect(allowed.status).toBe('success');
+    });
+
     it('issues an approval token when blocked, then allows execution once resolved', async () => {
       const agent = new ShellAgent();
       const cmd = 'rm -rf /tmp/exec-safety-ts-test-dir';

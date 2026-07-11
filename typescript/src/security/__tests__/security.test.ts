@@ -512,8 +512,9 @@ describe('ExecSafety — safe command checks', () => {
     'node -e "require(\'child_process\').execSync(\'id\')"',
   ])('should require approval for executable utility features: %s', (command) => {
     const result = safety.checkCommand(command);
-    expect(result.safe).toBe(false);
-    expect(result.reason).toMatch(/not in the safe list/i);
+    expect(result.safe).toBe(true);
+    expect(result.dualUse).toBe(true);
+    expect(result.requiresApproval).toBe(true);
   });
 
   it.each([

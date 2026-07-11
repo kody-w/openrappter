@@ -15,12 +15,26 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-# Keep this intentionally narrow. Interpreters, package managers, mutating
-# tools, and utilities with shell-escape features require explicit approval.
+# Broad compatibility allowlist. Risky members are classified as dual-use,
+# preserving the historical safe result while requiring caller approval.
 DEFAULT_SAFE_BINS = {
-    'ls', 'cat', 'grep', 'echo', 'printf', 'pwd', 'whoami', 'which',
-    'head', 'tail', 'wc', 'cut', 'stat', 'file', 'basename', 'dirname',
-    'test', 'true', 'false', 'sleep', 'seq', 'diff',
+    'ls', 'cat', 'grep', 'git', 'npm', 'node', 'python', 'python3',
+    'pip', 'pip3', 'echo', 'printf', 'pwd', 'whoami', 'date', 'which',
+    'curl', 'wget', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'awk',
+    'sed', 'find', 'mkdir', 'cp', 'mv', 'touch', 'chmod', 'chown',
+    'env', 'export', 'set', 'test', 'true', 'false', 'sleep', 'seq',
+    'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'jq', 'diff',
+    'yarn', 'pnpm', 'npx', 'tsc', 'tsx', 'vitest',
+}
+
+DUAL_USE_BINS = {
+    'curl', 'wget',
+    'pip', 'pip3', 'npm', 'npx', 'yarn', 'pnpm',
+    'node', 'python', 'python3', 'tsx', 'tsc', 'vitest',
+    'chmod', 'chown',
+    'find', 'awk', 'sed', 'tar', 'env',
+    'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
+    'date', 'sort', 'uniq',
 }
 
 # Injection detection patterns.
@@ -47,6 +61,8 @@ class SafetyCheckResult:
     binary: str
     reason: Optional[str] = None
     injection_type: Optional[str] = None
+    dual_use: Optional[bool] = None
+    requires_approval: Optional[bool] = None
 
 
 @dataclass
@@ -129,7 +145,16 @@ class ExecSafety:
             self._record_audit(cmd, binary, result, 'blocked')
             return result
 
-        result = SafetyCheckResult(safe=True, binary=binary)
+        result = (
+            SafetyCheckResult(
+                safe=True,
+                binary=binary,
+                dual_use=True,
+                requires_approval=True,
+            )
+            if binary in DUAL_USE_BINS
+            else SafetyCheckResult(safe=True, binary=binary)
+        )
         self._record_audit(cmd, binary, result, 'allowed')
         return result
 

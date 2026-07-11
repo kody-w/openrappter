@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,41 @@ def test_failed_brainstem_turn_remains_retryable(tmp_path):
     assert service.state.cursor_rowid is None
     assert service.process_message(message) == "replied"
     assert service.state.cursor_rowid == 10
+
+
+def test_never_seen_stale_backlog_is_dropped_without_model_call(tmp_path):
+    calls = {"count": 0}
+
+    def runner(*_):
+        calls["count"] += 1
+        return {"response": "must not run"}
+
+    service = IMessageService(
+        config(tmp_path),
+        supervisor=FakeSupervisor(),
+        chat_runner=runner,
+    )
+    message = owner_message(guid="STALE", rowid=11)
+    message["created_at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat()
+    assert service.process_message(message) == "stale_backlog"
+    assert calls["count"] == 0
+
+
+def test_previously_failed_message_retries_even_after_live_fence(tmp_path):
+    service = IMessageService(
+        config(tmp_path),
+        supervisor=FakeSupervisor(),
+        chat_runner=lambda *_: {"response": "recovered"},
+    )
+    message = owner_message(guid="OLD-RETRY", rowid=12)
+    message["created_at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=2)
+    ).isoformat()
+    service.state.observe(12, "OLD-RETRY", message)
+    service.state.mark_retryable(12, "OLD-RETRY")
+    assert service.process_message(message) == "replied"
 
 
 def test_first_pending_message_resumes_before_tail_after_restart(tmp_path):

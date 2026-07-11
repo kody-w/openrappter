@@ -289,6 +289,13 @@ class IMessageState:
                 continue
         return messages
 
+    def retry_attempts(self, guid: str) -> int:
+        row = self._db.execute(
+            "SELECT attempts FROM inbox WHERE guid_hash=?",
+            (self._digest("message-guid", guid),),
+        ).fetchone()
+        return int(row["attempts"]) if row else 0
+
     def mark_decision(self, rowid: int | None, guid: str, outcome: str) -> None:
         guid_hash = self._digest("message-guid", guid)
         with self._transaction():

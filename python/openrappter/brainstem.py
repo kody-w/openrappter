@@ -393,6 +393,15 @@ def copilot_session():
     gh = _github_token()
     if not gh:
         return None
+    if gh.startswith("gho_") or gh.startswith("github_pat_"):
+        _copilot_cache["token"] = gh
+        _copilot_cache["endpoint"] = os.environ.get(
+            "OPENRAPPTER_COPILOT_CAPI_URL",
+            "https://api.enterprise.githubcopilot.com",
+        )
+        _copilot_cache["expires_at"] = time.time() + 3600
+        _copilot_cache["direct_capi"] = True
+        return _copilot_cache
     prefix = "token" if gh.startswith("ghu_") else "Bearer"
     try:
         status, data = _http_json(
@@ -498,6 +507,15 @@ def llm_chat(messages, tools):
     session = copilot_session()
     if not session:
         raise RuntimeError("Copilot not authenticated — set GITHUB_TOKEN or run `gh auth login`")
+    direct_capi = bool(session.get("direct_capi"))
+    model = (
+        os.environ.get("OPENRAPPTER_CAPI_MODEL", "gpt-4o")
+        if direct_capi
+        else MODEL
+    )
+    payload = {"model": model, "messages": messages, "tools": tools or None}
+    if not direct_capi:
+        payload["max_tokens"] = 2000
     try:
         status, data = _http_json(
             f"{session['endpoint']}/chat/completions",
@@ -509,7 +527,7 @@ def llm_chat(messages, tools):
                 "Copilot-Integration-Id": "vscode-chat",
                 "Content-Type": "application/json",
             },
-            payload={"model": MODEL, "messages": messages, "tools": tools or None, "max_tokens": 2000},
+            payload=payload,
             timeout=120,
         )
     except urllib.error.HTTPError as e:

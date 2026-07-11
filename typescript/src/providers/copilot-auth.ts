@@ -94,18 +94,29 @@ export async function pollForAccessToken(params: {
     device_code: params.deviceCode,
     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
   });
+  let initialCodeRaceRetries = 0;
+  let consecutiveNetworkErrors = 0;
 
   while (Date.now() < params.expiresAt) {
     params.onPoll?.();
 
-    const res = await fetchImpl(ACCESS_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body,
-    });
+    let res: Response;
+    try {
+      res = await fetchImpl(ACCESS_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body,
+      });
+      consecutiveNetworkErrors = 0;
+    } catch (error) {
+      consecutiveNetworkErrors++;
+      if (consecutiveNetworkErrors >= 5) throw error;
+      await new Promise((r) => setTimeout(r, params.intervalMs));
+      continue;
+    }
 
     if (!res.ok) {
       throw new Error(`GitHub access token request failed: HTTP ${res.status}`);
@@ -125,6 +136,13 @@ export async function pollForAccessToken(params: {
     }
     if (err === 'slow_down') {
       await new Promise((r) => setTimeout(r, params.intervalMs + 2000));
+      continue;
+    }
+    // GitHub can briefly report incorrect_device_code when the poll reaches
+    // a different backend before the newly-issued grant has propagated.
+    if (err === 'incorrect_device_code' && initialCodeRaceRetries < 3) {
+      initialCodeRaceRetries++;
+      await new Promise((r) => setTimeout(r, params.intervalMs));
       continue;
     }
     if (err === 'expired_token') {

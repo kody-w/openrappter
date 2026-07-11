@@ -56,8 +56,8 @@ function loadCachedToken(cachePath: string): CachedCopilotToken | null {
 function saveCachedToken(cachePath: string, token: CachedCopilotToken): void {
   try {
     const dir = path.dirname(cachePath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify(token, null, 2));
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(cachePath, JSON.stringify(token, null, 2), { mode: 0o600 });
   } catch {
     // Non-fatal — token just won't be cached
   }

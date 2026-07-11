@@ -11,3 +11,4 @@ export { DiscordChannel, createDiscordChannel } from './discord.js';
 export type { DiscordConfig } from './discord.js';
 export { WhatsAppChannel, createWhatsAppChannel } from './whatsapp.js';
 export type { WhatsAppConfig } from './whatsapp.js';
+export { IMessageProxyChannel } from './imessage-proxy.js';

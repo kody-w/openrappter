@@ -5,6 +5,12 @@ import { hasCopilotAvailable, resolveGithubToken } from '../../copilot-check.js'
 vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
+vi.mock('../../providers/copilot-token.js', () => ({
+  resolveCopilotApiToken: vi.fn(async ({ githubToken }: { githubToken: string }) => {
+    if (githubToken.startsWith('bad_')) throw new Error('invalid token');
+    return { token: 'copilot-token', expiresAt: Date.now() + 60_000 };
+  }),
+}));
 vi.mock('util', async (importOriginal) => {
   const actual = await importOriginal<typeof import('util')>();
   return {
@@ -112,6 +118,12 @@ describe('resolveGithubToken', () => {
   });
 
   it('should return null when no token available', async () => {
+    expect(await resolveGithubToken()).toBeNull();
+  });
+
+  it('should return null when every discovered token fails validation', async () => {
+    process.env.COPILOT_GITHUB_TOKEN = 'bad_stale_token';
+    process.env.GH_TOKEN = 'bad_other_token';
     expect(await resolveGithubToken()).toBeNull();
   });
 });

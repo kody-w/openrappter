@@ -5,8 +5,11 @@ Recalls and provides context based on stored memories from past interactions.
 Uses local JSON file storage (no external dependencies).
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import Any, Mapping
 
 from openrappter.agents.basic_agent import BasicAgent
 
@@ -60,6 +63,7 @@ class ContextMemoryAgent(BasicAgent):
         keywords = kwargs.get('keywords', [])
         full_recall = kwargs.get('full_recall', False)
         query = kwargs.get('query', '')
+        trusted_context = self._trusted_context(kwargs.get("_trusted_context"))
         
         # If query provided, extract keywords from it
         if query and not keywords:
@@ -69,7 +73,12 @@ class ContextMemoryAgent(BasicAgent):
         if not keywords and 'max_messages' not in kwargs:
             full_recall = True
         
-        return self._recall_context(max_messages, keywords, full_recall)
+        return self._recall_context(
+            max_messages,
+            keywords,
+            full_recall,
+            trusted_context=trusted_context,
+        )
     
     def _load_memories(self) -> dict:
         """Load memories from file."""
@@ -80,9 +89,16 @@ class ContextMemoryAgent(BasicAgent):
                 return {}
         return {}
     
-    def _recall_context(self, max_messages: int, keywords: list, full_recall: bool) -> str:
+    def _recall_context(
+        self,
+        max_messages: int,
+        keywords: list,
+        full_recall: bool,
+        trusted_context: Mapping[str, Any] | None = None,
+    ) -> str:
         """Recall memories with optional filtering."""
         memories = self._load_memories()
+        context = self._trusted_context(trusted_context)
         
         if not memories:
             return json.dumps({
@@ -92,7 +108,14 @@ class ContextMemoryAgent(BasicAgent):
             })
         
         # Convert to list
-        memory_list = list(memories.values())
+        all_memories = [item for item in memories.values() if isinstance(item, Mapping)]
+        memory_list = [
+            item for item in all_memories if self._is_authorized(item, context)
+        ]
+        familiar = any(
+            context["principal_id"] in self._memory_principals(item)
+            for item in all_memories
+        )
         
         # Full recall - return all sorted by date
         if full_recall:
@@ -107,7 +130,8 @@ class ContextMemoryAgent(BasicAgent):
                 "status": "success",
                 "message": f"All memories ({len(sorted_memories)}):",
                 "formatted": formatted,
-                "memories": sorted_memories
+                "memories": self._project_memories(sorted_memories),
+                "familiar": familiar,
             })
         
         # Filter by keywords
@@ -141,7 +165,8 @@ class ContextMemoryAgent(BasicAgent):
                     "status": "success",
                     "message": f"Found {len(sorted_filtered)} memories matching: {', '.join(keywords)}",
                     "formatted": formatted,
-                    "memories": sorted_filtered
+                    "memories": self._project_memories(sorted_filtered),
+                    "familiar": familiar,
                 })
         
         # No keywords, return most recent
@@ -156,7 +181,8 @@ class ContextMemoryAgent(BasicAgent):
             "status": "success",
             "message": f"Recent memories ({len(sorted_memories)}):",
             "formatted": formatted,
-            "memories": sorted_memories
+            "memories": self._project_memories(sorted_memories),
+            "familiar": familiar,
         })
     
     def _format_memories(self, memories: list) -> str:
@@ -210,7 +236,7 @@ class ContextMemoryAgent(BasicAgent):
                 "status": "success",
                 "message": f"Found {len(results)} relevant memories",
                 "formatted": formatted,
-                "memories": results
+                "memories": self._project_memories(results)
             })
         
         return json.dumps({
@@ -218,3 +244,85 @@ class ContextMemoryAgent(BasicAgent):
             "message": "No matching memories found.",
             "memories": []
         })
+
+    @staticmethod
+    def _project_memories(memories: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": memory.get("id"),
+                "message": memory.get("message", ""),
+                "theme": memory.get("theme", "unknown"),
+            }
+            for memory in memories
+        ]
+
+    @staticmethod
+    def _trusted_context(value: object) -> dict[str, Any]:
+        if isinstance(value, Mapping) and value.get("trusted") is True:
+            principal = str(value.get("principal_id") or "")
+            audience = str(value.get("audience_id") or "")
+            if principal and audience:
+                return {
+                    "trusted": True,
+                    "principal_id": principal,
+                    "audience_id": audience,
+                    "conversation_type": str(value.get("conversation_type") or "dm"),
+                    "is_owner": bool(value.get("is_owner")),
+                }
+        if value is not None:
+            return {
+                "trusted": False,
+                "principal_id": "principal:invalid",
+                "audience_id": "audience:denied",
+                "conversation_type": "denied",
+                "is_owner": False,
+            }
+        return {
+            "trusted": True,
+            "principal_id": "principal:local-owner",
+            "audience_id": "owner:local",
+            "conversation_type": "owner",
+            "is_owner": True,
+        }
+
+    @staticmethod
+    def _memory_principals(memory: Mapping[str, Any]) -> set[str]:
+        trust = memory.get("trust")
+        if not isinstance(trust, Mapping):
+            return {"principal:local-owner"}
+        return {
+            str(item)
+            for item in list(trust.get("custodians", [])) + list(trust.get("subjects", []))
+            if str(item)
+        }
+
+    def _is_authorized(
+        self,
+        memory: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> bool:
+        trust = memory.get("trust")
+        if not isinstance(trust, Mapping):
+            return bool(context["is_owner"])
+        if trust.get("visibility") == "public":
+            return True
+        audience = str(context["audience_id"])
+        allowed = {str(item) for item in trust.get("allowed_audiences", [])}
+        if audience in allowed:
+            return True
+        for grant in trust.get("grants", []):
+            if (
+                isinstance(grant, Mapping)
+                and grant.get("audience_id") == audience
+                and not grant.get("revoked_at")
+            ):
+                return True
+        # A private relationship follows the same principal across DM transports,
+        # but never widens into a group.
+        if context["conversation_type"] == "dm":
+            principals = self._memory_principals(memory)
+            return (
+                context["principal_id"] in principals
+                and trust.get("origin_type") in ("dm", "owner")
+            )
+        return False

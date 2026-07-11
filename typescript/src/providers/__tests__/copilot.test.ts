@@ -336,6 +336,49 @@ describe('copilot-auth', () => {
       expect(callCount).toBe(3);
     });
 
+    it('should tolerate a short device-code propagation race', async () => {
+      const { pollForAccessToken } = await import('../copilot-auth.js');
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ error: 'incorrect_device_code' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ access_token: 'ghu_propagated', token_type: 'bearer' }),
+        });
+
+      const result = await pollForAccessToken({
+        deviceCode: 'DC-NEW',
+        intervalMs: 10,
+        expiresAt: Date.now() + 60000,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+
+      expect(result).toBe('ghu_propagated');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should retry transient network failures while polling', async () => {
+      const { pollForAccessToken } = await import('../copilot-auth.js');
+      const mockFetch = vi.fn()
+        .mockRejectedValueOnce(new TypeError('fetch failed'))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ access_token: 'ghu_recovered', token_type: 'bearer' }),
+        });
+
+      const result = await pollForAccessToken({
+        deviceCode: 'DC-NETWORK',
+        intervalMs: 10,
+        expiresAt: Date.now() + 60000,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+
+      expect(result).toBe('ghu_recovered');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
     it('should throw on access_denied', async () => {
       const { pollForAccessToken } = await import('../copilot-auth.js');
 

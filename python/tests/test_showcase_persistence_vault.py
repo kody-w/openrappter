@@ -5,7 +5,19 @@ Mirrors TypeScript showcase-persistence-vault.test.ts (8 tests).
 """
 
 import pytest
+from openrappter.storage import adapter as adapter_module
 from openrappter.storage.adapter import create_storage_adapter, StorageAdapter
+
+
+@pytest.fixture(autouse=True)
+def _isolated_default_db_path(tmp_path, monkeypatch):
+    """
+    Redirect the factory's default (no explicit path) sqlite location to a
+    per-test temp directory. Since the factory now defaults to a persistent
+    sqlite adapter, this keeps tests from writing to the real
+    ~/.openrappter directory on the host machine.
+    """
+    monkeypatch.setattr(adapter_module, 'DEFAULT_DB_PATH', tmp_path / 'storage.db')
 
 
 @pytest.fixture

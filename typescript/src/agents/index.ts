@@ -26,6 +26,8 @@ export { SelfHealingCronAgent } from './SelfHealingCronAgent.js';
 export type { JobConfig, CheckResult } from './SelfHealingCronAgent.js';
 export { WatchmakerAgent } from './WatchmakerAgent.js';
 export type { AgentVersion, AgentSlot, TestCase, EvaluationCheck, EvaluationResult, ComparisonResult, PromotionRecord, CycleResult } from './WatchmakerAgent.js';
+export { ComputerUseAgent } from './ComputerUseAgent.js';
+export { DemoRecorderAgent } from './DemoRecorderAgent.js';
 export { LearnNewAgent } from './LearnNewAgent.js';
 export { AgentChain, createAgentChain } from './chain.js';
 export type { ChainStep, ChainStepResult, ChainResult, ChainOptions } from './chain.js';

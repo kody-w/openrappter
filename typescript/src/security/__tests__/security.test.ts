@@ -473,11 +473,9 @@ describe('ExecSafety — safe command checks', () => {
       'ls -la',
       'cat README.md',
       'grep -r pattern src/',
-      'git status',
-      'npm install',
-      'node index.js',
-      'python script.py',
       'echo hello',
+      'head -n 10 README.md',
+      'wc -l README.md',
     ];
 
     for (const cmd of safeCommands) {
@@ -503,6 +501,30 @@ describe('ExecSafety — safe command checks', () => {
     const result = safety.checkCommand('rm -rf /');
     expect(result.safe).toBe(false);
     expect(result.reason).toMatch(/not in the safe list/i);
+  });
+
+  it.each([
+    'find /tmp -name x -exec cat /etc/passwd {} +',
+    `awk 'BEGIN{system("id")}'`,
+    'tar xf archive.tar --to-command=id',
+    `sed '1e id' file`,
+    'npx arbitrary-package',
+    'node -e "require(\'child_process\').execSync(\'id\')"',
+  ])('should require approval for executable utility features: %s', (command) => {
+    const result = safety.checkCommand(command);
+    expect(result.safe).toBe(false);
+    expect(result.reason).toMatch(/not in the safe list/i);
+  });
+
+  it.each([
+    'echo pwned > ~/.ssh/authorized_keys',
+    'echo pwned >> ~/.bashrc',
+    'cat /etc/passwd > stolen.txt',
+    'cat /etc/passwd >> ../outside/leak.txt',
+  ])('should require approval for every output redirection target: %s', (command) => {
+    const result = safety.checkCommand(command);
+    expect(result.safe).toBe(false);
+    expect(result.injectionType).toBe('output-redirect');
   });
 
   it('should have correct binary for rejected command', () => {
@@ -653,7 +675,7 @@ describe('ExecSafety — injection detection', () => {
   it('should detect dangerous redirects', () => {
     const result = safety.checkCommand('cat file > /etc/passwd');
     expect(result.safe).toBe(false);
-    expect(result.injectionType).toBe('dangerous-redirect');
+    expect(result.injectionType).toBe('output-redirect');
   });
 
   it('should detect newline injection', () => {
@@ -817,5 +839,107 @@ describe('ExecSafety — approval workflow', () => {
     // Clean up
     safety.reject(pending[0].id);
     await promise;
+  });
+});
+
+describe('ExecSafety — single-use approval tokens', () => {
+  let safety: ExecSafety;
+
+  beforeEach(() => {
+    safety = createExecSafety();
+  });
+
+  it('normalizes commands consistently for matching', () => {
+    expect(safety.normalizeCommand('  ls   -la  ')).toBe('ls -la');
+    expect(safety.normalizeCommand('ls -la')).toBe('ls -la');
+  });
+
+  it('issues a pending token for a blocked command', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    expect(token.status).toBe('pending');
+    expect(token.cmd).toBe('rm -rf /tmp/data');
+    expect(safety.getPendingApprovalTokens().map((t) => t.id)).toContain(token.id);
+  });
+
+  it('rejects consumption before the token is resolved', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    const result = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/not been approved/);
+  });
+
+  it('allows consumption once approved for the exact same command', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    expect(safety.resolveApprovalToken(token.id, true)).toBe(true);
+
+    const result = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(result.ok).toBe(true);
+  });
+
+  it('normalizes whitespace when matching the command at consume time', () => {
+    const token = safety.issueApprovalToken('rm   -rf  /tmp/data');
+    safety.resolveApprovalToken(token.id, true);
+
+    const result = safety.consumeApprovalToken(token.id, '  rm -rf /tmp/data ');
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects consumption for a mismatched command', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    safety.resolveApprovalToken(token.id, true);
+
+    const result = safety.consumeApprovalToken(token.id, 'rm -rf /etc');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/does not match/);
+  });
+
+  it('is single-use: a second consumption of the same token fails (replay)', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    safety.resolveApprovalToken(token.id, true);
+
+    const first = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(first.ok).toBe(true);
+
+    const replay = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(replay.ok).toBe(false);
+    expect(replay.reason).toMatch(/already used/);
+  });
+
+  it('rejects consumption after explicit rejection', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    safety.resolveApprovalToken(token.id, false);
+
+    const result = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/rejected/);
+  });
+
+  it('rejects consumption of an unknown token id', () => {
+    const result = safety.consumeApprovalToken('nonexistent', 'ls');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/Unknown/);
+  });
+
+  it('expires tokens past their TTL', () => {
+    vi.useFakeTimers();
+    const token = safety.issueApprovalToken('rm -rf /tmp/data', 100);
+    safety.resolveApprovalToken(token.id, true);
+    vi.advanceTimersByTime(200);
+
+    const result = safety.consumeApprovalToken(token.id, 'rm -rf /tmp/data');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/expired/);
+    vi.useRealTimers();
+  });
+
+  it('resolveApprovalToken returns false for unknown id', () => {
+    expect(safety.resolveApprovalToken('nonexistent', true)).toBe(false);
+  });
+
+  it('removes a token from the pending list once resolved', () => {
+    const token = safety.issueApprovalToken('rm -rf /tmp/data');
+    expect(safety.getPendingApprovalTokens()).toHaveLength(1);
+    safety.resolveApprovalToken(token.id, true);
+    expect(safety.getPendingApprovalTokens()).toHaveLength(0);
   });
 });

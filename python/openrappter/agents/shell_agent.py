@@ -21,10 +21,11 @@ import subprocess
 from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
+from openrappter.security.exec_safety import ExecSafety
 
 
 class ShellAgent(BasicAgent):
-    def __init__(self):
+    def __init__(self, exec_safety: ExecSafety = None):
         self.name = 'Shell'
         self.metadata = {
             "name": self.name,
@@ -52,13 +53,23 @@ class ShellAgent(BasicAgent):
                     "query": {
                         "type": "string",
                         "description": "Natural language query that may contain the command or path."
+                    },
+                    "approval_id": {
+                        "type": "string",
+                        "description": "Single-use approval token id obtained after a blocked command was reviewed and approved. Must match the exact command it was issued for."
                     }
                 },
                 "required": []
             }
         }
         super().__init__(name=self.name, metadata=self.metadata)
-    
+        # Enforces injection detection, safe-binary allowlisting, and approval tokens.
+        self._exec_safety = exec_safety if exec_safety is not None else ExecSafety()
+
+    def get_exec_safety(self) -> ExecSafety:
+        """Access to the underlying safety engine, e.g. to review/resolve approval tokens."""
+        return self._exec_safety
+
     def perform(self, **kwargs):
         """Execute the requested action."""
         action = kwargs.get('action', '')
@@ -66,13 +77,14 @@ class ShellAgent(BasicAgent):
         path = kwargs.get('path', '')
         content = kwargs.get('content', '')
         query = kwargs.get('query', '')
+        approval_id = kwargs.get('approval_id')
         
         # Try to infer action from query if not specified
         if not action and query:
             action, command, path, content = self._parse_query(query)
         
         if action == 'bash' or (command and not action):
-            return self._execute_bash(command or query)
+            return self._execute_bash(command or query, approval_id)
         elif action == 'read':
             return self._read_file(path or query)
         elif action == 'write':
@@ -82,7 +94,7 @@ class ShellAgent(BasicAgent):
         else:
             # Default: try as bash command
             if query:
-                return self._execute_bash(query)
+                return self._execute_bash(query, approval_id)
             return json.dumps({
                 "status": "error",
                 "message": "No action specified. Use: bash, read, write, or list"
@@ -114,14 +126,39 @@ class ShellAgent(BasicAgent):
         # Default to bash
         return 'bash', query, '', ''
     
-    def _execute_bash(self, command: str) -> str:
-        """Execute a shell command."""
+    def _execute_bash(self, command: str, approval_id: str = None) -> str:
+        """Execute a shell command, enforcing safety checks and approval tokens first."""
         if not command:
             return json.dumps({
                 "status": "error",
                 "message": "No command provided"
             })
-        
+
+        normalized = self._exec_safety.normalize_command(command)
+        safety = self._exec_safety.check_command(normalized)
+
+        if not safety.safe:
+            if approval_id:
+                consumed = self._exec_safety.consume_approval_token(approval_id, normalized)
+                if not consumed.ok:
+                    return json.dumps({
+                        "status": "error",
+                        "message": f"Command blocked: {safety.reason}. Approval rejected: {consumed.reason}",
+                        "blocked": True,
+                        "approval_id": approval_id
+                    })
+                # Approval verified and consumed (single-use) — fall through to execution.
+            else:
+                token = self._exec_safety.issue_approval_token(normalized)
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Command blocked by safety policy: {safety.reason}. "
+                               "Request approval and retry with the same command plus approval_id.",
+                    "blocked": True,
+                    "approval_required": True,
+                    "approval_id": token.id
+                })
+
         try:
             result = subprocess.run(
                 command,

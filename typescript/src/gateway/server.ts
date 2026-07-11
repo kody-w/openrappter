@@ -5,7 +5,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash, timingSafeEqual } from 'crypto';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -58,6 +58,18 @@ function parseVoiceDelimiter(content: string): { text: string; voiceText: string
 interface RateLimitEntry {
   count: number;
   windowStart: number;
+}
+
+/**
+ * Constant-time string comparison for secrets (tokens/passwords).
+ * Hashes both inputs to fixed-length digests before comparing so that
+ * neither the early-exit behavior nor the differing lengths of the raw
+ * inputs can leak timing information about the secret.
+ */
+function safeCompare(a: string, b: string): boolean {
+  const digestA = createHash('sha256').update(a).digest();
+  const digestB = createHash('sha256').update(b).digest();
+  return timingSafeEqual(digestA, digestB);
 }
 
 type StreamCallback = (response: StreamingResponse) => void;
@@ -583,6 +595,24 @@ export class GatewayServer {
       return;
     }
 
+    await this.dispatchMethod(connId, ws, info, frame);
+  }
+
+  /**
+   * Dispatch a parsed RPC frame to its registered method handler.
+   *
+   * This runs the rate limit check, method lookup, and — critically —
+   * enforces each method's `requiresAuth` flag against the connection's
+   * per-connection `authenticated` state before invoking the handler.
+   * This check is intentionally independent of (and in addition to) the
+   * connect-handshake gate in `handleMessage`: it guarantees a method
+   * registered with `requiresAuth: true` can never be invoked for an
+   * unauthenticated connection even if the handshake gate above is ever
+   * relaxed, refactored, or bypassed (e.g. a future public-method
+   * allowlist). Rejections use the standard JSON-RPC error frame shape
+   * and never invoke the underlying handler.
+   */
+  private async dispatchMethod(connId: string, ws: WebSocket, info: ConnectionInfo, frame: ParsedFrame): Promise<void> {
     // Rate limit
     if (!this.checkRateLimit(connId)) {
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.RATE_LIMITED, message: 'Rate limit exceeded' } });
@@ -593,6 +623,12 @@ export class GatewayServer {
     const method = this.methods.get(frame.method);
     if (!method) {
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.METHOD_NOT_FOUND, message: `Method '${frame.method}' not found` } });
+      return;
+    }
+
+    // Enforce per-method auth requirement — fail closed, do not call the handler.
+    if (method.requiresAuth && !info.authenticated) {
+      this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: `Method '${frame.method}' requires authentication` } });
       return;
     }
 
@@ -634,13 +670,17 @@ export class GatewayServer {
     if (authMode === 'token') {
       const auth = params.auth as { token?: string } | undefined;
       const token = auth?.token;
-      if (!token || !this.config.auth?.tokens?.includes(token)) {
+      const validTokens = this.config.auth?.tokens ?? [];
+      const tokenValid = !!token && validTokens.some((candidate) => safeCompare(candidate, token));
+      if (!tokenValid) {
         this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: 'Invalid or missing auth token' } });
         return;
       }
     } else if (authMode === 'password') {
       const auth = params.auth as { password?: string } | undefined;
-      if (!auth?.password || auth.password !== this.config.auth?.password) {
+      const expected = this.config.auth?.password;
+      const passwordValid = !!auth?.password && !!expected && safeCompare(auth.password, expected);
+      if (!passwordValid) {
         this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: 'Invalid or missing password' } });
         return;
       }

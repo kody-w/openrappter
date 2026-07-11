@@ -33,7 +33,7 @@ export interface AuditEntry {
   binary: string;
   safe: boolean;
   reason?: string;
-  status: 'allowed' | 'blocked' | 'pending' | 'approved' | 'rejected';
+  status: 'allowed' | 'blocked' | 'pending' | 'approved' | 'rejected' | 'used' | 'expired';
   timestamp: string;
 }
 
@@ -46,15 +46,51 @@ export interface PendingApproval {
   resolve: (approved: boolean) => void;
 }
 
-// Default safe binaries
+/**
+ * A non-blocking, single-use approval token bound to one exact normalized
+ * command. Used by callers (e.g. ShellAgent) that need to fail closed
+ * immediately and let approval happen out-of-band, rather than awaiting
+ * an in-process Promise (see requestApproval/approve/reject below).
+ */
+export interface ApprovalToken {
+  id: string;
+  /** The exact normalized command this token is valid for. */
+  cmd: string;
+  status: 'pending' | 'approved' | 'rejected' | 'used' | 'expired';
+  createdAt: string;
+  expiresAt: number;
+}
+
+export interface ApprovalConsumeResult {
+  ok: boolean;
+  reason?: string;
+}
+
+// Keep this intentionally narrow. Interpreters, package managers, mutating
+// tools, and utilities with shell-escape features require explicit approval.
 const DEFAULT_SAFE_BINS = new Set([
-  'ls', 'cat', 'grep', 'git', 'npm', 'node', 'python', 'python3',
-  'pip', 'pip3', 'echo', 'printf', 'pwd', 'whoami', 'date', 'which',
-  'curl', 'wget', 'head', 'tail', 'wc', 'sort', 'uniq', 'cut', 'awk',
-  'sed', 'find', 'mkdir', 'cp', 'mv', 'touch', 'chmod', 'chown',
-  'env', 'export', 'set', 'test', 'true', 'false', 'sleep',
-  'tar', 'gzip', 'gunzip', 'zip', 'unzip', 'jq', 'diff',
-  'yarn', 'pnpm', 'npx', 'tsc', 'tsx', 'vitest',
+  'ls',
+  'cat',
+  'grep',
+  'echo',
+  'printf',
+  'pwd',
+  'whoami',
+  'which',
+  'head',
+  'tail',
+  'wc',
+  'cut',
+  'stat',
+  'file',
+  'basename',
+  'dirname',
+  'test',
+  'true',
+  'false',
+  'sleep',
+  'seq',
+  'diff',
 ]);
 
 /**
@@ -90,8 +126,9 @@ const INJECTION_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
   { pattern: /;/, type: 'semicolon-chain' },
   // Pipe chains (single | only, after || is already handled)
   { pattern: /(?<!\|)\|(?!\|)/, type: 'pipe-chain' },
-  // Redirection that could be abused
-  { pattern: />\s*\/(?!tmp\/)/, type: 'dangerous-redirect' },
+  // Any output redirection can mutate files through absolute, relative, or
+  // home-expanded paths. Require exact-command approval for all forms.
+  { pattern: />/, type: 'output-redirect' },
   // Variable expansion with side effects
   { pattern: /\$\{[^}]*\}/, type: 'brace-expansion' },
   // Newline injection
@@ -112,6 +149,7 @@ export class ExecSafety {
   private strictDefaults: boolean;
   private auditLog: AuditEntry[] = [];
   private pendingApprovals = new Map<string, PendingApproval>();
+  private approvalTokens = new Map<string, ApprovalToken>();
 
   constructor(safeBins?: Iterable<string>, options?: ExecSafetyOptions) {
     this.strictDefaults = options?.strictDefaults ?? false;
@@ -124,6 +162,16 @@ export class ExecSafety {
     } else {
       this.safeBins = new Set(DEFAULT_SAFE_BINS);
     }
+  }
+
+  /**
+   * Normalize a command string for consistent safety checks and approval
+   * matching: trims outer whitespace and collapses internal whitespace runs
+   * to a single space. Does NOT alter casing or content otherwise, since
+   * shell commands are case-sensitive.
+   */
+  normalizeCommand(cmd: string): string {
+    return cmd.trim().replace(/\s+/g, ' ');
   }
 
   /**
@@ -292,6 +340,122 @@ export class ExecSafety {
    */
   getPendingApprovals(): Omit<PendingApproval, 'resolve'>[] {
     return Array.from(this.pendingApprovals.values()).map(({ resolve: _r, ...rest }) => rest);
+  }
+
+  // ── Single-use approval tokens ───────────────────────────────────────────
+  //
+  // These provide a non-blocking contract for callers (e.g. ShellAgent) that
+  // must fail closed immediately: a blocked command yields a token id, which
+  // an out-of-band reviewer resolves (approve/reject), and which can then be
+  // consumed exactly once for the exact same normalized command it was
+  // issued for. This is intentionally separate from requestApproval/approve/
+  // reject above, which block on an in-process Promise for interactive
+  // callers that can afford to wait.
+
+  /**
+   * Issue a single-use approval token scoped to the exact normalized command.
+   * Does not block; the token starts out 'pending' until resolved.
+   */
+  issueApprovalToken(cmd: string, ttlMs = 300_000): ApprovalToken {
+    const id = `token_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const normalized = this.normalizeCommand(cmd);
+    const token: ApprovalToken = {
+      id,
+      cmd: normalized,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      expiresAt: Date.now() + ttlMs,
+    };
+    this.approvalTokens.set(id, token);
+
+    this.auditLog.push({
+      id,
+      cmd: normalized,
+      binary: this.parseBinary(normalized),
+      safe: false,
+      reason: `Approval token issued for: ${normalized}`,
+      status: 'pending',
+      timestamp: token.createdAt,
+    });
+
+    return { ...token };
+  }
+
+  /**
+   * Approve or reject a pending approval token. Returns false if the token
+   * does not exist or is no longer pending (already resolved/used/expired).
+   */
+  resolveApprovalToken(tokenId: string, approved: boolean): boolean {
+    const token = this.approvalTokens.get(tokenId);
+    if (!token || token.status !== 'pending') return false;
+    if (Date.now() > token.expiresAt) {
+      token.status = 'expired';
+      return false;
+    }
+
+    token.status = approved ? 'approved' : 'rejected';
+
+    const entry = this.auditLog.find((e) => e.id === tokenId);
+    if (entry) entry.status = token.status;
+
+    return true;
+  }
+
+  /**
+   * Verify and consume a single-use approval token for the exact given
+   * command. Fails closed with an actionable reason on any mismatch:
+   * unknown id, expired, already used, not yet approved, rejected, or a
+   * command that doesn't match exactly what the token was issued for.
+   */
+  consumeApprovalToken(tokenId: string, cmd: string): ApprovalConsumeResult {
+    const token = this.approvalTokens.get(tokenId);
+    if (!token) {
+      return { ok: false, reason: 'Unknown or expired approval token' };
+    }
+
+    if (token.status !== 'expired' && Date.now() > token.expiresAt) {
+      token.status = 'expired';
+    }
+
+    if (token.status === 'expired') {
+      return { ok: false, reason: 'Approval token has expired' };
+    }
+    if (token.status === 'used') {
+      return { ok: false, reason: 'Approval token was already used (replay attempt)' };
+    }
+    if (token.status === 'rejected') {
+      return { ok: false, reason: 'Approval token was rejected' };
+    }
+    if (token.status === 'pending') {
+      return { ok: false, reason: 'Approval token has not been approved yet' };
+    }
+
+    // status === 'approved' at this point
+    const normalized = this.normalizeCommand(cmd);
+    if (token.cmd !== normalized) {
+      return { ok: false, reason: 'Approval token does not match this exact command' };
+    }
+
+    token.status = 'used';
+    const entry = this.auditLog.find((e) => e.id === tokenId);
+    if (entry) entry.status = 'used';
+
+    return { ok: true };
+  }
+
+  /**
+   * List all approval tokens that are still awaiting resolution.
+   */
+  getPendingApprovalTokens(): ApprovalToken[] {
+    return Array.from(this.approvalTokens.values()).filter((t) => t.status === 'pending');
+  }
+
+  /**
+   * Look up an approval token by id (any status).
+   */
+  getApprovalToken(tokenId: string): ApprovalToken | undefined {
+    const token = this.approvalTokens.get(tokenId);
+    return token ? { ...token } : undefined;
   }
 
   /**

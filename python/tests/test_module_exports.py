@@ -141,7 +141,11 @@ class TestMemoryExports:
 class TestSecurityExports:
     """Verify openrappter.security exports."""
 
-    expected = ['ApprovalManager', 'ApprovalRule', 'ApprovalRequest', 'ApprovalContext']
+    expected = [
+        'ApprovalManager', 'ApprovalRule', 'ApprovalRequest', 'ApprovalContext',
+        'ExecSafety', 'ApprovalToken', 'ApprovalConsumeResult', 'SafetyCheckResult',
+        'AuditEntry', 'create_exec_safety',
+    ]
 
     def test_all_defined(self):
         import openrappter.security as mod
@@ -149,11 +153,21 @@ class TestSecurityExports:
         assert sorted(mod.__all__) == sorted(self.expected)
 
     def test_all_importable(self):
-        from openrappter.security import ApprovalManager, ApprovalRule, ApprovalRequest, ApprovalContext
+        from openrappter.security import (
+            ApprovalManager, ApprovalRule, ApprovalRequest, ApprovalContext,
+            ExecSafety, ApprovalToken, ApprovalConsumeResult, SafetyCheckResult,
+            AuditEntry, create_exec_safety,
+        )
         assert ApprovalManager is not None
         assert ApprovalRule is not None
         assert ApprovalRequest is not None
         assert ApprovalContext is not None
+        assert ExecSafety is not None
+        assert ApprovalToken is not None
+        assert ApprovalConsumeResult is not None
+        assert SafetyCheckResult is not None
+        assert AuditEntry is not None
+        assert create_exec_safety is not None
 
     def test_types(self):
         from openrappter.security import ApprovalManager, ApprovalRule, ApprovalRequest, ApprovalContext

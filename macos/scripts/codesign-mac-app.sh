@@ -19,7 +19,6 @@ echo "Codesigning with identity: $IDENTITY"
 
 codesign --force --deep --sign "$IDENTITY" \
     --options runtime \
-    --entitlements /dev/null \
     "$APP_DIR"
 
 echo "Verifying..."

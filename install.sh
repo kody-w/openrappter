@@ -1698,7 +1698,10 @@ fi
 # Python runtime (fallback)
 PY_DIR="$OPENRAPPTER_HOME/python"
 if [[ -f "$PY_DIR/openrappter/cli.py" ]]; then
-    if command -v python3 &>/dev/null; then
+    VENV_PYTHON="$OPENRAPPTER_HOME/.venv/bin/python"
+    if [[ -x "$VENV_PYTHON" ]]; then
+        exec "$VENV_PYTHON" -m openrappter.cli "$@"
+    elif command -v python3 &>/dev/null; then
         exec python3 -m openrappter.cli "$@"
     elif command -v python &>/dev/null; then
         exec python -m openrappter.cli "$@"
@@ -2126,56 +2129,65 @@ install_via_git() {
         HAS_PYTHON=true
         ui_success "Python $($python_cmd --version 2>&1 | sed 's/Python //') found"
 
-        # Ensure pip is available (some Linux distros ship python3 without pip)
-        if ! "$python_cmd" -m pip --version &>/dev/null; then
-            ui_info "pip not found, attempting to install"
-            if [[ "$OS" == "linux" ]]; then
-                if command -v apt-get &>/dev/null; then
-                    if is_root; then
-                        run_quiet_step "Installing python3-pip" apt-get install -y -qq python3-pip python3-venv 2>/dev/null || true
-                    else
-                        run_quiet_step "Installing python3-pip" sudo apt-get install -y -qq python3-pip python3-venv 2>/dev/null || true
-                    fi
-                elif command -v dnf &>/dev/null; then
-                    if is_root; then
-                        run_quiet_step "Installing python3-pip" dnf install -y -q python3-pip 2>/dev/null || true
-                    else
-                        run_quiet_step "Installing python3-pip" sudo dnf install -y -q python3-pip 2>/dev/null || true
-                    fi
-                elif command -v yum &>/dev/null; then
-                    if is_root; then
-                        run_quiet_step "Installing python3-pip" yum install -y -q python3-pip 2>/dev/null || true
-                    else
-                        run_quiet_step "Installing python3-pip" sudo yum install -y -q python3-pip 2>/dev/null || true
-                    fi
-                elif command -v apk &>/dev/null; then
-                    if is_root; then
-                        run_quiet_step "Installing py3-pip" apk add --no-cache py3-pip 2>/dev/null || true
-                    else
-                        run_quiet_step "Installing py3-pip" sudo apk add --no-cache py3-pip 2>/dev/null || true
+        local venv_dir="$INSTALL_DIR/.venv"
+        local venv_python="$venv_dir/bin/python"
+
+        # Rebuild stale or incompatible environments without modifying the
+        # externally managed system/Homebrew interpreter (PEP 668).
+        if [[ -x "$venv_python" ]] && ! python_cmd_meets_min "$venv_python"; then
+            mv "$venv_dir" "${venv_dir}.bak.$(date +%s)"
+        fi
+
+        if [[ ! -x "$venv_python" ]]; then
+            if ! run_quiet_step "Creating Python virtual environment" "$python_cmd" -m venv "$venv_dir"; then
+                # Debian-family installations may split venv support into a
+                # separate package. Attempt that once, then retry creation.
+                ui_info "Python venv support unavailable, attempting to install it"
+                if [[ "$OS" == "linux" ]]; then
+                    if command -v apt-get &>/dev/null; then
+                        if is_root; then
+                            run_quiet_step "Installing python3-venv" apt-get install -y -qq python3-venv 2>/dev/null || true
+                        else
+                            run_quiet_step "Installing python3-venv" sudo apt-get install -y -qq python3-venv 2>/dev/null || true
+                        fi
+                    elif command -v dnf &>/dev/null; then
+                        if is_root; then
+                            run_quiet_step "Installing python3-pip" dnf install -y -q python3-pip 2>/dev/null || true
+                        else
+                            run_quiet_step "Installing python3-pip" sudo dnf install -y -q python3-pip 2>/dev/null || true
+                        fi
+                    elif command -v yum &>/dev/null; then
+                        if is_root; then
+                            run_quiet_step "Installing python3-pip" yum install -y -q python3-pip 2>/dev/null || true
+                        else
+                            run_quiet_step "Installing python3-pip" sudo yum install -y -q python3-pip 2>/dev/null || true
+                        fi
+                    elif command -v apk &>/dev/null; then
+                        if is_root; then
+                            run_quiet_step "Installing py3-pip" apk add --no-cache py3-pip 2>/dev/null || true
+                        else
+                            run_quiet_step "Installing py3-pip" sudo apk add --no-cache py3-pip 2>/dev/null || true
+                        fi
                     fi
                 fi
-            fi
-            # Fallback: try ensurepip
-            if ! "$python_cmd" -m pip --version &>/dev/null; then
-                "$python_cmd" -m ensurepip --default-pip 2>/dev/null || true
+
+                if ! run_quiet_step "Creating Python virtual environment" "$python_cmd" -m venv "$venv_dir"; then
+                    ui_warn "Python virtual environment creation failed — TypeScript runtime still works"
+                    HAS_PYTHON=false
+                fi
             fi
         fi
 
-        # Install Python package if pip is now available
-        if "$python_cmd" -m pip --version &>/dev/null; then
+        if [[ "$HAS_PYTHON" == "true" ]]; then
             cd "$INSTALL_DIR/python"
             if [[ -f pyproject.toml ]]; then
-                if run_quiet_step "Installing Python package" "$python_cmd" -m pip install -e . --quiet; then
-                    ui_success "Python runtime installed"
+                if run_quiet_step "Installing Python package" "$venv_python" -m pip install -e . --quiet; then
+                    ui_success "Python runtime installed in $venv_dir"
                 else
                     ui_warn "Python package install failed — TypeScript runtime still works"
                     HAS_PYTHON=false
                 fi
             fi
-        else
-            ui_warn "pip unavailable — skipping Python runtime (TypeScript works fine alone)"
-            HAS_PYTHON=false
         fi
     else
         ui_info "Python 3.${MIN_PYTHON_MINOR}+ not found — skipping (TypeScript works fine alone)"

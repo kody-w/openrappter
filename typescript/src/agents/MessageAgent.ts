@@ -8,16 +8,11 @@
  */
 
 import { BasicAgent } from './BasicAgent.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import type { AgentMetadata } from './types.js';
 
-const execAsync = promisify(exec);
 
 export class MessageAgent extends BasicAgent {
   private channelRegistry: any = null;
-  private static MAX_IMESSAGES_PER_HOUR = 10;
-  private iMessageSendTimes: number[] = [];
 
   constructor(channelRegistry?: any) {
     const metadata: AgentMetadata = {
@@ -109,9 +104,8 @@ export class MessageAgent extends BasicAgent {
   private async sendMessage(channelId: string, conversationId: string, content: string): Promise<string> {
     // Try channel registry first (daemon mode)
     if (this.channelRegistry) {
-      const channel = this.channelRegistry.get(channelId);
-      if (channel) {
-        await channel.sendMessage(conversationId, content);
+      if (this.channelRegistry.get(channelId)) {
+        await this.channelRegistry.sendMessage({ channelId, conversationId, content });
         return JSON.stringify({
           status: 'success',
           action: 'send',
@@ -125,7 +119,10 @@ export class MessageAgent extends BasicAgent {
     // Fallback: send directly via platform APIs (interactive mode)
     const ch = channelId.toLowerCase();
     if (ch === 'imessage' || ch === 'imsg') {
-      return this.sendIMessageDirect(conversationId, content);
+      return JSON.stringify({
+        status: 'error',
+        message: 'Direct iMessage sends are disabled; use the active trust-scoped iMessage conversation.',
+      });
     }
     if (ch.includes('telegram') || ch === 'tg') {
       return this.sendTelegramDirect(conversationId, content);
@@ -181,71 +178,6 @@ export class MessageAgent extends BasicAgent {
       conversationId: chatId,
       message: 'Message sent via Telegram',
     });
-  }
-
-  private async sendIMessageDirect(recipient: string, content: string): Promise<string> {
-    if (process.platform !== 'darwin') {
-      return JSON.stringify({ status: 'error', message: 'iMessage is only available on macOS' });
-    }
-
-    // Allowed contacts check (deny-by-default: empty list = nobody)
-    const allowed = (process.env.IMESSAGE_ALLOWED_CONTACTS || '')
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .filter(Boolean);
-    if (allowed.length === 0) {
-      return JSON.stringify({
-        status: 'error',
-        message: 'No allowed iMessage contacts configured. Set IMESSAGE_ALLOWED_CONTACTS in .env (comma-separated emails/phones).',
-      });
-    }
-    if (!allowed.includes(recipient.toLowerCase())) {
-      return JSON.stringify({
-        status: 'error',
-        message: `Recipient "${recipient}" is not in the allowed contacts list. Allowed: ${allowed.join(', ')}`,
-      });
-    }
-
-    // Rate limiting
-    const now = Date.now();
-    this.iMessageSendTimes = this.iMessageSendTimes.filter(t => now - t < 3_600_000);
-    if (this.iMessageSendTimes.length >= MessageAgent.MAX_IMESSAGES_PER_HOUR) {
-      return JSON.stringify({
-        status: 'error',
-        message: `Rate limit: max ${MessageAgent.MAX_IMESSAGES_PER_HOUR} iMessages per hour`,
-      });
-    }
-
-    // Send via AppleScript
-    const escapedContent = content
-      .replace(/\\/g, '\\\\')
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n');
-
-    const script = `
-      tell application "Messages"
-        set targetService to 1st account whose service type = iMessage
-        set targetBuddy to participant "${recipient}" of targetService
-        send "${escapedContent}" to targetBuddy
-      end tell
-    `;
-
-    try {
-      await execAsync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, { timeout: 15000 });
-      this.iMessageSendTimes.push(now);
-      return JSON.stringify({
-        status: 'success',
-        action: 'send',
-        channelId: 'imessage',
-        recipient,
-        message: 'iMessage sent successfully',
-      });
-    } catch (error) {
-      return JSON.stringify({
-        status: 'error',
-        message: `Failed to send iMessage: ${(error as Error).message}`,
-      });
-    }
   }
 
   private listChannels(): string {

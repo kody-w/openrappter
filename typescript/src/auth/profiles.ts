@@ -137,7 +137,7 @@ export class AuthProfileStore {
       fs.writeFileSync(
         this.profilesPath,
         JSON.stringify(this.profiles, null, 2),
-        'utf-8'
+        { encoding: 'utf-8', mode: 0o600 }
       );
     } catch (error) {
       console.error('Failed to save auth profiles:', error);

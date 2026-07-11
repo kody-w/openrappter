@@ -29,13 +29,13 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import type { RappterManager } from './rappter-manager.js';
+import { VERSION } from '../version.js';
 
 const DEFAULT_PORT = 18790;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
-const VERSION = '1.9.1';
 const PROTOCOL_VERSION = 3;
 const VOICE_DELIMITER = '|||VOICE|||';
 

@@ -247,6 +247,19 @@ public final class GitHubAuthService {
 
     // MARK: - Keychain
 
+    private func withoutKeychainInteraction<T>(_ operation: () -> T) -> T {
+        var previous = DarwinBoolean(false)
+        let hasPreviousState =
+            SecKeychainGetUserInteractionAllowed(&previous) == errSecSuccess
+        SecKeychainSetUserInteractionAllowed(false)
+        defer {
+            if hasPreviousState {
+                SecKeychainSetUserInteractionAllowed(previous.boolValue)
+            }
+        }
+        return operation()
+    }
+
     private func readKeychain() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -257,7 +270,9 @@ public final class GitHubAuthService {
             kSecUseNoAuthenticationUI as String: true,
         ]
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        let status = withoutKeychainInteraction {
+            SecItemCopyMatching(query as CFDictionary, &result)
+        }
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
@@ -271,7 +286,9 @@ public final class GitHubAuthService {
             kSecValueData as String: token.data(using: .utf8)!,
             kSecUseNoAuthenticationUI as String: true,
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        withoutKeychainInteraction {
+            SecItemAdd(query as CFDictionary, nil)
+        }
     }
 
     private func deleteKeychain() {
@@ -281,7 +298,9 @@ public final class GitHubAuthService {
             kSecAttrAccount as String: Self.keychainAccount,
             kSecUseNoAuthenticationUI as String: true,
         ]
-        SecItemDelete(query as CFDictionary)
+        withoutKeychainInteraction {
+            SecItemDelete(query as CFDictionary)
+        }
     }
 
     // MARK: - .env File

@@ -309,7 +309,7 @@ public struct RpcClient: RpcClientProtocol, Sendable {
                 fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 return fmt.date(from: str) ?? Date()
             }
-            if let _ = try? container.decodeNil() { return Date.distantPast }
+            if container.decodeNil() { return Date.distantPast }
             return Date()
         }
         if let jobs = try? decoder.decode([CronJob].self, from: data) {

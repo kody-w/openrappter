@@ -217,6 +217,23 @@ cd macos
 | `ManageMemory` | Store important information with content, importance, tags |
 | `ContextMemory` | Recall and provide context from stored memories |
 | `LearnNew` | Generate new agents from natural language — writes code, hot-loads, installs deps |
+| `Pokemon` | Let Copilot play a local Pokemon Red ROM with save states, MP4 clips, and a live viewer |
+
+Install the optional emulator support, then start or control the player through
+the agent:
+
+```bash
+cd python
+pip install -e ".[pokemon]"
+openrappter --exec Pokemon "start"
+openrappter --exec Pokemon "status"
+openrappter --exec Pokemon "save checkpoint and start a new clip"
+openrappter --exec Pokemon "stop"
+```
+
+The ROM is discovered locally and never copied into the repository. Runtime
+state, recordings, and the viewer data stay under
+`~/.openrappter/pokemon-red/`.
 
 ### TypeScript Runtime
 

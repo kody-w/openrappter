@@ -21,6 +21,11 @@ ObsidianVault/
 
 # Local user data (stays on machine, not in repo)
 memory.json
+*.[gG][bB]
+*.[gG][bB][cC]
+*.[rR][aA][mM]
+*.[rR][tT][cC]
+*.[sS][tT][aA][tT][eE]
 
 # Competitor reference copy (submodule removed, kept locally for reference)
 openclaw/

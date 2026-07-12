@@ -254,6 +254,7 @@ public final class GitHubAuthService {
             kSecAttrAccount as String: Self.keychainAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -277,6 +278,7 @@ public final class GitHubAuthService {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.keychainService,
             kSecAttrAccount as String: Self.keychainAccount,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
         SecItemDelete(query as CFDictionary)
     }

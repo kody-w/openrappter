@@ -607,7 +607,10 @@ def test_resume_skips_corrupt_newest_checkpoint(tmp_path):
 
 
 def test_resume_falls_back_after_pyboy_state_exception(tmp_path):
-    from pyboy.utils import PyBoyException
+    pyboy_utils = pytest.importorskip("pyboy.utils")
+    PyBoyException = getattr(pyboy_utils, "PyBoyException", None)
+    if PyBoyException is None:
+        pytest.skip("Installed PyBoy does not expose PyBoyException")
 
     older = tmp_path / "state-20260711-120000-000001.state"
     older.write_bytes(b"older-valid")

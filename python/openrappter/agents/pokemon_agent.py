@@ -2475,7 +2475,18 @@ class PokemonRunner:
     def _load_latest_state(self) -> Optional[Path]:
         if not self.args.resume:
             return None
-        from pyboy.utils import PyBoyException
+        state_errors: tuple[type[BaseException], ...] = (
+            OSError,
+            EOFError,
+            RuntimeError,
+            ValueError,
+        )
+        try:
+            from pyboy.utils import PyBoyException
+        except ImportError:
+            pass
+        else:
+            state_errors += (PyBoyException,)
 
         self._recover_orphaned_states()
 
@@ -2518,13 +2529,7 @@ class PokemonRunner:
                     self.pyboy.load_state(handle)
                 self.player.release_and_flush(self.pyboy)
                 return state_path
-            except (
-                OSError,
-                EOFError,
-                RuntimeError,
-                ValueError,
-                PyBoyException,
-            ) as error:
+            except state_errors as error:
                 LOGGER.warning("Skipping invalid checkpoint %s: %s", state_path, error)
                 try:
                     self._quarantine_state(

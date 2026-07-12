@@ -580,6 +580,26 @@ def set_desired_running(runtime_dir: Path, running: bool) -> None:
     atomic_write_json(desired_path, desired)
 
 
+def seed_legacy_ram_provenance(runtime_dir: Path) -> None:
+    legacy = runtime_dir / "pokemon-red.ram"
+    provenance_path = runtime_dir / "legacy-ram-provenance.json"
+    if not legacy.exists() or provenance_path.exists():
+        return
+    previous_config = read_json(runtime_dir / "config.json")
+    previous_status = read_json(runtime_dir / "status.json")
+    atomic_write_json(
+        provenance_path,
+        {
+            "rom_path": previous_config.get("rom_path"),
+            "rom_sha256": (
+                previous_config.get("rom_sha256")
+                or previous_status.get("rom_sha256")
+            ),
+            "recorded_at": utc_now(),
+        },
+    )
+
+
 def append_control(runtime_dir: Path, command: dict[str, Any]) -> None:
     runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(runtime_dir, 0o700)
@@ -990,19 +1010,7 @@ class PokemonAgent(BasicAgent):
         runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(runtime_dir, 0o700)
         previous_config = read_json(runtime_dir / "config.json")
-        legacy_provenance_path = runtime_dir / "legacy-ram-provenance.json"
-        if (
-            (runtime_dir / "pokemon-red.ram").exists()
-            and not legacy_provenance_path.exists()
-        ):
-            atomic_write_json(
-                legacy_provenance_path,
-                {
-                    "rom_path": previous_config.get("rom_path"),
-                    "rom_sha256": previous_config.get("rom_sha256"),
-                    "recorded_at": utc_now(),
-                },
-            )
+        seed_legacy_ram_provenance(runtime_dir)
         atomic_write_json(
             runtime_dir / "config.json",
             {

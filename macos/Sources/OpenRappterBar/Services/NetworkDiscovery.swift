@@ -1,6 +1,19 @@
 import Foundation
 import Network
 
+private final class ContinuationResumeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var resumed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resumed else { return false }
+        resumed = true
+        return true
+    }
+}
+
 // MARK: - Network Discovery
 
 /// Discovers OpenRappter gateway instances on the local network via Bonjour.
@@ -84,24 +97,15 @@ public final class NetworkDiscovery {
         )
 
         return await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var resumed = false
+            let resumeGate = ContinuationResumeGate()
 
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     connection.cancel()
-                    lock.lock()
-                    let shouldResume = !resumed
-                    resumed = true
-                    lock.unlock()
-                    if shouldResume { continuation.resume(returning: true) }
+                    if resumeGate.claim() { continuation.resume(returning: true) }
                 case .failed, .cancelled:
-                    lock.lock()
-                    let shouldResume = !resumed
-                    resumed = true
-                    lock.unlock()
-                    if shouldResume { continuation.resume(returning: false) }
+                    if resumeGate.claim() { continuation.resume(returning: false) }
                 default:
                     break
                 }
@@ -111,11 +115,7 @@ public final class NetworkDiscovery {
             // Timeout after 1 second
             DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
                 connection.cancel()
-                lock.lock()
-                let shouldResume = !resumed
-                resumed = true
-                lock.unlock()
-                if shouldResume { continuation.resume(returning: false) }
+                if resumeGate.claim() { continuation.resume(returning: false) }
             }
         }
     }

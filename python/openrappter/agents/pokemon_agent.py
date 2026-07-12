@@ -989,9 +989,29 @@ class PokemonAgent(BasicAgent):
 
         runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(runtime_dir, 0o700)
+        previous_config = read_json(runtime_dir / "config.json")
+        legacy_provenance_path = runtime_dir / "legacy-ram-provenance.json"
+        if (
+            (runtime_dir / "pokemon-red.ram").exists()
+            and not legacy_provenance_path.exists()
+        ):
+            atomic_write_json(
+                legacy_provenance_path,
+                {
+                    "rom_path": previous_config.get("rom_path"),
+                    "rom_sha256": previous_config.get("rom_sha256"),
+                    "recorded_at": utc_now(),
+                },
+            )
         atomic_write_json(
             runtime_dir / "config.json",
-            {"rom_path": str(rom), "updated_at": utc_now()},
+            {
+                "rom_path": str(rom),
+                "rom_sha256": file_sha256(rom),
+                "previous_rom_path": previous_config.get("rom_path"),
+                "previous_rom_sha256": previous_config.get("rom_sha256"),
+                "updated_at": utc_now(),
+            },
         )
         log_descriptor = os.open(
             runtime_dir / "player.log",
@@ -2111,11 +2131,17 @@ class PokemonRunner:
         if not GENERATED_STATE_RE.fullmatch(path.name):
             return False
         manifest = read_json(path.with_suffix(".json"))
-        return bool(
+        metadata_valid = bool(
             manifest.get("schema_version") == 1
             and manifest.get("sha256")
             and manifest.get("rom_sha256") == self.status.get("rom_sha256")
         )
+        if not metadata_valid:
+            return False
+        try:
+            return file_sha256(path) == manifest["sha256"]
+        except OSError:
+            return False
 
     def _recover_orphaned_clips(self) -> None:
         for clip in self.recorder.clips_dir.glob("clip-*.mp4"):
@@ -2152,6 +2178,23 @@ class PokemonRunner:
             manifest_path = state.with_suffix(".json")
             if manifest_path.exists():
                 state.with_suffix(".pending.json").unlink(missing_ok=True)
+                manifest = read_json(manifest_path)
+                if (
+                    manifest.get("schema_version") == 1
+                    and manifest.get("rom_sha256")
+                    == self.status.get("rom_sha256")
+                    and manifest.get("sha256")
+                ):
+                    try:
+                        valid_hash = file_sha256(state) == manifest["sha256"]
+                    except OSError:
+                        valid_hash = False
+                    if not valid_hash:
+                        self._quarantine_state(
+                            state,
+                            state.with_suffix(".pending.json"),
+                            "Checkpoint checksum validation failed",
+                        )
                 continue
             pending_path = state.with_suffix(".pending.json")
             pending = read_json(pending_path)
@@ -2527,8 +2570,6 @@ class PokemonRunner:
                     raise ValueError("checkpoint hash mismatch")
                 with state_path.open("rb") as handle:
                     self.pyboy.load_state(handle)
-                self.player.release_and_flush(self.pyboy)
-                return state_path
             except state_errors as error:
                 LOGGER.warning("Skipping invalid checkpoint %s: %s", state_path, error)
                 try:
@@ -2540,6 +2581,9 @@ class PokemonRunner:
                 except OSError:
                     LOGGER.exception("Could not quarantine invalid checkpoint")
                 self.pyboy.load_state(io.BytesIO(baseline_bytes))
+                continue
+            self.player.release_and_flush(self.pyboy)
+            return state_path
         return None
 
     def _save_checkpoint(self, reason: str, allow_stopped: bool = False) -> Path:
@@ -2671,16 +2715,47 @@ class PokemonRunner:
         else:
             self.next_record_at += due * interval
 
-    def _quarantine_ram(self, reason: str) -> None:
-        if not self.ram_path.exists():
+    def _ram_pair_valid(self, ram_path: Path, manifest_path: Path) -> bool:
+        if not ram_path.exists() or not manifest_path.exists():
+            return False
+        manifest = read_json(manifest_path)
+        if not (
+            manifest.get("schema_version") == 1
+            and manifest.get("rom_sha256") == self.rom_sha256
+            and manifest.get("sha256")
+        ):
+            return False
+        try:
+            return file_sha256(ram_path) == manifest["sha256"]
+        except OSError:
+            return False
+
+    def _ram_backup_paths(self) -> tuple[Path, Path]:
+        return (
+            self.ram_path.with_name(f".{self.ram_path.name}.backup"),
+            self.ram_path.with_name(
+                f".{self.ram_path.with_suffix('.json').name}.backup"
+            ),
+        )
+
+    def _ram_pending_path(self) -> Path:
+        return self.ram_path.with_name(f".{self.ram_path.name}.pending.json")
+
+    def _quarantine_ram_pair(
+        self,
+        ram_path: Path,
+        manifest_path: Path,
+        reason: str,
+    ) -> None:
+        if not ram_path.exists() and not manifest_path.exists():
             return
         quarantine_dir = self.runtime_dir / "quarantine"
         quarantine_dir.mkdir(exist_ok=True, mode=0o700)
         os.chmod(quarantine_dir, 0o700)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        destination = quarantine_dir / f"{self.ram_path.name}.{timestamp}.invalid"
-        os.replace(self.ram_path, destination)
-        manifest_path = self.ram_path.with_suffix(".json")
+        destination = quarantine_dir / f"{ram_path.name}.{timestamp}.invalid"
+        if ram_path.exists():
+            os.replace(ram_path, destination)
         if manifest_path.exists():
             os.replace(
                 manifest_path,
@@ -2692,48 +2767,232 @@ class PokemonRunner:
         )
         self.status["ram_warning"] = reason
 
+    def _quarantine_ram(self, reason: str) -> None:
+        self._quarantine_ram_pair(
+            self.ram_path,
+            self.ram_path.with_suffix(".json"),
+            reason,
+        )
+
+    def _recover_ram_transaction(self) -> None:
+        backup_ram, backup_manifest = self._ram_backup_paths()
+        current_manifest = self.ram_path.with_suffix(".json")
+        pending_path = self._ram_pending_path()
+        temporary = self.runtime_dir / f".{self.ram_path.name}.tmp"
+
+        def clear_transaction_files() -> None:
+            pending_path.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
+
+        if self._ram_pair_valid(self.ram_path, current_manifest):
+            backup_ram.unlink(missing_ok=True)
+            backup_manifest.unlink(missing_ok=True)
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if self._ram_pair_valid(self.ram_path, pending_path):
+            atomic_write_json(current_manifest, read_json(pending_path))
+            backup_ram.unlink(missing_ok=True)
+            backup_manifest.unlink(missing_ok=True)
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if self._ram_pair_valid(temporary, pending_path):
+            self._quarantine_ram("Discarded incomplete RAM transaction")
+            os.replace(temporary, self.ram_path)
+            os.chmod(self.ram_path, 0o600)
+            fsync_directory(self.runtime_dir)
+            atomic_write_json(current_manifest, read_json(pending_path))
+            backup_ram.unlink(missing_ok=True)
+            backup_manifest.unlink(missing_ok=True)
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if self._ram_pair_valid(backup_ram, current_manifest):
+            if self.ram_path.exists():
+                self._quarantine_ram_pair(
+                    self.ram_path,
+                    self.runtime_dir / ".no-ram-manifest",
+                    "Discarded incomplete RAM transaction",
+                )
+            os.replace(backup_ram, self.ram_path)
+            backup_manifest.unlink(missing_ok=True)
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if self._ram_pair_valid(self.ram_path, backup_manifest):
+            current_manifest.unlink(missing_ok=True)
+            os.replace(backup_manifest, current_manifest)
+            self._quarantine_ram_pair(
+                backup_ram,
+                self.runtime_dir / ".no-ram-manifest",
+                "Preserved incomplete RAM transaction data",
+            )
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if self._ram_pair_valid(backup_ram, backup_manifest):
+            self._quarantine_ram("Recovered previous RAM after interrupted commit")
+            os.replace(backup_ram, self.ram_path)
+            os.replace(backup_manifest, current_manifest)
+            clear_transaction_files()
+            fsync_directory(self.runtime_dir)
+            return
+        if backup_ram.exists() or backup_manifest.exists():
+            self._quarantine_ram_pair(
+                backup_ram,
+                backup_manifest,
+                "Invalid interrupted RAM backup",
+            )
+        if self.ram_path.exists() or current_manifest.exists():
+            self._quarantine_ram("Ignored incomplete RAM transaction")
+        clear_transaction_files()
+        fsync_directory(self.runtime_dir)
+
+    def _adopt_legacy_ram(self) -> None:
+        if self.ram_path.exists():
+            return
+        legacy = self.runtime_dir / "pokemon-red.ram"
+        if not legacy.exists():
+            return
+        legacy_manifest_path = legacy.with_suffix(".json")
+        legacy_manifest = read_json(legacy_manifest_path)
+        try:
+            manifest_matches = bool(
+                legacy_manifest.get("rom_sha256") == self.rom_sha256
+                and legacy_manifest.get("sha256")
+                and file_sha256(legacy) == legacy_manifest["sha256"]
+            )
+        except OSError:
+            manifest_matches = False
+        provenance = read_json(
+            self.runtime_dir / "legacy-ram-provenance.json"
+        )
+        previous_hash = provenance.get("rom_sha256")
+        previous_path = provenance.get("rom_path")
+        path_matches = False
+        if previous_path and not previous_hash:
+            try:
+                path_matches = Path(str(previous_path)).expanduser().resolve() == self.rom
+            except OSError:
+                path_matches = False
+        format_matches = bool(
+            not legacy_manifest_path.exists()
+            and (
+                previous_hash == self.rom_sha256
+                if previous_hash
+                else path_matches
+            )
+            and self.status.get("rom_title", "").upper().startswith("POKEMON RED")
+            and legacy.stat().st_size == 32768
+        )
+        if not (manifest_matches or format_matches):
+            self.status["ram_warning"] = (
+                "Preserved legacy cartridge RAM because ROM provenance did not match"
+            )
+            return
+        manifest = {
+            "schema_version": 1,
+            "created_at": utc_now(),
+            "rom_sha256": self.rom_sha256,
+            "sha256": file_sha256(legacy),
+            "bytes": legacy.stat().st_size,
+            "migrated_from": legacy.name,
+        }
+        pending_path = self._ram_pending_path()
+        try:
+            atomic_write_json(pending_path, manifest)
+            os.replace(legacy, self.ram_path)
+            os.chmod(self.ram_path, 0o600)
+            fsync_directory(self.runtime_dir)
+            atomic_write_json(self.ram_path.with_suffix(".json"), manifest)
+            legacy_manifest_path.unlink(missing_ok=True)
+            pending_path.unlink(missing_ok=True)
+            fsync_directory(self.runtime_dir)
+        except Exception:
+            if self.ram_path.exists() and not legacy.exists():
+                os.replace(self.ram_path, legacy)
+            self.ram_path.with_suffix(".json").unlink(missing_ok=True)
+            pending_path.unlink(missing_ok=True)
+            fsync_directory(self.runtime_dir)
+            raise
+
     def _validated_ram_path(self) -> Optional[Path]:
+        self._recover_ram_transaction()
+        if not any(path.exists() for path in self._ram_backup_paths()):
+            self._adopt_legacy_ram()
         if not self.ram_path.exists():
             return None
-        manifest = read_json(self.ram_path.with_suffix(".json"))
-        valid = bool(
-            manifest.get("schema_version") == 1
-            and manifest.get("rom_sha256") == self.rom_sha256
-            and manifest.get("sha256")
-        )
-        if valid:
-            try:
-                valid = file_sha256(self.ram_path) == manifest["sha256"]
-            except OSError:
-                valid = False
-        if not valid:
+        if not self._ram_pair_valid(
+            self.ram_path,
+            self.ram_path.with_suffix(".json"),
+        ):
             self._quarantine_ram("Ignored invalid or unverified cartridge RAM")
             return None
         return self.ram_path
 
     def _save_ram_and_stop(self) -> None:
         temporary = self.runtime_dir / f".{self.ram_path.name}.tmp"
+        manifest_path = self.ram_path.with_suffix(".json")
+        backup_ram, backup_manifest = self._ram_backup_paths()
+        pending_path = self._ram_pending_path()
+        self._recover_ram_transaction()
+        backed_up = self._ram_pair_valid(self.ram_path, manifest_path)
+        backup_started = False
+        backup_installed = False
         try:
             with temporary.open("w+b") as ram_output:
                 self.pyboy.stop(save=True, ram_file=ram_output)
                 ram_output.flush()
                 os.fsync(ram_output.fileno())
+            manifest = {
+                "schema_version": 1,
+                "created_at": utc_now(),
+                "rom_sha256": self.rom_sha256,
+                "sha256": file_sha256(temporary),
+                "bytes": temporary.stat().st_size,
+            }
+            atomic_write_json(pending_path, manifest)
+            if backed_up:
+                backup_started = True
+                os.replace(self.ram_path, backup_ram)
+                os.replace(manifest_path, backup_manifest)
+                backup_installed = True
+                fsync_directory(self.runtime_dir)
             os.replace(temporary, self.ram_path)
             os.chmod(self.ram_path, 0o600)
             fsync_directory(self.runtime_dir)
-            atomic_write_json(
-                self.ram_path.with_suffix(".json"),
-                {
-                    "schema_version": 1,
-                    "created_at": utc_now(),
-                    "rom_sha256": self.rom_sha256,
-                    "sha256": file_sha256(self.ram_path),
-                    "bytes": self.ram_path.stat().st_size,
-                },
-            )
+            atomic_write_json(manifest_path, manifest)
         except Exception:
-            temporary.unlink(missing_ok=True)
+            if backup_installed:
+                failed_path = self.ram_path.with_name(
+                    f".{self.ram_path.name}.{uuid.uuid4().hex}.failed"
+                )
+                if self.ram_path.exists():
+                    os.replace(self.ram_path, failed_path)
+                manifest_path.unlink(missing_ok=True)
+                os.replace(backup_ram, self.ram_path)
+                os.replace(backup_manifest, manifest_path)
+                pending_path.unlink(missing_ok=True)
+                temporary.unlink(missing_ok=True)
+                fsync_directory(self.runtime_dir)
+            elif backup_started:
+                try:
+                    self._recover_ram_transaction()
+                except Exception:
+                    LOGGER.exception("Could not recover partial RAM backup")
+            elif backed_up:
+                pending_path.unlink(missing_ok=True)
+                temporary.unlink(missing_ok=True)
+                fsync_directory(self.runtime_dir)
+            elif not pending_path.exists():
+                temporary.unlink(missing_ok=True)
             raise
+        else:
+            backup_ram.unlink(missing_ok=True)
+            backup_manifest.unlink(missing_ok=True)
+            pending_path.unlink(missing_ok=True)
+            fsync_directory(self.runtime_dir)
 
     def _read_external_controls(self) -> None:
         try:

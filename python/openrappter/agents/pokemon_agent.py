@@ -2869,20 +2869,9 @@ class PokemonRunner:
             self.runtime_dir / "legacy-ram-provenance.json"
         )
         previous_hash = provenance.get("rom_sha256")
-        previous_path = provenance.get("rom_path")
-        path_matches = False
-        if previous_path and not previous_hash:
-            try:
-                path_matches = Path(str(previous_path)).expanduser().resolve() == self.rom
-            except OSError:
-                path_matches = False
         format_matches = bool(
             not legacy_manifest_path.exists()
-            and (
-                previous_hash == self.rom_sha256
-                if previous_hash
-                else path_matches
-            )
+            and previous_hash == self.rom_sha256
             and self.status.get("rom_title", "").upper().startswith("POKEMON RED")
             and legacy.stat().st_size == 32768
         )
@@ -3288,7 +3277,14 @@ class PokemonRunner:
             raise RuntimeError(f"Pokemon player is already running as PID {existing['pid']}")
 
         from pyboy import PyBoy
-        from pyboy.utils import PyBoyException
+
+        emulator_errors: tuple[type[BaseException], ...] = (OSError, ValueError)
+        try:
+            from pyboy.utils import PyBoyException
+        except ImportError:
+            pass
+        else:
+            emulator_errors += (PyBoyException,)
 
         window = "SDL2" if self.args.visible else "null"
 
@@ -3311,12 +3307,12 @@ class PokemonRunner:
         validated_ram = self._validated_ram_path()
         try:
             self.pyboy = create_emulator(validated_ram)
-        except (OSError, ValueError, PyBoyException) as ram_error:
+        except emulator_errors as ram_error:
             if validated_ram is None:
                 raise
             try:
                 self.pyboy = create_emulator(None)
-            except (OSError, ValueError, PyBoyException) as retry_error:
+            except emulator_errors as retry_error:
                 raise retry_error from ram_error
             self._quarantine_ram(f"PyBoy rejected cartridge RAM: {ram_error}")
         self.pyboy.set_emulation_speed(1)

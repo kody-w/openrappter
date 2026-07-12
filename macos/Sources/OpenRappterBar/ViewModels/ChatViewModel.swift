@@ -53,6 +53,14 @@ public final class ChatViewModel {
         self.sessionStore = sessionStore
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
+    var isRpcClientConfigured: Bool {
+        rpcClient != nil
+    }
+
     // MARK: - Actions
 
     public func sendMessage() {
@@ -182,6 +190,10 @@ public final class ChatViewModel {
                 sessionKey: payload.sessionKey
             )
             messages.append(msg)
+
+        case .aborted:
+            streamingText = ""
+            chatState = .idle
         }
     }
 

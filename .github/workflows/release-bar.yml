@@ -5,13 +5,42 @@ on:
     tags:
       - 'v*-bar'
 
+# Serialize retries of the same macOS tag without allowing another tag or the
+# package lane to replace a pending release.
+concurrency:
+  group: openrappter-release-macos-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
+  validate-tag:
+    name: Validate release identity
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Validate exact macOS release tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly tag="${GITHUB_REF_NAME:-}"
+          if [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-bar$ ]]; then
+            readonly version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          else
+            printf 'Refusing malformed macOS release tag: %q\n' "$tag" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
   build-and-release:
     name: Build & Release DMG
+    needs: validate-tag
     runs-on: macos-14
+    env:
+      RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
     defaults:
       run:
         working-directory: macos
@@ -22,27 +51,36 @@ jobs:
         with:
           swift-version: '6.0'
 
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" | sed 's/-bar$//' >> "$GITHUB_OUTPUT"
-
       - name: Run tests
         run: swift build --product RunTests && .build/debug/RunTests
 
       - name: Build universal binary + DMG
-        run: VERSION=${{ steps.version.outputs.version }} bash scripts/build-mac-app.sh
+        shell: bash
+        run: VERSION="$RELEASE_VERSION" bash scripts/build-mac-app.sh
+
+      - name: Verify bundle and artifact version
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_version="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CFBundleShortVersionString' \
+              'dist/OpenRappter Bar.app/Contents/Info.plist'
+          )"
+          test "$bundle_version" = "$RELEASE_VERSION"
+          test -f "dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
 
       - name: Upload DMG as release asset
         uses: softprops/action-gh-release@v2
         with:
-          name: "OpenRappter Bar ${{ steps.version.outputs.version }}"
+          name: "OpenRappter Bar ${{ env.RELEASE_VERSION }}"
           body: |
-            ## OpenRappter Bar ${{ steps.version.outputs.version }}
+            ## OpenRappter Bar ${{ env.RELEASE_VERSION }}
 
             macOS menu bar companion for the OpenRappter gateway.
 
             ### Install
-            1. Download `OpenRappter-Bar-${{ steps.version.outputs.version }}.dmg`
+            1. Download `OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg`
             2. Open the DMG and drag **OpenRappter Bar** to Applications
             3. **First launch:** Right-click → Open (Gatekeeper bypass for unsigned app)
             4. The app appears in your menu bar and connects to the gateway at `localhost:18790`
@@ -53,8 +91,8 @@ jobs:
 
             ### Homebrew
             ```bash
-            brew tap openrappter/tap
+            brew tap kody-w/tap
             brew install --cask openrappter-bar
             ```
-          files: macos/dist/OpenRappter-Bar-${{ steps.version.outputs.version }}.dmg
+          files: macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
           fail_on_unmatched_files: true

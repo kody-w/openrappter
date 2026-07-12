@@ -14,8 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const HOME_DIR = path.join(os.homedir(), '.openrappter');
-const BACKUPS_DIR = path.join(HOME_DIR, 'backups');
+const DEFAULT_HOME_DIR = path.join(os.homedir(), '.openrappter');
 const MAX_BACKUPS = 5;
 
 // Directories and files to skip (transient / large / regenerable)
@@ -48,12 +47,13 @@ export interface BackupManifest {
  * Create a timestamped backup of ~/.openrappter/.
  * Returns metadata about the created backup.
  */
-export function createBackup(reason?: string): BackupInfo {
-  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+export function createBackup(reason?: string, homeDir = DEFAULT_HOME_DIR): BackupInfo {
+  const backupsDir = path.join(homeDir, 'backups');
+  fs.mkdirSync(backupsDir, { recursive: true });
 
   const now = new Date();
   const id = now.toISOString().replace(/[:.]/g, '-');
-  const backupPath = path.join(BACKUPS_DIR, id);
+  const backupPath = path.join(backupsDir, id);
   fs.mkdirSync(backupPath, { recursive: true });
 
   const files: string[] = [];
@@ -81,7 +81,7 @@ export function createBackup(reason?: string): BackupInfo {
     }
   }
 
-  copyDir(HOME_DIR, backupPath, '');
+  copyDir(homeDir, backupPath, '');
 
   // Write manifest
   const manifest: BackupManifest = {
@@ -97,7 +97,7 @@ export function createBackup(reason?: string): BackupInfo {
   );
 
   // Prune old backups
-  pruneBackups();
+  pruneBackups(homeDir);
 
   return {
     id,
@@ -113,8 +113,8 @@ export function createBackup(reason?: string): BackupInfo {
  * Copies files back into ~/.openrappter/, overwriting current versions.
  * Does NOT delete files that weren't in the backup.
  */
-export function restoreBackup(backupId?: string): BackupInfo {
-  const backups = listBackups();
+export function restoreBackup(backupId?: string, homeDir = DEFAULT_HOME_DIR): BackupInfo {
+  const backups = listBackups(homeDir);
   if (backups.length === 0) {
     throw new Error('No backups found in ~/.openrappter/backups/');
   }
@@ -139,7 +139,7 @@ export function restoreBackup(backupId?: string): BackupInfo {
   let restored = 0;
   for (const relFile of manifest.files) {
     const src = path.join(target.path, relFile);
-    const dest = path.join(HOME_DIR, relFile);
+    const dest = path.join(homeDir, relFile);
     if (!fs.existsSync(src)) continue;
 
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -159,15 +159,16 @@ export function restoreBackup(backupId?: string): BackupInfo {
 /**
  * List all available backups, most recent first.
  */
-export function listBackups(): BackupInfo[] {
-  if (!fs.existsSync(BACKUPS_DIR)) return [];
+export function listBackups(homeDir = DEFAULT_HOME_DIR): BackupInfo[] {
+  const backupsDir = path.join(homeDir, 'backups');
+  if (!fs.existsSync(backupsDir)) return [];
 
-  const entries = fs.readdirSync(BACKUPS_DIR, { withFileTypes: true });
+  const entries = fs.readdirSync(backupsDir, { withFileTypes: true });
   const backups: BackupInfo[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const backupPath = path.join(BACKUPS_DIR, entry.name);
+    const backupPath = path.join(backupsDir, entry.name);
     const manifestPath = path.join(backupPath, '.backup-manifest.json');
 
     let createdAt = '';
@@ -210,19 +211,65 @@ export function listBackups(): BackupInfo[] {
 /**
  * Delete a specific backup by ID.
  */
-export function deleteBackup(backupId: string): boolean {
-  const backupPath = path.join(BACKUPS_DIR, backupId);
-  if (!fs.existsSync(backupPath)) return false;
-  fs.rmSync(backupPath, { recursive: true, force: true });
+export function deleteBackup(backupId: string, homeDir = DEFAULT_HOME_DIR): boolean {
+  if (
+    typeof backupId !== 'string'
+    || !backupId
+    || backupId.includes('..')
+    || backupId.includes('/')
+    || backupId.includes('\\')
+    || backupId.includes('\0')
+  ) {
+    return false;
+  }
+
+  const backupsDir = path.join(homeDir, 'backups');
+  let rootStat: fs.Stats;
+  try {
+    rootStat = fs.lstatSync(backupsDir);
+  } catch {
+    return false;
+  }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return false;
+
+  const listed = listBackups(homeDir).find((backup) => backup.id === backupId);
+  if (!listed) return false;
+
+  const backupPath = path.resolve(backupsDir, backupId);
+  if (path.resolve(listed.path) !== backupPath) return false;
+
+  let backupStat: fs.Stats;
+  let realRoot: string;
+  let realBackup: string;
+  try {
+    backupStat = fs.lstatSync(backupPath);
+    realRoot = fs.realpathSync(backupsDir);
+    realBackup = fs.realpathSync(backupPath);
+  } catch {
+    return false;
+  }
+  if (!backupStat.isDirectory() || backupStat.isSymbolicLink()) return false;
+
+  const relative = path.relative(realRoot, realBackup);
+  if (
+    !relative
+    || relative === '..'
+    || relative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relative)
+  ) {
+    return false;
+  }
+
+  fs.rmSync(realBackup, { recursive: true, force: true });
   return true;
 }
 
 /** Keep only the most recent MAX_BACKUPS. */
-function pruneBackups(): void {
-  const backups = listBackups();
+function pruneBackups(homeDir: string): void {
+  const backups = listBackups(homeDir);
   if (backups.length <= MAX_BACKUPS) return;
 
   for (const old of backups.slice(MAX_BACKUPS)) {
-    deleteBackup(old.id);
+    deleteBackup(old.id, homeDir);
   }
 }

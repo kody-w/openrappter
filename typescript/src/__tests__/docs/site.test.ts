@@ -4,6 +4,11 @@ import { resolve } from 'path';
 import { JSDOM } from 'jsdom';
 
 const DOCS_DIR = resolve(__dirname, '../../../../docs');
+const PACKAGE_METADATA = JSON.parse(
+  readFileSync(resolve(__dirname, '../../../package.json'), 'utf-8'),
+) as { version: string };
+const CURRENT_VERSION = PACKAGE_METADATA.version;
+const CURRENT_RELEASE_FILE = `release-notes-${CURRENT_VERSION}-evolution.html`;
 
 function readDoc(filename: string): string {
   return readFileSync(resolve(DOCS_DIR, filename), 'utf-8');
@@ -44,6 +49,10 @@ describe('File existence', () => {
 
   it('.nojekyll exists', () => {
     expect(existsSync(resolve(DOCS_DIR, '.nojekyll'))).toBe(true);
+  });
+
+  it(`${CURRENT_RELEASE_FILE} exists`, () => {
+    expect(existsSync(resolve(DOCS_DIR, CURRENT_RELEASE_FILE))).toBe(true);
   });
 
   for (const file of DELETED_FILES) {
@@ -180,18 +189,72 @@ describe('Navigation consistency', () => {
         expect(href === './' || href === '#' || href === '').toBe(true);
       });
 
-      it('version badge shows v1.9.1', () => {
-        // New index has version in a span, old pages use .logo-badge
-        const badge = doc.querySelector('.logo-badge');
-        const navText = doc.querySelector('nav')?.textContent || '';
-        const hasVersion = badge?.textContent?.includes('v1.9.1') || navText.includes('v1.9.1');
-        expect(hasVersion).toBe(true);
-      });
     });
   }
 });
 
-/* ── 5. index.html content ── */
+/* ── 5. Current release identity ── */
+describe('Current release identity', () => {
+  it('publishes the 1.10.0 Pages release', () => {
+    expect(CURRENT_VERSION).toBe('1.10.0');
+  });
+
+  it('homepage badge derives from package metadata', () => {
+    const doc = parseHTML('index.html');
+    const navText = doc.querySelector('nav')?.textContent || '';
+    expect(navText).toContain(`v${CURRENT_VERSION}`);
+  });
+
+  it('homepage links only to the current release page', () => {
+    const doc = parseHTML('index.html');
+    const links = Array.from(doc.querySelectorAll('a[href*="release-notes-"]'));
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) {
+      expect(link.getAttribute('href')).toBe(CURRENT_RELEASE_FILE);
+    }
+  });
+
+  it('current release page identifies the package version and has valid local links', () => {
+    const doc = parseHTML(CURRENT_RELEASE_FILE);
+    expect(doc.title).toContain(CURRENT_VERSION);
+    expect(doc.body.textContent).toContain(`v${CURRENT_VERSION}`);
+
+    for (const link of Array.from(doc.querySelectorAll('a[href]'))) {
+      const href = link.getAttribute('href')!;
+      if (href.startsWith('#') || href.startsWith('http://') || href.startsWith('https://')) {
+        continue;
+      }
+      const target = href.split('#')[0];
+      expect(existsSync(resolve(DOCS_DIR, target)),
+        `Broken link in ${CURRENT_RELEASE_FILE}: ${href}`).toBe(true);
+    }
+  });
+
+  it('uses durable Bar release links instead of versioned DMG URLs', () => {
+    const doc = parseHTML('index.html');
+    const downloadLinks = Array.from(doc.querySelectorAll('a')).filter((link) =>
+      /download (for mac|free)/i.test(link.textContent || ''));
+    expect(downloadLinks.length).toBeGreaterThan(0);
+    for (const link of downloadLinks) {
+      expect(link.getAttribute('href')).toBe(
+        'https://github.com/kody-w/openrappter/releases?q=bar',
+      );
+    }
+    expect(readDoc('index.html')).not.toMatch(
+      /releases\/download\/v[^"']+-bar\/OpenRappter-Bar-[^"']+\.dmg/,
+    );
+  });
+
+  it('keeps release evidence tied to executable validation gates', () => {
+    const text = parseHTML(CURRENT_RELEASE_FILE).body.textContent || '';
+    for (const evidence of ['npm test', 'pytest', 'RunTests', 'CI + smoke', 'SHA-256']) {
+      expect(text).toContain(evidence);
+    }
+    expect(text).not.toMatch(/3,210\+|849\+|Known dependency CVEs/);
+  });
+});
+
+/* ── 6. index.html content ── */
 describe('index.html content', () => {
   let doc: Document;
   beforeAll(() => { doc = parseHTML('index.html'); });

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
+import { VERSION } from '../version.js';
 
 export class TuiGatewayClient extends EventEmitter {
   private ws: WebSocket | null = null;
@@ -13,7 +14,7 @@ export class TuiGatewayClient extends EventEmitter {
       this.ws.on('open', async () => {
         try {
           await this.call('connect', {
-            client: { id: 'tui', version: '1.4.0', platform: process.platform, mode: 'tui' },
+            client: { id: 'tui', version: VERSION, platform: process.platform, mode: 'tui' },
             auth: token ? { token } : undefined,
           });
           this.connected = true;

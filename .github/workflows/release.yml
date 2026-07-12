@@ -3,17 +3,24 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.*'
-      - '!v*-bar'  # exclude menu bar tags (handled by release-bar.yml)
+      - 'v*'
+      - '!v*-bar'
+
+# Serialize retries of the same package tag without allowing a newer tag or
+# the separate macOS lane to replace a pending release.
+concurrency:
+  group: openrappter-release-packages-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  # ── Validate ──
-  test:
-    name: Test
+  preflight:
+    name: Validate release identity
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,108 +29,364 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: typescript/package-lock.json
-
-      - name: TypeScript — install, lint, test
-        working-directory: typescript
-        run: npm ci && npm run lint && npm test
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Python — install and test
-        working-directory: python
-        run: pip install -e ".[dev]" && pytest tests/ -v
+      - name: Test deterministic preflight
+        run: node --test scripts/release-preflight.test.mjs
 
-  # ── Generate changelog and create GitHub Release ──
-  release:
-    name: Create Release
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # full history for changelog
+      # Install the TypeScript loader without running prepare (which builds).
+      - name: Install TypeScript dependencies without build scripts
+        working-directory: typescript
+        run: npm ci --ignore-scripts
 
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Generate changelog from commits
-        id: changelog
+      - name: Validate tag and versions
+        id: validate
+        shell: bash
         run: |
-          # Get the previous tag
-          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]' | grep -v '\-bar' | sed -n '2p')
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
-          fi
-          echo "Previous tag: $PREV_TAG"
+          set -euo pipefail
 
-          # Generate changelog grouped by type
-          {
-            echo "## What's Changed"
-            echo ""
+          typescript_runtime_version="$(
+            cd typescript
+            node --import tsx --input-type=module \
+              --eval "import { VERSION } from './src/version.ts'; process.stdout.write(VERSION);"
+          )"
+          python_runtime_version="$(
+            PYTHONPATH=python python -c \
+              'from openrappter import __version__; print(__version__, end="")'
+          )"
 
-            # Features
-            FEATS=$(git log "$PREV_TAG"..HEAD --pretty=format:'- %s' --grep='^feat' --no-merges)
-            if [ -n "$FEATS" ]; then
-              echo "### ✨ Features"
-              echo "$FEATS"
-              echo ""
-            fi
+          node scripts/release-preflight.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --typescript-runtime-version "$typescript_runtime_version" \
+            --python-runtime-version "$python_runtime_version"
 
-            # Fixes
-            FIXES=$(git log "$PREV_TAG"..HEAD --pretty=format:'- %s' --grep='^fix' --no-merges)
-            if [ -n "$FIXES" ]; then
-              echo "### 🐛 Fixes"
-              echo "$FIXES"
-              echo ""
-            fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-            # Other
-            OTHER=$(git log "$PREV_TAG"..HEAD --pretty=format:'- %s' --no-merges | grep -v -E '^- (feat|fix)')
-            if [ -n "$OTHER" ]; then
-              echo "### 📦 Other"
-              echo "$OTHER"
-              echo ""
-            fi
-
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...${{ github.ref_name }}"
-          } > /tmp/changelog.md
-
-          cat /tmp/changelog.md
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "v${{ steps.version.outputs.version }}"
-          body_path: /tmp/changelog.md
-          draft: false
-          prerelease: false
-          generate_release_notes: false
-
-  # ── Publish to npm ──
-  npm-publish:
-    name: Publish to npm
-    needs: release
+  build-artifacts:
+    name: Build release artifacts once
+    needs: preflight
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: typescript/package-lock.json
 
-      - name: Install and build
-        working-directory: typescript
-        run: npm ci && npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Publish to npm
+      - name: Set reproducible build timestamp
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          if [[ ! "$source_date_epoch" =~ ^[0-9]+$ ]]; then
+            printf 'Invalid source timestamp: %q\n' "$source_date_epoch" >&2
+            exit 1
+          fi
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch" >> "$GITHUB_ENV"
+
+      - name: Build npm package
         working-directory: typescript
-        run: npm publish --access public
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          mkdir -p ../release-dist
+          npm pack --ignore-scripts --pack-destination ../release-dist
+
+      - name: Build Python wheel and sdist
+        run: |
+          python -m pip install \
+            "build==1.5.1" \
+            "hatchling==1.31.0"
+          python -m build --no-isolation --outdir release-dist python
+
+      - name: Validate exact artifact names
+        run: |
+          node scripts/release-preflight.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --artifacts-dir release-dist
+
+      - name: Generate and verify checksums
+        working-directory: release-dist
+        run: |
+          sha256sum \
+            "openrappter-${RELEASE_VERSION}.tgz" \
+            "openrappter-${RELEASE_VERSION}-py3-none-any.whl" \
+            "openrappter-${RELEASE_VERSION}.tar.gz" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload immutable release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ env.RELEASE_VERSION }}
+          path: release-dist/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  cycle-11-quality:
+    name: Cycle 11 quality gates
+    needs: [preflight, build-artifacts]
+    uses: ./.github/workflows/ci.yml
+    with:
+      release_artifact_name: release-artifacts-${{ needs.preflight.outputs.version }}
+    permissions:
+      contents: read
+
+  cycle-11-install:
+    name: Cycle 11 install gates
+    needs: [preflight, build-artifacts]
+    uses: ./.github/workflows/install-smoke.yml
+    with:
+      release_artifact_name: release-artifacts-${{ needs.preflight.outputs.version }}
+    permissions:
+      contents: read
+
+  smoke-artifacts:
+    name: Smoke-install exact artifacts
+    needs: [preflight, build-artifacts, cycle-11-quality, cycle-11-install]
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.RELEASE_VERSION }}
+          path: release-dist
+
+      - name: Verify downloaded checksums
+        working-directory: release-dist
+        run: sha256sum --check SHA256SUMS
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Smoke-install npm tarball in a clean prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global \
+            --prefix "$RUNNER_TEMP/openrappter-npm-smoke" \
+            "$PWD/release-dist/openrappter-${RELEASE_VERSION}.tgz"
+          reported_version="$(
+            "$RUNNER_TEMP/openrappter-npm-smoke/bin/openrappter" --version
+          )"
+          test "$reported_version" = "$RELEASE_VERSION"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Smoke-install Python wheel in a clean environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/openrappter-wheel-smoke"
+          "$RUNNER_TEMP/openrappter-wheel-smoke/bin/pip" install \
+            "release-dist/openrappter-${RELEASE_VERSION}-py3-none-any.whl"
+          reported_version="$(
+            "$RUNNER_TEMP/openrappter-wheel-smoke/bin/python" -c \
+              'from openrappter import __version__; print(__version__, end="")'
+          )"
+          test "$reported_version" = "$RELEASE_VERSION"
+          "$RUNNER_TEMP/openrappter-wheel-smoke/bin/openrappter" --version
+
+      - name: Smoke-install Python sdist in a second clean environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/openrappter-sdist-smoke"
+          "$RUNNER_TEMP/openrappter-sdist-smoke/bin/pip" install \
+            "release-dist/openrappter-${RELEASE_VERSION}.tar.gz"
+          reported_version="$(
+            "$RUNNER_TEMP/openrappter-sdist-smoke/bin/python" -c \
+              'from openrappter import __version__; print(__version__, end="")'
+          )"
+          test "$reported_version" = "$RELEASE_VERSION"
+          "$RUNNER_TEMP/openrappter-sdist-smoke/bin/openrappter" --version
+
+  publish-registries:
+    name: Reconcile and publish exact registry artifacts
+    needs: [preflight, smoke-artifacts]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: openrappter-registry-publication
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.RELEASE_VERSION }}
+          path: release-dist
+
+      - name: Verify downloaded checksums
+        working-directory: release-dist
+        run: sha256sum --check SHA256SUMS
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Use npm with Trusted Publishing support
+        run: |
+          npm install --global npm@11.5.1
+          npm --version
+
+      - name: Reconcile and stage missing PyPI artifacts
+        id: pypi-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="$(
+            node scripts/release-preflight.mjs \
+              --tag "$GITHUB_REF_NAME" \
+              --artifacts-dir release-dist \
+              --check-registry pypi \
+              --stage-missing-dir pypi-dist
+          )"
+          case "$state" in
+            absent|partial|matching) ;;
+            *)
+              printf 'Unexpected PyPI state: %q\n' "$state" >&2
+              exit 1
+              ;;
+          esac
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight npm artifact identity
+        run: |
+          node scripts/release-preflight.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --artifacts-dir release-dist \
+            --check-registry npm
+
+      - name: Publish only missing PyPI artifacts with OIDC
+        if: steps.pypi-state.outputs.state != 'matching'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pypi-dist/
+
+      - name: Verify exact PyPI artifacts
+        run: |
+          node scripts/release-preflight.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --artifacts-dir release-dist \
+            --check-registry pypi \
+            --require-present
+
+      - name: Reconcile npm tarball
+        id: npm-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          state="$(
+            node scripts/release-preflight.mjs \
+              --tag "$GITHUB_REF_NAME" \
+              --artifacts-dir release-dist \
+              --check-registry npm
+          )"
+          case "$state" in
+            absent|matching) ;;
+            *)
+              printf 'Unexpected npm state: %q\n' "$state" >&2
+              exit 1
+              ;;
+          esac
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh release tags before npm publication
+        if: steps.npm-state.outputs.state == 'absent'
+        run: git fetch --force --tags origin
+
+      - name: Select npm dist-tag after semver comparison
+        if: steps.npm-state.outputs.state == 'absent'
+        id: npm-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          publish_tag="$(
+            node scripts/release-preflight.mjs \
+              --npm-publish-tag-candidate "$RELEASE_VERSION" \
+              --include-repository-tags
+          )"
+          historical_tag="release-${RELEASE_VERSION//./-}"
+          case "$publish_tag" in
+            latest|"$historical_tag") ;;
+            *)
+              printf 'Unexpected npm dist-tag: %q\n' "$publish_tag" >&2
+              exit 1
+              ;;
+          esac
+          printf 'tag=%s\n' "$publish_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish npm tarball with explicit semver-safe dist-tag
+        if: steps.npm-state.outputs.state == 'absent'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        continue-on-error: true  # Don't fail release if npm publish fails
+          NPM_PUBLISH_TAG: ${{ steps.npm-tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm publish \
+            "release-dist/openrappter-${RELEASE_VERSION}.tgz" \
+            --access public \
+            --provenance \
+            --tag "$NPM_PUBLISH_TAG"
+
+      - name: Verify exact npm tarball
+        run: |
+          node scripts/release-preflight.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --artifacts-dir release-dist \
+            --check-registry npm \
+            --require-present
+
+  github-release:
+    name: Create checksummed GitHub Release
+    needs: [preflight, publish-registries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.RELEASE_VERSION }}
+          path: release-dist
+
+      - name: Verify downloaded checksums
+        working-directory: release-dist
+        run: sha256sum --check SHA256SUMS
+
+      - name: Create GitHub Release with generated notes
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ env.RELEASE_VERSION }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          files: |
+            release-dist/openrappter-${{ env.RELEASE_VERSION }}.tgz
+            release-dist/openrappter-${{ env.RELEASE_VERSION }}-py3-none-any.whl
+            release-dist/openrappter-${{ env.RELEASE_VERSION }}.tar.gz
+            release-dist/SHA256SUMS

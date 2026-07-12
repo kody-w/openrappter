@@ -1,18 +1,34 @@
 name: Install Smoke Tests
 
 on:
+  workflow_call:
+    inputs:
+      release_artifact_name:
+        description: Use the caller's already-built npm tarball
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
-    paths:
+    paths: &install-smoke-paths
       - 'install.sh'
+      - 'docs/install.sh'
       - 'tests/install/**'
-      - '.github/workflows/install-smoke.yml'
+      - 'tests/test_install.sh'
+      - 'typescript/package.json'
+      - 'typescript/package-lock.json'
+      - 'python/pyproject.toml'
+      - '.github/workflows/**'
   pull_request:
     branches: [main]
-    paths:
-      - 'install.sh'
-      - 'tests/install/**'
-      - '.github/workflows/install-smoke.yml'
+    paths: *install-smoke-paths
+
+concurrency:
+  group: install-smoke-${{ github.event_name }}-${{ github.event_name == 'workflow_call' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   unit-tests:
@@ -54,11 +70,24 @@ jobs:
         with:
           node-version: 22
       - name: Build npm tarball
+        if: inputs.release_artifact_name == ''
         run: cd typescript && npm install --no-fund --no-audit && npm run build && npm pack
+      - name: Download already-built release tarball
+        if: inputs.release_artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.release_artifact_name }}
+          path: release-dist
       - name: Copy artifacts to Docker context
+        if: inputs.release_artifact_name == ''
         run: |
           cp install.sh tests/install/docker/smoke/install.sh
           cp typescript/openrappter-*.tgz tests/install/docker/smoke/
+      - name: Copy release artifact to Docker context
+        if: inputs.release_artifact_name != ''
+        run: |
+          cp install.sh tests/install/docker/smoke/install.sh
+          cp release-dist/openrappter-*.tgz tests/install/docker/smoke/
       - name: Build and run smoke test
         run: docker build --no-cache -t openrappter-test-smoke tests/install/docker/smoke/
 

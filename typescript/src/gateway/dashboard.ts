@@ -7,6 +7,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { createHash, timingSafeEqual } from 'crypto';
 import { BasicAgent } from '../agents/BasicAgent.js';
 import type { AgentResult } from '../agents/types.js';
 
@@ -46,6 +47,92 @@ export interface DashboardOptions {
   prefix?: string;
   /** Enable CORS headers (default: true) */
   cors?: boolean;
+  /**
+   * Hostnames or authorities accepted by this handler. A hostname entry
+   * permits any port; include a port to require it exactly.
+   */
+  trustedHosts?: string[];
+  /** Additional exact browser origins allowed to call read-only routes. */
+  trustedOrigins?: string[];
+  /** Bearer/X-Gateway-Token credential accepted by privileged routes. */
+  authToken?: string;
+  /** Mount-provided authorization hook for privileged routes. */
+  authorize?: (req: IncomingMessage) => boolean | Promise<boolean>;
+}
+
+interface TrustedHost {
+  hostname: string;
+  port?: string;
+}
+
+interface DashboardRequestSource {
+  origin?: string;
+  localSameOrigin: boolean;
+}
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const DEFAULT_TRUSTED_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, '');
+}
+
+function parseTrustedHost(value: string): TrustedHost {
+  if (!value || value !== value.trim() || value.includes('://')) {
+    throw new Error(`Invalid trusted dashboard host: ${value}`);
+  }
+  const authority = value === '::1' ? '[::1]' : value;
+  let parsed: URL;
+  try {
+    parsed = new URL(`http://${authority}`);
+  } catch {
+    throw new Error(`Invalid trusted dashboard host: ${value}`);
+  }
+  if (
+    parsed.username
+    || parsed.password
+    || parsed.pathname !== '/'
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error(`Invalid trusted dashboard host: ${value}`);
+  }
+  return { hostname: normalizeHostname(parsed.hostname), port: parsed.port || undefined };
+}
+
+function parseTrustedOrigin(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`Invalid trusted dashboard origin: ${value}`);
+  }
+  if (
+    !['http:', 'https:'].includes(parsed.protocol)
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== '/'
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error(`Invalid trusted dashboard origin: ${value}`);
+  }
+  return parsed.origin;
+}
+
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase();
+  return normalized === '::1'
+    || normalized === '127.0.0.1'
+    || normalized.startsWith('127.')
+    || normalized.startsWith('::ffff:127.');
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const left = createHash('sha256').update(a).digest();
+  const right = createHash('sha256').update(b).digest();
+  return timingSafeEqual(left, right);
 }
 
 export class DashboardHandler {
@@ -54,10 +141,18 @@ export class DashboardHandler {
   private maxTraceEntries: number = 500;
   private prefix: string;
   private corsEnabled: boolean;
+  private trustedHosts: TrustedHost[];
+  private trustedOrigins: Set<string>;
+  private authToken?: string;
+  private authorize?: (req: IncomingMessage) => boolean | Promise<boolean>;
 
   constructor(options?: DashboardOptions) {
     this.prefix = options?.prefix ?? '/api';
     this.corsEnabled = options?.cors ?? true;
+    this.trustedHosts = (options?.trustedHosts ?? DEFAULT_TRUSTED_HOSTS).map(parseTrustedHost);
+    this.trustedOrigins = new Set((options?.trustedOrigins ?? []).map(parseTrustedOrigin));
+    this.authToken = options?.authToken;
+    this.authorize = options?.authorize;
   }
 
   /** Register an agent for the dashboard */
@@ -98,21 +193,34 @@ export class DashboardHandler {
    * false if it should be passed to the next handler.
    */
   async handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+    const url = new URL(req.url ?? '/', 'http://dashboard.invalid');
     const pathname = url.pathname;
 
     // Only handle requests under our prefix
-    if (!pathname.startsWith(this.prefix)) {
+    if (pathname !== this.prefix && !pathname.startsWith(`${this.prefix}/`)) {
       return false;
+    }
+
+    const source = this.validateRequestSource(req);
+    if (!source) {
+      this.sendJson(res, 403, { error: 'Forbidden request origin' });
+      return true;
     }
 
     // CORS headers
     if (this.corsEnabled) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (source.origin) {
+        res.setHeader('Access-Control-Allow-Origin', source.origin);
+      }
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Gateway-Token');
+      res.setHeader('Vary', 'Origin');
 
       if (req.method === 'OPTIONS') {
+        if (!source.origin) {
+          this.sendJson(res, 403, { error: 'CORS preflight requires a trusted origin' });
+          return true;
+        }
         res.writeHead(204);
         res.end();
         return true;
@@ -127,6 +235,10 @@ export class DashboardHandler {
           return this.handleAgentList(res);
 
         case route === '/agents/execute' && req.method === 'POST':
+          if (!(await this.isPrivilegedRequestAuthorized(req, source))) {
+            this.sendJson(res, 401, { error: 'Authorization required' });
+            return true;
+          }
           return await this.handleAgentExecute(req, res);
 
         case route === '/traces' && req.method === 'GET': {
@@ -150,6 +262,88 @@ export class DashboardHandler {
       this.sendJson(res, 500, { error: error.message });
       return true;
     }
+  }
+
+  private validateRequestSource(req: IncomingMessage): DashboardRequestSource | null {
+    const host = req.headers.host;
+    if (!host || host !== host.trim() || host.length > 255) return null;
+
+    let authority: URL;
+    try {
+      authority = new URL(`http://${host}`);
+    } catch {
+      return null;
+    }
+    if (authority.username || authority.password || authority.pathname !== '/') {
+      return null;
+    }
+    if (authority.search || authority.hash) return null;
+
+    const hostname = normalizeHostname(authority.hostname);
+    const trustedHost = this.trustedHosts.some((candidate) => (
+      candidate.hostname === hostname
+      && (candidate.port === undefined || candidate.port === authority.port)
+    ));
+    if (!trustedHost) return null;
+
+    const header = req.headers.origin;
+    if (header === undefined) return { localSameOrigin: false };
+    if (Array.isArray(header)) return null;
+
+    try {
+      const origin = new URL(header);
+      const expectedProtocol = (req.socket as (typeof req.socket & { encrypted?: boolean }) | undefined)?.encrypted
+        ? 'https:'
+        : 'http:';
+      const requestOrigin = new URL(`${expectedProtocol}//${authority.host}`).origin;
+      const sameOrigin = origin.origin === requestOrigin;
+      if (
+        !['http:', 'https:'].includes(origin.protocol)
+        || origin.username
+        || origin.password
+        || origin.pathname !== '/'
+        || origin.search
+        || origin.hash
+        || (!sameOrigin && !this.trustedOrigins.has(origin.origin))
+      ) {
+        return null;
+      }
+      return {
+        origin: origin.origin,
+        localSameOrigin: sameOrigin
+          && LOCAL_HOSTS.has(hostname)
+          && isLoopbackAddress(req.socket?.remoteAddress),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async isPrivilegedRequestAuthorized(
+    req: IncomingMessage,
+    source: DashboardRequestSource,
+  ): Promise<boolean> {
+    if (source.localSameOrigin) return true;
+
+    if (this.authorize) {
+      try {
+        if (await this.authorize(req)) return true;
+      } catch {
+        return false;
+      }
+    }
+
+    if (!this.authToken) return false;
+    const authorization = req.headers.authorization;
+    const bearer = typeof authorization === 'string'
+      ? authorization.match(/^Bearer ([^\s,]+)$/i)?.[1]
+      : undefined;
+    const gatewayTokenHeader = req.headers['x-gateway-token'];
+    const gatewayToken = typeof gatewayTokenHeader === 'string'
+      ? gatewayTokenHeader
+      : undefined;
+    const presented = bearer ?? gatewayToken;
+    return presented !== undefined && safeEqual(presented, this.authToken);
   }
 
   private handleAgentList(res: ServerResponse): boolean {

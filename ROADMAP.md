@@ -1,10 +1,12 @@
 # OpenRappter Roadmap
 
-> Last updated: 2026-02-22 | Current version: **1.9.1**
+> Last updated: 2026-07-11 | Current version: **1.10.0**
 
 ## Where We Are
 
 OpenRappter is a local-first AI agent framework with dual TypeScript/Python runtimes. The core is solid: 18 agents, 6 orchestration patterns (Chain, Graph, Broadcast, Router, SubAgent, Pipeline), 22 messaging channels, 5 LLM providers, a WebSocket gateway with 60+ RPC methods, a 12-page Lit dashboard, 20 deterministic showcase demos, an MCP server, span-based tracing, and 2,800+ tests.
+
+The v1.10.0 Evolution release adds fail-closed release gates, cross-runtime gateway and observability hardening, exact-artifact publishing, and stronger native lifecycle ownership.
 
 The Multi-Rappter Gateway (v1.9.1) introduced hot-loadable souls — the gateway acts as a brainstem that can summon one or more rappter configurations per request via single, parallel, race, or chain modes.
 
@@ -265,6 +267,7 @@ _Push the boundaries of what agent systems can do._
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **1.10.0** | 2026-07-11 | Evolution release: cross-runtime hardening, observability, and exact-artifact release gates |
 | **1.9.1** | 2026-02-22 | Multi-Rappter Gateway (hot-loadable souls), Agent Stock Exchange showcase, 2,803 tests |
 | **1.9.0** | 2026-02-22 | Dashboard RPC parity (all 12 pages functional), 60+ RPC methods |
 | **1.8.2** | 2026-02-22 | Python package exports, stale version fixes |

@@ -69,7 +69,7 @@ export function registerAuthMethods(
   server: MethodRegistrar,
   _deps?: Record<string, unknown>
 ): void {
-  const store = new AuthProfileStore();
+  const store = new AuthProfileStore(_deps?.dataDir as string | undefined);
 
   // If a profile already exists, notify the caller so the provider can use it
   const onTokenUpdate = _deps?.onAuthTokenUpdate as ((token: string) => void) | undefined;

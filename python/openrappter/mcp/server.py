@@ -9,6 +9,8 @@ Mirrors TypeScript mcp/server.ts
 
 import json
 
+from openrappter import __version__
+
 
 class McpServer:
     """Minimal MCP server exposing agents as tools via JSON-RPC 2.0."""
@@ -17,7 +19,7 @@ class McpServer:
         options = options or {}
         self._server_info = {
             'name': options.get('name', 'openrappter'),
-            'version': options.get('version', '1.9.1'),
+            'version': options.get('version', __version__),
         }
         self._agents = {}  # name -> agent
 

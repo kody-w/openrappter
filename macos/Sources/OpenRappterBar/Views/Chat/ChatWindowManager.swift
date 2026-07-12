@@ -81,7 +81,7 @@ public final class ChatWindowManager {
 
             if auth.authState == .authenticated {
                 viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
-                settingsViewModel.accountViewModel.restartGatewayAfterAuth()
+                await settingsViewModel.accountViewModel.restartGatewayAfterAuth().value
             } else if let error = auth.error {
                 viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
             }

@@ -1,10 +1,26 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      release_artifact_name:
+        description: Use the caller's already-built release distributions
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
+# Cancel superseded runs on the same ref (branch/PR/tag) to save CI minutes.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'workflow_call' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default; individual jobs opt into anything more (none do).
+permissions:
+  contents: read
 
 jobs:
   typescript:
@@ -29,6 +45,60 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  # Dedicated gate for the dashboard UI surface (typescript/ui) — a separate
+  # npm project (own lockfile/deps) that the generic `typescript` job above
+  # never installs or builds.
+  dashboard:
+    name: Dashboard UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: typescript/ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/ui/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # Dedicated gate for the real-socket gateway integration/observability
+  # surfaces. Bounded so a hung real socket/connection can't stall CI
+  # indefinitely, and uploads only a small, targeted log on failure (no
+  # verbose default vitest/CI output dump).
+  gateway-realtime:
+    name: Gateway Integration & Observability (real sockets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      - name: Run real-socket gateway tests (bounded per-test timeout)
+        run: |
+          npx vitest run \
+            src/__tests__/integration/gateway.test.ts \
+            src/__tests__/integration/gateway-observability.test.ts \
+            --testTimeout=15000 --hookTimeout=15000 \
+            --reporter=default > gateway-realtime.log 2>&1
+      - name: Upload concise log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-realtime-failure-log
+          path: typescript/gateway-realtime.log
+          retention-days: 5
+
   macos-menu-bar:
     name: macOS Menu Bar App
     runs-on: macos-14
@@ -41,11 +111,14 @@ jobs:
         with:
           swift-version: '6.0'
       - run: swift build -c release --product OpenRappterBar
+      # Fails hard on either a Swift build error or any failing test in the
+      # custom RunTests harness (86+ tests; exits non-zero on any failure).
       - run: swift build --product RunTests && .build/debug/RunTests
 
   python:
     name: Python (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version: ['3.10', '3.12']
@@ -57,5 +130,89 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v
+
+      - name: Download already-built release distributions
+        if: inputs.release_artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.release_artifact_name }}
+          path: python/release-dist
+
+      - name: Build wheel + sdist
+        if: inputs.release_artifact_name == ''
+        run: |
+          pip install --upgrade pip build
+          rm -rf dist build ./*.egg-info
+          python -m build
+
+      - name: Install the built wheel into a fresh venv
+        if: inputs.release_artifact_name == ''
+        run: |
+          python -m venv "$RUNNER_TEMP/gateway-smoke-venv"
+          "$RUNNER_TEMP"/gateway-smoke-venv/bin/pip install --upgrade pip
+          "$RUNNER_TEMP"/gateway-smoke-venv/bin/pip install dist/*.whl
+
+      - name: Install the release wheel into a fresh venv
+        if: inputs.release_artifact_name != ''
+        run: |
+          python -m venv "$RUNNER_TEMP/gateway-smoke-venv"
+          "$RUNNER_TEMP"/gateway-smoke-venv/bin/pip install --upgrade pip
+          "$RUNNER_TEMP"/gateway-smoke-venv/bin/pip install release-dist/*.whl
+
+      - name: Real token-auth HTTP/WebSocket gateway smoke (installed wheel)
+        run: $RUNNER_TEMP/gateway-smoke-venv/bin/python scripts/gateway_token_smoke.py
+
+      - name: Install dev deps for full test suite
+        run: pip install -e ".[dev]"
+
+      - name: Run full test suite
+        run: pytest tests/ -v
+
+  # Explicit, fail-hard production dependency audit gates (npm side).
+  npm-audit:
+    name: npm dependency audit (production)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Audit typescript production dependencies
+        working-directory: typescript
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+      - name: Audit dashboard UI production dependencies
+        working-directory: typescript/ui
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
+  # Explicit, fail-hard production dependency audit gate (Python side).
+  # Installs only runtime dependencies (no [dev] extra) so the audit
+  # reflects what actually ships to users.
+  python-audit:
+    name: Python dependency audit (production)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download already-built release distributions
+        if: inputs.release_artifact_name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.release_artifact_name }}
+          path: python/release-dist
+      - run: pip install --upgrade pip pip-audit
+      - name: Install production package from source
+        if: inputs.release_artifact_name == ''
+        run: pip install .
+      - name: Install production package from release wheel
+        if: inputs.release_artifact_name != ''
+        run: pip install release-dist/*.whl
+      - run: pip-audit

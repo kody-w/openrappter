@@ -42,9 +42,13 @@ function createMockClient(responses: Record<string, unknown> = {}): GatewayClien
 // ===== Chat Controller =====
 
 import {
+  AGENT_REQUEST_TIMEOUT_MS,
+  AGENT_STREAM_IDLE_TIMEOUT_MS,
+  AGENT_STREAM_OVERALL_TIMEOUT_MS,
   createChatState,
   loadChatHistory,
   sendChatMessage,
+  sendChatMessageStreaming,
   loadSessions,
   deleteSession,
 } from '../services/chat.js';
@@ -55,6 +59,7 @@ describe('Chat Controller', () => {
     expect(s.messages).toEqual([]);
     expect(s.sessionId).toBeNull();
     expect(s.sending).toBe(false);
+    expect(s.streaming).toBe(false);
     expect(s.error).toBeNull();
   });
 
@@ -72,6 +77,11 @@ describe('Chat Controller', () => {
     expect(state.messages).toEqual(msgs);
     expect(state.sessionId).toBe('session-1');
     expect(state.error).toBeNull();
+    expect(client.call).toHaveBeenCalledWith('chat.messages', {
+      sessionId: 'session-1',
+      sessionKey: 'session-1',
+      limit: 200,
+    });
   });
 
   it('loadChatHistory handles error', async () => {
@@ -105,6 +115,13 @@ describe('Chat Controller', () => {
     expect(state.streaming).toBe(false);
     expect(result?.sessionId).toBe('s1');
     expect(state.sessionId).toBe('s1');
+    expect(client.call).toHaveBeenCalledWith('agent', {
+      agentId: undefined,
+      message: 'hello',
+    }, {
+      timeoutMs: AGENT_REQUEST_TIMEOUT_MS,
+      signal: undefined,
+    });
   });
 
   it('sendChatMessage rejects empty message', async () => {
@@ -123,6 +140,35 @@ describe('Chat Controller', () => {
     expect(result).toBeNull();
     expect(state.error).toContain('timeout');
     expect(state.sending).toBe(false);
+  });
+
+  it('sendChatMessageStreaming accumulates chunks and resolves final response', async () => {
+    const client = createMockClient();
+    (client.callStream as any) = vi.fn(async (method: string, params: Record<string, unknown>, onChunk: (r: any) => void) => {
+      expect(method).toBe('agent');
+      onChunk({ chunk: 'Hel' });
+      onChunk({ chunk: 'lo' });
+      return { sessionId: 's2', content: 'Hello' };
+    });
+    const state = createChatState();
+    state.client = client;
+
+    const result = await sendChatMessageStreaming(state, 'hi');
+    expect(state.streamContent).toBe('Hello');
+    expect(state.streaming).toBe(false);
+    expect(state.sending).toBe(false);
+    expect(result?.sessionId).toBe('s2');
+    expect(state.sessionId).toBe('s2');
+    expect(client.callStream).toHaveBeenCalledWith(
+      'agent',
+      { agentId: undefined, message: 'hi' },
+      expect.any(Function),
+      {
+        idleTimeoutMs: AGENT_STREAM_IDLE_TIMEOUT_MS,
+        overallTimeoutMs: AGENT_STREAM_OVERALL_TIMEOUT_MS,
+        signal: undefined,
+      },
+    );
   });
 
   it('loadSessions returns session list', async () => {

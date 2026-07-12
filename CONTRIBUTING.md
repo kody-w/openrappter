@@ -100,6 +100,43 @@ class MyAgent(BasicAgent):
 4. Update documentation if needed
 5. Submit PR with clear description
 
+## Releasing npm and PyPI packages
+
+Package releases use one canonical workflow: `.github/workflows/release.yml`.
+A strict `vX.Y.Z` tag is accepted only when it matches:
+
+- `typescript/package.json` and both root versions in `typescript/package-lock.json`
+- `python/pyproject.toml`
+- the TypeScript and Python runtime-reported versions
+
+Update the npm metadata, then update the Python project version and
+`python/openrappter/__init__.py`:
+
+```bash
+npm version X.Y.Z --no-git-tag-version --prefix typescript
+node scripts/release-preflight.mjs --tag vX.Y.Z
+node --test scripts/release-preflight.test.mjs
+```
+
+The local preflight is deterministic and does not require registry access.
+Pushing the tag builds each npm and Python distribution once, reruns the
+cycle-11 CI and install gates against those files, and smoke-installs the exact
+artifacts. The dependency lock, pinned Python builders, and commit-derived
+`SOURCE_DATE_EPOCH` keep rerun artifacts reproducible. Registry publication is
+globally serialized. Before either registry is changed, both remote identities
+are checked; immediately before each publish, the workflow either confirms the
+version is absent or compares the remote npm integrity/PyPI SHA-256 digests
+with the local files. Matching files are resumed as complete, missing PyPI
+files are published, and any conflict fails closed. npm uses an explicit
+dist-tag selected only after comparing stable semantic versions from the
+registry and release tags, so an older release cannot replace a newer
+`latest`.
+
+npm and PyPI use trusted publishing; the repository publishers must trust
+`.github/workflows/release.yml`, and no registry API tokens are used. A
+rerun safely completes any remaining registry and then creates or updates the
+GitHub Release with generated notes, the distributions, and `SHA256SUMS`.
+
 ## Code of Conduct
 
 - Be respectful and inclusive

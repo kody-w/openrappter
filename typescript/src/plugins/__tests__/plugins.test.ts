@@ -9,9 +9,10 @@
  * - Error handling (bad plugins, missing deps)
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
 import os from 'os';
+import * as fs from 'fs/promises';
 
 // ---------------------------------------------------------------------------
 // Manifest validation tests
@@ -333,16 +334,44 @@ describe('Plugin SDK', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Plugin Loader tests (mocked filesystem)
+// Plugin Loader tests (real filesystem, temp directories)
 // ---------------------------------------------------------------------------
 
 describe('Plugin Loader', () => {
   let loaderModule: typeof import('../loader.js');
+  /** Real, unique temp root per test — removed in afterEach. */
+  let tmpRoot: string;
+  /** Real plugin directory (a subdirectory of tmpRoot) passed as `pluginDir`. */
+  let pluginDir: string;
 
   beforeEach(async () => {
     vi.resetModules();
     loaderModule = await import('../loader.js');
+    tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'openrappter-plugin-test-'));
+    pluginDir = path.join(tmpRoot, 'plugins');
+    await fs.mkdir(pluginDir, { recursive: true });
   });
+
+  afterEach(async () => {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  /** Writes a real, loadable plugin directory: package.json (with an
+   * `openrappter` manifest key) + a trivial JS entry file. Returns the
+   * plugin's own directory path. */
+  async function writeRealPlugin(dir: string, name: string): Promise<string> {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name,
+        version: '1.0.0',
+        openrappter: { name, version: '1.0.0', entry: 'index.js' },
+      })
+    );
+    await fs.writeFile(path.join(dir, 'index.js'), 'export const marker = true;\n');
+    return dir;
+  }
 
   describe('SecurePluginLoader', () => {
     it('should expose a SecurePluginLoader class or createSecurePluginLoader factory', () => {
@@ -351,71 +380,117 @@ describe('Plugin Loader', () => {
       expect(hasClass || hasFactory).toBe(true);
     });
 
-    it('should reject absolute paths outside the plugin dir (path containment)', async () => {
-      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
-      const outsidePath = path.resolve(os.tmpdir(), 'etc', 'passwd');
+    it('should reject a real, valid, loadable plugin directory that lives outside the plugin dir (path containment)', async () => {
+      // A genuinely loadable plugin (real package.json + real entry file) —
+      // the only thing wrong with it is that it lives *outside* pluginDir.
+      // If containment were only a string check with no real fs boundary,
+      // this plugin would otherwise load successfully.
+      const outsideDir = await writeRealPlugin(path.join(tmpRoot, 'outside-plugin'), 'outside-plugin');
       const loader = loaderModule.createSecurePluginLoader({ pluginDir });
-      // A path that escapes the plugin directory should be rejected
-      await expect(loader.loadPluginFromPath(outsidePath)).rejects.toThrow();
+
+      await expect(loader.loadPluginFromPath(outsideDir)).rejects.toThrow(/outside the plugin directory/);
     });
 
-    it('should reject paths with directory traversal sequences', async () => {
-      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
-      const traversalPath = path.join(pluginDir, '..', '..', '..', 'etc', 'shadow');
+    it('should reject a real plugin reached via directory traversal sequences (../../..)', async () => {
+      // Same real, loadable plugin, but this time reached via a `pluginDir`-
+      // relative traversal path instead of an absolute outside path — proves
+      // the loader resolves the path before checking containment rather than
+      // matching on the raw (unresolved) string.
+      const escapedName = 'escaped-plugin';
+      await writeRealPlugin(path.join(tmpRoot, escapedName), escapedName);
+      const traversalPath = path.join(pluginDir, '..', escapedName);
       const loader = loaderModule.createSecurePluginLoader({ pluginDir });
-      await expect(
-        loader.loadPluginFromPath(traversalPath)
-      ).rejects.toThrow();
+
+      await expect(loader.loadPluginFromPath(traversalPath)).rejects.toThrow(/outside the plugin directory/);
     });
 
     it('should return null for a path that does not exist', async () => {
-      const pluginDir = path.resolve(os.tmpdir(), 'safe', 'plugins');
       const loader = loaderModule.createSecurePluginLoader({ pluginDir });
       const result = await loader.loadPluginFromPath(path.join(pluginDir, 'nonexistent-plugin'));
       expect(result).toBeNull();
     });
 
+    it('should successfully load a real, valid plugin that lives inside the plugin dir', async () => {
+      const goodDir = await writeRealPlugin(path.join(pluginDir, 'good-plugin'), 'good-plugin');
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
+
+      const loaded = await loader.loadPluginFromPath(goodDir);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.manifest.name).toBe('good-plugin');
+      expect(loaded?.module).toBeDefined();
+    });
+
     it('discoverPlugins should return an empty array when dir does not exist', async () => {
       const loader = loaderModule.createSecurePluginLoader({
-        pluginDir: path.resolve(os.tmpdir(), 'openrappter-test-nonexistent-12345'),
+        pluginDir: path.join(tmpRoot, 'openrappter-test-nonexistent-12345'),
       });
       const plugins = await loader.discoverPlugins();
       expect(Array.isArray(plugins)).toBe(true);
       expect(plugins).toHaveLength(0);
     });
+
+    it('discoverPlugins should find real plugin directories on disk without importing them', async () => {
+      await writeRealPlugin(path.join(pluginDir, 'plugin-a'), 'plugin-a');
+      await writeRealPlugin(path.join(pluginDir, 'plugin-b'), 'plugin-b');
+      // A directory with no package.json — should be silently skipped, not
+      // crash discovery.
+      await fs.mkdir(path.join(pluginDir, 'not-a-plugin'), { recursive: true });
+
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
+      const plugins = await loader.discoverPlugins();
+
+      expect(plugins.map((p) => p.name).sort()).toEqual(['plugin-a', 'plugin-b']);
+    });
   });
 
   describe('Security: symlink rejection', () => {
-    it('isSymlink should return true for symlinks', async () => {
-      // Test the exported helper
-      if ('isSymlink' in loaderModule) {
-        const fn = (loaderModule as Record<string, unknown>).isSymlink as (p: string) => Promise<boolean>;
-        // Non-existent path should not throw, should return false
-        const result = await fn(path.resolve(os.tmpdir(), 'definitely-not-a-symlink-xyz'));
-        expect(typeof result).toBe('boolean');
-      } else {
-        // If not exported, the security is internal — pass
-        expect(true).toBe(true);
-      }
+    it('isSymlink returns true for a real symlink and false for a real regular file/directory', async () => {
+      const realFile = path.join(tmpRoot, 'real-file.txt');
+      await fs.writeFile(realFile, 'hello');
+      const realDir = path.join(tmpRoot, 'real-dir');
+      await fs.mkdir(realDir);
+      const linkPath = path.join(tmpRoot, 'a-real-symlink');
+      await fs.symlink(realDir, linkPath, 'dir');
+
+      expect(await loaderModule.isSymlink(linkPath)).toBe(true);
+      expect(await loaderModule.isSymlink(realFile)).toBe(false);
+      expect(await loaderModule.isSymlink(realDir)).toBe(false);
+    });
+
+    it('isSymlink returns false (not throws) for a path that does not exist', async () => {
+      const result = await loaderModule.isSymlink(path.join(tmpRoot, 'definitely-not-a-symlink-xyz'));
+      expect(result).toBe(false);
+    });
+
+    it('loadPluginFromPath rejects a real symlink inside pluginDir that escapes to a plugin outside it', async () => {
+      // A real, otherwise-loadable plugin living outside the sandbox...
+      const outsideDir = await writeRealPlugin(path.join(tmpRoot, 'symlink-target-plugin'), 'symlink-target-plugin');
+      // ...reached through a real symlink planted *inside* pluginDir. If the
+      // loader only checked path containment on the string and not the
+      // symlink itself, this would resolve to a contained-looking path and
+      // load successfully.
+      const linkPath = path.join(pluginDir, 'escape-hatch');
+      await fs.symlink(outsideDir, linkPath, 'dir');
+
+      const loader = loaderModule.createSecurePluginLoader({ pluginDir });
+      await expect(loader.loadPluginFromPath(linkPath)).rejects.toThrow(/symlink/);
     });
   });
 
   describe('isContainedPath', () => {
-    it('should be exported and work correctly', () => {
-      if ('isContainedPath' in loaderModule) {
-        const fn = (loaderModule as Record<string, unknown>).isContainedPath as (
-          base: string,
-          target: string
-        ) => boolean;
-        const base = path.resolve(os.tmpdir(), 'safe', 'plugins');
-        expect(fn(base, path.join(base, 'my-plugin'))).toBe(true);
-        expect(fn(base, path.join(base, 'my-plugin', 'sub'))).toBe(true);
-        expect(fn(base, path.resolve(os.tmpdir(), 'etc', 'passwd'))).toBe(false);
-        expect(fn(base, path.join(base, '..', '..', '..', 'etc'))).toBe(false);
-      } else {
-        // Security is internal — that's fine
-        expect(true).toBe(true);
-      }
+    it('correctly distinguishes real contained paths from real escaping paths', async () => {
+      const base = pluginDir;
+      const nested = path.join(base, 'my-plugin');
+      await fs.mkdir(nested, { recursive: true });
+      const outside = path.join(tmpRoot, 'sibling-dir');
+      await fs.mkdir(outside, { recursive: true });
+
+      expect(loaderModule.isContainedPath(base, nested)).toBe(true);
+      expect(loaderModule.isContainedPath(base, path.join(nested, 'sub'))).toBe(true);
+      expect(loaderModule.isContainedPath(base, outside)).toBe(false);
+      expect(loaderModule.isContainedPath(base, path.join(base, '..', 'sibling-dir'))).toBe(false);
+      // Exact equality to base counts as contained.
+      expect(loaderModule.isContainedPath(base, base)).toBe(true);
     });
   });
 });

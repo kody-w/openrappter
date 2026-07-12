@@ -1,12 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
+VERSION="${VERSION:-0.0.0}"
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    printf 'VERSION must match X.Y.Z exactly (received %q)\n' "$VERSION" >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$PROJECT_DIR/dist"
 APP_NAME="OpenRappter Bar"
 BUNDLE_ID="com.openrappter.bar"
-VERSION="${VERSION:-1.0.0}"
 
 echo "==> Building OpenRappter Bar v${VERSION} (universal binary)..."
 

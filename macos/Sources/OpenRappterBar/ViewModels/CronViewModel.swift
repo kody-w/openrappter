@@ -18,6 +18,14 @@ public final class CronViewModel {
         self.rpcClient = rpcClient
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
+    var isRpcClientConfigured: Bool {
+        rpcClient != nil
+    }
+
     // MARK: - Jobs
 
     public func loadJobs() {

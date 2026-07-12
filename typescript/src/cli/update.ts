@@ -1,7 +1,6 @@
 import type { Command } from 'commander';
 import { checkForUpdate } from '../infra/update-check.js';
-
-const CURRENT_VERSION = '1.4.0';
+import { VERSION } from '../version.js';
 
 export function registerUpdateCommand(program: Command): void {
   program
@@ -15,7 +14,7 @@ export function registerUpdateCommand(program: Command): void {
       }
 
       console.log('Checking for updates...\n');
-      const result = await checkForUpdate(CURRENT_VERSION);
+      const result = await checkForUpdate(VERSION);
 
       console.log(`Current version: ${result.currentVersion}`);
       console.log(`Latest version:  ${result.latestVersion}`);

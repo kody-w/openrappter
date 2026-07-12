@@ -4,10 +4,32 @@ import Foundation
 public enum AppConstants {
     public static let appName = "OpenRappter"
     public static let bundleId = "com.openrappter.bar"
-    public static let version = "1.0.0"
+    public static let developmentVersion = "0.0.0"
+    public static let version = resolvedVersion(
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+    )
     public static let clientId = "openrappter-bar"
     public static let platform = "macos"
     public static let mode = "menubar"
+
+    static func resolvedVersion(_ value: Any?) -> String {
+        guard let candidate = value as? String else { return developmentVersion }
+        let components = candidate.split(separator: ".", omittingEmptySubsequences: false)
+        guard components.count == 3 else { return developmentVersion }
+        for component in components {
+            let bytes = component.utf8
+            guard
+                component == "0"
+                    || (
+                        bytes.first.map { (49...57).contains($0) } == true
+                            && bytes.dropFirst().allSatisfy { (48...57).contains($0) }
+                    )
+            else {
+                return developmentVersion
+            }
+        }
+        return candidate
+    }
 
     // MARK: - Connection
 
@@ -23,6 +45,10 @@ public enum AppConstants {
     public static let healthPollInterval: TimeInterval = 0.5
     public static let healthPollMaxWait: TimeInterval = 15
     public static let gracefulShutdownTimeout: TimeInterval = 5
+    /// Bounded wait after escalating from SIGINT to SIGTERM before escalating to SIGKILL.
+    public static let terminateTimeout: TimeInterval = 3
+    /// Bounded wait after SIGKILL — should be near-instant, but never unbounded.
+    public static let killTimeout: TimeInterval = 2
 
     // MARK: - Reconnection
 

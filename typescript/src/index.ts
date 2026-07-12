@@ -826,6 +826,10 @@ program
         console.error('Web UI not built. Run: cd ui && npm run build');
         process.exit(1);
       }
+      if (process.env.OPENRAPPTER_WEB_CHECK === '1') {
+        console.log(`${EMOJI} Web UI assets available: ${webRoot}`);
+        return;
+      }
       const { port } = await startGatewayInProcess({ webRoot });
       const url = `http://127.0.0.1:${port}`;
       console.log(`${EMOJI} Web UI: ${url}`);

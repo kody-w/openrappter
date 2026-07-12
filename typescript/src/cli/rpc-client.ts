@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { VERSION } from '../version.js';
 
 export class RpcClient {
   private ws: WebSocket | null = null;
@@ -12,7 +13,7 @@ export class RpcClient {
         try {
           // Send connect handshake
           await this.call('connect', {
-            client: { id: 'cli', version: '1.4.0', platform: process.platform, mode: 'cli' },
+            client: { id: 'cli', version: VERSION, platform: process.platform, mode: 'cli' },
             auth: token ? { token } : undefined,
           });
           resolve();

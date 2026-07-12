@@ -9,6 +9,8 @@ public struct Channel: Codable, Identifiable, Sendable {
     public var enabled: Bool
     public var config: [String: AnyCodable]?
     public var status: ChannelStatus
+    public var actionable: Bool
+    public var configurable: Bool
 
     public init(
         id: String = UUID().uuidString,
@@ -16,7 +18,9 @@ public struct Channel: Codable, Identifiable, Sendable {
         type: ChannelType,
         enabled: Bool = false,
         config: [String: AnyCodable]? = nil,
-        status: ChannelStatus = .disconnected
+        status: ChannelStatus = .disconnected,
+        actionable: Bool = true,
+        configurable: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -24,6 +28,8 @@ public struct Channel: Codable, Identifiable, Sendable {
         self.enabled = enabled
         self.config = config
         self.status = status
+        self.actionable = actionable
+        self.configurable = configurable
     }
 }
 

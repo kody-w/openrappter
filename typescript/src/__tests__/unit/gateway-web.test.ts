@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { GatewayServer } from '../../gateway/server.js';
 
 describe('Gateway static file serving', () => {
@@ -11,7 +10,7 @@ describe('Gateway static file serving', () => {
 
   beforeAll(() => {
     // Create a temp web root with test files
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gw-web-'));
+    tmpDir = fs.mkdtempSync(path.join(process.cwd(), '.gateway-web-'));
     fs.writeFileSync(path.join(tmpDir, 'index.html'), '<html><body>Hello</body></html>');
     fs.writeFileSync(path.join(tmpDir, 'app.js'), 'console.log("app")');
     fs.writeFileSync(path.join(tmpDir, 'style.css'), 'body { color: red; }');
@@ -26,7 +25,12 @@ describe('Gateway static file serving', () => {
   beforeEach(async () => {
     // Use a random high port
     port = 19000 + Math.floor(Math.random() * 1000);
-    server = new GatewayServer({ port, bind: 'loopback', webRoot: tmpDir });
+    server = new GatewayServer({
+      port,
+      bind: 'loopback',
+      webRoot: tmpDir,
+      dataDir: path.join(tmpDir, 'data'),
+    });
     await server.start();
   });
 

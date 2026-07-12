@@ -17,6 +17,14 @@ public final class ChannelsViewModel {
         self.rpcClient = rpcClient
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
+    var isRpcClientConfigured: Bool {
+        rpcClient != nil
+    }
+
     // MARK: - Actions
 
     public func loadChannels() {
@@ -37,7 +45,7 @@ public final class ChannelsViewModel {
     }
 
     public func enableChannel(_ channel: Channel) {
-        guard let rpc = rpcClient else { return }
+        guard channel.actionable, let rpc = rpcClient else { return }
         Task {
             do {
                 try await rpc.enableChannel(channelId: channel.id)
@@ -49,7 +57,7 @@ public final class ChannelsViewModel {
     }
 
     public func disableChannel(_ channel: Channel) {
-        guard let rpc = rpcClient else { return }
+        guard channel.actionable, let rpc = rpcClient else { return }
         Task {
             do {
                 try await rpc.disableChannel(channelId: channel.id)
@@ -60,20 +68,8 @@ public final class ChannelsViewModel {
         }
     }
 
-    public func deleteChannel(_ channel: Channel) {
-        guard let rpc = rpcClient else { return }
-        Task {
-            do {
-                try await rpc.deleteChannel(channelId: channel.id)
-                channels.removeAll { $0.id == channel.id }
-            } catch {
-                self.error = error.localizedDescription
-            }
-        }
-    }
-
     public func testChannel(_ channel: Channel) {
-        guard let rpc = rpcClient else { return }
+        guard channel.actionable, let rpc = rpcClient else { return }
         Task {
             do {
                 try await rpc.testChannel(channelId: channel.id)

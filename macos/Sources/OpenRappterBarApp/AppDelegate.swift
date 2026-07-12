@@ -38,6 +38,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public let settingsViewModel = SettingsViewModel()
     private let deepLinkHandler = DeepLinkHandler()
 
+    /// Set once the async shutdown path has completed, so a re-entrant
+    /// `applicationShouldTerminate` (e.g. `terminate(nil)` called again while
+    /// the first `.terminateLater` reply is still pending) can approve
+    /// immediately instead of re-running teardown.
+    private var didFinishShutdown = false
+
     // MARK: - Lifecycle
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -75,18 +81,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.onRpcClientReady = { [weak self] rpc in
             self?.settingsViewModel.configure(rpcClient: rpc)
         }
+        viewModel.onRpcClientInvalidated = { [weak self] in
+            self?.settingsViewModel.clearConfiguration()
+        }
 
         // Configure account auth with gateway restart capability
         settingsViewModel.configureAccount(
-            processManager: viewModel.processManager,
-            onGatewayRestarted: { [weak self] in
-                guard let self else { return }
-                self.viewModel.connectToGateway(
+            restartGateway: { [weak self] in
+                guard let self else { return Task {} }
+                return self.viewModel.restartGatewayAfterAuthentication(
                     host: self.settingsViewModel.settingsStore.host,
                     port: self.settingsViewModel.settingsStore.port
                 )
             }
         )
+    }
+
+    // MARK: - Termination
+
+    /// The single async shutdown path for app termination. Menu quit and the
+    /// "Quit" button both call `NSApplication.shared.terminate(nil)`, which
+    /// routes here — so there is exactly one place that stops background
+    /// loops, disconnects the WebSocket, and stops only the gateway process
+    /// this app started, before the app is actually allowed to exit.
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if didFinishShutdown { return .terminateNow }
+
+        Task { @MainActor [weak self] in
+            guard let self else {
+                NSApp.reply(toApplicationShouldTerminate: true)
+                return
+            }
+            await self.viewModel.shutdown()
+            self.didFinishShutdown = true
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     // MARK: - Status Item Setup
@@ -185,7 +215,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuDisconnect() {
-        viewModel.disconnectFromGateway()
+        Task { await viewModel.disconnectFromGateway() }
     }
 
     @objc private func menuStartGateway() {
@@ -236,7 +266,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if auth.authState == .authenticated {
                 viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
-                settingsViewModel.accountViewModel.restartGatewayAfterAuth()
+                await settingsViewModel.accountViewModel.restartGatewayAfterAuth().value
             }
             viewModel.chatViewModel.authFlowFinished(succeeded: auth.authState == .authenticated)
         }

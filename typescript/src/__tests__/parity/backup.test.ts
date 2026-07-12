@@ -24,7 +24,7 @@ describe('Backup & Restore', () => {
   let backupsDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openrappter-backup-test-'));
+    tmpDir = fs.mkdtempSync(path.join(process.cwd(), '.openrappter-backup-test-'));
     backupsDir = path.join(tmpDir, 'backups');
   });
 
@@ -192,12 +192,44 @@ describe('Backup & Restore', () => {
   });
 
   describe('Backup deletion (scoped)', () => {
-    it('should delete a backup directory', () => {
+    it('deletes only a canonical ID returned by listBackups', () => {
       const backup = createTestBackup({ 'test.json': '{}' });
       expect(fs.existsSync(backup.path)).toBe(true);
+      expect(listBackups(tmpDir).map(({ id }) => id)).toContain(backup.id);
 
-      fs.rmSync(backup.path, { recursive: true, force: true });
+      expect(deleteBackup(backup.id, tmpDir)).toBe(true);
       expect(fs.existsSync(backup.path)).toBe(false);
+    });
+
+    it.each([
+      '..',
+      '../outside',
+      'nested/backup',
+      'nested\\backup',
+      'unknown-backup-id',
+    ])('rejects unsafe or unknown backup ID %s', (id) => {
+      const backup = createTestBackup({ 'test.json': '{}' });
+      const outside = path.join(tmpDir, 'outside');
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+
+      expect(deleteBackup(id, tmpDir)).toBe(false);
+      expect(fs.existsSync(backup.path)).toBe(true);
+      expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8')).toBe('keep');
+    });
+
+    it('rejects a symlink in the backup root', () => {
+      const backup = createTestBackup({ 'test.json': '{}' });
+      const outside = path.join(tmpDir, 'outside');
+      fs.mkdirSync(outside, { recursive: true });
+      fs.writeFileSync(path.join(outside, 'keep.txt'), 'keep');
+      const symlinkId = '2099-02-02T00-00-00-000Z';
+      fs.symlinkSync(outside, path.join(backupsDir, symlinkId), 'dir');
+
+      expect(listBackups(tmpDir).map(({ id }) => id)).toContain(backup.id);
+      expect(listBackups(tmpDir).map(({ id }) => id)).not.toContain(symlinkId);
+      expect(deleteBackup(symlinkId, tmpDir)).toBe(false);
+      expect(fs.readFileSync(path.join(outside, 'keep.txt'), 'utf-8')).toBe('keep');
     });
   });
 });

@@ -30,14 +30,22 @@ import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import type { RappterManager } from './rappter-manager.js';
 import { VERSION } from '../version.js';
+import {
+  GatewayMetrics,
+  GatewayTimeoutError,
+  logGatewayLifecycle,
+  logGatewayRequest,
+} from './observability.js';
 
 const DEFAULT_PORT = 18790;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
+const DEFAULT_SHUTDOWN_TIMEOUT = 250;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const PROTOCOL_VERSION = 3;
 const VOICE_DELIMITER = '|||VOICE|||';
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 /** Parse a response that may contain a |||VOICE||| delimiter into formatted + voice parts */
 function parseVoiceDelimiter(content: string): { text: string; voiceText: string } {
@@ -55,9 +63,33 @@ function parseVoiceDelimiter(content: string): { text: string; voiceText: string
   return { text: content.trim(), voiceText };
 }
 
+/** Resolve a session identifier from params that may use either the
+ * canonical `sessionId` field or the legacy/alternate `sessionKey` field
+ * used by chat.send and several native clients (e.g. the macOS app).
+ * Both names refer to the same concept; this keeps every chat.* handler
+ * accepting whichever one a caller sends instead of requiring exact-name
+ * matches at the RPC boundary. */
+function resolveSessionId(params: { sessionId?: string; sessionKey?: string }): string | undefined {
+  return params.sessionId ?? params.sessionKey;
+}
+
 interface RateLimitEntry {
   count: number;
   windowStart: number;
+}
+
+interface ActiveRun {
+  runId: string;
+  sessionId: string;
+  aborted: boolean;
+  generation: number;
+}
+
+interface ActiveOperation {
+  generation: number;
+  aborted: boolean;
+  counted: boolean;
+  promise?: Promise<unknown>;
 }
 
 /**
@@ -74,6 +106,13 @@ function safeCompare(a: string, b: string): boolean {
 
 type StreamCallback = (response: StreamingResponse) => void;
 
+class GatewayStoppedError extends Error {
+  constructor() {
+    super('Gateway stopped during method execution');
+    this.name = 'GatewayStoppedError';
+  }
+}
+
 /** Parsed incoming frame — either new protocol or legacy JSON-RPC */
 interface ParsedFrame {
   type: 'req';
@@ -87,10 +126,16 @@ export class GatewayServer {
   private httpServer: ReturnType<typeof createServer> | null = null;
   private connections = new Map<string, { ws: WebSocket; info: ConnectionInfo }>();
   private methods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
+  private publicHttpMethods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private rateLimits = new Map<string, RateLimitEntry>();
   private config: GatewayConfig;
   private startedAt: number | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private generation = 0;
+  private stopping = true;
+  private stopPromise: Promise<void> | null = null;
+  private activeOperations = new Set<ActiveOperation>();
+  private readonly metrics = new GatewayMetrics();
 
   // Rappter multi-soul manager
   private rappterManager?: RappterManager;
@@ -104,6 +149,8 @@ export class GatewayServer {
     stream?: StreamCallback
   ) => Promise<AgentResponse>;
   private sessionStore = new Map<string, ChatSession>();
+  private activeRunsById = new Map<string, ActiveRun>();
+  private activeRunBySession = new Map<string, string>();
   private channelRegistry?: {
     getStatusList(): { id: string; type: string; connected: boolean; configured: boolean; running: boolean; lastActivity?: string; lastConnectedAt?: string; messageCount: number }[];
     sendMessage(request: SendMessageRequest): Promise<void>;
@@ -131,6 +178,9 @@ export class GatewayServer {
       heartbeatInterval: config?.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL,
       connectionTimeout: config?.connectionTimeout ?? DEFAULT_CONNECTION_TIMEOUT,
       webRoot: config?.webRoot,
+      dataDir: config?.dataDir,
+      executionTimeoutMs: config?.executionTimeoutMs,
+      shutdownTimeoutMs: config?.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT,
     };
     this.loadSessions();
     this.loadCronStore();
@@ -139,7 +189,7 @@ export class GatewayServer {
   /* ---- persistence ---- */
 
   private get dataDir(): string {
-    const dir = path.join(os.homedir(), '.openrappter');
+    const dir = this.config.dataDir ?? path.join(os.homedir(), '.openrappter');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -203,6 +253,77 @@ export class GatewayServer {
     } catch { /* ignore */ }
   }
 
+  private isGenerationActive(generation: number): boolean {
+    return !this.stopping && generation === this.generation && this.wss !== null;
+  }
+
+  /**
+   * Track work that ultimately runs outside the gateway (agent providers and
+   * cron services). Stop can fence its callbacks and wait briefly for it, but
+   * the legacy handler contracts do not expose an AbortSignal, so underlying
+   * cancellation remains best effort.
+   */
+  private async runAgentOperation<T>(
+    generation: number,
+    task: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.isGenerationActive(generation)) throw new GatewayStoppedError();
+
+    const operation: ActiveOperation = {
+      generation,
+      aborted: false,
+      counted: true,
+    };
+    this.activeOperations.add(operation);
+    this.metrics.agentExecutionStarted();
+
+    const promise = Promise.resolve().then(task);
+    operation.promise = promise;
+
+    try {
+      const result = await promise;
+      if (operation.aborted || !this.isGenerationActive(generation)) {
+        throw new GatewayStoppedError();
+      }
+      return result;
+    } finally {
+      this.activeOperations.delete(operation);
+      if (operation.counted) {
+        operation.counted = false;
+        this.metrics.agentExecutionFinished();
+      }
+    }
+  }
+
+  private abortGenerationOperations(generation: number): Promise<unknown>[] {
+    const pending: Promise<unknown>[] = [];
+    for (const operation of this.activeOperations) {
+      if (operation.generation !== generation) continue;
+      operation.aborted = true;
+      if (operation.counted) {
+        operation.counted = false;
+        this.metrics.agentExecutionFinished();
+      }
+      if (operation.promise) pending.push(operation.promise);
+    }
+    return pending;
+  }
+
+  private async waitBoundedly(promises: Promise<unknown>[], timeoutMs: number): Promise<boolean> {
+    if (promises.length === 0) return true;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        Promise.allSettled(promises).then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   setAgentHandler(
     handler: (request: AgentRequest, stream?: StreamCallback) => Promise<AgentResponse>
   ): void {
@@ -239,6 +360,12 @@ export class GatewayServer {
     this.cronService = service;
   }
 
+  private async runCronServiceJob(jobId: string, generation = this.generation): Promise<void> {
+    if (!this.cronService) throw new Error('Cron service not configured');
+    const cronService = this.cronService;
+    await this.runAgentOperation(generation, () => cronService.run(jobId));
+  }
+
   setAgentList(listFn: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[]): void {
     this.agentList = listFn;
   }
@@ -259,17 +386,29 @@ export class GatewayServer {
   }
 
   async start(): Promise<void> {
+    if (this.stopPromise) await this.stopPromise;
     if (this.wss) return;
+    if (this.config.bind === 'all' && (this.config.auth?.mode ?? 'none') === 'none') {
+      throw new Error('Gateway auth is required when binding to all interfaces');
+    }
 
     const host = this.config.bind === 'loopback' ? '127.0.0.1' : '0.0.0.0';
+    this.generation++;
+    this.stopping = false;
 
     this.httpServer = createServer((req, res) => this.handleHttpRequest(req, res));
 
-    this.wss = new WebSocketServer({ server: this.httpServer });
+    this.wss = new WebSocketServer({
+      server: this.httpServer,
+      verifyClient: (info: { req: IncomingMessage }) => this.validateRequestSource(info.req).ok,
+    });
     this.startedAt = Date.now();
+    this.metrics.start();
 
     this.wss.on('connection', (ws, req) => this.handleConnection(ws, req));
-    this.wss.on('error', (error) => console.error('Gateway server error:', error));
+    this.wss.on('error', (error) => logGatewayLifecycle(
+      'gateway', 'listener.error', `Gateway server error: ${error.message}`, undefined, 'error'
+    ));
 
     this.registerBuiltInMethods();
     this.startHeartbeat();
@@ -279,33 +418,91 @@ export class GatewayServer {
       this.httpServer!.on('error', reject);
     });
 
-    console.log(`Gateway server started on ${host}:${this.config.port}`);
+    logGatewayLifecycle(
+      'gateway',
+      'start',
+      `Gateway server started on ${host}:${this.config.port}`,
+      { host, port: this.config.port }
+    );
   }
 
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    const stopPromise = this.stopInternal();
+    this.stopPromise = stopPromise;
+    try {
+      await stopPromise;
+    } finally {
+      if (this.stopPromise === stopPromise) this.stopPromise = null;
+    }
+  }
+
+  private async stopInternal(): Promise<void> {
+    if (!this.wss && !this.httpServer && this.startedAt === null) return;
+
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
 
     this.broadcastEvent(GatewayEvents.SHUTDOWN, { reason: 'Server shutting down' });
+    const stoppedGeneration = this.generation;
+    this.stopping = true;
+    this.generation++;
+
+    for (const run of [...this.activeRunsById.values()]) {
+      this.abortActiveRun(run, false);
+    }
+    this.activeRunsById.clear();
+    this.activeRunBySession.clear();
+    const pendingOperations = this.abortGenerationOperations(stoppedGeneration);
 
     for (const { ws } of this.connections.values()) {
       ws.close(1000, 'Server shutting down');
     }
     this.connections.clear();
+    this.rateLimits.clear();
 
-    if (this.wss) {
-      await new Promise<void>((resolve) => this.wss!.close(() => resolve()));
-      this.wss = null;
+    const wss = this.wss;
+    const httpServer = this.httpServer;
+    this.wss = null;
+    this.httpServer = null;
+
+    const shutdownWaits: Promise<unknown>[] = [...pendingOperations];
+    if (wss) {
+      shutdownWaits.push(new Promise<void>((resolve) => {
+        try {
+          wss.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      }));
+    }
+    if (httpServer) {
+      shutdownWaits.push(new Promise<void>((resolve) => {
+        try {
+          httpServer.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      }));
     }
 
-    if (this.httpServer) {
-      await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));
-      this.httpServer = null;
+    const drained = await this.waitBoundedly(
+      shutdownWaits,
+      this.config.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT,
+    );
+    if (!drained) {
+      for (const client of wss?.clients ?? []) client.terminate();
+      const forceClose = httpServer as typeof httpServer & {
+        closeAllConnections?: () => void;
+      };
+      forceClose?.closeAllConnections?.();
     }
 
     this.startedAt = null;
+    this.metrics.stop();
+    logGatewayLifecycle('gateway', 'stop', 'Gateway server stopped');
   }
 
   getStatus(): GatewayStatus {
@@ -316,11 +513,13 @@ export class GatewayServer {
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0,
       version: VERSION,
       startedAt: this.startedAt ? new Date(this.startedAt).toISOString() : '',
+      metrics: this.metrics.snapshot(this.connections.size),
     };
   }
 
   /** Broadcast an event to all authenticated connections (type: "event" frame) */
   broadcastEvent(event: string, payload: unknown, filter?: (conn: ConnectionInfo) => boolean): void {
+    if (this.stopping || !this.wss) return;
     const frame = JSON.stringify({ type: 'event', event, payload });
 
     for (const { ws, info } of this.connections.values()) {
@@ -360,13 +559,82 @@ export class GatewayServer {
     '.map': 'application/json',
   };
 
-  private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
-    // CORS headers — allow local browser apps to connect (Amendment VII: Parent's Porch)
-    const corsHeaders: Record<string, string> = {
-      'Access-Control-Allow-Origin': '*',
+  /**
+   * Browser requests must come from the exact gateway origin. Originless
+   * native clients remain supported, but Host is always validated to block
+   * DNS-rebinding aliases from reaching an unauthenticated loopback gateway.
+   */
+  private validateRequestSource(req: IncomingMessage): { ok: boolean; origin?: string } {
+    const hostHeader = req.headers.host;
+    if (!hostHeader || hostHeader.length > 255) return { ok: false };
+
+    let authority: URL;
+    try {
+      authority = new URL(`http://${hostHeader}`);
+    } catch {
+      return { ok: false };
+    }
+    if (
+      authority.username
+      || authority.password
+      || authority.pathname !== '/'
+      || authority.search
+      || authority.hash
+    ) {
+      return { ok: false };
+    }
+
+    const hostname = authority.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (this.config.bind === 'loopback' && !LOOPBACK_HOSTS.has(hostname)) {
+      return { ok: false };
+    }
+
+    const originHeader = req.headers.origin;
+    if (originHeader === undefined) return { ok: true };
+    if (Array.isArray(originHeader)) return { ok: false };
+
+    let origin: URL;
+    try {
+      origin = new URL(originHeader);
+    } catch {
+      return { ok: false };
+    }
+
+    const expectedProtocol = (req.socket as typeof req.socket & { encrypted?: boolean }).encrypted
+      ? 'https:'
+      : 'http:';
+    if (
+      origin.protocol !== expectedProtocol
+      || origin.username
+      || origin.password
+      || origin.pathname !== '/'
+      || origin.search
+      || origin.hash
+      || origin.host.toLowerCase() !== authority.host.toLowerCase()
+    ) {
+      return { ok: false };
+    }
+
+    return { ok: true, origin: origin.origin };
+  }
+
+  private corsHeaders(origin?: string): Record<string, string> {
+    return {
+      ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Gateway-Token',
+      Vary: 'Origin',
     };
+  }
+
+  private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    const source = this.validateRequestSource(req);
+    if (!source.ok) {
+      res.writeHead(403, { 'Content-Type': 'application/json', Vary: 'Origin' });
+      res.end(JSON.stringify({ error: 'Forbidden request origin' }));
+      return;
+    }
+    const corsHeaders = this.corsHeaders(source.origin);
 
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
@@ -389,23 +657,84 @@ export class GatewayServer {
 
     // JSON-RPC over HTTP POST — allows browser games and local apps to call the gateway
     if (req.method === 'POST') {
+      const requestGeneration = this.generation;
       let body = '';
       req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
       req.on('end', async () => {
+        const dispatchStartedAt = Date.now();
         try {
+          if (!this.isGenerationActive(requestGeneration)) {
+            if (!res.writableEnded) {
+              res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: 'Gateway is stopping' }));
+            }
+            return;
+          }
+
           const parsed = JSON.parse(body);
-          if (parsed.jsonrpc === '2.0' && parsed.method) {
+          if (parsed.jsonrpc === '2.0' && typeof parsed.method === 'string') {
+            const authenticated = this.resolveHttpAuthenticated(req, parsed);
             const method = this.methods.get(parsed.method);
-            if (method) {
-              const result = await method.handler(parsed.params || {}, { id: "http", connectedAt: new Date().toISOString(), authenticated: true, subscriptions: new Set(), lastActivity: Date.now(), metadata: {} } as any);
+            const isPublicMethod = !!method
+              && this.publicHttpMethods.get(parsed.method) === method;
+
+            // HTTP is fail-closed whenever gateway credentials are configured:
+            // every method except the immutable built-in health handlers
+            // requires a valid credential, regardless of registration
+            // metadata. A plugin replacing a public name does not inherit
+            // the original handler's exemption.
+            if (!isPublicMethod && !authenticated) {
+              this.metrics.recordRequest('auth_failure');
+              logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'auth_failure', durationMs: Date.now() - dispatchStartedAt });
+              res.writeHead(401, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.UNAUTHORIZED, message: `Method '${parsed.method}' requires authentication` } }));
+              return;
+            }
+
+            if (!method) {
+              this.metrics.recordRequest('error');
+              logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'error', durationMs: Date.now() - dispatchStartedAt });
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.METHOD_NOT_FOUND, message: `Method not found: ${parsed.method}` } }));
+              return;
+            }
+
+            const info: ConnectionInfo = {
+              id: 'http',
+              connectedAt: new Date().toISOString(),
+              authenticated,
+              subscriptions: new Set(),
+              lastActivity: Date.now(),
+              metadata: {},
+            };
+            try {
+              const result = await this.runWithTimeout(method.handler(parsed.params || {}, info));
+              if (!this.isGenerationActive(requestGeneration)) return;
+              this.metrics.recordRequest('success');
+              logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'success', durationMs: Date.now() - dispatchStartedAt });
               res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
               res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result }));
-            } else {
+            } catch (error) {
+              if (
+                error instanceof GatewayStoppedError
+                || !this.isGenerationActive(requestGeneration)
+              ) {
+                return;
+              }
+              if (error instanceof GatewayTimeoutError) {
+                this.metrics.recordRequest('timeout');
+                logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'timeout', durationMs: Date.now() - dispatchStartedAt });
+                res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+                res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.TIMEOUT, message: error.message } }));
+                return;
+              }
+              this.metrics.recordRequest('error');
+              logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'error', durationMs: Date.now() - dispatchStartedAt });
               res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32601, message: `Method not found: ${parsed.method}` } }));
+              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } }));
             }
           } else {
-            // Plain chat message (backwards compatible)
+            // Plain chat message (backwards compatible) — not an RPC dispatch, not counted in metrics
             const chatMsg = parsed.message || parsed.query || body;
             const status = this.getStatus();
             res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
@@ -500,6 +829,7 @@ export class GatewayServer {
         agents: !!this.agentHandler,
         copilot: !!this.onAuthTokenUpdate,
       },
+      metrics: this.metrics.snapshot(this.connections.size),
     };
   }
 
@@ -613,8 +943,14 @@ export class GatewayServer {
    * and never invoke the underlying handler.
    */
   private async dispatchMethod(connId: string, ws: WebSocket, info: ConnectionInfo, frame: ParsedFrame): Promise<void> {
+    const startedAt = Date.now();
+    const dispatchGeneration = this.generation;
+    if (!this.isGenerationActive(dispatchGeneration)) return;
+
     // Rate limit
     if (!this.checkRateLimit(connId)) {
+      this.metrics.recordRequest('rate_limited');
+      logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'rate_limited', durationMs: Date.now() - startedAt });
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.RATE_LIMITED, message: 'Rate limit exceeded' } });
       return;
     }
@@ -622,23 +958,230 @@ export class GatewayServer {
     // Find method
     const method = this.methods.get(frame.method);
     if (!method) {
+      this.metrics.recordRequest('error');
+      logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'error', durationMs: Date.now() - startedAt });
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.METHOD_NOT_FOUND, message: `Method '${frame.method}' not found` } });
       return;
     }
 
     // Enforce per-method auth requirement — fail closed, do not call the handler.
     if (method.requiresAuth && !info.authenticated) {
+      this.metrics.recordRequest('auth_failure');
+      logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'auth_failure', durationMs: Date.now() - startedAt });
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: `Method '${frame.method}' requires authentication` } });
       return;
     }
 
-    // Execute
+    // Execute. Streaming calls have exactly one terminal streaming frame;
+    // they never also receive a normal `type: "res"` frame.
+    const wantsStream = frame.params?.stream === true;
+    let providerSettled = false;
+    let terminalSent = false;
+    let streamErrored = false;
+    const stream: StreamCallback | undefined = wantsStream
+      ? (response) => {
+          if (
+            providerSettled
+            || terminalSent
+            || !this.isGenerationActive(dispatchGeneration)
+          ) {
+            return;
+          }
+          if (response.error) {
+            providerSettled = true;
+            terminalSent = true;
+            streamErrored = true;
+            this.sendFrame(ws, {
+              id: frame.id,
+              streaming: true,
+              done: true,
+              error: response.error,
+            });
+            return;
+          }
+
+          // Providers may emit a legacy done marker before their promise
+          // resolves. It settles provider output immediately (so late
+          // callbacks are ignored), while the dispatcher retains ownership
+          // of the one terminal frame containing the actual method result.
+          if (response.done) {
+            providerSettled = true;
+            return;
+          }
+
+          this.sendFrame(ws, {
+            id: frame.id,
+            streaming: true,
+            ...(response.chunk !== undefined ? { chunk: response.chunk } : {}),
+            ...(response.toolOutput !== undefined ? { toolOutput: response.toolOutput } : {}),
+          });
+        }
+      : undefined;
+
     try {
-      const result = await method.handler(frame.params ?? {}, info);
+      const result = await this.runWithTimeout(method.handler(frame.params ?? {}, info, stream));
+      if (!this.isGenerationActive(dispatchGeneration)) return;
+      const outcome = streamErrored ? 'error' : 'success';
+      this.metrics.recordRequest(outcome);
+      logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome, durationMs: Date.now() - startedAt });
+
+      if (wantsStream) {
+        if (!terminalSent) {
+          providerSettled = true;
+          terminalSent = true;
+          this.sendFrame(ws, {
+            id: frame.id,
+            streaming: true,
+            done: true,
+            result,
+            payload: result,
+          });
+        }
+        return;
+      }
+
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: true, payload: result });
     } catch (error) {
-      this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } });
+      if (
+        error instanceof GatewayStoppedError
+        || !this.isGenerationActive(dispatchGeneration)
+      ) {
+        return;
+      }
+      if (error instanceof GatewayTimeoutError) {
+        this.metrics.recordRequest('timeout');
+        logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'timeout', durationMs: Date.now() - startedAt });
+        if (!terminalSent && wantsStream) {
+          providerSettled = true;
+          terminalSent = true;
+          this.sendFrame(ws, {
+            id: frame.id,
+            streaming: true,
+            done: true,
+            error: { code: RPC_ERROR.TIMEOUT, message: error.message },
+          });
+        } else if (!wantsStream) {
+          this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.TIMEOUT, message: error.message } });
+        }
+        return;
+      }
+      this.metrics.recordRequest('error');
+      logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'error', durationMs: Date.now() - startedAt });
+      if (!terminalSent && wantsStream) {
+        providerSettled = true;
+        terminalSent = true;
+        this.sendFrame(ws, {
+          id: frame.id,
+          streaming: true,
+          done: true,
+          error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message },
+        });
+      } else if (!wantsStream) {
+        this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } });
+      }
     }
+  }
+
+  /**
+   * Race a method handler's promise against `config.executionTimeoutMs`
+   * (disabled by default so existing long-running methods keep working
+   * unless a server explicitly opts in). On expiry the returned promise
+   * rejects with `GatewayTimeoutError`, which both dispatch paths
+   * classify as the `timeout` metric/error rather than a generic error.
+   */
+  private async runWithTimeout<T>(promise: Promise<T>): Promise<T> {
+    const timeoutMs = this.config.executionTimeoutMs;
+    if (!timeoutMs) return promise;
+
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new GatewayTimeoutError()), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Canonical auth-credential policy — the single source of truth for
+   * whether a supplied `{ token, password }` credential satisfies the
+   * gateway's configured `auth.mode`. Used by both the WebSocket connect
+   * handshake (`handleConnect`) and the HTTP JSON-RPC transport
+   * (`resolveHttpAuthenticated`) so neither transport can drift out of
+   * sync with the other or accidentally synthesize a passing result.
+   *
+   * - `mode: 'none'` (default, typical for loopback binds): always valid —
+   *   preserves existing trusted-local behavior.
+   * - `mode: 'token'`: requires `token` to constant-time-match one of
+   *   `config.auth.tokens`.
+   * - `mode: 'password'`: requires `password` to constant-time-match
+   *   `config.auth.password`.
+   */
+  private isAuthCredentialValid(credential?: { token?: string; password?: string }): boolean {
+    const authMode = this.config.auth?.mode ?? 'none';
+    if (authMode === 'none') return true;
+
+    if (authMode === 'token') {
+      const token = credential?.token;
+      const validTokens = this.config.auth?.tokens ?? [];
+      return !!token && validTokens.some((candidate) => safeCompare(candidate, token));
+    }
+
+    if (authMode === 'password') {
+      const password = credential?.password;
+      const expected = this.config.auth?.password;
+      return !!password && !!expected && safeCompare(password, expected);
+    }
+
+    return false;
+  }
+
+  /**
+   * Extract an auth credential from an HTTP request: supports the standard
+   * `Authorization: Bearer <token-or-password>` header, the
+   * `X-Gateway-Token` header (convenience alias), and a JSON-RPC body
+   * `auth: { token, password }` field (mirrors the WS connect handshake
+   * shape) for callers that cannot set custom headers. Never fabricates a
+   * credential — returns `undefined` fields when nothing was supplied.
+   */
+  private extractHttpAuthCredential(
+    req: IncomingMessage,
+    body?: Record<string, unknown>
+  ): { token?: string; password?: string } {
+    let bearer: string | undefined;
+    const authHeader = req.headers['authorization'];
+    if (typeof authHeader === 'string') {
+      const match = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+      if (match) bearer = match[1].trim();
+    }
+    if (!bearer) {
+      const tokenHeader = req.headers['x-gateway-token'];
+      if (typeof tokenHeader === 'string' && tokenHeader.trim()) bearer = tokenHeader.trim();
+    }
+
+    const bodyAuth = body?.auth as { token?: string; password?: string } | undefined;
+    const authMode = this.config.auth?.mode ?? 'none';
+
+    return {
+      token: bodyAuth?.token ?? (authMode === 'token' ? bearer : undefined),
+      password: bodyAuth?.password ?? (authMode === 'password' ? bearer : undefined),
+    };
+  }
+
+  /**
+   * Fail-closed HTTP authentication check for JSON-RPC-over-HTTP requests.
+   * Mirrors the WS connect handshake's credential policy exactly (via
+   * `isAuthCredentialValid`) instead of ever synthesizing `authenticated:
+   * true`. Only matters for methods registered with `requiresAuth: true` —
+   * public methods remain callable without a credential, same as the WS
+   * dispatch path.
+   */
+  private resolveHttpAuthenticated(req: IncomingMessage, body?: Record<string, unknown>): boolean {
+    const credential = this.extractHttpAuthCredential(req, body);
+    return this.isAuthCredentialValid(credential);
   }
 
   /** Parse both new-protocol frames and legacy JSON-RPC */
@@ -665,25 +1208,15 @@ export class GatewayServer {
       return;
     }
 
-    // Auth check
-    const authMode = this.config.auth?.mode ?? 'none';
-    if (authMode === 'token') {
-      const auth = params.auth as { token?: string } | undefined;
-      const token = auth?.token;
-      const validTokens = this.config.auth?.tokens ?? [];
-      const tokenValid = !!token && validTokens.some((candidate) => safeCompare(candidate, token));
-      if (!tokenValid) {
-        this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: 'Invalid or missing auth token' } });
-        return;
-      }
-    } else if (authMode === 'password') {
-      const auth = params.auth as { password?: string } | undefined;
-      const expected = this.config.auth?.password;
-      const passwordValid = !!auth?.password && !!expected && safeCompare(auth.password, expected);
-      if (!passwordValid) {
-        this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: 'Invalid or missing password' } });
-        return;
-      }
+    // Auth check — delegates to the same fail-closed credential policy used
+    // by the HTTP JSON-RPC transport (see `isAuthCredentialValid`) so WS and
+    // HTTP callers are held to one canonical auth contract.
+    const auth = params.auth as { token?: string; password?: string } | undefined;
+    if (!this.isAuthCredentialValid(auth)) {
+      const authMode = this.config.auth?.mode ?? 'none';
+      const message = authMode === 'password' ? 'Invalid or missing password' : 'Invalid or missing auth token';
+      this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message } });
+      return;
     }
 
     // Handshake succeeded
@@ -746,11 +1279,39 @@ export class GatewayServer {
 
   // ── Built-in Methods ─────────────────────────────────────────────────
 
+  /**
+   * Canonical RPC method registration path.
+   *
+   * This is the *single* place production method names/handlers/auth
+   * requirements are wired for the live GatewayServer — chat/channels/
+   * cron/connections/config here operate on this server's real state
+   * (`sessionStore`, `channelRegistry`, `cronStore`/`cronService`) and are
+   * the authoritative implementations for those names.
+   *
+   * `typescript/src/gateway/methods/*.ts` (aggregated by
+   * `methods/index.ts#registerAllMethods`) are standalone, independently
+   * unit-tested RPC method modules. Several of them declare the *same*
+   * method names as the ones below (e.g. `chat.list`, `channels.connect`,
+   * `cron.*`, `connections.list`, `config.get`/`config.set`) against their
+   * own local/disconnected dependencies. `registerAllMethods` is
+   * intentionally **not** invoked here: doing so would silently duplicate
+   * or override the real, wired handlers below with divergent
+   * implementations (the exact failure mode this method's doc-comment
+   * exists to prevent). Do not call `registerAllMethods` from
+   * `GatewayServer` without first reconciling those overlaps.
+   */
   private registerBuiltInMethods(): void {
     // Core
-    this.registerMethod('status', async () => this.getStatus());
-    this.registerMethod('health', async () => this.getHealthResponse());
-    this.registerMethod('ping', async () => ({ pong: Date.now() }));
+    const publicMethods: Array<[string, RpcMethodHandler]> = [
+      ['status', async () => this.getStatus()],
+      ['health', async () => this.getHealthResponse()],
+      ['ping', async () => ({ pong: Date.now() })],
+    ];
+    this.publicHttpMethods.clear();
+    for (const [name, handler] of publicMethods) {
+      this.registerMethod(name, handler);
+      this.publicHttpMethods.set(name, this.methods.get(name)!);
+    }
     this.registerMethod('methods', async () => Array.from(this.methods.keys()));
 
     // Agents
@@ -769,13 +1330,19 @@ export class GatewayServer {
     // chat.send — primary chat entry point (openclaw-compatible)
     this.registerMethod(
       'chat.send',
-      async (params: { sessionKey?: string; message?: string; idempotencyKey?: string }, conn) => {
+      async (params: { sessionKey?: string; sessionId?: string; message?: string; idempotencyKey?: string }, conn) => {
         const message = params.message?.trim();
         if (!message) throw new Error('message required');
         if (!this.agentHandler) throw new Error('Agent handler not configured');
 
-        const sessionKey = params.sessionKey || `session_${randomUUID().slice(0, 8)}`;
+        const sessionKey = resolveSessionId(params) || `session_${randomUUID().slice(0, 8)}`;
         const runId = `run_${randomUUID().slice(0, 8)}`;
+        const run: ActiveRun = {
+          runId,
+          sessionId: sessionKey,
+          aborted: false,
+          generation: this.generation,
+        };
 
         // Store user message in session
         const session = this.getOrCreateSession(sessionKey);
@@ -789,12 +1356,24 @@ export class GatewayServer {
         session.updatedAt = new Date().toISOString();
         this.saveSessions();
 
-        // Respond immediately with acceptance
-        const accepted = { runId, sessionKey, status: 'accepted' as const, acceptedAt: Date.now() };
+        // A session has one current run. Superseding it aborts and unindexes
+        // the prior run, while each run also has its own runId index so the
+        // UI can stop a run without knowing its session.
+        const previousRunId = this.activeRunBySession.get(sessionKey);
+        const previousRun = previousRunId ? this.activeRunsById.get(previousRunId) : undefined;
+        if (previousRun) this.abortActiveRun(previousRun);
+        this.activeRunsById.set(runId, run);
+        this.activeRunBySession.set(sessionKey, runId);
+
+        const accepted = { runId, sessionKey, sessionId: sessionKey, status: 'accepted' as const, acceptedAt: Date.now() };
 
         // Execute agent asynchronously — defer to ensure response is sent first
         setTimeout(() => {
-          void this.executeAgentWithEvents(sessionKey, runId, message, conn.id);
+          if (run.aborted || !this.isGenerationActive(run.generation)) {
+            this.cleanupActiveRun(run);
+            return;
+          }
+          void this.executeAgentWithEvents(run, message, conn.id);
         }, 0);
 
         return accepted;
@@ -802,12 +1381,43 @@ export class GatewayServer {
       { requiresAuth: true }
     );
 
+    // chat.abort — best-effort cancellation by runId, session alias, or both.
+    this.registerMethod(
+      'chat.abort',
+      async (params: { sessionKey?: string; sessionId?: string; runId?: string }) => {
+        const sessionId = resolveSessionId(params);
+        const sessionRunId = sessionId ? this.activeRunBySession.get(sessionId) : undefined;
+        if (params.runId && sessionRunId && params.runId !== sessionRunId) {
+          return { aborted: false, runId: params.runId };
+        }
+
+        const runId = params.runId ?? sessionRunId;
+        const active = runId ? this.activeRunsById.get(runId) : undefined;
+        if (!active || (sessionId && active.sessionId !== sessionId)) {
+          return { aborted: false, runId: params.runId };
+        }
+
+        this.abortActiveRun(active);
+        return { aborted: true, runId: active.runId };
+      },
+      { requiresAuth: true }
+    );
+
     // Legacy agent method (also works)
     this.registerMethod(
       'agent',
-      async (params: AgentRequest & { stream?: boolean }, conn) => {
+      async (params: AgentRequest & { stream?: boolean }, conn, stream) => {
         if (!this.agentHandler) throw new Error('Agent handler not configured');
-        const result = await this.agentHandler(params);
+        const generation = this.generation;
+        const handler = this.agentHandler;
+        const forwardStream: StreamCallback | undefined = params.stream && stream
+          ? (response) => stream(response)
+          : undefined;
+        const result = await this.runAgentOperation(
+          generation,
+          () => handler(params, forwardStream),
+        );
+        if (!this.isGenerationActive(generation)) throw new GatewayStoppedError();
         this.broadcastEvent(GatewayEvents.AGENT, {
           sessionId: result.sessionId,
           connectionId: conn.id,
@@ -819,8 +1429,8 @@ export class GatewayServer {
     );
 
     // Chat session methods
-    this.registerMethod('chat.session', async (params: { sessionId?: string; agentId?: string }) => {
-      const sessionId = params.sessionId ?? `session_${randomUUID().slice(0, 8)}`;
+    this.registerMethod('chat.session', async (params: { sessionId?: string; sessionKey?: string; agentId?: string }) => {
+      const sessionId = resolveSessionId(params) ?? `session_${randomUUID().slice(0, 8)}`;
       return this.getOrCreateSession(sessionId, params.agentId);
     }, { requiresAuth: true });
 
@@ -831,16 +1441,21 @@ export class GatewayServer {
       }));
     });
 
-    this.registerMethod('chat.messages', async (params: { sessionId: string; limit?: number }) => {
-      const session = this.sessionStore.get(params.sessionId);
+    this.registerMethod('chat.messages', async (params: { sessionId?: string; sessionKey?: string; limit?: number }) => {
+      const sessionId = resolveSessionId(params);
+      const session = sessionId ? this.sessionStore.get(sessionId) : undefined;
       if (!session) throw new Error('Session not found');
       let msgs = session.messages;
       if (params.limit) msgs = msgs.slice(-params.limit);
       return msgs;
     });
 
-    this.registerMethod('chat.delete', async (params: { sessionId: string }) => {
-      const result = { deleted: this.sessionStore.delete(params.sessionId) };
+    this.registerMethod('chat.delete', async (params: { sessionId?: string; sessionKey?: string }) => {
+      const sessionId = resolveSessionId(params);
+      const runId = sessionId ? this.activeRunBySession.get(sessionId) : undefined;
+      const run = runId ? this.activeRunsById.get(runId) : undefined;
+      if (run) this.abortActiveRun(run);
+      const result = { deleted: !!sessionId && this.sessionStore.delete(sessionId) };
       this.saveSessions();
       return result;
     }, { requiresAuth: true });
@@ -869,7 +1484,7 @@ export class GatewayServer {
     this.registerMethod('channels.configure', async (params: { type: string; config: Record<string, unknown> }) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       this.channelRegistry.configureChannel(params.type, params.config);
-      // Persist channel tokens to ~/.openrappter/.env so they survive restarts
+      // Persist channel tokens in the gateway data directory so they survive restarts
       await this.persistChannelConfig(params.type, params.config);
       return { configured: true };
     }, { requiresAuth: true });
@@ -896,7 +1511,7 @@ export class GatewayServer {
     }, { requiresAuth: true });
     this.registerMethod('cron.run', async (params: { jobId: string }) => {
       if (this.cronService) {
-        await this.cronService.run(params.jobId);
+        await this.runCronServiceJob(params.jobId);
         return { triggered: true };
       }
       // Fallback: trigger via agent handler if available
@@ -906,9 +1521,20 @@ export class GatewayServer {
         const payload = job.payload as { message?: string } | undefined;
         const message = payload?.message || `Run cron job: ${(job as { name?: string }).name || params.jobId}`;
         // Fire-and-forget so the RPC call returns immediately
-        this.agentHandler({ message, agentId: (job.agentId as string) || undefined }).catch((err) => {
-          console.error(`Cron job ${params.jobId} failed:`, err);
-        });
+        const generation = this.generation;
+        const handler = this.agentHandler;
+        void this.runAgentOperation(
+          generation,
+          () => handler({ message, agentId: (job.agentId as string) || undefined }),
+        )
+          .catch((err) => {
+            if (
+              !(err instanceof GatewayStoppedError)
+              && this.isGenerationActive(generation)
+            ) {
+              console.error(`Cron job ${params.jobId} failed:`, err);
+            }
+          });
         return { triggered: true };
       }
       throw new Error('No cron service or agent handler configured');
@@ -941,7 +1567,7 @@ export class GatewayServer {
     }, { requiresAuth: true });
     this.registerMethod('cron.trigger', async (params: { jobId: string }) => {
       if (this.cronService) {
-        await this.cronService.run(params.jobId);
+        await this.runCronServiceJob(params.jobId);
         return { triggered: true };
       }
       throw new Error('No cron service configured');
@@ -1007,10 +1633,11 @@ export class GatewayServer {
     // Auth profile methods (device-code login, switch, remove)
     registerAuthMethods(this, {
       onAuthTokenUpdate: (token: string) => this.onAuthTokenUpdate?.(token),
+      dataDir: this.dataDir,
     });
 
     // Backup & restore methods
-    registerBackupMethods(this);
+    registerBackupMethods(this, { dataDir: this.dataDir });
 
     // Rappter multi-soul methods
     if (this.rappterManager) {
@@ -1020,26 +1647,62 @@ export class GatewayServer {
 
   // ── Agent Execution with Chat Events ─────────────────────────────────
 
-  private async executeAgentWithEvents(sessionKey: string, runId: string, message: string, _connId: string): Promise<void> {
-    if (!this.agentHandler) return;
+  private cleanupActiveRun(run: ActiveRun): void {
+    if (this.activeRunsById.get(run.runId) === run) {
+      this.activeRunsById.delete(run.runId);
+    }
+    if (this.activeRunBySession.get(run.sessionId) === run.runId) {
+      this.activeRunBySession.delete(run.sessionId);
+    }
+  }
 
+  private abortActiveRun(run: ActiveRun, broadcast = true): void {
+    if (run.aborted) return;
+    run.aborted = true;
+    this.cleanupActiveRun(run);
+    if (broadcast && this.isGenerationActive(run.generation)) {
+      this.broadcastEvent(GatewayEvents.CHAT, {
+        runId: run.runId,
+        sessionKey: run.sessionId,
+        sessionId: run.sessionId,
+        state: 'aborted',
+      });
+    }
+  }
+
+  private async executeAgentWithEvents(run: ActiveRun, message: string, _connId: string): Promise<void> {
+    if (
+      !this.agentHandler
+      || run.aborted
+      || !this.isGenerationActive(run.generation)
+    ) {
+      this.cleanupActiveRun(run);
+      return;
+    }
+
+    const handler = this.agentHandler;
     try {
-      const result = await this.agentHandler(
-        { message, sessionId: sessionKey },
+      const result = await this.runAgentOperation(
+        run.generation,
+        () => handler({ message, sessionId: run.sessionId }),
       );
+
+      if (run.aborted || !this.isGenerationActive(run.generation)) return;
 
       // Send final response only (no streaming deltas — avoids duplication from multi-turn tool-call loops)
       const raw = result.content || '';
       const { text: finalText, voiceText } = parseVoiceDelimiter(raw);
       this.broadcastEvent(GatewayEvents.CHAT, {
-        runId, sessionKey,
+        runId: run.runId,
+        sessionKey: run.sessionId,
+        sessionId: run.sessionId,
         state: 'final',
         message: finalText ? { role: 'assistant', content: [{ type: 'text', text: finalText }], timestamp: Date.now() } : undefined,
         voiceText: voiceText || undefined,
       });
 
       // Store assistant message
-      const session = this.sessionStore.get(sessionKey);
+      const session = this.sessionStore.get(run.sessionId);
       if (session) {
         session.messages.push({
           id: `msg_${randomUUID().slice(0, 8)}`,
@@ -1051,11 +1714,22 @@ export class GatewayServer {
         this.saveSessions();
       }
     } catch (error) {
+      if (
+        run.aborted
+        || error instanceof GatewayStoppedError
+        || !this.isGenerationActive(run.generation)
+      ) {
+        return;
+      }
       this.broadcastEvent(GatewayEvents.CHAT, {
-        runId, sessionKey,
+        runId: run.runId,
+        sessionKey: run.sessionId,
+        sessionId: run.sessionId,
         state: 'error',
         errorMessage: (error as Error).message,
       });
+    } finally {
+      this.cleanupActiveRun(run);
     }
   }
 
@@ -1067,12 +1741,12 @@ export class GatewayServer {
     whatsapp: { token: 'WHATSAPP_TOKEN' },
   };
 
-  /** Persist channel config values to ~/.openrappter/.env */
+  /** Persist channel config values to the gateway data directory's .env file. */
   private async persistChannelConfig(channelType: string, config: Record<string, unknown>): Promise<void> {
     const mapping = GatewayServer.CHANNEL_ENV_MAP[channelType];
     if (!mapping) return;
 
-    const envFile = path.join(os.homedir(), '.openrappter', '.env');
+    const envFile = path.join(this.dataDir, '.env');
     const existing: Record<string, string> = {};
 
     // Read existing env file

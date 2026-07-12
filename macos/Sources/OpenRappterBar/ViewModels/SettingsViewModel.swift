@@ -35,8 +35,20 @@ public final class SettingsViewModel {
         approvalViewModel.configure(rpcClient: rpcClient)
     }
 
-    public func configureAccount(processManager: ProcessManager, onGatewayRestarted: @escaping () -> Void) {
-        accountViewModel.configure(processManager: processManager, onGatewayRestarted: onGatewayRestarted)
+    public func clearConfiguration() {
+        rpcClient = nil
+        channelsViewModel.clearConfiguration()
+        cronViewModel.clearConfiguration()
+        skillsViewModel.clearConfiguration()
+        approvalViewModel.clearConfiguration()
+    }
+
+    public func configureAccount(
+        restartGateway: @escaping () -> Task<Void, Never>
+    ) {
+        accountViewModel.configure(
+            restartGateway: restartGateway
+        )
     }
 
     // MARK: - Config Editor

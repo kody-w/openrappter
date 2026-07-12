@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-11
+
 ### Added
 
 - **Dual-use binary classification** (RAI hardening, closes audit must-fix #3's mechanism) — `exec-safety.ts` now tags network-fetch/install/arbitrary-exec/permission binaries (`curl`, `wget`, `pip`, `npm`, `npx`, `yarn`, `pnpm`, `node`, `python`, `tsx`, `chmod`, `chown`) via `DUAL_USE_BINS`; every `SafetyCheckResult` carries `dualUse` + `requiresApproval` so an approval layer can gate them (still `safe` under the default policy — backward-compatible). New opt-in `ExecSafety({ strictDefaults: true })` starts from the safe set minus dual-use binaries, so they return `safe: false, requiresApproval: true` unless explicitly re-added. Injection detection still precedes classification (a `curl … | sh` is blocked, not merely gated). `isDualUse()` helper; 6 new tests (suite 3109 → 3115).

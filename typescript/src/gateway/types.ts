@@ -2,6 +2,8 @@
  * Gateway types
  */
 
+import type { GatewayMetricsSnapshot } from './observability.js';
+
 export interface RpcRequest {
   id: string;
   method: string;
@@ -34,6 +36,7 @@ export const RPC_ERROR = {
   INTERNAL_ERROR: -32603,
   UNAUTHORIZED: -32000,
   RATE_LIMITED: -32001,
+  TIMEOUT: -32002,
 } as const;
 
 export interface GatewayConfig {
@@ -47,6 +50,25 @@ export interface GatewayConfig {
   heartbeatInterval?: number;
   connectionTimeout?: number;
   webRoot?: string;
+  /**
+   * Directory used for gateway-owned persistent state (sessions, cron,
+   * config, and channel environment values). Defaults to
+   * `~/.openrappter`; injectable so embedded runtimes and tests can
+   * isolate state without changing the process home directory.
+   */
+  dataDir?: string;
+  /**
+   * Optional bounded execution timeout (ms) applied to RPC method handlers
+   * on both the HTTP JSON-RPC and WS dispatch paths. Disabled by default
+   * (undefined) to preserve existing behavior for long-running methods;
+   * opt in to enforce a bound and populate the `rpcTimeoutsTotal` metric.
+   */
+  executionTimeoutMs?: number;
+  /**
+   * Maximum time to drain external agent/cron work and network listeners
+   * during stop(). Work that cannot be cancelled is generation-fenced.
+   */
+  shutdownTimeoutMs?: number;
 }
 
 export interface GatewayStatus {
@@ -56,6 +78,8 @@ export interface GatewayStatus {
   uptime: number;
   version: string;
   startedAt: string;
+  /** Bounded, low-cardinality observability snapshot (see `gateway/observability.ts`). */
+  metrics?: GatewayMetricsSnapshot;
 }
 
 export interface ConnectionInfo {
@@ -69,9 +93,12 @@ export interface ConnectionInfo {
   metadata?: Record<string, unknown>;
 }
 
+export type RpcStreamCallback = (response: StreamingResponse) => void;
+
 export type RpcMethodHandler<P = unknown, R = unknown> = (
   params: P,
-  connection: ConnectionInfo
+  connection: ConnectionInfo,
+  stream?: RpcStreamCallback
 ) => Promise<R>;
 
 export interface RpcMethod<P = unknown, R = unknown> {
@@ -81,14 +108,33 @@ export interface RpcMethod<P = unknown, R = unknown> {
 }
 
 // Streaming support
-export interface StreamingResponse {
+export interface StreamingDeltaResponse {
   id: string;
   streaming: true;
   chunk?: string;
   toolOutput?: ToolOutput;
-  done?: boolean;
-  error?: RpcError;
+  done?: false;
+  error?: never;
+  result?: never;
+  payload?: never;
 }
+
+export interface StreamingTerminalResponse<T = unknown> {
+  id: string;
+  streaming: true;
+  done: true;
+  chunk?: never;
+  toolOutput?: never;
+  error?: RpcError;
+  /** Final method value on the single terminal (`done: true`) frame. */
+  result?: T;
+  /** Backward-compatible alias for clients that use response payloads. */
+  payload?: T;
+}
+
+export type StreamingResponse<T = unknown> =
+  | StreamingDeltaResponse
+  | StreamingTerminalResponse<T>;
 
 export interface ToolOutput {
   toolCallId: string;
@@ -223,4 +269,6 @@ export interface HealthResponse {
     agents?: boolean;
     copilot?: boolean;
   };
+  /** Bounded, low-cardinality observability snapshot (see `gateway/observability.ts`). */
+  metrics?: GatewayMetricsSnapshot;
 }

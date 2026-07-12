@@ -55,7 +55,7 @@ public struct ChannelsSettingsView: View {
                                 }
                             },
                             onTest: { viewModel.testChannel(channel) },
-                            onDelete: { viewModel.deleteChannel(channel) }
+                            onDisconnect: { viewModel.disableChannel(channel) }
                         )
                     }
                 }
@@ -78,7 +78,7 @@ struct ChannelRow: View {
     let channel: Channel
     let onToggle: () -> Void
     let onTest: () -> Void
-    let onDelete: () -> Void
+    let onDisconnect: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -104,27 +104,38 @@ struct ChannelRow: View {
 
             Spacer()
 
-            // Actions
-            Button(action: onTest) {
-                Image(systemName: "bolt.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.borderless)
-            .help("Test channel")
+            if showsActionControls {
+                Button(action: onTest) {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Test channel")
 
-            Toggle("", isOn: .constant(channel.enabled))
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .onTapGesture { onToggle() }
+                Toggle("", isOn: .constant(channel.enabled))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .onTapGesture { onToggle() }
 
-            Button(action: onDelete) {
-                Image(systemName: "trash")
+                Button(action: onDisconnect) {
+                    Image(systemName: "bolt.slash")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Disconnect channel (configuration is preserved)")
+                .disabled(!channel.enabled && channel.status == .disconnected)
+            } else {
+                Text("Status only")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
+                    .help("This channel is reported by the gateway but is not registry-backed")
             }
-            .buttonStyle(.borderless)
         }
         .padding(.vertical, 4)
+    }
+
+    var showsActionControls: Bool {
+        channel.actionable
     }
 
     private var statusColor: Color {

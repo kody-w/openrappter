@@ -48,11 +48,20 @@ class FailAgent extends BasicAgent {
 }
 
 // Mock HTTP request/response
-function createMockReq(method: string, url: string, body?: string): IncomingMessage {
+function createMockReq(
+  method: string,
+  url: string,
+  body?: string,
+  headers?: Record<string, string>,
+): IncomingMessage {
   const req = new EventEmitter() as IncomingMessage;
   req.method = method;
   req.url = url;
-  req.headers = { host: 'localhost:18790' };
+  req.headers = { host: 'localhost:18790', ...headers };
+  Object.defineProperty(req, 'socket', {
+    value: { remoteAddress: '127.0.0.1' },
+    configurable: true,
+  });
 
   // Simulate body
   if (body !== undefined) {
@@ -164,7 +173,9 @@ describe('DashboardHandler', () => {
   describe('POST /api/agents/execute', () => {
     it('should execute an agent', async () => {
       const body = JSON.stringify({ agentName: 'Echo', kwargs: { query: 'test' } });
-      const req = createMockReq('POST', '/api/agents/execute', body);
+      const req = createMockReq('POST', '/api/agents/execute', body, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
@@ -178,7 +189,9 @@ describe('DashboardHandler', () => {
 
     it('should return 404 for unknown agent', async () => {
       const body = JSON.stringify({ agentName: 'NonExistent', kwargs: {} });
-      const req = createMockReq('POST', '/api/agents/execute', body);
+      const req = createMockReq('POST', '/api/agents/execute', body, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
@@ -187,7 +200,9 @@ describe('DashboardHandler', () => {
 
     it('should return 400 when agentName missing', async () => {
       const body = JSON.stringify({ kwargs: {} });
-      const req = createMockReq('POST', '/api/agents/execute', body);
+      const req = createMockReq('POST', '/api/agents/execute', body, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
@@ -195,7 +210,9 @@ describe('DashboardHandler', () => {
     });
 
     it('should return 400 for invalid JSON', async () => {
-      const req = createMockReq('POST', '/api/agents/execute', 'not json');
+      const req = createMockReq('POST', '/api/agents/execute', 'not json', {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
@@ -205,7 +222,9 @@ describe('DashboardHandler', () => {
     it('should handle agent execution errors', async () => {
       handler.registerAgent(new FailAgent());
       const body = JSON.stringify({ agentName: 'Fail', kwargs: {} });
-      const req = createMockReq('POST', '/api/agents/execute', body);
+      const req = createMockReq('POST', '/api/agents/execute', body, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
@@ -213,6 +232,31 @@ describe('DashboardHandler', () => {
       const result = JSON.parse(res._body);
       expect(result.status).toBe('error');
       expect(result.error).toContain('Intentional failure');
+    });
+
+    it('rejects an originless privileged request without authorization', async () => {
+      const body = JSON.stringify({ agentName: 'Echo', kwargs: {} });
+      const req = createMockReq('POST', '/api/agents/execute', body);
+      const res = createMockRes();
+
+      await handler.handle(req, res);
+
+      expect(res._statusCode).toBe(401);
+      expect(JSON.parse(res._body).error).toContain('Authorization');
+    });
+
+    it('accepts a configured bearer token for an originless native caller', async () => {
+      const h = new DashboardHandler({ authToken: 'dashboard-secret' });
+      h.registerAgent(new EchoAgent());
+      const body = JSON.stringify({ agentName: 'Echo', kwargs: {} });
+      const req = createMockReq('POST', '/api/agents/execute', body, {
+        authorization: 'Bearer dashboard-secret',
+      });
+      const res = createMockRes();
+
+      await h.handle(req, res);
+
+      expect(res._statusCode).toBe(200);
     });
   });
 
@@ -232,7 +276,9 @@ describe('DashboardHandler', () => {
     it('should record traces from execution', async () => {
       // Execute an agent to generate a trace
       const execBody = JSON.stringify({ agentName: 'Echo', kwargs: { query: 'trace-test' } });
-      const execReq = createMockReq('POST', '/api/agents/execute', execBody);
+      const execReq = createMockReq('POST', '/api/agents/execute', execBody, {
+        origin: 'http://localhost:18790',
+      });
       const execRes = createMockRes();
       await handler.handle(execReq, execRes);
 
@@ -291,16 +337,61 @@ describe('DashboardHandler', () => {
   // ── CORS ──
 
   describe('CORS', () => {
-    it('should add CORS headers by default', async () => {
-      const req = createMockReq('GET', '/api/agents');
+    it('should echo only the exact same origin by default', async () => {
+      const req = createMockReq('GET', '/api/agents', undefined, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       await handler.handle(req, res);
 
-      expect(res._headers['Access-Control-Allow-Origin']).toBe('*');
+      expect(res._headers['Access-Control-Allow-Origin']).toBe('http://localhost:18790');
+      expect(res._headers['Access-Control-Allow-Origin']).not.toBe('*');
+    });
+
+    it('should reject a cross-origin dashboard request', async () => {
+      const req = createMockReq('POST', '/api/agents/execute', '{}', {
+        origin: 'https://malicious.example',
+      });
+      const res = createMockRes();
+      await handler.handle(req, res);
+
+      expect(res._statusCode).toBe(403);
+      expect(res._headers['Access-Control-Allow-Origin']).toBeUndefined();
+    });
+
+    it('rejects a DNS-rebinding Host even when Origin matches it', async () => {
+      const req = createMockReq('GET', '/api/agents', undefined, {
+        host: 'rebound.attacker.example:18790',
+        origin: 'http://rebound.attacker.example:18790',
+      });
+      const res = createMockRes();
+
+      await handler.handle(req, res);
+
+      expect(res._statusCode).toBe(403);
+      expect(res._headers['Access-Control-Allow-Origin']).toBeUndefined();
+    });
+
+    it('allows only explicitly trusted cross-origin reads', async () => {
+      const h = new DashboardHandler({
+        trustedOrigins: ['http://localhost:3000'],
+      });
+      h.registerAgent(new EchoAgent());
+      const req = createMockReq('GET', '/api/agents', undefined, {
+        origin: 'http://localhost:3000',
+      });
+      const res = createMockRes();
+
+      await h.handle(req, res);
+
+      expect(res._statusCode).toBe(200);
+      expect(res._headers['Access-Control-Allow-Origin']).toBe('http://localhost:3000');
     });
 
     it('should handle OPTIONS preflight', async () => {
-      const req = createMockReq('OPTIONS', '/api/agents');
+      const req = createMockReq('OPTIONS', '/api/agents', undefined, {
+        origin: 'http://localhost:18790',
+      });
       const res = createMockRes();
       const handled = await handler.handle(req, res);
 

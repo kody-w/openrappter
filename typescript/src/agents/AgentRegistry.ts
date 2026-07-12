@@ -14,11 +14,16 @@ import type { AgentInfo } from './types.js';
 
 export class AgentRegistry {
   private agentsDir: string;
+  private userAgentsDir: string;
   private agents: Map<string, BasicAgent> = new Map();
   private loaded = false;
 
-  constructor(agentsDir: string) {
+  constructor(
+    agentsDir: string,
+    userAgentsDir = path.join(os.homedir(), '.openrappter', 'agents'),
+  ) {
     this.agentsDir = agentsDir;
+    this.userAgentsDir = userAgentsDir;
   }
 
   async discoverAgents(): Promise<void> {
@@ -65,14 +70,13 @@ export class AgentRegistry {
 
   /** Load user-generated agents (LearnNew factory pattern) from ~/.openrappter/agents/ */
   private async discoverUserAgents(): Promise<void> {
-    const userAgentsDir = path.join(os.homedir(), '.openrappter', 'agents');
     try {
-      const files = await fs.readdir(userAgentsDir);
+      const files = await fs.readdir(this.userAgentsDir);
       const agentFiles = files.filter(f => f.endsWith('_agent.js'));
 
       for (const file of agentFiles) {
         try {
-          const filePath = path.join(userAgentsDir, file);
+          const filePath = path.join(this.userAgentsDir, file);
           const fileUrl = pathToFileURL(filePath).href + `?t=${Date.now()}`;
           const mod = await import(fileUrl);
           if (typeof mod.createAgent === 'function') {

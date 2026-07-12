@@ -17,6 +17,10 @@ public final class SkillsViewModel {
         self.rpcClient = rpcClient
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
     // MARK: - Actions
 
     public func loadSkills() {

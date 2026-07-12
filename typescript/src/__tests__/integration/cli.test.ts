@@ -6,10 +6,10 @@
  * - CLI version and help structure
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 
 import { AgentRegistry } from '../../agents/AgentRegistry.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
@@ -17,8 +17,17 @@ import { ShellAgent } from '../../agents/ShellAgent.js';
 import { MemoryAgent } from '../../agents/MemoryAgent.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+let testHome = '';
 
 describe('CLI Integration', () => {
+  beforeEach(() => {
+    testHome = mkdtempSync(join(process.cwd(), '.cli-integration-'));
+  });
+
+  afterEach(() => {
+    rmSync(testHome, { recursive: true, force: true });
+  });
+
   // ── AgentRegistry ─────────────────────────────────────────────────────
   // Note: AgentRegistry.discoverAgents() scans for *Agent.js files (compiled).
   // In test env (vitest), .ts sources are used directly, so discovery won't find
@@ -26,7 +35,10 @@ describe('CLI Integration', () => {
 
   describe('AgentRegistry', () => {
     it('should handle empty/missing agents directory gracefully', async () => {
-      const registry = new AgentRegistry('/nonexistent/path');
+      const registry = new AgentRegistry(
+        join(testHome, 'missing-agents'),
+        join(testHome, 'user-agents'),
+      );
       await registry.discoverAgents();
 
       const agents = await registry.listAgents();
@@ -34,13 +46,19 @@ describe('CLI Integration', () => {
     });
 
     it('should return undefined for non-existent agent', async () => {
-      const registry = new AgentRegistry('/nonexistent/path');
+      const registry = new AgentRegistry(
+        join(testHome, 'missing-agents'),
+        join(testHome, 'user-agents'),
+      );
       const agent = await registry.getAgent('NonExistentAgent');
       expect(agent).toBeUndefined();
     });
 
     it('should return empty Map when no agents discovered', async () => {
-      const registry = new AgentRegistry('/nonexistent/path');
+      const registry = new AgentRegistry(
+        join(testHome, 'missing-agents'),
+        join(testHome, 'user-agents'),
+      );
       const all = await registry.getAllAgents();
       expect(all).toBeInstanceOf(Map);
       expect(all.size).toBe(0);
@@ -58,7 +76,7 @@ describe('CLI Integration', () => {
     });
 
     it('should instantiate MemoryAgent', () => {
-      const agent = new MemoryAgent();
+      const agent = new MemoryAgent(testHome);
       expect(agent).toBeInstanceOf(BasicAgent);
       expect(agent.name).toBe('Memory');
       expect(agent.metadata.description).toBeDefined();
@@ -73,7 +91,7 @@ describe('CLI Integration', () => {
     });
 
     it('should execute MemoryAgent', async () => {
-      const agent = new MemoryAgent();
+      const agent = new MemoryAgent(testHome);
       const result = await agent.execute({ query: 'remember that vitest is the test framework' });
       expect(typeof result).toBe('string');
     });

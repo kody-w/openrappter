@@ -49,6 +49,19 @@ public enum ChatState: Sendable {
 @Observable
 @MainActor
 public final class AppViewModel {
+    public typealias ConnectionFactory = @MainActor (_ host: String, _ port: Int) -> GatewayConnection
+
+    private struct GatewayEndpoint: Equatable {
+        let host: String
+        let port: Int
+    }
+
+    private enum GatewayLifecycleOperation: Equatable {
+        case start
+        case stop
+        case authenticationRestart(GatewayEndpoint)
+    }
+
     // Connection
     public var connectionState: ConnectionState = .disconnected
     public var gatewayStatus: GatewayStatusResponse?
@@ -81,8 +94,21 @@ public final class AppViewModel {
     public var menuBarUptime: String = ""
     private var uptimeTimer: Task<Void, Never>?
 
+    // Coalescing state for connect/shutdown so overlapping calls join a single
+    // in-flight attempt instead of allocating duplicate connections or racing
+    // to tear things down twice.
+    private var connectTask: Task<Void, Never>?
+    private var connectEndpoint: GatewayEndpoint?
+    private var shutdownTask: Task<Void, Never>?
+    private var gatewayLifecycleTask: Task<Void, Never>?
+    private var gatewayLifecycleOperation: GatewayLifecycleOperation?
+    private var connectGeneration: UInt = 0
+    private var gatewayLifecycleGeneration: UInt = 0
+    private var isShuttingDown = false
+
     // Callbacks
     public var onRpcClientReady: ((RpcClient) -> Void)?
+    public var onRpcClientInvalidated: (() -> Void)?
 
     // Services
     var connection: GatewayConnection?
@@ -91,6 +117,7 @@ public final class AppViewModel {
     var heartbeatMonitor: HeartbeatMonitor?
     let eventBus: EventBus
     let sessionStore: SessionStore
+    private let connectionFactory: ConnectionFactory
 
     // Legacy chat state (forwarded from ChatViewModel for existing views)
     public var chatInput: String {
@@ -152,6 +179,9 @@ public final class AppViewModel {
         self.eventBus = bus
         self.processManager = ProcessManager()
         self.sessionStore = SessionStore()
+        self.connectionFactory = { host, port in
+            GatewayConnection(host: host, port: port)
+        }
         Task { await sessionStore.load() }
         // Start fleet live polling
         fleetViewModel.startRefreshing()
@@ -160,8 +190,12 @@ public final class AppViewModel {
 
     /// Detect a running gateway and connect to it automatically.
     public func detectAndConnect(host: String = AppConstants.defaultHost, port: Int = AppConstants.defaultPort) {
+        guard !isShuttingDown else { return }
+        gatewayLifecycleGeneration &+= 1
+        let generation = gatewayLifecycleGeneration
         Task {
             if await processManager.detectRunningGateway() {
+                guard generation == gatewayLifecycleGeneration else { return }
                 processState = .running
                 addActivity(type: .system, text: "Detected running gateway")
                 connectToGateway(host: host, port: port)
@@ -173,71 +207,177 @@ public final class AppViewModel {
     public init(
         processManager: ProcessManager,
         eventBus: EventBus,
-        sessionStore: SessionStore? = nil
+        sessionStore: SessionStore? = nil,
+        connectionFactory: @escaping ConnectionFactory = { host, port in
+            GatewayConnection(host: host, port: port)
+        }
     ) {
         self.processManager = processManager
         self.eventBus = eventBus
         self.sessionStore = sessionStore ?? SessionStore()
+        self.connectionFactory = connectionFactory
     }
 
     // MARK: - Actions
 
-    public func connectToGateway(host: String = AppConstants.defaultHost, port: Int = AppConstants.defaultPort) {
-        let conn = GatewayConnection(host: host, port: port)
-        self.connection = conn
-        let rpc = RpcClient(connection: conn)
-        self.rpcClient = rpc
+    /// Connect to the gateway.
+    ///
+    /// Coalesces overlapping calls — if a connect attempt is already
+    /// in-flight, this joins it rather than allocating a second
+    /// `GatewayConnection`/`RpcClient` pair. If a previous connection object
+    /// still exists (e.g. a stale one from an earlier session), it is fully
+    /// torn down first so at most one `GatewayConnection` is ever live.
+    @discardableResult
+    public func connectToGateway(
+        host: String = AppConstants.defaultHost,
+        port: Int = AppConstants.defaultPort
+    ) -> Task<Void, Never> {
+        guard !isShuttingDown else { return Task {} }
+        let endpoint = GatewayEndpoint(host: host, port: port)
+        if let connectTask, connectEndpoint == endpoint {
+            return connectTask
+        }
 
-        // Configure sub-ViewModels
-        chatViewModel.configure(rpcClient: rpc, sessionStore: sessionStore)
-        sessionsViewModel.configure(rpcClient: rpc, sessionStore: sessionStore)
-        channelsViewModel.configure(rpcClient: rpc)
-        cronViewModel.configure(rpcClient: rpc)
-        approvalViewModel.configure(rpcClient: rpc)
-        onRpcClientReady?(rpc)
-
-        let hb = HeartbeatMonitor(rpcClient: rpc, eventBus: eventBus)
-        self.heartbeatMonitor = hb
-
-        Task {
-            await conn.setStateHandler { [weak self] state in
-                Task { @MainActor in
-                    self?.connectionState = state
-                    if state == .connected {
-                        await self?.fetchStatus()
-                        await self?.heartbeatMonitor?.start()
-                        self?.sessionsViewModel.syncFromGateway()
-                        self?.startUptimeTimer()
-                    } else if state == .disconnected {
-                        await self?.heartbeatMonitor?.stop()
-                        self?.stopUptimeTimer()
-                    }
-                }
-            }
-
-            await conn.setEventHandler { [weak self] event, payload in
-                Task { @MainActor in
-                    self?.handleEvent(event: event, payload: payload)
-                }
-            }
-
-            do {
-                try await conn.connect()
-            } catch {
-                self.addActivity(type: .error, text: "Connection failed: \(error.localizedDescription)")
+        let supersededTask = connectTask
+        supersededTask?.cancel()
+        connectGeneration &+= 1
+        let generation = connectGeneration
+        connectEndpoint = endpoint
+        let task = Task { [weak self] () -> Void in
+            guard let self else { return }
+            await self.performConnect(
+                host: host,
+                port: port,
+                generation: generation,
+                supersededTask: supersededTask
+            )
+            if generation == self.connectGeneration {
+                self.connectTask = nil
+                self.connectEndpoint = nil
             }
         }
+        connectTask = task
+        return task
     }
 
-    public func disconnectFromGateway() {
-        Task {
-            await heartbeatMonitor?.stop()
-            await connection?.disconnect()
+    private func performConnect(
+        host: String,
+        port: Int,
+        generation: UInt,
+        supersededTask: Task<Void, Never>?
+    ) async {
+        if let oldConnection = connection {
+            let oldHeartbeat = heartbeatMonitor
+            connection = nil
+            heartbeatMonitor = nil
+            clearRpcClientReferences()
+            await oldHeartbeat?.stop()
+            guard generation == connectGeneration, !Task.isCancelled else {
+                await oldConnection.disconnect()
+                return
+            }
+            await oldConnection.disconnect()
+            guard generation == connectGeneration, !Task.isCancelled else { return }
         }
+
+        await supersededTask?.value
+        guard generation == connectGeneration, !Task.isCancelled else { return }
+        let conn = connectionFactory(host, port)
+        connection = conn
+
+        await conn.setStateHandler { [weak self, weak conn] state in
+            Task { @MainActor in
+                guard let self, let conn,
+                      generation == self.connectGeneration,
+                      self.connection === conn else { return }
+                self.connectionState = state
+            }
+        }
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        await conn.setEventHandler { [weak self, weak conn] event, payload in
+            Task { @MainActor in
+                guard let self, let conn,
+                      generation == self.connectGeneration,
+                      self.connection === conn else { return }
+                self.handleEvent(event: event, payload: payload)
+            }
+        }
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        do {
+            try await conn.connect()
+        } catch is CancellationError {
+            await abandonConnection(conn)
+            return
+        } catch {
+            let shouldReport = isCurrentConnection(conn, generation: generation)
+            await abandonConnection(conn)
+            guard shouldReport, generation == connectGeneration else { return }
+            addActivity(type: .error, text: "Connection failed: \(error.localizedDescription)")
+            return
+        }
+
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        let rpc = RpcClient(connection: conn)
+        let hb = HeartbeatMonitor(rpcClient: rpc, eventBus: eventBus)
+        rpcClient = rpc
+        heartbeatMonitor = hb
+        configureChildViewModels(rpcClient: rpc)
+        onRpcClientReady?(rpc)
+
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        await fetchStatus(rpcClient: rpc, connection: conn, generation: generation)
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        await hb.start()
+        guard isCurrentConnection(conn, generation: generation) else {
+            await abandonConnection(conn)
+            return
+        }
+
+        sessionsViewModel.syncFromGateway()
+        startUptimeTimer()
+    }
+
+    /// Stop the heartbeat monitor and disconnect the WebSocket. Safe to call
+    /// even when already disconnected (captures the live instances up front
+    /// so the actual stop/disconnect always targets the real objects, rather
+    /// than racing the `nil`-out below).
+    public func disconnectFromGateway() async {
+        connectGeneration &+= 1
+        let inFlightConnect = connectTask
+        connectTask = nil
+        connectEndpoint = nil
+        inFlightConnect?.cancel()
+
+        let hb = heartbeatMonitor
+        let conn = connection
         heartbeatMonitor = nil
         connection = nil
-        rpcClient = nil
+        clearRpcClientReferences()
         gatewayStatus = nil
+        connectionState = .disconnected
+        await hb?.stop()
+        await conn?.disconnect()
+        await inFlightConnect?.value
     }
 
     public func sendMessage() {
@@ -246,38 +386,252 @@ public final class AppViewModel {
         chatViewModel.sendMessage()
     }
 
-    public func startGateway() {
-        Task {
+    @discardableResult
+    public func startGateway() -> Task<Void, Never> {
+        guard !isShuttingDown else { return Task {} }
+        if gatewayLifecycleOperation == .start, let gatewayLifecycleTask {
+            return gatewayLifecycleTask
+        }
+        gatewayLifecycleGeneration &+= 1
+        let generation = gatewayLifecycleGeneration
+        gatewayLifecycleTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if generation == self.gatewayLifecycleGeneration {
+                    self.gatewayLifecycleTask = nil
+                    self.gatewayLifecycleOperation = nil
+                }
+            }
             do {
-                processState = .starting
-                try await processManager.start()
-                processState = processManager.state
-                addActivity(type: .system, text: "Gateway started")
-                connectToGateway()
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+                self.processState = .starting
+                let result = try await self.processManager.start()
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled,
+                      result != .superseded else { return }
+                self.processState = self.processManager.state
+                self.addActivity(type: .system, text: "Gateway started")
+                self.connectToGateway()
             } catch {
-                processState = .stopped
-                addActivity(type: .error, text: "Start failed: \(error.localizedDescription)")
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+                self.processState = .stopped
+                self.addActivity(type: .error, text: "Start failed: \(error.localizedDescription)")
             }
         }
+        gatewayLifecycleOperation = .start
+        gatewayLifecycleTask = task
+        return task
     }
 
-    public func stopGateway() {
-        Task {
-            disconnectFromGateway()
-            processState = .stopping
-            await processManager.stop()
-            processState = .stopped
-            addActivity(type: .system, text: "Gateway stopped")
+    @discardableResult
+    public func stopGateway() -> Task<Void, Never> {
+        if gatewayLifecycleOperation == .stop, let gatewayLifecycleTask {
+            return gatewayLifecycleTask
         }
+        gatewayLifecycleGeneration &+= 1
+        let generation = gatewayLifecycleGeneration
+        gatewayLifecycleTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if generation == self.gatewayLifecycleGeneration {
+                    self.gatewayLifecycleTask = nil
+                    self.gatewayLifecycleOperation = nil
+                }
+            }
+            await self.disconnectFromGateway()
+            guard generation == self.gatewayLifecycleGeneration else { return }
+            self.processState = .stopping
+            let result = await self.processManager.stop()
+            guard generation == self.gatewayLifecycleGeneration,
+                  !Task.isCancelled,
+                  result != .superseded else { return }
+            self.processState = .stopped
+            self.addActivity(type: .system, text: "Gateway stopped")
+        }
+        gatewayLifecycleOperation = .stop
+        gatewayLifecycleTask = task
+        return task
+    }
+
+    /// Restart the managed gateway after authentication changes so the
+    /// process reloads its token. This operation shares the same lifecycle
+    /// generation/task as manual start and stop actions, so shutdown can
+    /// cancel and await it and a late auth callback can never resurrect the
+    /// process after teardown.
+    @discardableResult
+    public func restartGatewayAfterAuthentication(
+        host: String = AppConstants.defaultHost,
+        port: Int = AppConstants.defaultPort
+    ) -> Task<Void, Never> {
+        guard !isShuttingDown else { return Task {} }
+        let endpoint = GatewayEndpoint(host: host, port: port)
+        let operation = GatewayLifecycleOperation.authenticationRestart(endpoint)
+        if gatewayLifecycleOperation == operation, let gatewayLifecycleTask {
+            return gatewayLifecycleTask
+        }
+
+        gatewayLifecycleGeneration &+= 1
+        let generation = gatewayLifecycleGeneration
+        gatewayLifecycleTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if generation == self.gatewayLifecycleGeneration {
+                    self.gatewayLifecycleTask = nil
+                    self.gatewayLifecycleOperation = nil
+                }
+            }
+
+            await self.disconnectFromGateway()
+            guard generation == self.gatewayLifecycleGeneration,
+                  !self.isShuttingDown,
+                  !Task.isCancelled else { return }
+
+            self.processState = .stopping
+            let stopResult = await self.processManager.stop()
+            guard generation == self.gatewayLifecycleGeneration,
+                  !self.isShuttingDown,
+                  !Task.isCancelled,
+                  stopResult != .superseded else { return }
+
+            self.processState = .starting
+            do {
+                let startResult = try await self.processManager.start()
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled,
+                      startResult != .superseded else { return }
+
+                self.processState = self.processManager.state
+                self.addActivity(type: .system, text: "Gateway restarted after authentication")
+                let connectionTask = self.connectToGateway(host: host, port: port)
+                await connectionTask.value
+            } catch {
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+                self.processState = self.processManager.state
+                self.addActivity(type: .error, text: "Restart failed: \(error.localizedDescription)")
+            }
+        }
+        gatewayLifecycleOperation = operation
+        gatewayLifecycleTask = task
+        return task
+    }
+
+    /// The single, idempotent async shutdown path: stops all live background
+    /// loops (heartbeat, uptime timer, fleet polling), disconnects the
+    /// WebSocket, and stops only the gateway process this app itself
+    /// started (an externally-detected gateway is left untouched since
+    /// `ProcessManager` never took ownership of its `Process`).
+    ///
+    /// Invoked from menu quit (via `applicationShouldTerminate`) and app
+    /// termination. Concurrent/repeated calls join the same in-flight
+    /// shutdown rather than repeating the work.
+    public func shutdown() async {
+        if let inFlight = shutdownTask {
+            await inFlight.value
+            return
+        }
+        isShuttingDown = true
+        let task = Task { [weak self] () -> Void in
+            guard let self else { return }
+            await self.performShutdown()
+        }
+        shutdownTask = task
+        await task.value
+        shutdownTask = nil
+    }
+
+    private func performShutdown() async {
+        gatewayLifecycleGeneration &+= 1
+        let inFlightLifecycle = gatewayLifecycleTask
+        gatewayLifecycleTask = nil
+        gatewayLifecycleOperation = nil
+        inFlightLifecycle?.cancel()
+        fleetViewModel.stopRefreshing()
+        stopUptimeTimer()
+        await disconnectFromGateway()
+        await inFlightLifecycle?.value
+        await processManager.stop()
+        processState = processManager.state
     }
 
     public func fetchStatus() async {
-        guard let rpc = rpcClient else { return }
+        guard let rpc = rpcClient, let conn = connection else { return }
+        let generation = connectGeneration
+        await fetchStatus(rpcClient: rpc, connection: conn, generation: generation)
+    }
+
+    private func fetchStatus(
+        rpcClient rpc: RpcClient,
+        connection conn: GatewayConnection,
+        generation: UInt
+    ) async {
         do {
-            gatewayStatus = try await rpc.getStatus()
+            let status = try await rpc.getStatus()
+            guard isCurrentConnection(conn, generation: generation) else { return }
+            gatewayStatus = status
         } catch {
             // Silently ignore status fetch failures
         }
+    }
+
+    private func isCurrentConnection(_ conn: GatewayConnection, generation: UInt) -> Bool {
+        generation == connectGeneration &&
+            connection === conn &&
+            !Task.isCancelled
+    }
+
+    private func configureChildViewModels(rpcClient: RpcClient) {
+        chatViewModel.configure(rpcClient: rpcClient, sessionStore: sessionStore)
+        sessionsViewModel.configure(rpcClient: rpcClient, sessionStore: sessionStore)
+        channelsViewModel.configure(rpcClient: rpcClient)
+        cronViewModel.configure(rpcClient: rpcClient)
+        approvalViewModel.configure(rpcClient: rpcClient)
+    }
+
+    private func clearRpcClientReferences() {
+        let hadClient = rpcClient != nil || childViewModelsHaveRpcClient
+        rpcClient = nil
+        chatViewModel.clearConfiguration()
+        sessionsViewModel.clearConfiguration()
+        channelsViewModel.clearConfiguration()
+        cronViewModel.clearConfiguration()
+        approvalViewModel.clearConfiguration()
+        if hadClient {
+            onRpcClientInvalidated?()
+        }
+    }
+
+    private func abandonConnection(_ conn: GatewayConnection) async {
+        var heartbeat: HeartbeatMonitor?
+        if connection === conn {
+            connection = nil
+            heartbeat = heartbeatMonitor
+            heartbeatMonitor = nil
+            clearRpcClientReferences()
+            gatewayStatus = nil
+            connectionState = .disconnected
+            stopUptimeTimer()
+        }
+        await heartbeat?.stop()
+        await conn.disconnect()
+    }
+
+    var childViewModelsHaveRpcClient: Bool {
+        chatViewModel.isRpcClientConfigured ||
+            sessionsViewModel.isRpcClientConfigured ||
+            channelsViewModel.isRpcClientConfigured ||
+            cronViewModel.isRpcClientConfigured ||
+            approvalViewModel.isRpcClientConfigured
     }
 
     // MARK: - Event Handling
@@ -312,6 +666,8 @@ public final class AppViewModel {
         case .error:
             let errorMsg = payload.errorMessage ?? "Unknown error"
             addActivity(type: .error, text: "Agent error: \(errorMsg)")
+        case .aborted:
+            break
         }
     }
 

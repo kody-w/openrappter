@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { GatewayClient } from '../services/gateway.js';
 
 const uiRoot = path.resolve(__dirname, '..');
 const openclawUiRoot = path.resolve(__dirname, '..', '..', '..', '..', 'openclaw', 'ui', 'src');
@@ -98,10 +99,14 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
 
   // --- RPC Methods ---
 
+  // Every one of these is a method actually registered on GatewayServer
+  // (typescript/src/gateway/server.ts / methods/*.ts). Authentication is
+  // carried by the `connect` handshake (see GatewayClient.authenticate()),
+  // not a standalone `auth` RPC — there is no such method on the server.
   const requiredRpcMethods = [
     'status',
     'health',
-    'auth',
+    'connect',
     'subscribe',
     'agent',
     'chat.list',
@@ -183,27 +188,25 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
 
   // --- Gateway Client ---
 
-  it('openrappter gateway has required methods', () => {
-    const gatewaySrc = readFile(path.join(uiRoot, 'services', 'gateway.ts'));
-    const requiredMethods = [
-      'connect',
-      'disconnect',
-      'call',
-      'callStream',
-      'subscribe',
-      'unsubscribe',
-      'authenticate',
-      'on(',
-      'off(',
-      'isConnected',
-      'isAuthenticated',
-    ];
-    for (const m of requiredMethods) {
-      expect(
-        gatewaySrc.includes(m),
-        `Missing gateway method: ${m}`,
-      ).toBe(true);
-    }
+  it('openrappter gateway exposes a working request/response/streaming/auth API', () => {
+    // Behavior-level check (not a source-string scan): the real class must
+    // expose each of these as callable members with the right shape.
+    const client = new GatewayClient({ url: 'ws://test:0' });
+    expect(typeof client.connect).toBe('function');
+    expect(typeof client.disconnect).toBe('function');
+    expect(typeof client.call).toBe('function');
+    expect(typeof client.callStream).toBe('function');
+    expect(typeof client.subscribe).toBe('function');
+    expect(typeof client.unsubscribe).toBe('function');
+    expect(typeof client.authenticate).toBe('function');
+    expect(typeof client.authenticateWithToken).toBe('function');
+    expect(typeof client.on).toBe('function');
+    expect(typeof client.off).toBe('function');
+    expect(client.isConnected).toBe(false);
+    expect(client.isAuthenticated).toBe(false);
+
+    // Calling before connect() must reject cleanly rather than hang or throw.
+    return expect(client.call('anything')).rejects.toThrow('Not connected');
   });
 
   // --- Event Types ---

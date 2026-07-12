@@ -16,6 +16,14 @@ public final class ApprovalViewModel {
         self.rpcClient = rpcClient
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
+    var isRpcClientConfigured: Bool {
+        rpcClient != nil
+    }
+
     // MARK: - Computed
 
     public var hasPending: Bool {

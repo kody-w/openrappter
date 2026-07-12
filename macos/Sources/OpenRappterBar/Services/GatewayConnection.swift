@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - WebSocket Transport Protocol (for testability)
 
-public protocol WebSocketTransport: Sendable {
+public protocol WebSocketTransport: AnyObject, Sendable {
     func send(_ data: Data) async throws
     func receive() async throws -> Data
     func cancel()
@@ -77,9 +77,15 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     public typealias EventHandler = @Sendable (String, Any) -> Void
     public typealias StateHandler = @Sendable (ConnectionState) -> Void
     public typealias TransportFactory = @Sendable (URL) -> WebSocketTransport
+    public typealias ReconnectDelayProvider = @Sendable (Int) -> TimeInterval
+    public typealias ReconnectSleeper = @Sendable (TimeInterval) async throws -> Void
+    public typealias PostHandshakeHook = @Sendable () async -> Void
 
     private let url: URL
     private let transportFactory: TransportFactory
+    private let reconnectDelayProvider: ReconnectDelayProvider
+    private let reconnectSleeper: ReconnectSleeper
+    private let postHandshakeHook: PostHandshakeHook
 
     // Actor-isolated mutable state — safe by construction
     private var _state: ConnectionState = .disconnected
@@ -90,6 +96,15 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     private var shouldReconnect: Bool = true
     private var pendingRequests: [String: CheckedContinuation<RpcResponseFrame, Error>] = [:]
     private var receiveTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    /// Bumped for every explicit connect/disconnect lifecycle. Scheduled
+    /// reconnect attempts retain the same generation so an explicit
+    /// disconnect permanently invalidates the whole retry chain.
+    private var connectGeneration: UInt = 0
+    /// Identifies the currently-owned transport within a lifecycle generation.
+    /// This prevents a late failure from an older receive loop from scheduling
+    /// retries for (or tearing down) a newer transport.
+    private var transportGeneration: UInt = 0
 
     // Callbacks
     private var _onEvent: EventHandler?
@@ -98,14 +113,25 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     public init(
         host: String = AppConstants.defaultHost,
         port: Int = AppConstants.defaultPort,
-        transportFactory: TransportFactory? = nil
+        transportFactory: TransportFactory? = nil,
+        reconnectDelayProvider: @escaping ReconnectDelayProvider = {
+            GatewayConnection.backoffDelay(attempt: $0)
+        },
+        reconnectSleeper: @escaping ReconnectSleeper = {
+            try await Task.sleep(for: .seconds($0))
+        },
+        postHandshakeHook: @escaping PostHandshakeHook = {}
     ) {
         self.url = URL(string: "ws://\(host):\(port)")!
         self.transportFactory = transportFactory ?? { url in URLSessionWebSocket(url: url) }
+        self.reconnectDelayProvider = reconnectDelayProvider
+        self.reconnectSleeper = reconnectSleeper
+        self.postHandshakeHook = postHandshakeHook
     }
 
     deinit {
         receiveTask?.cancel()
+        reconnectTask?.cancel()
     }
 
     // MARK: - Public State
@@ -140,21 +166,71 @@ public actor GatewayConnection: GatewayConnectionProtocol {
 
     // MARK: - Connect / Disconnect
 
+    /// Establish a connection and complete the handshake.
+    ///
+    /// Repeated or overlapping explicit calls supersede the previous
+    /// lifecycle. A scheduled reconnect uses `connectAttempt` directly so it
+    /// keeps the retry generation and does not cancel its own task.
     public func connect() async throws {
+        connectGeneration &+= 1
+        let generation = connectGeneration
+        shouldReconnect = true
+        reconnectAttempt = 0
+        cancelReconnectTask()
+        try await connectAttempt(generation: generation)
+    }
+
+    private func connectAttempt(generation: UInt) async throws {
+        guard generation == connectGeneration, shouldReconnect else {
+            throw CancellationError()
+        }
+
+        teardownTransport()
+
         setState(.connecting)
 
         let newTransport = transportFactory(url)
         self.transport = newTransport
+        transportGeneration &+= 1
+        let attemptGeneration = transportGeneration
 
         // Start receive loop
-        receiveTask?.cancel()
         receiveTask = Task { [weak self] in
-            await self?.receiveLoop(transport: newTransport)
+            await self?.receiveLoop(
+                transport: newTransport,
+                connectGeneration: generation,
+                transportGeneration: attemptGeneration
+            )
         }
 
         // Perform handshake
         setState(.handshaking)
-        try await performHandshake(transport: newTransport)
+        do {
+            try await performHandshake(transport: newTransport)
+            await postHandshakeHook()
+        } catch {
+            // Only clean up if a newer connect()/disconnect() hasn't already
+            // superseded this attempt — otherwise we'd tear down state that
+            // belongs to that newer, still-active attempt.
+            if generation == connectGeneration,
+               attemptGeneration == transportGeneration {
+                teardownTransport()
+                setState(.disconnected)
+            }
+            throw error
+        }
+
+        guard generation == connectGeneration,
+              attemptGeneration == transportGeneration,
+              shouldReconnect,
+              transport === newTransport,
+              receiveTask != nil else {
+            // Superseded mid-handshake by a newer connect()/disconnect() call.
+            // A terminal receive can also invalidate this exact transport
+            // immediately after hello; never publish connected for a socket
+            // the receive loop has already torn down.
+            throw CancellationError()
+        }
 
         reconnectAttempt = 0
         setState(.connected)
@@ -163,13 +239,9 @@ public actor GatewayConnection: GatewayConnectionProtocol {
 
     public func disconnect() {
         shouldReconnect = false
-        let currentTransport = transport
-        transport = nil
-        receiveTask?.cancel()
-        receiveTask = nil
-
-        currentTransport?.cancel()
-        cancelAllPending()
+        connectGeneration &+= 1
+        cancelReconnectTask()
+        teardownTransport()
         setState(.disconnected)
         Log.connection.info("Disconnected from gateway")
     }
@@ -221,22 +293,44 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     }
 
     func scheduleReconnect() {
-        guard shouldReconnect else { return }
+        scheduleReconnect(generation: connectGeneration)
+    }
 
+    private func scheduleReconnect(generation: UInt) {
+        guard shouldReconnect,
+              generation == connectGeneration,
+              reconnectTask == nil else { return }
         let attempt = reconnectAttempt
         reconnectAttempt += 1
 
-        let delay = Self.backoffDelay(attempt: attempt)
+        let delay = reconnectDelayProvider(attempt)
         setState(.reconnecting)
         Log.connection.info("Reconnecting in \(String(format: "%.1f", delay))s (attempt \(attempt + 1))")
 
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
+        let sleeper = reconnectSleeper
+        reconnectTask = Task { [weak self] in
             do {
-                try await self?.connect()
+                try await sleeper(delay)
             } catch {
-                await self?.scheduleReconnect()
+                return
             }
+            guard let self, !Task.isCancelled else { return }
+            await self.runScheduledReconnect(generation: generation)
+        }
+    }
+
+    private func runScheduledReconnect(generation: UInt) async {
+        guard generation == connectGeneration, shouldReconnect else { return }
+
+        // Detach ownership before connecting. `connectAttempt` tears down the
+        // previous transport but must not cancel the Task currently executing
+        // it; a failed attempt can then schedule the next backoff normally.
+        reconnectTask = nil
+        do {
+            try await connectAttempt(generation: generation)
+        } catch {
+            guard generation == connectGeneration, shouldReconnect else { return }
+            scheduleReconnect(generation: generation)
         }
     }
 
@@ -287,18 +381,31 @@ public actor GatewayConnection: GatewayConnectionProtocol {
         }
     }
 
-    private func receiveLoop(transport: WebSocketTransport) async {
+    private func receiveLoop(
+        transport: WebSocketTransport,
+        connectGeneration generation: UInt,
+        transportGeneration attemptGeneration: UInt
+    ) async {
         while !Task.isCancelled {
             do {
                 let data = try await transport.receive()
+                guard generation == connectGeneration,
+                      attemptGeneration == transportGeneration else { return }
                 handleIncoming(data: data)
             } catch {
                 if Task.isCancelled { return }
-                // Connection closed or failed
+                guard generation == connectGeneration,
+                      attemptGeneration == transportGeneration,
+                      self.transport === transport,
+                      shouldReconnect else { return }
+
+                // Invalidate this transport before the suspended handshake can
+                // resume and publish `.connected`. This also fences late
+                // receive failures from touching a replacement transport.
                 let currentState = _state
                 if currentState != .disconnected {
-                    cancelAllPending()
-                    scheduleReconnect()
+                    teardownTransport()
+                    scheduleReconnect(generation: generation)
                 }
                 return
             }
@@ -338,6 +445,27 @@ public actor GatewayConnection: GatewayConnectionProtocol {
         for (_, continuation) in pending {
             continuation.resume(throwing: GatewayConnectionError.notConnected)
         }
+    }
+
+    /// Cancel and release the current transport/receive loop and fail pending
+    /// requests. Reconnect ownership is managed separately: a scheduled task
+    /// must detach before entering `connectAttempt`, while explicit lifecycle
+    /// calls cancel it through `cancelReconnectTask()`.
+    private func teardownTransport() {
+        transportGeneration &+= 1
+        let currentTransport = transport
+        transport = nil
+        receiveTask?.cancel()
+        receiveTask = nil
+
+        currentTransport?.cancel()
+        _connectionId = nil
+        cancelAllPending()
+    }
+
+    private func cancelReconnectTask() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
     }
 
     /// Remove a pending request and resume its continuation if it still exists.

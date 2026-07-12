@@ -17,8 +17,7 @@ export class AuthProfileStore {
   private profilesPath: string;
   private profiles: AuthProfile[] = [];
 
-  constructor() {
-    const configDir = path.join(os.homedir(), '.openrappter');
+  constructor(configDir = path.join(os.homedir(), '.openrappter')) {
     this.profilesPath = path.join(configDir, 'auth-profiles.json');
     this.ensureConfigDir();
     this.load();

@@ -13,7 +13,10 @@ import inspect
 class TestChannelsExports:
     """Verify openrappter.channels exports."""
 
-    expected = ['BaseChannel', 'IncomingMessage', 'OutgoingMessage', 'ChannelRegistry']
+    expected = [
+        'BaseChannel', 'IncomingMessage', 'OutgoingMessage', 'ChannelRegistry',
+        'WebhookChannel', 'ChannelConnectionError', 'ProviderChannelBridge', 'ChannelDispatchError',
+    ]
 
     def test_all_defined(self):
         import openrappter.channels as mod
@@ -21,18 +24,81 @@ class TestChannelsExports:
         assert sorted(mod.__all__) == sorted(self.expected)
 
     def test_all_importable(self):
-        from openrappter.channels import BaseChannel, IncomingMessage, OutgoingMessage, ChannelRegistry
+        from openrappter.channels import (
+            BaseChannel, IncomingMessage, OutgoingMessage, ChannelRegistry,
+            WebhookChannel, ChannelConnectionError, ProviderChannelBridge, ChannelDispatchError,
+        )
         assert BaseChannel is not None
         assert IncomingMessage is not None
         assert OutgoingMessage is not None
         assert ChannelRegistry is not None
+        assert WebhookChannel is not None
+        assert ChannelConnectionError is not None
+        assert ProviderChannelBridge is not None
+        assert ChannelDispatchError is not None
 
     def test_types(self):
-        from openrappter.channels import BaseChannel, IncomingMessage, OutgoingMessage, ChannelRegistry
+        from openrappter.channels import (
+            BaseChannel, IncomingMessage, OutgoingMessage, ChannelRegistry,
+            WebhookChannel, ChannelConnectionError, ProviderChannelBridge, ChannelDispatchError,
+        )
         assert inspect.isclass(BaseChannel)
         assert inspect.isclass(IncomingMessage)
         assert inspect.isclass(OutgoingMessage)
         assert inspect.isclass(ChannelRegistry)
+        assert inspect.isclass(WebhookChannel) and issubclass(WebhookChannel, BaseChannel)
+        assert inspect.isclass(ChannelConnectionError) and issubclass(ChannelConnectionError, Exception)
+        assert inspect.isclass(ProviderChannelBridge)
+        assert inspect.isclass(ChannelDispatchError) and issubclass(ChannelDispatchError, Exception)
+
+
+class TestProvidersExports:
+    """Verify openrappter.providers exports."""
+
+    expected = [
+        'ChatOptions', 'ProviderError', 'ProviderMessage', 'ProviderResponse',
+        'ProviderResponseTooLargeError', 'ProviderTimeoutError', 'ProviderUnavailableError',
+        'OpenAICompatibleProvider', 'create_openai_compatible_provider', 'ProviderRegistry',
+    ]
+
+    def test_all_defined(self):
+        import openrappter.providers as mod
+        assert hasattr(mod, '__all__')
+        assert sorted(mod.__all__) == sorted(self.expected)
+
+    def test_all_importable(self):
+        from openrappter.providers import (
+            ChatOptions, ProviderError, ProviderMessage, ProviderResponse,
+            ProviderResponseTooLargeError, ProviderTimeoutError, ProviderUnavailableError,
+            OpenAICompatibleProvider, create_openai_compatible_provider, ProviderRegistry,
+        )
+        assert ChatOptions is not None
+        assert ProviderError is not None
+        assert ProviderMessage is not None
+        assert ProviderResponse is not None
+        assert ProviderResponseTooLargeError is not None
+        assert ProviderTimeoutError is not None
+        assert ProviderUnavailableError is not None
+        assert OpenAICompatibleProvider is not None
+        assert create_openai_compatible_provider is not None
+        assert ProviderRegistry is not None
+
+    def test_types(self):
+        from openrappter.providers import (
+            ChatOptions, ProviderError, ProviderMessage, ProviderResponse,
+            ProviderResponseTooLargeError, ProviderTimeoutError, ProviderUnavailableError,
+            OpenAICompatibleProvider, create_openai_compatible_provider, ProviderRegistry,
+        )
+        assert inspect.isclass(ChatOptions)
+        assert inspect.isclass(ProviderError) and issubclass(ProviderError, Exception)
+        assert inspect.isclass(ProviderMessage)
+        assert inspect.isclass(ProviderResponse)
+        assert issubclass(ProviderResponseTooLargeError, ProviderError)
+        assert issubclass(ProviderTimeoutError, ProviderError)
+        assert issubclass(ProviderUnavailableError, ProviderError)
+        assert inspect.isclass(OpenAICompatibleProvider)
+        assert callable(create_openai_compatible_provider)
+        assert inspect.isclass(ProviderRegistry)
 
 
 class TestConfigExports:
@@ -68,7 +134,8 @@ class TestConfigExports:
 class TestGatewayExports:
     """Verify openrappter.gateway exports."""
 
-    expected = ['StreamManager', 'StreamBlock', 'StreamSession', 'stream_manager', 'DashboardHandler']
+    expected = ['StreamManager', 'StreamBlock', 'StreamSession', 'stream_manager', 'DashboardHandler',
+                'GatewayServer', 'GatewayError', 'RPC_ERROR', 'GatewayMetrics']
 
     def test_all_defined(self):
         import openrappter.gateway as mod
@@ -77,21 +144,31 @@ class TestGatewayExports:
 
     def test_all_importable(self):
         from openrappter.gateway import (StreamManager, StreamBlock, StreamSession,
-                                          stream_manager, DashboardHandler)
+                                          stream_manager, DashboardHandler,
+                                          GatewayServer, GatewayError, RPC_ERROR, GatewayMetrics)
         assert StreamManager is not None
         assert StreamBlock is not None
         assert StreamSession is not None
         assert stream_manager is not None
         assert DashboardHandler is not None
+        assert GatewayServer is not None
+        assert GatewayError is not None
+        assert RPC_ERROR is not None
+        assert GatewayMetrics is not None
 
     def test_types(self):
         from openrappter.gateway import (StreamManager, StreamBlock, StreamSession,
-                                          stream_manager, DashboardHandler)
+                                          stream_manager, DashboardHandler,
+                                          GatewayServer, GatewayError, RPC_ERROR, GatewayMetrics)
         assert inspect.isclass(StreamManager)
         assert inspect.isclass(StreamBlock)
         assert inspect.isclass(StreamSession)
         assert isinstance(stream_manager, StreamManager)
         assert inspect.isclass(DashboardHandler)
+        assert inspect.isclass(GatewayServer)
+        assert inspect.isclass(GatewayError) and issubclass(GatewayError, Exception)
+        assert isinstance(RPC_ERROR, dict)
+        assert inspect.isclass(GatewayMetrics)
 
 
 class TestMcpExports:

@@ -149,6 +149,14 @@ export class OpenRappterChannels extends LitElement {
       color: #6ee7b7;
     }
 
+    .status-connected {
+      color: #6ee7b7;
+    }
+
+    .status-disconnected {
+      color: #fca5a5;
+    }
+
     .row {
       display: flex;
       gap: 0.5rem;
@@ -416,7 +424,7 @@ export class OpenRappterChannels extends LitElement {
           </div>
           <div>
             <span class="label">Connected</span>
-            <span>${connected ? 'Yes' : 'No'}</span>
+            <span class="${connected ? 'status-connected' : 'status-disconnected'}">${connected ? 'Connected' : 'Disconnected'}</span>
           </div>
           <div>
             <span class="label">Last activity</span>

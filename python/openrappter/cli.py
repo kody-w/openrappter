@@ -71,8 +71,19 @@ class AgentRegistry:
     Follows the CommunityRAPP pattern for agent discovery.
     """
 
-    def __init__(self, agents_dir: Path = None):
-        self.agents_dir = agents_dir or PACKAGE_ROOT / "agents"
+    def __init__(
+        self,
+        agents_dir: Path = None,
+        skills_dir: Path = None,
+        load_skills: bool = True,
+    ):
+        self.agents_dir = Path(agents_dir) if agents_dir is not None else PACKAGE_ROOT / "agents"
+        self.skills_dir = (
+            Path(skills_dir)
+            if skills_dir is not None
+            else Path.home() / ".openrappter" / "skills"
+        )
+        self.load_skills = load_skills
         self._agents = {}
         self._clawhub_agents = {}
         self._loaded = False
@@ -83,7 +94,7 @@ class AgentRegistry:
             return self._agents
         
         if not self.agents_dir.exists():
-            self.agents_dir.mkdir(exist_ok=True)
+            self.agents_dir.mkdir(parents=True, exist_ok=True)
             return self._agents
         
         # Import BasicAgent for type checking
@@ -139,7 +150,7 @@ class AgentRegistry:
                 logging.warning(f"Failed to load {file_path}: {e}")
         
         # Also load ClawHub skills
-        if CLAWHUB_AVAILABLE:
+        if CLAWHUB_AVAILABLE and self.load_skills:
             self._discover_clawhub_skills()
 
         self._loaded = True
@@ -150,7 +161,7 @@ class AgentRegistry:
     def _discover_clawhub_skills(self):
         """Discover and load ClawHub skills from ~/.openrappter/skills/."""
         try:
-            client = ClawHubClient()
+            client = ClawHubClient(skills_dir=self.skills_dir)
             skill_agents = client.load_all_skills()
             for agent in skill_agents:
                 # Prefix with 'skill:' to distinguish from native agents
@@ -426,7 +437,7 @@ class Assistant:
         self.config = {
             'name': 'openrappter',
             'emoji': '🦖',
-            'version': '1.1.0'
+            'version': __version__,
         }
     
     def get_system_prompt(self) -> str:
@@ -665,6 +676,19 @@ Examples:
   python openrappter.py --list-agents       List available agents
   python openrappter.py --exec Agent query  Execute specific agent
   python openrappter.py --status            Show status
+  python openrappter.py --gateway           Run the HTTP/WebSocket gateway (foreground)
+
+Environment:
+  OPENRAPPTER_LOG_FORMAT=json  Emit gateway lifecycle/request logs as
+                                structured JSON lines (timestamp, level,
+                                component, event, safe numeric fields)
+                                instead of human-readable text. Off by
+                                default; never logs method names, user
+                                input, tokens, or stack traces.
+  OPENRAPPTER_GATEWAY_TRUSTED_ORIGINS
+                               Comma-separated browser origins allowed to
+                               connect cross-origin when gateway token auth
+                               is enabled.
 """,
     )
     parser.add_argument("--version", "-v", action="version", version=f"{orchestrator.name} {orchestrator.version}")
@@ -672,6 +696,23 @@ Examples:
     parser.add_argument("--status", "-s", action="store_true", help="Show status")
     parser.add_argument("--list-agents", "-l", action="store_true", help="List available agents")
     parser.add_argument("--exec", "-e", nargs=2, metavar=('AGENT', 'QUERY'), help="Execute specific agent")
+    parser.add_argument("--gateway", "-g", action="store_true",
+                         help="Run the HTTP/WebSocket gateway server in the foreground")
+    parser.add_argument("--gateway-host", default="127.0.0.1", metavar="HOST",
+                         help="Gateway bind host (default: 127.0.0.1 — loopback only)")
+    parser.add_argument("--gateway-port", type=int, default=18790, metavar="PORT",
+                         help="Gateway bind port (default: 18790)")
+    parser.add_argument("--gateway-token", default=None, metavar="TOKEN",
+                         help="Gateway auth token (required to bind to a non-loopback host; "
+                              "falls back to OPENRAPPTER_GATEWAY_TOKEN env var)")
+    parser.add_argument(
+        "--gateway-trusted-origin",
+        action="append",
+        default=None,
+        metavar="ORIGIN",
+        help="Browser origin allowed to connect cross-origin; repeatable and requires "
+             "gateway token auth",
+    )
 
     # ClawHub subcommands
     subparsers = parser.add_subparsers(dest='command', help='Commands')
@@ -705,6 +746,54 @@ Examples:
     rh_uninstall_parser.add_argument('agent', help='Agent name to uninstall')
     
     args = parser.parse_args()
+
+    # Run the HTTP/WebSocket gateway server in the foreground
+    if args.gateway:
+        import asyncio
+        from openrappter.gateway import GatewayServer
+        from openrappter.gateway.observability import log_gateway_lifecycle
+
+        orchestrator.initialize()
+        token = args.gateway_token or os.environ.get("OPENRAPPTER_GATEWAY_TOKEN")
+        trusted_origins = args.gateway_trusted_origin
+        if trusted_origins is None:
+            trusted_origins = [
+                origin.strip()
+                for origin in os.environ.get(
+                    "OPENRAPPTER_GATEWAY_TRUSTED_ORIGINS", ""
+                ).split(",")
+                if origin.strip()
+            ]
+
+        try:
+            server = GatewayServer(
+                agent_registry=orchestrator.registry,
+                host=args.gateway_host,
+                port=args.gateway_port,
+                token=token,
+                trusted_origins=trusted_origins,
+                version=orchestrator.version,
+            )
+        except ValueError as e:
+            print(f"Gateway configuration error: {e}")
+            sys.exit(1)
+
+        auth_state = "enabled" if server.auth_enabled else "disabled (loopback only)"
+        print(f"{orchestrator.emoji} Starting gateway on {args.gateway_host}:{args.gateway_port} (auth {auth_state})")
+        print("Press Ctrl+C to stop.")
+        # Opt-in structured log (OPENRAPPTER_LOG_FORMAT=json) alongside the
+        # human-readable prints above — never replaces them, and never logs
+        # the auth token itself.
+        log_gateway_lifecycle(
+            "cli", "gateway.start", f"Starting gateway on {args.gateway_host}:{args.gateway_port}",
+            {"host": args.gateway_host, "port": args.gateway_port, "auth_enabled": server.auth_enabled},
+        )
+
+        try:
+            asyncio.run(server.run_forever())
+        except KeyboardInterrupt:
+            pass
+        return
 
     # Handle clawhub commands before full initialization
     if args.command == 'clawhub':

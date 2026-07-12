@@ -33,6 +33,12 @@ classifiers = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pyboy>=2.6.1,<3",
+]
+pokemon = [
+    "github-copilot-sdk>=1.0.6; python_version >= '3.11'",
+    "pyboy>=2.6.1,<3",
+    "pillow>=10.0",
 ]
 
 [project.scripts]

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "openrappter"
-version = "1.9.8"
+version = "1.10.0"
 description = "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required"
 readme = {text = "openrappter - Local-first AI agent powered by GitHub Copilot SDK", content-type = "text/plain"}
 license = "MIT"
@@ -12,6 +12,9 @@ requires-python = ">=3.10"
 dependencies = [
     "pyyaml>=6.0",
     "requests>=2.28",
+    # Powers the gateway and bounded provider HTTP client. 3.13 adds an
+    # explicit response-header-count cap alongside line/field-size limits.
+    "aiohttp>=3.13",
 ]
 authors = [
     { name = "Kody W", email = "kody@example.com" }

@@ -11,6 +11,9 @@ import { gateway } from '../services/gateway.js';
 import { renderMarkdown } from '../services/markdown.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
 
+const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
+const RUN_ABORT_TIMEOUT_MS = 5_000;
+
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -859,6 +862,8 @@ export class OpenRappterChat extends LitElement {
 
   private toolSidebarWidth = 320;
   private resizing = false;
+  private runDeadline: ReturnType<typeof setTimeout> | null = null;
+  private closedRunIds = new Set<string>();
 
   @query('textarea') private textarea!: HTMLTextAreaElement;
   @query('.messages') private messagesContainer!: HTMLDivElement;
@@ -879,6 +884,14 @@ export class OpenRappterChat extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.activeRunId) {
+      const runId = this.activeRunId;
+      this.rememberClosedRun(runId);
+      void gateway.request('chat.abort', { runId }, {
+        timeoutMs: RUN_ABORT_TIMEOUT_MS,
+      }).catch(() => {});
+    }
+    this.clearRunDeadline();
     gateway.off('chat', this.handleChatEvent);
     gateway.off('agent.tool', this.handleToolEvent);
     document.removeEventListener('mousemove', this.handleResizeMove);
@@ -963,10 +976,11 @@ export class OpenRappterChat extends LitElement {
     const data = payload as {
       runId: string;
       sessionKey: string;
-      state: 'delta' | 'final' | 'error';
+      state: 'delta' | 'final' | 'error' | 'aborted';
       message?: { role: string; content: Array<{ type: string; text?: string }> };
       errorMessage?: string;
     };
+    if (!data.runId || this.closedRunIds.has(data.runId)) return;
 
     if (data.state === 'delta' || data.state === 'final') {
       const text = data.message?.content
@@ -984,6 +998,10 @@ export class OpenRappterChat extends LitElement {
 
     if (data.state === 'error') {
       this.handleStreamError(data.runId, data.errorMessage ?? 'Unknown error');
+    }
+
+    if (data.state === 'aborted') {
+      this.finishStreaming(data.runId);
     }
   };
 
@@ -1037,10 +1055,13 @@ export class OpenRappterChat extends LitElement {
 
   private async handleAbort() {
     if (!this.activeRunId) return;
+    const runId = this.activeRunId;
+    this.finishStreaming(runId);
     try {
-      await gateway.request('chat.abort', { runId: this.activeRunId });
+      await gateway.request('chat.abort', { runId }, {
+        timeoutMs: RUN_ABORT_TIMEOUT_MS,
+      });
     } catch { /* best effort */ }
-    this.finishStreaming(this.activeRunId);
   }
 
   // ── Message Queue ──
@@ -1155,6 +1176,7 @@ export class OpenRappterChat extends LitElement {
 
       this.sessionKey = result.sessionKey;
       this.activeRunId = result.runId;
+      this.armRunDeadline(result.runId);
       this.attachments = [];
 
       // Refresh session list if this is a new session
@@ -1188,12 +1210,16 @@ export class OpenRappterChat extends LitElement {
   }
 
   private finishStreaming(runId: string) {
+    this.rememberClosedRun(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
-    if (idx < 0) return;
+    if (idx >= 0) {
+      const messages = [...this.messages];
+      messages[idx] = { ...messages[idx], streaming: false };
+      this.messages = messages;
+    }
+    if (this.activeRunId !== runId) return;
 
-    const messages = [...this.messages];
-    messages[idx] = { ...messages[idx], streaming: false };
-    this.messages = messages;
+    this.clearRunDeadline();
     this.sending = false;
     this.activeRunId = null;
     // Flush queued messages
@@ -1203,6 +1229,7 @@ export class OpenRappterChat extends LitElement {
   }
 
   private handleStreamError(runId: string, errorMessage: string) {
+    this.rememberClosedRun(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx >= 0) {
       const messages = [...this.messages];
@@ -1213,8 +1240,37 @@ export class OpenRappterChat extends LitElement {
       };
       this.messages = messages;
     }
+    if (this.activeRunId !== runId) return;
+
+    this.clearRunDeadline();
     this.sending = false;
     this.activeRunId = null;
+  }
+
+  private rememberClosedRun(runId: string) {
+    this.closedRunIds.add(runId);
+    if (this.closedRunIds.size > 100) {
+      const oldest = this.closedRunIds.values().next().value;
+      if (oldest) this.closedRunIds.delete(oldest);
+    }
+  }
+
+  private clearRunDeadline() {
+    if (!this.runDeadline) return;
+    clearTimeout(this.runDeadline);
+    this.runDeadline = null;
+  }
+
+  private armRunDeadline(runId: string) {
+    this.clearRunDeadline();
+    this.runDeadline = setTimeout(() => {
+      if (this.activeRunId !== runId || this.closedRunIds.has(runId)) return;
+      this.error = 'Agent run exceeded the 30 minute limit and was cancelled.';
+      this.finishStreaming(runId);
+      void gateway.request('chat.abort', { runId }, {
+        timeoutMs: RUN_ABORT_TIMEOUT_MS,
+      }).catch(() => {});
+    }, AGENT_RUN_OVERALL_TIMEOUT_MS);
   }
 
   // ── Attachments ──

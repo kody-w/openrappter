@@ -3,7 +3,9 @@
  * frame-based messaging, chat.send → agent wiring, and event broadcasting.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { WebSocket } from 'ws';
 import { GatewayServer } from './server.js';
 import type { AgentRequest, AgentResponse, StreamingResponse } from './types.js';
@@ -75,13 +77,16 @@ async function connectHandshake(ws: WebSocket, opts?: { token?: string }): Promi
 
 describe('Gateway Protocol (openclaw-compatible)', () => {
   let server: GatewayServer;
+  let testDataDir: string;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
+    testDataDir = fs.mkdtempSync(path.join(process.cwd(), '.gateway-protocol-'));
     server = new GatewayServer({
       port: TEST_PORT,
       bind: 'loopback',
       auth: { mode: 'token', tokens: [TEST_TOKEN] },
       heartbeatInterval: 60000, // slow heartbeat to avoid noise
+      dataDir: testDataDir,
     });
 
     // Wire a simple echo agent
@@ -104,8 +109,9 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
     await server.start();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await server.stop();
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   });
 
   // ── Connect Handshake ──────────────────────────────────────────────────
@@ -163,6 +169,7 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
         bind: 'loopback',
         auth: { mode: 'none' },
         heartbeatInterval: 60000,
+        dataDir: path.join(testDataDir, 'no-auth'),
       });
       await noAuthServer.start();
       try {

@@ -109,27 +109,7 @@ public struct ChatContainerView: View {
 
             if viewModel.connectionState == .disconnected {
                 Button("Wake Up") {
-                    // Try to start the daemon, then connect
-                    Task {
-                        let process = Process()
-                        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-                        process.arguments = ["-c", """
-                            kill -9 $(lsof -ti:18790) 2>/dev/null
-                            sleep 1
-                            if [ -f "$HOME/Desktop/restart-openrappter.sh" ]; then
-                                bash "$HOME/Desktop/restart-openrappter.sh" &
-                            elif command -v openrappter &>/dev/null; then
-                                openrappter --daemon &
-                            fi
-                        """]
-                        process.standardOutput = FileHandle.nullDevice
-                        process.standardError = FileHandle.nullDevice
-                        try? process.run()
-                        try? await Task.sleep(for: .seconds(4))
-                        await MainActor.run {
-                            viewModel.connectToGateway()
-                        }
-                    }
+                    viewModel.startGateway()
                 }
                 .controlSize(.mini)
                 .buttonStyle(.borderedProminent)

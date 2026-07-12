@@ -1,5 +1,24 @@
 /**
  * Gateway RPC methods registry
+ *
+ * IMPORTANT — canonical registration path:
+ * `GatewayServer` (`../server.ts`) does NOT call `registerAllMethods` below.
+ * Its `registerBuiltInMethods()` is the single canonical, production
+ * registration path and is the authoritative source for `chat.*`,
+ * `channels.*`, `cron.*`, `connections.list`, and `config.get`/`config.set`
+ * — those handlers are wired to the server's real `sessionStore`,
+ * `channelRegistry`, and `cronStore`/`cronService`.
+ *
+ * The modules aggregated here (and `registerAllMethods` itself) are
+ * standalone, independently unit-tested RPC method implementations kept
+ * for parity/reference testing. Several re-declare method names that
+ * overlap with `GatewayServer`'s built-ins using their own local,
+ * disconnected dependencies (e.g. an isolated `Map` session store rather
+ * than the live one). If you ever wire `registerAllMethods` into
+ * `GatewayServer`, register it *before* `registerBuiltInMethods()` so the
+ * real, stateful implementations win — never after, and never for the
+ * overlapping names without first reconciling behavior, or the gateway
+ * will silently serve two divergent implementations of the same method.
  */
 
 import { registerChatMethods } from './chat-methods.js';

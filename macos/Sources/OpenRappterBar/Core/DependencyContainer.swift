@@ -24,8 +24,8 @@ public protocol RpcClientProtocol: Sendable {
 public protocol ProcessManagerProtocol {
     var state: ProcessManager.ProcessState { get }
     var projectPath: String { get }
-    func start() async throws
-    func stop() async
+    func start() async throws -> ProcessManager.LifecycleResult
+    func stop() async -> ProcessManager.LifecycleResult
     func checkHealth() async -> Bool
 }
 

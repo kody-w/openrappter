@@ -8,6 +8,7 @@ describe('package version', () => {
       fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
     ) as { version: string };
 
+    expect(metadata.version).toBe('1.10.0');
     expect(VERSION).toBe(metadata.version);
   });
 });

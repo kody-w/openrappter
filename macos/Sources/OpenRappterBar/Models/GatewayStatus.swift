@@ -51,6 +51,7 @@ public enum ChatEventState: String, Sendable {
     case delta
     case final_ = "final"
     case error
+    case aborted
 }
 
 public extension ChatEventPayload {
@@ -68,6 +69,7 @@ public extension ChatEventPayload {
         case "delta": state = .delta
         case "final": state = .final_
         case "error": state = .error
+        case "aborted": state = .aborted
         default: return nil
         }
 

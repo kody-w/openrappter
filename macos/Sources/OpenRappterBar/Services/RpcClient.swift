@@ -1,5 +1,72 @@
 import Foundation
 
+private struct GatewayChannelDTO: Decodable {
+    let id: String?
+    let type: String?
+    let name: String?
+    let connected: Bool?
+    let configured: Bool?
+    let running: Bool?
+    let enabled: Bool?
+    let actionable: Bool?
+    let configurable: Bool?
+    let status: String?
+    let config: [String: AnyCodable]?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case channelId
+        case type
+        case channelType
+        case name
+        case connected
+        case configured
+        case running
+        case enabled
+        case actionable
+        case configurable
+        case status
+        case config
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? container.decodeIfPresent(String.self, forKey: .channelId)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+            ?? container.decodeIfPresent(String.self, forKey: .channelType)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        connected = Self.decodeBool(from: container, forKey: .connected)
+        configured = Self.decodeBool(from: container, forKey: .configured)
+        running = Self.decodeBool(from: container, forKey: .running)
+        enabled = Self.decodeBool(from: container, forKey: .enabled)
+        actionable = Self.decodeBool(from: container, forKey: .actionable)
+        configurable = Self.decodeBool(from: container, forKey: .configurable)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        config = try container.decodeIfPresent([String: AnyCodable].self, forKey: .config)
+    }
+
+    private static func decodeBool(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) -> Bool? {
+        if let value = try? container.decodeIfPresent(Bool.self, forKey: key) {
+            return value
+        }
+        if let value = try? container.decodeIfPresent(Int.self, forKey: key) {
+            return value != 0
+        }
+        if let value = try? container.decodeIfPresent(String.self, forKey: key) {
+            switch value.lowercased() {
+            case "true", "yes", "1": return true
+            case "false", "no", "0": return false
+            default: return nil
+            }
+        }
+        return nil
+    }
+}
+
 // MARK: - RPC Client
 
 /// Typed RPC method wrapper around GatewayConnection.
@@ -148,60 +215,84 @@ public struct RpcClient: RpcClientProtocol, Sendable {
     public func listChannels() async throws -> [Channel] {
         let response = try await connection.sendRequest(method: "channels.list")
         guard response.ok else { throw RpcClientError.decodingFailed("Failed to list channels") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        // Try decoding as array directly, or from a wrapper
-        if let channels = try? JSONDecoder().decode([Channel].self, from: data) {
-            return channels
+        guard let payload = response.payload else {
+            throw RpcClientError.decodingFailed("Missing channels.list payload")
         }
-        return []
+
+        let rows = try Self.channelRows(from: payload)
+        return rows.enumerated().compactMap { index, row in
+            do {
+                let data = try JSONEncoder().encode(AnyCodable(row))
+                let dto = try JSONDecoder().decode(GatewayChannelDTO.self, from: data)
+                return try Self.mapChannel(dto)
+            } catch {
+                Log.rpc.warning(
+                    "Skipping invalid channels.list entry \(index): \(error.localizedDescription)"
+                )
+                return nil
+            }
+        }
     }
 
     public func getChannel(channelId: String) async throws -> Channel {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId)]
-        let response = try await connection.sendRequest(method: "channels.get", params: params)
-        return try decodePayload(response)
+        // The gateway has no `channels.get` RPC method — derive the single
+        // channel from the canonical `channels.list` response instead of
+        // calling a name that was never registered server-side.
+        let channels = try await listChannels()
+        guard let channel = channels.first(where: {
+            $0.id == channelId || $0.type.rawValue == Self.normalizedChannelType(channelId)
+        }) else {
+            throw RpcClientError.decodingFailed("Channel not found: \(channelId)")
+        }
+        return channel
     }
 
     public func enableChannel(channelId: String) async throws {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId), "enabled": AnyCodable(true)]
-        let response = try await connection.sendRequest(method: "channels.update", params: params)
+        let params: [String: AnyCodable] = ["type": AnyCodable(channelId)]
+        let response = try await connection.sendRequest(method: "channels.connect", params: params)
         guard response.ok else {
             throw GatewayConnectionError.serverError(code: response.error?.code ?? -1, message: response.error?.message ?? "Unknown error")
         }
     }
 
     public func disableChannel(channelId: String) async throws {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId), "enabled": AnyCodable(false)]
-        let response = try await connection.sendRequest(method: "channels.update", params: params)
-        guard response.ok else {
-            throw GatewayConnectionError.serverError(code: response.error?.code ?? -1, message: response.error?.message ?? "Unknown error")
-        }
-    }
-
-    public func deleteChannel(channelId: String) async throws {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId)]
-        let response = try await connection.sendRequest(method: "channels.delete", params: params)
+        let params: [String: AnyCodable] = ["type": AnyCodable(channelId)]
+        let response = try await connection.sendRequest(method: "channels.disconnect", params: params)
         guard response.ok else {
             throw GatewayConnectionError.serverError(code: response.error?.code ?? -1, message: response.error?.message ?? "Unknown error")
         }
     }
 
     public func testChannel(channelId: String) async throws {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId)]
-        let response = try await connection.sendRequest(method: "channels.test", params: params)
+        let params: [String: AnyCodable] = ["type": AnyCodable(channelId)]
+        let response = try await connection.sendRequest(method: "channels.probe", params: params)
         guard response.ok else {
             throw GatewayConnectionError.serverError(code: response.error?.code ?? -1, message: response.error?.message ?? "Unknown error")
+        }
+
+        guard let payload = response.payload?.value as? [String: Any] else {
+            throw RpcClientError.decodingFailed("Expected channels.probe result")
+        }
+        let probe = (payload["probe"] as? [String: Any]) ?? payload
+        let ok = (probe["ok"] as? Bool) ?? (probe["success"] as? Bool)
+        guard let ok else {
+            throw RpcClientError.decodingFailed("Missing channels.probe ok flag")
+        }
+        guard ok else {
+            let message = (probe["error"] as? String)
+                ?? (probe["message"] as? String)
+                ?? "Channel probe failed"
+            throw RpcClientError.channelProbeFailed(message)
         }
     }
 
     public func getChannelStatus(channelId: String) async throws -> ChannelStatus {
-        let params: [String: AnyCodable] = ["channelId": AnyCodable(channelId)]
-        let response = try await connection.sendRequest(method: "channels.status", params: params)
-        guard response.ok, let statusStr = response.payload?.value as? String,
-              let status = ChannelStatus(rawValue: statusStr) else {
-            return .disconnected
-        }
-        return status
+        // The gateway has no `channels.status` RPC method — derive status
+        // from the canonical `channels.list` response's `connected` flag.
+        let channels = try await listChannels()
+        return channels.first(where: {
+            $0.id == channelId || $0.type.rawValue == Self.normalizedChannelType(channelId)
+        })?.status ?? .disconnected
     }
 
     // MARK: - Cron Methods
@@ -501,6 +592,101 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
     // MARK: - Helpers
 
+    private static func mapChannel(_ dto: GatewayChannelDTO) throws -> Channel {
+        let rawID = nonBlank(dto.id)
+        guard let rawType = nonBlank(dto.type) ?? rawID else {
+            throw RpcClientError.decodingFailed("Channel entry is missing id/type")
+        }
+        let normalizedType = normalizedChannelType(rawType)
+        guard let type = ChannelType(rawValue: normalizedType) else {
+            throw RpcClientError.decodingFailed("Unsupported channel type: \(rawType)")
+        }
+
+        let id = rawID ?? normalizedType
+        let explicitStatus = dto.status
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .flatMap(ChannelStatus.init(rawValue:))
+        let connected = dto.connected ?? (explicitStatus == .connected)
+        let running = dto.running ?? dto.enabled ?? connected
+        let status: ChannelStatus
+        if connected {
+            status = .connected
+        } else if explicitStatus == .error {
+            status = .error
+        } else if running || explicitStatus == .connecting {
+            status = .connecting
+        } else {
+            status = .disconnected
+        }
+
+        // `running` is the canonical toggle state. Older gateways exposed
+        // `enabled`, and very old wrappers only exposed `configured`.
+        let enabled = dto.running ?? dto.enabled ?? dto.connected ?? dto.configured ?? false
+        let name = dto.name ?? id
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+        let isSyntheticStatusOnly = Self.syntheticStatusOnlyTypes.contains(type)
+            && dto.configured == false
+        let actionable = dto.actionable ?? !isSyntheticStatusOnly
+        let configurable = dto.configurable ?? !isSyntheticStatusOnly
+
+        return Channel(
+            id: id,
+            name: name,
+            type: type,
+            enabled: enabled,
+            config: dto.config,
+            status: status,
+            actionable: actionable,
+            configurable: configurable
+        )
+    }
+
+    private static let syntheticStatusOnlyTypes: Set<ChannelType> = [
+        .signal,
+        .matrix,
+        .teams,
+        .googleChat,
+    ]
+
+    private static func channelRows(from payload: AnyCodable) throws -> [Any] {
+        if let rows = payload.value as? [Any] {
+            return rows
+        }
+        if let envelope = payload.value as? [String: Any] {
+            if let rows = envelope["channels"] as? [Any] {
+                return rows
+            }
+            if let rows = envelope["items"] as? [Any] {
+                return rows
+            }
+        }
+        throw RpcClientError.decodingFailed("Expected channels.list array or channels wrapper")
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    private static func normalizedChannelType(_ rawValue: String) -> String {
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+
+        switch normalized {
+        case "googlechat", "google_chat": return ChannelType.googleChat.rawValue
+        case "i_message", "imessage": return ChannelType.imessage.rawValue
+        case "whats_app", "whatsapp": return ChannelType.whatsapp.rawValue
+        default: return normalized
+        }
+    }
+
     private func decodePayload<T: Decodable>(_ response: RpcResponseFrame) throws -> T {
         guard response.ok else {
             let detail = response.error ?? RpcErrorDetail(code: -1, message: "Unknown error")
@@ -519,10 +705,12 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
 enum RpcClientError: Error, LocalizedError {
     case decodingFailed(String)
+    case channelProbeFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .decodingFailed(let msg): return "Decoding failed: \(msg)"
+        case .channelProbeFailed(let msg): return "Channel probe failed: \(msg)"
         }
     }
 }

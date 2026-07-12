@@ -30,7 +30,7 @@ export class MemoryAgent extends BasicAgent {
   private memoryDir: string;
   private memoryFile: string;
 
-  constructor() {
+  constructor(memoryDir = path.join(os.homedir(), '.openrappter')) {
     const metadata: AgentMetadata = {
       name: 'Memory',
       description: 'Stores and recalls facts in persistent memory. Use "remember" to store, "recall" to retrieve.',
@@ -69,7 +69,7 @@ export class MemoryAgent extends BasicAgent {
     };
     super('Memory', metadata);
 
-    this.memoryDir = path.join(os.homedir(), '.openrappter');
+    this.memoryDir = memoryDir;
     this.memoryFile = path.join(this.memoryDir, 'memory.json');
   }
 

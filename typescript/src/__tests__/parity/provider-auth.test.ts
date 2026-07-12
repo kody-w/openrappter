@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { DeviceCodeFlow, DeviceCodeResponse, TokenResponse } from '../../auth/device-code.js';
 import { AuthProfileStore } from '../../auth/profiles.js';
 import { OAuthClient, OAuthTokenStore, OAuthToken } from '../../auth/oauth.js';
@@ -79,12 +81,15 @@ describe('Device Code Flow', () => {
 
 describe('Auth Profile Store', () => {
   let store: AuthProfileStore;
+  let testDataDir: string;
 
   beforeEach(() => {
-    store = new AuthProfileStore();
-    // Clear existing profiles for clean tests
-    const existing = store.list();
-    existing.forEach(p => store.remove(p.provider, p.id));
+    testDataDir = fs.mkdtempSync(path.join(process.cwd(), '.auth-profile-test-'));
+    store = new AuthProfileStore(testDataDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   });
 
   it('should instantiate', () => {

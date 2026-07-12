@@ -20,6 +20,14 @@ public final class SessionsViewModel {
         self.sessionStore = sessionStore
     }
 
+    public func clearConfiguration() {
+        rpcClient = nil
+    }
+
+    var isRpcClientConfigured: Bool {
+        rpcClient != nil
+    }
+
     // MARK: - Actions
 
     /// Load sessions from local cache.

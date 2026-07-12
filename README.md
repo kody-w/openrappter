@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [v1.10.0 Release Notes](./docs/release-notes-1.10.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 ---
 
@@ -126,7 +126,7 @@ First-time users see a step-by-step setup wizard right in the menu bar panel —
 4. **Auto-start** — daemon launches, launchd installs, cron jobs activate
 5. **Done** — transitions to chat, first tip notification fires
 
-### Install via Homebrew
+### Install via [Homebrew](https://github.com/kody-w/homebrew-tap)
 
 ```bash
 brew tap kody-w/tap
@@ -142,13 +142,13 @@ brew install --cask openrappter-bar
 
 > **Note:** The app is currently unsigned. macOS will block it on first launch — the right-click → Open step bypasses this once.
 
-### Release a new version
+### Release a new menu bar version
 
 ```bash
 git tag v1.0.1-bar && git push origin v1.0.1-bar
 ```
 
-This triggers the CI workflow to build a universal binary (Apple Silicon + Intel), package a DMG, and create a GitHub Release.
+This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](CONTRIBUTING.md#releasing-npm-and-pypi-packages).
 
 ## Manual Setup
 
@@ -193,7 +193,7 @@ node dist/index.js "ls"
 
 ### macOS Menu Bar App
 
-Download **OpenRappter Bar** from [Releases](https://github.com/kody-w/openrappter/releases) — it's a `.dmg` with a drag-to-Applications installer.
+Download **OpenRappter Bar** from the [latest Bar releases](https://github.com/kody-w/openrappter/releases?q=bar) — it's a `.dmg` with a drag-to-Applications installer.
 
 > **First launch:** macOS may show "unidentified developer" since the app isn't notarized. To open it, **right-click the app → Open → Open**. You only need to do this once.
 
@@ -201,10 +201,8 @@ Or build from source:
 
 ```bash
 cd macos
-./scripts/build-mac-app.sh
-./scripts/codesign-mac-app.sh
-./scripts/create-dmg.sh
-# DMG created at macos/dist/OpenRappterBar-1.0.0.dmg
+VERSION=1.10.0 ./scripts/build-mac-app.sh
+# DMG created at macos/dist/OpenRappter-Bar-1.10.0.dmg
 ```
 
 ## Built-in Agents

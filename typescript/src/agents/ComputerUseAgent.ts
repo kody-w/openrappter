@@ -2,7 +2,7 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFileSync, unlinkSync, readFileSync } from 'fs';
+import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -295,7 +295,7 @@ export class ComputerUseAgent extends BasicAgent {
     // Parse modifiers and key name
     const parts = key.toLowerCase().split('+').map((p) => p.trim());
     const modifiers: string[] = [];
-    let keyName = parts[parts.length - 1];
+    const keyName = parts[parts.length - 1];
 
     for (let i = 0; i < parts.length - 1; i++) {
       const mod = parts[i];

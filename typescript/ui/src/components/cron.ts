@@ -7,6 +7,8 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
+const CRON_RUN_TIMEOUT_MS = 15 * 60_000;
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -591,7 +593,9 @@ export class OpenRappterCron extends LitElement {
   private async runJob(job: CronJob) {
     this.busy = true;
     try {
-      await gateway.call('cron.run', { jobId: job.id });
+      await gateway.call('cron.run', { jobId: job.id }, {
+        timeoutMs: CRON_RUN_TIMEOUT_MS,
+      });
       await this.refresh();
     } catch (e) {
       console.error('Failed to run job:', e);
@@ -928,7 +932,7 @@ export class OpenRappterCron extends LitElement {
             </button>
             <button class="btn" ?disabled=${this.busy}
               @click=${(ev: Event) => { ev.stopPropagation(); this.runJob(job); }}>
-              Run
+              Run Now
             </button>
             <button class="btn" ?disabled=${this.busy}
               @click=${(ev: Event) => { ev.stopPropagation(); this.loadRuns(job.id); }}>

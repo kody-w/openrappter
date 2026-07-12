@@ -4,7 +4,9 @@
  * Tests the registration and structure of all RPC methods exposed by the gateway.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { registerAllMethods } from '../../gateway/methods/index.js';
 
 interface MethodInfo {
@@ -14,8 +16,10 @@ interface MethodInfo {
 
 describe('Gateway RPC Methods', () => {
   const methods = new Map<string, MethodInfo>();
+  let testDataDir = '';
 
   beforeAll(() => {
+    testDataDir = fs.mkdtempSync(path.join(process.cwd(), '.gateway-rpc-methods-'));
     // Create a mock server that captures registered methods
     const mockServer = {
       registerMethod<P = unknown, R = unknown>(
@@ -31,7 +35,11 @@ describe('Gateway RPC Methods', () => {
     };
 
     // Register all methods
-    registerAllMethods(mockServer);
+    registerAllMethods(mockServer, { dataDir: testDataDir });
+  });
+
+  afterAll(() => {
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   });
 
   describe('Method Registration', () => {

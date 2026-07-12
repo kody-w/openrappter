@@ -35,6 +35,7 @@ from openrappter.agents.pokemon_agent import (
     runtime_command,
     runner_main,
     runtime_status,
+    seed_legacy_ram_provenance,
     supervisor_main,
     wait_for_supervised_child,
     wait_supervisor_backoff,
@@ -1028,6 +1029,26 @@ def test_immutable_legacy_provenance_survives_rewritten_current_config(tmp_path)
     assert runner._validated_ram_path() is None
     assert legacy.exists()
     assert not runner.ram_path.exists()
+
+
+def test_released_layout_seeds_legacy_provenance_from_prior_status(tmp_path):
+    legacy = tmp_path / "pokemon-red.ram"
+    legacy.write_bytes(b"\x00" * 32768)
+    rom_sha = "2" * 64
+    (tmp_path / "config.json").write_text(
+        json.dumps({"rom_path": "/owned/Pokemon Red.gb"})
+    )
+    (tmp_path / "status.json").write_text(
+        json.dumps({"rom_sha256": rom_sha})
+    )
+
+    seed_legacy_ram_provenance(tmp_path)
+
+    provenance = json.loads(
+        (tmp_path / "legacy-ram-provenance.json").read_text()
+    )
+    assert provenance["rom_sha256"] == rom_sha
+    assert provenance["rom_path"] == "/owned/Pokemon Red.gb"
 
 
 def test_controller_normalization_failure_does_not_quarantine_valid_state(tmp_path):

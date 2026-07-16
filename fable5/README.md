@@ -8,6 +8,7 @@
 - **[reports/usage-audit.md](reports/usage-audit.md)** — your Claude Code usage audit → skills + automations.
 - **[reports/code-review.md](reports/code-review.md)** — 45-finding, 5-dimension review of openrappter.
 - **[reports/agentic-os-foundation.md](reports/agentic-os-foundation.md)** — the agentic-OS blueprint + phased roadmap.
+- **[reports/assimilation-into-openrappter.md](reports/assimilation-into-openrappter.md)** — competitive deep-read of OpenClaw/Hermes/Pi/OpenHands/Claude Code → prioritized assimilation backlog + adversarial critique.
 - **[transcripts/](transcripts)** — verbatim transcripts + source video metadata.
 - **[automations/](automations)** — 4 safe, dispatch-gated CI/automation stubs.
 - **[../.claude/skills/](../.claude/skills)** — 5 runnable Claude Code skills generated from the audit.

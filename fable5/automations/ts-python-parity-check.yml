@@ -1,0 +1,267 @@
+# =============================================================================
+# TS ⇄ Python Parity CI Check  —  SAFE STUB (manual dispatch only)
+# =============================================================================
+#
+# WHAT THIS IS
+#   A GitHub Actions workflow that guards the documented core invariant in
+#   CLAUDE.md: the TypeScript and Python agent implementations are designed to
+#   mirror each other. Today that invariant is trusted to manual diligence.
+#   The active `feat/frontier-memory` branch edits many Python agent files
+#   (basic_agent, chain, graph, context_memory_agent, manage_memory_agent, ...)
+#   with no automated cross-language guard. This workflow adds one.
+#
+#   On a PR that touches a MIRRORED agent module it:
+#     1. Runs a "parity check diff" — flags any mirrored pair changed on one
+#        language side without its counterpart changing (drift detection).
+#     2. Runs the TypeScript parity test suite (vitest).
+#     3. Runs the Python parity test suite (pytest).
+#   The build FAILS (gating merge, once wired as a required check) if either
+#   suite fails or if unpaired drift is detected.
+#
+# WHY IT IS A STUB (READ BEFORE ACTIVATING)
+#   - Trigger is `workflow_dispatch` ONLY. It NEVER runs automatically on push
+#     or pull_request until a human uncomments the `pull_request:` trigger
+#     below. Nothing here pushes, deletes, deploys, or mutates the repo.
+#   - Placed under fable5/automations/ (NOT .github/workflows/) so GitHub does
+#     NOT auto-register it. To activate, a maintainer copies/moves it into
+#     .github/workflows/ deliberately (see "HOW TO ACTIVATE" at the bottom).
+#   - Least-privilege: `permissions: contents: read`. No write scopes.
+#
+# =============================================================================
+
+name: TS ⇄ Python Parity Check (SAFE STUB)
+
+on:
+  # SAFE DEFAULT: manual only. A human must click "Run workflow" in the Actions
+  # tab (or `gh workflow run`). This is the only enabled trigger.
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: >-
+          Base git ref to diff mirrored-pair changes against (parity diff step).
+          Defaults to origin/main.
+        required: false
+        type: string
+        default: main
+
+  # ----------------------------------------------------------------------------
+  # ACTIVATION STEP (commented out on purpose): uncomment to gate real PRs.
+  # Once enabled AND this file lives in .github/workflows/, every PR touching a
+  # mirrored agent module runs the full parity gate. Left disabled so the stub
+  # can be reviewed/tested via manual dispatch with zero surprise CI load.
+  #
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - 'typescript/src/agents/**'
+  #     - 'python/openrappter/agents/**'
+  #     - 'typescript/src/__tests__/parity/**'
+  #     - 'python/tests/**'
+  # ----------------------------------------------------------------------------
+
+# Cancel superseded runs on the same ref to save CI minutes (mirrors ci.yml).
+concurrency:
+  group: parity-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: read-only. No job here needs write access to anything.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Parity drift diff — the automatable proxy for the "parity check skill".
+  #    Detects mirrored pairs changed on one side only. Non-destructive:
+  #    it only reads git history and prints a report; it fails the build if a
+  #    mirrored pair drifted (one language edited, the counterpart untouched).
+  # ---------------------------------------------------------------------------
+  parity-diff:
+    name: Parity drift diff (mirrored pairs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need history so we can diff against the base ref.
+          fetch-depth: 0
+
+      - name: Detect mirrored-pair drift
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Resolve the base ref to diff against.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="origin/${{ inputs.base_ref }}"
+          fi
+          echo "Diffing changed files against: $BASE"
+          git fetch --quiet origin "${{ github.base_ref || inputs.base_ref }}" || true
+
+          CHANGED="$(git diff --name-only "$BASE"...HEAD || git diff --name-only "$BASE" HEAD)"
+          echo "----- changed files -----"
+          echo "$CHANGED"
+          echo "-------------------------"
+
+          # Mirrored pairs: TypeScript source  <->  Python source.
+          # Keep this table in sync with the "Language Parity" section of CLAUDE.md.
+          # Format: "<ts_path>|<py_path>"
+          PAIRS="
+          typescript/src/agents/BasicAgent.ts|python/openrappter/agents/basic_agent.py
+          typescript/src/agents/ShellAgent.ts|python/openrappter/agents/shell_agent.py
+          typescript/src/agents/LearnNewAgent.ts|python/openrappter/agents/learn_new_agent.py
+          typescript/src/agents/broadcast.ts|python/openrappter/agents/broadcast.py
+          typescript/src/agents/router.ts|python/openrappter/agents/router.py
+          typescript/src/agents/subagent.ts|python/openrappter/agents/subagent.py
+          typescript/src/agents/PipelineAgent.ts|python/openrappter/agents/pipeline_agent.py
+          typescript/src/agents/GitAgent.ts|python/openrappter/agents/git_agent.py
+          typescript/src/agents/CodeReviewAgent.ts|python/openrappter/agents/code_review_agent.py
+          typescript/src/agents/WebAgent.ts|python/openrappter/agents/web_agent.py
+          typescript/src/agents/chain.ts|python/openrappter/agents/chain.py
+          typescript/src/agents/graph.ts|python/openrappter/agents/graph.py
+          typescript/src/agents/tracer.ts|python/openrappter/agents/tracer.py
+          "
+
+          changed() { echo "$CHANGED" | grep -qxF "$1"; }
+
+          DRIFT=0
+          while IFS='|' read -r TS PY; do
+            [ -z "${TS// }" ] && continue
+            TS="$(echo "$TS" | xargs)"; PY="$(echo "$PY" | xargs)"
+            TS_HIT=false; PY_HIT=false
+            changed "$TS" && TS_HIT=true
+            changed "$PY" && PY_HIT=true
+            if [ "$TS_HIT" = true ] && [ "$PY_HIT" = false ]; then
+              echo "::error::Parity drift — $TS changed but counterpart $PY was NOT updated."
+              DRIFT=1
+            elif [ "$PY_HIT" = true ] && [ "$TS_HIT" = false ]; then
+              echo "::error::Parity drift — $PY changed but counterpart $TS was NOT updated."
+              DRIFT=1
+            elif [ "$TS_HIT" = true ] && [ "$PY_HIT" = true ]; then
+              echo "OK (both sides touched): $TS  <->  $PY"
+            fi
+          done <<< "$PAIRS"
+
+          if [ "$DRIFT" -ne 0 ]; then
+            echo ""
+            echo "One or more mirrored agent modules drifted across languages."
+            echo "Update the counterpart file (or intentionally acknowledge divergence"
+            echo "in the PR description) so the parity invariant is preserved."
+            exit 1
+          fi
+          echo "No mirrored-pair drift detected."
+
+  # ---------------------------------------------------------------------------
+  # 2. TypeScript parity test suite (vitest). Matrix leg: language=typescript.
+  # ---------------------------------------------------------------------------
+  typescript-parity:
+    name: TypeScript parity tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - run: npm ci
+      # tsc is the only type-check gate (vitest/esbuild does not type-check).
+      - run: npm run build
+      - name: Run parity test suite
+        run: npx vitest run src/__tests__/parity/
+
+  # ---------------------------------------------------------------------------
+  # 3. Python parity test suite (pytest). Matrix leg across supported versions.
+  # ---------------------------------------------------------------------------
+  python-parity:
+    name: Python parity tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.12']
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]"
+      - name: Run parity test suite
+        # Explicit list of the mirrored parity suites (see CLAUDE.md "Parity tests").
+        # Add new parity test files here as new agent pairs are mirrored.
+        run: >-
+          pytest -v
+          tests/test_broadcast.py
+          tests/test_router.py
+          tests/test_subagent.py
+          tests/test_pipeline.py
+          tests/test_git_agent.py
+          tests/test_code_review.py
+          tests/test_web_agent.py
+          tests/test_agent_chain.py
+          tests/test_agent_graph.py
+
+  # ---------------------------------------------------------------------------
+  # 4. Gate — a single required-check target that stays green only if every leg
+  #    (drift diff + both language suites) succeeded. Wire THIS job name as the
+  #    branch-protection required status check, not the individual matrix legs.
+  # ---------------------------------------------------------------------------
+  parity-gate:
+    name: Parity gate
+    runs-on: ubuntu-latest
+    needs: [parity-diff, typescript-parity, python-parity]
+    if: always()
+    steps:
+      - name: Fail if any parity leg failed
+        run: |
+          if [ "${{ needs.parity-diff.result }}" != "success" ] \
+             || [ "${{ needs.typescript-parity.result }}" != "success" ] \
+             || [ "${{ needs.python-parity.result }}" != "success" ]; then
+            echo "Parity check failed:"
+            echo "  parity-diff        = ${{ needs.parity-diff.result }}"
+            echo "  typescript-parity  = ${{ needs.typescript-parity.result }}"
+            echo "  python-parity      = ${{ needs.python-parity.result }}"
+            exit 1
+          fi
+          echo "TS ⇄ Python parity preserved."
+
+# =============================================================================
+# HOW TO ACTIVATE  (deliberate, human-only steps — nothing here is automatic)
+# -----------------------------------------------------------------------------
+# 1. Review this file. Confirm the mirrored-pair table in the `parity-diff` job
+#    matches the "Language Parity" section of CLAUDE.md.
+#
+# 2. Test it safely first, WITHOUT touching real PRs:
+#       - Move/copy this file to .github/workflows/ts-python-parity-check.yml
+#       - Open the repo Actions tab → "TS ⇄ Python Parity Check (SAFE STUB)"
+#         → "Run workflow" (workflow_dispatch). Or: `gh workflow run
+#         ts-python-parity-check.yml -f base_ref=main`.
+#       - Confirm all four jobs behave as expected on the current branch.
+#
+# 3. Enable PR gating: uncomment the `pull_request:` trigger block near the top.
+#    From then on, any PR touching a mirrored agent module (or a parity test
+#    dir) runs the full gate automatically.
+#
+# 4. (Optional) Make it a required check: repo Settings → Branches → branch
+#    protection rule for `main` → require the "Parity gate" status check.
+#    Use the `parity-gate` job as the single required target so matrix legs can
+#    evolve without editing branch protection.
+#
+# NOTE ON THE feat/frontier-memory BRANCH
+#   That branch adds NEW Python-only modules under python/openrappter/memory/
+#   (embeddings, migrations, projection, retrieval, safety, store, working_set)
+#   with no TypeScript counterpart yet. Those are intentionally NOT in the
+#   mirrored-pair table above, so they will not trip the drift diff. When a
+#   TypeScript mirror is added later, add the pair to the table AND add its
+#   parity test files to the vitest/pytest steps.
+# =============================================================================

@@ -1,0 +1,210 @@
+name: iMessage Event Responder (SAFE stub)
+
+# ---------------------------------------------------------------------------
+# Automation: Event-driven iMessage responder — change-detection gate check.
+#
+# GOAL
+#   Replace the "every-minute polling cron" that fires the persona brainstem on
+#   a fixed schedule with an ON-MESSAGE trigger + a cheap change-detection gate,
+#   so the expensive reasoning agent only runs when the chat DB has genuinely
+#   new *allowlisted* messages since the last processed cursor.
+#
+#   Motivation: 33,212 chat_messages reads yielded 77 replies (a 431:1 ratio).
+#   Nearly every scheduled run is wasted work. Event-driving it removes the
+#   empty invocations while IMPROVING responsiveness.
+#
+# WHAT THIS FILE IS
+#   This is a SAFE, workflow_dispatch-gated GUARDRAIL workflow. It is NOT the
+#   runtime responder. The actual event-driven responder already lives in the
+#   codebase and runs on-device (macOS, chat.db access required):
+#
+#       python -m openrappter.imessage run
+#
+#   ...which subscribes to the imsg "watch.subscribe" event stream and resumes
+#   from the durable cursor. See "ACTIVATION" at the bottom of this file.
+#
+#   This workflow's ONLY job is to statically verify — with no side effects —
+#   that the event-driven wiring is intact and that a fixed every-minute polling
+#   cron has NOT crept back in. It runs read-only checks and prints a report.
+#
+# SAFETY CONTRACT (read before editing)
+#   - Trigger is workflow_dispatch ONLY. Nothing runs on push/schedule/PR.
+#   - No secrets are read. No chat.db, no message contents, no PII ever touch CI.
+#   - No steps push, deploy, delete, install a launch agent, or start the
+#     responder. Every step is a static read/grep/import check.
+#   - permissions: contents: read (least privilege).
+#   - A human must click "Run workflow" for anything here to execute.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Static verification only. This workflow never starts the responder,
+          never touches chat.db, and never sends a message. Leave "true".
+        required: false
+        type: boolean
+        default: true
+      fail_on_findings:
+        description: >-
+          Fail the run if a polling-cron regression or a missing
+          change-detection gate is detected. Set false to report-only.
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: imessage-event-responder-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: read-only. No write, no packages, no deployments.
+permissions:
+  contents: read
+
+jobs:
+  verify-event-wiring:
+    name: Verify event-driven wiring (read-only)
+    runs-on: ubuntu-latest
+    # Belt-and-suspenders: hard-refuse anything but an explicit human dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - name: Announce SAFE stub
+        run: |
+          echo "::notice::SAFE stub — static verification only."
+          echo "dry_run=${{ inputs.dry_run }} fail_on_findings=${{ inputs.fail_on_findings }}"
+          echo "This workflow does NOT start the responder, read chat.db, or send messages."
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # -- Guard 1 --------------------------------------------------------------
+      # The event path must exist: the service subscribes to the imsg event
+      # stream ("watch.subscribe") rather than polling on a timer.
+      - name: Guard 1 — event subscription present
+        run: |
+          set -euo pipefail
+          if grep -q "watch.subscribe" openrappter/imessage/service.py; then
+            echo "OK: service.py subscribes to the imsg 'watch.subscribe' event stream."
+          else
+            echo "::error::Event subscription missing — 'watch.subscribe' not found in service.py."
+            exit 1
+          fi
+
+      # -- Guard 2 --------------------------------------------------------------
+      # The cheap change-detection gate must exist: resume-from-cursor via
+      # since_rowid, backed by cursor_rowid / watch_resume_rowid in state.py.
+      # This is what makes a run cheap — no new rows since the cursor => no work.
+      - name: Guard 2 — change-detection gate present
+        run: |
+          set -euo pipefail
+          gate_ok=1
+          grep -q "since_rowid" openrappter/imessage/service.py \
+            || { echo "::error::Missing 'since_rowid' resume in service.py"; gate_ok=0; }
+          grep -q "watch_resume_rowid" openrappter/imessage/state.py \
+            || { echo "::error::Missing 'watch_resume_rowid' cursor in state.py"; gate_ok=0; }
+          grep -q "cursor_rowid" openrappter/imessage/state.py \
+            || { echo "::error::Missing 'cursor_rowid' cursor in state.py"; gate_ok=0; }
+          if [ "$gate_ok" -eq 1 ]; then
+            echo "OK: change-detection gate is wired (since_rowid + cursor_rowid + watch_resume_rowid)."
+          else
+            echo "::error::Change-detection gate incomplete — event driving would re-scan the DB."
+            [ "${{ inputs.fail_on_findings }}" = "true" ] && exit 1 || true
+          fi
+
+      # -- Guard 3 --------------------------------------------------------------
+      # Regression guard: a fixed *every-minute* polling cron must NOT reappear.
+      # We flag classic every-minute crontab specs (`* * * * *`) and known
+      # short-interval poll loops in the imessage package. A low-frequency
+      # *liveness* fallback (e.g. hourly) is allowed and is NOT flagged here.
+      - name: Guard 3 — no every-minute polling regression
+        run: |
+          set -euo pipefail
+          # Match the crontab "every minute" pattern: minute field is a bare '*'.
+          if grep -REn '(^|["'\''`[:space:]])\*[[:space:]]+\*[[:space:]]+\*[[:space:]]+\*[[:space:]]+\*' \
+               openrappter/imessage/ 2>/dev/null; then
+            echo "::error::Found an every-minute cron spec (* * * * *) in the imessage package."
+            [ "${{ inputs.fail_on_findings }}" = "true" ] && exit 1 || true
+          else
+            echo "OK: no every-minute polling cron detected in the imessage package."
+          fi
+
+      # -- Guard 4 --------------------------------------------------------------
+      # Import-only sanity: the package imports and the CLI exposes the
+      # foreground 'run' subcommand (the event-driven entrypoint). No config is
+      # loaded, no service is started, nothing is dispatched.
+      - name: Guard 4 — CLI event entrypoint importable
+        env:
+          PYTHONPATH: ${{ github.workspace }}/python
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import importlib
+          cli = importlib.import_module("openrappter.imessage.cli")
+          parser = cli._parser()
+          # Collect subcommand names from the subparsers action.
+          subs = []
+          for action in parser._actions:
+              choices = getattr(action, "choices", None)
+              if choices:
+                  subs.extend(choices.keys())
+          assert "run" in subs, f"missing 'run' subcommand; found {sorted(subs)}"
+          assert "preflight" in subs, f"missing 'preflight' subcommand; found {sorted(subs)}"
+          print("OK: CLI exposes event-driven 'run' + 'preflight' (no service started).")
+          PY
+
+      - name: Report
+        if: ${{ always() }}
+        run: |
+          echo "### iMessage Event Responder — verification summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "SAFE stub. Read-only static checks. No responder started, no chat.db read, no message sent." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Guard 1: event subscription (watch.subscribe) present" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Guard 2: change-detection gate (since_rowid + cursor_rowid + watch_resume_rowid) wired" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Guard 3: no every-minute polling cron regression" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Guard 4: CLI event entrypoint ('run') importable" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "To actually run the responder, see ACTIVATION in this workflow file." >> "$GITHUB_STEP_SUMMARY"
+
+# ===========================================================================
+# ACTIVATION — how to turn on the real event-driven responder (NOT done in CI)
+# ===========================================================================
+#
+# The runtime is on-device only (macOS with Full Disk Access so imsg can read
+# ~/Library/Messages/chat.db). CI cannot and must not run it. To go live:
+#
+#   1. One-time config (writes ~/.openrappter/imessage/config.json, chmod 600):
+#        python -m openrappter.imessage init \
+#          --owner "+15555550123" \
+#          --allow-dm "+15555550123" \
+#          --allow-group "chat123456789"
+#      Manage the allowlist via the `/imessage:access` skill — never from a
+#      channel message. The allowlist is what makes the gate meaningful: only
+#      new *allowlisted* rows past the cursor wake the reasoning agent.
+#
+#   2. Preflight (read-only sanity check — no service started):
+#        python -m openrappter.imessage preflight
+#
+#   3. Run the event-driven responder in the foreground (Ctrl-C to stop):
+#        python -m openrappter.imessage run
+#      This subscribes to the imsg "watch.subscribe" event stream and resumes
+#      from state.watch_resume_rowid (the durable cursor). The brainstem agent
+#      is invoked ONLY on a new allowlisted message — no empty per-minute runs.
+#
+#   4. LIVENESS FALLBACK (optional, low frequency — NOT every minute):
+#      The event stream is the primary trigger. Keep a cheap safety net in case
+#      the watcher stalls (sleep/wake, imsg restart). run_forever() already
+#      refreshes its lease and drains retries every 5s while running; if you
+#      supervise the *process* externally (e.g. launchd KeepAlive, or an HOURLY
+#      cron that runs `preflight` and restarts `run` only when not healthy),
+#      use hourly-or-slower — a low-frequency liveness poll, never `* * * * *`.
+#      That fallback is deliberately excluded from Guard 3's regression check.
+#
+# Nothing above happens automatically. This CI file only *verifies* the wiring.

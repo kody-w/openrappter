@@ -1,0 +1,355 @@
+# Pre-Release Review Gate CI  (SAFE STUB — human-dispatch-gated)
+#
+# WHAT THIS DOES
+#   Runs the "release reviewer" skill (read-only) against a release-candidate
+#   PR or RC tag, then posts the skill's adversarial findings and per-claim
+#   verdicts as a single PR comment, and surfaces a structured go / no-go
+#   verdict. When wired into branch protection, a red (no-go) verdict blocks
+#   merge until it turns green.
+#
+# WHY THIS EXISTS
+#   The reviewer already performs this review by hand, repeatedly, once per RC
+#   (rc14 twice, rc15, ...). This makes the review consistent, un-skippable,
+#   and removes the manual retype-and-rerun loop. The intent is one canonical,
+#   auditable review per candidate instead of ad-hoc terminal runs.
+#
+# SAFETY POSTURE (read this before activating)
+#   * This file lives under fable5/automations/ and is INTENTIONALLY NOT under
+#     .github/workflows/. GitHub does not schedule or auto-trigger it here.
+#     To make it live, a human copies/moves it to .github/workflows/ AND
+#     uncomments the automatic triggers below. Until then it does nothing.
+#   * The ONLY active trigger is `workflow_dispatch` — it runs only when a
+#     human clicks "Run workflow" (or via `gh workflow run`). No push / PR /
+#     tag event starts it in stub form.
+#   * The release reviewer skill is invoked in READ-ONLY mode. This workflow
+#     performs NO push, NO tag mutation, NO deploy, NO publish, NO release
+#     creation, and NO deletion of any kind.
+#   * Least-privilege token: `contents: read`. The PR-comment step needs
+#     `pull-requests: write`; that permission is scoped and only exercised
+#     when a human dispatches the run against a PR. It writes a comment only —
+#     it cannot merge, close, push, or deploy.
+#   * The gate is advisory in stub form: the final "no-go" job fails the run
+#     so a human sees red, but it blocks a MERGE only after a human adds this
+#     check to branch-protection required status checks (see ACTIVATION).
+
+name: Pre-Release Review Gate (stub)
+
+# ---------------------------------------------------------------------------
+# TRIGGERS
+#
+# ACTIVE (stub): manual human dispatch only. Nothing runs automatically.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number of the release candidate to review (leave blank for a tag/manual review)."
+        required: false
+        type: string
+      rc_ref:
+        description: "Git ref / RC tag to review (e.g. v1.9.1-rc15). Defaults to the checked-out ref."
+        required: false
+        type: string
+      post_comment:
+        description: "Post the findings as a PR comment (requires pr_number). Off by default in the stub."
+        required: false
+        type: boolean
+        default: false
+
+  # -------------------------------------------------------------------------
+  # PRODUCTION TRIGGERS — COMMENTED OUT ON PURPOSE.
+  #
+  # A human uncomments these (and moves this file to .github/workflows/) to
+  # let the gate run automatically on every release-candidate PR and RC tag.
+  # Review each line before enabling; these are the ONLY things that make the
+  # gate un-skippable.
+  # -------------------------------------------------------------------------
+  #
+  # pull_request:
+  #   types: [opened, reopened, synchronize, labeled, ready_for_review]
+  #   # Only PRs carrying the "release candidate" label are gated (see the
+  #   # `if:` guard on the review job). Other PRs skip the gate entirely.
+  #
+  # push:
+  #   tags:
+  #     - "v*-rc*"      # e.g. v1.9.1-rc14, v1.9.1-rc15
+  #     - "*-rc[0-9]*"  # generic RC pattern fallback
+
+# Serialize runs per candidate so a newer push supersedes an in-flight review
+# of the same PR/tag instead of racing it. Never cancels across candidates.
+concurrency:
+  group: pre-release-review-${{ github.event.inputs.pr_number || github.event.inputs.rc_ref || github.ref }}
+  cancel-in-progress: true
+
+# Least privilege. `pull-requests: write` is ONLY for posting the findings
+# comment; it grants no merge/push/deploy capability.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ==========================================================================
+  # 1. Run the release reviewer skill (READ-ONLY) and emit a structured verdict
+  # ==========================================================================
+  review:
+    name: Release reviewer (read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # In production (auto-trigger) form, gate strictly to labeled RC PRs and
+    # RC tags. Harmless for manual dispatch (workflow_dispatch always passes).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'release candidate')) ||
+      startsWith(github.ref, 'refs/tags/')
+
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}         # "go" | "no-go" | "error"
+      summary: ${{ steps.gate.outputs.summary }}
+
+    steps:
+      - name: Check out the candidate (read-only clone)
+        uses: actions/checkout@v4
+        with:
+          # Prefer the explicitly requested RC ref; otherwise the event ref.
+          ref: ${{ github.event.inputs.rc_ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false   # token is not written to .git/config
+
+      - name: Resolve candidate identity
+        id: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="${{ github.event.inputs.pr_number || github.event.pull_request.number || '' }}"
+          ref="${{ github.event.inputs.rc_ref || github.ref_name }}"
+          echo "pr=${pr}"   >> "$GITHUB_OUTPUT"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          printf 'Reviewing candidate: PR=%s ref=%s\n' "${pr:-<none>}" "${ref}"
+
+      # -----------------------------------------------------------------------
+      # Invoke the release reviewer skill in READ-ONLY mode.
+      #
+      # This is a STUB. Replace the placeholder block below with the real
+      # read-only invocation once the release-reviewer skill exists in-repo,
+      # e.g. a command that:
+      #   * loads the release-reviewer skill,
+      #   * runs its adversarial review over the candidate diff/notes,
+      #   * writes machine-readable output to review-report.json with shape:
+      #       {
+      #         "verdict": "go" | "no-go",
+      #         "summary": "one-line human summary",
+      #         "findings": [ { "severity": "...", "text": "..." }, ... ],
+      #         "claims":   [ { "claim": "...", "verdict": "verified" |
+      #                          "refuted" | "unverifiable", "evidence": "..." } ]
+      #       }
+      #
+      # HARD RULE: the invocation MUST be read-only. It reads the diff, notes,
+      # and repo; it MUST NOT push, tag, publish, deploy, or delete anything.
+      # Keep any real command flags explicitly read-only (e.g. --read-only,
+      # --no-write, --dry-run) and never grant it write scopes.
+      # -----------------------------------------------------------------------
+      - name: Run release reviewer skill (READ-ONLY placeholder)
+        id: reviewer
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "STUB: release reviewer skill not yet wired in."
+          echo "Would run the 'release reviewer' skill READ-ONLY against:"
+          echo "  PR:  ${{ steps.candidate.outputs.pr }}"
+          echo "  ref: ${{ steps.candidate.outputs.ref }}"
+
+          # Emit a neutral, well-formed report so downstream steps are
+          # exercised end-to-end without performing any real (or destructive)
+          # action. A real run overwrites this file.
+          cat > review-report.json <<'JSON'
+          {
+            "verdict": "no-go",
+            "summary": "STUB run — reviewer skill not wired in; defaulting to no-go so the stub never green-lights a real merge.",
+            "findings": [
+              {
+                "severity": "info",
+                "text": "This is a stub. Replace the placeholder step with the real read-only release-reviewer invocation before relying on this gate."
+              }
+            ],
+            "claims": []
+          }
+          JSON
+          echo "report_path=review-report.json" >> "$GITHUB_OUTPUT"
+
+      - name: Parse verdict and build gate output
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="${{ steps.reviewer.outputs.report_path }}"
+          if [[ ! -f "$report" ]]; then
+            echo "verdict=error" >> "$GITHUB_OUTPUT"
+            echo "summary=Reviewer produced no report file." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          verdict="$(jq -r '.verdict // "error"' "$report")"
+          summary="$(jq -r '.summary // "(no summary)"' "$report")"
+
+          case "$verdict" in
+            go|no-go|error) ;;
+            *) verdict="error"; summary="Unrecognized verdict in report." ;;
+          esac
+
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          echo "summary=${summary}" >> "$GITHUB_OUTPUT"
+          printf 'Structured verdict: %s\n' "$verdict"
+
+      - name: Render findings + per-claim verdicts (markdown)
+        id: render
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="${{ steps.reviewer.outputs.report_path }}"
+          out="review-comment.md"
+
+          verdict="${{ steps.gate.outputs.verdict }}"
+          case "$verdict" in
+            go)    badge="🟢 GO" ;;
+            no-go) badge="🔴 NO-GO" ;;
+            *)     badge="⚠️ ERROR" ;;
+          esac
+
+          {
+            echo "## Pre-Release Review Gate — ${badge}"
+            echo ""
+            echo "> ${{ steps.gate.outputs.summary }}"
+            echo ""
+            echo "**Candidate:** PR \`${{ steps.candidate.outputs.pr }}\` · ref \`${{ steps.candidate.outputs.ref }}\`"
+            echo ""
+            echo "### Adversarial findings"
+            if [[ "$(jq '.findings | length' "$report")" -eq 0 ]]; then
+              echo "_No findings._"
+            else
+              jq -r '.findings[] | "- **[\(.severity // "note")]** \(.text)"' "$report"
+            fi
+            echo ""
+            echo "### Per-claim verdicts"
+            if [[ "$(jq '.claims | length' "$report")" -eq 0 ]]; then
+              echo "_No claims evaluated._"
+            else
+              echo "| Claim | Verdict | Evidence |"
+              echo "| --- | --- | --- |"
+              jq -r '.claims[] | "| \(.claim) | \(.verdict) | \(.evidence // "") |"' "$report"
+            fi
+            echo ""
+            echo "<sub>Read-only automated review. This gate does not push, tag, publish, or deploy.</sub>"
+          } > "$out"
+
+          echo "comment_path=${out}" >> "$GITHUB_OUTPUT"
+          echo "----- rendered comment -----"
+          cat "$out"
+
+      # Post the findings as a PR comment. Guarded: only when a human opted in
+      # (post_comment=true) AND a PR number is present. In auto-trigger form
+      # this becomes `if: github.event_name == 'pull_request'`.
+      - name: Post findings as PR comment
+        if: >-
+          steps.candidate.outputs.pr != '' &&
+          (github.event.inputs.post_comment == 'true' ||
+           github.event_name == 'pull_request')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review-comment.md', 'utf8');
+            const issue_number = Number('${{ steps.candidate.outputs.pr }}');
+            const marker = '<!-- pre-release-review-gate -->';
+            const withMarker = `${marker}\n${body}`;
+
+            // Upsert a single sticky comment so re-runs update in place
+            // instead of spamming the PR.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: withMarker,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body: withMarker,
+              });
+            }
+
+      - name: Upload review report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-review-report
+          path: |
+            review-report.json
+            review-comment.md
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ==========================================================================
+  # 2. The merge-blocking gate. Fails the run on no-go / error so a human sees
+  #    red. Becomes an actual MERGE block only when added to branch-protection
+  #    required checks (see ACTIVATION below).
+  # ==========================================================================
+  gate:
+    name: Go / No-Go gate
+    needs: review
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Enforce verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict="${{ needs.review.outputs.verdict }}"
+          summary="${{ needs.review.outputs.summary }}"
+          echo "Verdict: ${verdict:-<none>}"
+          echo "Summary: ${summary:-<none>}"
+          if [[ "$verdict" == "go" ]]; then
+            echo "✅ Release reviewer says GO."
+            exit 0
+          fi
+          echo "❌ Release reviewer says '${verdict:-error}'. Blocking until GO."
+          exit 1
+
+# ===========================================================================
+# ACTIVATION (human steps — nothing below happens on its own)
+#
+# 1. Wire the real skill:
+#    Replace the "Run release reviewer skill (READ-ONLY placeholder)" step
+#    with the real read-only invocation of the release-reviewer skill,
+#    writing review-report.json in the documented shape. Keep it read-only.
+#
+# 2. Dry-run manually first:
+#    Move nothing yet. From a branch, run via the Actions tab
+#    ("Run workflow") or:
+#        gh workflow run "Pre-Release Review Gate (stub)" \
+#          -f pr_number=<PR> -f post_comment=false
+#    Confirm the rendered comment and verdict look right on a known RC
+#    (e.g. re-run the rc14 / rc15 reviews and compare to your manual output).
+#
+# 3. Go live (auto-trigger):
+#    a. Move this file to .github/workflows/pre-release-review-gate.yml.
+#    b. Uncomment the `pull_request` and `push: tags` triggers above.
+#    c. Flip the PR-comment step guard to run on `pull_request` events.
+#
+# 4. Make it un-skippable (block merge):
+#    In repo Settings → Branches → branch protection for `main`, add the
+#    "Go / No-Go gate" job as a Required status check. Merge is then blocked
+#    until the reviewer returns GO.
+#
+# This automation never pushes, tags, publishes, deploys, or deletes.
+# ===========================================================================

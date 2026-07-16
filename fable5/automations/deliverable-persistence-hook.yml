@@ -1,0 +1,226 @@
+# Deliverable & Notes Persistence Hook (SAFE STUB)
+#
+# Purpose
+#   Standardize where multi-step research / audit / prompt outputs land so
+#   findings accumulate and stay queryable instead of scattering into ad hoc
+#   per-run worktree files. This is the "post-run hook" for skills/workflows
+#   that produce report, transcript, or prompt artifacts (e.g. video->prompts,
+#   release-reviewer output).
+#
+#   It scans the fixed durable locations, (re)builds a searchable INDEX.md +
+#   index.json over everything found, and uploads the result as a workflow
+#   artifact for review. It NEVER commits, pushes, deletes, or deploys — it is
+#   gated behind workflow_dispatch (explicit human click) and is read-only over
+#   the repo tree apart from the artifacts it stages under a scratch dir.
+#
+# Why a stub
+#   The video prompt explicitly asked to store final drafts in a notes app, but
+#   there is no standing integration, so outputs landed in improvised paths.
+#   This file is the standing seam: point every artifact-producing skill at
+#   fable5/reports/ + fable5/transcripts/, and this hook keeps a durable,
+#   queryable index. Wire a real notes app (Obsidian / Notion / etc.) at the
+#   marked TODO once you have a token — until then it is a no-op passthrough.
+#
+# Activation
+#   1. Merge this file to a branch GitHub can see (it lives at
+#      fable5/automations/deliverable-persistence-hook.yml). GitHub only reads
+#      workflows under the repo's top-level .github/workflows/ — so to make the
+#      dispatch button appear, ALSO symlink or copy this file to
+#      .github/workflows/fable5-deliverable-persistence.yml. Keeping the source
+#      of truth under fable5/automations/ documents intent; the copy under
+#      .github/workflows/ is what the Actions runner discovers.
+#   2. Run it manually: Actions tab -> "Fable5 Deliverable & Notes Persistence
+#      Hook" -> "Run workflow". Nothing runs on push/PR/schedule by design.
+#   3. Download the "fable5-deliverable-index" artifact to review INDEX.md and
+#      index.json. Commit them yourself if they look right — the workflow will
+#      not commit for you.
+#   4. (Optional) Populate NOTES_APP_TOKEN as a repo secret and fill in the
+#      "Sync to notes app" TODO to push the index into a real notes app.
+#
+# Safety contract
+#   - Trigger: workflow_dispatch ONLY. No push/PR/schedule/tag triggers.
+#   - permissions: contents: read (least privilege; cannot write the repo).
+#   - No git commit / git push / gh release / deploy / rm of repo files.
+#   - The only writes are into $RUNNER_TEMP scratch + the uploaded artifact.
+#   - The notes-app sync step is disabled by default (guarded by a dispatch
+#     input AND presence of a secret) and ships as an inert TODO.
+
+name: Fable5 Deliverable & Notes Persistence Hook
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_roots:
+        description: >-
+          Comma-separated durable roots to index (relative to repo). Defaults to
+          the standardized fable5 deliverable locations.
+        required: false
+        type: string
+        default: 'fable5/reports,fable5/transcripts'
+      sync_to_notes_app:
+        description: >-
+          Also sync the index to the configured notes app? Requires the
+          NOTES_APP_TOKEN secret. Off by default — leave false for a dry run.
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Build & upload the index but take no external action.'
+        required: false
+        type: boolean
+        default: true
+
+# Least-privilege: this hook can read the tree to index it and nothing else.
+permissions:
+  contents: read
+
+# Never let two manual index builds race and produce a confusing artifact.
+concurrency:
+  group: fable5-deliverable-persistence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  index-deliverables:
+    name: Scan artifacts & build searchable index
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository (read-only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan durable roots and build searchable index
+        id: build
+        shell: bash
+        env:
+          ARTIFACT_ROOTS: ${{ inputs.artifact_roots }}
+        run: |
+          set -euo pipefail
+
+          # Staging dir lives outside the repo tree so we never dirty the repo.
+          out_dir="$RUNNER_TEMP/fable5-index"
+          mkdir -p "$out_dir"
+          index_md="$out_dir/INDEX.md"
+          index_json="$out_dir/index.json"
+
+          {
+            printf '# Fable5 Deliverable & Notes Index\n\n'
+            printf '_Generated %s by deliverable-persistence-hook (read-only)._\n\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'Standardized durable locations for research, audit, transcript,\n'
+            printf 'and prompt artifacts. Search this file (or index.json) instead of\n'
+            printf 'hunting through per-run worktree paths.\n\n'
+          } > "$index_md"
+
+          # Start the JSON index as an array; append one object per artifact.
+          printf '[\n' > "$index_json"
+          first=1
+          count=0
+
+          # Split the comma-separated roots without eval/word-splitting surprises.
+          IFS=',' read -r -a roots <<< "${ARTIFACT_ROOTS:-fable5/reports,fable5/transcripts}"
+
+          for raw_root in "${roots[@]}"; do
+            root="$(printf '%s' "$raw_root" | tr -d '[:space:]')"
+            [ -z "$root" ] && continue
+
+            printf '## %s\n\n' "$root" >> "$index_md"
+
+            if [ ! -d "$root" ]; then
+              printf '_(no such directory yet — nothing indexed)_\n\n' >> "$index_md"
+              continue
+            fi
+
+            # Only index text-like deliverables; skip binaries/lockfiles/dotfiles.
+            # -print0 / read -d '' keeps spaces-in-paths safe.
+            found_any=0
+            while IFS= read -r -d '' f; do
+              found_any=1
+              count=$((count + 1))
+              rel="${f#./}"
+              title="$(basename "$rel")"
+              size="$(wc -c < "$f" | tr -d ' ')"
+              modified="$(date -u -r "$f" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+
+              # First markdown heading, if any, makes a nicer human title.
+              heading="$(grep -m1 -E '^#{1,6}[[:space:]]+' "$f" 2>/dev/null \
+                | sed -E 's/^#{1,6}[[:space:]]+//' || true)"
+              display="${heading:-$title}"
+
+              printf -- '- [`%s`](../%s) — %s (%s bytes, modified %s)\n' \
+                "$title" "$rel" "$display" "$size" "$modified" >> "$index_md"
+
+              # Escape backslashes and quotes for valid JSON string values.
+              esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+              [ "$first" -eq 1 ] || printf ',\n' >> "$index_json"
+              first=0
+              printf '  {"root": "%s", "path": "%s", "title": "%s", "bytes": %s, "modified": "%s"}' \
+                "$(esc "$root")" "$(esc "$rel")" "$(esc "$display")" "$size" "$modified" \
+                >> "$index_json"
+            done < <(find "$root" -type f \
+              \( -name '*.md' -o -name '*.txt' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) \
+              ! -name '.*' -print0 | sort -z)
+
+            [ "$found_any" -eq 0 ] && printf '_(empty)_\n' >> "$index_md"
+            printf '\n' >> "$index_md"
+          done
+
+          printf '\n]\n' >> "$index_json"
+
+          printf 'Indexed %s artifact(s) across roots: %s\n' "$count" "${ARTIFACT_ROOTS}"
+          printf 'artifact_count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'out_dir=%s\n' "$out_dir" >> "$GITHUB_OUTPUT"
+
+          # Surface a preview in the run summary so reviewers see it inline.
+          {
+            printf '### Fable5 deliverable index (%s artifacts)\n\n' "$count"
+            printf '```markdown\n'
+            cat "$index_md"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload searchable index as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fable5-deliverable-index
+          path: ${{ steps.build.outputs.out_dir }}
+          retention-days: 30
+          if-no-files-found: error
+
+      # ------------------------------------------------------------------ #
+      # OPTIONAL notes-app sync — inert stub. Disabled unless the operator  #
+      # both flips sync_to_notes_app=true AND provides NOTES_APP_TOKEN.     #
+      # Even then this default body only logs; it does NOT call out to any  #
+      # external service. Fill in the TODO with your notes app's API to     #
+      # activate real syncing. Nothing here pushes/deletes/deploys.         #
+      # ------------------------------------------------------------------ #
+      - name: Sync index to notes app (disabled stub)
+        if: ${{ inputs.sync_to_notes_app && !inputs.dry_run }}
+        shell: bash
+        env:
+          NOTES_APP_TOKEN: ${{ secrets.NOTES_APP_TOKEN }}
+          OUT_DIR: ${{ steps.build.outputs.out_dir }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NOTES_APP_TOKEN:-}" ]; then
+            echo "sync_to_notes_app requested but NOTES_APP_TOKEN is not set." >&2
+            echo "Add the secret, then re-run. Skipping sync (no-op)." >&2
+            exit 0
+          fi
+
+          echo "Notes-app sync is a stub — no external call is made yet."
+          echo "Index staged at: $OUT_DIR"
+          # TODO(activate): POST "$OUT_DIR/index.json" to your notes app here,
+          # e.g. Obsidian local REST plugin, Notion API, or a durable reports
+          # database. Keep it idempotent (upsert by artifact path) so repeated
+          # runs update rather than duplicate. Do not delete existing notes.
+
+      - name: Report result
+        shell: bash
+        run: |
+          echo "Deliverable persistence hook complete."
+          echo "Artifacts indexed: ${{ steps.build.outputs.artifact_count }}"
+          echo "Download the 'fable5-deliverable-index' artifact to review"
+          echo "INDEX.md and index.json. Commit them yourself if correct —"
+          echo "this workflow intentionally does not commit or push."

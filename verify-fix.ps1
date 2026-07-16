@@ -1,4 +1,4 @@
-Set-Location "C:\Users\kowildfe\Documents\GitHub\openrappter\typescript"
+Set-Location "$env:USERPROFILE\Documents\GitHub\openrappter\typescript"
 
 # Clean dist without rm (Windows-safe)
 if (Test-Path dist) { Remove-Item -Recurse -Force dist }

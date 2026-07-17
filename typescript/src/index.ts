@@ -148,6 +148,7 @@ async function startGatewayInProcess(opts?: {
   let imessageModelProbeStopped = false;
   let imessageModelProbeController: AbortController | undefined;
   let imessageModelProbePromise: Promise<void> | undefined;
+  let updateIMessageToken: ((token: string) => void) | undefined;
   if (imessageConfig.enabled) {
     const { CopilotCliProvider } = await import('./providers/copilot-cli.js');
     const imessageModel =
@@ -208,6 +209,12 @@ async function startGatewayInProcess(opts?: {
           imessageModelProbeController = undefined;
         }
       }
+    };
+    updateIMessageToken = (token: string) => {
+      imessageProvider.updateToken(token);
+      imessageRuntime?.setModelReadiness('pending', 'model_preflight_pending');
+      imessageModelProbeController?.abort();
+      imessageModelProbePromise = probeIMessageModel();
     };
     await imessageRuntime.start();
     imessageModelProbePromise = probeIMessageModel();
@@ -314,6 +321,7 @@ async function startGatewayInProcess(opts?: {
   // Wire auth profile token updates → live provider refresh (no restart needed)
   server.setAuthTokenCallback((token) => {
     assistant.setGithubToken(token);
+    updateIMessageToken?.(token);
     log(`${EMOJI} Copilot token updated from profile store`);
   });
 
@@ -1056,7 +1064,22 @@ program
     const telegramReady = false;
 
     // ── iMessage channel (macOS only) ──
-    let imessageReady = false;
+    const existingChannels =
+      config.channels
+      && typeof config.channels === 'object'
+      && !Array.isArray(config.channels)
+        ? config.channels as Record<string, unknown>
+        : {};
+    const existingIMessage =
+      existingChannels.imessage
+      && typeof existingChannels.imessage === 'object'
+      && !Array.isArray(existingChannels.imessage)
+        ? existingChannels.imessage as Record<string, unknown>
+        : {};
+    let imessageReady =
+      existingIMessage.enabled === true
+      && Array.isArray(existingIMessage.allowFrom)
+      && existingIMessage.allowFrom.length > 0;
     if (isMac) {
       log.step(`Step 2 of ${totalSteps} — iMessage Channel`);
       const setupIMessage = await confirm({
@@ -1103,7 +1126,6 @@ program
 
         if (!isCancel(imsgId) && imsgId && typeof imsgId === 'string' && imsgId.length > 0) {
           env.IMESSAGE_SELF_ID = imsgId;
-          imessageReady = true;
           log.success(`iMessage self ID set to ${imsgId}`);
 
           // Ask which contacts should trigger AI responses
@@ -1120,7 +1142,33 @@ program
           });
           if (!isCancel(allowedContacts) && allowedContacts && typeof allowedContacts === 'string' && allowedContacts.trim().length > 0) {
             env.IMESSAGE_ALLOWED_CONTACTS = allowedContacts.trim();
-            log.success(`AI will respond to: ${allowedContacts.trim()}`);
+            const { normalizeIMessageAddress } = await import(
+              './channels/imessage.js'
+            );
+            const allowFrom = allowedContacts
+              .split(',')
+              .map(contact => contact.trim())
+              .map(normalizeIMessageAddress)
+              .filter((contact): contact is string => contact !== null);
+            if (allowFrom.length > 0) {
+              config.channels = {
+                ...existingChannels,
+                imessage: {
+                  ...existingIMessage,
+                  enabled: true,
+                  mode: 'applescript',
+                  allowFrom,
+                  pollInterval: 1_500,
+                  staleAfterMs: 30 * 60 * 1000,
+                },
+              };
+              imessageReady = true;
+              log.success(`AI will respond to: ${allowedContacts.trim()}`);
+            } else {
+              log.warn('iMessage was not enabled because the allowlist was invalid.');
+            }
+          } else {
+            log.warn('iMessage was not enabled because no allowlisted contacts were provided.');
           }
 
           log.info('Contacts can send @ to start real-time chat, and @ again to stop.');

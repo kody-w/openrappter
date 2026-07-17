@@ -265,6 +265,28 @@ describe('CopilotCliProvider', () => {
     expect(calls[0].options.env).not.toHaveProperty('COPILOT_GITHUB_TOKEN');
   });
 
+  it('switches the isolated token without retaining the previous account', async () => {
+    const { calls, runner } = captureRunner();
+    const provider = new CopilotCliProvider({
+      promptTransport: 'argv',
+      env: testEnv({
+        COPILOT_GITHUB_TOKEN: 'old-token',
+        GH_TOKEN: 'older-fallback',
+      }),
+      runner,
+      homePreparer: async () => {},
+    });
+
+    provider.updateToken('new-token');
+    await provider.chat([{ role: 'user', content: 'hello' }]);
+
+    expect(calls[0].options.env).toMatchObject({
+      COPILOT_GITHUB_TOKEN: 'new-token',
+    });
+    expect(calls[0].options.env).not.toHaveProperty('GH_TOKEN');
+    expect(JSON.stringify(calls[0].options.env)).not.toContain('old-token');
+  });
+
   it('caps configurable prompt and timeout bounds', async () => {
     const { calls, runner } = captureRunner();
     const provider = new CopilotCliProvider({

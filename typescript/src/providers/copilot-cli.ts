@@ -400,7 +400,7 @@ export class CopilotCliProvider implements LLMProvider {
   private readonly promptAttachmentPreparer: CopilotCliPromptAttachmentPreparer;
 
   constructor(options: CopilotCliProviderOptions = {}) {
-    this.sourceEnv = options.env ?? process.env;
+    this.sourceEnv = { ...(options.env ?? process.env) };
     this.executable =
       options.executable?.trim()
       || this.sourceEnv.COPILOT_CLI_PATH?.trim()
@@ -431,6 +431,16 @@ export class CopilotCliProvider implements LLMProvider {
     this.promptTransport = options.promptTransport ?? 'attachment';
     this.promptAttachmentPreparer =
       options.promptAttachmentPreparer ?? defaultPromptAttachmentPreparer;
+  }
+
+  updateToken(token: string): void {
+    for (const key of TOKEN_ENV_KEYS) {
+      delete this.sourceEnv[key];
+    }
+    const normalized = token.trim();
+    if (normalized) {
+      this.sourceEnv.COPILOT_GITHUB_TOKEN = normalized;
+    }
   }
 
   async chat(

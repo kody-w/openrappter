@@ -95,9 +95,7 @@ public final class LaunchAgentManager {
               fileManager.fileExists(atPath: entryPoint) else {
             throw LaunchAgentError.runtimeUnavailable
         }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: resolvedNodePath)
-        process.arguments = enabled
+        let arguments = enabled
             ? [
                 entryPoint,
                 "service",
@@ -106,14 +104,31 @@ public final class LaunchAgentManager {
                 String(port),
             ]
             : [entryPoint, "service", "uninstall"]
-        process.currentDirectoryURL = URL(fileURLWithPath: resolvedProjectPath)
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw LaunchAgentError.commandFailed
+        do {
+            let terminationStatus = try await Task.detached(priority: .userInitiated) {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: resolvedNodePath)
+                process.arguments = arguments
+                process.currentDirectoryURL = URL(
+                    fileURLWithPath: resolvedProjectPath
+                )
+                process.standardInput = FileHandle.nullDevice
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                try process.run()
+                process.waitUntilExit()
+                return process.terminationStatus
+            }.value
+            guard terminationStatus == 0 else {
+                throw LaunchAgentError.commandFailed
+            }
+        } catch {
+            if !enabled {
+                try await unload()
+                try uninstall()
+                return
+            }
+            throw error
         }
     }
 

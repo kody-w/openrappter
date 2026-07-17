@@ -33,6 +33,7 @@ export interface DurableIMessageAssistant {
     onDelta?: (text: string) => void,
     memoryContext?: string,
     conversationKey?: string,
+    signal?: AbortSignal,
   ): Promise<AssistantResponse>;
   clearConversation(key: string): void;
   exportConversation(key: string): AssistantConversationMessage[];
@@ -113,6 +114,8 @@ export class IMessageRuntime {
   private connecting: Promise<void> | null = null;
   private reconnectAttempts = 0;
   private removeMessageHandler?: () => void;
+  private readonly activeInferenceControllers = new Map<string, AbortController>();
+  private stopping = false;
   private modelReadiness: 'ready' | 'pending' | 'failed' = 'ready';
   private modelReadinessReason?: string;
 
@@ -181,12 +184,14 @@ export class IMessageRuntime {
   async start(): Promise<void> {
     await this.initialize();
     if (this.running) return;
+    this.stopping = false;
     this.running = true;
     await this.ensureConnected();
     this.wake();
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     this.running = false;
     if (this.workerTimer !== undefined) {
       this.cancelSchedule(this.workerTimer);
@@ -198,6 +203,9 @@ export class IMessageRuntime {
     }
     this.removeMessageHandler?.();
     this.removeMessageHandler = undefined;
+    for (const controller of this.activeInferenceControllers.values()) {
+      controller.abort();
+    }
     await this.connecting?.catch(() => undefined);
     await this.channel.disconnect().catch(() => undefined);
     await this.workerPromise?.catch(() => undefined);
@@ -292,6 +300,7 @@ export class IMessageRuntime {
 
   private async runUntilIdle(): Promise<void> {
     for (let cycle = 0; cycle < 100; cycle++) {
+      if (this.stopping) return;
       await this.reconcileSending();
 
       const jobs = await this.store.claimReadyInbound(this.timestamp());
@@ -306,6 +315,7 @@ export class IMessageRuntime {
 
       delivered += await this.deliverReadyOutbox();
 
+      if (this.stopping) return;
       if (jobs.length === 0 && delivered === 0) return;
     }
     throw new Error('iMessage worker exceeded its bounded drain cycle');
@@ -321,6 +331,8 @@ export class IMessageRuntime {
 
   private async processInbound(job: StoredIMessageInbound): Promise<void> {
     const previousMessages = this.assistant.exportConversation(job.conversationKey);
+    const controller = new AbortController();
+    this.activeInferenceControllers.set(job.messageId, controller);
     try {
       if (await this.processCommand(job)) {
         return;
@@ -331,6 +343,7 @@ export class IMessageRuntime {
         undefined,
         undefined,
         job.conversationKey,
+        controller.signal,
       );
       const reply = response.content.trim()
         ? response.content
@@ -353,6 +366,8 @@ export class IMessageRuntime {
     } catch (error) {
       this.restoreConversation(job.conversationKey, previousMessages);
       await this.handleModelFailure(job, error);
+    } finally {
+      this.activeInferenceControllers.delete(job.messageId);
     }
   }
 
@@ -456,6 +471,15 @@ export class IMessageRuntime {
       lastModelErrorCode: failure.code,
       consecutiveModelFailures: health.consecutiveModelFailures + 1,
     });
+
+    if (this.stopping) {
+      await this.store.retryInbound(
+        job.messageId,
+        'runtime_stopping',
+        this.timestamp(),
+      );
+      return;
+    }
 
     if (!failure.permanent && job.attempts < this.maxModelAttempts) {
       await this.store.retryInbound(

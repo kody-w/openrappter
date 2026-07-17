@@ -372,6 +372,16 @@ describe('IMessageStateStore legacy migration and privacy', () => {
               replyTo: 'ready',
             },
           },
+          longReady: {
+            status: 'ready',
+            updatedAt: '2026-07-16T21:01:30.000Z',
+            conversationKey: 'imessage:iMessage;-;chat-a',
+            reply: {
+              target: '+15551234567',
+              content: 'x'.repeat(3001),
+              replyTo: 'longReady',
+            },
+          },
           sending: {
             status: 'sending',
             updatedAt: '2026-07-16T21:02:00.000Z',
@@ -407,6 +417,14 @@ describe('IMessageStateStore legacy migration and privacy', () => {
       status: 'response_ready',
     });
     expect(await store.getOutbox('ready:0')).toMatchObject({ status: 'ready' });
+    expect(await store.getOutbox('longReady:0')).toMatchObject({
+      status: 'ready',
+      content: 'x'.repeat(3000),
+    });
+    expect(await store.getOutbox('longReady:1')).toMatchObject({
+      status: 'ready',
+      content: 'x',
+    });
     expect(await store.getInbound('sending')).toMatchObject({
       status: 'ambiguous',
     });

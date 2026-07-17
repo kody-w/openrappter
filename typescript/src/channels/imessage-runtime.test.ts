@@ -31,6 +31,7 @@ class FakeAssistant implements DurableIMessageAssistant {
     _onDelta?: (text: string) => void,
     _memoryContext?: string,
     conversationKey = 'default',
+    signal?: AbortSignal,
   ): Promise<AssistantResponse> {
     this.calls.push(message);
     const history = this.histories.get(conversationKey) ?? [];
@@ -38,7 +39,17 @@ class FakeAssistant implements DurableIMessageAssistant {
     this.histories.set(conversationKey, history);
     const failure = this.failures.shift();
     if (failure) throw failure;
-    await this.responseGates.get(message);
+    const gate = this.responseGates.get(message);
+    if (gate) {
+      await Promise.race([
+        gate,
+        new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new Error('Copilot CLI request aborted'));
+          }, { once: true });
+        }),
+      ]);
+    }
     const content = `reply:${message}`;
     history.push({ role: 'assistant', content });
     return { content, agentLogs: [] };
@@ -484,6 +495,25 @@ describe('IMessageRuntime delivery ambiguity', () => {
 });
 
 describe('IMessageRuntime connection recovery', () => {
+  it('aborts active inference during shutdown', async () => {
+    const assistant = new FakeAssistant();
+    assistant.responseGates.set('never-finishes', new Promise<void>(() => {}));
+    const { store, runtime } = await harness({ assistant });
+    await store.ingestAppleRow(
+      1,
+      message('shutdown-abort', 1, 'never-finishes'),
+    );
+
+    const processing = runtime.processNow();
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+    const startedAt = Date.now();
+    await runtime.stop();
+    await processing;
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(assistant.calls).toEqual(['never-finishes']);
+  });
+
   it('keeps readiness degraded until the isolated model probe succeeds', async () => {
     const { runtime } = await harness();
     runtime.setModelReadiness('pending', 'model_preflight_pending');

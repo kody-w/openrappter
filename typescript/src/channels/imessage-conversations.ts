@@ -17,6 +17,7 @@ export interface IMessageAssistant {
     onDelta?: (text: string) => void,
     memoryContext?: string,
     conversationKey?: string,
+    signal?: AbortSignal,
   ): Promise<AssistantResponse>;
   clearConversation(key: string): void;
   exportConversation(key: string): AssistantConversationMessage[];

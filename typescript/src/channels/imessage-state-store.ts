@@ -304,6 +304,16 @@ function validIsoTimestamp(value: string, fallback: string): string {
   return Number.isFinite(Date.parse(value)) ? value : fallback;
 }
 
+function chunkLegacyReply(content: string): string[] {
+  const characters = Array.from(content);
+  if (characters.length === 0) return [''];
+  const chunks: string[] = [];
+  for (let index = 0; index < characters.length; index += 3_000) {
+    chunks.push(characters.slice(index, index + 3_000).join(''));
+  }
+  return chunks;
+}
+
 function safeJsonParse<T>(content: string, description: string): T {
   try {
     return JSON.parse(content) as T;
@@ -1327,7 +1337,7 @@ export class IMessageStateStore implements IMessageDurableIngestStore {
       INSERT INTO imessage_outbox (
         id, inbound_id, conversation_key, chat_guid, target, content,
         chunk_index, status, attempts, error_code, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
       ON CONFLICT(inbound_id, chunk_index) DO NOTHING
     `);
     const now = this.timestamp();
@@ -1385,18 +1395,25 @@ export class IMessageStateStore implements IMessageDurableIngestStore {
         updatedAt,
         updatedAt,
       );
-      insertOutbox.run(
-        `${messageId}:0`,
-        messageId,
-        delivery.conversationKey,
-        chatGuid,
-        reply.target,
-        reply.content,
-        outboxStatus,
-        errorCode,
-        updatedAt,
-        updatedAt,
-      );
+      const replyChunks =
+        delivery.status === 'sending'
+          ? [reply.content]
+          : chunkLegacyReply(reply.content);
+      replyChunks.forEach((content, chunkIndex) => {
+        insertOutbox.run(
+          `${messageId}:${chunkIndex}`,
+          messageId,
+          delivery.conversationKey,
+          chatGuid,
+          reply.target,
+          content,
+          chunkIndex,
+          outboxStatus,
+          errorCode,
+          updatedAt,
+          updatedAt,
+        );
+      });
     }
   }
 

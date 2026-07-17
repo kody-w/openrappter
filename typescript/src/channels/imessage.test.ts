@@ -513,18 +513,18 @@ describe('IMessageChannel Apple transport', () => {
     )).toBe(true);
   });
 
-  it('confirms a locally persisted outbound row by chat or participant', async () => {
+  it('confirms exactly one locally persisted outbound row in the same chat', async () => {
+    const sentRows = [
+      {
+        rowid: 52,
+        text: 'confirmed reply',
+        chat_guid: 'iMessage;-;chat-guid',
+      },
+    ];
     const runner: IMessageCommandRunner = async (executable, args) => {
       if (executable === 'sqlite3' && args[0] === '-json') {
         return {
-          stdout: JSON.stringify([
-            {
-              rowid: 52,
-              text: 'confirmed reply',
-              chat_guid: 'iMessage;-;different-alias',
-              participants: '+15551234567',
-            },
-          ]),
+          stdout: JSON.stringify(sentRows),
           stderr: '',
         };
       }
@@ -559,6 +559,18 @@ describe('IMessageChannel Apple transport', () => {
       target: '+15551234567',
       content: 'confirmed reply',
     })).resolves.toBe(52);
+
+    sentRows.push({
+      rowid: 53,
+      text: 'confirmed reply',
+      chat_guid: 'iMessage;-;chat-guid',
+    });
+    await expect(channel.findSentMessage({
+      afterRowId: 50,
+      chatGuid: 'iMessage;-;chat-guid',
+      target: '+15551234567',
+      content: 'confirmed reply',
+    })).resolves.toBeNull();
   });
 
   it('passes outbound address and content through ephemeral private files', async () => {

@@ -136,7 +136,6 @@ interface AppleSentMessageRow {
   text?: unknown;
   attributed_body_hex?: unknown;
   chat_guid?: unknown;
-  participants?: unknown;
 }
 
 export interface IMessageTransportHealth {
@@ -710,13 +709,7 @@ SELECT
   m.ROWID AS rowid,
   COALESCE(m.text, '') AS text,
   hex(m.attributedBody) AS attributed_body_hex,
-  c.guid AS chat_guid,
-  (
-    SELECT GROUP_CONCAT(h2.id, char(31))
-    FROM chat_handle_join chj2
-    JOIN handle h2 ON h2.ROWID = chj2.handle_id
-    WHERE chj2.chat_id = c.ROWID
-  ) AS participants
+  c.guid AS chat_guid
 FROM message m
 LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 LEFT JOIN chat c ON c.ROWID = cmj.chat_id
@@ -735,6 +728,7 @@ LIMIT 200;
       throw new Error('Unexpected iMessage confirmation response');
     }
 
+    const matches: number[] = [];
     for (const row of parsed as AppleSentMessageRow[]) {
       const rowId = Number(row.rowid);
       if (!Number.isSafeInteger(rowId) || rowId <= confirmation.afterRowId) {
@@ -745,21 +739,9 @@ LIMIT 200;
       if (content !== confirmation.content) continue;
 
       const chatGuid = typeof row.chat_guid === 'string' ? row.chat_guid : '';
-      const participants =
-        typeof row.participants === 'string'
-          ? row.participants
-              .split(String.fromCharCode(31))
-              .map(normalizeIMessageAddress)
-              .filter((address): address is string => address !== null)
-          : [];
-      if (
-        chatGuid === confirmation.chatGuid
-        || participants.includes(normalizedTarget)
-      ) {
-        return rowId;
-      }
+      if (chatGuid === confirmation.chatGuid) matches.push(rowId);
     }
-    return null;
+    return matches.length === 1 ? matches[0] : null;
   }
 
   getTransportHealth(): IMessageTransportHealth {

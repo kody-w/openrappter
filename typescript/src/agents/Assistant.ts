@@ -131,6 +131,7 @@ export class Assistant {
     onDelta?: (text: string) => void,
     memoryContext?: string,
     conversationKey?: string,
+    signal?: AbortSignal,
   ): Promise<AssistantResponse> {
     this.agentLogs = [];
 
@@ -181,6 +182,7 @@ export class Assistant {
       const response = await this.provider.chat(history, {
         model: this.config.model,
         tools: tools.length > 0 ? tools : undefined,
+        signal,
       });
 
       // If the LLM responded with tool calls, execute them

@@ -13,7 +13,7 @@
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
 import { truncateHistory } from '../providers/messages.js';
-import type { Message, Tool, ToolCall } from '../providers/types.js';
+import type { LLMProvider, Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
@@ -34,6 +34,12 @@ export interface AssistantConfig {
   maxToolRounds?: number;
   /** Override workspace directory (default: ~/.openrappter/workspace) */
   workspaceDir?: string;
+  /** Explicit provider injection for development, tests, and custom runtimes */
+  provider?: LLMProvider;
+  /** Load identity/workspace files into the system prompt (default true) */
+  loadWorkspaceContext?: boolean;
+  /** Load global MemoryAgent facts into the system prompt (default true) */
+  loadMemoryContext?: boolean;
 }
 
 export interface AssistantResponse {
@@ -43,10 +49,15 @@ export interface AssistantResponse {
   agentLogs: string[];
 }
 
+export interface AssistantConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export class Assistant {
   private agents: Map<string, BasicAgent>;
   private config: AssistantConfig;
-  private provider: CopilotProvider;
+  private provider: LLMProvider;
   private agentLogs: string[] = [];
   /** Maps conversation keys to message history for multi-turn continuity */
   private conversations: Map<string, Message[]> = new Map();
@@ -65,12 +76,16 @@ export class Assistant {
       githubToken: config?.githubToken,
       streaming: config?.streaming ?? true,
       maxToolRounds: config?.maxToolRounds ?? 10,
+      loadWorkspaceContext: config?.loadWorkspaceContext ?? true,
+      loadMemoryContext: config?.loadMemoryContext ?? true,
     };
     this.workspaceDir = config?.workspaceDir ?? WORKSPACE_DIR;
 
-    this.provider = new CopilotProvider({
-      githubToken: config?.githubToken,
-    });
+    this.provider =
+      config?.provider ??
+      new CopilotProvider({
+        githubToken: config?.githubToken,
+      });
   }
 
   /** Parsed identity from IDENTITY.md (updated each turn) */
@@ -86,7 +101,9 @@ export class Assistant {
   /** Update the GitHub token at runtime (e.g. after device-code login) */
   setGithubToken(token: string): void {
     this.config.githubToken = token;
-    this.provider.setGithubToken(token);
+    if (this.provider instanceof CopilotProvider) {
+      this.provider.setGithubToken(token);
+    }
   }
 
   /** Get the current model ID */
@@ -114,26 +131,27 @@ export class Assistant {
     onDelta?: (text: string) => void,
     memoryContext?: string,
     conversationKey?: string,
+    signal?: AbortSignal,
   ): Promise<AssistantResponse> {
     this.agentLogs = [];
 
     // Build tools from agent metadata
     const tools = this.buildTools();
 
-    // Ensure workspace exists (idempotent, cheap after first call)
-    await ensureWorkspace(this.workspaceDir);
-
-    // Load workspace files and identity
-    const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
-    const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
-    const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
-    if (identityFile?.content) {
-      this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+    let workspaceContext = '';
+    if (this.config.loadWorkspaceContext) {
+      await ensureWorkspace(this.workspaceDir);
+      const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
+      const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
+      const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+      if (identityFile?.content) {
+        this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+      }
+      workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
     }
-    const workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
 
     // Load persistent memories into context if none provided
-    if (!memoryContext) {
+    if (!memoryContext && this.config.loadMemoryContext) {
       memoryContext = await this.loadMemoryContext();
     }
 
@@ -164,6 +182,7 @@ export class Assistant {
       const response = await this.provider.chat(history, {
         model: this.config.model,
         tools: tools.length > 0 ? tools : undefined,
+        signal,
       });
 
       // If the LLM responded with tool calls, execute them
@@ -236,7 +255,8 @@ export class Assistant {
     conversationKey?: string,
   ): Promise<AssistantResponse> {
     // Fall back to non-streaming if provider doesn't support chatStream
-    if (!this.hasStreamSupport()) {
+    const chatStream = this.provider.chatStream;
+    if (!chatStream) {
       return this.getResponse(message, onDelta, undefined, conversationKey);
     }
 
@@ -244,16 +264,21 @@ export class Assistant {
 
     const tools = this.buildTools();
 
-    await ensureWorkspace(this.workspaceDir);
-    const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
-    const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
-    const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
-    if (identityFile?.content) {
-      this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+    let workspaceContext = '';
+    if (this.config.loadWorkspaceContext) {
+      await ensureWorkspace(this.workspaceDir);
+      const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
+      const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
+      const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+      if (identityFile?.content) {
+        this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
+      }
+      workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
     }
-    const workspaceContext = buildWorkspaceContext(workspaceFiles, onboardingDone);
 
-    const memoryContext = await this.loadMemoryContext();
+    const memoryContext = this.config.loadMemoryContext
+      ? await this.loadMemoryContext()
+      : undefined;
     const systemContent = this.buildSystemPrompt(memoryContext, workspaceContext);
 
     const key = conversationKey ?? 'default';
@@ -281,7 +306,7 @@ export class Assistant {
       let lastError: Error | undefined;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          for await (const delta of this.provider.chatStream(history, {
+          for await (const delta of chatStream.call(this.provider, history, {
             model: this.config.model,
             tools: tools.length > 0 ? tools : undefined,
           })) {
@@ -382,12 +407,44 @@ export class Assistant {
 
   /** Check if the provider supports streaming */
   private hasStreamSupport(): boolean {
-    return typeof (this.provider as any).chatStream === 'function';
+    return typeof this.provider.chatStream === 'function';
   }
 
   /** Clear a single conversation's history */
   clearConversation(key: string): void {
     this.conversations.delete(key);
+  }
+
+  /** Export bounded conversational text only; system prompts and tool output are excluded. */
+  exportConversation(key: string): AssistantConversationMessage[] {
+    const history = this.conversations.get(key) ?? [];
+    return history
+      .filter(
+        (message): message is Message & { role: 'user' | 'assistant' } =>
+          (message.role === 'user' || message.role === 'assistant')
+          && typeof message.content === 'string',
+      )
+      .slice(-40)
+      .map(message => ({ role: message.role, content: message.content }));
+  }
+
+  /** Replace a conversation from a persisted user/assistant-only transcript. */
+  importConversation(
+    key: string,
+    messages: readonly AssistantConversationMessage[],
+  ): void {
+    const imported = messages
+      .filter(
+        (message): message is AssistantConversationMessage =>
+          (message.role === 'user' || message.role === 'assistant')
+          && typeof message.content === 'string',
+      )
+      .slice(-40)
+      .map(message => ({ role: message.role, content: message.content }));
+    this.conversations.set(key, [
+      { role: 'system', content: '' },
+      ...imported,
+    ]);
   }
 
   /** Gracefully shut down */
@@ -484,6 +541,17 @@ export class Assistant {
     const workspaceBlock = workspaceContext
       ? `\n<workspace>\n${workspaceContext}\n</workspace>\n`
       : '';
+
+    if (!agentList) {
+      return `<identity>
+You are ${displayName}, ${this.config.description}.
+</identity>
+${workspaceBlock}${memoryBlock}
+<conversation_mode>
+- Respond directly and conversationally.
+- No tools are available. Do not claim to run commands, access files, or store global memories.
+</conversation_mode>`;
+    }
 
     return `<identity>
 You are ${displayName}, ${this.config.description}.

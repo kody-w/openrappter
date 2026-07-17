@@ -44,6 +44,7 @@ export interface ChatOptions {
   stream?: boolean;
   /** Internal: prevents infinite retry loops on auth errors */
   _isRetry?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface StreamDelta {
@@ -77,6 +78,11 @@ export interface LLMProvider {
    * Send a chat message and get a response
    */
   chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse>;
+
+  /**
+   * Stream a chat response when supported.
+   */
+  chatStream?(messages: Message[], options?: ChatOptions): AsyncGenerator<StreamDelta>;
 
   /**
    * Generate embeddings for texts (optional)

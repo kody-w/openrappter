@@ -66,24 +66,147 @@ public final class ProcessManager: Observable {
 
     /// Resolve the path to the TypeScript project root.
     public var projectPath: String {
-        // 1. OPENRAPPTER_PATH env var
-        if let envPath = ProcessInfo.processInfo.environment["OPENRAPPTER_PATH"] {
-            return envPath
+        Self.resolveProjectPath()
+    }
+
+    public static func resolveProjectPath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: String = NSHomeDirectory(),
+        executableURL: URL? = Bundle.main.executableURL,
+        currentDirectory: String = FileManager.default.currentDirectoryPath,
+        fileManager: FileManager = .default
+    ) -> String {
+        var candidates: [String] = []
+
+        if let configured = environment["OPENRAPPTER_PATH"], !configured.isEmpty {
+            candidates.append(configured)
         }
 
-        // 2. ~/.openrappter/config.json
-        let configPath = NSHomeDirectory() + "/.openrappter/config.json"
-        if FileManager.default.fileExists(atPath: configPath),
+        let configPath = homeDirectory + "/.openrappter/config.json"
+        if fileManager.fileExists(atPath: configPath),
            let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let path = json["projectPath"] as? String {
-            return path
+           let configured = json["projectPath"] as? String,
+           !configured.isEmpty {
+            candidates.append(configured)
         }
 
-        // 3. Relative to executable (assuming macos/ is sibling to typescript/)
-        let execURL = Bundle.main.executableURL ?? URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0])
-        let projectRoot = execURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return projectRoot.appendingPathComponent("typescript").path
+        candidates.append(homeDirectory + "/.local/share/openrappter/current")
+        candidates.append(homeDirectory + "/.openrappter")
+        candidates.append(homeDirectory + "/.npm-global/lib/node_modules/openrappter")
+        candidates.append(homeDirectory + "/.local/lib/node_modules/openrappter")
+        for binDirectory in nodeSearchPath(
+            homeDirectory: homeDirectory,
+            parentPath: environment["PATH"],
+            fileManager: fileManager
+        ).split(separator: ":") {
+            candidates.append(
+                URL(fileURLWithPath: String(binDirectory))
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("lib/node_modules/openrappter")
+                    .path
+            )
+        }
+        candidates.append("/opt/homebrew/lib/node_modules/openrappter")
+        candidates.append("/usr/local/lib/node_modules/openrappter")
+        candidates.append(currentDirectory)
+        candidates.append((currentDirectory as NSString).deletingLastPathComponent)
+
+        if let executableURL {
+            let contents = executableURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            candidates.append(contents.appendingPathComponent("Resources/openrappter").path)
+            candidates.append(
+                contents
+                    .deletingLastPathComponent()
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("typescript")
+                    .path
+            )
+        }
+
+        for candidate in candidates {
+            let expanded = candidate.hasPrefix("~/")
+                ? homeDirectory + String(candidate.dropFirst())
+                : candidate
+            let directPackage = (expanded as NSString).appendingPathComponent("package.json")
+            if fileManager.fileExists(atPath: directPackage) {
+                return URL(fileURLWithPath: expanded).standardizedFileURL.path
+            }
+
+            let typescript = (expanded as NSString).appendingPathComponent("typescript")
+            let nestedPackage = (typescript as NSString).appendingPathComponent("package.json")
+            if fileManager.fileExists(atPath: nestedPackage) {
+                return URL(fileURLWithPath: typescript).standardizedFileURL.path
+            }
+        }
+
+        return homeDirectory + "/.local/share/openrappter/current/typescript"
+    }
+
+    public static func nodeSearchPath(
+        homeDirectory: String = NSHomeDirectory(),
+        parentPath: String? = ProcessInfo.processInfo.environment["PATH"],
+        fileManager: FileManager = .default
+    ) -> String {
+        var candidates: [String] = []
+
+        func appendVersionedBins(root: String, prefix: String? = nil) {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: root)
+            else { return }
+            for entry in entries.sorted(by: >) {
+                if let prefix, !entry.hasPrefix(prefix) { continue }
+                candidates.append(
+                    (root as NSString).appendingPathComponent(entry + "/bin")
+                )
+            }
+        }
+
+        appendVersionedBins(
+            root: homeDirectory + "/.openrappter/tools",
+            prefix: "node-v"
+        )
+        appendVersionedBins(root: homeDirectory + "/.nvm/versions/node")
+        candidates.append(homeDirectory + "/.volta/bin")
+        candidates.append(homeDirectory + "/.local/share/fnm/aliases/default/bin")
+        candidates.append(
+            homeDirectory + "/Library/Application Support/fnm/aliases/default/bin"
+        )
+        candidates.append(homeDirectory + "/.local/share/mise/shims")
+        candidates.append(homeDirectory + "/.asdf/shims")
+        candidates.append(homeDirectory + "/.local/bin")
+        candidates.append("/opt/homebrew/bin")
+        candidates.append("/usr/local/bin")
+        candidates.append("/usr/bin")
+        candidates.append("/bin")
+        if let parentPath {
+            candidates.append(contentsOf: parentPath.split(separator: ":").map(String.init))
+        }
+
+        var seen = Set<String>()
+        return candidates
+            .filter { seen.insert($0).inserted }
+            .joined(separator: ":")
+    }
+
+    public static func resolveNodeExecutable(
+        homeDirectory: String = NSHomeDirectory(),
+        parentPath: String? = ProcessInfo.processInfo.environment["PATH"],
+        fileManager: FileManager = .default
+    ) -> String? {
+        for directory in nodeSearchPath(
+            homeDirectory: homeDirectory,
+            parentPath: parentPath,
+            fileManager: fileManager
+        ).split(separator: ":") {
+            let candidate = (String(directory) as NSString)
+                .appendingPathComponent("node")
+            if fileManager.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     /// The launch agent manager for auto-start on login.

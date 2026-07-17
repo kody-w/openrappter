@@ -106,6 +106,13 @@ function safeCompare(a: string, b: string): boolean {
 
 type StreamCallback = (response: StreamingResponse) => void;
 
+export interface GatewayReadiness {
+  ready: boolean;
+  status: 'ready' | 'degraded';
+  reason?: string;
+  details?: Record<string, unknown>;
+}
+
 class GatewayStoppedError extends Error {
   constructor() {
     super('Gateway stopped during method execution');
@@ -136,6 +143,7 @@ export class GatewayServer {
   private stopPromise: Promise<void> | null = null;
   private activeOperations = new Set<ActiveOperation>();
   private readonly metrics = new GatewayMetrics();
+  private readinessProvider?: () => Promise<GatewayReadiness>;
 
   // Rappter multi-soul manager
   private rappterManager?: RappterManager;
@@ -372,6 +380,12 @@ export class GatewayServer {
 
   setRappterManager(manager: RappterManager): void {
     this.rappterManager = manager;
+  }
+
+  setReadinessProvider(
+    provider: (() => Promise<GatewayReadiness>) | undefined,
+  ): void {
+    this.readinessProvider = provider;
   }
 
   registerMethod<P = unknown, R = unknown>(
@@ -628,6 +642,49 @@ export class GatewayServer {
   }
 
   private handleHttpRequest(req: IncomingMessage, res: ServerResponse): void {
+    if (req.url === '/livez' && req.method === 'GET') {
+      const live = Boolean(this.wss);
+      res.writeHead(live ? 200 : 503, {
+        'Content-Type': 'application/json',
+        Connection: 'close',
+      });
+      res.end(JSON.stringify({
+        live,
+        timestamp: new Date().toISOString(),
+      }));
+      return;
+    }
+    if (req.url === '/readyz' && req.method === 'GET') {
+      const readiness = this.readinessProvider
+        ? this.readinessProvider()
+        : Promise.resolve<GatewayReadiness>({
+            ready: Boolean(this.wss),
+            status: this.wss ? 'ready' : 'degraded',
+            reason: this.wss ? undefined : 'gateway_stopped',
+          });
+      void readiness.then(result => {
+        res.writeHead(result.ready ? 200 : 503, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(JSON.stringify({
+          ...result,
+          timestamp: new Date().toISOString(),
+        }));
+      }).catch(() => {
+        res.writeHead(503, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(JSON.stringify({
+          ready: false,
+          status: 'degraded',
+          reason: 'readiness_check_failed',
+          timestamp: new Date().toISOString(),
+        }));
+      });
+      return;
+    }
     const source = this.validateRequestSource(req);
     if (!source.ok) {
       res.writeHead(403, { 'Content-Type': 'application/json', Vary: 'Origin' });

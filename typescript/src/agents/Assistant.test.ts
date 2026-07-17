@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Assistant } from './Assistant.js';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
+import * as workspaceModule from './workspace.js';
 
 // ── Mock the CopilotProvider ─────────────────────────────────────────────────
 
@@ -233,6 +234,22 @@ describe('Assistant (direct Copilot API)', () => {
     expect((capturedOptions as { model?: string }).model).toBe('gpt-4o');
   });
 
+  it('supports a chat-only mode without workspace, memory, or tool claims', async () => {
+    const assistant = new Assistant(makeAgents(), {
+      loadWorkspaceContext: false,
+      loadMemoryContext: false,
+    });
+
+    await assistant.getResponse('hi');
+
+    expect(workspaceModule.ensureWorkspace).not.toHaveBeenCalled();
+    expect((capturedOptions as { tools?: unknown[] }).tools).toBeUndefined();
+    const system = (capturedMessages as { role: string; content: string }[])
+      .find(message => message.role === 'system');
+    expect(system?.content).toContain('No tools are available');
+    expect(system?.content).not.toContain('use the Memory agent');
+  });
+
   it('stop() clears conversations', async () => {
     const assistant = new Assistant(makeAgents());
     await assistant.getResponse('hi', undefined, undefined, 'conv-1');
@@ -277,6 +294,24 @@ describe('Assistant (direct Copilot API)', () => {
     const userMsgs = messages.filter(m => m.role === 'user');
     expect(userMsgs).toHaveLength(1);
     expect(userMsgs[0].content).toBe('msg B');
+  });
+
+  it('imports and exports only the bounded conversational transcript', async () => {
+    const assistant = new Assistant(makeAgents());
+    const transcript = Array.from({ length: 45 }, (_, index) => ({
+      role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+      content: `message-${index}`,
+    }));
+
+    assistant.importConversation('mobile-chat', transcript);
+    const exported = assistant.exportConversation('mobile-chat');
+
+    expect(exported).toHaveLength(40);
+    expect(exported[0]).toEqual({ role: 'assistant', content: 'message-5' });
+    expect(exported.every(message => message.role !== ('system' as string))).toBe(true);
+
+    assistant.clearConversation('mobile-chat');
+    expect(assistant.exportConversation('mobile-chat')).toEqual([]);
   });
 
   it('calls onDelta with final content', async () => {

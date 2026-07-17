@@ -95,14 +95,22 @@ export class ChannelRegistry {
   getStatusList(): ChannelStatusInfo[] {
     return this.list().map(ch => {
       const info = ch.getInfo();
+      const operational = ch as BaseChannel & {
+        getTransportHealth?: () => {
+          lastPollSuccessAt?: string;
+          lastPollErrorCode?: string;
+        };
+      };
+      const transportHealth = operational.getTransportHealth?.();
       return {
         id: info.name,
         type: info.type,
         connected: info.status === 'connected',
-        configured: true,
+        configured: ch.isConfigured(),
         running: info.status === 'connected' || info.status === 'connecting',
-        lastActivity: info.connectedAt,
+        lastActivity: transportHealth?.lastPollSuccessAt ?? info.connectedAt,
         lastConnectedAt: info.connectedAt,
+        lastError: transportHealth?.lastPollErrorCode,
         messageCount: info.messageCount,
       };
     });

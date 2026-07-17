@@ -344,6 +344,41 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
       expect(body.status).toBe('ok');
     });
 
+    it('should distinguish liveness from readiness', async () => {
+      const live = await fetch(`http://127.0.0.1:${TEST_PORT}/livez`);
+      const ready = await fetch(`http://127.0.0.1:${TEST_PORT}/readyz`);
+
+      expect(live.status).toBe(200);
+      expect(ready.status).toBe(200);
+      expect(await live.json()).toMatchObject({ live: true });
+      expect(await ready.json()).toMatchObject({
+        ready: true,
+        status: 'ready',
+      });
+    });
+
+    it('should remain live while reporting degraded readiness', async () => {
+      server.setReadinessProvider(async () => ({
+        ready: false,
+        status: 'degraded',
+        reason: 'imessage_offline',
+      }));
+      try {
+        const live = await fetch(`http://127.0.0.1:${TEST_PORT}/livez`);
+        const ready = await fetch(`http://127.0.0.1:${TEST_PORT}/readyz`);
+
+        expect(live.status).toBe(200);
+        expect(ready.status).toBe(503);
+        expect(await ready.json()).toMatchObject({
+          ready: false,
+          status: 'degraded',
+          reason: 'imessage_offline',
+        });
+      } finally {
+        server.setReadinessProvider(undefined);
+      }
+    });
+
     it('should serve /status', async () => {
       const res = await fetch(`http://127.0.0.1:${TEST_PORT}/status`);
       expect(res.ok).toBe(true);

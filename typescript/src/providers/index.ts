@@ -8,4 +8,5 @@ export * from './openai.js';
 export * from './ollama.js';
 export * from './registry.js';
 export * from './copilot.js';
+export * from './copilot-cli.js';
 export * from './gemini.js';

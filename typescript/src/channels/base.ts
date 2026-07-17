@@ -88,6 +88,10 @@ export abstract class BaseChannel {
     };
   }
 
+  isConfigured(): boolean {
+    return true;
+  }
+
   async sendTyping(_conversationId: string): Promise<void> {
     // No-op default — channels override if supported
   }

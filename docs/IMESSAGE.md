@@ -1,143 +1,146 @@
-# iMessage assistant (macOS)
+# iMessage: OpenRappter's primary external channel
 
-OpenRappter can run a private, allowlisted iMessage assistant on macOS. The
-transport is deliberately deterministic: it ingests Messages rows, persists a
-durable queue, invokes a tool-free assistant, and reconciles replies against
-the local Messages database. It does not attach to an interactive Copilot CLI
-session.
+On-device chat is the local control room. iMessage is the primary way a person
+talks to a running Rappter away from that device.
 
-## Configure
+OpenRappter uses one canonical transport:
 
-Add this to `~/.openrappter/config.json`:
+```text
+Messages.app
+  -> signed imsg 0.12.3 (read-only chat.db + Apple Events)
+  -> supervised Python iMessage service
+  -> RAPP-shaped Python brainstem
+  -> hot-loaded *_agent.py cartridges and memory agents
+```
+
+The TypeScript gateway, web UI, and menu-bar app remain the consumer control
+plane. They display and control the Python sidecar; they do not run a second
+Messages reader.
+
+## Trust model
+
+OpenRappter keeps one local memory graph, but each turn receives a
+conversation-specific projection:
+
+- owner conversations use the owner-private history;
+- each other person has a private principal history;
+- each group has a group history bound to its current participant roster;
+- adding or removing a group member creates a new privacy epoch;
+- direct-chat memories do not enter a group automatically;
+- the same person can be recognized across chats without exposing why;
+- a custodian can explicitly share one fact with the current group in natural
+  language;
+- consent is one-shot, fact-specific, audience-specific, and revocable;
+- missing, malformed, ambiguous, or negated consent fails closed;
+- non-owner conversations expose only trust-aware memory tools, never Shell or
+  filesystem tools.
+
+Transport setup uses a private local configuration file. Memory, consent,
+sharing, revocation, and relationship behavior are controlled through natural
+language—not forms.
+
+## Install on one Mac
+
+Requirements:
+
+- macOS 14 or newer;
+- a logged-in Aqua user signed into Messages;
+- Python 3.10+ (3.12 recommended);
+- a GitHub Copilot account;
+- Full Disk Access and Messages Automation approval.
+
+From the repository:
+
+```bash
+scripts/install-imessage-runtime.sh
+
+~/.openrappter/runtimes/imessage/current/bin/python \
+  -m openrappter.imessage \
+  --config ~/.openrappter/imessage/config.json \
+  init \
+  --owner "<this Mac's owner iMessage handle>"
+
+copilot login
+
+scripts/install-imessage-service.sh
+```
+
+`init` discovers the exact self-chat identifiers without printing them. The
+configuration and state files are mode `0600`; raw handles never appear in
+logical session IDs or operational logs.
+
+Grant Full Disk Access to the responsible OpenRappter/imsg process in:
+
+`System Settings -> Privacy & Security -> Full Disk Access`
+
+Approve control of Messages when macOS shows the Automation prompt.
+
+Check health:
+
+```bash
+~/.openrappter/runtimes/imessage/current/bin/python \
+  -m openrappter.imessage \
+  --config ~/.openrappter/imessage/config.json \
+  status
+```
+
+The service is ready only when `healthy`, `read_ready`, and `ready` are true.
+`send_ready` becomes true after the first successful reply.
+
+## Add people and groups
+
+DMs and groups are deny-by-default. Add transport handles or stable chat
+GUIDs only on the local Mac:
 
 ```json
 {
-  "channels": {
-    "imessage": {
-      "enabled": true,
-      "mode": "applescript",
-      "allowFrom": ["+15551234567", "person@example.com"],
-      "pollInterval": 5000,
-      "staleAfterMs": 1800000
-    }
-  }
+  "allowed_dm_handles": ["<explicitly approved handle>"],
+  "allowed_group_chat_ids": ["<stable chat GUID>"],
+  "mention_required": true,
+  "mention_tokens": ["@rappter"]
 }
 ```
 
-`allowFrom` must contain at least one valid phone number or email address.
-Unlisted or malformed senders are discarded before persistence or inference.
-Group chats are always discarded. Attachments are acknowledged at the database
-cursor but are not processed. BlueBubbles mode fails explicitly rather than
-falling back.
+Display names are never identity links. Link multiple handles to one person
+only through an explicit local `identity_links` entry.
 
-Messages older than `staleAfterMs` when first observed are held as
-`stale_pending`. They are never silently replayed or discarded; the sender must
-use `/resume`. The default stale window is 30 minutes.
+Inside an allowed group, address the Rappter using its configured mention.
+The rest is conversational:
 
-## Install and diagnose
-
-Build once, then install the per-user launch service:
-
-```bash
-cd typescript
-npm run build
-node dist/index.js imessage install-service
-node dist/index.js imessage diagnose
+```text
+Remember that this launch detail is private between us.
+You may share the launch detail with this group.
+Do not share that detail anymore.
+Forget that launch detail.
 ```
 
-Useful operator commands:
+OpenRappter records the verified speaker, source event, exact audience, group
+roster epoch, and one-shot consent capability before a memory agent may act.
 
-```bash
-node dist/index.js imessage service-status --json
-node dist/index.js imessage diagnose --json
-node dist/index.js imessage uninstall-service
-```
+## Three-Mac test
 
-The installer uses modern `launchctl bootstrap`, `enable`, and `kickstart`
-operations, a private `umask`, throttled restart behavior, and an exclusive
-gateway lock. If an installer-managed system daemon already exists, it becomes
-a lightweight sentinel while the GUI LaunchAgent owns the gateway. This is
-intentional: Apple Events automation must run in the logged-in GUI session.
-The delegation marker is a lease: interrupted handoffs expire, and the system
-daemon resumes if the GUI gateway remains unavailable. Removing the user
-service removes the lease and restores normal system-daemon ownership.
+Use one dedicated macOS user and one distinct iMessage account per Rappter.
+Do not run two active Rappters on one Apple account.
 
-`GET /livez` reports process liveness. `GET /readyz` reports dependency
-readiness and returns a sanitized reason code when iMessage is degraded.
-Gateway liveness never depends on Messages permissions, preventing restart
-storms.
+For each Mac mini:
 
-## macOS permissions
+1. Install the same OpenRappter commit and signed `imsg` version.
+2. Run the runtime installer and initialize a private config.
+3. Give the Rappter a distinct instance id, account, and mention token.
+4. Complete FDA, Automation, and Copilot authorization.
+5. Start the per-user LaunchAgent after GUI login.
+6. Verify one DM reply, one addressed group reply, restart recovery, and
+   sleep/wake recovery.
 
-The process that actually owns the GUI LaunchAgent needs:
+Then create a group containing the human and all three Rappters. Each Rappter
+must answer only its own mention, preserve its own memory graph, keep group
+history separate from DMs, and never respond to another Rappter's echo.
 
-1. **Full Disk Access** to read `~/Library/Messages/chat.db`.
-2. **Automation → Messages** access to send with Apple Events.
-3. A valid **GitHub Copilot token** available through OpenRappter's private
-   `.env` file or GitHub CLI authentication.
+## Safety
 
-Run `imessage diagnose` after changing permissions. A terminal foreground probe
-does not prove that a background launch identity has the same TCC grants.
-
-## Mobile commands
-
-- `/status` — readiness and queue summary
-- `/diagnose` — sanitized cursor, poll, model, and send health
-- `/reset` or `/new` — clear this chat's persisted assistant history
-- `/resume` — release stale messages held for this chat
-- `/retry` — explicitly retry the latest ambiguous delivery; a duplicate is
-  possible and the command says so
-- `/help` — command summary
-
-Commands are handled without model invocation.
-
-## Durability and privacy
-
-State lives in `~/.openrappter/imessage.sqlite` using SQLite WAL mode. The
-directory is `0700`; the database, WAL, and shared-memory files are `0600`.
-Legacy `imessage-state.json` and `imessage-conversations.json` files are
-imported once and retained untouched as rollback evidence.
-
-The core invariants are:
-
-1. An accepted inbound GUID and its Messages cursor advance commit in one
-   transaction.
-2. Model work never blocks database polling.
-3. One turn per chat runs at a time; different chats may progress concurrently.
-4. Replies are durable before send and chunks remain ordered.
-5. A crash before send is retryable. A crash after entering `sending` is
-   reconciled against new `is_from_me` rows in `chat.db`.
-6. Unconfirmed sends become `ambiguous` and are not blindly resent.
-7. Later chunks are cancelled if an earlier chunk is ambiguous or dead-lettered.
-
-Messages database read-back confirms local Messages persistence, not remote
-delivery. Exactly-once remote delivery is not available through AppleScript;
-the implementation favors no duplicates and explicit ambiguity.
-
-The assistant receives bounded per-chat user/assistant history. It has no
-shell, filesystem, memory, or messaging tools. The Copilot CLI runs with an
-isolated `COPILOT_HOME`, a restricted environment, no custom instructions, and
-an empty tool list. Transcripts are supplied as ephemeral private native
-documents, and Apple Events reads recipient/body data from ephemeral `0600`
-files; private text and addresses are not placed in process arguments. The
-configured model is tried first; the CLI default can be used as a fallback when
-that model disappears.
-
-Message bodies, sender addresses, prompts, and tokens are never written to
-OpenRappter logs. Health output contains only counts, timestamps, cursor lag,
-and stable reason codes.
-
-## Recovery
-
-- `processing` work returns to a retry state after restart.
-- `preparing` outbox work returns to `ready`.
-- `sending` work remains at the ambiguity boundary until local reconciliation.
-- Startup and poll failures use jittered backoff capped at 60 seconds.
-- Definitively pre-send transport failures retry indefinitely with that bounded
-  backoff; they are never dead-lettered merely because an outage lasted.
-- A removed allowlist target is quarantined rather than crashing startup.
-- A cursor beyond a replaced Messages database is safely re-baselined.
-
-Before running an older pre-SQLite binary, stop both supervisors and preserve
-`imessage.sqlite*`. The retained JSON files predate any post-migration messages;
-starting old code directly can replay rows and is not a safe rollback.
+- Never write directly to `chat.db`.
+- Never enable SMS fallback; the service accepts iMessage chats only.
+- Never run the service as root or as a system LaunchDaemon.
+- Never retry an ambiguous send automatically.
+- Never run live tests against arbitrary contacts or groups.
+- Keep private IMCore features and SIP changes disabled.

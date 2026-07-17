@@ -15,7 +15,7 @@
 
 [Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [v1.10.0 Release Notes](./docs/release-notes-1.10.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
-[macOS iMessage assistant setup](./docs/imessage.md) ·
+[TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
 
 ---

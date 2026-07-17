@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasCopilotAvailable, autoAuthIfNeeded, saveGitHubToken } from './copilot-check.js';
+import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
 
@@ -40,20 +40,33 @@ async function getGhToken(): Promise<string | null> {
 // GATEWAY IN-PROCESS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string }): Promise<{ port: number; cleanup: () => Promise<void> }> {
+async function startGatewayInProcess(opts?: {
+  silent?: boolean;
+  webRoot?: string;
+  port?: number;
+  releaseProcessLock?: () => void;
+}): Promise<{ port: number; cleanup: () => Promise<void> }> {
   const { GatewayServer } = await import('./gateway/server.js');
   const { Assistant } = await import('./agents/Assistant.js');
   const { ChannelRegistry } = await import('./channels/registry.js');
   const { TelegramChannel } = await import('./channels/telegram.js');
   const { DiscordChannel } = await import('./channels/discord.js');
   const { WhatsAppChannel } = await import('./channels/whatsapp.js');
-  const { getOrCreateStore } = await import('./gateway/methods/twin-methods.js');
   const { SlackChannel } = await import('./channels/slack.js');
   const { CLIChannel } = await import('./channels/cli.js');
-  const { IMessageProxyChannel } = await import('./channels/imessage-proxy.js');
+  const {
+    describeIMessageConnectionFailure,
+    IMessageChannel,
+  } = await import('./channels/imessage.js');
+  const { IMessageRuntime } = await import('./channels/imessage-runtime.js');
+  const { IMessageStateStore } = await import('./channels/imessage-state-store.js');
+  const {
+    listGatewayChannelStatuses,
+    readIMessageConfig,
+  } = await import('./channels/imessage-gateway.js');
   const { listBundledSkills } = await import('./skills/bundled.js');
 
-  const port = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+  const port = opts?.port ?? parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
   const token = process.env.OPENRAPPTER_TOKEN || undefined;
   const silent = opts?.silent ?? false;
   const log = (...args: unknown[]) => { if (!silent) console.log(...args); };
@@ -117,306 +130,95 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   channelRegistry.register(new SlackChannel('slack', 'slack', { botToken: process.env.SLACK_BOT_TOKEN || '', appToken: process.env.SLACK_APP_TOKEN || '' }));
   channelRegistry.register(new WhatsAppChannel({}));
   channelRegistry.register(new CLIChannel());
-  const imessageProxy = new IMessageProxyChannel(HOME_DIR);
-  channelRegistry.register(imessageProxy);
-
-  // ── iMessage channel (macOS — self-chat + contacts) ──
-  const { IMessageChannel } = await import('./channels/imessage.js');
-  const imessageSelfId = process.env.IMESSAGE_SELF_ID || '';
-  const imessageAllowedContacts = (process.env.IMESSAGE_ALLOWED_CONTACTS || '')
-    .split(',').map(s => s.trim()).filter(Boolean);
-  const imessageGroupChats = (process.env.IMESSAGE_GROUP_CHATS || '')
-    .split(',').map(s => s.trim()).filter(Boolean);
-  const imessage = new IMessageChannel({
-    mode: 'applescript',
-    selfChatId: imessageSelfId || undefined,
-    watchContacts: imessageAllowedContacts,
-    watchGroups: imessageGroupChats,
-    pollInterval: 3000,
+  const rawConfig = await loadConfig(CONFIG_FILE);
+  const imessageConfig = readIMessageConfig(rawConfig);
+  const imessageStore = imessageConfig.enabled
+    ? new IMessageStateStore({
+        staleAfterMs: imessageConfig.staleAfterMs,
+      })
+    : undefined;
+  const imessage = new IMessageChannel(imessageConfig, {
+    durableStore: imessageStore,
   });
+  channelRegistry.register(imessage);
 
-  // ── iMessage persona routing ──
-  // IMESSAGE_PERSONAS format: "contact:name:emoji:description, ..."
-  // e.g. "rappter2@icloud.com:Rex:🦕:a witty dinosaur companion, rappter1@icloud.com:Nova:🌟:a curious stargazer AI"
-  // Contacts without a persona use the default assistant.
-  const personaAssistants = new Map<string, { assistant: InstanceType<typeof Assistant>; emoji: string }>();
-  const personaConfig = process.env.IMESSAGE_PERSONAS || '';
-  if (personaConfig) {
-    for (const entry of personaConfig.split(/,\s*/)) {
-      const [contact, pName, pEmoji, ...descParts] = entry.split(':');
-      if (!contact || !pName) continue;
-      const pDesc = descParts.join(':') || `a unique AI persona named ${pName}`;
-      const pAssistant = new Assistant(agents, {
-        name: pName,
-        description: pDesc,
-        model: process.env.OPENRAPPTER_MODEL,
-        githubToken: githubToken ?? undefined,
-        workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
-      });
-      personaAssistants.set(contact.toLowerCase(), { assistant: pAssistant, emoji: pEmoji || '🤖' });
-      log(`${EMOJI} iMessage persona: ${pEmoji || '🤖'} ${pName} → ${contact}`);
-    }
-  }
-
-  // Track which persona responds next in group chats (round-robin)
-  let groupPersonaIndex = 0;
-  const personaList = Array.from(personaAssistants.entries()); // [[contact, {assistant, emoji}], ...]
-
-  // Real-time chat mode: per-conversation toggle via @ prefix
-  // @ message → enter real-time mode (respond to everything)
-  // Another @ message → exit real-time mode (go silent until next @)
-  // Default: allowed contacts start in real-time mode (they opted in via config)
-  const realtimeChatMode = new Map<string, boolean>();
-  for (const contact of imessageAllowedContacts) {
-    if (contact) realtimeChatMode.set(contact.toLowerCase(), true);
-  }
-
-  // The in-process SQLite/AppleScript poller is retained temporarily for source
-  // migration only and cannot be activated in production.
-  const legacyIMessageEnabled = false;
-  if (
-    legacyIMessageEnabled &&
-    process.platform === 'darwin'
-    && imessageSelfId
-  ) {
-    imessage.onMessage(async (incoming) => {
-      try {
-        const contactKey = (incoming.conversationId || '').toLowerCase();
-        const isGroupChat = !!(incoming.metadata as any)?.isGroupChat;
-        const rawContent = (incoming.content || '').trim();
-        const isWalPlaceholder = !!(incoming.metadata as any)?.walMutation
-          && rawContent.startsWith('[New iMessage');
-
-        // ── @ toggle: real-time chat mode ──
-        // WAL poller can't read content → auto-respond to everything
-        const isAtMessage = !isWalPlaceholder && rawContent.startsWith('@');
-        const convId = incoming.conversationId || contactKey;
-        const wasRealtime = realtimeChatMode.get(convId) ?? false;
-
-        if (isWalPlaceholder) {
-          // WAL mode: always respond (can't filter by content)
-          // Menu bar bridge handles @ toggle when FDA is available
-          if (!wasRealtime) {
-            realtimeChatMode.set(convId, true);
-            log(`${EMOJI} iMessage [${convId}] WAL mode — auto real-time`);
+  let imessageAssistant: InstanceType<typeof Assistant> | undefined;
+  let imessageRuntime: InstanceType<typeof IMessageRuntime> | undefined;
+  let imessageModelProbeTimer: ReturnType<typeof setTimeout> | undefined;
+  let imessageModelProbeStopped = false;
+  let imessageModelProbeController: AbortController | undefined;
+  let imessageModelProbePromise: Promise<void> | undefined;
+  if (imessageConfig.enabled) {
+    const { CopilotCliProvider } = await import('./providers/copilot-cli.js');
+    const imessageModel =
+      process.env.OPENRAPPTER_IMESSAGE_MODEL || 'gpt-5.6-sol';
+    const imessageProvider = new CopilotCliProvider({
+      executable: process.env.COPILOT_CLI_PATH,
+      copilotHome: path.join(HOME_DIR, 'copilot-imessage-home'),
+      model: imessageModel,
+      fallbackModels: (
+        process.env.OPENRAPPTER_IMESSAGE_FALLBACK_MODELS?.split(',')
+        ?? ['']
+      ),
+      promptTransport: 'attachment',
+      env: githubToken
+        ? {
+            ...process.env,
+            COPILOT_GITHUB_TOKEN: githubToken,
           }
-        } else if (isAtMessage) {
-          if (wasRealtime) {
-            // Exit real-time mode
-            realtimeChatMode.set(convId, false);
-            log(`${EMOJI} iMessage [${convId}] real-time chat OFF`);
-            await imessage.send(convId, {
-              channel: 'imessage',
-              content: `${EMOJI} Real-time chat ended. Send @ to start again.`,
-            });
-            return;
-          } else {
-            // Enter real-time mode — strip the @ and process the message
-            realtimeChatMode.set(convId, true);
-            incoming.content = rawContent.slice(1).trim() || 'Hey';
-            log(`${EMOJI} iMessage [${convId}] real-time chat ON`);
-          }
-        } else if (!wasRealtime) {
-          // Not in real-time mode and no @ prefix → ignore
-          log(`${EMOJI} iMessage [${convId}] skipped (not in real-time mode — send @ to start)`);
-          return;
-        }
-
-        let activeAssistant: InstanceType<typeof Assistant>;
-        let activeEmoji: string;
-        let personaName = '';
-
-        if (isGroupChat && personaList.length > 0) {
-          // Group chat: rotate personas so they take turns
-          const [, persona] = personaList[groupPersonaIndex % personaList.length];
-          activeAssistant = persona.assistant;
-          activeEmoji = persona.emoji;
-          personaName = (activeAssistant as any).config?.name || '';
-          groupPersonaIndex++;
-
-          // Use per-persona chat key so each persona has its own memory in the group
-          const chatKey = `imessage_group_${incoming.conversationId}_${personaName}`;
-          log(`${activeEmoji} iMessage [group] ← ${incoming.senderName}: ${incoming.content}`);
-
-          // Give the persona context about who said what
-          const groupPrompt = `[Group chat message from ${incoming.senderName || incoming.sender}]: ${incoming.content}`;
-          const result = await activeAssistant.getResponse(groupPrompt, undefined, undefined, chatKey);
-          let reply = result.content;
-          const voiceIdx = reply.indexOf('|||VOICE|||');
-          if (voiceIdx !== -1) reply = reply.substring(0, voiceIdx).trim();
-
-          await imessage.send(incoming.conversationId!, {
-            channel: 'imessage',
-            content: `${activeEmoji} ${personaName}: ${reply}`,
-          });
-
-          log(`${activeEmoji} iMessage [group] → ${personaName}: ${reply.slice(0, 80)}...`);
-          return;
-        }
-
-        // 1:1 chat: pick persona by contact or default
-        const chatKey = `imessage_${incoming.conversationId || 'self'}`;
-        const persona = personaAssistants.get(contactKey);
-        activeAssistant = persona?.assistant ?? assistant;
-        activeEmoji = persona?.emoji ?? EMOJI;
-
-        log(`${activeEmoji} iMessage ← ${incoming.senderName}: ${incoming.content}`);
-
-        // Build context-enriched prompt — include read status and metadata hints
-        const meta = (incoming.metadata || {}) as Record<string, unknown>;
-        let prompt = incoming.content;
-        if (meta.walMutation) {
-          // WAL poller mode: content may be placeholder, enrich with available signals
-          const hints: string[] = [];
-          if (meta.read) hints.push('message has been read');
-          if (meta.delivered) hints.push('message was delivered');
-          if (meta.audio) hints.push('message is an audio clip');
-          if (hints.length > 0) {
-            prompt += `\n[Signal: ${hints.join(', ')}]`;
-          }
-        }
-
-        const result = await activeAssistant.getResponse(prompt, undefined, undefined, chatKey);
-        let reply = result.content;
-        const voiceIdx = reply.indexOf('|||VOICE|||');
-        let voiceText = '';
-        if (voiceIdx !== -1) {
-          voiceText = reply.substring(voiceIdx + 11).trim();
-          reply = reply.substring(0, voiceIdx).trim();
-        }
-
-        // Send text reply
-        await imessage.send(incoming.conversationId!, {
-          channel: 'imessage',
-          content: `${activeEmoji} ${reply}`,
-        });
-
-        // Send voice clip if there's voice text
-        if (voiceText && voiceText.length > 5) {
-          await imessage.sendVoiceClip(incoming.conversationId!, voiceText);
-        }
-
-        log(`${activeEmoji} iMessage → ${incoming.conversationId}: ${reply.slice(0, 80)}...`);
-
-        // Persist to twin store for RappterSignal UI
-        try {
-          const twinStore = getOrCreateStore();
-          // Ingest incoming message
-          twinStore.addMessage(incoming.conversationId!, {
-            sender: incoming.senderName || incoming.sender,
-            content: incoming.content,
-            status: 'delivered',
-            metadata: { source: 'imessage', ...(incoming.metadata as Record<string, unknown> || {}) },
-          });
-          // Ingest AI reply
-          twinStore.addMessage(incoming.conversationId!, {
-            sender: personaName || 'Rappter',
-            senderEmoji: activeEmoji,
-            content: reply,
-            status: 'delivered',
-            metadata: { source: 'imessage-reply' },
-          });
-        } catch { /* twin store persistence is best-effort */ }
-      } catch (err) {
-        const errMsg = (err as Error).message || 'Unknown error';
-        console.error(`${EMOJI} iMessage reply error:`, errMsg);
-
-        const isAuthError = errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('Copilot');
-        if (isAuthError) {
-          // ── Self-healing: auto-refresh token, or send device code via iMessage ──
-          try {
-            log(`${EMOJI} Auth error detected — attempting auto-refresh…`);
-
-            // Step 1: Clear cached Copilot API token and retry
-            const { clearCachedCopilotToken } = await import('./providers/copilot-token.js');
-            clearCachedCopilotToken();
-
-            // Step 2: Try to re-resolve and validate the GitHub token
-            const { resolveGithubToken } = await import('./copilot-check.js');
-            const refreshedToken = await resolveGithubToken();
-
-            if (refreshedToken) {
-              const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-              try {
-                await resolveCopilotApiToken({ githubToken: refreshedToken });
-                log(`${EMOJI} Token auto-refreshed — retrying message…`);
-                // Retry the AI call using default assistant
-                const retryResult = await assistant.getResponse(
-                  incoming.content, undefined, undefined,
-                  `imessage_${incoming.conversationId || 'self'}`
-                );
-                let retryReply = retryResult.content;
-                const vi = retryReply.indexOf('|||VOICE|||');
-                if (vi !== -1) retryReply = retryReply.substring(0, vi).trim();
-                await imessage.send(incoming.conversationId!, {
-                  channel: 'imessage',
-                  content: `${EMOJI} ${retryReply}`,
-                });
-                log(`${EMOJI} iMessage → ${incoming.conversationId}: (retry) ${retryReply.slice(0, 80)}…`);
-                return; // Success — skip error message
-              } catch {
-                log(`${EMOJI} Token refresh failed — falling back to device code flow`);
-              }
-            }
-
-            // Step 3: GitHub token is dead — start device code flow via iMessage
-            const { deviceCodeLogin } = await import('./providers/copilot-auth.js');
-            await imessage.send(incoming.conversationId!, {
-              channel: 'imessage',
-              content: `${EMOJI} My GitHub token expired. Starting re-auth — I'll send you a code to enter on GitHub…`,
-            });
-
-            const newToken = await deviceCodeLogin((code, url) => {
-              // Send the device code via iMessage so the user can auth from their phone
-              imessage.send(incoming.conversationId!, {
-                channel: 'imessage',
-                content: `${EMOJI} 🔑 Auth needed!\n\nGo to: ${url}\nEnter code: ${code}\n\nI'll wake back up once you authorize.`,
-              }).catch(() => {});
-              log(`${EMOJI} Device code sent via iMessage: ${code}`);
-            });
-
-            // Save the new token everywhere
-            const { saveGitHubToken } = await import('./copilot-check.js');
-            saveGitHubToken(newToken, 'device_code');
-            const { loadEnv, saveEnv } = await import('./env.js');
-            const envData = await loadEnv();
-            envData.GITHUB_TOKEN = newToken;
-            envData.COPILOT_GITHUB_TOKEN = newToken;
-            await saveEnv(envData);
-            process.env.GITHUB_TOKEN = newToken;
-            process.env.COPILOT_GITHUB_TOKEN = newToken;
-
-            await imessage.send(incoming.conversationId!, {
-              channel: 'imessage',
-              content: `${EMOJI} ✅ Re-authenticated! I'm back online. What were you saying?`,
-            });
-            log(`${EMOJI} Token refreshed via iMessage device code flow`);
-            return;
-          } catch (refreshErr) {
-            console.error(`${EMOJI} Auto-refresh failed:`, (refreshErr as Error).message);
-          }
-        }
-
-        // Fallback: send error message
-        try {
-          const reply = isAuthError
-            ? 'My brain is offline — I tried to auto-fix but couldn\'t. Run `openrappter onboard` on your Mac to re-auth.'
-            : 'Something went wrong processing that. Try again in a moment.';
-          await imessage.send(incoming.conversationId!, {
-            channel: 'imessage',
-            content: `${EMOJI} ${reply}`,
-          });
-        } catch { /* don't loop on send failure */ }
-      }
+        : process.env,
     });
-
-    try {
-      await imessage.connect();
-      const watchList = [imessageSelfId, ...imessageAllowedContacts].filter(Boolean);
-      log(`${EMOJI} iMessage connected — watching: ${watchList.join(', ')}`);
-    } catch (err) {
-      console.warn(`${EMOJI} iMessage connect failed:`, (err as Error).message);
-      console.warn(`${EMOJI} Tip: Grant Full Disk Access to Terminal/iTerm in System Settings → Privacy`);
+    imessageAssistant = new Assistant(new Map(), {
+      name: `${NAME} iMessage`,
+      description: 'a private conversational assistant without tool access',
+      model: imessageModel,
+      provider: imessageProvider,
+      streaming: false,
+      maxToolRounds: 1,
+      loadWorkspaceContext: false,
+      loadMemoryContext: false,
+    });
+    log(`${EMOJI} iMessage assistant uses isolated Copilot CLI`);
+    imessageRuntime = new IMessageRuntime({
+      assistant: imessageAssistant,
+      channel: imessage,
+      store: imessageStore!,
+    });
+    imessageRuntime.setModelReadiness('pending', 'model_preflight_pending');
+    const probeIMessageModel = async (): Promise<void> => {
+      const controller = new AbortController();
+      imessageModelProbeController = controller;
+      try {
+        const response = await imessageProvider.chat([{
+          role: 'user',
+          content: 'Reply exactly OPENRAPPTER_MODEL_READY and nothing else.',
+        }], { signal: controller.signal });
+        if (response.content?.trim() !== 'OPENRAPPTER_MODEL_READY') {
+          throw new Error('unexpected model probe response');
+        }
+        imessageRuntime?.setModelReadiness('ready');
+      } catch {
+        if (imessageModelProbeStopped || controller.signal.aborted) return;
+        imessageRuntime?.setModelReadiness('failed', 'model_preflight_failed');
+        imessageModelProbeTimer = setTimeout(() => {
+          imessageModelProbePromise = probeIMessageModel();
+        }, 60_000);
+      } finally {
+        if (imessageModelProbeController === controller) {
+          imessageModelProbeController = undefined;
+        }
+      }
+    };
+    await imessageRuntime.start();
+    imessageModelProbePromise = probeIMessageModel();
+    if (imessage.connected) {
+      log(`${EMOJI} iMessage connected with durable queue`);
+    } else {
+      console.error(
+        `${EMOJI} iMessage is offline and will retry: ${
+          describeIMessageConnectionFailure(new Error('connection failed'))
+        }`,
+      );
     }
   }
 
@@ -457,6 +259,28 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
   }
 
   server.setChannelRegistry(channelRegistry);
+  server.setReadinessProvider(async () => {
+    if (!imessageConfig.enabled || !imessageRuntime) {
+      return {
+        ready: true,
+        status: 'ready',
+      };
+    }
+    const status = await imessageRuntime.getStatus();
+    return {
+      ready: status.state === 'online',
+      status: status.state === 'online' ? 'ready' : 'degraded',
+      reason: status.reason,
+      details: {
+        imessage: status.state,
+        cursorLag: status.transport.cursorLag,
+        consecutivePollFailures: status.transport.consecutivePollFailures,
+        ambiguousDeliveries: status.queue.outbox.ambiguous,
+        deadLetters:
+          status.queue.inbound.dead_letter + status.queue.outbox.dead_letter,
+      },
+    };
+  });
 
   // Expose agents to UI
   server.setAgentList(() => {
@@ -629,20 +453,17 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
     console.warn(`${EMOJI} Cron init failed:`, (err as Error).message);
   }
 
-  // Override channels.list to include EventEmitter-based channels not in registry
-  const extraChannels = [
-    { id: 'signal', type: 'signal' },
-    { id: 'matrix', type: 'matrix' },
-    { id: 'teams', type: 'teams' },
-    { id: 'googlechat', type: 'googlechat' },
-  ];
   server.registerMethod('channels.list', async () => {
-    const extras = extraChannels.map(ch => ({
-      id: ch.id, type: ch.type, connected: false, configured: false,
-      running: false, messageCount: 0,
-    }));
-    imessageProxy.refreshStatus();
-    return [...channelRegistry.getStatusList(), ...extras];
+    return listGatewayChannelStatuses(channelRegistry);
+  });
+  server.registerMethod('imessage.status', async () => {
+    if (!imessageRuntime) {
+      return {
+        state: 'offline',
+        reason: imessageConfig.enabled ? 'runtime_unavailable' : 'disabled',
+      };
+    }
+    return imessageRuntime.getStatus();
   });
 
   // Register skills.list RPC method
@@ -725,17 +546,39 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
 
   log(`${EMOJI} Assistant: Copilot SDK with ${agents.size} agents as tools`);
 
-  // Clean shutdown
-  const cleanup = async () => {
-    await channelRegistry.disconnectAll();
-    await assistant.stop();
-    await server.stop();
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = (): Promise<void> => {
+    if (!cleanupPromise) {
+      cleanupPromise = (async () => {
+        try {
+          process.off('SIGINT', shutdown);
+          process.off('SIGTERM', shutdown);
+          imessageModelProbeStopped = true;
+          if (imessageModelProbeTimer) {
+            clearTimeout(imessageModelProbeTimer);
+            imessageModelProbeTimer = undefined;
+          }
+          imessageModelProbeController?.abort();
+          await imessageModelProbePromise?.catch(() => undefined);
+          await imessageRuntime?.stop();
+          await channelRegistry.disconnectAll();
+          await imessageAssistant?.stop();
+          await assistant.stop();
+          await server.stop();
+        } finally {
+          opts?.releaseProcessLock?.();
+        }
+      })();
+    }
+    return cleanupPromise;
   };
 
-  process.on('SIGINT', async () => {
-    await cleanup();
-    process.exit(0);
-  });
+  function shutdown(): void {
+    void cleanup().finally(() => process.exit(0));
+  }
+
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 
   return { port, cleanup };
 }
@@ -755,6 +598,13 @@ program
   .option('-t, --task <task>', 'Run a single task')
   .option('-e, --evolve <n>', 'Run N evolution ticks', parseInt)
   .option('-d, --daemon', 'Run as background daemon')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  })
   .option('-s, --status', 'Show status')
   .option('-l, --list-agents', 'List available agents')
   .option('--exec <agent>', 'Execute a specific agent')
@@ -766,6 +616,118 @@ program
     const envVars = await loadEnv();
     for (const [key, val] of Object.entries(envVars)) {
       if (!process.env[key]) process.env[key] = val;
+    }
+
+    const gatewayDelegationMarker = path.join(
+      HOME_DIR,
+      'gateway-user-agent.enabled',
+    );
+    const delegatedSystemGateway =
+      options.daemon
+      && Boolean(process.env.OPENRAPPTER_NODE_ID)
+      && process.env.OPENRAPPTER_LAUNCHD !== '1'
+      && fs.existsSync(gatewayDelegationMarker);
+    if (delegatedSystemGateway) {
+      for (const logName of ['daemon.stdout.log', 'daemon.stderr.log']) {
+        const logPath = path.join(HOME_DIR, 'logs', logName);
+        try {
+          if (fs.statSync(logPath).size >= 5 * 1024 * 1024) {
+            fs.truncateSync(logPath, 0);
+          }
+          fs.chmodSync(logPath, 0o600);
+        } catch {
+          // The system daemon may not have created both log files yet.
+        }
+      }
+      console.log(`${EMOJI} System gateway delegated to the GUI LaunchAgent`);
+      let checkingDelegation = false;
+      let observedUserGateway = false;
+      let userGatewayUnavailableSince: number | undefined;
+      setInterval(() => {
+        if (checkingDelegation) return;
+        checkingDelegation = true;
+        void (async () => {
+          if (!fs.existsSync(gatewayDelegationMarker)) {
+            process.exit(1);
+          }
+
+          let markerState: 'preparing' | 'active' = 'active';
+          let expiresAt = 0;
+          let delegatedPort = Number.parseInt(
+            process.env.OPENRAPPTER_PORT ?? '18790',
+            10,
+          );
+          try {
+            const marker = JSON.parse(
+              fs.readFileSync(gatewayDelegationMarker, 'utf8'),
+            ) as { state?: unknown; expiresAt?: unknown; port?: unknown };
+            if (marker.state === 'preparing') markerState = 'preparing';
+            if (typeof marker.expiresAt === 'string') {
+              expiresAt = Date.parse(marker.expiresAt);
+            }
+            if (
+              Number.isSafeInteger(marker.port)
+              && Number(marker.port) >= 1
+              && Number(marker.port) <= 65_535
+            ) {
+              delegatedPort = Number(marker.port);
+            }
+          } catch {
+            // Legacy markers are treated as active leases.
+          }
+
+          let userGatewayLive = false;
+          try {
+            const response = await fetch(
+              `http://127.0.0.1:${delegatedPort}/livez`,
+              {
+                signal: AbortSignal.timeout(2_000),
+              },
+            );
+            const body = await response.json() as { live?: unknown };
+            userGatewayLive = response.ok && body.live === true;
+          } catch {
+            userGatewayLive = false;
+          }
+
+          if (userGatewayLive) {
+            observedUserGateway = true;
+            userGatewayUnavailableSince = undefined;
+            return;
+          }
+
+          const now = Date.now();
+          if (
+            markerState === 'preparing'
+            && !observedUserGateway
+            && Number.isFinite(expiresAt)
+            && expiresAt > now
+          ) {
+            return;
+          }
+          if (markerState === 'preparing' && !observedUserGateway) {
+            try {
+              fs.unlinkSync(gatewayDelegationMarker);
+            } catch {
+              // The next system-daemon launch handles a missing marker.
+            }
+            process.exit(1);
+          }
+
+          userGatewayUnavailableSince ??= now;
+          if (now - userGatewayUnavailableSince >= 60_000) {
+            try {
+              fs.unlinkSync(gatewayDelegationMarker);
+            } catch {
+              // The next system-daemon launch handles a missing marker.
+            }
+            process.exit(1);
+          }
+        })().finally(() => {
+          checkingDelegation = false;
+        });
+      }, 5_000);
+      return;
     }
 
     // Initialize agents
@@ -830,7 +792,10 @@ program
         console.log(`${EMOJI} Web UI assets available: ${webRoot}`);
         return;
       }
-      const { port } = await startGatewayInProcess({ webRoot });
+      const { port } = await startGatewayInProcess({
+        webRoot,
+        port: options.port,
+      });
       const url = `http://127.0.0.1:${port}`;
       console.log(`${EMOJI} Web UI: ${url}`);
       console.log('Press Ctrl+C to stop\n');
@@ -842,10 +807,45 @@ program
     if (options.daemon) {
       const webRoot = path.resolve(__dirname, '../ui/dist');
       const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
-      const { port } = await startGatewayInProcess(hasWebUI ? { webRoot } : undefined);
-      console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
-      if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
-      console.log('Press Ctrl+C to stop\n');
+      const { acquireLock, releaseLock } = await import('./infra/gateway-lock.js');
+      if (!acquireLock()) {
+        console.error(`${EMOJI} Another OpenRappter gateway already owns the runtime lock.`);
+        process.exitCode = 1;
+        return;
+      }
+      let lockHandedToGateway = false;
+      try {
+        const { port, cleanup } = await startGatewayInProcess({
+          ...(hasWebUI ? { webRoot } : {}),
+          port: options.port,
+          releaseProcessLock: releaseLock,
+        });
+        lockHandedToGateway = true;
+        if (
+          process.env.OPENRAPPTER_NODE_ID
+          && process.env.OPENRAPPTER_LAUNCHD !== '1'
+        ) {
+          let delegating = false;
+          const delegationWatcher = setInterval(() => {
+            if (
+              !delegating
+              && fs.existsSync(path.join(
+                HOME_DIR,
+                'gateway-user-agent.enabled',
+              ))
+            ) {
+              delegating = true;
+              clearInterval(delegationWatcher);
+              void cleanup().finally(() => process.exit(0));
+            }
+          }, 1_000);
+        }
+        console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
+        if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
+        console.log('Press Ctrl+C to stop\n');
+      } finally {
+        if (!lockHandedToGateway) releaseLock();
+      }
       return;
     }
 
@@ -1407,6 +1407,177 @@ program
     outro(`${EMOJI} You're all set! openrappter is running in the background.`);
   });
 
+
+async function installManagedGatewayService(
+  port: number,
+  delegateSystemService: boolean,
+) {
+  const { installIMessageLaunchAgent } = await import(
+    './channels/imessage-launchd.js'
+  );
+  const stableEntryPath = path.join(
+    path.dirname(HOME_DIR),
+    '.local',
+    'share',
+    'openrappter',
+    'current',
+    'typescript',
+    'dist',
+    'index.js',
+  );
+  return installIMessageLaunchAgent({
+    port,
+    entryPath: fs.existsSync(stableEntryPath) ? stableEntryPath : undefined,
+    workingDirectory: fs.existsSync(stableEntryPath)
+      ? path.dirname(path.dirname(stableEntryPath))
+      : undefined,
+    delegateSystemService,
+  });
+}
+
+const serviceCommand = program
+  .command('service')
+  .description('Manage the launchd-supervised OpenRappter gateway');
+
+serviceCommand
+  .command('install')
+  .description('Install or adopt the gateway service')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  }, 18790)
+  .action(async (options: { port: number }) => {
+    const status = await installManagedGatewayService(options.port, false);
+    console.log(
+      `${EMOJI} Gateway service: supervisor=${status.supervisor} `
+      + `live=${status.live} ready=${status.ready}`,
+    );
+  });
+
+serviceCommand
+  .command('uninstall')
+  .description('Stop and remove the per-user gateway service')
+  .action(async () => {
+    const { uninstallIMessageLaunchAgent } = await import(
+      './channels/imessage-launchd.js'
+    );
+    await uninstallIMessageLaunchAgent();
+    console.log(`${EMOJI} Per-user gateway service uninstalled`);
+  });
+
+const imessageCommand = program
+  .command('imessage')
+  .description('Manage the private macOS iMessage service');
+
+imessageCommand
+  .command('install-service')
+  .description('Install and start the launchd-supervised gateway')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  }, 18790)
+  .action(async (options: { port: number }) => {
+    const { readIMessageConfig } = await import('./channels/imessage-gateway.js');
+    const imessageConfig = readIMessageConfig(await loadConfig());
+    if (!imessageConfig.enabled || (imessageConfig.allowFrom?.length ?? 0) === 0) {
+      throw new Error(
+        'Enable channels.imessage with a non-empty allowFrom list before installing the service',
+      );
+    }
+    const status = await installManagedGatewayService(options.port, true);
+    console.log(
+      `${EMOJI} iMessage service installed: `
+      + `${status.live ? 'live' : 'not live'}, `
+      + `${status.ready ? 'ready' : `degraded (${status.readinessReason ?? 'unknown'})`}`,
+    );
+  });
+
+imessageCommand
+  .command('uninstall-service')
+  .description('Stop and remove the launchd service')
+  .action(async () => {
+    const { uninstallIMessageLaunchAgent } = await import(
+      './channels/imessage-launchd.js'
+    );
+    await uninstallIMessageLaunchAgent();
+    console.log(`${EMOJI} iMessage service uninstalled`);
+  });
+
+imessageCommand
+  .command('service-status')
+  .description('Show sanitized launchd, liveness, and readiness status')
+  .option('--json', 'Print machine-readable JSON')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  }, 18790)
+  .action(async (options: { json?: boolean; port: number }) => {
+    const { getIMessageServiceStatus } = await import(
+      './channels/imessage-launchd.js'
+    );
+    const status = await getIMessageServiceStatus({ port: options.port });
+    if (options.json) {
+      console.log(JSON.stringify(status, null, 2));
+      return;
+    }
+    console.log(
+      `${EMOJI} iMessage service: `
+      + `installed=${status.installed} loaded=${status.loaded} `
+      + `supervisor=${status.supervisor} `
+      + `live=${status.live} ready=${status.ready}`
+      + (status.readinessReason ? ` reason=${status.readinessReason}` : ''),
+    );
+  });
+
+imessageCommand
+  .command('diagnose')
+  .description('Run privacy-safe iMessage readiness diagnostics')
+  .option('--json', 'Print machine-readable JSON')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  }, 18790)
+  .action(async (options: { json?: boolean; port: number }) => {
+    const managedEnv = await loadEnv();
+    for (const [key, value] of Object.entries(managedEnv)) {
+      if (!process.env[key]) process.env[key] = value;
+    }
+    const [{ diagnoseIMessage }, { readIMessageConfig }] = await Promise.all([
+      import('./channels/imessage-diagnostics.js'),
+      import('./channels/imessage-gateway.js'),
+    ]);
+    const tokenConfigured = Boolean(await resolveGithubToken());
+    const result = await diagnoseIMessage({
+      config: readIMessageConfig(await loadConfig()),
+      tokenConfigured,
+      launchAgent: { port: options.port },
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`${EMOJI} iMessage diagnostics: ${result.ready ? 'ready' : 'not ready'}`);
+    console.log(`  Configured allowlist entries: ${result.allowlistEntries}`);
+    console.log(`  Messages database: ${result.databaseQueryable ? 'readable' : 'unavailable'}`);
+    console.log(`  Messages automation: ${result.automationAvailable ? 'available' : 'unavailable'}`);
+    console.log(`  Copilot token: ${result.tokenConfigured ? 'configured' : 'missing'}`);
+    console.log(`  Service: loaded=${result.service.loaded} live=${result.service.live} ready=${result.service.ready}`);
+    if (result.reasons.length > 0) {
+      console.log(`  Reasons: ${result.reasons.join(', ')}`);
+    }
+  });
 
 // Reset command
 program

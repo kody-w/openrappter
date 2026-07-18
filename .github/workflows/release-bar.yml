@@ -39,6 +39,7 @@ jobs:
     name: Build & Release DMG
     needs: validate-tag
     runs-on: macos-14
+    timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ needs.validate-tag.outputs.version }}
     defaults:
@@ -54,9 +55,71 @@ jobs:
       - name: Run tests
         run: swift build --product RunTests && .build/debug/RunTests
 
-      - name: Build universal binary + DMG
+      - name: Import Developer ID certificate
         shell: bash
-        run: VERSION="$RELEASE_VERSION" bash scripts/build-mac-app.sh
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE_P12_BASE64"
+          test -n "$CERTIFICATE_PASSWORD"
+
+          certificate_path="$RUNNER_TEMP/openrappter-signing.p12"
+          keychain_path="$RUNNER_TEMP/openrappter-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+
+          identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' |
+              head -1
+          )"
+          test -n "$identity"
+          printf 'CODESIGN_IDENTITY=%s\n' "$identity" >> "$GITHUB_ENV"
+          printf 'SIGNING_KEYCHAIN_PATH=%s\n' "$keychain_path" >> "$GITHUB_ENV"
+          printf 'NOTARY_KEY_PATH=%s/AuthKey_%s.p8\n' \
+            "$RUNNER_TEMP" \
+            "${{ secrets.APPLE_API_KEY_ID }}" \
+            >> "$GITHUB_ENV"
+
+      - name: Prepare notarization API key
+        shell: bash
+        env:
+          API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$API_KEY_P8_BASE64"
+          test -n "$API_KEY_ID"
+          test -n "$API_ISSUER_ID"
+          printf '%s' "$API_KEY_P8_BASE64" | base64 -D > "$NOTARY_KEY_PATH"
+          chmod 600 "$NOTARY_KEY_PATH"
+
+      - name: Build and sign universal binary and DMG
+        shell: bash
+        run: |
+          REQUIRE_SIGNING=1 \
+          VERSION="$RELEASE_VERSION" \
+          CODESIGN_IDENTITY="$CODESIGN_IDENTITY" \
+            bash scripts/build-mac-app.sh
 
       - name: Verify bundle and artifact version
         shell: bash
@@ -69,6 +132,66 @@ jobs:
           )"
           test "$bundle_version" = "$RELEASE_VERSION"
           test -f "dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          codesign --verify --deep --strict --verbose=2 \
+            'dist/OpenRappter Bar.app'
+          codesign --verify --strict --verbose=2 \
+            "dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+
+      - name: Notarize and staple DMG
+        shell: bash
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          dmg="dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          xcrun notarytool submit "$dmg" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$API_KEY_ID" \
+            --issuer "$API_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=2 \
+            "$dmg"
+
+      - name: Verify mounted app and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="dist/OpenRappter-Bar-${RELEASE_VERSION}.dmg"
+          mount_dir="$RUNNER_TEMP/openrappter-dmg"
+          mkdir -p "$mount_dir"
+          cleanup() {
+            hdiutil detach "$mount_dir" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          codesign --verify --deep --strict --verbose=2 \
+            "$mount_dir/OpenRappter Bar.app"
+          spctl --assess --type execute --verbose=2 \
+            "$mount_dir/OpenRappter Bar.app"
+          cleanup
+          trap - EXIT
+          (
+            cd dist
+            shasum -a 256 "OpenRappter-Bar-${RELEASE_VERSION}.dmg" \
+              > "OpenRappter-Bar-${RELEASE_VERSION}.dmg.sha256"
+          )
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN_PATH" || true
+          fi
+          rm -f \
+            "$RUNNER_TEMP/openrappter-signing.p12" \
+            "${NOTARY_KEY_PATH:-}"
 
       - name: Upload DMG as release asset
         uses: softprops/action-gh-release@v2
@@ -82,8 +205,10 @@ jobs:
             ### Install
             1. Download `OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg`
             2. Open the DMG and drag **OpenRappter Bar** to Applications
-            3. **First launch:** Right-click → Open (Gatekeeper bypass for unsigned app)
+            3. Launch **OpenRappter Bar** normally from Applications
             4. The app appears in your menu bar and connects to the gateway at `localhost:18790`
+
+            The app is signed with Apple Developer ID and notarized by Apple.
 
             ### Requirements
             - macOS 14 (Sonoma) or later
@@ -94,5 +219,7 @@ jobs:
             brew tap kody-w/tap
             brew install --cask openrappter-bar
             ```
-          files: macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
+          files: |
+            macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
+            macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg.sha256
           fail_on_unmatched_files: true

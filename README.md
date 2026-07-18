@@ -140,10 +140,10 @@ brew install --cask openrappter-bar
 
 1. Download the latest DMG from [Releases](https://github.com/kody-w/openrappter/releases?q=bar)
 2. Open the DMG and drag **OpenRappter Bar** to Applications
-3. **First launch:** Right-click the app → Open, then click "Open" in the Gatekeeper dialog
+3. Launch **OpenRappter Bar** normally from Applications
 4. The app appears in your menu bar and auto-connects to `localhost:18790`
 
-> **Note:** The app is currently unsigned. macOS will block it on first launch — the right-click → Open step bypasses this once.
+Release builds are signed with Apple Developer ID and notarized by Apple.
 
 ### Release a new menu bar version
 
@@ -198,7 +198,7 @@ node dist/index.js "ls"
 
 Download **OpenRappter Bar** from the [latest Bar releases](https://github.com/kody-w/openrappter/releases?q=bar) — it's a `.dmg` with a drag-to-Applications installer.
 
-> **First launch:** macOS may show "unidentified developer" since the app isn't notarized. To open it, **right-click the app → Open → Open**. You only need to do this once.
+Release builds are signed and notarized, so they launch normally without a Gatekeeper bypass.
 
 Or build from source:
 

@@ -83,6 +83,13 @@ PLIST
 
 echo "==> Built: $APP_DIR"
 
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    CODESIGN_IDENTITY="$CODESIGN_IDENTITY" bash "$SCRIPT_DIR/codesign-mac-app.sh"
+elif [ "${REQUIRE_SIGNING:-0}" = "1" ]; then
+    echo "Error: release build requires CODESIGN_IDENTITY." >&2
+    exit 1
+fi
+
 # Create DMG
 DMG_NAME="OpenRappter-Bar-${VERSION}.dmg"
 DMG_PATH="$DIST_DIR/$DMG_NAME"
@@ -97,19 +104,27 @@ cp -R "$APP_DIR" "$DMG_STAGING/"
 # Create Applications symlink for drag-to-install
 ln -s /Applications "$DMG_STAGING/Applications"
 
-# Create a README for Gatekeeper bypass
-cat > "$DMG_STAGING/READ ME FIRST.txt" << 'README'
+# Include installation instructions that reflect the artifact's trust state.
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    cat > "$DMG_STAGING/READ ME FIRST.txt" << 'README'
 OpenRappter Bar — macOS Menu Bar Companion
 
-FIRST LAUNCH (unsigned app):
+INSTALL:
   1. Drag "OpenRappter Bar" to Applications
-  2. Right-click the app in Applications → Open
-  3. Click "Open" in the Gatekeeper dialog
-  4. Subsequent launches work normally from the menu bar
+  2. Launch it normally from Applications
+  3. The dinosaur icon appears in the menu bar
 
 Requires: macOS 14 (Sonoma) or later
 Gateway:  The app connects to the OpenRappter gateway at localhost:18790
 README
+else
+    cat > "$DMG_STAGING/READ ME FIRST.txt" << 'README'
+OpenRappter Bar — Local Unsigned Build
+
+This image was built without a Developer ID identity and is intended only for
+local development. Public release images are signed and notarized by Apple.
+README
+fi
 
 # Create DMG via hdiutil
 echo "==> Creating DMG..."
@@ -121,6 +136,12 @@ hdiutil create \
     "$DMG_PATH"
 
 rm -rf "$DMG_STAGING"
+
+if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    echo "==> Signing DMG..."
+    codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$DMG_PATH"
+    codesign --verify --strict --verbose=2 "$DMG_PATH"
+fi
 
 echo "==> DMG created: $DMG_PATH"
 echo "==> Size: $(du -h "$DMG_PATH" | cut -f1)"

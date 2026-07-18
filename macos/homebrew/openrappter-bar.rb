@@ -7,8 +7,8 @@
 # 3. Update the version and sha256 after each release
 
 cask "openrappter-bar" do
-  version "1.0.0"
-  sha256 :no_check # Update with actual SHA256 after first release
+  version "1.10.4"
+  sha256 "e83acc1e9b90f7f463a137c5a75b2df1d25b79ca1a3450c046999a98a64cfaeb"
 
   url "https://github.com/kody-w/openrappter/releases/download/v#{version}-bar/OpenRappter-Bar-#{version}.dmg"
   name "OpenRappter Bar"
@@ -21,11 +21,5 @@ cask "openrappter-bar" do
 
   zap trash: [
     "~/Library/Preferences/com.openrappter.bar.plist",
-    "~/.openrappter",
   ]
-
-  caveats <<~EOS
-    This app is not signed or notarized.
-    On first launch, right-click the app → Open, then click "Open" in the dialog.
-  EOS
 end

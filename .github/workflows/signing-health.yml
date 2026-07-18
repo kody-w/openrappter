@@ -1,0 +1,156 @@
+name: macOS Signing Health
+
+on:
+  schedule:
+    - cron: '17 12 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID identity
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE_P12_BASE64"
+          test -n "$CERTIFICATE_PASSWORD"
+          certificate_path="$RUNNER_TEMP/openrappter-signing.p12"
+          keychain_path="$RUNNER_TEMP/openrappter-health.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$CERTIFICATE_P12_BASE64" | base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 900 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          printf 'SIGNING_KEYCHAIN=%s\n' "$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Require certificate validity beyond 90 days
+        run: |
+          set -euo pipefail
+          certificate="$RUNNER_TEMP/developer-id.pem"
+          security find-certificate \
+            -c 'Developer ID Application' \
+            -p \
+            "$SIGNING_KEYCHAIN" \
+            > "$certificate"
+          openssl x509 -in "$certificate" -noout -subject -issuer -enddate
+          expiry="$(openssl x509 -in "$certificate" -noout -enddate | cut -d= -f2-)"
+          python3 - "$expiry" <<'PY'
+          from datetime import datetime, timezone
+          import sys
+
+          expires = datetime.strptime(sys.argv[1], "%b %d %H:%M:%S %Y %Z").replace(
+              tzinfo=timezone.utc
+          )
+          remaining = (expires - datetime.now(timezone.utc)).days
+          print(f"Developer ID certificate remaining days: {remaining}")
+          if remaining < 90:
+              raise SystemExit("Developer ID certificate expires in under 90 days")
+          PY
+
+      - name: Validate App Store Connect notarization key
+        env:
+          API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$API_KEY_P8_BASE64"
+          test -n "$API_KEY_ID"
+          test -n "$API_ISSUER_ID"
+          key_path="$RUNNER_TEMP/AuthKey_${API_KEY_ID}.p8"
+          printf '%s' "$API_KEY_P8_BASE64" | base64 -D > "$key_path"
+          chmod 600 "$key_path"
+          xcrun notarytool history \
+            --key "$key_path" \
+            --key-id "$API_KEY_ID" \
+            --issuer "$API_ISSUER_ID" \
+            --output-format json \
+            > /dev/null
+
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi
+          rm -f \
+            "$RUNNER_TEMP/openrappter-signing.p12" \
+            "$RUNNER_TEMP"/AuthKey_*.p8 \
+            "$RUNNER_TEMP/developer-id.pem"
+
+      - name: Open or update signing-health issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '[signing-health] macOS release credentials need attention';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(issue => issue.title === title);
+            const body =
+              `The scheduled macOS signing-health check failed.\n\n` +
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+              `Follow \`macos/SIGNING.md\` to rotate or repair the Developer ID certificate and App Store Connect key.`;
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+
+      - name: Close resolved signing-health issues
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = '[signing-health] macOS release credentials need attention';
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            for (const issue of issues.filter(item => item.title === title)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: 'Signing credentials validated successfully; closing this alert.',
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+              });
+            }

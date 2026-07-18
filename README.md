@@ -153,6 +153,9 @@ git tag v1.0.1-bar && git push origin v1.0.1-bar
 
 This separate platform workflow builds a universal binary (Apple Silicon + Intel), packages a DMG, and creates a GitHub Release. npm and PyPI releases use the strict `vX.Y.Z` process documented in [CONTRIBUTING.md](CONTRIBUTING.md#releasing-npm-and-pypi-packages).
 
+Signing credential setup, health checks, rotation, and compromise response are
+documented in [`macos/SIGNING.md`](macos/SIGNING.md).
+
 ## Manual Setup
 
 If you prefer to set things up yourself:

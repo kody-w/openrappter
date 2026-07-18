@@ -12,14 +12,12 @@ cask "openrappter-bar" do
 
   url "https://github.com/kody-w/openrappter/releases/download/v#{version}-bar/OpenRappter-Bar-#{version}.dmg"
   name "OpenRappter Bar"
-  desc "macOS menu bar companion for the OpenRappter AI agent gateway"
+  desc "Menu bar companion for the OpenRappter AI agent gateway"
   homepage "https://github.com/kody-w/openrappter"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "OpenRappter Bar.app"
 
-  zap trash: [
-    "~/Library/Preferences/com.openrappter.bar.plist",
-  ]
+  zap trash: "~/Library/Preferences/com.openrappter.bar.plist"
 end

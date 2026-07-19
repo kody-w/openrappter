@@ -11,6 +11,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -152,7 +153,69 @@ def test_chat_validates_input_like_the_kernel(server):
     assert status == 400
     status, body = post_json(f"{server}/chat", {"user_input": "   "})
     assert status == 400
-    assert body["error"] == "user_input is required"
+    assert body["error"] == "message is required"
+
+
+def test_rapp_chat_v1_contract(server, monkeypatch):
+    contract = json.loads(
+        (Path(__file__).parents[2] / "contracts" / "rapp-chat-v1.json").read_text()
+    )
+    assert contract["brand"] == "RAPP + X™"
+    monkeypatch.setattr(
+        brainstem,
+        "llm_chat",
+        lambda _messages, _tools: {"role": "assistant", "content": "canonical"},
+    )
+    status, body = post_json(f"{server}/chat", {
+        "schema": "rapp-chat/1.0",
+        "message": "hello",
+        "session_id": "shared-session",
+        "idempotency_key": "shared-idempotency",
+        "conversation_history": [],
+    })
+    assert status == 200
+    assert body["schema"] == "rapp-chat/1.0"
+    assert body["status"] == "success"
+    assert body["response"] == body["content"] == "canonical"
+    assert body["session_id"] == body["sessionId"] == "shared-session"
+    assert body["idempotency_key"] == "shared-idempotency"
+
+
+def test_rapp_chat_idempotency_prevents_duplicate_execution(server, monkeypatch):
+    calls = {"count": 0}
+
+    def fake_llm(_messages, _tools):
+        calls["count"] += 1
+        return {"role": "assistant", "content": "once"}
+
+    monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
+    payload = {
+        "message": "run once",
+        "session_id": "idempotent-session",
+        "idempotency_key": "python-idempotency-once",
+    }
+    first_status, first = post_json(f"{server}/chat", payload)
+    second_status, second = post_json(f"{server}/chat", payload)
+    assert first_status == second_status == 200
+    assert first == second
+    assert calls["count"] == 1
+
+    conflict_status, conflict = post_json(f"{server}/chat", {
+        **payload,
+        "message": "different",
+    })
+    assert conflict_status == 409
+    assert conflict["status"] == "error"
+    assert calls["count"] == 1
+
+    generated_payload = {
+        "message": "generate one session",
+        "idempotency_key": "python-generated-session-once",
+    }
+    _, generated_first = post_json(f"{server}/chat", generated_payload)
+    _, generated_second = post_json(f"{server}/chat", generated_payload)
+    assert generated_first == generated_second
+    assert generated_first["session_id"] == generated_second["session_id"]
 
 
 def test_chat_tool_loop_executes_agents(server, tmp_path, monkeypatch):

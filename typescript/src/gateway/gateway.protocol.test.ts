@@ -234,6 +234,155 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
   // ── Chat Send ──────────────────────────────────────────────────────────
 
   describe('chat.send → agent execution', () => {
+    it('should expose the same RAPP + X HTTP /chat contract', async () => {
+      const response = await fetch(`http://127.0.0.1:${TEST_PORT}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+          Connection: 'close',
+        },
+        body: JSON.stringify({
+          schema: 'rapp-chat/1.0',
+          message: 'Hello agent',
+          session_id: 'shared-session',
+          idempotency_key: 'shared-idempotency',
+          conversation_history: [],
+        }),
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json() as Record<string, unknown>;
+      expect(body.schema).toBe('rapp-chat/1.0');
+      expect(body.status).toBe('success');
+      expect(body.response).toBe(body.content);
+      expect(body.content).toBe('Echo: Hello agent');
+      expect(body.session_id).toBe('shared-session');
+      expect(body.sessionId).toBe('shared-session');
+      expect(body.idempotency_key).toBe('shared-idempotency');
+    });
+
+    it('should require gateway authentication for HTTP /chat', async () => {
+      const response = await fetch(`http://127.0.0.1:${TEST_PORT}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Connection: 'close' },
+        body: JSON.stringify({ message: 'Hello agent' }),
+      });
+      expect(response.status).toBe(401);
+      const body = await response.json() as Record<string, unknown>;
+      expect(body.schema).toBe('rapp-chat/1.0');
+      expect(body.status).toBe('error');
+    });
+
+    it('should deduplicate HTTP /chat by idempotency key', async () => {
+      let calls = 0;
+      server.setAgentHandler(async req => {
+        calls += 1;
+        return {
+          sessionId: req.sessionId ?? 'generated',
+          content: `Once: ${req.message}`,
+          finishReason: 'stop',
+        };
+      });
+      const request = {
+        schema: 'rapp-chat/1.0',
+        message: 'run once',
+        session_id: 'idempotent-session',
+        idempotency_key: 'typescript-idempotency-once',
+      };
+      const send = (body: Record<string, unknown>) => fetch(
+        `http://127.0.0.1:${TEST_PORT}/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${TEST_TOKEN}`,
+            Connection: 'close',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      const first = await send(request);
+      const second = await send(request);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual(await first.json());
+      expect(calls).toBe(1);
+
+      const conflict = await send({ ...request, message: 'different' });
+      expect(conflict.status).toBe(409);
+      expect(calls).toBe(1);
+    });
+
+    it('should preserve session history when history is omitted', async () => {
+      const histories: unknown[] = [];
+      server.setAgentHandler(async req => {
+        histories.push(req.conversationHistory);
+        return {
+          sessionId: req.sessionId ?? 'generated',
+          content: 'ok',
+          finishReason: 'stop',
+        };
+      });
+      for (const message of ['one', 'two']) {
+        const response = await fetch(`http://127.0.0.1:${TEST_PORT}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${TEST_TOKEN}`,
+            Connection: 'close',
+          },
+          body: JSON.stringify({ message, session_id: 'continuity-session' }),
+        });
+        expect(response.status).toBe(200);
+      }
+      expect(histories).toEqual([undefined, undefined]);
+    });
+
+    it('should retain timed-out work under its idempotency key', async () => {
+      const timeoutServer = new GatewayServer({
+        port: TEST_PORT + 2,
+        bind: 'loopback',
+        auth: { mode: 'token', tokens: [TEST_TOKEN] },
+        executionTimeoutMs: 20,
+        dataDir: path.join(testDataDir, 'timeout-idempotency'),
+      });
+      let calls = 0;
+      timeoutServer.setAgentHandler(async req => {
+        calls += 1;
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return {
+          sessionId: req.sessionId ?? 'generated',
+          content: 'eventually complete',
+          finishReason: 'stop',
+        };
+      });
+      await timeoutServer.start();
+      const send = () => fetch(`http://127.0.0.1:${TEST_PORT + 2}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+          Connection: 'close',
+        },
+        body: JSON.stringify({
+          message: 'slow side effect',
+          session_id: 'slow-session',
+          idempotency_key: 'slow-idempotency',
+        }),
+      });
+      try {
+        expect((await send()).status).toBe(504);
+        expect((await send()).status).toBe(504);
+        expect(calls).toBe(1);
+        await new Promise(resolve => setTimeout(resolve, 110));
+        const completed = await send();
+        expect(completed.status).toBe(200);
+        expect(calls).toBe(1);
+      } finally {
+        await timeoutServer.stop();
+      }
+    });
+
     it('should accept chat.send and broadcast chat events', async () => {
       const ws = await connectWs();
       await connectHandshake(ws, { token: TEST_TOKEN });

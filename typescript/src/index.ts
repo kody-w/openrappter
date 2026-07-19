@@ -304,6 +304,12 @@ async function startGatewayInProcess(opts?: {
 
   server.setAgentHandler(async (req, stream) => {
     const conversationKey = req.sessionId || req.conversationId || 'default';
+    if (req.conversationHistory) {
+      assistant.importConversation(
+        conversationKey,
+        req.conversationHistory,
+      );
+    }
     const result = await assistant.getResponse(
       req.message,
       // Forward streaming deltas
@@ -314,6 +320,7 @@ async function startGatewayInProcess(opts?: {
     return {
       sessionId: req.sessionId ?? 'default',
       content: result.content,
+      agentLogs: result.agentLogs,
       finishReason: 'stop' as const,
     };
   });

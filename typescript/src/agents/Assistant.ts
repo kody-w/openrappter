@@ -58,7 +58,6 @@ export class Assistant {
   private agents: Map<string, BasicAgent>;
   private config: AssistantConfig;
   private provider: LLMProvider;
-  private agentLogs: string[] = [];
   /** Maps conversation keys to message history for multi-turn continuity */
   private conversations: Map<string, Message[]> = new Map();
   private workspaceDir: string;
@@ -133,7 +132,7 @@ export class Assistant {
     conversationKey?: string,
     signal?: AbortSignal,
   ): Promise<AssistantResponse> {
-    this.agentLogs = [];
+    const agentLogs: string[] = [];
 
     // Build tools from agent metadata
     const tools = this.buildTools();
@@ -197,7 +196,7 @@ export class Assistant {
         // Execute each tool call
         for (const tc of response.tool_calls) {
           try {
-            const result = await this.executeToolCall(tc);
+            const result = await this.executeToolCall(tc, agentLogs);
             history.push({
               role: 'tool',
               content: result,
@@ -232,7 +231,7 @@ export class Assistant {
 
       return {
         content,
-        agentLogs: [...this.agentLogs],
+        agentLogs,
       };
     }
 
@@ -240,7 +239,7 @@ export class Assistant {
     const lastAssistant = history.filter(m => m.role === 'assistant').pop();
     return {
       content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
-      agentLogs: [...this.agentLogs],
+      agentLogs,
     };
   }
 
@@ -260,7 +259,7 @@ export class Assistant {
       return this.getResponse(message, onDelta, undefined, conversationKey);
     }
 
-    this.agentLogs = [];
+    const agentLogs: string[] = [];
 
     const tools = this.buildTools();
 
@@ -366,7 +365,7 @@ export class Assistant {
 
         for (const tc of assembledToolCalls) {
           try {
-            const result = await this.executeToolCall(tc);
+            const result = await this.executeToolCall(tc, agentLogs);
             history.push({
               role: 'tool',
               content: result,
@@ -394,14 +393,14 @@ export class Assistant {
 
       return {
         content: fullContent,
-        agentLogs: [...this.agentLogs],
+        agentLogs,
       };
     }
 
     const lastAssistant = history.filter(m => m.role === 'assistant').pop();
     return {
       content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
-      agentLogs: [...this.agentLogs],
+      agentLogs,
     };
   }
 
@@ -477,13 +476,13 @@ export class Assistant {
   }
 
   /** Execute a single tool call by dispatching to the matching agent */
-  private async executeToolCall(tc: ToolCall): Promise<string> {
+  private async executeToolCall(tc: ToolCall, agentLogs: string[]): Promise<string> {
     const agentName = tc.function.name;
     const agent = this.agents.get(agentName);
 
     if (!agent) {
       const msg = `Unknown agent: ${agentName}`;
-      this.agentLogs.push(msg);
+      agentLogs.push(msg);
       return msg;
     }
 
@@ -497,11 +496,11 @@ export class Assistant {
 
       const result = await agent.execute(params);
       const resultStr = result == null ? 'Agent completed successfully' : String(result);
-      this.agentLogs.push(`Performed ${agentName} → ${truncate(resultStr, 200)}`);
+      agentLogs.push(`Performed ${agentName} → ${truncate(resultStr, 200)}`);
       return resultStr;
     } catch (err) {
       const errMsg = `Error: ${(err as Error).message}`;
-      this.agentLogs.push(`Performed ${agentName} → ${errMsg}`);
+      agentLogs.push(`Performed ${agentName} → ${errMsg}`);
       return errMsg;
     }
   }

@@ -8,7 +8,8 @@ the foundation a user installs on their own device and builds out: drop a
 ``*_agent.py`` into the agents folder and it is live on the next request.
 
 Kernel-parity surface:
-    POST /chat                     {user_input, conversation_history?, session_id?}
+    POST /chat                     {message, conversation_history?, session_id?}
+                                   (`user_input` remains a legacy alias)
     GET  /health                   status, version, agents, model, copilot
     GET  /version
     GET  /agents                   files + loaded agent names
@@ -23,6 +24,7 @@ Run:  python -m openrappter.brainstem          (PORT env overrides, default 7072
 """
 
 import glob
+import hashlib
 import importlib.util
 import json
 import os
@@ -31,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import urllib.error
 import urllib.request
@@ -59,6 +62,50 @@ SOUL_PATH = Path(os.environ.get("OPENRAPPTER_SOUL", BRAINSTEM_HOME.parent / "sou
 DEFAULT_PORT = int(os.environ.get("PORT", os.environ.get("OPENRAPPTER_BRAINSTEM_PORT", "7072")))
 MODEL = os.environ.get("OPENRAPPTER_MODEL", "claude-sonnet-5")
 MAX_TOOL_ROUNDS = 5
+_CHAT_IDEMPOTENCY = {}
+_CHAT_IDEMPOTENCY_LOCKS = {}
+_CHAT_IDEMPOTENCY_GUARD = threading.Lock()
+
+
+class IdempotencyConflict(ValueError):
+    pass
+
+
+def _run_idempotent_chat(key, fingerprint, runner):
+    if not key:
+        return runner()
+    now = time.monotonic()
+    with _CHAT_IDEMPOTENCY_GUARD:
+        expired = [
+            item_key
+            for item_key, item in _CHAT_IDEMPOTENCY.items()
+            if item["expires_at"] <= now
+        ]
+        for item_key in expired:
+            _CHAT_IDEMPOTENCY.pop(item_key, None)
+            _CHAT_IDEMPOTENCY_LOCKS.pop(item_key, None)
+        lock = _CHAT_IDEMPOTENCY_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        with _CHAT_IDEMPOTENCY_GUARD:
+            existing = _CHAT_IDEMPOTENCY.get(key)
+            if existing:
+                if existing["fingerprint"] != fingerprint:
+                    raise IdempotencyConflict(
+                        "Idempotency key conflicts with another request"
+                    )
+                return dict(existing["result"])
+        result = runner()
+        with _CHAT_IDEMPOTENCY_GUARD:
+            _CHAT_IDEMPOTENCY[key] = {
+                "fingerprint": fingerprint,
+                "expires_at": time.monotonic() + 15 * 60,
+                "result": dict(result),
+            }
+            while len(_CHAT_IDEMPOTENCY) > 512:
+                oldest = next(iter(_CHAT_IDEMPOTENCY))
+                _CHAT_IDEMPOTENCY.pop(oldest, None)
+                _CHAT_IDEMPOTENCY_LOCKS.pop(oldest, None)
+        return result
 
 # ── Local storage shim (kernel: utils.azure_file_storage → local_storage) ────
 
@@ -710,15 +757,68 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 data = None
             if not isinstance(data, dict):
                 return self._send(400, {"error": "Request body must be a JSON object"})
-            user_input = (data.get("user_input") or "").strip() if isinstance(data.get("user_input"), str) else ""
+            raw_message = (
+                data.get("message")
+                if isinstance(data.get("message"), str)
+                else data.get("user_input")
+            )
+            user_input = raw_message.strip() if isinstance(raw_message, str) else ""
             if not user_input:
-                return self._send(400, {"error": "user_input is required"})
-            history = data.get("conversation_history") if isinstance(data.get("conversation_history"), list) else []
-            session_id = data.get("session_id") or str(uuid.uuid4())
+                return self._send(400, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": "message is required",
+                })
+            history_value = data.get("conversation_history", data.get("history"))
+            history = history_value if isinstance(history_value, list) else []
+            provided_session_id = data.get("session_id") or data.get("sessionId")
+            session_id = provided_session_id or str(uuid.uuid4())
+            raw_idempotency_key = (
+                data.get("idempotency_key") or data.get("idempotencyKey")
+            )
+            idempotency_key = (
+                raw_idempotency_key
+                if isinstance(raw_idempotency_key, str) and raw_idempotency_key
+                else None
+            )
+            fingerprint = hashlib.sha256(json.dumps({
+                "message": user_input,
+                "session_id": provided_session_id,
+                "conversation_history": history,
+            }, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
             try:
-                return self._send(200, run_chat(user_input, history, session_id))
+                result = _run_idempotent_chat(
+                    idempotency_key,
+                    fingerprint,
+                    lambda: run_chat(user_input, history, session_id),
+                )
+                response = str(result.get("response", ""))
+                response_session_id = result.get("session_id") or session_id
+                result.update({
+                    "schema": "rapp-chat/1.0",
+                    "status": "success",
+                    "response": response,
+                    "content": response,
+                    "session_id": response_session_id,
+                    "sessionId": response_session_id,
+                })
+                if idempotency_key:
+                    result["idempotency_key"] = idempotency_key
+                return self._send(200, result)
+            except IdempotencyConflict as e:
+                return self._send(409, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": str(e),
+                })
             except Exception as e:  # noqa: BLE001
-                return self._send(503, {"error": str(e), "session_id": session_id})
+                return self._send(503, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": str(e),
+                    "session_id": session_id,
+                    "sessionId": session_id,
+                })
 
         if self.path == "/login":
             try:

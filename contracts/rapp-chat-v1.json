@@ -1,0 +1,55 @@
+{
+  "schema": "rapp-chat-contract/1.0",
+  "brand": "RAPP + X™",
+  "principle": "UI is optional. Humans, AIs, twins, rapplications, Brainstems, and neighborhood peers use the same /chat capability surface.",
+  "endpoint": {
+    "method": "POST",
+    "path": "/chat"
+  },
+  "request": {
+    "required": ["message"],
+    "properties": {
+      "schema": "rapp-chat/1.0",
+      "message": "string",
+      "session_id": "string?",
+      "idempotency_key": "string?",
+      "conversation_history": "array?"
+    },
+    "legacy_aliases": {
+      "user_input": "message",
+      "sessionId": "session_id",
+      "history": "conversation_history"
+    }
+  },
+  "response": {
+    "success": {
+      "required": [
+        "schema",
+        "status",
+        "response",
+        "content",
+        "session_id"
+      ],
+      "properties": {
+        "schema": "rapp-chat/1.0",
+        "status": "success",
+        "response": "string",
+        "content": "string",
+        "session_id": "string",
+        "sessionId": "string",
+        "agent_logs": "string",
+        "idempotency_key": "string?"
+      }
+    },
+    "error": {
+      "required": ["schema", "status", "error"],
+      "properties": {
+        "schema": "rapp-chat/1.0",
+        "status": "error",
+        "error": "string",
+        "session_id": "string?",
+        "sessionId": "string?"
+      }
+    }
+  }
+}

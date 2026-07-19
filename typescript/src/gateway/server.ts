@@ -157,6 +157,11 @@ export class GatewayServer {
     stream?: StreamCallback
   ) => Promise<AgentResponse>;
   private sessionStore = new Map<string, ChatSession>();
+  private httpChatIdempotency = new Map<string, {
+    fingerprint: string;
+    expiresAt: number;
+    promise: Promise<Record<string, unknown>>;
+  }>();
   private activeRunsById = new Map<string, ActiveRun>();
   private activeRunBySession = new Map<string, string>();
   private channelRegistry?: {
@@ -729,6 +734,162 @@ export class GatewayServer {
           }
 
           const parsed = JSON.parse(body);
+          if (req.url === '/chat') {
+            const authenticated = this.resolveHttpAuthenticated(req, parsed);
+            if (!authenticated) {
+              res.writeHead(401, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: 'Authentication required',
+              }));
+              return;
+            }
+            if (!this.agentHandler) {
+              res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: 'Agent handler not configured',
+              }));
+              return;
+            }
+            const rawMessage = typeof parsed.message === 'string'
+              ? parsed.message
+              : parsed.user_input;
+            const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+            if (!message) {
+              res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: 'message is required',
+              }));
+              return;
+            }
+            const sessionId = (
+              typeof parsed.session_id === 'string'
+                ? parsed.session_id
+                : typeof parsed.sessionId === 'string'
+                  ? parsed.sessionId
+                  : randomUUID()
+            );
+            const idempotencyKey = (
+              typeof parsed.idempotency_key === 'string'
+                ? parsed.idempotency_key
+                : typeof parsed.idempotencyKey === 'string'
+                  ? parsed.idempotencyKey
+                  : undefined
+            );
+            const historyValue = Array.isArray(parsed.conversation_history)
+              ? parsed.conversation_history
+              : Array.isArray(parsed.history)
+                ? parsed.history
+                : undefined;
+            const conversationHistory = historyValue?.filter(
+              (entry: unknown): entry is { role: 'user' | 'assistant'; content: string } => {
+                if (!entry || typeof entry !== 'object') return false;
+                const item = entry as Record<string, unknown>;
+                return (
+                  (item.role === 'user' || item.role === 'assistant')
+                  && typeof item.content === 'string'
+                );
+              }
+            ).map((entry: { role: 'user' | 'assistant'; content: string }) => ({
+              role: entry.role,
+              content: entry.content,
+            }));
+            const agentHandler = this.agentHandler;
+            const executeChat = async (): Promise<Record<string, unknown>> => {
+              const result = await agentHandler({
+                message,
+                sessionId,
+                conversationHistory,
+                conversationId: typeof parsed.conversation_id === 'string'
+                  ? parsed.conversation_id
+                  : undefined,
+                channelId: typeof parsed.channel_id === 'string'
+                  ? parsed.channel_id
+                  : undefined,
+                userId: typeof parsed.user_id === 'string'
+                  ? parsed.user_id
+                  : undefined,
+              });
+              return {
+                schema: 'rapp-chat/1.0',
+                status: 'success',
+                response: result.content,
+                content: result.content,
+                session_id: result.sessionId,
+                sessionId: result.sessionId,
+                agent_logs: result.agentLogs?.join('\n')
+                  ?? (result.toolCalls ? JSON.stringify(result.toolCalls) : ''),
+                ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+              };
+            };
+
+            let responsePromise: Promise<Record<string, unknown>>;
+            if (idempotencyKey) {
+              const now = Date.now();
+              for (const [key, value] of this.httpChatIdempotency) {
+                if (value.expiresAt <= now) this.httpChatIdempotency.delete(key);
+              }
+              const fingerprint = createHash('sha256').update(JSON.stringify({
+                message,
+                session_id: parsed.session_id ?? parsed.sessionId ?? null,
+                conversation_history: conversationHistory ?? null,
+              })).digest('hex');
+              const existing = this.httpChatIdempotency.get(idempotencyKey);
+              if (existing && existing.fingerprint !== fingerprint) {
+                res.writeHead(409, { 'Content-Type': 'application/json', ...corsHeaders });
+                res.end(JSON.stringify({
+                  schema: 'rapp-chat/1.0',
+                  status: 'error',
+                  error: 'Idempotency key conflicts with another request',
+                }));
+                return;
+              }
+              if (existing) {
+                responsePromise = existing.promise;
+              } else {
+                responsePromise = executeChat();
+                this.httpChatIdempotency.set(idempotencyKey, {
+                  fingerprint,
+                  expiresAt: now + 15 * 60 * 1000,
+                  promise: responsePromise,
+                });
+                if (this.httpChatIdempotency.size > 512) {
+                  const oldest = this.httpChatIdempotency.keys().next().value;
+                  if (oldest) this.httpChatIdempotency.delete(oldest);
+                }
+              }
+            } else {
+              responsePromise = executeChat();
+            }
+            try {
+              const responseBody = await this.runWithTimeout(responsePromise);
+              if (!this.isGenerationActive(requestGeneration)) return;
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify(responseBody));
+            } catch (error) {
+              if (idempotencyKey && !(error instanceof GatewayTimeoutError)) {
+                this.httpChatIdempotency.delete(idempotencyKey);
+              }
+              if (!this.isGenerationActive(requestGeneration)) return;
+              res.writeHead(
+                error instanceof GatewayTimeoutError ? 504 : 503,
+                { 'Content-Type': 'application/json', ...corsHeaders }
+              );
+              res.end(JSON.stringify({
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: (error as Error).message,
+                session_id: sessionId,
+                sessionId,
+              }));
+            }
+            return;
+          }
           if (parsed.jsonrpc === '2.0' && typeof parsed.method === 'string') {
             const authenticated = this.resolveHttpAuthenticated(req, parsed);
             const method = this.methods.get(parsed.method);

@@ -64,6 +64,14 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
+### RAPP + X™: UI is optional
+
+`POST /chat` is the universal capability surface for people, AIs, twins,
+rapplications, Brainstems, and neighborhood peers. Python and TypeScript accept
+the same `rapp-chat/1.0` envelope; UI, TUI, menu bar, and other clients are
+projections over that headless contract, not separate capability paths. See
+[`contracts/rapp-chat-v1.json`](contracts/rapp-chat-v1.json).
+
 ```bash
 # Install and go
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash

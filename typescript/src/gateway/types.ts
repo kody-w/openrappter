@@ -151,6 +151,10 @@ export interface AgentRequest {
   conversationId?: string;
   channelId?: string;
   userId?: string;
+  conversationHistory?: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
   attachments?: Attachment[];
   options?: AgentOptions;
 }
@@ -177,6 +181,7 @@ export interface AgentResponse {
   toolCalls?: ToolCallResult[];
   usage?: TokenUsage;
   finishReason?: 'stop' | 'tool_calls' | 'length' | 'error';
+  agentLogs?: string[];
 }
 
 export interface ToolCallResult {

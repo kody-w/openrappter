@@ -180,121 +180,113 @@ async function rappterGenome(){
   return rapGenome;
 }
 
-const RAP = { skin:'#3fbf80', skinDk:'#238a5b', skinLt:'#7cf0b4', belly:'#bff7d8',
-              accent:'#26b6ff', tooth:'#f4fff8', eyeW:'#eafffb', eyeI:'#0a2a24' };
-
+// The Rappter — a real 3D low-poly raptor (Three.js / WebGL), reactive to state.
 class Rappter {
   constructor(canvas){
-    this.cv=canvas; this.g=canvas.getContext('2d'); this.W=canvas.width; this.H=canvas.height;
-    this.t=0; this.raf=null; this.state='idle';
-    this.jaw=0; this.jawT=0; this.blink=0; this.blinkAt=1.4;
-    this.tilt=0; this.tiltT=0; this.glow=0.4; this.glowT=0.4; this.look=0; this.lookT=0;
+    this.cv=canvas; this.state='idle'; this.t=0; this.raf=null; this.ready=false;
+    this.jaw=0; this.headTurn=0; this.glow=0.4; this.blink=0; this.blinkAt=1.6;
   }
-  setState(s){
-    this.state=s;
-    this.tiltT = s==='listening'?-0.15 : s==='thinking'?-0.07 : 0;
-    this.glowT = (s==='speaking'||s==='listening')?0.95:0.4;
-    this.lookT = s==='listening'?0.6 : s==='thinking'?-0.5 : 0;
-  }
-  start(){ if(this.raf) return; const loop=()=>{ this.step(); try{this.draw();}catch(e){} this.raf=requestAnimationFrame(loop); }; this.raf=requestAnimationFrame(loop); if($('creatureName')) $('creatureName').textContent='rappter'; }
-  stop(){ if(this.raf){ cancelAnimationFrame(this.raf); this.raf=null; } }
-  step(){
-    const dt=1/60; this.t+=dt;
-    this.tilt+=(this.tiltT-this.tilt)*0.08; this.glow+=(this.glowT-this.glow)*0.06; this.look+=(this.lookT-this.look)*0.08;
-    this.blinkAt-=dt;
-    if(this.blinkAt<=0){ this.blink=Math.min(1,this.blink+0.28); if(this.blinkAt<-0.12){ this.blink=0; this.blinkAt=1.6+Math.random()*3.4; } }
-    else if(this.blink>0) this.blink=Math.max(0,this.blink-0.28);
-    this.jawT = this.state==='speaking' ? Math.max(0,Math.min(1, 0.5+0.42*Math.sin(this.t*12.5)+0.16*Math.sin(this.t*25.7+1))) : 0;
-    this.jaw += (this.jawT-this.jaw)*0.4;
-  }
-  draw(){
-    const g=this.g, W=this.W, H=this.H; g.clearRect(0,0,W,H);
-    const breathe = 1 + Math.sin(this.t*1.6)*0.022;
-    const bob = Math.sin(this.t*1.6)*4 + (this.state==='speaking'?Math.sin(this.t*7.5)*3:0);
-    const tail = Math.sin(this.t*1.1)*(this.state==='idle'?0.13:0.22)+Math.sin(this.t*2.4)*0.04;
-    g.save(); g.translate(W*0.5, H*0.56); const Sc=(W/512)*1.0; g.scale(Sc,Sc);
-
-    // ambient glow + listening ring + shadow
-    let ag=g.createRadialGradient(0,-10,20,0,-10,235);
-    ag.addColorStop(0,`rgba(68,204,136,${0.09+this.glow*0.15})`); ag.addColorStop(1,'rgba(68,204,136,0)');
-    g.fillStyle=ag; g.beginPath(); g.arc(0,-10,235,0,7); g.fill();
-    if(this.state==='listening'){ const r=158+Math.sin(this.t*3)*7; g.strokeStyle=`rgba(124,240,180,${0.3+Math.sin(this.t*3)*0.15})`; g.lineWidth=2; g.beginPath(); g.arc(0,-6,r,0,7); g.stroke(); }
-    g.fillStyle='rgba(0,0,0,0.26)'; g.beginPath(); g.ellipse(6,150,118,18,0,0,7); g.fill();
-
-    // TAIL
-    g.save(); g.translate(-86,20); g.rotate(tail);
-    let tg=g.createLinearGradient(-180,0,0,0); tg.addColorStop(0,RAP.skinDk); tg.addColorStop(1,RAP.skin); g.fillStyle=tg;
-    g.beginPath(); g.moveTo(8,-24); g.bezierCurveTo(-60,-34,-130,-28,-182,0); g.bezierCurveTo(-128,-4,-64,16,8,24); g.closePath(); g.fill();
-    g.fillStyle=RAP.accent; for(let i=0;i<4;i++){ const x=-36-i*34,y=-26+i*6; g.beginPath(); g.moveTo(x,y); g.lineTo(x-8,y-15); g.lineTo(x+9,y-12); g.closePath(); g.fill(); }
-    g.restore();
-
-    // FAR LEG (behind)
-    g.fillStyle=RAP.skinDk;
-    g.beginPath(); g.ellipse(-34,62,26,38,0.05,0,7); g.fill();
-    g.save(); g.translate(-30,92); g.rotate(0.12); g.beginPath(); g.moveTo(-9,0); g.lineTo(9,0); g.lineTo(6,52); g.lineTo(-8,52); g.closePath(); g.fill(); g.restore();
-    g.beginPath(); g.moveTo(-52,150); g.quadraticCurveTo(-30,138,-6,145); g.lineTo(-8,151); g.closePath(); g.fill();
-
-    // BODY
-    g.save(); g.translate(-6,6); g.scale(1,breathe);
-    let bg=g.createLinearGradient(0,-70,0,72); bg.addColorStop(0,RAP.skinLt); bg.addColorStop(0.45,RAP.skin); bg.addColorStop(1,RAP.skinDk);
-    g.fillStyle=bg; g.beginPath(); g.ellipse(-8,4,98,74,-0.08,0,7); g.fill();
-    g.fillStyle=RAP.belly; g.globalAlpha=0.85; g.beginPath(); g.ellipse(2,34,52,40,-0.05,0,7); g.fill(); g.globalAlpha=1;
-    g.restore();
-
-    // BACK SPIKES
-    g.fillStyle=RAP.accent;
-    for(let i=0;i<5;i++){ const p=i/4, x=-70+p*118, y=-58-Math.sin(p*Math.PI)*18; g.save(); g.translate(x,y); g.rotate(-0.5+p*0.9); g.beginPath(); g.moveTo(0,0); g.lineTo(-7,-20-(i%2)*4); g.lineTo(8,-14); g.closePath(); g.fill(); g.restore(); }
-
-    // NEAR LEG
-    g.fillStyle=RAP.skin;
-    g.beginPath(); g.ellipse(18,66,30,42,-0.05,0,7); g.fill();
-    g.save(); g.translate(24,98); g.rotate(-0.06); g.beginPath(); g.moveTo(-10,0); g.lineTo(11,0); g.lineTo(8,50); g.lineTo(-8,50); g.closePath(); g.fill(); g.restore();
-    g.fillStyle=RAP.skinDk; g.beginPath(); g.moveTo(2,151); g.quadraticCurveTo(30,137,58,146); g.lineTo(52,152); g.quadraticCurveTo(28,148,4,152); g.closePath(); g.fill();
-
-    // ARM
-    g.save(); g.translate(46,6); g.rotate(0.5+Math.sin(this.t*1.6)*0.05); g.fillStyle=RAP.skin;
-    g.beginPath(); g.moveTo(0,0); g.quadraticCurveTo(18,8,24,30); g.lineTo(16,34); g.quadraticCurveTo(10,14,-4,8); g.closePath(); g.fill();
-    g.fillStyle=RAP.tooth; g.beginPath(); g.moveTo(22,30); g.lineTo(30,36); g.lineTo(22,37); g.closePath(); g.fill(); g.restore();
-
-    // NECK
-    g.fillStyle=RAP.skin;
-    g.beginPath(); g.moveTo(40,-30); g.quadraticCurveTo(58,-78,86,-96); g.quadraticCurveTo(104,-78,86,-46); g.quadraticCurveTo(66,-24,40,-30); g.closePath(); g.fill();
-
-    // HEAD (focal point)
-    g.save(); g.translate(96,-104+bob); g.rotate(this.tilt);
-    let hg=g.createLinearGradient(0,-40,0,30); hg.addColorStop(0,RAP.skinLt); hg.addColorStop(1,RAP.skin); g.fillStyle=hg;
-    g.beginPath();
-    g.moveTo(-30,-6);
-    g.bezierCurveTo(-30,-34,10,-40,30,-30);
-    g.bezierCurveTo(60,-24,84,-16,92,-6);
-    g.lineTo(90,4);
-    g.bezierCurveTo(70,2,44,2,20,4);
-    g.bezierCurveTo(-6,6,-24,10,-30,-6);
-    g.closePath(); g.fill();
-    g.fillStyle=RAP.tooth; for(let i=0;i<4;i++){ const x=30+i*15; g.beginPath(); g.moveTo(x,4); g.lineTo(x+6,4); g.lineTo(x+3,12); g.closePath(); g.fill(); }
-    // lower jaw (opens)
-    g.save(); g.translate(18,4); g.rotate(this.jaw*0.4);
-    g.fillStyle=RAP.skinDk; g.beginPath(); g.moveTo(-8,0); g.bezierCurveTo(30,6,58,8,72,12); g.lineTo(70,20); g.bezierCurveTo(44,22,10,20,-6,14); g.closePath(); g.fill();
-    g.fillStyle=RAP.tooth; for(let i=0;i<3;i++){ const x=20+i*16; g.beginPath(); g.moveTo(x,8); g.lineTo(x+6,8); g.lineTo(x+3,2); g.closePath(); g.fill(); }
-    g.restore();
-    // nostril + brow
-    g.fillStyle=RAP.skinDk; g.beginPath(); g.ellipse(80,-8,3.4,2.4,0,0,7); g.fill();
-    g.beginPath(); g.moveTo(-6,-28); g.quadraticCurveTo(14,-40,30,-30); g.quadraticCurveTo(14,-30,-6,-22); g.closePath(); g.fill();
-    // eye
-    const eh = 1-this.blink;
-    g.save(); g.translate(8,-20);
-    g.fillStyle=RAP.eyeW; g.beginPath(); g.ellipse(0,0,13,13*eh+0.5,0,0,7); g.fill();
-    if(eh>0.2){
-      g.fillStyle=RAP.accent; g.beginPath(); g.ellipse(3+this.look*4,0,7,7*eh,0,0,7); g.fill();
-      g.fillStyle=RAP.eyeI; g.beginPath(); g.ellipse(4+this.look*4,0,3.4,3.4*eh,0,0,7); g.fill();
-      g.fillStyle='#fff'; g.beginPath(); g.ellipse(1+this.look*4,-3,2,2*eh,0,0,7); g.fill();
+  setState(s){ this.state=s; }
+  async start(){
+    if(this.raf||this.ready) return;
+    try{
+      await this.init(); this.ready=true;
+      if($('creatureName')) $('creatureName').textContent='rappter';
+      const loop=()=>{ this.step(1/60); this.raf=requestAnimationFrame(loop); };
+      this.raf=requestAnimationFrame(loop);
+    }catch(e){
+      console.warn('rappter 3D init failed → emoji', e);
+      this.cv.style.display='none'; if($('holoFallback')) $('holoFallback').style.display='grid';
     }
-    g.restore();
-    // head frill
-    g.fillStyle=RAP.accent; for(let i=0;i<3;i++){ g.save(); g.translate(-24-i*2,-18+i*10); g.rotate(-0.8-i*0.25); g.beginPath(); g.moveTo(0,0); g.lineTo(-24,-5); g.lineTo(-6,8); g.closePath(); g.fill(); g.restore(); }
-    g.restore(); // head
+  }
+  stop(){ if(this.raf){ cancelAnimationFrame(this.raf); this.raf=null; } }
+  async init(){
+    const T = this.T = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js');
+    const cv=this.cv;
+    const rn=this.rn=new T.WebGLRenderer({canvas:cv, alpha:true, antialias:true});
+    rn.setSize(cv.width, cv.height, false); rn.setPixelRatio(Math.min(2, window.devicePixelRatio||1));
+    const sc=this.sc=new T.Scene();
+    const cam=this.cam=new T.PerspectiveCamera(34, cv.width/cv.height, 0.1, 100);
+    cam.position.set(4.2,1.75,7.2); cam.lookAt(0,0.75,0.15);
+    sc.add(new T.AmbientLight(0x9fffd8,0.55));
+    const key=new T.DirectionalLight(0xffffff,1.15); key.position.set(4,7,6); sc.add(key);
+    const rim=new T.DirectionalLight(0x2aa8ff,0.85); rim.position.set(-5,2,-4); sc.add(rim);
+    this.glowLight=new T.PointLight(0x44cc88,16,16,2); this.glowLight.position.set(0,1.5,3.6); sc.add(this.glowLight);
+    this.buildRaptor();
+  }
+  buildRaptor(){
+    const T=this.T;
+    const skin =new T.MeshStandardMaterial({color:0x3fbf80,emissive:0x0a3d26,emissiveIntensity:0.28,roughness:0.55,metalness:0.02,flatShading:true});
+    const belly=new T.MeshStandardMaterial({color:0xbff7d8,roughness:0.7,flatShading:true});
+    const spike=new T.MeshStandardMaterial({color:0x26b6ff,emissive:0x0b3d5c,emissiveIntensity:0.6,roughness:0.4,flatShading:true});
+    const white=new T.MeshStandardMaterial({color:0xffffff,emissive:0xcceeff,emissiveIntensity:0.3});
+    const dark =new T.MeshStandardMaterial({color:0x0a2a24});
+    const rig=this.rig=new T.Group(); this.sc.add(rig);
+    const M=(geo,mat,p,s,r)=>{ const m=new T.Mesh(geo,mat); if(p)m.position.set(p[0],p[1],p[2]); if(s)m.scale.set(s[0],s[1],s[2]); if(r)m.rotation.set(r[0],r[1],r[2]); return m; };
 
-    g.restore(); // world
+    // body + belly
+    this.body=M(new T.SphereGeometry(1,11,8), skin, [0,0.92,0.05], [0.78,0.72,1.72]); rig.add(this.body);
+    rig.add(M(new T.SphereGeometry(0.72,10,8), belly, [0,0.68,0.5], [0.66,0.72,1.12]));
+    // tail (tapered, points back -z)
+    rig.add(M(new T.CylinderGeometry(0.05,0.42,3.1,8), skin, [0,0.85,-1.95], [1,1,1], [1.5,0,0]));
+    // legs + feet
+    const leg=new T.CylinderGeometry(0.19,0.3,1.35,8);
+    rig.add(M(leg, skin, [0.4,0.5,0.42], null, [0.28,0,0.04]));
+    rig.add(M(leg, skin, [-0.4,0.48,0.34], null, [0.22,0,-0.04]));
+    const foot=new T.BoxGeometry(0.42,0.16,0.66);
+    rig.add(M(foot, skin, [0.44,0.05,0.66])); rig.add(M(foot, skin, [-0.44,0.04,0.58]));
+    // arms
+    const arm=new T.CylinderGeometry(0.07,0.11,0.55,6);
+    rig.add(M(arm, skin, [0.6,0.98,0.62], null, [0.7,0,-0.5]));
+    rig.add(M(arm, skin, [-0.6,0.98,0.62], null, [0.7,0,0.5]));
+    // neck
+    rig.add(M(new T.CylinderGeometry(0.26,0.4,1.2,8), skin, [0,1.15,1.05], null, [1.05,0,0]));
+    // HEAD group (turns to listen, bobs)
+    const head=this.head=new T.Group(); head.position.set(0,1.5,1.85); head.rotation.x=0.15; rig.add(head);
+    head.add(M(new T.SphereGeometry(0.46,10,8), skin, [0,0,0], [1,0.95,1.2]));
+    head.add(M(new T.BoxGeometry(0.5,0.34,0.62), skin, [0,-0.03,0.52]));    // snout (upper)
+    // upper teeth
+    for(let i=0;i<4;i++){ head.add(M(new T.ConeGeometry(0.04,0.12,4), white, [-0.18+i*0.12,-0.2,0.72], null, [Math.PI,0,0])); }
+    // jaw (hinge, opens)
+    const jaw=this.jawG=new T.Group(); jaw.position.set(0,-0.18,0.28); head.add(jaw);
+    jaw.add(M(new T.BoxGeometry(0.46,0.16,0.5), skin, [0,-0.06,0.22]));
+    for(let i=0;i<3;i++){ jaw.add(M(new T.ConeGeometry(0.035,0.1,4), white, [-0.14+i*0.14,0.02,0.4])); }
+    // eyes + pupils
+    const eye=new T.SphereGeometry(0.16,10,8), pup=new T.SphereGeometry(0.075,8,6);
+    this.eyeL=M(eye,white,[0.31,0.14,0.34]); this.eyeR=M(eye,white,[-0.31,0.14,0.34]); head.add(this.eyeL); head.add(this.eyeR);
+    head.add(M(pup,dark,[0.37,0.14,0.46])); head.add(M(pup,dark,[-0.37,0.14,0.46]));
+    // head frill spikes
+    for(let i=0;i<3;i++){ head.add(M(new T.ConeGeometry(0.09,0.3,5), spike, [ (i-1)*0.16, 0.36, -0.2], null, [-0.5,0,0])); }
+    // back spikes along spine
+    for(let i=0;i<6;i++){ const z=-1.5+i*0.44, y=1.6-Math.abs(i-2.5)*0.05; rig.add(M(new T.ConeGeometry(0.13,0.38,5), spike, [0,y,z], null, [0.2,0,0])); }
+    // ground disc (subtle)
+    const disc=M(new T.CircleGeometry(2.0,32), new T.MeshBasicMaterial({color:0x0a2a1e,transparent:true,opacity:0.35}), [0,-0.02,0], null, [-Math.PI/2,0,0]); rig.add(disc);
+  }
+  step(dt){
+    const T=this.T; this.t+=dt;
+    // eased targets
+    this.headTurn += ((this.state==='listening'?1:0)-this.headTurn)*0.06;
+    const jawT = this.state==='speaking' ? Math.max(0, 0.5+0.42*Math.sin(this.t*13)+0.16*Math.sin(this.t*25+1)) : 0;
+    this.jaw += (jawT-this.jaw)*0.4;
+    this.glow += (((this.state==='speaking'||this.state==='listening')?1:0.4)-this.glow)*0.05;
+    // blink
+    this.blinkAt-=dt;
+    if(this.blinkAt<=0){ this.blink=Math.min(1,this.blink+0.3); if(this.blinkAt<-0.12){ this.blink=0; this.blinkAt=1.8+Math.random()*3.2; } }
+    else if(this.blink>0) this.blink=Math.max(0,this.blink-0.3);
+    // idle turntable + bob + breathe
+    const base=-0.32;
+    this.rig.rotation.y = base + Math.sin(this.t*0.5)*0.32 - this.headTurn*0.22;
+    this.rig.position.y = Math.sin(this.t*1.6)*0.05;
+    this.body.scale.y = 1.0 + Math.sin(this.t*1.6)*0.03;
+    // head motion
+    this.head.rotation.x = -0.04 + Math.sin(this.t*1.6)*0.04 + (this.state==='thinking'?-0.22:0) + (this.state==='speaking'?Math.sin(this.t*7)*0.05:0);
+    this.head.rotation.y = this.headTurn*0.5;
+    this.jawG.rotation.x = this.jaw*0.5;
+    // blink
+    const eh=1-this.blink; this.eyeL.scale.y=eh||0.06; this.eyeR.scale.y=eh||0.06;
+    // glow
+    this.glowLight.intensity = 10 + this.glow*16;
+    this.rn.render(this.sc, this.cam);
   }
 }
 
@@ -511,6 +503,8 @@ function finishOnboard(){
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async function boot(){
+  // ?peek — skip the intro overlay and just show the rappter (handy for a quick look)
+  if(/[?&]peek/.test(location.search)){ const o=$('onboard'); if(o) o.style.display='none'; }
   connect();
   try{
     rappter = new Rappter($('holo'));

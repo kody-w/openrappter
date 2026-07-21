@@ -2,10 +2,14 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 
 import {
+  PRODUCTION_PACKAGE,
   RINGS,
   PRERELEASE_RINGS,
   compareVersions,
   distTagForRing,
+  isProductionPackage,
+  packageForRing,
+  repoForRing,
   nextRing,
   parseRingVersion,
   planPromotion,
@@ -29,12 +33,32 @@ describe('train topology', () => {
     assert.equal(nextRing('stable'), undefined);
   });
 
-  it('gives latest to stable only', () => {
-    assert.equal(distTagForRing('stable'), 'latest');
+  it('isolates every prerelease ring in its own npm package', () => {
+    // The core safety property: production is unreachable from ring work.
+    assert.equal(packageForRing('stable'), PRODUCTION_PACKAGE);
     for (const ring of PRERELEASE_RINGS) {
-      assert.notEqual(distTagForRing(ring), 'latest');
-      assert.equal(distTagForRing(ring), ring);
+      assert.equal(packageForRing(ring), `openrappter-${ring}`);
+      assert.notEqual(packageForRing(ring), PRODUCTION_PACKAGE);
+      assert.equal(isProductionPackage(packageForRing(ring)), false);
     }
+  });
+
+  it('gives every ring package names that are all distinct', () => {
+    const names = RINGS.map(packageForRing);
+    assert.equal(new Set(names).size, RINGS.length);
+  });
+
+  it('isolates every prerelease ring in its own repo', () => {
+    assert.equal(repoForRing('stable'), 'kody-w/openrappter');
+    for (const ring of PRERELEASE_RINGS) {
+      assert.equal(repoForRing(ring), `kody-w/openrappter-${ring}`);
+      assert.notEqual(repoForRing(ring), repoForRing('stable'));
+    }
+  });
+
+  it('lets each ring own latest within its own package', () => {
+    // Safe precisely because the package differs per ring.
+    for (const ring of RINGS) assert.equal(distTagForRing(ring), 'latest');
   });
 
   it('rejects unknown rings', () => {
@@ -171,7 +195,8 @@ describe('planPromotion', () => {
   it('promotes one ring forward without rebuilding', () => {
     const plan = planPromotion({ version: canary, from: 'canary', to: 'nightly', publishedVersions: published });
     assert.equal(plan.rebuild, false);
-    assert.equal(plan.distTag, 'nightly');
+    assert.equal(plan.fromPackage, 'openrappter-canary');
+    assert.equal(plan.toPackage, 'openrappter-nightly');
     assert.equal(plan.version, canary);
   });
 
@@ -203,33 +228,54 @@ describe('planPromotion', () => {
     );
   });
 
-  it('never lets latest point at a prerelease', () => {
+  it('can never promote into the production package', () => {
     const beta = ringVersion({ ring: 'beta', baseVersion: BASE, counter: 1 });
     assert.throws(
       () => planPromotion({ version: beta, from: 'beta', to: 'stable', publishedVersions: [beta] }),
-      /latest never points at a prerelease/,
+      /only ever written by a real release/,
     );
+  });
+
+  it('no legal promotion ever targets the production package', () => {
+    // Exhaustive: walk every adjacent ring pair the train allows.
+    for (let i = 0; i < RINGS.length - 1; i += 1) {
+      const from = RINGS[i];
+      const to = RINGS[i + 1];
+      const v = ringVersion({
+        ring: from, baseVersion: BASE, sha: 'a1b2c3d4', date: '20260721', counter: 1,
+      });
+      if (to === 'stable') {
+        assert.throws(() => planPromotion({ version: v, from, to, publishedVersions: [v] }));
+        continue;
+      }
+      const plan = planPromotion({ version: v, from, to, publishedVersions: [v] });
+      assert.equal(isProductionPackage(plan.toPackage), false);
+    }
   });
 });
 
 describe('resolveInstallSpec', () => {
-  const pkg = 'openrappter';
-
-  it('defaults to latest when no ring is given', () => {
-    assert.equal(resolveInstallSpec({ packageName: pkg, ring: undefined }), 'openrappter@latest');
-    assert.equal(resolveInstallSpec({ packageName: pkg, ring: '' }), 'openrappter@latest');
+  it('defaults to the production package when no ring is given', () => {
+    assert.equal(resolveInstallSpec({ ring: undefined }), 'openrappter@latest');
+    assert.equal(resolveInstallSpec({ ring: '' }), 'openrappter@latest');
   });
 
-  it('maps each ring to its dist-tag', () => {
-    assert.equal(resolveInstallSpec({ packageName: pkg, ring: 'canary' }), 'openrappter@canary');
-    assert.equal(resolveInstallSpec({ packageName: pkg, ring: 'beta' }), 'openrappter@beta');
-    assert.equal(resolveInstallSpec({ packageName: pkg, ring: 'stable' }), 'openrappter@latest');
+  it('sends each ring to its own package', () => {
+    assert.equal(resolveInstallSpec({ ring: 'canary' }), 'openrappter-canary@latest');
+    assert.equal(resolveInstallSpec({ ring: 'beta' }), 'openrappter-beta@latest');
+    assert.equal(resolveInstallSpec({ ring: 'stable' }), 'openrappter@latest');
   });
 
-  it('lets an explicit version win over the ring', () => {
+  it('never resolves a prerelease ring to the production package', () => {
+    for (const ring of PRERELEASE_RINGS) {
+      assert.ok(!resolveInstallSpec({ ring }).startsWith('openrappter@'));
+    }
+  });
+
+  it('lets an explicit version win, still inside the ring package', () => {
     assert.equal(
-      resolveInstallSpec({ packageName: pkg, ring: 'canary', explicitVersion: '1.9.8' }),
-      'openrappter@1.9.8',
+      resolveInstallSpec({ ring: 'canary', explicitVersion: '1.9.8' }),
+      'openrappter-canary@1.9.8',
     );
   });
 });

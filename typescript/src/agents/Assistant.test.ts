@@ -86,6 +86,9 @@ function makeAgents(...agents: StubAgent[]): Map<string, BasicAgent> {
 
 describe('Assistant (direct Copilot API)', () => {
   beforeEach(() => {
+    // These tests exercise the direct Copilot API provider; pin that backend so
+    // the CLI-first auto-selection doesn't shell out to a real `copilot` binary.
+    process.env.OPENRAPPTER_AI_BACKEND = 'copilot-api';
     vi.clearAllMocks();
     chatCallCount = 0;
     capturedMessages = [];

@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID, createHash, timingSafeEqual } from 'crypto';
+import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -44,23 +45,24 @@ const DEFAULT_SHUTDOWN_TIMEOUT = 250;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const PROTOCOL_VERSION = 3;
-const VOICE_DELIMITER = '|||VOICE|||';
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
 /** Parse a response that may contain a |||VOICE||| delimiter into formatted + voice parts */
 function parseVoiceDelimiter(content: string): { text: string; voiceText: string } {
   if (!content) return { text: '', voiceText: '' };
 
-  const parts = content.split(VOICE_DELIMITER);
-  if (parts.length >= 2) {
-    return { text: parts[0].trim(), voiceText: parts[1].trim() };
+  // Route through the shared sense seam so the gateway parses |||VOICE||| the
+  // same way every other surface does.
+  const parsed = parseSenses(content);
+  if (parsed.senses.voice) {
+    return { text: parsed.text, voiceText: parsed.senses.voice };
   }
 
-  // No delimiter — extract first sentence as fallback voice text
+  // No |||VOICE||| sense — extract first sentence as fallback voice text
   const stripped = content.replace(/\*\*|`{1,3}[^`]*`{1,3}|#{1,3}\s|>|---/g, '').trim();
   const sentences = stripped.split(/(?<=[.!?])\s+/);
   const voiceText = sentences[0]?.trim() || "I've completed your request.";
-  return { text: content.trim(), voiceText };
+  return { text: parsed.text || content.trim(), voiceText };
 }
 
 /** Resolve a session identifier from params that may use either the
@@ -1910,6 +1912,9 @@ export class GatewayServer {
       // Send final response only (no streaming deltas — avoids duplication from multi-turn tool-call loops)
       const raw = result.content || '';
       const { text: finalText, voiceText } = parseVoiceDelimiter(raw);
+      // Forward modality senses (|||HOLO|||, …) so surfaces like the Voice UI
+      // can render a creature/visual from the same reply.
+      const allSenses = parseSenses(raw).senses;
       this.broadcastEvent(GatewayEvents.CHAT, {
         runId: run.runId,
         sessionKey: run.sessionId,
@@ -1917,6 +1922,8 @@ export class GatewayServer {
         state: 'final',
         message: finalText ? { role: 'assistant', content: [{ type: 'text', text: finalText }], timestamp: Date.now() } : undefined,
         voiceText: voiceText || undefined,
+        holo: allSenses.holo || undefined,
+        senses: Object.keys(allSenses).length ? allSenses : undefined,
       });
 
       // Store assistant message

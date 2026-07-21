@@ -12,6 +12,7 @@
  */
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
+import { CopilotCLIProvider } from '../providers/copilot-cli.js';
 import { truncateHistory } from '../providers/messages.js';
 import type { Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
@@ -46,7 +47,7 @@ export interface AssistantResponse {
 export class Assistant {
   private agents: Map<string, BasicAgent>;
   private config: AssistantConfig;
-  private provider: CopilotProvider;
+  private provider: CopilotProvider | CopilotCLIProvider;
   private agentLogs: string[] = [];
   /** Maps conversation keys to message history for multi-turn continuity */
   private conversations: Map<string, Message[]> = new Map();
@@ -68,9 +69,18 @@ export class Assistant {
     };
     this.workspaceDir = config?.workspaceDir ?? WORKSPACE_DIR;
 
-    this.provider = new CopilotProvider({
-      githubToken: config?.githubToken,
-    });
+    // Choose the AI backend. Prefer the GitHub Copilot CLI whenever it's
+    // installed: it owns its own auth + refresh, so openrappter never runs the
+    // flaky device-code flow. Opt out with OPENRAPPTER_AI_BACKEND=copilot-api.
+    const backend = process.env.OPENRAPPTER_AI_BACKEND;
+    const cliPath = CopilotCLIProvider.findCLI();
+    if (backend === 'copilot-cli' || (backend !== 'copilot-api' && cliPath)) {
+      this.provider = new CopilotCLIProvider({ cliPath: cliPath ?? undefined, model: this.config.model });
+    } else {
+      this.provider = new CopilotProvider({
+        githubToken: config?.githubToken,
+      });
+    }
   }
 
   /** Parsed identity from IDENTITY.md (updated each turn) */
@@ -281,7 +291,7 @@ export class Assistant {
       let lastError: Error | undefined;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          for await (const delta of this.provider.chatStream(history, {
+          for await (const delta of (this.provider as CopilotProvider).chatStream(history, {
             model: this.config.model,
             tools: tools.length > 0 ? tools : undefined,
           })) {

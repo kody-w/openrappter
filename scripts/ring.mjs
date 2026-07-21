@@ -20,13 +20,28 @@
  *    Naming rings without the rank (e.g. `-canary.1` vs `-beta.1`) would sort
  *    alphabetically and invert the train, making canary look newer than beta.
  *
- * 2. Promotion NEVER rebuilds an artifact. A version is built once in canary and
- *    advances by re-pointing an npm dist-tag at the same published version. This
- *    mirrors the exact-commit promotion rule used by the rapp release train:
- *    no phase creates a new source commit or rebuilds an asset.
+ * 2. EACH RING IS ITS OWN REPO AND ITS OWN NPM PACKAGE. This is the primary
+ *    isolation boundary, and it is why the rapp release train uses separate
+ *    rapp-canary / rapp-nightly / rapp-alpha / rapp-beta repositories rather
+ *    than one repo with channel tags.
  *
- * 3. Only `stable` may own the `latest` dist-tag. Prereleases must never move
- *    `latest`, or `npm install openrappter` would serve an unstable build.
+ *      canary  -> openrappter-canary
+ *      nightly -> openrappter-nightly
+ *      alpha   -> openrappter-alpha
+ *      beta    -> openrappter-beta
+ *      stable  -> openrappter          <- the only package prod users install
+ *
+ *    Sharing one package across rings would mean every canary permanently
+ *    consumes a version number in the production package's history, and the
+ *    production `latest` tag would sit one workflow bug away from moving.
+ *    Separate packages make production physically unreachable from ring work
+ *    instead of merely guarded: a ring package can be deleted outright with
+ *    zero production impact.
+ *
+ * 3. Promotion NEVER rebuilds an artifact. The tarball built once in canary is
+ *    republished byte-for-byte under the next ring's package name. This mirrors
+ *    the exact-commit promotion rule of the rapp release train: no phase
+ *    creates a new source commit or rebuilds an asset.
  */
 
 /** Ordered least-stable -> most-stable. Index is the semver rank. */
@@ -35,14 +50,40 @@ export const RINGS = ['canary', 'nightly', 'alpha', 'beta', 'stable'];
 /** Rings that publish a semver prerelease (everything except stable). */
 export const PRERELEASE_RINGS = RINGS.filter((ring) => ring !== 'stable');
 
-/** npm dist-tag that each ring owns. Only stable owns `latest`. */
-const DIST_TAGS = {
-  canary: 'canary',
-  nightly: 'nightly',
-  alpha: 'alpha',
-  beta: 'beta',
-  stable: 'latest',
-};
+/** The production package. Only the stable ring may ever publish to it. */
+export const PRODUCTION_PACKAGE = 'openrappter';
+
+/** GitHub repo that owns each ring. */
+export function repoForRing(ring) {
+  return requireRing(ring) === 'stable'
+    ? 'kody-w/openrappter'
+    : `kody-w/openrappter-${ring}`;
+}
+
+/**
+ * npm package a ring publishes to. Each prerelease ring owns a DISTINCT
+ * package, so nothing a ring does can be served to `npm install openrappter`.
+ */
+export function packageForRing(ring) {
+  return requireRing(ring) === 'stable'
+    ? PRODUCTION_PACKAGE
+    : `${PRODUCTION_PACKAGE}-${ring}`;
+}
+
+/**
+ * Within its own package, every ring simply owns `latest` — that package's
+ * newest build. There is no cross-ring dist-tag juggling because there is no
+ * shared package to juggle within.
+ */
+export function distTagForRing(ring) {
+  requireRing(ring);
+  return 'latest';
+}
+
+/** True only for the one package real users install. */
+export function isProductionPackage(name) {
+  return name === PRODUCTION_PACKAGE;
+}
 
 const NUM = '(?:0|[1-9]\\d*)';
 const CORE = `${NUM}\\.${NUM}\\.${NUM}`;
@@ -73,10 +114,6 @@ export function requireRing(ring) {
 
 export function ringRank(ring) {
   return RINGS.indexOf(requireRing(ring));
-}
-
-export function distTagForRing(ring) {
-  return DIST_TAGS[requireRing(ring)];
 }
 
 /** The ring a build is promoted into next, or undefined if already stable. */
@@ -232,26 +269,43 @@ export function planPromotion({ version, from, to, publishedVersions = [] }) {
   if (!publishedVersions.includes(version)) {
     throw new Error(`refusing to promote unpublished version ${version}`);
   }
-  // `stable` is a real rebuild-free re-publish of the base version, not a
-  // dist-tag move of a prerelease: `latest` must never point at a prerelease.
+  // Promotion never reaches production. Shipping stable means running the
+  // existing release workflow against a real release tag, which is a separate,
+  // human-gated path — so no automated ring step can publish to `openrappter`.
   if (to === 'stable') {
     throw new Error(
-      'stable is not reachable by dist-tag promotion; publish the release version ' +
-        `${parsed.baseVersion} through the release workflow so latest never points at a prerelease`,
+      'stable is not reachable by ring promotion; publish ' +
+        `${parsed.baseVersion} through the release workflow so the production ` +
+        `package ${PRODUCTION_PACKAGE} is only ever written by a real release`,
     );
   }
 
-  return { version, from, to, distTag: distTagForRing(to), rebuild: false };
+  const fromPackage = packageForRing(from);
+  const toPackage = packageForRing(to);
+
+  // Belt and braces: a promotion target must never be the production package.
+  if (isProductionPackage(toPackage)) {
+    throw new Error(`refusing to promote into the production package ${toPackage}`);
+  }
+
+  return {
+    version,
+    from,
+    to,
+    fromPackage,
+    toPackage,
+    // Same bytes republished under the next ring's package name.
+    rebuild: false,
+  };
 }
 
 /**
  * Resolve what an installer should install for a ring.
- * Precedence: explicit version > ring dist-tag > stable.
+ * Precedence: explicit version > ring package > production.
  */
-export function resolveInstallSpec({ packageName, ring, explicitVersion }) {
-  if (explicitVersion) return `${packageName}@${explicitVersion}`;
-  if (ring === undefined || ring === null || ring === '') {
-    return `${packageName}@${distTagForRing('stable')}`;
-  }
-  return `${packageName}@${distTagForRing(ring)}`;
+export function resolveInstallSpec({ ring, explicitVersion }) {
+  const name = ring === undefined || ring === null || ring === ''
+    ? PRODUCTION_PACKAGE
+    : packageForRing(ring);
+  return explicitVersion ? `${name}@${explicitVersion}` : `${name}@latest`;
 }

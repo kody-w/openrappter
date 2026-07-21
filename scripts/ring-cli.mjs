@@ -27,9 +27,12 @@ import { fileURLToPath } from 'node:url';
 
 import {
   PRERELEASE_RINGS,
+  PRODUCTION_PACKAGE,
   RINGS,
-  distTagForRing,
+  isProductionPackage,
+  packageForRing,
   planPromotion,
+  repoForRing,
   requireRing,
   ringVersion,
 } from './ring.mjs';
@@ -94,8 +97,19 @@ const commands = {
     );
   },
 
-  'dist-tag'(args) {
-    process.stdout.write(`${distTagForRing(requireRing(String(args.ring ?? '')))}\n`);
+  // Which npm package a ring publishes to. Prerelease rings each own a
+  // distinct package, so production is unreachable from ring work.
+  package(args) {
+    const ring = requireRing(String(args.ring ?? ''));
+    const name = packageForRing(ring);
+    if (args['assert-not-production'] && isProductionPackage(name)) {
+      fail(`ring ${ring} resolves to the production package ${name}`);
+    }
+    process.stdout.write(`${name}\n`);
+  },
+
+  repo(args) {
+    process.stdout.write(`${repoForRing(requireRing(String(args.ring ?? '')))}\n`);
   },
 
   promote(args) {
@@ -116,35 +130,39 @@ const commands = {
   },
 
   async manifest(args) {
-    const name = packageName();
-    const distTags = await fetchDistTags(name);
-
     const channels = {};
-    for (const ring of RINGS) {
-      const tag = distTagForRing(ring);
+    // Each ring is a separate package, so this is one registry read per ring.
+    await Promise.all(RINGS.map(async (ring) => {
+      const name = packageForRing(ring);
+      let version = null;
+      try {
+        version = (await fetchDistTags(name)).latest ?? null;
+      } catch {
+        version = null;
+      }
       channels[ring] = {
         ring,
-        distTag: tag,
-        version: distTags[tag] ?? null,
-        install:
-          ring === 'stable'
-            ? `npm install -g ${name}`
-            : `npm install -g ${name}@${tag}`,
+        package: name,
+        repo: repoForRing(ring),
+        production: isProductionPackage(name),
+        version,
+        install: `npm install -g ${name}`,
         installer:
           ring === 'stable'
             ? 'curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash'
             : `curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel ${ring}`,
       };
-    }
+    }));
 
     const manifest = {
-      schema: 'openrappter-channels/1.0',
-      package: name,
+      schema: 'openrappter-channels/2.0',
+      productionPackage: PRODUCTION_PACKAGE,
       // Least-stable first; promotion always advances exactly one step.
       train: RINGS,
       prereleaseRings: PRERELEASE_RINGS,
-      // `latest` is reserved for stable so a plain install never gets a prerelease.
-      stableDistTag: distTagForRing('stable'),
+      // Every prerelease ring lives in its own package and repo, so nothing a
+      // ring does can be served to `npm install openrappter`.
+      isolation: 'package-per-ring',
       channels,
     };
 

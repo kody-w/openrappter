@@ -6,6 +6,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
+import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -37,22 +38,23 @@ const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const VERSION = '1.9.1';
 const PROTOCOL_VERSION = 3;
-const VOICE_DELIMITER = '|||VOICE|||';
 
 /** Parse a response that may contain a |||VOICE||| delimiter into formatted + voice parts */
 function parseVoiceDelimiter(content: string): { text: string; voiceText: string } {
   if (!content) return { text: '', voiceText: '' };
 
-  const parts = content.split(VOICE_DELIMITER);
-  if (parts.length >= 2) {
-    return { text: parts[0].trim(), voiceText: parts[1].trim() };
+  // Route through the shared sense seam so the gateway parses |||VOICE||| the
+  // same way every other surface does.
+  const parsed = parseSenses(content);
+  if (parsed.senses.voice) {
+    return { text: parsed.text, voiceText: parsed.senses.voice };
   }
 
-  // No delimiter — extract first sentence as fallback voice text
+  // No |||VOICE||| sense — extract the first sentence as fallback voice text.
   const stripped = content.replace(/\*\*|`{1,3}[^`]*`{1,3}|#{1,3}\s|>|---/g, '').trim();
   const sentences = stripped.split(/(?<=[.!?])\s+/);
   const voiceText = sentences[0]?.trim() || "I've completed your request.";
-  return { text: content.trim(), voiceText };
+  return { text: parsed.text || content.trim(), voiceText };
 }
 
 interface RateLimitEntry {

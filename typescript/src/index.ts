@@ -12,6 +12,7 @@ import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasCopilotAvailable, autoAuthIfNeeded, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
+import { parseSenses } from './channels/senses.js';
 
 const execAsync = promisify(exec);
 
@@ -231,9 +232,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
           // Give the persona context about who said what
           const groupPrompt = `[Group chat message from ${incoming.senderName || incoming.sender}]: ${incoming.content}`;
           const result = await activeAssistant.getResponse(groupPrompt, undefined, undefined, chatKey);
-          let reply = result.content;
-          const voiceIdx = reply.indexOf('|||VOICE|||');
-          if (voiceIdx !== -1) reply = reply.substring(0, voiceIdx).trim();
+          const reply = parseSenses(result.content ?? '').text;
 
           await imessage.send(incoming.conversationId!, {
             channel: 'imessage',
@@ -267,13 +266,9 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
         }
 
         const result = await activeAssistant.getResponse(prompt, undefined, undefined, chatKey);
-        let reply = result.content;
-        const voiceIdx = reply.indexOf('|||VOICE|||');
-        let voiceText = '';
-        if (voiceIdx !== -1) {
-          voiceText = reply.substring(voiceIdx + 11).trim();
-          reply = reply.substring(0, voiceIdx).trim();
-        }
+        const parsed = parseSenses(result.content ?? '');
+        const reply = parsed.text;
+        const voiceText = parsed.senses.voice ?? '';
 
         // Send text reply
         await imessage.send(incoming.conversationId!, {
@@ -335,9 +330,7 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
                   incoming.content, undefined, undefined,
                   `imessage_${incoming.conversationId || 'self'}`
                 );
-                let retryReply = retryResult.content;
-                const vi = retryReply.indexOf('|||VOICE|||');
-                if (vi !== -1) retryReply = retryReply.substring(0, vi).trim();
+                const retryReply = parseSenses(retryResult.content ?? '').text;
                 await imessage.send(incoming.conversationId!, {
                   channel: 'imessage',
                   content: `${EMOJI} ${retryReply}`,
@@ -417,12 +410,8 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       log(`${EMOJI} Telegram ← ${incoming.senderName}: ${incoming.content}`);
 
       const result = await assistant.getResponse(incoming.content, undefined, undefined, chatId);
-      // Strip |||VOICE||| delimiter — only send the formatted part
-      let reply = result.content;
-      const voiceIdx = reply.indexOf('|||VOICE|||');
-      if (voiceIdx !== -1) {
-        reply = reply.substring(0, voiceIdx).trim();
-      }
+      // Send only the main text projection (senses like |||VOICE||| are for other surfaces)
+      const reply = parseSenses(result.content ?? '').text;
 
       await telegram.send(incoming.conversationId!, {
         channel: 'telegram',
@@ -506,10 +495,8 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
             // poisoned history from one job breaking others
             const cronKey = `cron_${agentId}_${Date.now()}`;
             const resp = await assistant.getResponse(message, undefined, undefined, cronKey);
-            // Strip voice delimiter from cron output
-            let content = resp.content;
-            const voiceIdx = content.indexOf('|||VOICE|||');
-            if (voiceIdx !== -1) content = content.substring(0, voiceIdx).trim();
+            // Cron output uses only the main text projection
+            const content = parseSenses(resp.content ?? '').text;
             console.log(`${EMOJI} Cron done: agent=${agentId} result=${content.slice(0, 80)}`);
             return content;
           }
@@ -549,14 +536,11 @@ async function startGatewayInProcess(opts?: { silent?: boolean; webRoot?: string
       let voiceText = '';
 
       if (event.type === 'job:executed') {
-        let result = (data?.result || 'No output') as string;
-
-        // Extract |||VOICE||| portion for TTS
-        const voiceIdx = result.indexOf('|||VOICE|||');
-        if (voiceIdx !== -1) {
-          voiceText = result.substring(voiceIdx + 11).trim();
-          result = result.slice(0, voiceIdx).trimEnd();
-        }
+        const rawResult = (data?.result || 'No output') as string;
+        const parsedResult = parseSenses(rawResult);
+        let result = parsedResult.text;
+        if (!result && Object.keys(parsedResult.senses).length === 0) result = rawResult;
+        if (parsedResult.senses.voice) voiceText = parsedResult.senses.voice;
 
         // Try to parse JSON results and extract human-readable content
         let body = result;

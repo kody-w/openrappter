@@ -718,6 +718,21 @@ export class GatewayServer {
       res.end(JSON.stringify(this.getStatus()));
       return;
     }
+    // Voice UI (the rappter-vui fauna player) — served same-origin so it can
+    // reach this gateway over WebSocket without mixed-content blocking.
+    if ((req.url === '/vui' || req.url === '/vui/' || req.url === '/vui/index.html') && req.method === 'GET') {
+      const vuiPath = path.join(os.homedir(), '.openrappter', 'vui', 'index.html');
+      fs.readFile(vuiPath, (err, data) => {
+        if (err) {
+          res.writeHead(404, { 'Content-Type': 'text/plain', ...corsHeaders });
+          res.end('Voice UI not installed. Expected at ~/.openrappter/vui/index.html');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders });
+        res.end(data);
+      });
+      return;
+    }
 
     // JSON-RPC over HTTP POST — allows browser games and local apps to call the gateway
     if (req.method === 'POST') {

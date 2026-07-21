@@ -6,6 +6,16 @@
     Installs OpenRappter (local-first AI agent framework) on Windows.
     Handles Node.js detection/install, npm global install, Copilot auth,
     gateway brainstem startup, and home directory setup.
+
+    INSTALL (run directly in PowerShell — do NOT wrap in powershell -c):
+      irm https://kody-w.github.io/openrappter/install.ps1 | iex
+
+    If execution policy blocks it:
+      Set-ExecutionPolicy Bypass -Scope Process -Force; irm https://kody-w.github.io/openrappter/install.ps1 | iex
+
+    From Command Prompt (cmd.exe):
+      powershell -ExecutionPolicy Bypass -NoProfile -Command "iex (irm 'https://kody-w.github.io/openrappter/install.ps1')"
+
 .PARAMETER Method
     Install method: "npm" (default) or "git"
 .PARAMETER NoPrompt
@@ -40,7 +50,9 @@ param(
     [switch]$DryRun,
     [switch]$VerboseOutput,
 
-    [string]$Version = ""
+    [string]$Version = "",
+    [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
+    [string]$Channel = ""
 )
 
 # ── Strict mode ──────────────────────────────────────────────────────────────
@@ -81,6 +93,10 @@ $INSTALL_TOTAL  = 4
 # ── Environment variable overrides ──────────────────────────────────────────
 if ($env:OPENRAPPTER_INSTALL_METHOD) { $Method  = $env:OPENRAPPTER_INSTALL_METHOD }
 if ($env:OPENRAPPTER_VERSION)        { $Version = $env:OPENRAPPTER_VERSION }
+if (-not $Channel -and $env:OPENRAPPTER_CHANNEL) { $Channel = $env:OPENRAPPTER_CHANNEL }
+# OPENRAPPTER_BETA predates rings and resolved a dist-tag nothing published,
+# so it silently failed. Keep it working as an alias for the beta ring.
+if (-not $Channel -and $env:OPENRAPPTER_BETA -eq "1") { $Channel = "beta" }
 if ($env:OPENRAPPTER_HOME)           { $InstallDir = $env:OPENRAPPTER_HOME }
 if ($env:OPENRAPPTER_NO_PROMPT -eq "true") { $NoPrompt = $true }
 if (-not $InstallDir) { $InstallDir = $HOME_DIR }
@@ -270,12 +286,29 @@ function Get-ExistingInstall {
 
 # ── npm install ──────────────────────────────────────────────────────────────
 
+# Ring -> npm dist-tag. Only `stable` owns `latest`, so a prerelease ring can
+# never be served to a plain `npm install openrappter`.
+function Get-RingDistTag {
+    param([string]$Ring)
+    switch ($Ring) {
+        "canary"  { return "canary" }
+        "nightly" { return "nightly" }
+        "alpha"   { return "alpha" }
+        "beta"    { return "beta" }
+        "stable"  { return "latest" }
+        default   { return "latest" }
+    }
+}
+
 function Install-ViaNpm {
+    # Precedence: explicit version > ring dist-tag > stable.
     $pkg = $NPM_PACKAGE
     if ($Version) {
         $pkg = "${NPM_PACKAGE}@${Version}"
-    } elseif ($env:OPENRAPPTER_BETA -eq "1") {
-        $pkg = "${NPM_PACKAGE}@beta"
+    } else {
+        $ring = if ($Channel) { $Channel } else { "stable" }
+        $pkg = "${NPM_PACKAGE}@$(Get-RingDistTag $ring)"
+        Write-Info "Release ring: $ring"
     }
 
     Write-Info "Running: npm install -g $pkg"
@@ -847,6 +880,13 @@ try {
 } catch {
     Write-Host ""
     Write-Err "Installation failed: $_"
+    Write-Host ""
+    Write-Info "If you see 'Access is denied', run this command directly in PowerShell:"
+    Write-Host ""
+    Write-Host "  irm https://kody-w.github.io/openrappter/install.ps1 | iex" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Info "If execution policy blocks it, run this first:"
+    Write-Host "  Set-ExecutionPolicy Bypass -Scope Process -Force" -ForegroundColor DarkGray
     Write-Host ""
     Write-Info "If this keeps happening, please file an issue:"
     Write-Info "https://github.com/kody-w/openrappter/issues"

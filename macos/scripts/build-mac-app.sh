@@ -61,11 +61,45 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>OpenRappter Bar sends your replies through the Messages app so your rappter can text you back.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>OpenRappter Bar reads the Messages database so your rappter can see texts sent to it.</string>
 </dict>
 </plist>
 PLIST
 
 echo "==> Built: $APP_DIR"
+
+# ── Code sign ──
+# A STABLE signature is required for macOS to remember the Full Disk Access and
+# Automation grants across relaunches (the exact thing that silently breaks an
+# unsigned/ad-hoc iMessage bot). Defaults to the Apple Development identity for
+# local testing; set SIGN_IDENTITY="Developer ID Application: ..." to notarize.
+SIGN_IDENTITY="${SIGN_IDENTITY:-Apple Development}"
+ENTITLEMENTS="$DIST_DIR/openrappter.entitlements"
+cat > "$ENTITLEMENTS" << 'ENT'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>com.apple.security.automation.apple-events</key><true/>
+</dict></plist>
+ENT
+
+SIGN_ARGS=(--force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID")
+# Developer ID builds need hardened runtime + timestamp for notarization.
+if [[ "$SIGN_IDENTITY" == Developer\ ID* ]]; then
+    SIGN_ARGS+=(--options runtime --timestamp --entitlements "$ENTITLEMENTS")
+fi
+
+if security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+    echo "==> Signing with: $SIGN_IDENTITY"
+    codesign "${SIGN_ARGS[@]}" "$APP_DIR"
+    codesign -dv --verbose=2 "$APP_DIR" 2>&1 | grep -E "Authority|Identifier=|TeamIdentifier" | head
+else
+    echo "==> WARNING: '$SIGN_IDENTITY' not found — ad-hoc signing (FDA won't persist across rebuilds)"
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
+fi
 
 # Create DMG
 DMG_NAME="OpenRappter-Bar-${VERSION}.dmg"

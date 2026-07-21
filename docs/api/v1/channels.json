@@ -1,0 +1,65 @@
+{
+  "schema": "openrappter-channels/2.0",
+  "productionPackage": "openrappter",
+  "train": [
+    "canary",
+    "nightly",
+    "alpha",
+    "beta",
+    "stable"
+  ],
+  "prereleaseRings": [
+    "canary",
+    "nightly",
+    "alpha",
+    "beta"
+  ],
+  "isolation": "package-per-ring",
+  "channels": {
+    "beta": {
+      "ring": "beta",
+      "package": "openrappter-beta",
+      "repo": "kody-w/openrappter-beta",
+      "production": false,
+      "version": null,
+      "install": "npm install -g openrappter-beta",
+      "installer": "curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel beta"
+    },
+    "nightly": {
+      "ring": "nightly",
+      "package": "openrappter-nightly",
+      "repo": "kody-w/openrappter-nightly",
+      "production": false,
+      "version": null,
+      "install": "npm install -g openrappter-nightly",
+      "installer": "curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel nightly"
+    },
+    "canary": {
+      "ring": "canary",
+      "package": "openrappter-canary",
+      "repo": "kody-w/openrappter-canary",
+      "production": false,
+      "version": null,
+      "install": "npm install -g openrappter-canary",
+      "installer": "curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel canary"
+    },
+    "alpha": {
+      "ring": "alpha",
+      "package": "openrappter-alpha",
+      "repo": "kody-w/openrappter-alpha",
+      "production": false,
+      "version": null,
+      "install": "npm install -g openrappter-alpha",
+      "installer": "curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel alpha"
+    },
+    "stable": {
+      "ring": "stable",
+      "package": "openrappter",
+      "repo": "kody-w/openrappter",
+      "production": true,
+      "version": "1.9.8",
+      "install": "npm install -g openrappter",
+      "installer": "curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash"
+    }
+  }
+}

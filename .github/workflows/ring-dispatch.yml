@@ -1,0 +1,47 @@
+name: Ring — dispatch to canary
+
+# openrappter itself never publishes a prerelease. It only tells the canary
+# ring repo which ref to build. Every ring publish happens in that ring's own
+# repo, against that ring's own npm package, so this repo's release path and
+# the production package stay exactly as they were.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'typescript/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openrappter-ring-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record production latest so the ring can prove it did not move
+        id: prod
+        run: |
+          set -euo pipefail
+          latest="$(npm view openrappter dist-tags.latest 2>/dev/null || echo '')"
+          printf 'latest=%s\n' "$latest" >> "$GITHUB_OUTPUT"
+          printf 'production openrappter latest = %s\n' "$latest"
+
+      - name: Ask openrappter-canary to build this ref
+        env:
+          # Fine-grained PAT with contents:write on kody-w/openrappter-canary only.
+          GH_TOKEN: ${{ secrets.RING_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api repos/kody-w/openrappter-canary/dispatches \
+            -f event_type=promote \
+            -F "client_payload[ref]=${GITHUB_SHA}" \
+            -F "client_payload[production_latest]=${{ steps.prod.outputs.latest }}"
+          echo "dispatched ${GITHUB_SHA} to openrappter-canary"

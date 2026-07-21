@@ -482,6 +482,15 @@ show_install_plan() {
     ui_section "Install plan"
     ui_kv "OS" "$OS"
     ui_kv "Method" "${INSTALL_METHOD:-auto}"
+    # Surface the ring here so a dry run can preview which train car it would
+    # install from; the npm stage is never reached under --dry-run.
+    if [[ "$INSTALL_METHOD" != "git" ]]; then
+        local plan_ring plan_spec
+        if plan_ring="$(effective_channel)" && plan_spec="$(resolve_pkg_spec)"; then
+            ui_kv "Release ring" "${plan_ring}"
+            ui_kv "Package" "${plan_spec}"
+        fi
+    fi
     if [[ "$INSTALL_METHOD" == "git" ]]; then
         ui_kv "Install directory" "$INSTALL_DIR"
     fi
@@ -629,6 +638,88 @@ INSTALL_METHOD="${OPENRAPPTER_INSTALL_METHOD:-}"
 OPT_NO_PROMPT="${OPENRAPPTER_NO_PROMPT:-false}"
 OPT_SET_NPM_PREFIX=false
 
+# ── Release rings ──────────────────────────────────────────
+# Train order, least-stable first. Each ring owns one npm dist-tag; only
+# `stable` owns `latest`, so a prerelease can never be served to a plain
+# `npm install openrappter`.
+RING_ORDER="canary nightly alpha beta stable"
+CHANNEL="${OPENRAPPTER_CHANNEL:-}"
+CHANNEL_FILE="${INSTALL_DIR}/channel"
+
+# OPENRAPPTER_BETA predates rings and used to resolve a `beta` dist-tag that
+# nothing ever published, so it silently failed. Keep it working as an alias.
+if [[ -z "$CHANNEL" && "${OPENRAPPTER_BETA:-0}" == "1" ]]; then
+    CHANNEL="beta"
+fi
+
+# Map a ring to its npm PACKAGE. Each prerelease ring ships as its own package,
+# so nothing a ring publishes can ever be served to `npm install openrappter`.
+# Production is unreachable from ring work rather than merely guarded.
+ring_package() {
+    case "$1" in
+        canary|nightly|alpha|beta) printf '%s-%s\n' "$NPM_PACKAGE" "$1" ;;
+        stable)                    printf '%s\n' "$NPM_PACKAGE" ;;
+        *)                         return 1 ;;
+    esac
+}
+
+is_valid_ring() {
+    local candidate="$1" ring
+    for ring in $RING_ORDER; do
+        [[ "$ring" == "$candidate" ]] && return 0
+    done
+    return 1
+}
+
+# Ring precedence: --channel/env > previously installed channel > stable.
+# Prints the ring; returns 1 if the requested ring is invalid. It must not
+# call `exit` — callers invoke it inside $( ), where exit would only kill the
+# subshell and leave the caller building a malformed package spec.
+effective_channel() {
+    if [[ -n "$CHANNEL" ]]; then
+        is_valid_ring "$CHANNEL" || return 1
+        printf '%s\n' "$CHANNEL"
+        return 0
+    fi
+    if [[ -r "$CHANNEL_FILE" ]]; then
+        local saved
+        saved="$(tr -d '[:space:]' < "$CHANNEL_FILE" 2>/dev/null || true)"
+        if [[ -n "$saved" ]] && is_valid_ring "$saved"; then
+            printf '%s\n' "$saved"
+            return 0
+        fi
+    fi
+    printf 'stable\n'
+}
+
+# Precedence: explicit OPENRAPPTER_VERSION > ring package > production.
+# The version pin applies WITHIN the selected ring's package, so pinning a
+# version on a prerelease ring still cannot pull from production.
+resolve_pkg_spec() {
+    local ring pkg
+    if ! ring="$(effective_channel)"; then
+        ui_error "Unknown release ring: ${CHANNEL:-<empty>}"
+        ui_error "Valid rings: ${RING_ORDER// /, }"
+        return 2
+    fi
+    pkg="$(ring_package "$ring")" || return 2
+
+    if [[ -n "${OPENRAPPTER_VERSION:-}" ]]; then
+        printf '%s@%s\n' "$pkg" "$OPENRAPPTER_VERSION"
+        return 0
+    fi
+    printf '%s@latest\n' "$pkg"
+}
+
+# Remember the ring so `openrappter` upgrades stay on the same train car.
+persist_channel() {
+    local ring
+    ring="$(effective_channel)"
+    [[ "${DRY_RUN:-0}" == "1" ]] && return 0
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 0
+    printf '%s\n' "$ring" > "$CHANNEL_FILE" 2>/dev/null || true
+}
+
 print_usage() {
     cat <<EOF
 OpenRappter installer (macOS + Linux)
@@ -639,6 +730,10 @@ Usage:
 
 Options:
   --method npm|git                   Install method (default: npm)
+  --channel <ring>                   Release ring: canary|nightly|alpha|beta|stable
+                                     Each ring is a separate npm package
+                                     (openrappter-<ring>); only stable installs
+                                     openrappter itself. Remembered across upgrades.
   --dir <path>                       Install directory for git method (default: ~/.openrappter)
   --dry-run                          Print what would happen (no changes)
   --verbose                          Print debug output
@@ -653,8 +748,9 @@ Options:
 Environment variables:
   OPENRAPPTER_HOME=...              Install directory (default: ~/.openrappter)
   OPENRAPPTER_INSTALL_METHOD=npm|git Install method override
-  OPENRAPPTER_VERSION=1.4.0         Pin specific version (npm method)
-  OPENRAPPTER_BETA=1                Install @beta tag (npm method)
+  OPENRAPPTER_VERSION=1.4.0         Pin exact version (npm method; wins over --channel)
+  OPENRAPPTER_CHANNEL=beta          Release ring (same values as --channel)
+  OPENRAPPTER_BETA=1                Deprecated alias for OPENRAPPTER_CHANNEL=beta
   OPENRAPPTER_NO_PROMPT=true        Non-interactive mode
   OPENRAPPTER_DRY_RUN=1             Dry run mode
   OPENRAPPTER_VERBOSE=1             Verbose output
@@ -674,6 +770,15 @@ parse_args() {
         case "$1" in
             --method)
                 INSTALL_METHOD="$2"
+                shift 2
+                ;;
+            --channel|--ring)
+                CHANNEL="${2:-}"
+                if ! is_valid_ring "$CHANNEL"; then
+                    ui_error "Unknown release ring: ${CHANNEL:-<empty>}"
+                    ui_error "Valid rings: ${RING_ORDER// /, }"
+                    exit 2
+                fi
                 shift 2
                 ;;
             --no-prompt)
@@ -1313,13 +1418,12 @@ ensure_build_tools() {
 install_via_npm() {
     ui_info "Installing openrappter via npm (global)"
 
-    # Determine version spec
-    local pkg_spec="$NPM_PACKAGE"
-    if [[ -n "${OPENRAPPTER_VERSION:-}" ]]; then
-        pkg_spec="${NPM_PACKAGE}@${OPENRAPPTER_VERSION}"
-    elif [[ "${OPENRAPPTER_BETA:-0}" == "1" ]]; then
-        pkg_spec="${NPM_PACKAGE}@beta"
-    fi
+    # Determine version spec.
+    # Precedence: explicit version > ring/channel dist-tag > stable (latest).
+    local pkg_spec ring
+    pkg_spec="$(resolve_pkg_spec)" || exit 2
+    ring="$(effective_channel)"
+    ui_info "Release ring: ${ring} → ${pkg_spec}"
 
     # Fix npm prefix if needed (Linux EACCES)
     if [[ "$OPT_SET_NPM_PREFIX" == "true" ]]; then
@@ -1345,6 +1449,7 @@ install_via_npm() {
         fi
     fi
 
+    persist_channel
     refresh_shell_command_cache
 
     # Verify binary is on PATH

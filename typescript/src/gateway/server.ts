@@ -376,6 +376,20 @@ export class GatewayServer {
       res.end(JSON.stringify(this.getStatus()));
       return;
     }
+    // Voice UI — served same-origin so it can reach this gateway over WebSocket.
+    if ((req.url === '/vui' || req.url === '/vui/' || req.url === '/vui/index.html') && req.method === 'GET') {
+      const vuiPath = path.join(os.homedir(), '.openrappter', 'vui', 'index.html');
+      fs.readFile(vuiPath, (err, data) => {
+        if (err) {
+          res.writeHead(404, { 'Content-Type': 'text/plain', ...corsHeaders });
+          res.end('Voice UI not installed. Expected at ~/.openrappter/vui/index.html');
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders });
+        res.end(data);
+      });
+      return;
+    }
 
     // JSON-RPC over HTTP POST — allows browser games and local apps to call the gateway
     if (req.method === 'POST') {
@@ -993,11 +1007,16 @@ export class GatewayServer {
       // Send final response only (no streaming deltas — avoids duplication from multi-turn tool-call loops)
       const raw = result.content || '';
       const { text: finalText, voiceText } = parseVoiceDelimiter(raw);
+      // Forward modality senses (|||HOLO|||, etc.) so surfaces like the Voice UI
+      // can render a creature/visual from the same reply.
+      const allSenses = parseSenses(raw).senses;
       this.broadcastEvent(GatewayEvents.CHAT, {
         runId, sessionKey,
         state: 'final',
         message: finalText ? { role: 'assistant', content: [{ type: 'text', text: finalText }], timestamp: Date.now() } : undefined,
         voiceText: voiceText || undefined,
+        holo: allSenses.holo || undefined,
+        senses: Object.keys(allSenses).length ? allSenses : undefined,
       });
 
       // Store assistant message

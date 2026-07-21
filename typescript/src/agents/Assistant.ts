@@ -12,7 +12,7 @@
  */
 
 import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
-import { CopilotCliProvider } from '../providers/copilot-cli.js';
+import { CopilotCliDirectProvider } from '../providers/copilot-cli-direct.js';
 import { truncateHistory } from '../providers/messages.js';
 import type { LLMProvider, Message, Tool, ToolCall } from '../providers/types.js';
 import type { BasicAgent } from './BasicAgent.js';
@@ -86,7 +86,7 @@ export class Assistant {
       // Prefer the GitHub Copilot CLI when explicitly selected: it owns its own
       // auth + refresh, so openrappter never runs the flaky device-code flow.
       (process.env.OPENRAPPTER_AI_BACKEND === 'copilot-cli'
-        ? new CopilotCliProvider({ model: this.config.model })
+        ? new CopilotCliDirectProvider({ model: this.config.model })
         : new CopilotProvider({
             githubToken: config?.githubToken,
           }));

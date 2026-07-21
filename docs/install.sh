@@ -482,6 +482,15 @@ show_install_plan() {
     ui_section "Install plan"
     ui_kv "OS" "$OS"
     ui_kv "Method" "${INSTALL_METHOD:-auto}"
+    # Surface the ring here so a dry run can preview which train car it would
+    # install from; the npm stage is never reached under --dry-run.
+    if [[ "$INSTALL_METHOD" != "git" ]]; then
+        local plan_ring plan_spec
+        if plan_ring="$(effective_channel)" && plan_spec="$(resolve_pkg_spec)"; then
+            ui_kv "Release ring" "${plan_ring}"
+            ui_kv "Package" "${plan_spec}"
+        fi
+    fi
     if [[ "$INSTALL_METHOD" == "git" ]]; then
         ui_kv "Install directory" "$INSTALL_DIR"
     fi

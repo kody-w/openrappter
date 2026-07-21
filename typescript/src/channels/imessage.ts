@@ -601,14 +601,15 @@ export class IMessageChannel extends EventEmitter {
       const query = `
         SELECT m.rowid, COALESCE(m.text, '') as text, m.is_from_me, c.chat_identifier,
                COALESCE(h.id, '') as sender_id, c.display_name, c.style,
-               (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.rowid) as attach_count
+               (SELECT COUNT(*) FROM message_attachment_join maj WHERE maj.message_id = m.rowid) as attach_count,
+               COALESCE(hex(m.attributedBody), '') as ab_hex
         FROM message m
         JOIN chat_message_join cmj ON cmj.message_id = m.rowid
         JOIN chat c ON c.rowid = cmj.chat_id
         LEFT JOIN handle h ON m.handle_id = h.rowid
         WHERE m.rowid > ${this.lastMessageRowId}
           AND (${chatFilter})
-          AND (m.text IS NOT NULL AND m.text != '' OR EXISTS (SELECT 1 FROM message_attachment_join maj WHERE maj.message_id = m.rowid))
+          AND (m.text IS NOT NULL AND m.text != '' OR m.attributedBody IS NOT NULL OR EXISTS (SELECT 1 FROM message_attachment_join maj WHERE maj.message_id = m.rowid))
         ORDER BY m.rowid ASC
         LIMIT 20
       `.replace(/\n/g, ' ');
@@ -625,14 +626,20 @@ export class IMessageChannel extends EventEmitter {
         const parts = line.split('|||');
         if (parts.length < 5) continue;
 
-        const [rowIdStr, rawContent, isFromMeStr, chatIdentifier, senderId, displayName, styleStr, attachCountStr] = parts;
+        const [rowIdStr, rawContent, isFromMeStr, chatIdentifier, senderId, displayName, styleStr, attachCountStr, abHex] = parts;
         const rowId = parseInt(rowIdStr, 10);
         const isFromMe = isFromMeStr === '1';
         const isGroupChat = styleStr === '43' || watchGroups.includes(chatIdentifier);
         const attachCount = parseInt(attachCountStr || '0', 10);
 
-        // Build content: use text if available, otherwise describe the attachment
+        // Build content: prefer the plain text column. On macOS 26 (Tahoe) that
+        // column is usually NULL and the message body lives only in the
+        // attributedBody typedstream blob — decode it so the poller isn't deaf.
         let content = rawContent || '';
+        if (!content && abHex) {
+          const decoded = this.decodeAttributedBody(abHex);
+          if (decoded) content = decoded;
+        }
         if (!content && attachCount > 0) {
           content = `[Sent ${attachCount} image${attachCount > 1 ? 's' : ''}/attachment${attachCount > 1 ? 's' : ''}]`;
         }
@@ -699,6 +706,62 @@ export class IMessageChannel extends EventEmitter {
     } catch (error) {
       console.debug('iMessage sqlite poll error:', (error as Error).message);
     }
+  }
+
+  /**
+   * Decode the plain text out of a Messages `attributedBody` typedstream blob.
+   *
+   * On macOS 26 (Tahoe) the `message.text` column is frequently NULL and the
+   * body is stored only in `attributedBody` (an NSAttributedString archived in
+   * Apple's legacy `streamtyped` format). The string is stored as an NSString:
+   * after the class name the stream carries a `+` (0x2B, "bytes follow") type
+   * marker, a length prefix, then the UTF-8 bytes. Length prefix encoding:
+   *   - single byte < 0x80        → that byte is the length
+   *   - 0x81 <u16-le>             → 2-byte length
+   *   - 0x82 <u32-le>             → 4-byte length
+   *
+   * @param hex uppercase hex string of the attributedBody blob (from `hex()`)
+   * @returns the decoded message text, or '' if it can't be recovered
+   */
+  private decodeAttributedBody(hex: string): string {
+    if (!hex) return '';
+    let data: Buffer;
+    try {
+      data = Buffer.from(hex, 'hex');
+    } catch {
+      return '';
+    }
+    const marker = data.indexOf('NSString', 0, 'latin1');
+    if (marker === -1) return '';
+    const afterName = marker + 'NSString'.length;
+
+    // The length prefix sits just past a `+` type marker a few bytes after the
+    // class name. Find that `+` within a small window; fall back to afterName.
+    let plus = data.indexOf(0x2b, afterName);
+    if (plus === -1 || plus - afterName > 12) plus = afterName;
+    let q = plus + 1;
+    if (q >= data.length) return '';
+
+    let length: number;
+    const b0 = data[q];
+    if (b0 === 0x81) {
+      if (q + 3 > data.length) return '';
+      length = data.readUInt16LE(q + 1);
+      q += 3;
+    } else if (b0 === 0x82) {
+      if (q + 5 > data.length) return '';
+      length = data.readUInt32LE(q + 1);
+      q += 5;
+    } else {
+      length = b0;
+      q += 1;
+    }
+
+    if (length <= 0) return '';
+    if (q + length > data.length) length = data.length - q; // guard corrupt length
+    if (length <= 0) return '';
+
+    return data.subarray(q, q + length).toString('utf8');
   }
 
   /**

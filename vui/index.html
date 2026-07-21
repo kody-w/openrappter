@@ -159,70 +159,143 @@
 const $ = (id) => document.getElementById(id);
 const GATEWAY = `ws://${location.hostname || '127.0.0.1'}:18790`;
 
-// ── HOLO creature (rapp-go fauna, imported canonical so creatures match everywhere) ──
-const FAUNA_BASE = 'https://kody-w.github.io/rapp-static-apis/rapp-go/lib';
-let fauna = null, genomeLib = null, creatureStop = null;
-
-async function loadFauna(){
-  try{
-    [fauna, genomeLib] = await Promise.all([
-      import(`${FAUNA_BASE}/fauna.js`),
-      import(`${FAUNA_BASE}/genome.js`),
-    ]);
-    return true;
-  }catch(e){ console.warn('fauna load failed, using emoji rappter', e); return false; }
+// ── The Rappter — openrappter's OWN creature (custom model + animation) ─────────
+// A hand-built raptor rendered on canvas, alive and reactive to listening/speaking.
+// Not a generic fauna species — its own look. The rapp-go-compatible genome is
+// kept ONLY for the .egg export (so an egg still imports into rapp-go); the
+// on-screen creature is entirely openrappter's own.
+let genomeLib = null, rappter = null, rapGenome = null;
+async function ensureGenomeLib(){
+  if(genomeLib) return genomeLib;
+  try{ genomeLib = await import('https://kody-w.github.io/rapp-static-apis/rapp-go/lib/genome.js'); }catch{ genomeLib = null; }
+  return genomeLib;
+}
+// A rappter-flavoured rapp-go genome, only used to mint a verifiable .egg.
+async function rappterGenome(){
+  if(rapGenome) return rapGenome;
+  const G = await ensureGenomeLib(); if(!G) return null;
+  const genome = G.momentToGenome({ temp:20, weathercode:0, wind:36, isDay:1 });
+  const surf = genome.layers.find(l=>l.role==='surface'); if(surf){ surf.palette=['#44cc88','#22aaff','#7cf0b4']; surf.pattern='stripe'; surf.glow=0.6; }
+  rapGenome = { genome, id: await G.genomeId(genome) };
+  return rapGenome;
 }
 
-// Build a RAPPTER: a green, legged `strider` (the dino family). We seed-search a
-// genome whose species derives to strider so the default always reads as a rappter.
-async function makeRappterCart(seedTag='rappter'){
-  if(!fauna || !genomeLib) return null;
-  // rappter genome: warm-ish temp → green palette, wind>30 → 4 limbs, clear → glow
-  const base = genomeLib.momentToGenome({ temp:20, weathercode:0, wind:36, isDay:1 });
-  // Force the rappter-green identity palette regardless of derivation.
-  const surf = base.layers.find(l=>l.role==='surface'); if(surf){ surf.palette=['#44cc88','#22aaff','#7cf0b4']; surf.pattern='stripe'; surf.glow=0.6; }
-  for(let i=0;i<24;i++){
-    const genome = JSON.parse(JSON.stringify(base));
-    const id = await genomeLib.genomeId(genome);
-    const cart = { genome, id, key:id, rarity:'uncommon', source:'vui',
-      born:{ coord:'9q8yy'+ (i.toString(36)), t: 0 }, lat:37.77, lng:-122.41 };
-    try{
-      const sp = fauna.speciesOf(cart);
-      if(sp && (sp.family==='strider' || (i===23))){ cart.species = sp; cart._family = sp.family; return cart; }
-    }catch(e){ /* try next seed */ }
+const RAP = { skin:'#3fbf80', skinDk:'#238a5b', skinLt:'#7cf0b4', belly:'#bff7d8',
+              accent:'#26b6ff', tooth:'#f4fff8', eyeW:'#eafffb', eyeI:'#0a2a24' };
+
+class Rappter {
+  constructor(canvas){
+    this.cv=canvas; this.g=canvas.getContext('2d'); this.W=canvas.width; this.H=canvas.height;
+    this.t=0; this.raf=null; this.state='idle';
+    this.jaw=0; this.jawT=0; this.blink=0; this.blinkAt=1.4;
+    this.tilt=0; this.tiltT=0; this.glow=0.4; this.glowT=0.4; this.look=0; this.lookT=0;
   }
-  return null;
-}
-
-let currentCart = null;
-async function renderCreature(cart){
-  const canvas = $('holo'); const fb = $('holoFallback');
-  if(creatureStop){ try{creatureStop();}catch{} creatureStop=null; }
-  if(!cart || !fauna){ canvas.style.display='none'; fb.style.display='grid'; $('creatureName').textContent='rappter'; return; }
-  try{
-    canvas.style.display='block'; fb.style.display='none';
-    const ret = fauna.renderLoop(cart, canvas, { pose:'idle', spin:true, bg:'transparent' });
-    creatureStop = (typeof ret==='function') ? ret : (ret && ret.stop) ? ()=>ret.stop() : null;
-    $('creatureName').textContent = 'rappter · ' + (cart._family || (cart.species&&cart.species.family) || 'strider');
-    currentCart = cart;
-  }catch(e){
-    console.warn('renderLoop failed → emoji rappter', e);
-    canvas.style.display='none'; fb.style.display='grid';
+  setState(s){
+    this.state=s;
+    this.tiltT = s==='listening'?-0.15 : s==='thinking'?-0.07 : 0;
+    this.glowT = (s==='speaking'||s==='listening')?0.95:0.4;
+    this.lookT = s==='listening'?0.6 : s==='thinking'?-0.5 : 0;
   }
-}
+  start(){ if(this.raf) return; const loop=()=>{ this.step(); try{this.draw();}catch(e){} this.raf=requestAnimationFrame(loop); }; this.raf=requestAnimationFrame(loop); if($('creatureName')) $('creatureName').textContent='rappter'; }
+  stop(){ if(this.raf){ cancelAnimationFrame(this.raf); this.raf=null; } }
+  step(){
+    const dt=1/60; this.t+=dt;
+    this.tilt+=(this.tiltT-this.tilt)*0.08; this.glow+=(this.glowT-this.glow)*0.06; this.look+=(this.lookT-this.look)*0.08;
+    this.blinkAt-=dt;
+    if(this.blinkAt<=0){ this.blink=Math.min(1,this.blink+0.28); if(this.blinkAt<-0.12){ this.blink=0; this.blinkAt=1.6+Math.random()*3.4; } }
+    else if(this.blink>0) this.blink=Math.max(0,this.blink-0.28);
+    this.jawT = this.state==='speaking' ? Math.max(0,Math.min(1, 0.5+0.42*Math.sin(this.t*12.5)+0.16*Math.sin(this.t*25.7+1))) : 0;
+    this.jaw += (this.jawT-this.jaw)*0.4;
+  }
+  draw(){
+    const g=this.g, W=this.W, H=this.H; g.clearRect(0,0,W,H);
+    const breathe = 1 + Math.sin(this.t*1.6)*0.022;
+    const bob = Math.sin(this.t*1.6)*4 + (this.state==='speaking'?Math.sin(this.t*7.5)*3:0);
+    const tail = Math.sin(this.t*1.1)*(this.state==='idle'?0.13:0.22)+Math.sin(this.t*2.4)*0.04;
+    g.save(); g.translate(W*0.5, H*0.56); const Sc=(W/512)*1.0; g.scale(Sc,Sc);
 
-// A |||HOLO||| sense may carry a creature descriptor (genome / genomeId / family).
-async function creatureFromHolo(holoText){
-  if(!fauna || !genomeLib) return null;
-  try{
-    const desc = JSON.parse(holoText);
-    let genome = desc.genome || (desc.layers ? desc : genomeLib.momentToGenome(desc.moment || { temp:18, weathercode:0, wind:20, isDay:1 }));
-    const id = desc.id || await genomeLib.genomeId(genome);
-    const cart = { genome, id, key:id, rarity:desc.rarity||'uncommon', source:'holo',
-      born:{ coord: desc.coord || '9q8yy', t:0 }, lat:37.77, lng:-122.41 };
-    cart.species = fauna.speciesOf(cart); cart._family = cart.species.family;
-    return cart;
-  }catch(e){ return null; }  // not JSON → keep current creature
+    // ambient glow + listening ring + shadow
+    let ag=g.createRadialGradient(0,-10,20,0,-10,235);
+    ag.addColorStop(0,`rgba(68,204,136,${0.09+this.glow*0.15})`); ag.addColorStop(1,'rgba(68,204,136,0)');
+    g.fillStyle=ag; g.beginPath(); g.arc(0,-10,235,0,7); g.fill();
+    if(this.state==='listening'){ const r=158+Math.sin(this.t*3)*7; g.strokeStyle=`rgba(124,240,180,${0.3+Math.sin(this.t*3)*0.15})`; g.lineWidth=2; g.beginPath(); g.arc(0,-6,r,0,7); g.stroke(); }
+    g.fillStyle='rgba(0,0,0,0.26)'; g.beginPath(); g.ellipse(6,150,118,18,0,0,7); g.fill();
+
+    // TAIL
+    g.save(); g.translate(-86,20); g.rotate(tail);
+    let tg=g.createLinearGradient(-180,0,0,0); tg.addColorStop(0,RAP.skinDk); tg.addColorStop(1,RAP.skin); g.fillStyle=tg;
+    g.beginPath(); g.moveTo(8,-24); g.bezierCurveTo(-60,-34,-130,-28,-182,0); g.bezierCurveTo(-128,-4,-64,16,8,24); g.closePath(); g.fill();
+    g.fillStyle=RAP.accent; for(let i=0;i<4;i++){ const x=-36-i*34,y=-26+i*6; g.beginPath(); g.moveTo(x,y); g.lineTo(x-8,y-15); g.lineTo(x+9,y-12); g.closePath(); g.fill(); }
+    g.restore();
+
+    // FAR LEG (behind)
+    g.fillStyle=RAP.skinDk;
+    g.beginPath(); g.ellipse(-34,62,26,38,0.05,0,7); g.fill();
+    g.save(); g.translate(-30,92); g.rotate(0.12); g.beginPath(); g.moveTo(-9,0); g.lineTo(9,0); g.lineTo(6,52); g.lineTo(-8,52); g.closePath(); g.fill(); g.restore();
+    g.beginPath(); g.moveTo(-52,150); g.quadraticCurveTo(-30,138,-6,145); g.lineTo(-8,151); g.closePath(); g.fill();
+
+    // BODY
+    g.save(); g.translate(-6,6); g.scale(1,breathe);
+    let bg=g.createLinearGradient(0,-70,0,72); bg.addColorStop(0,RAP.skinLt); bg.addColorStop(0.45,RAP.skin); bg.addColorStop(1,RAP.skinDk);
+    g.fillStyle=bg; g.beginPath(); g.ellipse(-8,4,98,74,-0.08,0,7); g.fill();
+    g.fillStyle=RAP.belly; g.globalAlpha=0.85; g.beginPath(); g.ellipse(2,34,52,40,-0.05,0,7); g.fill(); g.globalAlpha=1;
+    g.restore();
+
+    // BACK SPIKES
+    g.fillStyle=RAP.accent;
+    for(let i=0;i<5;i++){ const p=i/4, x=-70+p*118, y=-58-Math.sin(p*Math.PI)*18; g.save(); g.translate(x,y); g.rotate(-0.5+p*0.9); g.beginPath(); g.moveTo(0,0); g.lineTo(-7,-20-(i%2)*4); g.lineTo(8,-14); g.closePath(); g.fill(); g.restore(); }
+
+    // NEAR LEG
+    g.fillStyle=RAP.skin;
+    g.beginPath(); g.ellipse(18,66,30,42,-0.05,0,7); g.fill();
+    g.save(); g.translate(24,98); g.rotate(-0.06); g.beginPath(); g.moveTo(-10,0); g.lineTo(11,0); g.lineTo(8,50); g.lineTo(-8,50); g.closePath(); g.fill(); g.restore();
+    g.fillStyle=RAP.skinDk; g.beginPath(); g.moveTo(2,151); g.quadraticCurveTo(30,137,58,146); g.lineTo(52,152); g.quadraticCurveTo(28,148,4,152); g.closePath(); g.fill();
+
+    // ARM
+    g.save(); g.translate(46,6); g.rotate(0.5+Math.sin(this.t*1.6)*0.05); g.fillStyle=RAP.skin;
+    g.beginPath(); g.moveTo(0,0); g.quadraticCurveTo(18,8,24,30); g.lineTo(16,34); g.quadraticCurveTo(10,14,-4,8); g.closePath(); g.fill();
+    g.fillStyle=RAP.tooth; g.beginPath(); g.moveTo(22,30); g.lineTo(30,36); g.lineTo(22,37); g.closePath(); g.fill(); g.restore();
+
+    // NECK
+    g.fillStyle=RAP.skin;
+    g.beginPath(); g.moveTo(40,-30); g.quadraticCurveTo(58,-78,86,-96); g.quadraticCurveTo(104,-78,86,-46); g.quadraticCurveTo(66,-24,40,-30); g.closePath(); g.fill();
+
+    // HEAD (focal point)
+    g.save(); g.translate(96,-104+bob); g.rotate(this.tilt);
+    let hg=g.createLinearGradient(0,-40,0,30); hg.addColorStop(0,RAP.skinLt); hg.addColorStop(1,RAP.skin); g.fillStyle=hg;
+    g.beginPath();
+    g.moveTo(-30,-6);
+    g.bezierCurveTo(-30,-34,10,-40,30,-30);
+    g.bezierCurveTo(60,-24,84,-16,92,-6);
+    g.lineTo(90,4);
+    g.bezierCurveTo(70,2,44,2,20,4);
+    g.bezierCurveTo(-6,6,-24,10,-30,-6);
+    g.closePath(); g.fill();
+    g.fillStyle=RAP.tooth; for(let i=0;i<4;i++){ const x=30+i*15; g.beginPath(); g.moveTo(x,4); g.lineTo(x+6,4); g.lineTo(x+3,12); g.closePath(); g.fill(); }
+    // lower jaw (opens)
+    g.save(); g.translate(18,4); g.rotate(this.jaw*0.4);
+    g.fillStyle=RAP.skinDk; g.beginPath(); g.moveTo(-8,0); g.bezierCurveTo(30,6,58,8,72,12); g.lineTo(70,20); g.bezierCurveTo(44,22,10,20,-6,14); g.closePath(); g.fill();
+    g.fillStyle=RAP.tooth; for(let i=0;i<3;i++){ const x=20+i*16; g.beginPath(); g.moveTo(x,8); g.lineTo(x+6,8); g.lineTo(x+3,2); g.closePath(); g.fill(); }
+    g.restore();
+    // nostril + brow
+    g.fillStyle=RAP.skinDk; g.beginPath(); g.ellipse(80,-8,3.4,2.4,0,0,7); g.fill();
+    g.beginPath(); g.moveTo(-6,-28); g.quadraticCurveTo(14,-40,30,-30); g.quadraticCurveTo(14,-30,-6,-22); g.closePath(); g.fill();
+    // eye
+    const eh = 1-this.blink;
+    g.save(); g.translate(8,-20);
+    g.fillStyle=RAP.eyeW; g.beginPath(); g.ellipse(0,0,13,13*eh+0.5,0,0,7); g.fill();
+    if(eh>0.2){
+      g.fillStyle=RAP.accent; g.beginPath(); g.ellipse(3+this.look*4,0,7,7*eh,0,0,7); g.fill();
+      g.fillStyle=RAP.eyeI; g.beginPath(); g.ellipse(4+this.look*4,0,3.4,3.4*eh,0,0,7); g.fill();
+      g.fillStyle='#fff'; g.beginPath(); g.ellipse(1+this.look*4,-3,2,2*eh,0,0,7); g.fill();
+    }
+    g.restore();
+    // head frill
+    g.fillStyle=RAP.accent; for(let i=0;i<3;i++){ g.save(); g.translate(-24-i*2,-18+i*10); g.rotate(-0.8-i*0.25); g.beginPath(); g.moveTo(0,0); g.lineTo(-24,-5); g.lineTo(-6,8); g.closePath(); g.fill(); g.restore(); }
+    g.restore(); // head
+
+    g.restore(); // world
+  }
 }
 
 // ── openrappter gateway (connect handshake → chat.send → chat events) ──────────
@@ -277,14 +350,16 @@ function clearPartial(){ if(partialEl){ partialEl.remove(); partialEl=null; } }
 function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 const wrap=$('holo-wrap');
-function setSpeaking(on){ wrap.classList.toggle('speaking', on); }
-function setListening(on){ wrap.classList.toggle('listening', on); }
-function setThinking(on){ $('connText').textContent = on ? 'thinking…' : 'rappter online'; }
+let _spk=false, _lsn=false, _thk=false;
+function _rapState(){ if(rappter) rappter.setState(_spk?'speaking':_thk?'thinking':_lsn?'listening':'idle'); }
+function setSpeaking(on){ _spk=on; wrap.classList.toggle('speaking', on); _rapState(); }
+function setListening(on){ _lsn=on; wrap.classList.toggle('listening', on); _rapState(); }
+function setThinking(on){ _thk=on; $('connText').textContent = on ? 'thinking…' : 'rappter online'; _rapState(); }
 
 async function onReply(fullText, voiceText, holo){
   setThinking(false);
   addMsg('rap', fullText || voiceText);
-  if(holo){ const c = await creatureFromHolo(holo); if(c) renderCreature(c); }
+  // (|||HOLO||| senses can tune the creature's mood later; the rappter is always shown)
   speak(voiceText);
 }
 
@@ -393,11 +468,13 @@ function eggPayloadOf(cart){
            title: cart.title || 'a rappter', rarity: cart.rarity || 'uncommon', source: 'openrappter-vui' };
 }
 function currentEgg(){
-  if(!currentCart || !genomeLib) return null;
-  const b64 = genomeLib.b64enc(JSON.stringify(eggPayloadOf(currentCart)));
-  return { b64, link: RAPPGO_URL + '#egg=' + b64, id: currentCart.id };
+  if(!rapGenome || !genomeLib) return null;
+  const cart = { genome: rapGenome.genome, id: rapGenome.id, born:{coord:'9q8yy',t:0}, title:'a rappter', rarity:'uncommon' };
+  const b64 = genomeLib.b64enc(JSON.stringify(eggPayloadOf(cart)));
+  return { b64, link: RAPPGO_URL + '#egg=' + b64, id: rapGenome.id };
 }
-$('eggBtn').addEventListener('click', ()=>{
+$('eggBtn').addEventListener('click', async ()=>{
+  await rappterGenome();
   const egg = currentEgg();
   if(!egg){ addMsg('rap','No creature to export yet — the rappter is still hatching.'); return; }
   // 1) download the .egg file (raw canonical b64 — what rapp·go's #egg= expects)
@@ -435,9 +512,14 @@ function finishOnboard(){
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (async function boot(){
   connect();
-  const ok = await loadFauna();
-  if(ok){ const cart = await makeRappterCart(); await renderCreature(cart); }
-  else { $('holo').style.display='none'; $('holoFallback').style.display='grid'; }
+  try{
+    rappter = new Rappter($('holo'));
+    rappter.start();
+    $('holoFallback').style.display='none';
+    rappterGenome();            // warm up the .egg genome in the background
+  }catch(e){
+    $('holo').style.display='none'; $('holoFallback').style.display='grid';
+  }
 })();
 </script>
 </body>

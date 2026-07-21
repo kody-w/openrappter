@@ -1743,6 +1743,16 @@ program
     await launchBar(options);
   });
 
+// Flight command — report which release-train ring this installed build is.
+// Lets a tester confirm at a glance whether they are on a pre-release flight.
+program
+  .command('flight')
+  .description('Show which release ring (canary/nightly/alpha/beta/stable) this build is')
+  .action(async () => {
+    const { renderFlight } = await import('./flight.js');
+    console.log(renderFlight());
+  });
+
 // Channel command — release channel switching (stable / experimental)
 const channelCmd = program
   .command('channel')

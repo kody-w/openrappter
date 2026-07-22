@@ -1415,6 +1415,10 @@ export class GatewayServer {
    * dispatch path.
    */
   private resolveHttpAuthenticated(req: IncomingMessage, body?: Record<string, unknown>): boolean {
+    // Same-machine (loopback) callers — e.g. the local Voice UI served at /vui —
+    // are trusted; the gateway binds to localhost only.
+    const ra = req.socket?.remoteAddress || '';
+    if (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') return true;
     const credential = this.extractHttpAuthCredential(req, body);
     return this.isAuthCredentialValid(credential);
   }

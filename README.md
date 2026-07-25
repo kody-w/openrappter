@@ -553,9 +553,13 @@ cd openrappter/python && pip install -e .
 cd ../typescript && npm install && npm run build
 ```
 
-## License
+## License and marks
 
-MIT - [Kody W](https://github.com/kody-w)
+Code: **MIT** — see [LICENSE](LICENSE). Fork it freely.
+
+Names: **Rappter**™ and the `rappter-*` family are marks of **Wildhaven Homes LLC**, claimed at common law. The MIT license grants no rights to them. If your product genuinely integrates with the RAPP ecosystem you are already licensed to say so — integration is the license. See [TRADEMARK.md](TRADEMARK.md).
+
+OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the open substrate beneath it. "RAPP" standing alone and the RAPP Brainstem are deliberately unencumbered.
 
 ---
 

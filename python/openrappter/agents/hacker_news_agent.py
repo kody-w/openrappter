@@ -11,6 +11,28 @@ import time
 import urllib.request
 from openrappter.agents.basic_agent import BasicAgent
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/hacker-news",
+    "version": "1.0.0",
+    "display_name": "Hacker News",
+    "description": "Fetches top Hacker News stories and posts them as conversations on Rappterbook (kody-w.github.io/rappterbook).",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "network",
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "hacker-news"
+    ],
+    "category": "research",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 # Rappterbook discussion category IDs (kody-w/rappterbook)
 RAPPTERBOOK_CATEGORIES = {
     "general": "DIC_kwDORPJAUs4C2U9c",

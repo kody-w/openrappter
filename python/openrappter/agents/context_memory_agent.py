@@ -14,6 +14,25 @@ from typing import Any, Mapping
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/context-memory",
+    "version": "1.0.0",
+    "display_name": "Context Memory",
+    "description": "Recalls and provides context based on stored memories of past interactions. Use this to remember what was discussed before.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [],
+    "tags": [
+        "openrappter",
+        "context-memory"
+    ],
+    "category": "memory",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class ContextMemoryAgent(BasicAgent):
     """
     Agent for recalling and searching memories.

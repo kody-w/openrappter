@@ -40,6 +40,30 @@ from typing import Any, Optional
 
 from openrappter.agents.basic_agent import BasicAgent
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/pokemon",
+    "version": "1.0.0",
+    "display_name": "Pokemon",
+    "description": "Let GitHub Copilot play a local Pokemon Red ROM through PyBoy. Starts a live localhost viewer, records rotating MP4 clips, and supports status, pause, resume, checkpoint, manual button, view, and stop actions.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "credential-access",
+        "filesystem-write",
+        "network",
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "pokemon"
+    ],
+    "category": "showcase",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - OpenRappter's Pokemon runtime targets Unix/macOS

@@ -20,6 +20,27 @@ from urllib.parse import urlparse, quote
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/web",
+    "version": "1.0.0",
+    "display_name": "Web",
+    "description": "Fetch web pages and search the web. Includes SSRF protection to prevent access to private networks.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "network"
+    ],
+    "tags": [
+        "openrappter",
+        "web"
+    ],
+    "category": "research",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class WebAgent(BasicAgent):
     def __init__(self):
         self.name = 'Web'

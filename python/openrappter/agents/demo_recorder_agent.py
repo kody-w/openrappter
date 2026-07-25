@@ -6,7 +6,36 @@ import time
 from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
-from openrappter.agents.computer_use_agent import ComputerUseAgent
+
+try:
+    from openrappter.agents.computer_use_agent import ComputerUseAgent
+except ModuleNotFoundError:
+    # The brainstem loads single-file agents in isolation. Keep this file
+    # loadable on its own; recording actions fail closed when the sibling
+    # agent is not present. Same pattern as shell_agent's exec_safety guard.
+    ComputerUseAgent = None
+
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/demo-recorder",
+    "version": "1.0.0",
+    "display_name": "Demo Recorder",
+    "description": "A guided tour of the RAPP Agent Repository",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "filesystem-write",
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "demo-recorder"
+    ],
+    "category": "media",
+    "quality_tier": "official",
+    "requires_env": []
+}
 
 RAR_DEMO_SCRIPT = {
     "name": "RAR Feature Walkthrough",

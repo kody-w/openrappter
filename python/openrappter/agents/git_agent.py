@@ -18,6 +18,27 @@ from datetime import datetime
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/git",
+    "version": "1.0.0",
+    "display_name": "Git",
+    "description": "Git repository operations. Status, diff, log, branch management, commits, and PR creation.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "git"
+    ],
+    "category": "devtools",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class GitAgent(BasicAgent):
     def __init__(self, cwd=None, exec_fn=None):
         self.name = 'Git'

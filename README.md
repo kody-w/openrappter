@@ -43,6 +43,25 @@ Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git
 
 ---
 
+## Built on RAPP
+
+OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the
+open, MIT-licensed substrate it stands on. That is checked, not just claimed:
+
+```bash
+python3 conformance.py     # 9 checks, proved against the code
+```
+
+Every agent is a single `*_agent.py` file carrying a `rapp-agent/1.0`
+`__manifest__` whose declared capabilities were **derived from its own syntax
+tree** — the same analysis an enterprise strain
+([rapp-light](https://github.com/kody-w/rapp-light)) runs at approval time. An
+agent that under-declares is refused there, so conformance here is what makes
+these agents adoptable by a governed deployment.
+
+Details: [`docs/RAPP.md`](docs/RAPP.md)
+
+
 ## Get Started — Let Your AI Agent Do It
 
 The fastest way to install and use openrappter is to hand [`skills.md`](./skills.md) to any AI agent. It contains everything an agent needs — prerequisites, installation, startup, configuration, and usage — in a single file.

@@ -26,6 +26,25 @@ from datetime import datetime
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/code-review",
+    "version": "1.0.0",
+    "display_name": "Code Review",
+    "description": "Deterministic heuristic code review agent. Checks for common quality issues like long lines, TODO comments, console.log usage, excessive any types, duplicate imports, and missing return types.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [],
+    "tags": [
+        "openrappter",
+        "code-review"
+    ],
+    "category": "devtools",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class CodeReviewAgent(BasicAgent):
     def __init__(self, max_line_length=120):
         self.name = 'CodeReview'

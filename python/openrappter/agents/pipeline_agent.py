@@ -21,6 +21,25 @@ from datetime import datetime
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/pipeline",
+    "version": "1.0.0",
+    "display_name": "Pipeline",
+    "description": "Declarative multi-agent pipeline runner. Chains agents sequentially with data_slush threading, parallel fan-out, conditional branching, and loop steps.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [],
+    "tags": [
+        "openrappter",
+        "pipeline"
+    ],
+    "category": "orchestration",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class PipelineAgent(BasicAgent):
     def __init__(self, agent_resolver=None):
         self.name = 'Pipeline'

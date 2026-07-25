@@ -7,6 +7,28 @@ from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/computer-use",
+    "version": "1.0.0",
+    "display_name": "Computer Use",
+    "description": "Controls the computer like a person \u2014 takes screenshots, moves the mouse, clicks, types, scrolls, and launches apps. Uses macOS native APIs (CoreGraphics, AppleScript, Accessibility).",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "filesystem-write",
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "computer-use"
+    ],
+    "category": "automation",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 MAX_NATIVE_INPUT = 1_000_000
 
 

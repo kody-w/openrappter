@@ -138,6 +138,7 @@ describe('Channel Parity', () => {
   describe('Slack Channel', () => {
     it('should connect with bot token', async () => {
       const config = {
+        // rapp-keyring: allow mock token fixture, not a real credential
         botToken: 'xoxb-mock-token',
         appToken: 'xapp-mock-token',
       };

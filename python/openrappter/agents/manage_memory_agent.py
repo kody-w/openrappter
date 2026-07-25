@@ -21,6 +21,27 @@ from typing import Any, Mapping
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/manage-memory",
+    "version": "1.0.0",
+    "display_name": "Manage Memory",
+    "description": "Stores important information to memory for future reference. Use this to remember facts, preferences, insights, or tasks.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "filesystem-write"
+    ],
+    "tags": [
+        "openrappter",
+        "manage-memory"
+    ],
+    "category": "memory",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class ManageMemoryAgent(BasicAgent):
     _memory_lock = threading.RLock()
 

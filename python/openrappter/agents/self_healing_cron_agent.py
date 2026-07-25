@@ -28,6 +28,25 @@ from datetime import datetime
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/self-healing-cron",
+    "version": "1.0.0",
+    "display_name": "Self Healing Cron",
+    "description": "Autonomous self-healing health check agent. Schedules health checks, detects failures, runs repair commands, and sends notifications.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [],
+    "tags": [
+        "openrappter",
+        "self-healing-cron"
+    ],
+    "category": "reliability",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class SelfHealingCronAgent(BasicAgent):
     def __init__(self, web_agent=None, shell_agent=None, message_agent=None):
         self.name = 'SelfHealingCron'

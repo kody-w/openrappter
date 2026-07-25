@@ -19,6 +19,27 @@ from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/pong",
+    "version": "1.0.0",
+    "display_name": "Pong",
+    "description": "Launch terminal Pong. Default: zen mode (watch two AI rappters play while you breathe). Use action 'play' for player vs AI, or 'host'/'join' for multiplayer.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "pong"
+    ],
+    "category": "showcase",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 PONG_SCRIPT = Path(__file__).resolve().parent.parent.parent.parent / "pong.js"
 
 

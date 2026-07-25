@@ -22,6 +22,28 @@ from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/shell",
+    "version": "1.0.0",
+    "display_name": "Shell",
+    "description": "Executes shell commands and file operations. Use this to run commands, read files, write files, or list directories.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [
+        "filesystem-write",
+        "process-exec"
+    ],
+    "tags": [
+        "openrappter",
+        "shell"
+    ],
+    "category": "system",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 try:
     from openrappter.security.exec_safety import ExecSafety
 except ModuleNotFoundError:

@@ -30,6 +30,25 @@ from datetime import datetime
 from openrappter.agents.basic_agent import BasicAgent
 
 
+
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/watchmaker",
+    "version": "1.0.0",
+    "display_name": "Watchmaker",
+    "description": "Self-evolving agent ecosystem manager. Evaluates agent capabilities, A/B tests competing versions, and promotes winners.",
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    "capabilities": [],
+    "tags": [
+        "openrappter",
+        "watchmaker"
+    ],
+    "category": "reliability",
+    "quality_tier": "official",
+    "requires_env": []
+}
+
 class WatchmakerAgent(BasicAgent):
     def __init__(self):
         self.name = 'Watchmaker'

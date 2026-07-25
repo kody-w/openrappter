@@ -16,6 +16,28 @@ import https from 'https';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/update',
+  version: '1.0.0',
+  display_name: 'Update',
+  description: 'Check for updates and self-update openrappter from the public repo.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'network',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'update'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const REPO_OWNER = 'kody-w';
 const REPO_NAME = 'openrappter';
 const LOCAL_VERSION_FILE = 'package.json';

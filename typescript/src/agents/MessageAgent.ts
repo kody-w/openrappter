@@ -11,6 +11,27 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/message',
+  version: '1.0.0',
+  display_name: 'Message',
+  description: 'Send messages to people via iMessage, Telegram, Slack, Discord, and more.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'credential-access',
+    'network'
+  ],
+  tags: [
+    'openrappter',
+    'message'
+  ],
+  category: 'messaging',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class MessageAgent extends BasicAgent {
   private channelRegistry: any = null;
 

@@ -8,6 +8,27 @@ import { copyFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/demo-recorder',
+  version: '1.0.0',
+  display_name: 'Demo Recorder',
+  description: 'A guided tour of the RAPP Agent Repository',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'demo-recorder'
+  ],
+  category: 'media',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 

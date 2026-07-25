@@ -23,6 +23,28 @@ import { createHash } from 'crypto';
 import { join } from 'path';
 import { HOME_DIR } from '../env.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/ouroboros',
+  version: '1.0.0',
+  display_name: 'Ouroboros',
+  description: 'Adds wordStats() \u2014 word count, unique words, avg length, most frequent',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code',
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'ouroboros'
+  ],
+  category: 'meta',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 // Absolute path to BasicAgent — computed in Gen 0, frozen as literal in generated files
 // Resolve .js (compiled dist/) or .ts (dev tsx) — same pattern as selfPath below
 const _baJs = fileURLToPath(new URL('./BasicAgent.js', import.meta.url));

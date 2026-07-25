@@ -14,6 +14,29 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/t-t-s',
+  version: '1.0.0',
+  display_name: 'T T S',
+  description: 'Text-to-speech synthesis. Convert text to spoken audio with multiple voice options.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'credential-access',
+    'dynamic-code',
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    't-t-s'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class TTSAgent extends BasicAgent {
   private ttsService: any = null;
 

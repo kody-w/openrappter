@@ -10,6 +10,27 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/web',
+  version: '1.0.0',
+  display_name: 'Web',
+  description: 'Fetch web pages and search the web. Includes SSRF protection to prevent access to private networks.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'network',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'web'
+  ],
+  category: 'research',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class WebAgent extends BasicAgent {
   constructor() {
     const metadata: AgentMetadata = {

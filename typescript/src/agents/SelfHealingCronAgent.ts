@@ -22,6 +22,24 @@ import { WebAgent } from './WebAgent.js';
 import { ShellAgent } from './ShellAgent.js';
 import { MessageAgent } from './MessageAgent.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/self-healing-cron',
+  version: '1.0.0',
+  display_name: 'Self Healing Cron',
+  description: 'Autonomous self-healing health check agent. Schedules health checks, detects failures, runs repair commands, and sends notifications.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [],
+  tags: [
+    'openrappter',
+    'self-healing-cron'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export interface JobConfig {
   name: string;
   url: string;

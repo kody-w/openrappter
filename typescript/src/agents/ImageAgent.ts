@@ -10,6 +10,26 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/image',
+  version: '1.0.0',
+  display_name: 'Image',
+  description: 'Analyze and process images. Extract information from image URLs or local files with SSRF protection.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code'
+  ],
+  tags: [
+    'openrappter',
+    'image'
+  ],
+  category: 'media',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class ImageAgent extends BasicAgent {
   private mediaProcessor: any = null;
 

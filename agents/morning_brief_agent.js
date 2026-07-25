@@ -12,6 +12,27 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/morning_brief_agent',
+  version: '1.0.0',
+  display_name: 'morning_brief_agent',
+  description: 'Daily briefing: weather, calendar, priorities from memory, spoken via TTS.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code',
+    'filesystem-write'
+  ],
+  tags: [
+    'openrappter',
+    'morning_brief_agent'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export function createAgent(BasicAgent) {
 
   // Lazy-load sibling agents from the built-in agents directory

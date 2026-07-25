@@ -10,6 +10,26 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/cron',
+  version: '1.0.0',
+  display_name: 'Cron',
+  description: 'Manage scheduled jobs. Add, remove, run, enable/disable recurring agent tasks with cron-style scheduling.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code'
+  ],
+  tags: [
+    'openrappter',
+    'cron'
+  ],
+  category: 'reliability',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class CronAgent extends BasicAgent {
   private cronService: any = null;
 

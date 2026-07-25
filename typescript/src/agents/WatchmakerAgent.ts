@@ -19,6 +19,24 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/watchmaker',
+  version: '1.0.0',
+  display_name: 'Watchmaker',
+  description: 'Self-evolving agent ecosystem manager. Evaluates agent capabilities, A/B tests competing versions, and promotes winners.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [],
+  tags: [
+    'openrappter',
+    'watchmaker'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 // ── Type Definitions ────────────────────────────────────────────────
 
 export interface AgentVersion {

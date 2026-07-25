@@ -10,6 +10,24 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/sessions',
+  version: '1.0.0',
+  display_name: 'Sessions',
+  description: 'Manage chat sessions. List sessions, retrieve message history, send messages, and clean up old conversations.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [],
+  tags: [
+    'openrappter',
+    'sessions'
+  ],
+  category: 'general',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class SessionsAgent extends BasicAgent {
   private sessionAccessor: any = null;
 

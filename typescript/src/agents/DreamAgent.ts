@@ -14,6 +14,26 @@ import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/dream',
+  version: '1.0.0',
+  display_name: 'Dream',
+  description: 'Memory consolidation agent. Reviews all memories, merges duplicates, flags contradictions, prunes stale entries. Run periodically to keep memory clean.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write'
+  ],
+  tags: [
+    'openrappter',
+    'dream'
+  ],
+  category: 'showcase',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 interface MemoryEntry {
   id?: string;
   message: string;

@@ -6,6 +6,24 @@ import { HNPipelineAgent } from './HNPipelineAgent.js';
 import { NotesIntakeAgent } from './NotesIntakeAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/productivity-stack',
+  version: '1.0.0',
+  display_name: 'Productivity Stack',
+  description: 'Assembles a unified productivity report from parallel agent results.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [],
+  tags: [
+    'openrappter',
+    'productivity-stack'
+  ],
+  category: 'productivity',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 class ReportAssemblerAgent extends BasicAgent {
   constructor() {
     const metadata: AgentMetadata = { name: 'ReportAssembler', description: 'Assembles a unified productivity report from parallel agent results.', parameters: { type: 'object', properties: {}, required: [] } };

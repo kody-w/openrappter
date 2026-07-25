@@ -2,6 +2,26 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { HackerNewsAgent } from './HackerNewsAgent.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/h-n-pipeline',
+  version: '1.0.0',
+  display_name: 'H N Pipeline',
+  description: 'Fetches top Hacker News stories, filters by project-relevant keywords, and returns highlights.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'network'
+  ],
+  tags: [
+    'openrappter',
+    'h-n-pipeline'
+  ],
+  category: 'research',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 interface Highlight { title: string; url: string; score: number; relevance_keyword: string; }
 
 export class HNPipelineAgent extends BasicAgent {

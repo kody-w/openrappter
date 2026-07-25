@@ -19,6 +19,26 @@ import { fileURLToPath } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/pong',
+  version: '1.0.0',
+  display_name: 'Pong',
+  description: 'Launch terminal Pong. Default: zen mode (watch two AI rappters play while you breathe).',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'pong'
+  ],
+  category: 'showcase',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PONG_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'pong.js');

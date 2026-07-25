@@ -3,6 +3,27 @@ import type { AgentMetadata } from './types.js';
 import { readdir, stat, readFile } from 'fs/promises';
 import { join, extname, basename } from 'path';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/doc-scanner',
+  version: '1.0.0',
+  display_name: 'Doc Scanner',
+  description: 'Scans a directory for documents and notes, reporting file count, types, recent changes, and TODOs found.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'doc-scanner'
+  ],
+  category: 'documents',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const SKIP_DIRS = new Set(['node_modules', '.git', '.obsidian', 'dist', 'build', '__pycache__', '.venv', 'venv']);
 const TEXT_EXTS = new Set(['.md', '.txt', '.rst', '.org', '.adoc', '.tex']);
 const TODO_PATTERN = /(?:TODO|FIXME|HACK|XXX|BUG)[\s:]+(.+)/gi;

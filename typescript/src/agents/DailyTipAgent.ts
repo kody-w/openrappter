@@ -17,6 +17,29 @@ import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/daily-tip',
+  version: '1.0.0',
+  display_name: 'Daily Tip',
+  description: 'Sends a daily onboarding tip as a native notification. Teaches one openrappter feature per day for 30 days.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'credential-access',
+    'dynamic-code',
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'daily-tip'
+  ],
+  category: 'content',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 interface Tip {
   day: number;
   title: string;

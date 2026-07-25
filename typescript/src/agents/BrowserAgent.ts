@@ -10,6 +10,26 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/browser',
+  version: '1.0.0',
+  display_name: 'Browser',
+  description: 'Headless browser automation for web scraping, testing, and interaction. Navigate pages, take screenshots, click elements, fill forms, and extract content.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code'
+  ],
+  tags: [
+    'openrappter',
+    'browser'
+  ],
+  category: 'automation',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export class BrowserAgent extends BasicAgent {
   private browser: any = null;
 

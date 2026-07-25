@@ -23,6 +23,29 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/learn-new',
+  version: '1.0.0',
+  display_name: 'Learn New',
+  description: 'Creates new agents from natural language descriptions. Describe what you want the agent to do and it will generate, save, and hot-load it.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'dynamic-code',
+    'filesystem-write',
+    'network',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'learn-new'
+  ],
+  category: 'meta',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const execAsync = promisify(exec);
 
 export class LearnNewAgent extends BasicAgent {

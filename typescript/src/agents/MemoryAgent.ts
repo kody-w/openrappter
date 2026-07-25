@@ -14,6 +14,26 @@ import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata, MemoryEcho } from './types.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/memory',
+  version: '1.0.0',
+  display_name: 'Memory',
+  description: 'Stores and recalls facts in persistent memory. Use \'remember\' to store, \'recall\' to retrieve.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write'
+  ],
+  tags: [
+    'openrappter',
+    'memory'
+  ],
+  category: 'memory',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 interface MemoryEntry {
   id?: string;
   message: string;

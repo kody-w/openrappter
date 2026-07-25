@@ -16,6 +16,27 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { ExecSafety } from '../security/exec-safety.js';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/shell',
+  version: '1.0.0',
+  display_name: 'Shell',
+  description: 'Executes shell commands and file operations. Use this to run commands, read files, write files, or list directories.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'shell'
+  ],
+  category: 'system',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const execAsync = promisify(exec);
 
 export class ShellAgent extends BasicAgent {

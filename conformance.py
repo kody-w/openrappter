@@ -27,7 +27,16 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-AGENTS = os.path.join(ROOT, "python", "openrappter", "agents")
+# Every agent-shaped file in the repository, in every language. An earlier
+# version of this gate pointed only at the Python agents directory — which was
+# the one directory that had just been brought into conformance. A gate scoped
+# to the work already done reports green and proves nothing.
+AGENT_DIRS = [
+    os.path.join(ROOT, "python", "openrappter", "agents"),
+    os.path.join(ROOT, "typescript", "src", "agents"),
+    os.path.join(ROOT, "agents"),
+]
+AGENTS = AGENT_DIRS[0]  # python dir, for checks that are python-specific
 BRAINSTEM = os.path.join(ROOT, "python", "openrappter", "brainstem.py")
 
 AGENT_SCHEMA = "rapp-agent/1.0"
@@ -84,10 +93,30 @@ def check(cid, claim):
 
 
 def agent_files():
+    """Python agents only — the checks that parse a syntax tree."""
     if not os.path.isdir(AGENTS):
         return []
     return [os.path.join(AGENTS, f) for f in sorted(os.listdir(AGENTS))
             if f.endswith("_agent.py") and f != "basic_agent.py"]
+
+
+def all_agent_files():
+    """Every agent in the repo, whatever language it is written in."""
+    out = []
+    for d in AGENT_DIRS:
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            # The abstract base class is not an agent, in either language.
+            # Matched case-insensitively: the Python file is basic_agent.py and
+            # the TypeScript one is BasicAgent.ts.
+            if f.lower() in ("basic_agent.py", "basicagent.ts", "index.ts",
+                             "types.ts", "agentregistry.ts"):
+                continue
+            if f.endswith(("_agent.py", "_agent.ts", "_agent.js",
+                           "Agent.ts", "Agent.js")):
+                out.append(os.path.join(d, f))
+    return out
 
 
 def dotted(node):
@@ -173,31 +202,40 @@ def declared_manifest(path):
 
 # ── the agent contract ───────────────────────────────────────────────────────
 
-@check("R1", "Every agent is a single file matching *_agent.py.")
+@check("R1", "Every agent is a single file, in every language.")
 def r1_single_file():
-    files = agent_files()
+    files = all_agent_files()
     if not files:
         return None, "no agents directory found"
     for path in files:
         if os.path.isdir(path):
             return False, f"{os.path.basename(path)} is a package, not a file"
-    return True, "%d agents, each one file" % len(files)
+    py = sum(1 for f in files if f.endswith(".py"))
+    return True, "%d agents, each one file (%d python, %d ts/js)" % (
+        len(files), py, len(files) - py)
 
 
-@check("R2", "Every agent declares a rapp-agent/1.0 __manifest__.")
+@check("R2", "EVERY agent in the repo declares a rapp-agent/1.0 manifest.")
 def r2_manifest_present():
-    missing, wrong = [], []
-    files = agent_files()
+    """Every agent, in every language. The contract is not language-specific."""
+    files = all_agent_files()
+    if not files:
+        return None, "no agents found"
+    missing = []
     for path in files:
-        man = declared_manifest(path)
-        if man is None:
-            missing.append(os.path.basename(path))
-        elif man.get("schema") != AGENT_SCHEMA:
-            wrong.append(f"{os.path.basename(path)}={man.get('schema')!r}")
+        if path.endswith(".py"):
+            man = declared_manifest(path)
+            ok = man is not None and man.get("schema") == AGENT_SCHEMA
+        else:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                body = fh.read()
+            ok = "__manifest__" in body and AGENT_SCHEMA in body
+        if not ok:
+            missing.append(os.path.relpath(path, ROOT))
     if missing:
-        return False, "no readable __manifest__: " + ", ".join(missing[:5])
-    if wrong:
-        return False, "wrong schema: " + ", ".join(wrong[:5])
+        return False, ("%d of %d agents carry no rapp-agent/1.0 manifest: %s%s"
+                       % (len(missing), len(files), ", ".join(missing[:4]),
+                          " …" if len(missing) > 4 else ""))
     return True, "all %d agents declare %s" % (len(files), AGENT_SCHEMA)
 
 

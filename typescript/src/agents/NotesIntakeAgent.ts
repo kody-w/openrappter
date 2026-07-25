@@ -3,6 +3,27 @@ import type { AgentMetadata } from './types.js';
 import { readdir, readFile } from 'fs/promises';
 import { join, extname, basename } from 'path';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/notes-intake',
+  version: '1.0.0',
+  display_name: 'Notes Intake',
+  description: 'Scans an Obsidian vault or notes directory, extracts action items, tags, and identifies smart reminders by urgency.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'notes-intake'
+  ],
+  category: 'memory',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 const TAG_PATTERN = /#([a-zA-Z][\w-/]*)/g;
 const UNCHECKED = /^[\s]*- \[ \]\s+(.+)/;

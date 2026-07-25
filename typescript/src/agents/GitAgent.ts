@@ -14,6 +14,26 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { execSync } from 'child_process';
 
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/git',
+  version: '1.0.0',
+  display_name: 'Git',
+  description: 'Git repository operations. Status, diff, log, branch management, commits, and PR creation.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'git'
+  ],
+  category: 'devtools',
+  quality_tier: 'official',
+  requires_env: []
+} as const;
 export type ExecFn = (cmd: string, cwd?: string) => { stdout: string; stderr: string };
 
 export class GitAgent extends BasicAgent {

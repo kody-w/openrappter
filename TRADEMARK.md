@@ -1,7 +1,12 @@
 # Trademarks
 
-**Short version: use the code however you like, and if you build on it, you are
-welcome to say so.**
+## Integration is the license
+
+Use the code however you like — it is open source, and nothing here adds a
+condition to it. If you build on the ecosystem, you are welcome to use the names
+to say so: no permission slip, no fee, no paperwork.
+
+**The only condition is that the integration is real.**
 
 ## You may
 

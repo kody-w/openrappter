@@ -83,7 +83,7 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
-### RAPP + X™: UI is optional
+### RAPP + X: UI is optional
 
 `POST /chat` is the universal capability surface for people, AIs, twins,
 rapplications, Brainstems, and neighborhood peers. Python and TypeScript accept
@@ -553,13 +553,10 @@ cd openrappter/python && pip install -e .
 cd ../typescript && npm install && npm run build
 ```
 
-## License and marks
+## License
 
-Code: **MIT** — see [LICENSE](LICENSE). Fork it freely.
+MIT — see [LICENSE](LICENSE).
 
-Names: **Rappter**™ and the `rappter-*` family are marks of **Wildhaven Homes LLC**, claimed at common law. The MIT license grants no rights to them. If your product genuinely integrates with the RAPP ecosystem you are already licensed to say so — integration is the license. See [TRADEMARK.md](TRADEMARK.md).
-
-OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the open substrate beneath it. "RAPP" standing alone and the RAPP Brainstem are deliberately unencumbered.
 
 ---
 
@@ -568,3 +565,7 @@ OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the open
 **[Star on GitHub](https://github.com/kody-w/openrappter)** | **[Documentation](./docs)** | **[Skills Reference](./skills.md)**
 
 </div>
+
+---
+
+<sub>OpenRappter is a trademark of Wildhaven Homes LLC. Code is MIT licensed; the license does not grant rights to the name. [Trademark notice](TRADEMARK.md)</sub>

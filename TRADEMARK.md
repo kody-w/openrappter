@@ -1,36 +1,32 @@
 # Trademarks
 
-The code in this repository is open source under its stated license. **That
-license grants no rights to the names.**
+**Short version: use the code however you like, and if you build on it, you are
+welcome to say so.**
 
-The compound marks of the RAPP ecosystem — the `rapp-*` names and
-"RAPP&nbsp;&lt;thing&gt;" names, including the mark used by this project — are
-claimed by **Wildhaven Homes LLC** at common law (™) through use in commerce.
+## You may
 
-**Deliberately not claimed:**
+- **Fork, modify, ship and sell the code.** It is open source under this
+  repository's license, with no additional permission needed.
+- **Say what you integrate with.** "AcmeBot for RAPP", "HoloWatch — a VUI for
+  rapp-holo", "built on the RAPP Brainstem" — all fine, no permission slip.
+  Attribute the mark to Wildhaven Homes LLC on first mention, keep the
+  integration real and working, and don't imply you are the official version.
+- **Run, name, teach and redistribute the Brainstem freely.** "RAPP" standing
+  alone and the RAPP Brainstem are deliberately **not** claimed. The stem is
+  open and the front door is never tolled.
 
-- **"RAPP" standing alone.** The stem is open.
-- **RAPP Brainstem / `rapp-brainstem`.** The Brainstem is the universal
-  launchpad and stays unencumbered on purpose — anyone may run it, name it,
-  teach it, and redistribute it. The front door is never tolled.
+## We ask that you don't
 
-## Integration is the license
+Use the compound names — the `rapp-*` and "RAPP <thing>" names — to brand a
+derivative product as though it were ours, or in a way that implies origin or
+endorsement. Those names belong to Wildhaven Homes LLC through use in commerce,
+and the code license doesn't transfer them.
 
-**The first hit is free.** If your product genuinely integrates with the RAPP
-ecosystem — it runs the Brainstem, speaks a `rapp-*` protocol, publishes to the
-RAR, rides the Train — you are licensed to use these marks to name and describe
-that integration, no permission slip required. Conditions: the integration must
-actually exist and keep working, the mark takes ™ with attribution to Wildhaven
-Homes LLC on first mention, and your use must not claim to be the origin or the
-official version. Revocable for abuse or confusion.
-
-Fork the code freely. Do not use the names to brand a derivative product or to
-imply origin or endorsement.
+That's the whole of it. If your use is honest and your integration is real, you
+are already inside the line.
 
 ---
 
-**Canonical record.** The authoritative trademark record for the RAPP ecosystem
-is [TRADEMARKS.md in kody-w/rapp-train](https://kody-w.github.io/rapp-train/TRADEMARKS.md).
-This file defers to it; where the two differ, the canonical record governs.
-
-Copyright © 2026 Wildhaven Homes LLC.
+<sub>The authoritative record for the RAPP ecosystem is
+[TRADEMARKS.md in kody-w/rapp-train](https://kody-w.github.io/rapp-train/TRADEMARKS.md);
+this file defers to it. Copyright © 2026 Wildhaven Homes LLC.</sub>

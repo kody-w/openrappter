@@ -456,7 +456,29 @@ run_with_spinner() {
         return $?
     fi
 
-    "$@"
+    # No gum. A shell function must run in this shell to keep the state it
+    # sets, so it cannot be backgrounded — but it can still be announced.
+    if is_shell_function "${1:-}"; then
+        printf '%b·%b %s ...\n' "$MUTED" "$NC" "$title"
+        "$@"
+        return $?
+    fi
+
+    # In verbose mode the user asked to see the output, so let it through and
+    # just bracket it with a timed line rather than hiding it behind a spinner.
+    if [[ "${VERBOSE:-0}" == "1" ]]; then
+        printf '%b·%b %s ...\n' "$MUTED" "$NC" "$title"
+        local start=$SECONDS rc=0
+        "$@" || rc=$?
+        if (( rc == 0 )); then
+            printf '%b✓%b %s %b(%ds)%b\n' "$SUCCESS" "$NC" "$title" "$MUTED" "$((SECONDS - start))" "$NC"
+        fi
+        return $rc
+    fi
+
+    local log
+    log="$(mktempfile)"
+    run_with_progress "$title" "$log" "$@"
 }
 
 # ── Progress for long, silent steps ──────────────────────────────────────
@@ -593,7 +615,7 @@ run_quiet_step() {
         local log_quoted=""
         printf -v cmd_quoted '%q ' "$@"
         printf -v log_quoted '%q' "$log"
-        if run_with_spinner "$title" bash -c "${cmd_quoted}>${log_quoted} 2>&1"; then
+        if "$GUM" spin --spinner dot --title "$title" -- bash -c "${cmd_quoted}>${log_quoted} 2>&1"; then
             return 0
         fi
     elif is_shell_function "${1:-}"; then
@@ -605,6 +627,7 @@ run_quiet_step() {
             return 0
         fi
     else
+        # run_with_progress prints its own ✓/✗ line with timing.
         if run_with_progress "$title" "$log" "$@"; then
             return 0
         fi

@@ -14,6 +14,7 @@ import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubTo
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
+import { registerTwinCommands } from './twin/index.js';
 
 const execAsync = promisify(exec);
 
@@ -1814,5 +1815,6 @@ channelCmd
   });
 
 registerTelephonyCommands(program);
+registerTwinCommands(program);
 
 program.parse();

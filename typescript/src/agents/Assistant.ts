@@ -19,12 +19,22 @@ import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
 import type { AgentIdentity } from './workspace.js';
+import { TwinVault, renderSoul } from '../twin/index.js';
 
 export interface AssistantConfig {
   /** Display name shown in system prompt */
   name?: string;
   /** Short personality / role description */
   description?: string;
+  /**
+   * Use the device twin as the persona.
+   *
+   * The twin is the default rappter — but only when the caller has not asked
+   * for a specific persona. An explicit name or description is a deliberate
+   * choice and must win, or a named agent silently becomes the owner instead.
+   * Set false to opt out entirely.
+   */
+  useTwin?: boolean;
   /** Model override (e.g. "gpt-4.1", "claude-sonnet-4.5") */
   model?: string;
   /** GitHub token for Copilot API (falls back to env vars) */
@@ -531,8 +541,35 @@ export class Assistant {
   }
 
   /** Build the system prompt content */
+  /**
+   * The twin's persona, when one exists on this machine.
+   *
+   * Read from the device vault on every build rather than cached, so editing
+   * your twin takes effect on the next message instead of the next restart.
+   * Any failure falls back to the generic identity: a broken twin must never
+   * take the assistant down with it.
+   */
+  private twinIdentity(): string | null {
+    // An explicitly configured persona always wins. Without this a test bot,
+    // a named sub-agent, or any purpose-built assistant would quietly turn
+    // into the owner's twin the moment a vault existed on the machine.
+    const explicitPersona = Boolean(this.config.name || this.config.description);
+    const wanted = this.config.useTwin ?? !explicitPersona;
+    if (!wanted) return null;
+
+    try {
+      const vault = new TwinVault();
+      if (!vault.exists()) return null;
+      return renderSoul(vault.load(), { audience: 'owner' });
+    } catch {
+      // A broken twin must never take the assistant down with it.
+      return null;
+    }
+  }
+
   private buildSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
     const displayName = this.cachedIdentity?.name || this.config.name;
+    const twinSoul = this.twinIdentity();
 
     const agentList = Array.from(this.agents.values())
       .map((a) => `- **${a.metadata.name}**: ${a.metadata.description}`)
@@ -546,10 +583,12 @@ export class Assistant {
       ? `\n<workspace>\n${workspaceContext}\n</workspace>\n`
       : '';
 
+    const identityBlock = twinSoul
+      ? `<identity>\n${twinSoul}\n</identity>`
+      : `<identity>\nYou are ${displayName}, ${this.config.description}.\n</identity>`;
+
     if (!agentList) {
-      return `<identity>
-You are ${displayName}, ${this.config.description}.
-</identity>
+      return `${identityBlock}
 ${workspaceBlock}${memoryBlock}
 <conversation_mode>
 - Respond directly and conversationally.
@@ -557,9 +596,7 @@ ${workspaceBlock}${memoryBlock}
 </conversation_mode>`;
     }
 
-    return `<identity>
-You are ${displayName}, ${this.config.description}.
-</identity>
+    return `${identityBlock}
 ${workspaceBlock}${memoryBlock}
 <available_agents>
 ${agentList}

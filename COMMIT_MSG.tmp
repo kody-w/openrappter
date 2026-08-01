@@ -1,0 +1,42 @@
+feat(twin): inherit archetypes from the twin hub
+
+openrappter can now adopt a twin archetype from kody-w/rapp-twin-hub — a
+reusable description of HOW a twin behaves (voice, working habits, mandate)
+that never contains anyone's personal details.
+
+    openrappter twin inherit founder
+
+Inheritance flows hub -> device only. There is no function in archetype.ts
+that sends a profile anywhere, and a test asserts that rather than a comment
+promising it.
+
+- resolveArchetype walks `extends` to the root and merges back down
+- boundaries are ADDITIVE: a child may add a restriction but never remove one,
+  and a mayDo that contradicts an ancestor's mustAsk/neverDo is dropped.
+  Without that rule anyone could publish a friendly-looking archetype that
+  quietly disarms everything downstream of it.
+- validateArchetype rejects unknown fields outright, so a crafted archetype
+  cannot smuggle a field an older client would store blindly
+- cycles, missing parents and chains deeper than 8 are errors, not warnings
+- inherit() is additive and idempotent: identity, roles, context and accounts
+  are never touched, the owner's own words come first in every merged list,
+  and `inherits` records the lineage so a boundary's origin is always visible
+- httpLoader is read-only (no method, no body) and rejects an id that could
+  escape the archetype path
+
+Kept deliberately in step with the Python implementation in the hub; both are
+run over the same archetypes and must agree.
+
+Fixed a real bug found end to end: `inherit` used vaultFor(command.parent!),
+which is right for nested subcommands like `set voice` but wrong for a direct
+child of `twin`. The shared --home resolved to the wrong vault, so the command
+printed "Inherited base -> founder" while the profile on disk was untouched.
+Reporting success for work that did not happen is the worst failure available,
+so there are now two guards: a save/load round trip, and a check that no direct
+child of `twin` uses the two-level form. Verified by reintroducing the bug and
+watching both fail.
+
+64 twin tests. Full suite: same 3 pre-existing gateway failures, no regressions.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+Copilot-Session: 0ee03100-81d1-488a-b42b-4aa317fc42a1

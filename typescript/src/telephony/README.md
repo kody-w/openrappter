@@ -155,15 +155,47 @@ The brain is a separate process on purpose: a brainstem agent, a browser sphere
 and this phone agent all read and write **one** log. Appends are read-then-write,
 so the client serialises every call — concurrent writers cannot fork history.
 
+## Parity with the JARVIS demo
+
+The [video](https://www.youtube.com/watch?v=whIp1SOahOM) this was built against, feature by feature.
+
+| From the demo | Here | How |
+|---|---|---|
+| AI with its own phone number | ✅ | `RetellProvider` / `TwilioProvider` |
+| Calls a business and books | ✅ | `openrappter call place` |
+| Negotiates a counter-offer | ✅ | `decide()` + `counter` |
+| Calls you back for approval | ✅ | `PhoneApprover` / `call callback` |
+| Lands on your calendar | ✅ | `rsb calendar` — an RFC 5545 feed Google Calendar, Apple Calendar and Outlook subscribe to. No OAuth, no vendor. |
+| PIN-protected inbound hotline | ✅ | `HotlineGate` — constant-time, lockout, no oracle |
+| Telegram texts | ✅ | `channels/telegram.ts` |
+| Telegram voice notes | ✅ | `file_id` → download → transcribe → message content |
+| Leads, quotes, invoices | ✅ | `rsb lead` / `quote` / `invoice` |
+| …as PDFs | ✅ | `--render pdf` — a real PDF, no dependency |
+| …as editable documents | ◐ | `--render md`, which pastes into Google Docs. Native Docs API is not wired: it needs OAuth credentials, and shipping an unverifiable integration would be worse than saying so. |
+| The AI Second Brain | ✅ | [`kody-w/rapp-secondbrain`](https://github.com/kody-w/rapp-secondbrain) |
+| Local, your own keys | ✅ | Copilot SDK + your provider keys; the brain is a file on your disk |
+
+Two things here that the demo does not have:
+
+- **The gate is code, not a prompt.** `decide()` is pure and unit-tested, and
+  `approval check` answers through an exit code. An agent cannot be talked into
+  booking outside your limits.
+- **It is auditable.** Every call, proposal, approval and booking is an event in
+  a hash-chained log. `rsb verify` proves none of it was edited after the fact.
+
 ## Tests
 
 ```bash
 npx vitest run src/telephony/
 ```
 
-71 tests. 60 are pure and instant; 11 spawn the real `rsb` binary and drive the
+```bash
+npx vitest run src/telephony/ src/channels/telegram-voice.test.ts
+```
+
+86 tests. 60 are pure and instant; 11 spawn the real `rsb` binary and drive the
 whole JARVIS flow — negotiate, refuse to book, call back, approve, confirm —
-asserting at each step that nothing was committed early.
+asserting at each step that nothing was committed early; 15 cover inbound voice.
 
 ```
 ✓ ESCALATES an offer that is legal but not what was asked for
@@ -173,4 +205,10 @@ asserting at each step that nothing was committed early.
 ✓ treats a check that throws as a refusal, never as approval
 ✓ leaves the approval pending when the owner does not answer
 ✓ survives concurrent writers without corrupting the log
+✓ still delivers the message when transcription fails
+✓ delivers a batch in order even when transcription is slow
 ```
+
+The RAPP Second Brain has its own [86 tests](https://github.com/kody-w/rapp-secondbrain),
+including two independent implementations of the spec proving they read and write
+one log.

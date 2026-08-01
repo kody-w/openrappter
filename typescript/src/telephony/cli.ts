@@ -259,4 +259,79 @@ export function registerTelephonyCommands(program: Command): void {
         process.exit(1);
       }
     });
+
+  call
+    .command('google-voice')
+    .description('Check the free, on-device phone layer: your own Google Voice, in your own browser')
+    .option('--port <n>', 'Chrome DevTools port', '9222')
+    .option('--account <email>', 'The Google account the session must be')
+    .option('--send <number>', 'Compose a message to this number without sending it')
+    .option('--text <message>', 'What to compose', 'openrappter dry run — this was never sent.')
+    .action(async (options) => {
+      const { ChromeSession } = await import('./providers/chrome-cdp.js');
+      const { connectGoogleVoice } = await import('./providers/google-voice-browser.js');
+      const port = Number(options.port);
+
+      const line = (ok: boolean, label: string, detail?: string) => {
+        console.log(
+          `  ${ok ? chalk.green('[ok]') : chalk.yellow('[--]')} ${label}` +
+            (detail ? chalk.dim(` — ${detail}`) : ''),
+        );
+      };
+
+      console.log(`\n${PHONE} Google Voice — the rung that costs nothing\n`);
+
+      const session = new ChromeSession({ port });
+      if (!(await session.isAvailable())) {
+        line(false, `Chrome DevTools on :${port}`, 'not listening');
+        console.log(
+          chalk.dim(
+            '\n  openrappter will not restart your browser to open one.\n' +
+              '  Quit Chrome, then start it once with:\n' +
+              chalk.reset(`    open -a "Google Chrome" --args --remote-debugging-port=${port}\n`) +
+              chalk.dim('  Your profile, and the Google Voice session in it, are unchanged.\n'),
+          ),
+        );
+        process.exit(1);
+      }
+      line(true, `Chrome DevTools on :${port}`, 'listening');
+
+      const driver = await connectGoogleVoice({
+        port,
+        account: options.account,
+        dryRun: true,
+      });
+      if (!driver) {
+        line(false, 'Google Voice tab', 'could not attach');
+        process.exit(1);
+      }
+      line(true, 'Google Voice tab', 'attached');
+
+      try {
+        const signedIn = await driver.isSignedIn();
+        line(signedIn, 'signed in', signedIn ? (options.account ?? 'session active') : 'not signed in');
+        if (!signedIn) {
+          console.log(chalk.dim('\n  Sign in at voice.google.com, then run this again.\n'));
+          process.exit(1);
+        }
+
+        if (options.send) {
+          // Always a dry run here. This command diagnoses; it does not text people.
+          const thread = await driver.sendSms(options.send, options.text);
+          line(true, 'composed a message', `${options.send} — NOT sent (${thread})`);
+        }
+
+        console.log(
+          chalk.dim(
+            '\n  Ready. This rung negotiates by text through your own number:\n' +
+              '  no API key, no per-minute billing, nothing leaving the machine\n' +
+              '  except the message itself.\n',
+          ),
+        );
+      } catch (error) {
+        line(false, 'check failed', (error as Error).message);
+        console.log('');
+        process.exit(1);
+      }
+    });
 }

@@ -20,6 +20,12 @@
  * It drives the owner's real, already-signed-in browser session, so there is no
  * credential to store here. The account is configuration
  * (`GOOGLE_VOICE_ACCOUNT`), never a hardcoded value in this repo.
+ *
+ * The driver this is written against now has a real implementation:
+ * `GoogleVoiceBrowserDriver` in ./google-voice-browser.ts, which attaches to the
+ * owner's Chrome over the DevTools Protocol. Before that this file described a
+ * capability nothing could perform — the only `GoogleVoiceDriver` in the tree
+ * was a fake inside a test.
  */
 
 import type { CallHandle, CallProvider, DialRequest, ProviderCapability } from '../types.js';

@@ -27,3 +27,12 @@ export type { GoogleVoiceDriver, GoogleVoiceOptions } from './providers/google-v
 export { MacNativeProvider, MAC_SMS, MAC_HANDOFF, buildSendScript, osaEscape } from './providers/macos.js';
 export { resolveProvider, NoProviderError, speakerModality } from './providers/resolve.js';
 export type { ResolveOptions, Resolution } from './providers/resolve.js';
+
+export {
+  GoogleVoiceBrowserDriver,
+  GoogleVoiceSurfaceError,
+  connectGoogleVoice,
+} from './providers/google-voice-browser.js';
+export type { GoogleVoiceBrowserOptions, ConnectGoogleVoiceOptions } from './providers/google-voice-browser.js';
+export { ChromeSession, ChromeNotDebuggableError } from './providers/chrome-cdp.js';
+export type { PageSurface, CdpOptions, CdpTarget } from './providers/chrome-cdp.js';

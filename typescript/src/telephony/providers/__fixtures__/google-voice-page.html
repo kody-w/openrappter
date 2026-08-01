@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Google Voice (fixture)</title></head>
+<body>
+<!--
+  A stand-in for the Google Voice message view, shaped like the selectors the
+  driver actually reaches for. It exists so the DOM logic can be exercised in a
+  real browser, over real CDP, without sending a text to a real person.
+
+  It deliberately reproduces the two behaviours that matter:
+    - the send button only works once the input has text
+    - a sent message becomes a bubble in the thread, which is the ONLY evidence
+      the driver is allowed to accept that a send happened
+-->
+<div gv-test-id="thread">
+  <div class="gvMessageRow" data-e2e-is-outgoing="false">
+    <span data-e2e-message-text>Hi, this is the restaurant.</span>
+  </div>
+</div>
+
+<textarea gv-test-id="gv-message-input" aria-label="Type a message"></textarea>
+<button gv-test-id="send-button" aria-label="Send message">Send</button>
+
+<script>
+  // Mode switch used by the harness to simulate a send that silently no-ops —
+  // the exact failure the driver's confirmation step exists to catch.
+  window.__swallowSend = new URLSearchParams(location.search).has('swallow');
+
+  document.querySelector('[gv-test-id="send-button"]').addEventListener('click', () => {
+    const box = document.querySelector('[gv-test-id="gv-message-input"]');
+    const text = box.value;
+    if (!text) return;
+    if (window.__swallowSend) { box.value = ''; return; }   // looks fine, sends nothing
+    const row = document.createElement('div');
+    row.className = 'gvMessageRow';
+    row.setAttribute('data-e2e-is-outgoing', 'true');
+    const span = document.createElement('span');
+    span.setAttribute('data-e2e-message-text', '');
+    span.textContent = text;
+    row.appendChild(span);
+    document.querySelector('[gv-test-id="thread"]').appendChild(row);
+    box.value = '';
+  });
+
+  // Lets the harness push an inbound reply, so awaitReply is exercised too.
+  window.__reply = (t) => {
+    const row = document.createElement('div');
+    row.className = 'gvMessageRow';
+    row.setAttribute('data-e2e-is-outgoing', 'false');
+    const span = document.createElement('span');
+    span.setAttribute('data-e2e-message-text', '');
+    span.textContent = t;
+    row.appendChild(span);
+    document.querySelector('[gv-test-id="thread"]').appendChild(row);
+  };
+</script>
+</body></html>

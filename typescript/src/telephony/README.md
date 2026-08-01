@@ -293,3 +293,45 @@ cross-language parity table, 22 cover the offline ladder, 15 inbound voice, and
 The RAPP Second Brain has its own [86 tests](https://github.com/kody-w/rapp-secondbrain),
 including two independent implementations of the spec proving they read and write
 one log.
+
+## The free rung: your own Google Voice, in your own browser
+
+Every other voice backend bills per minute and wants an account, a key, and a
+copy of the conversation. You already have a number that costs nothing, and a
+browser already signed into it.
+
+```bash
+# once, so Chrome exposes a DevTools port
+open -a "Google Chrome" --args --remote-debugging-port=9222
+
+openrappter call google-voice                       # diagnose the whole path
+openrappter call google-voice --send +15551234567   # compose WITHOUT sending
+```
+
+It attaches over the DevTools Protocol using `ws`, which this project already
+depends on — no Playwright, no second browser, no credential stored anywhere.
+The cookie that authenticates Google Voice stays in your profile.
+
+**It will not restart your browser.** Chrome only exposes a debugging port when
+started with one, and forcing that means killing a running browser and every
+unsaved thing in it. Without the port it says exactly that and stops.
+
+### The rule the driver is built around
+
+> Never report a message as sent unless the thread can be seen to contain it.
+
+A telephony layer that silently no-ops is worse than one that fails: the
+negotiation loop will wait for a reply to a message that was never delivered,
+then record an outcome for a conversation that never happened. Google Voice is a
+live web app whose DOM is not a contract, so *"I clicked something"* is not
+evidence. Every send reads the thread back and throws if its own text is not
+there.
+
+Verified in real Chrome over real CDP, including a page rigged to swallow sends —
+`google-voice-live.test.ts`, opt-in via `OPENRAPPTER_CDP_PORT`, skipped otherwise.
+
+### Voice calls
+
+Still a handoff. Google Voice bridges *your* phone, so there is no audio path for
+the agent to speak on — `say()` throws in `handoff` mode rather than let the
+agent claim it spoke. Text is where this rung is autonomous.

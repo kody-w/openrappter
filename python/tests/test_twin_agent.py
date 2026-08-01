@@ -143,6 +143,26 @@ class TestPortability(unittest.TestCase):
                 for needle in expectations["absent"]:
                     self.assertNotIn(needle, soul, f"{audience} LEAKED {needle!r}")
 
+    def test_rendered_bytes_match_the_pin(self) -> None:
+        """
+        The claim is byte-identity across platforms, so pin the bytes.
+
+        contains/absent alone let a paraphrase drift between the two
+        implementations undetected — which is exactly what happened once.
+        """
+        import hashlib
+
+        for audience, expected in FIXTURE["expect"].items():
+            if audience == "fingerprint" or "sha256" not in expected:
+                continue
+            got = hashlib.sha256(self.soul(audience).encode()).hexdigest()
+            with self.subTest(audience=audience):
+                self.assertEqual(
+                    got, expected["sha256"],
+                    f"{audience} render drifted from the pin — if this change is intended, "
+                    "re-pin BOTH suites together",
+                )
+
     def test_accounts_never_reach_the_prompt(self) -> None:
         # Accounts are loaded so the twin can act, never so it can talk about them.
         for audience in ("owner", "trusted", "public"):

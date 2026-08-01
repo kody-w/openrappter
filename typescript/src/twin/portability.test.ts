@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +46,17 @@ describe('twin portability across bones', () => {
       });
     });
   }
+
+  it('rendered bytes match the pin, on every audience', () => {
+    // The claim is byte-identity across platforms, so pin the bytes.
+    // contains/absent alone let a paraphrase drift undetected once already.
+    for (const audience of ['owner', 'trusted', 'public'] as const) {
+      const expected = fixture.expect[audience]?.sha256;
+      if (!expected) continue;
+      const got = createHash('sha256').update(renderSoul(profile, { audience })).digest('hex');
+      expect(got, `${audience} render drifted from the pin — re-pin BOTH suites together`).toBe(expected);
+    }
+  });
 
   it('accounts never reach the prompt, on any audience', () => {
     for (const audience of ['owner', 'trusted', 'public'] as const) {

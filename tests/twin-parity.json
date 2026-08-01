@@ -2,37 +2,84 @@
   "$comment": [
     "A twin must live on either set of bones unchanged.",
     "",
-    "The GOD half is the operator's, not the platform's — so the same vault file",
+    "The GOD half is the operator's, not the platform's \u2014 so the same vault file",
     "must render the same persona whether the brainstem (Python) or openrappter",
     "(TypeScript) is doing the rendering. Both suites read this fixture.",
     "",
     "The profile below is synthetic. Every 'secret' in it is asserted ABSENT from",
-    "the public projection by both implementations."
+    "the public projection by both implementations.",
+    "expect.<audience>.sha256 pins the RENDERED BYTES. contains/absent alone let a paraphrase drift between implementations undetected; byte-identity is the claim."
   ],
   "profile": {
     "version": 1,
     "id": "twin_parity",
     "createdAt": "2026-08-01T00:00:00.000Z",
     "updatedAt": "2026-08-01T00:00:00.000Z",
-    "identity": { "name": "Alex Doe", "shortName": "Alex", "pronouns": "they/them", "timezone": "America/New_York" },
-    "roles": [{ "title": "Founder", "org": "Northwind Traders", "focus": "shipping the thing" }],
+    "identity": {
+      "name": "Alex Doe",
+      "shortName": "Alex",
+      "pronouns": "they/them",
+      "timezone": "America/New_York"
+    },
+    "roles": [
+      {
+        "title": "Founder",
+        "org": "Northwind Traders",
+        "focus": "shipping the thing"
+      }
+    ],
     "voice": {
-      "tone": ["direct", "dry"],
-      "avoid": ["hedging", "corporate filler"],
-      "signatures": ["ship it", "what does the test say"]
+      "tone": [
+        "direct",
+        "dry"
+      ],
+      "avoid": [
+        "hedging",
+        "corporate filler"
+      ],
+      "signatures": [
+        "ship it",
+        "what does the test say"
+      ]
     },
     "context": {
-      "projects": [{ "name": "Project Halcyon", "what": "the secret one", "where": "~/dev/halcyon" }],
-      "people": [{ "name": "Jordan Rivera", "relationship": "business partner", "notes": "handles the books" }],
-      "tools": ["openrappter", "git"],
-      "facts": ["renewal is due in March"]
+      "projects": [
+        {
+          "name": "Project Halcyon",
+          "what": "the secret one",
+          "where": "~/dev/halcyon"
+        }
+      ],
+      "people": [
+        {
+          "name": "Jordan Rivera",
+          "relationship": "business partner",
+          "notes": "handles the books"
+        }
+      ],
+      "tools": [
+        "openrappter",
+        "git"
+      ],
+      "facts": [
+        "renewal is due in March"
+      ]
     },
     "boundaries": {
-      "mayDo": ["draft replies"],
-      "mustAsk": ["spend money"],
-      "neverDo": ["share personal details"]
+      "mayDo": [
+        "draft replies"
+      ],
+      "mustAsk": [
+        "spend money"
+      ],
+      "neverDo": [
+        "share personal details"
+      ]
     },
-    "accounts": { "email": "private.person@example.com", "phone": "+15551234567" }
+    "accounts": {
+      "email": "private.person@example.com",
+      "phone": "+15551234567"
+    }
   },
   "secrets": [
     "private.person@example.com",
@@ -47,17 +94,39 @@
     "fingerprint": null,
     "owner": {
       "$why": "the owner gets their whole context",
-      "contains": ["Alex Doe", "Project Halcyon", "Jordan Rivera", "ship it", "Northwind Traders"],
-      "absent": ["private.person@example.com", "+15551234567"]
+      "contains": [
+        "Alex Doe",
+        "Project Halcyon",
+        "Jordan Rivera",
+        "ship it",
+        "Northwind Traders"
+      ],
+      "absent": [
+        "private.person@example.com",
+        "+15551234567"
+      ],
+      "sha256": "7e578a3183f15142da253ed788ea545fef7132b35c351107e6d7fd6e4385da40"
     },
     "trusted": {
       "$why": "a trusted third party gets context but never people or accounts",
-      "contains": ["Alex Doe", "direct"],
-      "absent": ["Jordan Rivera", "private.person@example.com", "+15551234567"]
+      "contains": [
+        "Alex Doe",
+        "direct"
+      ],
+      "absent": [
+        "Jordan Rivera",
+        "private.person@example.com",
+        "+15551234567"
+      ],
+      "sha256": "b5ace45c7f64dd635e2891295cb061672f52520dfa1e80d12f65e8ec1cb7f98a"
     },
     "public": {
       "$why": "a stranger gets voice and nothing that identifies anyone",
-      "contains": ["Alex Doe", "direct", "Founder"],
+      "contains": [
+        "Alex Doe",
+        "direct",
+        "Founder"
+      ],
       "absent": [
         "private.person@example.com",
         "+15551234567",
@@ -66,17 +135,36 @@
         "Project Halcyon",
         "renewal is due in March",
         "~/dev/halcyon"
-      ]
+      ],
+      "sha256": "9bb5ef4b3676c2ec5002f85bbb3fde5f8de95038edc87fc191865680e67800f4"
     }
   },
   "shape": {
     "$why": "the only sanctioned export: counts, never values",
     "present": {
-      "identity": ["name", "pronouns", "shortName", "timezone"],
+      "identity": [
+        "name",
+        "pronouns",
+        "shortName",
+        "timezone"
+      ],
       "roles": 1,
-      "voice": { "tone": 2, "avoid": 2, "signatures": 2 },
-      "context": { "projects": 1, "people": 1, "tools": 2, "facts": 1 },
-      "boundaries": { "mayDo": 1, "mustAsk": 1, "neverDo": 1 },
+      "voice": {
+        "tone": 2,
+        "avoid": 2,
+        "signatures": 2
+      },
+      "context": {
+        "projects": 1,
+        "people": 1,
+        "tools": 2,
+        "facts": 1
+      },
+      "boundaries": {
+        "mayDo": 1,
+        "mustAsk": 1,
+        "neverDo": 1
+      },
       "accounts": 2
     }
   }

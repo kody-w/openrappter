@@ -13,6 +13,7 @@ import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONF
 import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
+import { registerTelephonyCommands } from './telephony/cli.js';
 
 const execAsync = promisify(exec);
 
@@ -1811,5 +1812,7 @@ channelCmd
       process.exit(1);
     }
   });
+
+registerTelephonyCommands(program);
 
 program.parse();

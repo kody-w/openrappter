@@ -1,0 +1,261 @@
+{
+  "$comment": [
+    "Cross-implementation parity fixture.",
+    "",
+    "openrappter's phone logic exists twice: TypeScript (typescript/src/telephony/)",
+    "for openrappter itself, and Python (python/openrappter/agents/phone_agent.py) so",
+    "a RAPP brainstem is not a second-class citizen. There is no runtime both can",
+    "import from, so the duplication is real.",
+    "",
+    "This table is what stops them drifting. Both suites read it and must agree on",
+    "every case. Changing the policy in one language without mirroring it in the",
+    "other fails the build in both.",
+    "",
+    "2026-08-07 is a Friday; 2026-08-06 is a Thursday."
+  ],
+
+  "constraints": [
+    { "text": "no later than 20:00", "expect": { "kind": "not_after", "time": "20:00" } },
+    { "text": "no later than 8pm", "expect": { "kind": "not_after", "time": "8pm" } },
+    { "text": "not before 6pm", "expect": { "kind": "not_before", "time": "6pm" } },
+    { "text": "no earlier than 09:00", "expect": { "kind": "not_before", "time": "09:00" } },
+    { "text": "after 6pm", "expect": { "kind": "not_before", "time": "6pm" } },
+    { "text": "before 8pm", "expect": { "kind": "not_after", "time": "8pm" } },
+    { "text": "party size exactly 2", "expect": { "kind": "party_size", "exactly": 2 } },
+    { "text": "party of 6", "expect": { "kind": "party_size", "exactly": 6 } },
+    { "text": "budget under 400", "expect": { "kind": "max_price", "cents": 40000 } },
+    { "text": "no more than $1,250.50", "expect": { "kind": "max_price", "cents": 125050 } },
+    { "text": "must be on Thursday", "expect": { "kind": "day_of_week", "days": ["thursday"] } },
+    { "text": "vibes must be immaculate", "expect": null },
+    { "text": "as soon as possible", "expect": null }
+  ],
+
+  "constraintLists": [
+    {
+      "texts": ["between 6pm and 8pm"],
+      "expectKinds": ["not_before", "not_after"],
+      "expectUnparsed": []
+    },
+    {
+      "texts": ["no later than 8pm", "vibes must be immaculate"],
+      "expectKinds": ["not_after"],
+      "expectUnparsed": ["vibes must be immaculate"]
+    }
+  ],
+
+  "extraction": [
+    {
+      "utterance": "I could do 7:45",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:45:00" }
+    },
+    {
+      "utterance": "how about 19:30?",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:30:00" }
+    },
+    {
+      "utterance": "I could do seven forty-five",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:45:00" }
+    },
+    {
+      "$why": "the first number is the thing being refused, not the offer",
+      "utterance": "Seven is fully booked. I could do seven forty-five?",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:45:00" }
+    },
+    {
+      "utterance": "half past seven works",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:30:00" }
+    },
+    {
+      "utterance": "quarter past eight",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T20:15:00" }
+    },
+    {
+      "$why": "an explicit meridiem beats the context hint",
+      "utterance": "nine am is free",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T09:00:00" }
+    },
+    {
+      "utterance": "Seven o'clock, table for two, that's fine.",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "start": "2026-08-07T19:00:00", "partySize": 2 }
+    },
+    {
+      "utterance": "that would be $450",
+      "date": "2026-08-07",
+      "hint": "none",
+      "expect": { "priceCents": 45000 }
+    },
+    {
+      "utterance": "about 1,250 dollars",
+      "date": "2026-08-07",
+      "hint": "none",
+      "expect": { "priceCents": 125000 }
+    },
+    {
+      "utterance": "a table for four",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": { "partySize": 4 }
+    },
+    {
+      "$why": "'one' is a word, not an offer of 13:00",
+      "utterance": "one moment please",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": null
+    },
+    {
+      "utterance": "hello, Bella Vista",
+      "date": "2026-08-07",
+      "hint": "evening",
+      "expect": null
+    }
+  ],
+
+  "refusal": [
+    { "utterance": "no, we're fully booked", "expect": true },
+    { "utterance": "we're fully booked, but I could do 7:45", "expect": false },
+    { "utterance": "I could do seven forty-five", "expect": false }
+  ],
+
+  "agreement": [
+    { "utterance": "yes, that works", "expect": true },
+    { "utterance": "see you then", "expect": true },
+    { "utterance": "let me check", "expect": false }
+  ],
+
+  "decisions": [
+    {
+      "$why": "exactly what was asked for",
+      "objective": {
+        "goal": "Book a table for 2 on Friday at 7pm",
+        "constraints": [
+          { "kind": "not_before", "time": "18:00" },
+          { "kind": "not_after", "time": "20:00" },
+          { "kind": "party_size", "exactly": 2 }
+        ],
+        "ideal": { "start": "2026-08-07T19:00:00", "partySize": 2 }
+      },
+      "offer": { "start": "2026-08-07T19:00:00", "partySize": 2 },
+      "expect": "accept"
+    },
+    {
+      "$why": "legal but not what was asked for — the whole point of the design",
+      "objective": {
+        "goal": "Book a table for 2 on Friday at 7pm",
+        "constraints": [
+          { "kind": "not_before", "time": "18:00" },
+          { "kind": "not_after", "time": "20:00" },
+          { "kind": "party_size", "exactly": 2 }
+        ],
+        "ideal": { "start": "2026-08-07T19:00:00", "partySize": 2 }
+      },
+      "offer": { "start": "2026-08-07T19:45:00", "partySize": 2 },
+      "expect": "escalate"
+    },
+    {
+      "$why": "breaks a limit, with room left to negotiate",
+      "objective": {
+        "goal": "Book a table",
+        "constraints": [{ "kind": "not_after", "time": "20:00" }],
+        "ideal": { "start": "2026-08-07T19:00:00" }
+      },
+      "offer": { "start": "2026-08-07T21:30:00" },
+      "roomToNegotiate": true,
+      "expect": "counter"
+    },
+    {
+      "$why": "an illegal offer must never reach the owner as an approval",
+      "objective": {
+        "goal": "Book a table",
+        "constraints": [{ "kind": "not_after", "time": "20:00" }],
+        "ideal": { "start": "2026-08-07T19:00:00" }
+      },
+      "offer": { "start": "2026-08-07T21:30:00" },
+      "roomToNegotiate": false,
+      "expect": "decline"
+    },
+    {
+      "$why": "limits given, but nothing more specific asked for",
+      "objective": {
+        "goal": "Any table Friday evening",
+        "constraints": [
+          { "kind": "not_before", "time": "18:00" },
+          { "kind": "not_after", "time": "20:00" }
+        ]
+      },
+      "offer": { "start": "2026-08-07T19:45:00" },
+      "expect": "accept"
+    },
+    {
+      "$why": "wrong party size is a hard violation",
+      "objective": {
+        "goal": "Book a table for 2",
+        "constraints": [{ "kind": "party_size", "exactly": 2 }],
+        "ideal": { "start": "2026-08-07T19:00:00", "partySize": 2 }
+      },
+      "offer": { "start": "2026-08-07T19:00:00", "partySize": 6 },
+      "expect": "counter"
+    },
+    {
+      "$why": "over budget",
+      "objective": {
+        "goal": "Book a service",
+        "constraints": [{ "kind": "max_price", "cents": 40000 }]
+      },
+      "offer": { "priceCents": 45000 },
+      "expect": "counter"
+    },
+    {
+      "$why": "under budget with no stated preference is fine",
+      "objective": {
+        "goal": "Book a service",
+        "constraints": [{ "kind": "max_price", "cents": 40000 }]
+      },
+      "offer": { "priceCents": 39900 },
+      "expect": "accept"
+    },
+    {
+      "$why": "wrong day",
+      "objective": {
+        "goal": "Book a service on Thursday",
+        "constraints": [{ "kind": "day_of_week", "days": ["thursday"] }]
+      },
+      "offer": { "start": "2026-08-07T09:00:00" },
+      "expect": "counter"
+    },
+    {
+      "$why": "right day",
+      "objective": {
+        "goal": "Book a service on Thursday",
+        "constraints": [{ "kind": "day_of_week", "days": ["thursday"] }]
+      },
+      "offer": { "start": "2026-08-06T09:00:00" },
+      "expect": "accept"
+    },
+    {
+      "$why": "too early",
+      "objective": {
+        "goal": "Book a table",
+        "constraints": [{ "kind": "not_before", "time": "18:00" }]
+      },
+      "offer": { "start": "2026-08-07T17:00:00" },
+      "expect": "counter"
+    }
+  ]
+}

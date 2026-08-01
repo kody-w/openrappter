@@ -90,20 +90,53 @@ export interface CallHandle {
 export type CallStatus = 'ringing' | 'connected' | 'ended' | 'failed';
 
 /**
+ * How a provider actually carries the conversation.
+ *
+ * This matters because it changes what the agent may claim. A cloud voice API
+ * lets the agent speak and listen. Google Voice does not: it bridges *your*
+ * phone to the callee, so over that provider the agent can negotiate by text
+ * or hand you a connected call, but it cannot say it spoke to anyone.
+ */
+export type Modality = 'voice' | 'sms' | 'handoff';
+
+export interface ProviderCapability {
+  modality: Modality;
+  /** The agent can conduct the whole exchange itself. */
+  autonomous: boolean;
+  /** Works with no cloud account or API key. */
+  onDevice: boolean;
+  /** Shown to the owner when this provider is chosen. */
+  summary: string;
+}
+
+/**
  * The contract every telephony backend implements. Deliberately small — the
  * negotiation logic lives above this line so it can be tested without a phone.
  */
 export interface CallProvider {
   readonly name: string;
+  /** What this backend can actually do. Defaults to autonomous voice. */
+  readonly capability?: ProviderCapability;
   isAvailable(): Promise<boolean>;
   dial(request: DialRequest): Promise<CallHandle>;
-  /** Speak. Resolves once the words have been handed to the line. */
+  /** Speak, or send a message. Resolves once it has been handed to the line. */
   say(handle: CallHandle, text: string): Promise<void>;
   /** Wait for the other party. Resolves null when they have hung up or gone silent. */
   listen(handle: CallHandle, timeoutMs?: number): Promise<string | null>;
   hangup(handle: CallHandle, reason?: string): Promise<void>;
   /** Read DTMF keypad input — used by the hotline PIN gate. */
   readDigits?(handle: CallHandle, count: number, timeoutMs?: number): Promise<string | null>;
+}
+
+export const VOICE_CAPABILITY: ProviderCapability = {
+  modality: 'voice',
+  autonomous: true,
+  onDevice: false,
+  summary: 'speaks and listens on a real call',
+};
+
+export function capabilityOf(provider: CallProvider): ProviderCapability {
+  return provider.capability ?? VOICE_CAPABILITY;
 }
 
 export interface CallResult {

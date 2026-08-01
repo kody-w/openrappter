@@ -87,7 +87,19 @@ export class SecondBrain {
    * so callers need both the code and the payload.
    */
   async exec<T = Record<string, unknown>>(...args: string[]): Promise<BrainResult<T> & { code: number }> {
-    return this.serialize(() => this.execNow<T>(...args));
+    return this.serialize(async () => {
+      const first = await this.execNow<T>(...args);
+
+      // An uninitialised brain would otherwise swallow everything silently:
+      // the call happens, nothing is recorded, and no one finds out until they
+      // go looking for the transcript. `init` is idempotent, so create and retry.
+      if (!first.ok && /run `?rsb init/.test(first.error ?? '') && args[0] !== 'init') {
+        const created = await this.execNow('init');
+        if (created.ok) return this.execNow<T>(...args);
+      }
+
+      return first;
+    });
   }
 
   private async execNow<T>(...args: string[]): Promise<BrainResult<T> & { code: number }> {

@@ -27,5 +27,26 @@ memory.json
 *.[rR][tT][cC]
 *.[sS][tT][aA][tT][eE]
 
+# Secrets and runtime state.
+#
+# ~/.openrappter is both a checkout of this repo AND the runtime home: the
+# daemon writes credentials, tokens and session data straight into the working
+# tree. Without these rules a `git add -A` there commits live secrets.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials/
+auth-profiles.json
+config.json
+config.json.bak
+*.pid
+*.pid.sqlite
+bar-sessions.json
+sessions.json
+*-token.json
+.rapp-second-brain/
+
 # Competitor reference copy (submodule removed, kept locally for reference)
 openclaw/

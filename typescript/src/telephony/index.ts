@@ -22,3 +22,8 @@ export { SimulationProvider } from './providers/simulation.js';
 export type { ScriptedPeer, SimulationOptions } from './providers/simulation.js';
 export { RetellProvider } from './providers/retell.js';
 export { TwilioProvider } from './providers/twilio.js';
+export { GoogleVoiceProvider, GOOGLE_VOICE_SMS, GOOGLE_VOICE_HANDOFF, smsSpeaker } from './providers/google-voice.js';
+export type { GoogleVoiceDriver, GoogleVoiceOptions } from './providers/google-voice.js';
+export { MacNativeProvider, MAC_SMS, MAC_HANDOFF, buildSendScript, osaEscape } from './providers/macos.js';
+export { resolveProvider, NoProviderError, speakerModality } from './providers/resolve.js';
+export type { ResolveOptions, Resolution } from './providers/resolve.js';

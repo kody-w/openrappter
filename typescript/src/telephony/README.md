@@ -115,6 +115,48 @@ a real answer. A check that throws is a **denial**, never a shrug, and an
 `EvidenceApprover` with no evidence and no fallback refuses rather than
 proceeding.
 
+## It degrades to this machine, and says so
+
+No cloud account? It still works. `resolveProvider()` walks a ladder and reports
+which rung it landed on — what it never does is quietly substitute a weaker
+capability for a stronger one.
+
+| rung | what it does | needs |
+|---|---|---|
+| `retell` / `twilio` | speaks and listens | an account + keys |
+| `google-voice` (sms) | **negotiates by text** through your own number | a signed-in browser |
+| `macos-native` (sms) | negotiates by text through Messages | a Mac paired to your iPhone |
+| `google-voice` (handoff) | connects **you** to them | a signed-in browser |
+| `macos-native` (`tel:`) | rings from your paired iPhone | macOS |
+| `simulation` | rehearsal — never presented as real | nothing |
+
+An honest note on Google Voice: it has **no programmable audio path**. A call
+there bridges *your* phone to the callee, so the agent cannot speak on it. What
+it can do is text — and the negotiation loop is identical over SMS, because
+`decide()` does not care how the words arrived. The agent really can book the
+table by message with no API key at all.
+
+So the ladder prefers **texting autonomously** over **handing you a call**:
+doing the job in a weaker medium beats not doing the job.
+
+```ts
+const { provider, capability, notice } = await resolveProvider({
+  googleVoiceDriver,          // enables the on-device rungs
+  requireOnDevice: true,      // refuse to involve a third party
+});
+// notice: "Using google-voice: negotiates by text message through your own
+//          Google Voice number — no API keys."
+```
+
+`requireAutonomous` and `requireOnDevice` make it **throw** rather than degrade,
+and the error lists every rung it tried and why each was skipped. When the best
+available option is a handoff, the agent says so in the same breath:
+
+> I cannot speak on this line, so I have dialled +1555… and connected you.
+
+The Google account is configuration (`GOOGLE_VOICE_ACCOUNT`) — never a value
+committed to this repo.
+
 ## Providers
 
 | provider | use |
@@ -122,10 +164,37 @@ proceeding.
 | `SimulationProvider` | scripted callee — tests and `--rehearse` |
 | `RetellProvider` | Retell AI holds the PSTN leg, STT and TTS |
 | `TwilioProvider` | Twilio number + TwiML, with DTMF for the hotline |
+| `GoogleVoiceProvider` | on-device SMS or bridged call, no keys |
+| `MacNativeProvider` | Messages / `tel:` handoff on macOS |
 
 Adding one means implementing five methods: `dial`, `say`, `listen`, `hangup`,
-`isAvailable`. All the judgement lives above that line, so a new provider
-inherits the negotiation, the gate and the audit trail for free.
+`isAvailable`, plus a `capability` describing what it can honestly claim. All
+the judgement lives above that line, so a new provider inherits the negotiation,
+the gate and the audit trail for free.
+
+## The brainstem gets the same thing
+
+`Phone` exists twice, so a RAPP brainstem is not a second-class citizen:
+
+- `src/agents/PhoneAgent.ts` — openrappter's agent, with the provider ladder
+- `python/openrappter/agents/phone_agent.py` — the grail agent: one class
+  extending `BasicAgent`, one `metadata` dict, one `perform() -> str`, all I/O
+  through the storage shim, importing BasicAgent from `agents.basic_agent` and
+  falling back to `openrappter.agents.basic_agent`
+
+Both write the **same hash-chained log** as `rsb`, so a call placed from a
+brainstem is visible to the CLI, the sphere and openrappter alike.
+
+There is no runtime both can import from, so the decision core is genuinely
+duplicated — and [`tests/decision-parity.json`](../../../tests/decision-parity.json)
+is what stops it drifting. Both suites read that table and must agree on all 47
+cases; changing the policy in one language without mirroring it fails both
+builds. (Verified by injecting drift and watching it fail.)
+
+```bash
+python3 python/tests/test_phone_agent.py    # 28 tests
+npx vitest run src/telephony/parity.test.ts # 47 cases, same fixture
+```
 
 ```bash
 # Retell
@@ -174,6 +243,8 @@ The [video](https://www.youtube.com/watch?v=whIp1SOahOM) this was built against,
 | …as editable documents | ◐ | `--render md`, which pastes into Google Docs. Native Docs API is not wired: it needs OAuth credentials, and shipping an unverifiable integration would be worse than saying so. |
 | The AI Second Brain | ✅ | [`kody-w/rapp-secondbrain`](https://github.com/kody-w/rapp-secondbrain) |
 | Local, your own keys | ✅ | Copilot SDK + your provider keys; the brain is a file on your disk |
+| Works with no cloud account at all | ✅+ | not in the demo: degrades to Google Voice SMS or Messages on this machine |
+| Same capability from a RAPP brainstem | ✅+ | not in the demo: `phone_agent.py`, parity-tested against the TS core |
 
 Two things here that the demo does not have:
 
@@ -193,9 +264,15 @@ npx vitest run src/telephony/
 npx vitest run src/telephony/ src/channels/telegram-voice.test.ts
 ```
 
-86 tests. 60 are pure and instant; 11 spawn the real `rsb` binary and drive the
-whole JARVIS flow — negotiate, refuse to book, call back, approve, confirm —
-asserting at each step that nothing was committed early; 15 cover inbound voice.
+```bash
+python3 python/tests/test_phone_agent.py
+```
+
+203 tests. Most are pure and instant; 11 spawn the real `rsb` binary and drive
+the whole JARVIS flow — negotiate, refuse to book, call back, approve, confirm —
+asserting at each step that nothing was committed early. 47 are the
+cross-language parity table, 22 cover the offline ladder, 15 inbound voice, and
+28 the Python brainstem agent.
 
 ```
 ✓ ESCALATES an offer that is legal but not what was asked for
@@ -207,6 +284,10 @@ asserting at each step that nothing was committed early; 15 cover inbound voice.
 ✓ survives concurrent writers without corrupting the log
 ✓ still delivers the message when transcription fails
 ✓ delivers a batch in order even when transcription is slow
+✓ never silently substitutes a rehearsal for a real call
+✓ refuses to claim it spoke on a bridged call
+✓ escapes AppleScript so a message cannot become a script
+✓ prefers negotiating by text over handing off a call
 ```
 
 The RAPP Second Brain has its own [86 tests](https://github.com/kody-w/rapp-secondbrain),

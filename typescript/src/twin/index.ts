@@ -9,4 +9,5 @@
 export * from './types.js';
 export * from './vault.js';
 export * from './soul.js';
+export * from './archetype.js';
 export { registerTwinCommands } from './cli.js';

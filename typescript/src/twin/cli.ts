@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 
 import { TwinVault, toShape } from './vault.js';
+import { DEFAULT_HUB, httpLoader, inherit, resolveArchetype } from './archetype.js';
 import { renderPublicSoul, renderSoul } from './soul.js';
 import type { TwinProfile } from './types.js';
 
@@ -313,6 +314,55 @@ export function registerTwinCommands(program: Command): void {
     .action(async (_options, command) => {
       const vault = vaultFor(command);
       console.log(JSON.stringify(toShape(vault.load()), null, 2));
+    });
+
+  twin
+    .command('inherit')
+    .description('Adopt an archetype from the twin hub — how a twin behaves, never who it is')
+    .argument('[id]', 'archetype id, e.g. base, founder, engineer, operator')
+    .option('--hub <url>', 'archetype hub', DEFAULT_HUB)
+    .option('--dry-run', 'show what would change without writing')
+    .option('--json', 'machine-readable')
+    .action(async (id: string | undefined, options, command) => {
+      // `inherit` is a direct child of `twin`, like init/show — so the shared
+      // --home option lives one level up from *this* command, not two.
+      const vault = vaultFor(command);
+
+      if (!id) {
+        console.log(`\n  Archetypes live at ${options.hub}\n`);
+        console.log('    base      honest about being an AI, and unable to commit you to anything');
+        console.log('    founder   runs a small company and answers for it');
+        console.log('    engineer  reasons from the code that exists');
+        console.log('    operator  schedules, suppliers, quotes and follow-ups\n');
+        console.log(chalk.dim('    openrappter twin inherit founder\n'));
+        return;
+      }
+
+      try {
+        const resolved = await resolveArchetype(id, httpLoader(options.hub));
+        const result = inherit(vault.load(), resolved);
+
+        if (options.dryRun) {
+          console.log(JSON.stringify({ lineage: result.lineage, changed: result.changed, counts: result.counts }, null, 2));
+          return;
+        }
+
+        vault.save(result.profile);
+
+        if (options.json) {
+          console.log(JSON.stringify({ lineage: result.lineage, changed: result.changed, counts: result.counts }, null, 2));
+          return;
+        }
+
+        console.log(`\n  ${result.changed ? 'Inherited' : 'Already had'} ${chalk.bold(result.lineage.join(' → '))}`);
+        console.log(chalk.dim(`  voice ${JSON.stringify(result.counts.voice)}`));
+        console.log(chalk.dim(`  boundaries ${JSON.stringify(result.counts.boundaries)}`));
+        console.log(chalk.dim('\n  Added to your twin. Your name, people and accounts were not touched.'));
+        console.log(chalk.dim('  Nothing left this machine.\n'));
+      } catch (error) {
+        console.error(chalk.red(`\n  ${(error as Error).message}\n`));
+        process.exit(1);
+      }
     });
 
   twin

@@ -84,6 +84,13 @@ export interface TwinProfile {
   context: TwinContext;
   boundaries: TwinBoundaries;
   /**
+   * Archetype ids this twin has inherited, root first.
+   *
+   * Provenance: it should always be possible to see where a boundary came
+   * from, rather than wondering why the twin refuses to do something.
+   */
+  inherits?: string[];
+  /**
    * Handles, addresses, numbers.
    *
    * Never exported and never printed unless explicitly asked for. Present so

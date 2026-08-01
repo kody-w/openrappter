@@ -1,11 +1,18 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_VAULT, TwinVault, TwinVaultError, findEnclosingRepo, fingerprint, toShape } from './vault.js';
 import { disclosureRules, renderPublicSoul, renderSoul, renderTwinContext } from './soul.js';
 import { emptyProfile } from './types.js';
+import {
+  ArchetypeError,
+  httpLoader,
+  inherit,
+  resolveArchetype,
+  validateArchetype,
+} from './archetype.js';
 import type { TwinProfile } from './types.js';
 
 /**
@@ -408,5 +415,281 @@ describe('the twin is the default persona, not an override', () => {
 
   it('can be opted out of entirely', () => {
     expect(wantsTwin({ useTwin: false })).toBe(false);
+  });
+});
+
+describe('inheriting an archetype', () => {
+  const HUB = 'https://example.test/hub';
+
+  const archetype = (id: string, extra: Record<string, unknown> = {}) => ({
+    schema: 'rapp-twin-archetype/1.0',
+    id,
+    name: id,
+    summary: `${id} archetype`,
+    boundaries: { mustAsk: [], neverDo: [] },
+    ...extra,
+  });
+
+  const loaderFor = (table: Record<string, unknown>) => async (id: string) => {
+    if (!(id in table)) throw new ArchetypeError(`no archetype "${id}"`);
+    return table[id];
+  };
+
+  describe('validation is a gate', () => {
+    it('rejects an unknown field, so nothing can be smuggled', () => {
+      // Without this, a crafted archetype could carry a field an older client
+      // stores blindly and a newer one surfaces.
+      expect(() =>
+        validateArchetype(archetype('sneaky', { accounts: { email: 'x@example.com' } }), 'test'),
+      ).toThrow(/unknown field/);
+    });
+
+    it('rejects a wrong schema', () => {
+      expect(() => validateArchetype({ ...archetype('x'), schema: 'other/1.0' }, 'test')).toThrow();
+    });
+
+    it('rejects a malformed id', () => {
+      for (const id of ['Uppercase', 'has space', '-lead', 'x', 'a/b']) {
+        expect(() => validateArchetype(archetype(id), 'test')).toThrow(/invalid id/);
+      }
+    });
+
+    it('requires the mandate', () => {
+      const missing = archetype('okay');
+      (missing as Record<string, unknown>).boundaries = { mustAsk: [] };
+      expect(() => validateArchetype(missing, 'test')).toThrow(/neverDo/);
+    });
+  });
+
+  describe('resolution', () => {
+    it('merges a chain, root first', async () => {
+      const resolved = await resolveArchetype(
+        'child',
+        loaderFor({
+          root: archetype('root', { voice: { tone: ['plain'] }, boundaries: { mustAsk: ['ask A'], neverDo: ['never A'] } }),
+          child: archetype('child', { extends: 'root', voice: { tone: ['dry'] }, boundaries: { mustAsk: ['ask B'], neverDo: [] } }),
+        }),
+      );
+
+      expect(resolved.lineage).toEqual(['root', 'child']);
+      expect(resolved.voice?.tone).toEqual(['plain', 'dry']);
+      expect(resolved.boundaries.mustAsk).toEqual(['ask A', 'ask B']);
+    });
+
+    it('a child cannot drop a parent restriction', async () => {
+      const resolved = await resolveArchetype(
+        'lax',
+        loaderFor({
+          strict: archetype('strict', { boundaries: { mustAsk: ['ask before spending'], neverDo: ['share an address'] } }),
+          lax: archetype('lax', { extends: 'strict', boundaries: { mustAsk: [], neverDo: [] } }),
+        }),
+      );
+
+      expect(resolved.boundaries.mustAsk).toContain('ask before spending');
+      expect(resolved.boundaries.neverDo).toContain('share an address');
+    });
+
+    it('a child cannot permit what a parent forbids', async () => {
+      // The property that makes inheriting a stranger's archetype safe.
+      const resolved = await resolveArchetype(
+        'eager',
+        loaderFor({
+          strict: archetype('strict', { boundaries: { mustAsk: ['quote a price'], neverDo: ['share an address'] } }),
+          eager: archetype('eager', {
+            extends: 'strict',
+            boundaries: { mayDo: ['quote a price', 'share an address', 'book a table'], mustAsk: [], neverDo: [] },
+          }),
+        }),
+      );
+
+      expect(resolved.boundaries.mayDo).toEqual(['book a table']);
+    });
+
+    it('rejects a cycle', async () => {
+      const load = loaderFor({
+        alpha: archetype('alpha', { extends: 'beta' }),
+        beta: archetype('beta', { extends: 'alpha' }),
+      });
+      await expect(resolveArchetype('alpha', load)).rejects.toThrow(/cycle/);
+    });
+
+    it('caps the depth rather than exhausting the resolver', async () => {
+      const table: Record<string, unknown> = {};
+      for (let i = 0; i < 12; i++) {
+        table[`link${String(i).padStart(2, '0')}`] = archetype(`link${String(i).padStart(2, '0')}`, {
+          extends: `link${String(i + 1).padStart(2, '0')}`,
+        });
+      }
+      table.link12 = archetype('link12');
+      await expect(resolveArchetype('link00', loaderFor(table))).rejects.toThrow(/deeper than/);
+    });
+
+    it('de-duplicates case-insensitively', async () => {
+      const resolved = await resolveArchetype(
+        'child',
+        loaderFor({
+          root: archetype('root', { voice: { tone: ['Direct'] }, boundaries: { mustAsk: ['Ask First'], neverDo: [] } }),
+          child: archetype('child', { extends: 'root', voice: { tone: ['direct'] }, boundaries: { mustAsk: ['ask first'], neverDo: [] } }),
+        }),
+      );
+
+      expect(resolved.voice?.tone).toHaveLength(1);
+      expect(resolved.boundaries.mustAsk).toHaveLength(1);
+    });
+  });
+
+  describe('applying to a profile', () => {
+    const seed = (): TwinProfile => ({
+      version: 1,
+      id: 'twin_x',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      identity: { name: 'Alex Doe' },
+      roles: [{ title: 'Founder', org: 'Acme' }],
+      voice: { tone: ['warm'], avoid: [], signatures: [] },
+      context: { projects: [], people: [{ name: 'Jane', relationship: 'partner' }], tools: [], facts: ['a fact'] },
+      boundaries: { mayDo: [], mustAsk: [], neverDo: [] },
+      accounts: { email: 'alex@example.com' },
+    });
+
+    const resolved = {
+      schema: 'rapp-twin-archetype/1.0',
+      id: 'child',
+      name: 'Child',
+      summary: 'x',
+      lineage: ['root', 'child'],
+      voice: { tone: ['plain'] },
+      boundaries: { mustAsk: ['ask A'], neverDo: ['never A'] },
+    } as never;
+
+    it('never touches who the owner is', () => {
+      const before = seed();
+      const { profile } = inherit(before, resolved);
+
+      expect(profile.identity).toEqual(before.identity);
+      expect(profile.roles).toEqual(before.roles);
+      expect(profile.context).toEqual(before.context);
+      expect(profile.accounts).toEqual(before.accounts);
+    });
+
+    it("puts the owner's own words first", () => {
+      const { profile } = inherit(seed(), resolved);
+      expect(profile.voice.tone[0]).toBe('warm');
+    });
+
+    it('records the lineage for provenance', () => {
+      const { profile, lineage } = inherit(seed(), resolved);
+      expect(profile.inherits).toEqual(['root', 'child']);
+      expect(lineage).toEqual(['root', 'child']);
+    });
+
+    it('is idempotent', () => {
+      const first = inherit(seed(), resolved);
+      const second = inherit(first.profile, resolved);
+
+      expect(first.changed).toBe(true);
+      expect(second.changed).toBe(false);
+      expect(JSON.stringify(second.profile)).toBe(JSON.stringify(first.profile));
+    });
+
+    it('does not mutate its input', () => {
+      const original = seed();
+      const snapshot = JSON.stringify(original);
+      inherit(original, resolved);
+      expect(JSON.stringify(original)).toBe(snapshot);
+    });
+  });
+
+  describe('the hub loader is read-only', () => {
+    it('fetches an archetype by id', async () => {
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => archetype('base'),
+      })) as unknown as typeof fetch;
+
+      const loaded = await httpLoader(HUB, fetchMock)('base');
+
+      expect((loaded as { id: string }).id).toBe('base');
+      expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]).toBe(
+        `${HUB}/archetypes/base.json`,
+      );
+      // one argument means no options object, so no method and no body
+      expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]).toHaveLength(1);
+    });
+
+    it('refuses an id that could escape the archetype path', async () => {
+      const fetchMock = vi.fn() as unknown as typeof fetch;
+      await expect(httpLoader(HUB, fetchMock)('../../etc/passwd')).rejects.toThrow(/invalid archetype id/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('says plainly when an archetype does not exist', async () => {
+      const fetchMock = vi.fn(async () => ({ ok: false, status: 404 })) as unknown as typeof fetch;
+      await expect(httpLoader(HUB, fetchMock)('ghost')).rejects.toThrow(/no archetype "ghost"/);
+    });
+  });
+
+  it('has no code path that publishes a profile', () => {
+    // The whole promise: inheritance flows hub -> device and never back.
+    const source = readFileSync(new URL('./archetype.ts', import.meta.url), 'utf8');
+    for (const forbidden of ['method: \'POST\'', 'method: "POST"', 'body:', 'export function publish', 'export function upload']) {
+      expect(source).not.toContain(forbidden);
+    }
+  });
+});
+
+describe('the CLI writes what it claims to have written', () => {
+  /**
+   * A real bug this caught: `inherit` used `command.parent!` (correct for
+   * nested subcommands like `set voice`) even though it is a direct child of
+   * `twin`. The shared --home resolved to the wrong vault, so the command
+   * reported "Inherited base → founder" while the profile on disk was
+   * untouched. Reporting success for work that did not happen is the worst
+   * failure mode available, so this asserts the round trip.
+   */
+  it('a merged profile survives save and load', () => {
+    const home = mkdtempSync(join(tmpdir(), 'twin-roundtrip-'));
+    try {
+      const vault = new TwinVault({ dir: join(home, 'twin') });
+      vault.init('Alex Doe');
+
+      const resolved = {
+        schema: 'rapp-twin-archetype/1.0',
+        id: 'founder',
+        name: 'Founder',
+        summary: 'x',
+        lineage: ['base', 'founder'],
+        voice: { tone: ['direct'] },
+        boundaries: { mustAsk: ['quote a price'], neverDo: ['claim to be a human being'] },
+      } as never;
+
+      const { profile } = inherit(vault.load(), resolved);
+      vault.save(profile);
+
+      const reloaded = vault.load();
+      expect(reloaded.inherits).toEqual(['base', 'founder']);
+      expect(reloaded.boundaries.mustAsk).toContain('quote a price');
+      expect(reloaded.voice.tone).toContain('direct');
+      expect(reloaded.identity.name).toBe('Alex Doe');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('every twin subcommand reads the same --home', () => {
+    // vaultFor(command) vs vaultFor(command.parent!) depends on nesting depth.
+    // Direct children of `twin` take the first form; anything under set/add
+    // takes the second. Getting it wrong silently targets the default vault.
+    const source = readFileSync(new URL('./cli.ts', import.meta.url), 'utf8');
+    const directChildren = ['init', 'show', 'soul', 'shape', 'where', 'inherit'];
+
+    for (const name of directChildren) {
+      const block = source.split(`.command('${name}')`)[1];
+      if (!block) continue;
+      const action = block.slice(0, block.indexOf('});'));
+      if (!action.includes('vaultFor(')) continue;
+      expect(action, `${name} is a direct child of twin`).not.toContain('vaultFor(command.parent!)');
+    }
   });
 });

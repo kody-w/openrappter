@@ -19,6 +19,17 @@ export interface TelegramConfig {
   allowedChatIds?: string[];
   webhookUrl?: string;
   pollingInterval?: number;
+  /**
+   * Turns inbound voice notes into text.
+   *
+   * Telegram sends a `file_id`, not a URL, so a voice note is unreadable until
+   * it is resolved and downloaded. With a transcriber wired in, the transcript
+   * becomes the message content and the rest of the system never has to know
+   * the difference between something typed and something said.
+   */
+  transcriber?: { transcribe(audio: Buffer): Promise<{ text: string }> };
+  /** Cap on voice notes to download. Default 20 MB (Telegram's own bot limit). */
+  maxVoiceBytes?: number;
 }
 
 const TELEGRAM_API = 'https://api.telegram.org';
@@ -248,6 +259,58 @@ export class TelegramChannel extends BaseChannel {
   }
 
   handleWebhookUpdate(update: Record<string, unknown>): void {
+    void this.processUpdate(update);
+  }
+
+  /**
+   * Resolve a Telegram `file_id` into a download URL.
+   *
+   * Telegram never hands out URLs directly — `getFile` returns a `file_path`
+   * that is only valid for about an hour, and the bot token is part of the URL.
+   */
+  async getFileUrl(fileId: string): Promise<string | null> {
+    if (!fileId) return null;
+    const result = await this.callApi('getFile', { file_id: fileId });
+    if (result.ok !== true) return null;
+    const filePath = (result.result as Record<string, unknown> | undefined)?.file_path;
+    return filePath ? `${TELEGRAM_API}/file/bot${this.config.token}/${String(filePath)}` : null;
+  }
+
+  /** Download an attachment by `file_id`. */
+  async downloadFile(fileId: string, maxBytes = this.config.maxVoiceBytes ?? 20 * 1024 * 1024): Promise<Buffer | null> {
+    const url = await this.getFileUrl(fileId);
+    if (!url) return null;
+
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const declared = Number(response.headers.get('content-length') ?? 0);
+    if (declared > maxBytes) return null;
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer.byteLength > maxBytes ? null : buffer;
+  }
+
+  /**
+   * Turn a voice note into text. Returns null when there is nothing to
+   * transcribe or no transcriber is configured — a failure here must degrade to
+   * "a voice note arrived", never throw away the message.
+   */
+  async transcribeVoice(fileId: string): Promise<string | null> {
+    if (!this.config.transcriber || !fileId) return null;
+    try {
+      const audio = await this.downloadFile(fileId);
+      if (!audio) return null;
+      const { text } = await this.config.transcriber.transcribe(audio);
+      const trimmed = (text ?? '').trim();
+      return trimmed.length > 0 ? trimmed : null;
+    } catch (err) {
+      console.warn('Voice transcription failed:', (err as Error).message);
+      return null;
+    }
+  }
+
+  private async processUpdate(update: Record<string, unknown>): Promise<void> {
     const msg = update.message as Record<string, unknown> | undefined;
     if (!msg) return;
 
@@ -260,7 +323,7 @@ export class TelegramChannel extends BaseChannel {
     }
 
     // Extract text from various message types
-    const text = String(
+    let text = String(
       msg.text ?? msg.caption ?? '',
     );
 
@@ -284,12 +347,12 @@ export class TelegramChannel extends BaseChannel {
         mimeType: String(doc.mime_type ?? ''),
       });
     }
-    if (msg.voice) {
-      const voice = msg.voice as Record<string, unknown>;
+    if (msg.voice || msg.video_note) {
+      const clip = (msg.voice ?? msg.video_note) as Record<string, unknown>;
       attachments.push({
         type: 'audio',
-        url: String(voice.file_id ?? ''),
-        filename: 'voice.ogg',
+        url: String(clip.file_id ?? ''),
+        filename: msg.voice ? 'voice.ogg' : 'video_note.mp4',
       });
     }
     if (msg.sticker) {
@@ -299,6 +362,21 @@ export class TelegramChannel extends BaseChannel {
         url: String(sticker.file_id ?? ''),
         filename: String(sticker.emoji ?? '🦖') + '.webp',
       });
+    }
+
+    // A voice note is only useful once it is words. If transcription is
+    // configured and succeeds, the transcript becomes the message; if it fails
+    // the message still arrives, marked, rather than vanishing.
+    const voiceClip = (msg.voice ?? msg.video_note) as Record<string, unknown> | undefined;
+    let transcribed = false;
+    if (voiceClip && !text) {
+      const transcript = await this.transcribeVoice(String(voiceClip.file_id ?? ''));
+      if (transcript) {
+        text = transcript;
+        transcribed = true;
+      } else {
+        text = '[voice note]';
+      }
     }
 
     const incoming: IncomingMessage = {
@@ -315,6 +393,8 @@ export class TelegramChannel extends BaseChannel {
         chatType: chat?.type,
         username: from?.username ? String(from.username) : undefined,
         isCommand: typeof text === 'string' && text.startsWith('/'),
+        transcribed,
+        voiceDurationSeconds: voiceClip?.duration ? Number(voiceClip.duration) : undefined,
         replyToMessageId: msg.reply_to_message
           ? String((msg.reply_to_message as Record<string, unknown>).message_id)
           : undefined,
@@ -351,7 +431,9 @@ export class TelegramChannel extends BaseChannel {
       if (result.ok && Array.isArray(result.result)) {
         for (const update of result.result) {
           this.offset = (update.update_id as number) + 1;
-          this.handleWebhookUpdate(update);
+          // Awaited deliberately: processing is async now that voice notes are
+          // downloaded and transcribed, and a batch must still arrive in order.
+          await this.processUpdate(update);
         }
       }
     } catch {

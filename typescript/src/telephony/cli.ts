@@ -17,20 +17,21 @@ import { parseConstraints, parseLocalIso } from './constraints.js';
 import { SimulationProvider } from './providers/simulation.js';
 import { RetellProvider } from './providers/retell.js';
 import { TwilioProvider } from './providers/twilio.js';
+import { resolveProvider as resolveLadder } from './providers/resolve.js';
+import { smsSpeaker } from './providers/google-voice.js';
 import type { CallObjective, CallProvider, Offer } from './types.js';
 
 const PHONE = '☎️ ';
 
-function resolveProvider(name: string, rehearsalReplies?: string[]): CallProvider {
+/** Named backend, for `callback` where the caller knows what it wants. */
+function namedProvider(name: string): CallProvider {
   switch (name) {
     case 'retell':
       return new RetellProvider();
     case 'twilio':
       return new TwilioProvider();
     case 'simulation':
-      return new SimulationProvider({
-        peers: [{ number: '*', replies: rehearsalReplies ?? ['Let me check... I could do 7:45.'] }],
-      });
+      return new SimulationProvider({ peers: [{ number: '*', replies: ['Yes, go ahead.'] }] });
     default:
       throw new Error(`unknown provider ${name} (try: simulation, retell, twilio)`);
   }
@@ -75,21 +76,21 @@ export function registerTelephonyCommands(program: Command): void {
     .option('-c, --constraint <rule...>', 'A hard limit, repeatable (e.g. "no later than 8pm")')
     .option('--at <iso>', 'The time you actually want, e.g. 2026-08-07T19:00')
     .option('--party <n>', 'Party size you actually want')
-    .option('-p, --provider <name>', 'simulation | retell | twilio', 'simulation')
+    .option('-p, --provider <name>', 'auto | retell | twilio | google-voice | macos-native', 'auto')
+    .option('--on-device', 'refuse anything that would involve a third party')
     .option('--owner <number>', 'Your number, for the approval callback')
     .option('--rehearse <reply...>', 'Scripted replies to practise against, no real call')
     .option('--hint <when>', 'Bias bare numbers: evening | morning | none', 'none')
     .action(async (number: string, options) => {
       try {
         const { objective, date } = buildObjective(options);
-        const providerName = options.rehearse ? 'simulation' : options.provider;
-        const provider = resolveProvider(providerName, options.rehearse);
 
-        if (!(await provider.isAvailable())) {
-          console.error(chalk.red(`\n  ${providerName} is not configured.`));
-          console.error(chalk.dim('  Set the provider credentials, or use --rehearse to practise offline.\n'));
-          process.exit(1);
-        }
+        const resolution = await resolveLadder({
+          rehearse: options.rehearse,
+          prefer: options.provider === 'auto' ? undefined : options.provider,
+          requireOnDevice: options.onDevice,
+        });
+        const { provider, capability, notice } = resolution;
 
         const brain = new SecondBrain({ actor: 'openrappter-call' });
         if (!(await brain.isAvailable())) {
@@ -101,14 +102,31 @@ export function registerTelephonyCommands(program: Command): void {
           );
         }
 
-        console.log(`\n${PHONE} ${chalk.bold(providerName)} → ${number}`);
+        console.log(`\n${PHONE} ${chalk.bold(provider.name)} → ${number}`);
+        console.log(chalk.dim(`   ${notice}`));
         console.log(chalk.dim(`   goal: ${objective.goal}`));
         for (const constraint of objective.constraints) {
           console.log(chalk.dim(`   limit: ${constraint.label ?? constraint.kind}`));
         }
         console.log('');
 
-        const agent = new CallAgent({ provider, brain, ownerNumber: options.owner });
+        if (capability.modality === 'handoff') {
+          const handle = await provider.dial({ to: number, objective });
+          console.log(chalk.yellow('\n   I cannot speak on this line, so I have dialled and connected you.'));
+          console.log(`   What you want: ${objective.goal}`);
+          for (const constraint of objective.constraints) {
+            console.log(chalk.dim(`   Your limit: ${constraint.label ?? constraint.kind}`));
+          }
+          console.log(chalk.dim(`\n   call ${handle.id}\n`));
+          return;
+        }
+
+        const agent = new CallAgent({
+          provider,
+          brain,
+          ownerNumber: options.owner,
+          speaker: capability.modality === 'sms' ? (smsSpeaker as never) : undefined,
+        });
         const result = await agent.placeCall({
           to: number,
           objective,
@@ -157,7 +175,7 @@ export function registerTelephonyCommands(program: Command): void {
     .option('-p, --provider <name>', 'simulation | retell | twilio', 'retell')
     .option('--appointment <id>', 'Appointment the answer applies to')
     .action(async (approvalId: string, options) => {
-      const provider = resolveProvider(options.provider);
+      const provider = namedProvider(options.provider);
       const brain = new SecondBrain({ actor: 'openrappter-callback' });
       const agent = new CallAgent({ provider, brain, ownerNumber: options.to });
 

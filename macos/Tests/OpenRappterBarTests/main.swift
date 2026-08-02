@@ -12,6 +12,7 @@ await runProcessManagerTests()
 await runAppViewModelTests()
 await runHeartbeatMonitorTests()
 await runSessionStoreTests()
+await runOnboardingSpawnTests()
 
 printResults()
 exitWithCode()

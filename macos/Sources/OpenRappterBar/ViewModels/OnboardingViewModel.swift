@@ -1,6 +1,27 @@
 import Foundation
 import AppKit
 
+/// Why a spawn failed, in words that are true.
+///
+/// `Process.run()` reports a present-but-not-executable file as
+/// `NSCocoaErrorDomain Code=4`, which Foundation renders as
+/// `The file "x" doesn't exist.` That message sent a real debugging session
+/// looking for a file that was sitting on disk the whole time. These cases are
+/// surfaced instead, so the error names the actual problem.
+public enum ShellError: LocalizedError {
+    case notFound(String)
+    case notExecutable(String, String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .notFound(let path):
+            return "No such file: \(path)"
+        case .notExecutable(let path, let why):
+            return "Cannot execute \(path): \(why)"
+        }
+    }
+}
+
 /// Drives the visual onboarding wizard in the menu bar app.
 /// Mirrors the CLI onboard flow but with a SwiftUI interface.
 @MainActor
@@ -81,38 +102,40 @@ public final class OnboardingViewModel {
                 return
             }
 
-            // Start device code flow
-            do {
-                authState = .waitingForCode(
-                    code: "XXXX-XXXX",
-                    url: "https://github.com/login/device"
-                )
+            // A placeholder call used to sit here that ran `dist/index.js` as a
+            // process executable and discarded the result. It could never
+            // succeed: `dist/index.js` is mode 0644 with no shebang — an ESM
+            // module, not a program — so `Process.run()` threw NSCocoaErrorDomain
+            // Code=4, whose localizedDescription is the untrue string
+            // `The file "index.js" doesn't exist.`
+            //
+            // The lying message was only the visible symptom. The real damage was
+            // structural: the throw jumped straight to the catch, so nothing after
+            // it ever ran — not the `gh auth token` path, not the browser device
+            // flow. A discarded no-op was taking the whole onboarding step down.
+            //
+            // Deleted rather than repaired: running `--help` and throwing the
+            // output away is still a no-op when spelled correctly, and a CLI
+            // preflight does not belong inside GitHub authentication. `runNode`
+            // below exists so the correct spelling is the easy one when a real
+            // call is needed.
 
-                // Shell out to the CLI onboard device-code helper
-                let result = try await runShell(
-                    "\(homeDir)/typescript/dist/index.js",
-                    args: ["--help"]  // placeholder — real device code would use the copilot-auth module
-                )
-                _ = result
-
-                // For now, try to use `gh auth token` as the fastest path
-                if let ghToken = try? await runShell("/usr/bin/env", args: ["gh", "auth", "token"]) {
-                    let token = ghToken.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !token.isEmpty && token.count > 10 {
-                        saveEnvVar("GITHUB_TOKEN", value: token)
-                        authState = .success
-                        return
-                    }
+            // `gh auth token`, in case the CLI gained a token since the sync check.
+            if let ghToken = try? await runShell("/usr/bin/env", args: ["gh", "auth", "token"]) {
+                let token = ghToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !token.isEmpty && token.count > 10 {
+                    saveEnvVar("GITHUB_TOKEN", value: token)
+                    authState = .success
+                    return
                 }
-
-                // Open GitHub device flow in browser
-                let deviceUrl = "https://github.com/login/device"
-                NSWorkspace.shared.open(URL(string: deviceUrl)!)
-                authState = .waitingForCode(code: "Check browser", url: deviceUrl)
-
-            } catch {
-                authState = .failed(error.localizedDescription)
             }
+
+            // Hand off to the browser device flow. No fabricated code is shown:
+            // the previous version displayed a hardcoded "XXXX-XXXX" while it
+            // worked, which is a made-up credential on screen.
+            let deviceUrl = "https://github.com/login/device"
+            NSWorkspace.shared.open(URL(string: deviceUrl)!)
+            authState = .waitingForCode(code: "Check browser", url: deviceUrl)
         }
     }
 
@@ -299,6 +322,29 @@ public final class OnboardingViewModel {
     }
 
     private func runShell(_ executable: String, args: [String]) async throws -> String {
+        // Foundation lies about this case, and the lie cost real debugging time.
+        // Handing `Process` a path that exists but is not executable fails with
+        // NSCocoaErrorDomain Code=4, which renders as `The file "x" doesn't
+        // exist.` — so the operator goes looking for a missing file that is
+        // sitting right there. Check first and say what is actually wrong.
+        let fm = FileManager.default
+        if executable.hasPrefix("/") {
+            var isDir: ObjCBool = false
+            if !fm.fileExists(atPath: executable, isDirectory: &isDir) {
+                throw ShellError.notFound(executable)
+            }
+            if isDir.boolValue {
+                throw ShellError.notExecutable(executable, "it is a directory")
+            }
+            if !fm.isExecutableFile(atPath: executable) {
+                throw ShellError.notExecutable(
+                    executable,
+                    "the file exists but has no execute permission — if it is a script, "
+                        + "run it through its interpreter instead of as the executable"
+                )
+            }
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
@@ -308,6 +354,20 @@ public final class OnboardingViewModel {
         try process.run()
         process.waitUntilExit()
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    /// Run a Node script the way `startDaemon` already does correctly: resolve the
+    /// interpreter, then pass the script as its first argument.
+    ///
+    /// This exists so the executable-vs-script mistake has an obvious right answer
+    /// next to it. `dist/index.js` is not a program — it is a module, and every
+    /// caller that forgets that gets Foundation's misleading "doesn't exist".
+    @discardableResult
+    private func runNode(script: String, args: [String] = []) async throws -> String {
+        let nodePath = (try? await runShell("/usr/bin/env", args: ["which", "node"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = (nodePath?.isEmpty == false ? nodePath! : "/opt/homebrew/bin/node")
+        return try await runShell(resolved, args: [script] + args)
     }
 
     private func shellSync(_ executable: String, args: [String]) throws -> String {

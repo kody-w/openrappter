@@ -292,6 +292,17 @@ public final class ProcessManager: Observable {
         proc.executableURL = URL(fileURLWithPath: nodePath)
         proc.arguments = ["dist/index.js", "--daemon", "--port", String(port)]
         proc.currentDirectoryURL = URL(fileURLWithPath: tsPath)
+        // Give the daemon a PATH that can find command-line tools.
+        //
+        // Without this the child silently inherits OpenRappterBar's own
+        // environment, and a menu-bar app launched from Finder gets launchd's
+        // session PATH — `/usr/bin:/bin:/usr/sbin:/sbin`, no Homebrew. The
+        // daemon then cannot find `copilot`, and the failure surfaces to the
+        // operator as "Copilot CLI failed" with no hint that PATH is the cause.
+        // `LaunchAgentManager` already sets this correctly; this path did not.
+        var childEnv = ProcessInfo.processInfo.environment
+        childEnv["PATH"] = ProcessManager.nodeSearchPath()
+        proc.environment = childEnv
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
 

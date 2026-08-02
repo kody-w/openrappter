@@ -19,6 +19,42 @@ import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './type
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * A PATH that still finds the CLI when the daemon was not started from a shell.
+ *
+ * A menu-bar app launched from Finder inherits launchd's session environment,
+ * whose PATH is `/usr/bin:/bin:/usr/sbin:/sbin` — no Homebrew — and the daemon
+ * it spawns inherits that too. `/opt/homebrew/bin/copilot` then becomes
+ * unreachable even though it is installed, which is what "Copilot CLI failed"
+ * actually was on this machine: the daemon's PATH contained no `copilot` at all.
+ *
+ * It matters twice over, because both entrypoints need PATH:
+ *   · the real binary is `#!/usr/bin/env node`, so it needs `node`;
+ *   · the VS Code wrapper shells `copilot --version` to find the real one.
+ *
+ * Mirrors `ProcessManager.nodeSearchPath()` on the Swift side.
+ */
+export function resolveSpawnPath(env: NodeJS.ProcessEnv = process.env): string {
+  const home = env.HOME || homedir();
+  const dirs = [
+    join(home, '.local/bin'),
+    join(home, '.volta/bin'),
+    join(home, '.asdf/shims'),
+    join(home, '.local/share/mise/shims'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ];
+  const existing = (env.PATH || '').split(':').filter(Boolean);
+  const seen = new Set<string>();
+  // Existing entries first: an operator's explicit PATH still wins, and these
+  // known locations act as a floor rather than an override.
+  return [...existing, ...dirs].filter((d) => (d && !seen.has(d) ? (seen.add(d), true) : false)).join(':');
+}
+
 export interface CopilotCliDirectOptions {
   cliPath?: string;
   model?: string;
@@ -49,25 +85,49 @@ export class CopilotCliDirectProvider implements LLMProvider {
       async (executable, args, options) => execFileAsync(
         executable,
         args,
-        options,
+        // Without an enriched PATH the CLI cannot find `node` (it is a
+        // `#!/usr/bin/env node` script), so a daemon started outside a shell
+        // fails before it ever reaches Copilot.
+        { ...options, env: { ...process.env, PATH: resolveSpawnPath() } },
       )
     );
   }
 
   setGithubToken(_token: string): void { /* CLI owns its own credential */ }
 
+  /**
+   * Where to look for the CLI, best first.
+   *
+   * Exposed so the ORDER is testable — the ordering is what carries the fix,
+   * and an ordering that only exists inside a loop over the real filesystem
+   * cannot be asserted on.
+   *
+   * The VS Code entry is not the CLI. It is a 300-byte shim that runs VS Code's
+   * Electron helper, which then shells `copilot --version` to locate the real
+   * binary — so preferring it takes a hard dependency on VS Code being installed
+   * AND the real CLI being on PATH. Real installs first; the shim is a last
+   * resort for machines where Copilot CLI only ever arrived through VS Code.
+   */
+  static candidatePaths(home: string = homedir()): string[] {
+    return [
+      '/opt/homebrew/bin/copilot',
+      '/usr/local/bin/copilot',
+      join(home, '.local/bin/copilot'),
+      join(home, '.copilot/bin/copilot'),
+      join(home, 'Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/copilot'),
+    ];
+  }
+
   static findCLI(): string | null {
     const envPath = process.env.OPENRAPPTER_COPILOT_CLI || process.env.COPILOT_CLI_PATH;
     if (envPath && existsSync(envPath)) return envPath;
-    const candidates = [
-      join(homedir(), 'Library/Application Support/Code/User/globalStorage/github.copilot-chat/copilotCli/copilot'),
-      '/opt/homebrew/bin/copilot',
-      '/usr/local/bin/copilot',
-      join(homedir(), '.copilot/bin/copilot'),
-    ];
-    for (const c of candidates) if (existsSync(c)) return c;
+    for (const c of CopilotCliDirectProvider.candidatePaths()) if (existsSync(c)) return c;
     try {
-      const p = execSync('command -v copilot', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const p = execSync('command -v copilot', {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: { ...process.env, PATH: resolveSpawnPath() },
+      }).trim();
       if (p && existsSync(p)) return p;
     } catch { /* not on PATH */ }
     return null;

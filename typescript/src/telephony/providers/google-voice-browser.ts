@@ -40,6 +40,9 @@ export interface InboxEntry {
   from: string;
   preview: string;
   unread: boolean;
+  /** Every participant, so a group is never answered as if it were one person. */
+  participants?: string[];
+  isGroup?: boolean;
   /**
    * The timestamp the list itself displays - "8:02 PM", "Jul 14", "Mar 9".
    *
@@ -50,6 +53,18 @@ export interface InboxEntry {
    * as a duplicate.
    */
   shownAt: string;
+  /**
+   * True when the newest message in the thread is one WE sent.
+   *
+   * The list preview shows the latest message in the thread, whichever way it
+   * went. After the agent replies, the preview becomes the agent's own words —
+   * a different string, so a different message id, so the next poll read it as
+   * a brand new message and replied to it. That is a self-reply loop that texts
+   * a real person every time the watcher wakes. Google Voice marks its own
+   * outbound previews with a "You: " prefix; that prefix is the only direction
+   * signal the list view offers.
+   */
+  outbound: boolean;
 }
 
 export interface GoogleVoiceBrowserOptions {
@@ -333,6 +348,9 @@ export class GoogleVoiceBrowserDriver implements GoogleVoiceDriver {
         // shownAt was added to fix.
         const tm = text.match(/\\b(\\d{1,2}:\\d{2}\\s?[AP]M)\\b/i)
           || text.match(/\\b([A-Z][a-z]{2}\\s+\\d{1,2})\\b/);
+        // "You: " on the preview means the last message in the thread is ours.
+        const cleaned = preview.replace(/\\s+/g, ' ').trim();
+        const outbound = /^You:\\s*/i.test(cleaned);
         out.push({
           // A group's identity is the whole participant set, sorted so the same
           // thread always hashes to the same id regardless of render order.
@@ -340,9 +358,10 @@ export class GoogleVoiceBrowserDriver implements GoogleVoiceDriver {
           from: '+1' + num,
           participants: numbers.map(function (d) { return '+1' + d; }),
           isGroup: isGroup,
-          preview: preview.replace(/\\s+/g, ' ').trim(),
+          preview: cleaned.replace(/^You:\\s*/i, ''),
           unread: !!row.querySelector('[class*="unread"]'),
           shownAt: tm ? tm[1] : '',
+          outbound: outbound,
         });
       }
       return out;

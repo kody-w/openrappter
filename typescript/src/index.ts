@@ -15,6 +15,7 @@ import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
 import { registerTwinCommands } from './twin/index.js';
+import { registerCronCommand } from './cli/cron.js';
 
 const execAsync = promisify(exec);
 
@@ -545,6 +546,21 @@ async function startGatewayInProcess(opts?: {
         }
       },
     });
+    // A job added at runtime must survive a restart. Scheduling it without
+    // writing it back would just invert the old defect: it would run now and
+    // vanish on the next daemon start.
+    const persistCronJobs = (): void => {
+      try {
+        fs.writeFileSync(cronFile, JSON.stringify(cronService.listJobs(), null, 2));
+      } catch (err) {
+        console.error(`${EMOJI} Could not persist cron jobs:`, (err as Error).message);
+      }
+    };
+    // lastRun only tells you a job is silent if it outlives the process.
+    cronService.onEvent((event) => {
+      if (event.type === 'job:executed' || event.type === 'job:error') persistCronJobs();
+    });
+
     server.setCronService({
       list: () => cronService.listJobs().map(j => ({
         id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled,
@@ -552,9 +568,21 @@ async function startGatewayInProcess(opts?: {
         lastRun: j.lastRun || null, nextRun: j.nextRun || null,
       })),
       run: async (id: string) => { await cronService.executeJob(id, 'force'); },
-      enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); },
-      disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); },
+      enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); persistCronJobs(); },
+      disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); persistCronJobs(); },
       getRunLogs: (jobId?: string) => cronService.getRunLogs(jobId),
+      add: async (job: Record<string, unknown>) => {
+        const created = await cronService.addJob({
+          name: String(job.name ?? 'job'),
+          schedule: String(job.schedule ?? '*/5 * * * *'),
+          agentId: job.agentId ? String(job.agentId) : undefined,
+          message: String(job.message ?? ''),
+          enabled: job.enabled !== false,
+        });
+        persistCronJobs();
+        return { id: created.id };
+      },
+      remove: async (id: string) => { await cronService.removeJob(id); persistCronJobs(); },
     });
     // Send cron job results to Telegram when connected
     const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';
@@ -1987,5 +2015,10 @@ channelCmd
 
 registerTelephonyCommands(program);
 registerTwinCommands(program);
+// This module existed and was exported, but nothing ever called it — so
+// `openrappter cron` was not a command at all. Commander read it as a chat
+// message, which is why asking for `cron add --help` printed the top-level help
+// instead of an error.
+registerCronCommand(program);
 
 program.parse();

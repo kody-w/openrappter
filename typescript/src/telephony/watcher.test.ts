@@ -26,11 +26,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function transport(threads: Array<{ from: string; preview: string }>, sent: string[] = []): WatchTransport {
+function transport(
+  threads: Array<{ from: string; preview: string; outbound?: boolean }>,
+  sent: string[] = [],
+): WatchTransport {
   return {
     async listInbox() {
       return threads.map((t) => ({
         threadId: `t.${t.from}`, from: t.from, preview: t.preview, unread: true,
+        outbound: t.outbound ?? false,
       }));
     },
     async sendSms(to, text) {
@@ -214,5 +218,67 @@ describe('GoogleVoiceWatcher', () => {
     await w.tick();
     // Unhandled, so a transport that CAN reply will pick it up later.
     expect((await loadState(statePath)).handled).toEqual([]);
+  });
+});
+
+/**
+ * The self-reply loop.
+ *
+ * Google Voice's thread list shows the LATEST message in a thread, whichever
+ * direction it went. So the moment the agent replies, the preview becomes the
+ * agent's own words. Message identity is a hash of that preview, so the next
+ * poll saw a string it had never seen before, called it new, and answered it —
+ * then answered that, every five minutes, to a real phone.
+ *
+ * This was observed in production: two identical replies to one message, five
+ * minutes apart, with the watcher's `handled` count climbing on every tick.
+ */
+describe('the watcher does not answer itself', () => {
+  it('stays silent when the newest message in the thread is its own reply', async () => {
+    const sent: string[] = [];
+    const inbox: Array<{ from: string; preview: string; outbound?: boolean }> = [
+      { from: '+15551230000', preview: 'hello there' },
+    ];
+    const w = new GoogleVoiceWatcher({
+      statePath, respond: async () => 'an agent reply', log: () => {},
+      driverFactory: async () => transport(inbox, sent),
+      now: (() => { let t = 1_000_000; return () => (t += 60_000); })(),
+    });
+
+    await w.tick();                       // first run: observe only
+    expect(await w.tick()).toBe(1);       // genuine inbound gets one reply
+    expect(sent).toHaveLength(1);
+
+    // Now the list shows OUR message as the newest thing in the thread.
+    inbox[0] = { from: '+15551230000', preview: 'an agent reply', outbound: true };
+
+    expect(await w.tick()).toBe(0);
+    expect(await w.tick()).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('answers again when a real inbound follows its own reply', async () => {
+    const sent: string[] = [];
+    const inbox: Array<{ from: string; preview: string; outbound?: boolean }> = [
+      { from: '+15551230000', preview: 'first', outbound: false },
+    ];
+    const w = new GoogleVoiceWatcher({
+      statePath, respond: async () => 'reply', log: () => {},
+      driverFactory: async () => transport(inbox, sent),
+      now: (() => { let t = 2_000_000; return () => (t += 60_000); })(),
+    });
+
+    await w.tick();
+    await w.tick();
+    expect(sent).toHaveLength(1);
+
+    inbox[0] = { from: '+15551230000', preview: 'reply', outbound: true };
+    await w.tick();
+    expect(sent).toHaveLength(1);
+
+    // A human writes back. Silence here would be just as broken as the loop.
+    inbox[0] = { from: '+15551230000', preview: 'thanks!', outbound: false };
+    expect(await w.tick()).toBe(1);
+    expect(sent).toHaveLength(2);
   });
 });

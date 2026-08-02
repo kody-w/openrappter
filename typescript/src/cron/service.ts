@@ -34,6 +34,65 @@ export function resolveSchedule(schedule: string): string {
   return NAMED_SCHEDULES[schedule] ?? schedule;
 }
 
+/** Check if a single cron field matches a value. */
+function fieldMatchesValue(pattern: string, value: number): boolean {
+  if (pattern === '*') return true;
+
+  // Step values: */5, 1-10/2
+  if (pattern.includes('/')) {
+    const [range, stepStr] = pattern.split('/');
+    const step = parseInt(stepStr, 10);
+    if (isNaN(step) || step <= 0) return false;
+    if (range === '*') return value % step === 0;
+    if (range.includes('-')) {
+      const [start, end] = range.split('-').map(Number);
+      return value >= start && value <= end && (value - start) % step === 0;
+    }
+    return false;
+  }
+
+  if (pattern.includes(',')) {
+    return pattern.split(',').some(p => fieldMatchesValue(p.trim(), value));
+  }
+
+  if (pattern.includes('-')) {
+    const [start, end] = pattern.split('-').map(Number);
+    return value >= start && value <= end;
+  }
+
+  return parseInt(pattern, 10) === value;
+}
+
+/** Does `schedule` match the minute containing `at`? */
+export function cronMatchesAt(schedule: string, at: Date): boolean {
+  const parts = resolveSchedule(schedule).split(' ').filter(p => p);
+  if (parts.length !== 5) return false;
+  const fields = [at.getMinutes(), at.getHours(), at.getDate(), at.getMonth() + 1, at.getDay()];
+  for (let i = 0; i < 5; i++) {
+    if (!fieldMatchesValue(parts[i], fields[i])) return false;
+  }
+  return true;
+}
+
+// A cron expression that matches nothing (Feb 30) must terminate rather than
+// spin, so the walk is bounded at just over four years to cover leap days.
+const NEXT_RUN_SEARCH_MINUTES = 366 * 4 * 24 * 60;
+
+/**
+ * The first minute strictly after `from` whose minute matches `schedule`.
+ * Returns undefined for an invalid or unsatisfiable expression.
+ */
+export function computeNextRun(schedule: string, from: Date = new Date()): string | undefined {
+  if (!validateCronExpression(schedule)) return undefined;
+  const cursor = new Date(from.getTime());
+  cursor.setSeconds(0, 0);
+  for (let i = 0; i < NEXT_RUN_SEARCH_MINUTES; i++) {
+    cursor.setMinutes(cursor.getMinutes() + 1);
+    if (cronMatchesAt(schedule, cursor)) return cursor.toISOString();
+  }
+  return undefined;
+}
+
 export function validateCronExpression(expr: string): boolean {
   const resolved = resolveSchedule(expr);
   const parts = resolved.split(' ').filter(p => p);
@@ -85,7 +144,7 @@ export function validateCronExpression(expr: string): boolean {
 
 export class CronService {
   private jobs: Map<string, CronJob> = new Map();
-  private timers: Map<string, ReturnType<typeof setInterval>> = new Map();
+  private timers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private runLogs: CronRunLog[] = [];
   private maxLogRetention = 100;
   private running = false;
@@ -107,7 +166,7 @@ export class CronService {
   stop(): void {
     this.running = false;
     for (const timer of this.timers.values()) {
-      clearInterval(timer);
+      clearTimeout(timer);
     }
     this.timers.clear();
   }
@@ -115,6 +174,12 @@ export class CronService {
   async loadJobs(jobs: CronJob[]): Promise<void> {
     for (const job of jobs) {
       this.jobs.set(job.id, job);
+      // Jobs restored from disk carry a stale or absent nextRun.
+      // addJob defaults enabled to true; a record persisted without the field
+      // must load the same way or it comes back silently disabled.
+      if (job.enabled === undefined) job.enabled = true;
+      if (this.running && job.enabled) this.scheduleJob(job);
+      else job.nextRun = job.enabled ? computeNextRun(job.schedule) : undefined;
     }
   }
 
@@ -220,6 +285,7 @@ export class CronService {
 
       // Update job timestamps
       job.lastRun = logEntry.completedAt;
+      job.nextRun = computeNextRun(job.schedule);
       this.jobs.set(id, job);
 
       this.emit({ type: 'job:executed', jobId: id, timestamp: logEntry.completedAt, data: { result } });
@@ -228,6 +294,10 @@ export class CronService {
       logEntry.status = 'error';
       logEntry.error = err instanceof Error ? err.message : String(err);
       logEntry.completedAt = new Date().toISOString();
+      // A failed run must still advance, or a due-mode caller retries forever.
+      job.lastRun = logEntry.completedAt;
+      job.nextRun = computeNextRun(job.schedule);
+      this.jobs.set(id, job);
 
       this.emit({ type: 'job:error', jobId: id, timestamp: logEntry.completedAt, data: { error: logEntry.error } });
       return null;
@@ -273,74 +343,44 @@ export class CronService {
   }
 
   private scheduleJob(job: CronJob): void {
-    // Check every 60s but only execute if the cron expression matches the current minute
-    const intervalMs = 60000;
-    const timer = setInterval(() => {
+    job.nextRun = computeNextRun(job.schedule);
+    this.jobs.set(job.id, job);
+
+    const tick = (): void => {
       if (job.enabled && this.cronMatches(job.schedule)) {
         this.executeJob(job.id, 'force').catch(() => {});
+      } else {
+        // Keep nextRun truthful even on minutes that do not fire.
+        job.nextRun = computeNextRun(job.schedule);
+        this.jobs.set(job.id, job);
       }
-    }, intervalMs);
+    };
+
+    // A bare 60s interval drifts off the minute it was started on and can skip a
+    // target minute entirely. Re-align to just past the top of each minute.
+    const alignAndRun = (): void => {
+      tick();
+      const delay = 60000 - (Date.now() % 60000) + 500;
+      const t = setTimeout(alignAndRun, delay);
+      if (typeof t.unref === 'function') t.unref();
+      this.timers.set(job.id, t);
+    };
+
+    const firstDelay = 60000 - (Date.now() % 60000) + 500;
+    const timer = setTimeout(alignAndRun, firstDelay);
+    if (typeof timer.unref === 'function') timer.unref();
     this.timers.set(job.id, timer);
   }
 
   /** Check if a cron expression matches the current time (minute-level precision) */
   private cronMatches(schedule: string): boolean {
-    const resolved = resolveSchedule(schedule);
-    const parts = resolved.split(' ').filter(p => p);
-    if (parts.length !== 5) return false;
-
-    const now = new Date();
-    const fields = [
-      now.getMinutes(),   // 0-59
-      now.getHours(),     // 0-23
-      now.getDate(),      // 1-31
-      now.getMonth() + 1, // 1-12
-      now.getDay(),       // 0-6 (Sunday=0)
-    ];
-
-    for (let i = 0; i < 5; i++) {
-      if (!this.fieldMatches(parts[i], fields[i])) return false;
-    }
-    return true;
-  }
-
-  /** Check if a single cron field matches a value */
-  private fieldMatches(pattern: string, value: number): boolean {
-    if (pattern === '*') return true;
-
-    // Handle step values: */5, 1-10/2
-    if (pattern.includes('/')) {
-      const [range, stepStr] = pattern.split('/');
-      const step = parseInt(stepStr, 10);
-      if (isNaN(step) || step <= 0) return false;
-      if (range === '*') return value % step === 0;
-      // Range with step: 1-30/5
-      if (range.includes('-')) {
-        const [start, end] = range.split('-').map(Number);
-        return value >= start && value <= end && (value - start) % step === 0;
-      }
-      return false;
-    }
-
-    // Handle lists: 1,3,5
-    if (pattern.includes(',')) {
-      return pattern.split(',').some(p => this.fieldMatches(p.trim(), value));
-    }
-
-    // Handle ranges: 1-5
-    if (pattern.includes('-')) {
-      const [start, end] = pattern.split('-').map(Number);
-      return value >= start && value <= end;
-    }
-
-    // Plain number
-    return parseInt(pattern, 10) === value;
+    return cronMatchesAt(schedule, new Date());
   }
 
   private unscheduleJob(id: string): void {
     const timer = this.timers.get(id);
     if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
       this.timers.delete(id);
     }
   }

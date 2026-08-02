@@ -28,12 +28,23 @@ export function registerCronCommand(program: Command): void {
     .command('add <schedule> <action>')
     .description('Add a new cron job')
     .option('-d, --description <desc>', 'Job description')
-    .action(async (schedule: string, action: string, options: { description?: string }) => {
+    .option('-a, --agent <id>', 'Agent to run (default: the main assistant)')
+    .option('-n, --name <name>', 'Job name, as it appears in `cron list`')
+    .action(async (
+      schedule: string,
+      action: string,
+      options: { description?: string; agent?: string; name?: string },
+    ) => {
       await withClient(async (client) => {
+        // These key names are the gateway's contract, not this file's choice.
+        // Sending {schedule, action, description} — which is what this did —
+        // meant the daemon read no message and no agent, and quietly created a
+        // job called "job" that ran the main assistant with an empty prompt.
         const result = await client.call('cron.add', {
+          name: options.name ?? options.description ?? action,
           schedule,
-          action,
-          description: options.description,
+          message: action,
+          agentId: options.agent,
         });
         console.log('Cron job added:', result);
       });

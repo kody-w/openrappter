@@ -183,6 +183,17 @@ export class GatewayServer {
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
     getRunLogs?(jobId?: string): unknown[];
+    /**
+     * Add a job to the LIVE scheduler.
+     *
+     * Optional because not every host wires one, but its absence was a real
+     * defect: `cron.add` wrote to `cronStore` (a JSON file) while `cron.list`
+     * read from `cronService` (the running scheduler). A job added at runtime
+     * persisted to disk, vanished from the listing, and never fired until the
+     * daemon was restarted — it looked accepted and did nothing.
+     */
+    add?(job: Record<string, unknown>): Promise<{ id: string }>;
+    remove?(id: string): Promise<void>;
   };
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
@@ -203,6 +214,26 @@ export class GatewayServer {
     this.loadSessions();
     this.loadCronStore();
   }
+
+  /**
+   * Add a cron job, preferring the live scheduler so it actually runs. Falling
+   * back to the file-only store keeps older hosts working, but a job that only
+   * reaches the file will not fire until restart — so the reply says which
+   * happened rather than reporting a uniform success.
+   */
+  private addCronJob = async (params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    // `enabled` defaults to true when adding, so persisting without the field
+    // would round-trip an enabled job back as a disabled one.
+    const job = { enabled: true, ...params };
+    if (this.cronService?.add) {
+      const created = await this.cronService.add(job);
+      return { ...job, ...created, scheduled: true };
+    }
+    const stored = { id: `cron_${randomUUID().slice(0, 8)}`, ...job };
+    this.cronStore.push(stored);
+    this.saveCronStore();
+    return { ...stored, scheduled: false, note: 'saved to disk; will not run until the daemon restarts' };
+  };
 
   /* ---- persistence ---- */
 
@@ -374,6 +405,8 @@ export class GatewayServer {
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
     getRunLogs?(jobId?: string): unknown[];
+    add?(job: Record<string, unknown>): Promise<{ id: string }>;
+    remove?(id: string): Promise<void>;
   }): void {
     this.cronService = service;
   }
@@ -1764,13 +1797,9 @@ export class GatewayServer {
       if (this.cronService) return this.cronService.list();
       return this.cronStore;
     });
-    this.registerMethod('cron.add', async (params: Record<string, unknown>) => {
-      const job = { id: `cron_${randomUUID().slice(0, 8)}`, ...params };
-      this.cronStore.push(job);
-      this.saveCronStore();
-      return job;
-    }, { requiresAuth: true });
+    this.registerMethod('cron.add', this.addCronJob, { requiresAuth: true });
     this.registerMethod('cron.remove', async (params: { jobId: string }) => {
+      if (this.cronService?.remove) await this.cronService.remove(params.jobId);
       this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== params.jobId);
       this.saveCronStore();
       return { removed: true };
@@ -1806,26 +1835,39 @@ export class GatewayServer {
       throw new Error('No cron service or agent handler configured');
     }, { requiresAuth: true });
     this.registerMethod('cron.enable', async (params: { jobId: string; enabled: boolean }) => {
-      // Update in built-in store
+      // The live scheduler comes FIRST. This used to find the job in the file
+      // store, flip the flag on disk, and return success without ever telling
+      // the running scheduler — so "disable" reported done while the job kept
+      // firing. Toggling a job that is actively texting someone has to act on
+      // the thing that is actually running.
+      let applied = false;
+      if (this.cronService) {
+        const known = this.cronService.list().some((j) => j.id === params.jobId);
+        if (known) {
+          if (params.enabled) await this.cronService.enable(params.jobId);
+          else await this.cronService.disable(params.jobId);
+          applied = true;
+        }
+      }
+
       const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId) as Record<string, unknown> | undefined;
       if (job) {
         job.enabled = params.enabled;
         this.saveCronStore();
-        return { enabled: params.enabled };
+        applied = true;
       }
-      if (!this.cronService) throw new Error('Cron service not configured');
-      if (params.enabled) await this.cronService.enable(params.jobId);
-      else await this.cronService.disable(params.jobId);
+
+      // Reporting success for a job that does not exist is how an empty jobId
+      // came back "{ enabled: false }" while the real job kept running.
+      if (!applied) throw new Error(`Cron job not found: ${params.jobId || '(empty id)'}`);
       return { enabled: params.enabled };
     }, { requiresAuth: true });
 
     // ── Cron method aliases (menu bar app uses different names) ──
-    this.registerMethod('cron.create', async (params: Record<string, unknown>) => {
-      const job = { id: `cron_${randomUUID().slice(0, 8)}`, ...params };
-      this.cronStore.push(job);
-      this.saveCronStore();
-      return job;
-    }, { requiresAuth: true });
+    // Must share cron.add's implementation, not re-derive it: this alias kept
+    // the original file-only bug after cron.add was fixed, so the menu bar could
+    // create a job that silently never ran.
+    this.registerMethod('cron.create', this.addCronJob, { requiresAuth: true });
     this.registerMethod('cron.delete', async (params: { jobId: string }) => {
       this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== params.jobId);
       this.saveCronStore();

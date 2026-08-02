@@ -61,7 +61,7 @@ export interface WatcherOptions {
 export interface WatchTransport {
   listInbox(limit?: number): Promise<Array<{
     threadId: string; from: string; preview: string; unread: boolean;
-    shownAt?: string; isGroup?: boolean;
+    shownAt?: string; isGroup?: boolean; outbound?: boolean;
   }>>;
   sendSms(to: string, text: string): Promise<string>;
   /**
@@ -168,7 +168,10 @@ export class GoogleVoiceWatcher {
         id: `${entry.threadId}:${hash(`${entry.shownAt ?? ''}|${entry.preview}`)}`,
         threadId: entry.threadId,
         from: entry.from,
-        direction: 'inbound',
+        // Never hardcode this. decide() has always refused to answer our own
+        // messages; the watcher simply asserted every row was inbound, so that
+        // guard could not fire and the agent answered itself in a loop.
+        direction: entry.outbound ? 'outbound' : 'inbound',
         text: entry.preview,
         at,
       };

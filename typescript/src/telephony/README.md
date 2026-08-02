@@ -335,3 +335,63 @@ Verified in real Chrome over real CDP, including a page rigged to swallow sends 
 Still a handoff. Google Voice bridges *your* phone, so there is no audio path for
 the agent to speak on — `say()` throws in `handoff` mode rather than let the
 agent claim it spoke. Text is where this rung is autonomous.
+
+### Waking itself up: the Google Voice cron job
+
+Polling only happens while something is polling. `openrappter watch` holds a
+process open; the cron job instead lets the daemon wake *itself* every five
+minutes, so the number stays answered without a terminal left running.
+
+```bash
+# the daemon must already be running (it is, under launchd)
+openrappter cron add "*/5 * * * *" check \
+  --agent GoogleVoice \
+  --name "Google Voice check"
+
+openrappter cron list        # nextRun is the field that tells you it is real
+```
+
+Over the gateway directly, which is what the menu bar and the UI use:
+
+```jsonc
+// method: cron.add
+{ "name": "Google Voice check", "schedule": "*/5 * * * *",
+  "agentId": "GoogleVoice", "message": "check" }
+```
+
+The reply tells you which half happened:
+
+```jsonc
+{ "id": "job_...", "scheduled": true }   // in the running scheduler AND on disk
+{ "id": "job_...", "scheduled": false,   // file only — a host with no scheduler
+  "note": "saved to disk; will not run until the daemon restarts" }
+```
+
+`cron.list` shows `nextRun` for every enabled job. A job listed with
+`nextRun: null` is not scheduled, whatever else the listing says — that is the
+one field worth reading.
+
+**One poll per invocation.** `GoogleVoiceAgent` does a single pass and returns,
+because a cron job that never returns is a daemon, not a job. Its result carries
+`replied`, `knownThreads` and `handled`, which is how a silent failure and a
+quiet day are told apart.
+
+**It needs Chrome on the DevTools port.** Without it the agent reports the failure
+and the job still completes — the schedule is not wedged by a closed browser.
+
+#### Why the first tick after a reply must say `replied: 0`
+
+Google Voice's thread list previews the newest message in a thread *in either
+direction*. The moment the agent replies, the preview becomes the agent's own
+words — and message identity is a hash of that preview, so the next poll read a
+string it had never seen, called it new, and answered it. Then answered that.
+
+This ran in production on 2026-08-02 and texted a real phone twice, five minutes
+apart, with identical text; `handled` climbed on every tick. `decide()` had always
+refused to answer an outbound message, but `watcher.ts` hardcoded
+`direction: 'inbound'` on every row, so the guard could never fire.
+
+The list marks our own previews with a `You: ` prefix. That prefix is the only
+direction signal the list view offers, and it is now the thing `outbound` is
+derived from — see `inbox-extraction.test.ts`, which runs the extraction script
+against a real DOM rather than a stubbed `evaluate`.

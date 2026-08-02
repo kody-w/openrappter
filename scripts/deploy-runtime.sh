@@ -48,7 +48,17 @@ fi
 TARGET="$RELEASES/${SHA}${DIRTY}"
 
 printf '\n  building %s\n' "$SHA"
-(cd "$TS" && npm run build >/dev/null 2>&1) || die "build failed — refusing to deploy"
+# Swallowing the build log made a real failure unreadable: the deploy said only
+# "build failed", the symlink silently kept pointing at the previous release, and
+# a stale daemon went on serving as though the fix had shipped. Show the reason.
+BUILD_LOG="$(mktemp -t openrappter-build)"
+if ! (cd "$TS" && npm run build >"$BUILD_LOG" 2>&1); then
+  printf '\n  build failed — refusing to deploy\n\n'
+  tail -30 "$BUILD_LOG" | sed 's/^/    /'
+  printf '\n  full log: %s\n' "$BUILD_LOG"
+  exit 1
+fi
+rm -f "$BUILD_LOG"
 
 [ -f "$TS/dist/index.js" ] || die "build produced no dist/index.js"
 

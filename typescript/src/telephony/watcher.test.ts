@@ -160,4 +160,51 @@ describe('GoogleVoiceWatcher', () => {
     await saveState(s, statePath);
     expect((await loadState(statePath)).knownThreads['t.1'].watermark).toBe(123);
   });
+
+  // A group answered by texting one participant is worse than no answer: the
+  // rest of the group never sees it, and one person gets what looks like an
+  // unsolicited direct message from a number they were only ever in a group with.
+  it('replies to a GROUP in its thread, never privately to one participant', async () => {
+    const sms: string[] = [];
+    const threads: string[] = [];
+    let t = 1_000_000;
+    const w = new GoogleVoiceWatcher({
+      statePath, respond: async () => 'group reply', log: () => {},
+      now: () => (t += 60_000),
+      driverFactory: async () => ({
+        async listInbox() {
+          return [{
+            threadId: 'g.4048406745-7043867727', from: '+14048406745',
+            preview: 'hi all', unread: true, isGroup: true,
+          }];
+        },
+        async sendSms(to: string) { sms.push(to); return 't'; },
+        async sendToThread(id: string) { threads.push(id); return id; },
+      }),
+    });
+    await w.tick();
+    (w as unknown as { state: unknown }).state = await loadState(statePath);
+    await w.tick();
+    expect(sms, 'a group must never be answered with a private sendSms').toEqual([]);
+    expect(threads).toEqual(['g.4048406745-7043867727']);
+  });
+
+  it('refuses a group when the transport cannot reply in-thread', async () => {
+    let t2 = 1_000_000;
+    const w = new GoogleVoiceWatcher({
+      statePath, respond: async () => 'x', log: () => {},
+      now: () => (t2 += 60_000),
+      driverFactory: async () => ({
+        async listInbox() {
+          return [{ threadId: 'g.1-2', from: '+15551110000', preview: 'hi', unread: true, isGroup: true }];
+        },
+        async sendSms() { throw new Error('should never be called for a group'); },
+      }),
+    });
+    await w.tick();
+    (w as unknown as { state: unknown }).state = await loadState(statePath);
+    await w.tick();
+    // Unhandled, so a transport that CAN reply will pick it up later.
+    expect((await loadState(statePath)).handled).toEqual([]);
+  });
 });

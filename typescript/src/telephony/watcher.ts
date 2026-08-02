@@ -60,9 +60,15 @@ export interface WatcherOptions {
 /** The slice of the Google Voice driver the loop actually uses. */
 export interface WatchTransport {
   listInbox(limit?: number): Promise<Array<{
-    threadId: string; from: string; preview: string; unread: boolean; shownAt?: string;
+    threadId: string; from: string; preview: string; unread: boolean;
+    shownAt?: string; isGroup?: boolean;
   }>>;
   sendSms(to: string, text: string): Promise<string>;
+  /**
+   * Reply inside an existing thread. Required for groups, where there is no
+   * single number to address.
+   */
+  sendToThread?(threadId: string, text: string): Promise<string>;
 }
 
 export async function loadState(path = STATE_PATH): Promise<WatchState> {
@@ -190,7 +196,8 @@ export class GoogleVoiceWatcher {
       }
 
       if (this.opts.dryRun) {
-        this.log(`[watch] DRY RUN — would reply to ${entry.from}: ${reply.slice(0, 60)}`);
+        const target = entry.isGroup ? `group ${entry.threadId}` : entry.from;
+        this.log(`[watch] DRY RUN — would reply to ${target}: ${reply.slice(0, 60)}`);
         this.state = recordReply(this.state, message, at);
         await saveState(this.state, this.statePath);
         acted++;
@@ -198,7 +205,19 @@ export class GoogleVoiceWatcher {
       }
 
       try {
-        await d.sendSms(entry.from, reply);
+        // A GROUP must be answered in its thread. Calling sendSms(entry.from)
+        // would text the first participant PRIVATELY — the rest of the group
+        // would never see it, and one person would receive what looks like an
+        // unsolicited direct message. The inbox reader already knows which
+        // threads are groups; this is where that has to be honoured.
+        if (entry.isGroup) {
+          if (!d.sendToThread) {
+            throw new Error('this transport cannot reply to a group thread');
+          }
+          await d.sendToThread(entry.threadId, reply);
+        } else {
+          await d.sendSms(entry.from, reply);
+        }
         // Only recorded after the driver confirms the thread contains it. A
         // failed send must stay unhandled so the next poll retries — which is
         // safe precisely because sendSms refuses to claim an unconfirmed send.

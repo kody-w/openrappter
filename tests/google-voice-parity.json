@@ -1,0 +1,124 @@
+{
+  "$why": "The Google Voice watcher runs unattended and can text real people. If openrappter and the grail brainstem disagree about when it may speak, then which machine woke up first becomes a behavioural fact. Both implementations assert against these cases.",
+  "now": 1754000000000,
+  "policy": {
+    "selfNumber": "+15559990000",
+    "maxRepliesPerThread": 4,
+    "windowMs": 3600000,
+    "maxAgeMs": 86400000
+  },
+  "cases": [
+    {
+      "$why": "Our own outbound is our own voice. Treating it as input is how a loop starts.",
+      "message": { "id": "m1", "threadId": "t.1", "from": "+15551110001", "direction": "outbound", "text": "hi", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.1": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": false, "reason": "outbound" }
+    },
+    {
+      "$why": "A message from our own number is us. Never converse with ourselves.",
+      "message": { "id": "m2", "threadId": "t.2", "from": "+1 (555) 999-0000", "direction": "inbound", "text": "hi", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.2": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": false, "reason": "self" }
+    },
+    {
+      "$why": "Acting twice on one message is how a poll loop double-texts someone.",
+      "message": { "id": "m3", "threadId": "t.3", "from": "+15551110003", "direction": "inbound", "text": "hi", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.3": { "watermark": 1753999000000 } }, "handled": ["m3"], "replies": {} },
+      "expect": { "act": false, "reason": "already-handled" }
+    },
+    {
+      "$why": "THE BIG ONE. First run sees an inbox full of history. Replying to it would text everyone who ever messaged this number. First sight records a watermark and says nothing.",
+      "message": { "id": "m4", "threadId": "t.brand-new", "from": "+15551110004", "direction": "inbound", "text": "hello?", "at": 1753999990000 },
+      "state": { "knownThreads": {}, "handled": [], "replies": {} },
+      "expect": { "act": false, "reason": "thread-unseen" }
+    },
+    {
+      "$why": "Anything at or before the watermark was already there when we arrived.",
+      "message": { "id": "m5", "threadId": "t.5", "from": "+15551110005", "direction": "inbound", "text": "old", "at": 1753000000000 },
+      "state": { "knownThreads": { "t.5": { "watermark": 1753500000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": false, "reason": "older-than-watermark" }
+    },
+    {
+      "$why": "A message from last week is history, not a live conversation. Answering it is worse than silence.",
+      "message": { "id": "m6", "threadId": "t.6", "from": "+15551110006", "direction": "inbound", "text": "ancient", "at": 1753000000000 },
+      "state": { "knownThreads": { "t.6": { "watermark": 1752000000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": false, "reason": "too-old" }
+    },
+    {
+      "$why": "With an allow list configured, an unknown number gets nothing.",
+      "message": { "id": "m7", "threadId": "t.7", "from": "+15558887777", "direction": "inbound", "text": "hi", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.7": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "policy": { "selfNumber": "+15559990000", "allowFrom": ["+14048628786"], "maxRepliesPerThread": 4, "windowMs": 3600000, "maxAgeMs": 86400000 },
+      "expect": { "act": false, "reason": "not-allowed" }
+    },
+    {
+      "$why": "An allow-listed number is matched on digits, so formatting differences do not lock the owner out.",
+      "message": { "id": "m8", "threadId": "t.8", "from": "+1 404-862-8786", "direction": "inbound", "text": "hi", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.8": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "policy": { "selfNumber": "+15559990000", "allowFrom": ["4048628786"], "maxRepliesPerThread": 4, "windowMs": 3600000, "maxAgeMs": 86400000 },
+      "expect": { "act": true, "reason": "new-inbound" }
+    },
+    {
+      "$why": "The loop guard. Four replies in the window is the stop, whatever is driving it.",
+      "message": { "id": "m9", "threadId": "t.9", "from": "+15551110009", "direction": "inbound", "text": "again", "at": 1753999990000 },
+      "state": {
+        "knownThreads": { "t.9": { "watermark": 1753999000000 } },
+        "handled": [],
+        "replies": { "t.9": [1753999100000, 1753999200000, 1753999300000, 1753999400000] }
+      },
+      "expect": { "act": false, "reason": "rate-limited" }
+    },
+    {
+      "$why": "Replies that have aged out of the window do not count against the cap.",
+      "message": { "id": "m10", "threadId": "t.10", "from": "+15551110010", "direction": "inbound", "text": "later", "at": 1753999990000 },
+      "state": {
+        "knownThreads": { "t.10": { "watermark": 1753999000000 } },
+        "handled": [],
+        "replies": { "t.10": [1753000000000, 1753000100000, 1753000200000, 1753000300000] }
+      },
+      "expect": { "act": true, "reason": "new-inbound" }
+    },
+    {
+      "$why": "The ordinary case: a known thread, a fresh inbound message, nothing else against it.",
+      "message": { "id": "m11", "threadId": "t.11", "from": "+15551110011", "direction": "inbound", "text": "can you do 7:45?", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.11": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": true, "reason": "new-inbound" }
+    },
+    {
+      "$why": "Google Voice transcribes voicemail, so a missed CALL arrives as readable text. The agent cannot speak on a call, but it can act on what was said — which is most of the value.",
+      "message": { "id": "m12", "threadId": "t.12", "from": "+15551110012", "direction": "inbound", "kind": "voicemail", "text": "Hi, calling back about the quote.", "at": 1753999990000 },
+      "state": { "knownThreads": { "t.12": { "watermark": 1753999000000 } }, "handled": [], "replies": {} },
+      "expect": { "act": true, "reason": "new-inbound" }
+    }
+  ],
+  "transitions": [
+    {
+      "$why": "observe() on an unseen thread sets the watermark, which is what makes the NEXT message actionable.",
+      "op": "observe",
+      "state": { "knownThreads": {}, "handled": [], "replies": {} },
+      "threadId": "t.x",
+      "at": 1753999990000,
+      "expect": { "knownThreads": { "t.x": { "watermark": 1753999990000 } }, "handled": [], "replies": {} }
+    },
+    {
+      "$why": "observe() never moves a watermark backwards; an out-of-order poll must not reopen history.",
+      "op": "observe",
+      "state": { "knownThreads": { "t.x": { "watermark": 1753999990000 } }, "handled": [], "replies": {} },
+      "threadId": "t.x",
+      "at": 1753000000000,
+      "expect": { "knownThreads": { "t.x": { "watermark": 1753999990000 } }, "handled": [], "replies": {} }
+    },
+    {
+      "$why": "record() marks the message handled, stamps the reply for the loop guard, and advances the watermark in one step.",
+      "op": "record",
+      "state": { "knownThreads": { "t.y": { "watermark": 1753000000000 } }, "handled": [], "replies": {} },
+      "message": { "id": "m20", "threadId": "t.y", "from": "+15551110020", "direction": "inbound", "text": "ok", "at": 1753999990000 },
+      "at": 1754000000000,
+      "expect": {
+        "knownThreads": { "t.y": { "watermark": 1753999990000 } },
+        "handled": ["m20"],
+        "replies": { "t.y": [1754000000000] }
+      }
+    }
+  ]
+}

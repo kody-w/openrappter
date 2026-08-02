@@ -23,18 +23,35 @@ export interface CopilotCliDirectOptions {
   cliPath?: string;
   model?: string;
   timeoutMs?: number;
+  runner?: CopilotCliDirectRunner;
 }
+
+export type CopilotCliDirectRunner = (
+  executable: string,
+  args: string[],
+  options: { timeout: number; maxBuffer: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
 export class CopilotCliDirectProvider implements LLMProvider {
   readonly id = 'copilot-cli-direct';
   readonly name = 'GitHub Copilot CLI (direct)';
 
   private cliPath: string;
+  private model: string;
   private timeoutMs: number;
+  private runner: CopilotCliDirectRunner;
 
   constructor(config?: CopilotCliDirectOptions) {
     this.cliPath = config?.cliPath || CopilotCliDirectProvider.findCLI() || 'copilot';
+    this.model = config?.model?.trim() || 'auto';
     this.timeoutMs = config?.timeoutMs ?? 120_000;
+    this.runner = config?.runner ?? (
+      async (executable, args, options) => execFileAsync(
+        executable,
+        args,
+        options,
+      )
+    );
   }
 
   setGithubToken(_token: string): void { /* CLI owns its own credential */ }
@@ -66,20 +83,32 @@ export class CopilotCliDirectProvider implements LLMProvider {
   async chat(messages: Message[], _options?: ChatOptions): Promise<ProviderResponse> {
     const prompt = this.buildPrompt(messages);
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await this.runner(
         this.cliPath,
-        ['-p', prompt, '--no-color'],
+        [
+          '--prompt',
+          prompt,
+          '--silent',
+          '--no-color',
+          '--no-remote',
+          '--no-remote-export',
+          '--no-auto-update',
+          '--no-custom-instructions',
+          '--no-ask-user',
+          '--model',
+          this.model,
+          '--available-tools=',
+        ],
         { timeout: this.timeoutMs, maxBuffer: 20 * 1024 * 1024 },
       );
       const content = this.cleanOutput(stdout);
       return { content: content || null, tool_calls: null };
     } catch (error) {
-      const err = error as NodeJS.ErrnoException & { stdout?: string };
-      if (err.stdout) {
-        const partial = this.cleanOutput(err.stdout);
-        if (partial) return { content: partial, tool_calls: null };
+      const err = error as NodeJS.ErrnoException & { stderr?: string };
+      if (err.stderr?.includes('No authentication information found')) {
+        throw new Error('Copilot CLI is not authenticated');
       }
-      throw new Error(`Copilot CLI failed: ${err.message}`);
+      throw new Error('Copilot CLI request failed');
     }
   }
 

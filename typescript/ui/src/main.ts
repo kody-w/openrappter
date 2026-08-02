@@ -4,6 +4,7 @@
 
 import './components/app.js';
 import './components/sidebar.js';
+import './components/surgeon.js';
 import './components/chat.js';
 import './components/channels.js';
 import './components/sessions.js';

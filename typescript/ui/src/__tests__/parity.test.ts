@@ -1,8 +1,8 @@
 /**
- * Feature parity test — compares the openrappter UI against
- * the openclaw UI to ensure the same feature surface exists.
+ * Secondary anatomy compatibility tests.
  *
- * Checks: views/tabs, RPC methods used, controller patterns.
+ * The Copilot Surgeon is the primary interaction. These checks keep the
+ * previous operational pages available behind it for direct inspection.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -10,8 +10,6 @@ import * as path from 'path';
 import { GatewayClient } from '../services/gateway.js';
 
 const uiRoot = path.resolve(__dirname, '..');
-const openclawUiRoot = path.resolve(__dirname, '..', '..', '..', '..', 'openclaw', 'ui', 'src');
-
 // --- Helpers ---
 
 function fileExists(p: string): boolean {
@@ -38,10 +36,10 @@ function findAllTsFiles(dir: string): string[] {
 
 // ===== Feature Parity Tests =====
 
-describe('Feature Parity: OpenRappter vs OpenClaw', () => {
+describe('OpenRappter anatomy compatibility surfaces', () => {
   // --- Views / Tabs ---
   
-  const openclawViews = [
+  const legacyViews = [
     'chat',
     'config',
     'channels',
@@ -54,10 +52,10 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
     'skills',
   ];
 
-  it('openrappter has all OpenClaw view tabs', () => {
+  it('keeps all legacy operational view tabs available as anatomy', () => {
     const sidebarSrc = readFile(path.join(uiRoot, 'components', 'sidebar.ts'));
     
-    for (const view of openclawViews) {
+    for (const view of legacyViews) {
       expect(
         sidebarSrc.includes(`'${view}'`) || sidebarSrc.includes(`"${view}"`),
         `Missing view tab: ${view}`,
@@ -65,10 +63,10 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
     }
   });
 
-  it('openrappter app.ts routes all OpenClaw views', () => {
+  it('routes all legacy operational views behind the surgeon', () => {
     const appSrc = readFile(path.join(uiRoot, 'components', 'app.ts'));
     
-    for (const view of openclawViews) {
+    for (const view of legacyViews) {
       expect(
         appSrc.includes(`'${view}'`) || appSrc.includes(`"${view}"`),
         `Missing route for view: ${view}`,
@@ -211,7 +209,7 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
 
   // --- Event Types ---
 
-  it('openrappter defines all OpenClaw event constants', () => {
+  it('keeps the established gateway event constants', () => {
     const typesSrc = readFile(path.join(uiRoot, 'types.ts'));
     const events = [
       'agent',
@@ -285,9 +283,10 @@ describe('Feature Parity: OpenRappter vs OpenClaw', () => {
     expect(indexHtml).toContain('--text-primary');
   });
 
-  it('openrappter sidebar has all navigation sections', () => {
+  it('positions the surgeon above the secondary anatomy navigation', () => {
     const sidebarSrc = readFile(path.join(uiRoot, 'components', 'sidebar.ts'));
-    expect(sidebarSrc).toContain('Main');
-    expect(sidebarSrc).toContain('System');
+    expect(sidebarSrc).toContain('Operating room');
+    expect(sidebarSrc).toContain('Anatomy');
+    expect(sidebarSrc).toContain('Copilot Surgeon');
   });
 });

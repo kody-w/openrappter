@@ -221,6 +221,110 @@ export interface ConnectionInfo {
   metadata?: Record<string, unknown>;
 }
 
+// --- Copilot Surgeon Types ---
+
+export type SurgeonPatientState = 'stable' | 'degraded' | 'critical' | 'dormant';
+
+export interface SurgeonPatientTissue {
+  id: string;
+  label: string;
+  status: SurgeonPatientState;
+  summary: string;
+  value?: number;
+}
+
+export interface SurgeonPatientSnapshot {
+  capturedAt: string;
+  patient: 'OpenRappter';
+  version: string;
+  state: SurgeonPatientState;
+  uptimeSeconds: number;
+  tissues: SurgeonPatientTissue[];
+  inventory: {
+    agents: string[];
+    channels: string[];
+    scheduledJobs: string[];
+  };
+  metrics: {
+    connections: number;
+    agents: number;
+    configuredChannels: number;
+    connectedChannels: number;
+    scheduledJobs: number;
+    activeCases: number;
+  };
+}
+
+export interface SurgeonOption {
+  label: string;
+  value: string;
+}
+
+export interface SurgeonDiagnosis {
+  summary: string;
+  severity: 'stable' | 'notice' | 'warning' | 'critical';
+  findings: string[];
+}
+
+export interface SurgeonProcedure {
+  id: string;
+  digest: string;
+  patientDigest: string;
+  title: string;
+  summary: string;
+  risk: 'low' | 'medium' | 'high';
+  steps: string[];
+  expectedOutcome: string;
+  verification: string[];
+  status: 'proposed' | 'approved' | 'rejected' | 'operating' | 'verifying' | 'recovered' | 'needs_attention' | 'failed';
+  proposedAt: string;
+  approvedAt?: string;
+  completedAt?: string;
+}
+
+export interface SurgeonTurn {
+  id: string;
+  kind: 'consultation' | 'proposal' | 'error';
+  response: string;
+  voiceLine: string;
+  prompt: string;
+  options: SurgeonOption[];
+  diagnosis?: SurgeonDiagnosis;
+  procedure?: SurgeonProcedure;
+  createdAt: string;
+}
+
+export interface SurgeonCaseTurn {
+  userInput: string;
+  turn: SurgeonTurn;
+  createdAt: string;
+}
+
+export interface SurgeonOutcome {
+  status: 'recovered' | 'needs_attention' | 'failed';
+  summary: string;
+  evidence: string[];
+  completedAt: string;
+  patientAfter?: SurgeonPatientSnapshot;
+}
+
+export interface SurgeonCase {
+  id: string;
+  status: 'observing' | 'proposed' | 'approved' | 'rejected' | 'operating' | 'verifying' | 'recovered' | 'needs_attention' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+  patientAtDiagnosis: SurgeonPatientSnapshot;
+  turns: SurgeonCaseTurn[];
+  procedure?: SurgeonProcedure;
+  outcome?: SurgeonOutcome;
+}
+
+export interface SurgeonConsultResult {
+  case: SurgeonCase;
+  turn: SurgeonTurn;
+  patient: SurgeonPatientSnapshot;
+}
+
 // --- Event Constants ---
 
 export const GatewayEvents = {

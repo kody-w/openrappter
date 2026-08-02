@@ -6,7 +6,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'surgeon' | 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -37,6 +37,26 @@ export class OpenRappterApp extends LitElement {
       font-weight: 600;
     }
 
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .back {
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.45rem 0.7rem;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .back:hover {
+      color: var(--text-primary);
+      border-color: var(--accent);
+    }
+
     .status {
       display: flex;
       align-items: center;
@@ -62,12 +82,43 @@ export class OpenRappterApp extends LitElement {
     }
 
     .connecting {
+      width: 100vw;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100%;
       gap: 1rem;
+      background:
+        radial-gradient(circle at 50% 42%, rgba(88, 245, 210, 0.12), transparent 24rem),
+        #050711;
+      color: #f7f9ff;
+    }
+
+    .connecting strong {
+      font-size: 1rem;
+    }
+
+    .connecting span {
+      color: #94a0ba;
+      font-size: 0.8rem;
+    }
+
+    .retry {
+      margin-top: 0.35rem;
+      border: 1px solid rgba(88, 245, 210, 0.35);
+      border-radius: 0.6rem;
+      padding: 0.55rem 0.9rem;
+      background: rgba(88, 245, 210, 0.1);
+      color: #d7fff5;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .retry:hover {
+      background: rgba(88, 245, 210, 0.18);
     }
 
     .spinner {
@@ -87,10 +138,16 @@ export class OpenRappterApp extends LitElement {
   `;
 
   @state()
-  private currentView: View = 'chat';
+  private currentView: View = 'surgeon';
 
   @state()
   private connected = false;
+
+  @state()
+  private connecting = true;
+
+  @state()
+  private connectionError: string | null = null;
 
   @state()
   private status: { uptime: number; connections: number } | null = null;
@@ -102,10 +159,16 @@ export class OpenRappterApp extends LitElement {
     // Update status when connection state changes
     gateway.onStatusChange = (connected: boolean) => {
       this.connected = connected;
+      if (connected) {
+        this.connecting = false;
+        this.connectionError = null;
+      }
     };
   }
 
   private async connectToGateway() {
+    this.connecting = true;
+    this.connectionError = null;
     try {
       await gateway.connect();
       this.connected = true;
@@ -124,6 +187,9 @@ export class OpenRappterApp extends LitElement {
     } catch (error) {
       console.error('Failed to connect to gateway:', error);
       this.connected = false;
+      this.connectionError = (error as Error).message;
+    } finally {
+      this.connecting = false;
     }
   }
 
@@ -133,6 +199,8 @@ export class OpenRappterApp extends LitElement {
 
   private renderView() {
     switch (this.currentView) {
+      case 'surgeon':
+        return html`<openrappter-surgeon></openrappter-surgeon>`;
       case 'chat':
         return html`<openrappter-chat></openrappter-chat>`;
       case 'channels':
@@ -167,6 +235,39 @@ export class OpenRappterApp extends LitElement {
   }
 
   render() {
+    // Only the very first connection blocks the surface. A later drop must
+    // leave the operating room usable and offer an explicit retry instead of
+    // trapping the owner behind a spinner.
+    if (this.connecting && !this.connected) {
+      return html`
+        <div class="connecting">
+          <div class="spinner"></div>
+          <strong>Waking the OpenRappter patient…</strong>
+          <span>Connecting Copilot to live anatomy</span>
+        </div>
+      `;
+    }
+
+    if (!this.connected) {
+      return html`
+        <div class="connecting">
+          <strong>The OpenRappter patient is unreachable.</strong>
+          <span>${this.connectionError ?? 'The gateway connection was lost.'}</span>
+          <button class="retry" @click=${() => void this.connectToGateway()}>
+            Reconnect
+          </button>
+        </div>
+      `;
+    }
+
+    if (this.currentView === 'surgeon') {
+      return html`
+        <openrappter-surgeon
+          @navigate=${this.handleNavigation}
+        ></openrappter-surgeon>
+      `;
+    }
+
     return html`
       <openrappter-sidebar
         .currentView=${this.currentView}
@@ -175,7 +276,12 @@ export class OpenRappterApp extends LitElement {
 
       <div class="main-content">
         <header class="header">
-          <h1>${this.getViewTitle()}</h1>
+          <div class="header-title">
+            <button class="back" @click=${() => { this.currentView = 'surgeon'; }}>
+              ← Operating room
+            </button>
+            <h1>${this.getViewTitle()}</h1>
+          </div>
           <div class="status">
             <span class="status-dot ${this.connected ? 'connected' : ''}"></span>
             ${this.connected ? 'Connected' : 'Disconnected'}
@@ -192,6 +298,7 @@ export class OpenRappterApp extends LitElement {
 
   private getViewTitle(): string {
     const titles: Record<View, string> = {
+      surgeon: 'Copilot Surgeon',
       chat: 'Chat',
       channels: 'Channels',
       sessions: 'Sessions',

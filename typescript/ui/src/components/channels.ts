@@ -1,7 +1,7 @@
 /**
  * Channels View Component
  * Manage and monitor channel connections (Telegram, Discord, WhatsApp).
- * Inspired by OpenClaw's channels UI with per-channel cards and status fields.
+ * Direct channel anatomy with per-channel cards and status fields.
  */
 
 import { LitElement, html, css, nothing } from 'lit';

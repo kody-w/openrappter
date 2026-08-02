@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Copilot Surgeon primary interface** — replaces the static dashboard landing
+  page with an adaptive operating room where OpenRappter is the patient and
+  GitHub Copilot shapes each next interaction from live, sanitized patient
+  anatomy. Existing operational pages remain available as secondary anatomy.
+- **Consent-bound procedures** — Copilot proposals are persisted with an
+  immutable SHA-256 digest, require explicit owner approval (plus
+  `OPERATE OPENRAPPTER` for high-risk work), and cannot report recovery without
+  real agent-tool evidence and post-operative verification.
+
+### Fixed
+
+- **HTTP RPC authentication** — token/password mode no longer trusts every
+  loopback request implicitly; protected JSON-RPC and `/chat` calls now enforce
+  configured credentials consistently with WebSocket authentication.
+
 ## [1.10.0] - 2026-07-11
 
 ### Added

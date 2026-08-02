@@ -327,9 +327,133 @@ async function startGatewayInProcess(opts?: {
     };
   });
 
+  const [
+    { SurgeonService },
+    { buildPatientSnapshot },
+    { CopilotCliDirectProvider },
+    { CopilotProvider },
+  ] = await Promise.all([
+    import('./surgeon/service.js'),
+    import('./surgeon/patient.js'),
+    import('./providers/copilot-cli-direct.js'),
+    import('./providers/copilot.js'),
+  ]);
+  const surgeonService = new SurgeonService({
+    dataDir: HOME_DIR,
+    provider: githubToken
+      ? new CopilotProvider({ githubToken })
+      : new CopilotCliDirectProvider({
+          model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
+        }),
+    inspectPatient: async () => {
+      const status = server.getStatus();
+      const channels = channelRegistry.getStatusList();
+      let scheduledJobs: string[] = [];
+      try {
+        const cronData = JSON.parse(
+          fs.readFileSync(path.join(HOME_DIR, 'cron.json'), 'utf8'),
+        ) as unknown;
+        const jobs = Array.isArray(cronData)
+          ? cronData
+          : cronData
+            && typeof cronData === 'object'
+            && Array.isArray((cronData as { jobs?: unknown }).jobs)
+              ? (cronData as { jobs: unknown[] }).jobs
+              : [];
+        scheduledJobs = jobs
+          .filter(job =>
+            !job
+            || typeof job !== 'object'
+            || (job as { enabled?: unknown }).enabled !== false
+          )
+          .map((job, index) => {
+            if (!job || typeof job !== 'object') return `Job ${index + 1}`;
+            const record = job as { id?: unknown; name?: unknown };
+            if (typeof record.name === 'string' && record.name.trim()) {
+              return record.name.trim().slice(0, 120);
+            }
+            if (typeof record.id === 'string' && record.id.trim()) {
+              return record.id.trim().slice(0, 120);
+            }
+            return `Job ${index + 1}`;
+          })
+          .slice(0, 100);
+      } catch {
+        scheduledJobs = [];
+      }
+
+      let storageReady = true;
+      try {
+        fs.accessSync(HOME_DIR, fs.constants.R_OK | fs.constants.W_OK);
+      } catch {
+        storageReady = false;
+      }
+      const memoryReady = [
+        'memory.db',
+        'memory.json',
+        'openrappter.db',
+      ].some(file => fs.existsSync(path.join(HOME_DIR, file)));
+
+      return buildPatientSnapshot({
+        capturedAt: new Date().toISOString(),
+        version: VERSION,
+        running: status.running,
+        uptimeSeconds: status.uptime,
+        connections: status.connections,
+        agents: Array.from(agents.keys()).sort(),
+        channels: channels
+          .filter(channel => channel.type !== '')
+          .map(channel => ({
+            id: channel.type,
+            configured: channel.connected || (
+              channel.type === 'telegram'
+                ? Boolean(process.env.TELEGRAM_BOT_TOKEN)
+                : channel.type === 'discord'
+                  ? Boolean(process.env.DISCORD_BOT_TOKEN)
+                  : channel.type === 'slack'
+                    ? Boolean(process.env.SLACK_BOT_TOKEN || process.env.SLACK_APP_TOKEN)
+                    : channel.type === 'imessage'
+                      ? imessageConfig.enabled === true
+                      : false
+            ),
+            connected: channel.connected,
+          })),
+        scheduledJobs,
+        storageReady,
+        memoryReady,
+      });
+    },
+    executeProcedure: async ({ case: patientCase, executionPrompt }) => {
+      const result = await assistant.getResponse(
+        executionPrompt,
+        undefined,
+        undefined,
+        `surgeon_${patientCase.id}`,
+      );
+      const voiceDelimiter = result.content.indexOf('|||VOICE|||');
+      return {
+        summary: voiceDelimiter >= 0
+          ? result.content.slice(0, voiceDelimiter).trim()
+          : result.content.trim(),
+        agentLogs: result.agentLogs,
+      };
+    },
+  });
+  server.setSurgeonService(surgeonService);
+
   // Wire auth profile token updates → live provider refresh (no restart needed)
   server.setAuthTokenCallback((token) => {
     assistant.setGithubToken(token);
+    void import('./providers/copilot-token.js')
+      .then(({ resolveCopilotApiToken }) =>
+        resolveCopilotApiToken({ githubToken: token })
+      )
+      .then(() => {
+        surgeonService.setProvider(new CopilotProvider({ githubToken: token }));
+      })
+      .catch(() => {
+        log(`${EMOJI} Stored Copilot profile is stale; surgeon provider unchanged`);
+      });
     updateIMessageToken?.(token);
     log(`${EMOJI} Copilot token updated from profile store`);
   });

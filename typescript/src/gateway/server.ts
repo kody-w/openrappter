@@ -29,7 +29,9 @@ import { registerShowcaseMethods } from './methods/showcase-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
+import { registerSurgeonMethods } from './methods/surgeon-methods.js';
 import type { RappterManager } from './rappter-manager.js';
+import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
 import {
   GatewayMetrics,
@@ -184,6 +186,7 @@ export class GatewayServer {
   };
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
+  private surgeonService?: SurgeonService;
 
   constructor(config?: Partial<GatewayConfig>) {
     this.config = {
@@ -387,6 +390,10 @@ export class GatewayServer {
 
   setRappterManager(manager: RappterManager): void {
     this.rappterManager = manager;
+  }
+
+  setSurgeonService(service: SurgeonService): void {
+    this.surgeonService = service;
   }
 
   setReadinessProvider(
@@ -1415,10 +1422,6 @@ export class GatewayServer {
    * dispatch path.
    */
   private resolveHttpAuthenticated(req: IncomingMessage, body?: Record<string, unknown>): boolean {
-    // Same-machine (loopback) callers — e.g. the local Voice UI served at /vui —
-    // are trusted; the gateway binds to localhost only.
-    const ra = req.socket?.remoteAddress || '';
-    if (ra === '127.0.0.1' || ra === '::1' || ra === '::ffff:127.0.0.1') return true;
     const credential = this.extractHttpAuthCredential(req, body);
     return this.isAuthCredentialValid(credential);
   }
@@ -1868,6 +1871,10 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+
+    if (this.surgeonService) {
+      registerSurgeonMethods(this, this.surgeonService);
+    }
 
     // Auth profile methods (device-code login, switch, remove)
     registerAuthMethods(this, {

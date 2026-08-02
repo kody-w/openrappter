@@ -83,6 +83,25 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
+### Copilot Surgeon: the main interaction
+
+**OpenRappter is the patient. Copilot is the surgeon. It’s above that.**
+
+The web root is an AI-native operating room rather than a static dashboard.
+Every turn combines live, sanitized OpenRappter anatomy with the owner’s request.
+Copilot returns a direct response and the contextual next choices that reshape
+the interface. Static pages such as agents, channels, logs, and configuration
+remain available as secondary anatomy views.
+
+This adapts the MIT-licensed
+[vBrainstem Brain Surgeon](https://kody-w.github.io/vbrainstem/) pattern to an
+OpenRappter-native patient, consent, and verification contract.
+
+If Copilot proposes a mutation, OpenRappter records the exact procedure and a
+SHA-256 digest. The owner must approve that immutable procedure before it can
+run; high-risk work requires typing `OPERATE OPENRAPPTER`. Recovery is only
+reported after real agent-tool evidence and a post-operative verification pass.
+
 ### RAPP + X: UI is optional
 
 `POST /chat` is the universal capability surface for people, AIs, twins,
@@ -108,6 +127,7 @@ openrappter --exec Shell "ls -la"
 | Feature | Description |
 |---------|-------------|
 | **Copilot-Powered** | Uses your existing GitHub Copilot subscription for AI inference — no separate API keys |
+| **Copilot Surgeon** | Adaptive primary UI: live patient anatomy, AI-generated next choices, digest-bound procedures, and evidence-gated recovery |
 | **Local-First Data** | Memory, config, and state live in `~/.openrappter/` on your machine |
 | **Single File Agents** | One file = one agent — metadata defined in native code constructors, deterministic, portable |
 | **Persistent Memory** | Remembers facts, preferences, and context across sessions |

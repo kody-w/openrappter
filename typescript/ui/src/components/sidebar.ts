@@ -5,7 +5,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'surgeon' | 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 interface NavItem {
   id: View;
@@ -115,9 +115,10 @@ export class OpenRappterSidebar extends LitElement {
   `;
 
   @property({ type: String })
-  currentView: View = 'chat';
+  currentView: View = 'surgeon';
 
   private navItems: NavItem[] = [
+    { id: 'surgeon', label: 'Copilot Surgeon', icon: '✦' },
     { id: 'chat', label: 'Chat', icon: '💬' },
     { id: 'channels', label: 'Channels', icon: '📡' },
     { id: 'sessions', label: 'Sessions', icon: '📋' },
@@ -153,8 +154,8 @@ export class OpenRappterSidebar extends LitElement {
 
       <nav>
         <div class="nav-section">
-          <div class="nav-section-title">Main</div>
-          ${this.navItems.slice(0, 8).map(
+          <div class="nav-section-title">Operating room</div>
+          ${this.navItems.slice(0, 1).map(
             (item) => html`
               <div
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"
@@ -168,8 +169,8 @@ export class OpenRappterSidebar extends LitElement {
         </div>
 
         <div class="nav-section">
-          <div class="nav-section-title">System</div>
-          ${this.navItems.slice(8).map(
+          <div class="nav-section-title">Anatomy</div>
+          ${this.navItems.slice(1).map(
             (item) => html`
               <div
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"
@@ -184,8 +185,8 @@ export class OpenRappterSidebar extends LitElement {
       </nav>
 
       <div class="footer">
-        <a href="https://github.com/kody-w/openrappter" target="_blank">GitHub</a>
-        • v1.4.0
+        <a href="https://github.com/kody-w/openrappter" target="_blank">OpenRappter</a>
+        · It’s above that.
       </div>
     `;
   }

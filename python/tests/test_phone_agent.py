@@ -103,8 +103,15 @@ def install_grail_shims(data_dir: Path) -> None:
 
 def load_agent_module(data_dir: Path):
     install_grail_shims(data_dir)
-    for stale in [m for m in sys.modules if m.endswith("phone_agent")]:
-        del sys.modules[stale]
+    # Drop only the agent module, by exact name.
+    #
+    # This used to purge everything whose name *ended with* "phone_agent",
+    # which under pytest matched the test module itself — `tests.test_phone_agent`
+    # deleted itself from sys.modules mid-import, and the import machinery then
+    # raised `KeyError: 'tests.test_phone_agent'` and took the whole collection
+    # down with it. Running the file as a script never hit it, because then the
+    # module is named `__main__`.
+    sys.modules.pop("phone_agent", None)
 
     import importlib.util
 

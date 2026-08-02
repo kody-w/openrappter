@@ -33,6 +33,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var windowManager: ChatWindowManager!
     private let dino = DinoStatusIcon()
+    private let bonesWindow = BonesWindowController()
 
     public let viewModel = AppViewModel()
     public let settingsViewModel = SettingsViewModel()
@@ -140,6 +141,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if event.type == .rightMouseUp {
             showContextMenu()
+        } else if event.modifierFlags.contains(.option) {
+            // Click the dino, see what you are made of.
+            //
+            // Bound to option-click rather than plain click because plain click
+            // is the chat panel, and taking that away to add this would be a bad
+            // trade. The same view is the first item in the right-click menu, so
+            // it is discoverable without knowing the modifier.
+            dino.poke()
+            bonesWindow.show()
         } else {
             // Poke the dino! Then open the panel
             dino.poke()
@@ -172,6 +182,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if viewModel.processState == .running {
             menu.addItem(NSMenuItem(title: "Stop Gateway", action: #selector(menuStopGateway), keyEquivalent: ""))
         }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // The bones — the real files that make up this AI.
+        menu.addItem(NSMenuItem(title: "🦖 Show the bones", action: #selector(menuShowBones), keyEquivalent: "b"))
 
         menu.addItem(NSMenuItem.separator())
 
@@ -224,6 +239,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuStopGateway() {
         viewModel.stopGateway()
+    }
+
+    @objc private func menuShowBones() {
+        bonesWindow.show()
     }
 
     @objc private func menuNewSession() {

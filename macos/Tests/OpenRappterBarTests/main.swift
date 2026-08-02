@@ -13,6 +13,7 @@ await runAppViewModelTests()
 await runHeartbeatMonitorTests()
 await runSessionStoreTests()
 await runOnboardingSpawnTests()
+await runBonesInspectorTests()
 
 printResults()
 exitWithCode()

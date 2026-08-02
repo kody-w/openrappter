@@ -51,12 +51,12 @@ function fakePage(opts: {
         if (m) sent.push(JSON.parse(m[1]));
         return { ok: true } as unknown as T;
       }
-      if (expr.includes('no enabled send button')) {
-        if (!o.sendButton) return { ok: false, why: 'no enabled send button' } as unknown as T;
+      if (expr.includes('send button never became enabled')) {
+        if (!o.sendButton) return { ok: false, why: 'send button never became enabled' } as unknown as T;
         clicked = true;
         return { ok: true } as unknown as T;
       }
-      if (expr.includes('nodes.filter')) {
+      if (expr.includes('const inbound')) {
         const v = inboundIdx < o.inbound.length ? o.inbound[inboundIdx++] : (o.inbound.at(-1) ?? null);
         return v as unknown as T;
       }
@@ -70,6 +70,8 @@ function fakePage(opts: {
     async navigate(url: string) { navigations.push(url); },
     async url() { return o.url; },
     async close() {},
+    async closeTab() {},
+    opened: false,
   };
   return { page, sent, navigations };
 }
@@ -108,7 +110,10 @@ describe('GoogleVoiceBrowserDriver', () => {
     await expect(d.sendSms('+1555', 'x')).rejects.toThrow(/did not take the text/i);
   });
 
-  it('refuses when there is no enabled send button', async () => {
+  // Google Voice keeps Send disabled until it registers the text, so a button
+  // that never enables means the app did not accept the message — clicking it
+  // anyway would be a no-op indistinguishable from a send.
+  it('refuses when the send button never becomes enabled', async () => {
     const { page } = fakePage({ sendButton: false });
     const d = new GoogleVoiceBrowserDriver({ page });
     await expect(d.sendSms('+1555', 'x')).rejects.toThrow(/could not press send/i);

@@ -128,19 +128,30 @@ export class GoogleVoiceBrowserDriver implements GoogleVoiceDriver {
       throw new GoogleVoiceSurfaceError('not signed in to Google Voice');
     }
 
+    // The live app addresses a thread by itemId, not by the `a=nc,` parameter
+    // this originally guessed at. That guess quietly landed on the CALLS view,
+    // where the only textarea is the dialpad — so the driver typed a message
+    // into a phone-number field and then correctly failed to find a send button.
+    // Composing into the wrong control is precisely the class of mistake the
+    // confirmation step exists to stop from being reported as a sent message.
     const sep = this.messagesUrl.includes('?') ? '&' : '?';
-    await this.page.navigate(`${this.messagesUrl}${sep}a=nc,${encodeURIComponent(to)}`);
+    const itemId = `t.${to.startsWith('+') ? to : `+1${to.replace(/\D/g, '')}`}`;
+    await this.page.navigate(`${this.messagesUrl}${sep}itemId=${encodeURIComponent(itemId)}`);
 
     const composed = await this.page.evaluate<{ ok: boolean; why?: string }>(`(async () => {
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      // Visibility is part of the selector, not an afterthought: this view keeps
+      // detached textareas around, and the calls view owns a dialpad textarea.
+      const pick = () => {
+        const cands = Array.from(document.querySelectorAll('textarea,div[contenteditable="true"][role="textbox"]'));
+        const visible = cands.filter(el => !!el.offsetParent);
+        return visible.find(el => /type a message/i.test(el.getAttribute('placeholder') || ''))
+            || visible.find(el => /message/i.test(el.getAttribute('aria-label') || ''))
+            || visible.find(el => el.getAttribute('gv-test-id') === 'gv-message-input')
+            || visible[0] || null;
+      };
       let box = null;
-      for (let i = 0; i < 40 && !box; i++) {
-        box = document.querySelector('textarea[gv-test-id="gv-message-input"]')
-           || document.querySelector('div[contenteditable="true"][role="textbox"]')
-           || document.querySelector('textarea[aria-label*="essage" i]')
-           || document.querySelector('textarea');
-        if (!box) await sleep(250);
-      }
+      for (let i = 0; i < 40 && !box; i++) { box = pick(); if (!box) await sleep(250); }
       if (!box) return { ok: false, why: 'no message input appeared' };
       box.focus();
       const value = ${jsonArg(text)};
@@ -166,11 +177,17 @@ export class GoogleVoiceBrowserDriver implements GoogleVoiceDriver {
 
     const before = await this.countOutbound(text);
 
-    const clicked = await this.page.evaluate<{ ok: boolean; why?: string }>(`(() => {
-      const btn = document.querySelector('button[gv-test-id="send-button"]')
-               || Array.from(document.querySelectorAll('button')).find(b =>
-                    /send/i.test(b.getAttribute('aria-label') || '') && !b.disabled);
-      if (!btn) return { ok: false, why: 'no enabled send button' };
+    const clicked = await this.page.evaluate<{ ok: boolean; why?: string }>(`(async () => {
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      const find = () => document.querySelector('button[gv-test-id="send-button"]:not([disabled])')
+        || Array.from(document.querySelectorAll('button')).find(b =>
+             /send/i.test(b.getAttribute('aria-label') || '') && !b.disabled && !!b.offsetParent);
+      // Google Voice keeps Send disabled until it has registered the text. Waiting
+      // for it to enable is the app telling us it accepted the input — clicking a
+      // disabled button would be a no-op that looks exactly like a send.
+      let btn = null;
+      for (let i = 0; i < 20 && !btn; i++) { btn = find(); if (!btn) await sleep(250); }
+      if (!btn) return { ok: false, why: 'send button never became enabled' };
       btn.click();
       return { ok: true };
     })()`);
@@ -219,27 +236,46 @@ export class GoogleVoiceBrowserDriver implements GoogleVoiceDriver {
     return `bridged:${to}`;
   }
 
+  /**
+   * How many times our own text appears as an OUTGOING message.
+   *
+   * Direction matters. Counting every occurrence would also count the text still
+   * sitting in the compose box, which is present the instant it is typed — so a
+   * send that did nothing would "confirm" itself immediately. The bubble has to
+   * be one the app marked as ours.
+   */
   private async countOutbound(text: string): Promise<number> {
     return this.page.evaluate<number>(`(() => {
       const want = ${jsonArg(text)};
-      const nodes = Array.from(document.querySelectorAll('[data-e2e-message-text], .gvMessageText, [gv-test-id*="message"]'));
-      const hay = nodes.length ? nodes.map(n => n.textContent || '') : [document.body ? document.body.innerText : ''];
-      return hay.filter(t => t.indexOf(want) !== -1).length;
+      const items = Array.from(document.querySelectorAll('gv-message-item, [data-e2e-is-outgoing]'));
+      return items.filter(n => {
+        const mine = !!n.querySelector('.outgoing') || n.getAttribute('data-e2e-is-outgoing') === 'true'
+          || (n.className || '').toString().indexOf('outgoing') !== -1;
+        return mine && (n.innerText || '').indexOf(want) !== -1;
+      }).length;
     })()`);
   }
 
   private async lastInbound(): Promise<string | null> {
     return this.page.evaluate<string | null>(`(() => {
-      const nodes = Array.from(document.querySelectorAll('[data-e2e-message-text], .gvMessageText'));
-      if (!nodes.length) return null;
-      // Inbound bubbles are the ones Google Voice does not mark as ours.
-      const inbound = nodes.filter(n => {
-        const row = n.closest('[data-e2e-is-outgoing], .gvMessageRow, li, div');
-        const flag = row && row.getAttribute && row.getAttribute('data-e2e-is-outgoing');
-        return flag !== 'true';
-      });
+      const items = Array.from(document.querySelectorAll('gv-message-item, [data-e2e-is-outgoing]'));
+      const inbound = items.filter(n =>
+        !!n.querySelector('.incoming') || n.getAttribute('data-e2e-is-outgoing') === 'false');
       const last = inbound[inbound.length - 1];
-      return last ? (last.textContent || '').trim() || null : null;
+      if (!last) return null;
+      // Reach for the node that holds the words, rather than taking the whole
+      // bubble and deleting things. A live message-row is
+      //   gv-avatar("person") + .subject-content-container("Hello?") + .options-button-container("more_vert")
+      // so a naive innerText yields "person Hello? more_vert" — Material icon
+      // ligatures read as real text — and that would be handed to the model as
+      // if the other party had said it. Subtracting furniture is a guess about
+      // what is not the message; selecting the content container is a statement
+      // about what is.
+      const body = last.querySelector('.subject-content-container')
+        || last.querySelector('[data-e2e-message-text]')
+        || last.querySelector('.message-row');
+      if (!body) return null;
+      return (body.innerText || body.textContent || '').replace(/\\s+/g, ' ').trim() || null;
     })()`);
   }
 

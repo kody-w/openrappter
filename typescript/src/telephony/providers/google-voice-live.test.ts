@@ -70,7 +70,7 @@ describe.skipIf(!PORT)('GoogleVoiceBrowserDriver against real Chrome', () => {
       'document.querySelector("[gv-test-id=thread]").innerText',
     );
     expect(thread).toContain('Table for 4 at 7:30?');
-    await page.close();
+    await (page.opened ? page.closeTab() : page.close());
   }, 30_000);
 
   it('reads a real inbound reply out of a live DOM mutation', async () => {
@@ -79,7 +79,7 @@ describe.skipIf(!PORT)('GoogleVoiceBrowserDriver against real Chrome', () => {
     const id = await d.sendSms('+15551234567', 'ping');
     setTimeout(() => void page.evaluate('window.__reply("we can do 7:45")').catch(() => {}), 300);
     await expect(d.awaitReply(id, 8000)).resolves.toBe('we can do 7:45');
-    await page.close();
+    await (page.opened ? page.closeTab() : page.close());
   }, 30_000);
 
   // The failure this whole design is arranged around: the click succeeds, the
@@ -90,6 +90,6 @@ describe.skipIf(!PORT)('GoogleVoiceBrowserDriver against real Chrome', () => {
     await expect(d.sendSms('+15551234567', 'this will vanish')).rejects.toThrow(
       /could not be confirmed/i,
     );
-    await page.close();
+    await (page.opened ? page.closeTab() : page.close());
   }, 30_000);
 });

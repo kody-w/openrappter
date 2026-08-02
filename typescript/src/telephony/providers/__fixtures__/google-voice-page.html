@@ -12,45 +12,47 @@
       the driver is allowed to accept that a send happened
 -->
 <div gv-test-id="thread">
-  <div class="gvMessageRow" data-e2e-is-outgoing="false">
-    <span data-e2e-message-text>Hi, this is the restaurant.</span>
-  </div>
+  <gv-message-item data-e2e-is-outgoing="false">
+    <div class="full-container end-of-cluster incoming"><div class="message-row"><gv-avatar class="avatar">person</gv-avatar><div class="subject-content-container bubble"><span data-e2e-message-text>Hi, this is the restaurant.</span></div><div class="options-button-container">more_vert</div></div></div>
+  </gv-message-item>
 </div>
 
-<textarea gv-test-id="gv-message-input" aria-label="Type a message"></textarea>
-<button gv-test-id="send-button" aria-label="Send message">Send</button>
+<textarea gv-test-id="gv-message-input" placeholder="Type a message" aria-label="Type a message"></textarea>
+<!-- Disabled until there is text, exactly like the live app. Clicking a disabled
+     send is a no-op that looks identical to a successful one. -->
+<button gv-test-id="send-button" aria-label="Send message" disabled>Send</button>
 
 <script>
   // Mode switch used by the harness to simulate a send that silently no-ops —
   // the exact failure the driver's confirmation step exists to catch.
   window.__swallowSend = new URLSearchParams(location.search).has('swallow');
 
+  // Mirror Google Voice: Send only enables once the box has content.
+  const _box = document.querySelector('[gv-test-id="gv-message-input"]');
+  const _btn = document.querySelector('[gv-test-id="send-button"]');
+  _box.addEventListener('input', () => { _btn.disabled = !_box.value; });
+
   document.querySelector('[gv-test-id="send-button"]').addEventListener('click', () => {
     const box = document.querySelector('[gv-test-id="gv-message-input"]');
     const text = box.value;
     if (!text) return;
     if (window.__swallowSend) { box.value = ''; return; }   // looks fine, sends nothing
-    const row = document.createElement('div');
-    row.className = 'gvMessageRow';
-    row.setAttribute('data-e2e-is-outgoing', 'true');
-    const span = document.createElement('span');
-    span.setAttribute('data-e2e-message-text', '');
-    span.textContent = text;
-    row.appendChild(span);
-    document.querySelector('[gv-test-id="thread"]').appendChild(row);
+    document.querySelector('[gv-test-id="thread"]').insertAdjacentHTML('beforeend',
+      '<gv-message-item data-e2e-is-outgoing="true"><div class="full-container outgoing">' +
+      '<div class="message-row outgoing"><div class="subject-content-container bubble"><span data-e2e-message-text></span></div></div></div></gv-message-item>');
+    const added = document.querySelector('[gv-test-id="thread"] gv-message-item:last-child span');
+    added.textContent = text;
     box.value = '';
+    _btn.disabled = true;
   });
 
   // Lets the harness push an inbound reply, so awaitReply is exercised too.
   window.__reply = (t) => {
-    const row = document.createElement('div');
-    row.className = 'gvMessageRow';
-    row.setAttribute('data-e2e-is-outgoing', 'false');
-    const span = document.createElement('span');
-    span.setAttribute('data-e2e-message-text', '');
-    span.textContent = t;
-    row.appendChild(span);
-    document.querySelector('[gv-test-id="thread"]').appendChild(row);
+    document.querySelector('[gv-test-id="thread"]').insertAdjacentHTML('beforeend',
+      '<gv-message-item data-e2e-is-outgoing="false"><div class="full-container incoming">' +
+      '<div class="message-row"><gv-avatar class="avatar">person</gv-avatar><div class="subject-content-container bubble"><span data-e2e-message-text></span></div><div class="options-button-container">more_vert</div></div></div></gv-message-item>');
+    const n = document.querySelector('[gv-test-id="thread"] gv-message-item:last-child span');
+    n.textContent = t;
   };
 </script>
 </body></html>

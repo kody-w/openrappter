@@ -66,7 +66,20 @@ export interface PageSurface {
   evaluate<T = unknown>(expression: string): Promise<T>;
   navigate(url: string): Promise<void>;
   url(): Promise<string>;
+  /** Detach the debugger. The owner's tab is left exactly as it was. */
   close(): Promise<void>;
+  /**
+   * Close the actual browser tab.
+   *
+   * Only ever correct for a tab we opened ourselves. `close()` deliberately does
+   * not do this: the common case is attaching to a tab the owner already had
+   * open, and closing that would be destructive. But a tab we created and then
+   * merely detached from is litter left in someone else's browser — which is the
+   * same category of side effect as restarting it.
+   */
+  closeTab(): Promise<void>;
+  /** True when this session opened the tab, rather than attaching to an existing one. */
+  readonly opened: boolean;
 }
 
 interface Pending {
@@ -80,10 +93,16 @@ class CdpPage implements PageSurface {
   private readonly pending = new Map<number, Pending>();
   private seq = 0;
   private readonly timeoutMs: number;
+  private readonly targetId: string;
+  private readonly endpoint: string;
+  readonly opened: boolean;
 
-  constructor(ws: WebSocket, timeoutMs: number) {
+  constructor(ws: WebSocket, timeoutMs: number, targetId: string, endpoint: string, opened: boolean) {
     this.ws = ws;
     this.timeoutMs = timeoutMs;
+    this.targetId = targetId;
+    this.endpoint = endpoint;
+    this.opened = opened;
     this.ws.on('message', (raw: Buffer | string) => this.onMessage(String(raw)));
     this.ws.on('close', () => this.failAll(new Error('DevTools connection closed')));
   }
@@ -168,6 +187,17 @@ class CdpPage implements PageSurface {
       /* already gone */
     }
   }
+
+  async closeTab(): Promise<void> {
+    await this.close();
+    try {
+      await fetch(`${this.endpoint}/json/close/${this.targetId}`, {
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {
+      /* the tab is already gone, which is the outcome we wanted */
+    }
+  }
 }
 
 export class ChromeSession {
@@ -207,8 +237,10 @@ export class ChromeSession {
   async page(matchUrl: string, openIfMissing?: string): Promise<PageSurface> {
     const targets = await this.targets();
     let target = targets.find((t) => t.type === 'page' && t.url.includes(matchUrl));
+    let opened = false;
 
     if (!target && openIfMissing) {
+      opened = true;
       const res = await fetch(
         `http://${this.host}:${this.port}/json/new?${encodeURIComponent(openIfMissing)}`,
         { method: 'PUT', signal: AbortSignal.timeout(5000) },
@@ -235,7 +267,9 @@ export class ChromeSession {
       });
     });
 
-    const page = new CdpPage(ws, this.timeoutMs);
+    const page = new CdpPage(
+      ws, this.timeoutMs, target.id, `http://${this.host}:${this.port}`, opened,
+    );
     await page.evaluate('1');
     return page;
   }

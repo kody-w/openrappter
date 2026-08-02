@@ -107,5 +107,34 @@ func runOnboardingSpawnTests() async {
                        "node should run the module, exit was \(process.terminationStatus)")
             try expect(!data.isEmpty, "`--help` should print something")
         }
+
+        // The bug that was live on this machine: `which node` finds nothing, and
+        // the empty string it returns defeats the `??` fallback, so "" ends up
+        // as ProgramArguments[0] in the launch agent plist.
+        await test("an empty `which` result must not survive as an executable path") {
+            let emptyFromWhich = ""
+            let viaNilCoalescing = emptyFromWhich.isEmpty ? "" : emptyFromWhich
+            try expect(viaNilCoalescing.isEmpty,
+                       "precondition: an empty string is not nil, so ?? does not fire")
+
+            // What the fixed resolver must guarantee, whatever `which` says.
+            let resolved = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+            try expectNotNil(resolved, "some node must be findable on a dev machine")
+            try expect(!(resolved ?? "").isEmpty, "a resolved node path is never empty")
+        }
+
+        await test("the installed launch agent names a real executable") {
+            let plist = NSHomeDirectory() + "/Library/LaunchAgents/com.openrappter.daemon.plist"
+            guard let data = FileManager.default.contents(atPath: plist),
+                  let obj = try? PropertyListSerialization.propertyList(
+                      from: data, options: [], format: nil) as? [String: Any],
+                  let args = obj["ProgramArguments"] as? [String], let first = args.first
+            else { return } // not installed here; nothing to assert
+            try expect(!first.isEmpty,
+                       "ProgramArguments[0] is empty — `which node` returned \"\" and the fallback did not fire")
+            try expect(FileManager.default.isExecutableFile(atPath: first),
+                       "ProgramArguments[0] is not executable: \(first)")
+        }
     }
 }

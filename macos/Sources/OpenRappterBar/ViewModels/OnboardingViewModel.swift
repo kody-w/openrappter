@@ -191,7 +191,7 @@ public final class OnboardingViewModel {
         } else {
             // Start daemon via shell
             do {
-                let nodePath = (try? await runShell("/usr/bin/env", args: ["which", "node"]))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "/opt/homebrew/bin/node"
+                let nodePath = resolveNodePath()
                 let indexPath = homeDir + "/typescript/dist/index.js"
 
                 let process = Process()
@@ -272,10 +272,15 @@ public final class OnboardingViewModel {
 
     private func installLaunchAgent() {
         let plistPath = NSHomeDirectory() + "/Library/LaunchAgents/com.openrappter.daemon.plist"
-        let nodePath = (try? shellSync("which", args: ["node"]))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "/opt/homebrew/bin/node"
+        let nodePath = resolveNodePath()
         let indexPath = homeDir + "/typescript/dist/index.js"
         let logPath = homeDir + "/daemon.log"
 
+        // PATH comes from `nodeSearchPath()`, not from this app's own
+        // environment. A Finder-launched menu-bar app inherits launchd's
+        // session PATH, so the previous version baked a four-entry PATH with
+        // no node and no copilot into the plist — which is exactly the
+        // configuration the daemon on this machine was running under.
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -292,7 +297,7 @@ public final class OnboardingViewModel {
             <key>StandardOutPath</key><string>\(logPath)</string>
             <key>StandardErrorPath</key><string>\(logPath)</string>
             <key>EnvironmentVariables</key><dict>
-                <key>PATH</key><string>\(ProcessInfo.processInfo.environment["PATH"] ?? "/usr/local/bin:/usr/bin:/bin")</string>
+                <key>PATH</key><string>\(ProcessManager.nodeSearchPath())</string>
                 <key>HOME</key><string>\(NSHomeDirectory())</string>
             </dict>
         </dict>
@@ -356,6 +361,31 @@ public final class OnboardingViewModel {
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
+    /// Find a usable `node`, or fall back to a real path — never to "".
+    ///
+    /// The obvious spelling of this is a trap that was live on this machine:
+    ///
+    ///     (try? shellSync("which", args: ["node"]))?.trimming… ?? "/opt/homebrew/bin/node"
+    ///
+    /// `which node` does not throw when it finds nothing — it exits non-zero with
+    /// empty stdout, and the helpers here return "" for that. `??` only fires on
+    /// nil, so the fallback never ran and the empty string was used as the
+    /// executable. That is how `com.openrappter.daemon.plist` came to be written
+    /// with `ProgramArguments[0] = ""`. Same family as the `index.js` defect:
+    /// something that is not a program handed to `Process` as one.
+    private func resolveNodePath() -> String {
+        let found = (try? shellSync("which", args: ["node"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !found.isEmpty, FileManager.default.isExecutableFile(atPath: found) { return found }
+        for candidate in [
+            "/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node",
+            NSHomeDirectory() + "/.volta/bin/node",
+        ] where FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+        return "/opt/homebrew/bin/node"
+    }
+
     /// Run a Node script the way `startDaemon` already does correctly: resolve the
     /// interpreter, then pass the script as its first argument.
     ///
@@ -364,10 +394,7 @@ public final class OnboardingViewModel {
     /// caller that forgets that gets Foundation's misleading "doesn't exist".
     @discardableResult
     private func runNode(script: String, args: [String] = []) async throws -> String {
-        let nodePath = (try? await runShell("/usr/bin/env", args: ["which", "node"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolved = (nodePath?.isEmpty == false ? nodePath! : "/opt/homebrew/bin/node")
-        return try await runShell(resolved, args: [script] + args)
+        return try await runShell(resolveNodePath(), args: [script] + args)
     }
 
     private func shellSync(_ executable: String, args: [String]) throws -> String {

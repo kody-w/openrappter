@@ -70,13 +70,21 @@ describe('GoogleVoiceWatcher', () => {
 
   it('replies once the thread is known and the message is new', async () => {
     const sent: string[] = [];
+    // Both ticks must be given distinct times. On wall time they land in the
+    // same millisecond, the second message reads as no-newer than the watermark
+    // the first one wrote, and the reply is correctly suppressed — so the test
+    // failed 5 runs in 6 and passed in the full suite only by scheduling luck.
+    // That is the watcher behaving properly against a badly written test.
+    let t = 1_000_000;
     const w = new GoogleVoiceWatcher({
       statePath, respond: async () => 'on it', log: () => {},
+      now: () => (t += 60_000),
       driverFactory: async () => transport([{ from: '+15551110000', preview: 'are you there?' }], sent),
     });
     await w.tick();                       // first sight: watermark only
     const w2 = new GoogleVoiceWatcher({   // a restart, reading state from disk
       statePath, respond: async () => 'on it', log: () => {},
+      now: () => (t += 60_000),
       driverFactory: async () => transport([{ from: '+15551110000', preview: 'second message' }], sent),
     });
     (w2 as unknown as { state: unknown }).state = await loadState(statePath);

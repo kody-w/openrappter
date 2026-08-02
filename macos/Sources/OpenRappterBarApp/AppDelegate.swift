@@ -47,7 +47,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Lifecycle
 
+    /// Receive `openrappter://` URLs.
+    ///
+    /// `application(_:open:)` alone is not enough here. This is an accessory
+    /// app whose only SwiftUI scene is `Settings`, and in that configuration the
+    /// delegate callback is never invoked — the URL was accepted by
+    /// LaunchServices, the app was activated, and the event was then dropped on
+    /// the floor with no error anywhere. Registering the Apple Event handler
+    /// explicitly is what actually delivers it.
+    private func installURLEventHandler() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {
+        guard
+            let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+            let url = URL(string: string)
+        else { return }
+        Log.app.info("deep link received: \(string, privacy: .public)")
+        guard let link = deepLinkHandler.parse(url: url) else { return }
+        handleDeepLink(link)
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        installURLEventHandler()
         setupCrashTelemetry()
         
         // Log launch for debugging
@@ -298,6 +326,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Deep Links
 
     public func application(_ application: NSApplication, open urls: [URL]) {
+        Log.app.info("deep link received: \(urls.map(\.absoluteString).joined(separator: ", "), privacy: .public)")
         for url in urls {
             guard let link = deepLinkHandler.parse(url: url) else { continue }
             handleDeepLink(link)
@@ -311,6 +340,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 viewModel.chatViewModel.switchToSession(sessionKey: sessionKey)
             }
             windowManager.showPanel(relativeTo: statusItem.button)
+        case .bones:
+            bonesWindow.show()
         case .settings:
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .connect(let host, let port):

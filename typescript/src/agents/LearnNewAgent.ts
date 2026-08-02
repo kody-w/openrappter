@@ -186,6 +186,12 @@ export class LearnNewAgent extends BasicAgent {
       file_path: filePath,
       hot_loaded: hotLoadResult.success,
       description: description.slice(0, 200),
+      // What was actually produced. A scaffold echoes its input; saying
+      // otherwise would have the UI claim an implementation that is not there.
+      implementation: this.lastGenerationWasTemplate ? 'scaffold' : 'generated',
+      ...(this.lastGenerationWasTemplate
+        ? { note: 'A scaffold was written — it echoes its input rather than implementing the description. No model was available to generate the body.' }
+        : {}),
     };
 
     if (hotLoadResult.installed_deps) {
@@ -265,12 +271,34 @@ export class LearnNewAgent extends BasicAgent {
     if (this.provider) {
       try {
         const llmCode = await this.generateAgentCodeViaLLM(description, name, className);
-        if (llmCode) return llmCode;
+        if (llmCode) { this.lastGenerationWasTemplate = false; return llmCode; }
       } catch {
         // Fall through to template-based generation
       }
     }
+    // No provider, or generation failed: a scaffold, not an implementation.
+    // Recorded so callers can tell the operator the truth — the surgeon panel
+    // was reporting "installed X" for an agent that only echoes its input.
+    this.lastGenerationWasTemplate = true;
     return this.generateAgentCodeTemplate(description, name, className);
+  }
+
+  /**
+   * True when the last created agent was a scaffold rather than a real
+   * implementation. "Writes the agent live" overstates a template that echoes
+   * its input, and the UI must not claim more than was produced.
+   */
+  public lastGenerationWasTemplate = false;
+
+  /**
+   * Give the writer a model after construction.
+   *
+   * The agent registry instantiates agents with no arguments, so without this
+   * the writer never had a provider and every "built" agent was a scaffold that
+   * echoed its input. The daemon hands over whichever backend it selected.
+   */
+  setProvider(provider: LLMProvider | null): void {
+    this.provider = provider;
   }
 
   private async generateAgentCodeViaLLM(

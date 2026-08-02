@@ -91,13 +91,45 @@ async function startGatewayInProcess(opts?: {
     console.warn(`${EMOJI} No GitHub token found. Run 'openrappter onboard' to set up Copilot.`);
   }
 
+  // Choose a backend that can actually answer.
+  //
+  // Previously this always constructed the SDK provider, which needs a GitHub
+  // token with Copilot API access. When that token was missing, fake, or
+  // unentitled, every message returned "GitHub token does not have Copilot API
+  // access" — while a working, separately-authenticated Copilot CLI sat on the
+  // same disk. The product had a path that worked and was not choosing it.
+  const { selectBackend } = await import('./providers/backend-select.js');
+  const backend = await selectBackend({
+    githubToken: githubToken ?? undefined,
+    model: process.env.OPENRAPPTER_MODEL,
+  });
+  log(`${EMOJI} AI backend: ${backend.kind} — ${backend.reason}`);
+  // Give the agent-writer a model. Without one it silently falls back to a
+  // scaffold that echoes its input, so the surgeon reported "installed X" for
+  // an agent that does not implement anything. The registry constructs agents
+  // with no provider, so it has to be handed over after selection.
+  if (backend.provider) {
+    const learner = agents.get('LearnNew') ?? agents.get('LearnNewAgent');
+    (learner as unknown as { setProvider?: (p: unknown) => void } | undefined)
+      ?.setProvider?.(backend.provider);
+  }
+  if (backend.kind === 'none' && backend.remedy) {
+    // Actionable, not a stack trace: this is what the operator has to do.
+    console.warn(`${EMOJI} ${backend.remedy.title}`);
+    console.warn(`${EMOJI} ${backend.remedy.detail}`);
+  }
+
   const assistant = new Assistant(agents, {
     name: NAME,
     description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
     model: process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
+    ...(backend.provider ? { provider: backend.provider } : {}),
   });
+  // Carried so the gateway can answer "why can't it talk?" with a remedy
+  // instead of a transport error.
+  server.setBackendStatus?.({ kind: backend.kind, reason: backend.reason, remedy: backend.remedy });
 
   // Set up RappterManager — multi-soul brainstem with persisted souls
   const { RappterManager } = await import('./gateway/rappter-manager.js');
@@ -451,8 +483,19 @@ async function startGatewayInProcess(opts?: {
       .then(() => {
         surgeonService.setProvider(new CopilotProvider({ githubToken: token }));
       })
-      .catch(() => {
-        log(`${EMOJI} Stored Copilot profile is stale; surgeon provider unchanged`);
+      .catch(async () => {
+        // A credential we have just observed to be bad is a decision point, not
+        // a warning to print and walk past. Re-select a backend that works.
+        const { selectBackend: reselect } = await import('./providers/backend-select.js');
+        const next = await reselect({ githubToken: token, model: process.env.OPENRAPPTER_MODEL });
+        if (next.provider) {
+          surgeonService.setProvider(next.provider);
+          assistant.setProvider?.(next.provider);
+          log(`${EMOJI} Stored Copilot profile is stale — switched to ${next.kind}`);
+        } else {
+          log(`${EMOJI} Stored Copilot profile is stale and no backend can answer`);
+        }
+        server.setBackendStatus?.({ kind: next.kind, reason: next.reason, remedy: next.remedy });
       });
     updateIMessageToken?.(token);
     log(`${EMOJI} Copilot token updated from profile store`);
@@ -685,7 +728,11 @@ async function startGatewayInProcess(opts?: {
     };
   });
 
-  log(`${EMOJI} Assistant: Copilot SDK with ${agents.size} agents as tools`);
+  // Name the backend actually in use. This line said "Copilot SDK"
+  // unconditionally, which is how a machine running the CLI path looked
+  // identical in the log to one running the SDK — and made the real
+  // failure much harder to see.
+  log(`${EMOJI} Assistant: ${backend.kind} with ${agents.size} agents as tools`);
 
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = (): Promise<void> => {

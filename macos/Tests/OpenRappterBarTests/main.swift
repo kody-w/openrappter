@@ -14,6 +14,7 @@ await runHeartbeatMonitorTests()
 await runSessionStoreTests()
 await runOnboardingSpawnTests()
 await runBonesInspectorTests()
+await runBonesWindowTests()
 
 printResults()
 exitWithCode()

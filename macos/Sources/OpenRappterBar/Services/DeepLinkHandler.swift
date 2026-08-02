@@ -7,6 +7,15 @@ import Foundation
 public final class DeepLinkHandler {
     public enum DeepLink {
         case chat(sessionKey: String?)
+        /// `openrappter://bones` — open the files that make up this AI.
+        ///
+        /// Exists so the window can be OPENED BY A MACHINE. It was previously
+        /// reachable only by option-clicking the menu-bar dino or via its
+        /// transient context menu, neither of which AppleScript can drive — so
+        /// it could not be screenshotted or regression-tested. Something that
+        /// cannot be driven cannot be verified, and that is a design defect
+        /// rather than a testing inconvenience.
+        case bones
         case settings(tab: String?)
         case connect(host: String, port: Int)
         case unknown(URL)
@@ -29,6 +38,8 @@ public final class DeepLinkHandler {
         switch host {
         case "chat":
             return .chat(sessionKey: queryValue("session"))
+        case "bones":
+            return .bones
         case "settings":
             return .settings(tab: queryValue("tab"))
         case "connect":

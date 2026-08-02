@@ -1542,6 +1542,27 @@ export class GatewayServer {
    * exists to prevent). Do not call `registerAllMethods` from
    * `GatewayServer` without first reconciling those overlaps.
    */
+  /**
+   * Why the assistant can or cannot talk.
+   *
+   * Held so the UI can render an action instead of a transport error. Kody saw
+   * `Copilot CLI failed: Command failed: <entire argv>`; what he needed was
+   * "your Copilot sign-in expired — reconnect", with a button.
+   */
+  private backendStatus: {
+    kind: string;
+    reason: string;
+    remedy?: { title: string; detail: string; action: string };
+  } = { kind: 'unknown', reason: 'not yet determined' };
+
+  setBackendStatus(status: {
+    kind: string;
+    reason: string;
+    remedy?: { title: string; detail: string; action: string };
+  }): void {
+    this.backendStatus = status;
+  }
+
   private registerBuiltInMethods(): void {
     // Core
     const publicMethods: Array<[string, RpcMethodHandler]> = [
@@ -1558,6 +1579,9 @@ export class GatewayServer {
 
     // Agents
     this.registerMethod('agents.list', async () => this.agentList ? this.agentList() : []);
+
+    // What the assistant is running on, and what to do when it cannot run.
+    this.registerMethod('backend.status', async () => this.backendStatus);
 
     // Subscribe/unsubscribe
     this.registerMethod('subscribe', async (params: { events: string[] }, conn) => {

@@ -107,6 +107,17 @@ export class Assistant {
     return this.cachedIdentity;
   }
 
+  /**
+   * Swap the live provider.
+   *
+   * Needed so a credential discovered to be bad at runtime can be recovered
+   * from without a restart — the daemon re-selects a working backend and hands
+   * it here, instead of printing a warning and failing the next request.
+   */
+  setProvider(provider: LLMProvider): void {
+    this.provider = provider;
+  }
+
   /** Reload agents (e.g. after hot-load) */
   setAgents(agents: Map<string, BasicAgent>): void {
     this.agents = agents;

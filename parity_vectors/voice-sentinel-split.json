@@ -1,0 +1,49 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "",
+      "response": "written form",
+      "session_id": "fixed-session-0014",
+      "voice_mode": true,
+      "voice_response": "spoken form"
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "status": 200
+  },
+  "fixture": {
+    "agents": [],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper.",
+    "voice_mode": true
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "content": "written form|||VOICE|||spoken form"
+      },
+      "round": 1
+    }
+  ],
+  "name": "voice-sentinel-split",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0014",
+    "user_input": "speak to me",
+    "voice_mode": true
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": false,
+    "edge": false
+  }
+}

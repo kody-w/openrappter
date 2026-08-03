@@ -1,0 +1,77 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "[Boom] ERROR: detonated",
+      "response": "Survived.",
+      "session_id": "fixed-session-0009",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "status": 200
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Always raises.",
+          "name": "Boom",
+          "parameters": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          }
+        },
+        "name": "Boom",
+        "perform": {
+          "kind": "raises",
+          "message": "detonated"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "Boom"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "Survived."
+      },
+      "round": 2
+    }
+  ],
+  "name": "agent-raises",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0009",
+    "user_input": "detonate"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

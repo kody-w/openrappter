@@ -1,0 +1,85 @@
+{
+  "expect": {
+    "arguments_defaulted_to": {},
+    "envelope": {
+      "agent_logs": "[Echo] echo:",
+      "response": "Recovered.",
+      "session_id": "fixed-session-0007",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "status": 200,
+    "tool_call_sequence": [
+      "Echo"
+    ]
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Echo the text back.",
+          "name": "Echo",
+          "parameters": {
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "type": "object"
+          }
+        },
+        "name": "Echo",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "echo:{text}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a calculator."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{not valid json",
+              "name": "Echo"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "Recovered."
+      },
+      "round": 2
+    }
+  ],
+  "name": "bad-arguments-fallback",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0007",
+    "user_input": "break the args"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

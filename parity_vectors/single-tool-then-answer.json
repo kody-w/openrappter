@@ -1,0 +1,90 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "[AddNumbers] 2+3=5",
+      "response": "2 plus 3 is 5.",
+      "session_id": "fixed-session-0003",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "status": 200,
+    "tool_call_sequence": [
+      "AddNumbers"
+    ]
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Add two integers a and b.",
+          "name": "AddNumbers",
+          "parameters": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ],
+            "type": "object"
+          }
+        },
+        "name": "AddNumbers",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "{a}+{b}={sum}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a calculator. Use tools for arithmetic."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":2,\"b\":3}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "2 plus 3 is 5."
+      },
+      "round": 2
+    }
+  ],
+  "name": "single-tool-then-answer",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0003",
+    "user_input": "what is 2 plus 3?"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

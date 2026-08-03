@@ -1,0 +1,49 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "",
+      "response": "Hello there.",
+      "session_id": "fixed-session-0002",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "rounds": 1,
+    "status": 200,
+    "tool_call_sequence": [],
+    "tools_argument": null
+  },
+  "fixture": {
+    "agents": [],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "content": "Hello there."
+      },
+      "round": 1
+    }
+  ],
+  "name": "no-agents-passthrough",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0002",
+    "user_input": "hello"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

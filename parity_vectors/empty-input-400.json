@@ -1,0 +1,29 @@
+{
+  "expect": {
+    "body": {
+      "error": "user_input is required"
+    },
+    "model_called": false,
+    "status": 400
+  },
+  "fixture": {
+    "agents": [],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [],
+  "name": "empty-input-400",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0001",
+    "user_input": ""
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

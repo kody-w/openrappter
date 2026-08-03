@@ -1,0 +1,22 @@
+{
+  "canonicalization": "sha256 over JSON with sorted keys and (',',':') separators, UTF-8",
+  "corpus_sha256": "571decb2d78d41e354008b182cef58d5d927dc3522c1194c66201ff4fb7dec0f",
+  "spec": "rapp-runtime-parity/1.0",
+  "vector_count": 14,
+  "vectors": {
+    "agent-not-found": "a65276f5906db37733007fc549a9804cb4b1b7dc37771bcfda1a0e62e36024e3",
+    "agent-raises": "403437bd5f515cdf9e189f7ff46c2b1a3fcf0c123dd9f6f62beb073d37295815",
+    "bad-arguments-fallback": "ccc4de2395e5d6e775741073758931fcbb170419b5293f379781833e9e7396b2",
+    "empty-input-400": "b70ce40465bcd2f8c362e35d96a5bb7edccb5b30ce0b34c2ff46f6837c4de3a0",
+    "finish-reason-agnostic-trigger": "0c4713b71821456ae863534a69e611ea7ded0994f078cf6a19fc746e982e6ed4",
+    "history-role-filter": "0f5aacec9e351a6cc3591ddff686305b5c6bdee2d917f44a6b9eead85e96c063",
+    "multi-round-tools": "2510ed9a6a409dce848a7488b1ec6b4e2cba625e0823d22cd869af44fd59fe02",
+    "no-agents-passthrough": "deaefc9651fd958e6ad5b0980907bf3209fb7a48d3c3349e551dbe7401356564",
+    "parallel-tool-calls": "8174c38586d0b1564d1f0ea62744d75fc6609c47491d3bfbcd4fe4e9ca5bb397",
+    "round-cap-3": "bb26e441e2f98ff00b5af630257f44e58f7b3612eda3f9e4da5098c4950c675e",
+    "session-id-minted": "dda4a21939f679f806f2a47ca4625692cd45549df64e4a18cbd0ea285fb31822",
+    "single-tool-then-answer": "b55e1d6043baa4afa6494b77de19fbd930003f2369bf8aef3da0c2de57f1fc7d",
+    "system-context-injection": "a52b1c07b31842c6a6f918311b1ca6c53145086ce281ff34a0ad73a766d538ca",
+    "voice-sentinel-split": "6ef0e45fa778910ec3f1a30dc91d85b979cd4d0840adf28960adbd9454d1a82c"
+  }
+}

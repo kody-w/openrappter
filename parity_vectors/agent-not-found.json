@@ -1,0 +1,88 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "[Nope] Agent 'Nope' not found.",
+      "response": "Carried on.",
+      "session_id": "fixed-session-0008",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "loop_continues": true,
+    "status": 200
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Add two integers a and b.",
+          "name": "AddNumbers",
+          "parameters": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ],
+            "type": "object"
+          }
+        },
+        "name": "AddNumbers",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "{a}+{b}={sum}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{}",
+              "name": "Nope"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "Carried on."
+      },
+      "round": 2
+    }
+  ],
+  "name": "agent-not-found",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0008",
+    "user_input": "call a ghost"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "",
+      "response": "Acknowledged.",
+      "session_id": "fixed-session-0011",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "outbound_system_prompt_contains": "ORBIT-CONTEXT-7731",
+    "status": 200
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Carries system context.",
+          "name": "Ctx",
+          "parameters": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+          }
+        },
+        "name": "Ctx",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "ok"
+        },
+        "system_context": "ORBIT-CONTEXT-7731"
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "content": "Acknowledged."
+      },
+      "round": 1
+    }
+  ],
+  "name": "system-context-injection",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0011",
+    "user_input": "hello"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

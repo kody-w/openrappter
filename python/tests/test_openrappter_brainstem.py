@@ -153,7 +153,9 @@ def test_chat_validates_input_like_the_kernel(server):
     assert status == 400
     status, body = post_json(f"{server}/chat", {"user_input": "   "})
     assert status == 400
-    assert body["error"] == "message is required"
+    # PARITY §2.4 fixes this string; the test previously pinned our own
+    # non-conformant wording while claiming to validate "like the kernel".
+    assert body["error"] == "user_input is required"
 
 
 def test_rapp_chat_v1_contract(server, monkeypatch):

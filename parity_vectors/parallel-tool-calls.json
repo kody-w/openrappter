@@ -1,0 +1,119 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "[AddNumbers] 1+2=3\n[Echo] echo:hi",
+      "response": "Both done.",
+      "session_id": "fixed-session-0004",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "status": 200,
+    "tool_call_sequence": [
+      "AddNumbers",
+      "Echo"
+    ],
+    "tool_messages_appended": 2
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Add two integers a and b.",
+          "name": "AddNumbers",
+          "parameters": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ],
+            "type": "object"
+          }
+        },
+        "name": "AddNumbers",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "{a}+{b}={sum}"
+        }
+      },
+      {
+        "metadata": {
+          "description": "Echo the text back.",
+          "name": "Echo",
+          "parameters": {
+            "properties": {
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [],
+            "type": "object"
+          }
+        },
+        "name": "Echo",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "echo:{text}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a calculator."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":1,\"b\":2}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_1"
+          },
+          {
+            "function": {
+              "arguments": "{\"text\":\"hi\"}",
+              "name": "Echo"
+            },
+            "id": "tc_2"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "Both done."
+      },
+      "round": 2
+    }
+  ],
+  "name": "parallel-tool-calls",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0004",
+    "user_input": "add and echo"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

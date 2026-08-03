@@ -33,12 +33,31 @@ yet measured end-to-end against a live model on every release.
 
 PARITY §5 says the golden corpus **SHOULD** ship at `rapp_brainstem/parity_vectors/`,
 mirrored into `rapp-map`. Both locations return `404` as of 2026-08-03, and §5 marks the
-corpus **PLANNED — not yet committed**. There is nothing to fetch.
+corpus **PLANNED — not yet committed**. §6's `parity_harness.py` is PLANNED too. There is
+nothing to fetch and nothing in the estate that executes the vectors.
 
-What *is* normative is §5.2, which names the fourteen required cases. Those are implemented
-against this runtime in `typescript/src/gateway/__tests__/parity-vectors.test.ts`, which
-reports per-case rather than as a summary number, and explicitly names the cases that need a
-live model rather than passing them silently.
+So we wrote a candidate corpus and harness rather than leave the tier claim unfalsifiable:
+
+- `parity_vectors/` — 14 vectors, one per class required by §5.3, to the §5.1 schema and
+  content-addressed per §5. They carry nothing openrappter-specific and can be offered
+  upstream unchanged. Corpus sha256 is in `parity_vectors/CORPUS.json`.
+- `parity_harness.py` — runs them against the Python runtime over real HTTP with a scripted
+  model injected at the model-call seam, as §5.2 requires.
+- `python/tests/test_parity_corpus.py` — runs the corpus in the test suite, so this is a
+  gate on every change rather than a one-off report.
+
+**Result on first run: 9/14.** The five failures were normative violations, since fixed:
+a 5-round tool loop where §2.2 freezes 3 and names looping 5 times as non-conformant; no
+`system_context()` concatenation at all; JSON error blobs where §2.3 fixes the `agent_logs`
+strings; and the wrong `400` body. A sixth — tool result messages missing the required
+`name` key — was found by tightening the harness after the first run. It is now 14/14 full,
+13/13 core.
+
+**This measures the Python runtime only.** The TypeScript runtime is not yet covered by the
+harness and is known to diverge: its tool loop defaults to 10 rounds (`Assistant.ts`),
+against a cap §2.2 freezes at 3. Our two runtimes therefore do not currently agree on
+loop semantics, which fails parity inside this product before the estate is involved. That
+is stated here rather than left for someone to discover.
 
 ---
 

@@ -1,0 +1,119 @@
+{
+  "expect": {
+    "envelope": {
+      "response": "working 3",
+      "session_id": "fixed-session-0006",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "note": "The 3rd assistant content is returned even though a tool was still requested.",
+    "rounds": 3,
+    "status": 200
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Add two integers a and b.",
+          "name": "AddNumbers",
+          "parameters": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ],
+            "type": "object"
+          }
+        },
+        "name": "AddNumbers",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "{a}+{b}={sum}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a calculator."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "content": "working 1",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":1,\"b\":1}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "content": "working 2",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":2,\"b\":2}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_2"
+          }
+        ]
+      },
+      "round": 2
+    },
+    {
+      "emit": {
+        "content": "working 3",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":3,\"b\":3}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_3"
+          }
+        ]
+      },
+      "round": 3
+    },
+    {
+      "emit": {
+        "content": "must not be reached"
+      },
+      "round": 4
+    }
+  ],
+  "name": "round-cap-3",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0006",
+    "user_input": "loop forever"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

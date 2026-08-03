@@ -61,7 +61,10 @@ AGENTS_PATH = Path(os.environ.get("OPENRAPPTER_BRAINSTEM_AGENTS", BRAINSTEM_HOME
 SOUL_PATH = Path(os.environ.get("OPENRAPPTER_SOUL", BRAINSTEM_HOME.parent / "soul.md"))
 DEFAULT_PORT = int(os.environ.get("PORT", os.environ.get("OPENRAPPTER_BRAINSTEM_PORT", "7072")))
 MODEL = os.environ.get("OPENRAPPTER_MODEL", "claude-sonnet-5")
-MAX_TOOL_ROUNDS = 5
+# PARITY §2.2 freezes this at 3 and is explicit that it is load-bearing: "a
+# runtime that caches agents across requests, that loops 5 times, or that only
+# triggers on finish_reason is non-conformant even if it works." We looped 5.
+MAX_TOOL_ROUNDS = 3
 _CHAT_IDEMPOTENCY = {}
 _CHAT_IDEMPOTENCY_LOCKS = {}
 _CHAT_IDEMPOTENCY_GUARD = threading.Lock()
@@ -709,6 +712,20 @@ def run_chat(user_input, history, session_id, trusted_context=None):
         }
     tools = [to_tool(a) for a in agents.values()]
     system_prompt = load_soul()
+    # PARITY §2.2: each agent's optional `system_context()` is concatenated onto
+    # the system prompt in agent-discovery order, and a failure in one agent's
+    # hook MUST NOT abort the turn. We were not calling it at all, so an agent
+    # could not contribute standing context to its own turn.
+    for _agent_name, _agent in agents.items():
+        hook = getattr(_agent, "system_context", None)
+        if not callable(hook):
+            continue
+        try:
+            extra = hook()
+        except Exception:  # noqa: BLE001 - one agent must not take down the turn
+            continue
+        if isinstance(extra, str) and extra.strip():
+            system_prompt += "\n\n" + extra.strip()
     memory_data_message = None
     if trusted:
         familiar = bool(trusted.get("familiarity"))
@@ -741,8 +758,11 @@ def run_chat(user_input, history, session_id, trusted_context=None):
 
     agent_logs = []
     served_model = None
+    last_content = ""
     for _ in range(MAX_TOOL_ROUNDS):
         reply, served_model = llm_chat(messages, tools)
+        if isinstance(reply.get("content"), str) and reply["content"]:
+            last_content = reply["content"]
         calls = reply.get("tool_calls")
         if not calls:
             return build_chat_envelope(
@@ -761,7 +781,11 @@ def run_chat(user_input, history, session_id, trusted_context=None):
             kwargs.pop("_transport_event_id", None)
             agent = agents.get(name)
             if agent is None:
-                result = json.dumps({"status": "error", "message": f"Unknown agent: {name}"})
+                # PARITY §2.3 fixes these strings: tooling (Flight Recorder,
+                # rapp-god) reads agent_logs, so the shape is contract, not
+                # cosmetics. We were emitting a JSON error blob instead.
+                result = f"Agent '{name}' not found."
+                log_line = result
             else:
                 try:
                     if trusted and name in ("ManageMemory", "ContextMemory"):
@@ -769,13 +793,24 @@ def run_chat(user_input, history, session_id, trusted_context=None):
                         kwargs["_trusted_context"] = trusted
                         kwargs["_transport_event_id"] = trusted.get("transport_event_id")
                     result = str(agent.perform(**kwargs))
+                    log_line = result
                 except Exception as e:  # noqa: BLE001
-                    result = json.dumps({"status": "error", "message": str(e)})
-            agent_logs.append(f"[{name}] {result}")
-            messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
+                    result = f"Error: {e}"
+                    log_line = f"ERROR: {e}"
+            agent_logs.append(f"[{name}] {log_line}")
+            # §2.3 fixes the tool message shape, including `name`, which we omitted.
+            messages.append({
+                "tool_call_id": call.get("id", name),
+                "role": "tool",
+                "name": name,
+                "content": result,
+            })
 
+    # PARITY §2.2: "On the 3rd round the loop ends whether or not tools were
+    # requested; the last assistant `content` is the reply." A synthetic
+    # "Tool loop limit reached." discards an answer the model actually gave.
     return build_chat_envelope(
-        "Tool loop limit reached.", session_id, agent_logs, model=served_model,
+        last_content, session_id, agent_logs, model=served_model,
     )
 
 
@@ -867,7 +902,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 return self._send(400, {
                     "schema": "rapp-chat/1.0",
                     "status": "error",
-                    "error": "message is required",
+                    # PARITY §2.1/§2.4 fix this string exactly. `message` is our
+                    # preferred field name and `user_input` the spec's; both are
+                    # accepted, so the spec's wording stays accurate here.
+                    "error": "user_input is required",
                 })
             history_value = data.get("conversation_history", data.get("history"))
             history = history_value if isinstance(history_value, list) else []

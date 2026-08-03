@@ -1,0 +1,106 @@
+{
+  "expect": {
+    "envelope": {
+      "agent_logs": "[AddNumbers] 1+1=2\n[AddNumbers] 2+2=4",
+      "response": "Sums are 2 and 4.",
+      "session_id": "fixed-session-0005",
+      "voice_mode": false
+    },
+    "envelope_required_keys": [
+      "response",
+      "session_id",
+      "agent_logs",
+      "voice_mode",
+      "model",
+      "requested_model"
+    ],
+    "rounds": 3,
+    "status": 200,
+    "tool_call_sequence": [
+      "AddNumbers",
+      "AddNumbers"
+    ]
+  },
+  "fixture": {
+    "agents": [
+      {
+        "metadata": {
+          "description": "Add two integers a and b.",
+          "name": "AddNumbers",
+          "parameters": {
+            "properties": {
+              "a": {
+                "type": "integer"
+              },
+              "b": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "a",
+              "b"
+            ],
+            "type": "object"
+          }
+        },
+        "name": "AddNumbers",
+        "perform": {
+          "kind": "deterministic",
+          "returns": "{a}+{b}={sum}"
+        }
+      }
+    ],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a calculator."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":1,\"b\":1}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_1"
+          }
+        ]
+      },
+      "round": 1
+    },
+    {
+      "emit": {
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"a\":2,\"b\":2}",
+              "name": "AddNumbers"
+            },
+            "id": "tc_2"
+          }
+        ]
+      },
+      "round": 2
+    },
+    {
+      "emit": {
+        "content": "Sums are 2 and 4."
+      },
+      "round": 3
+    }
+  ],
+  "name": "multi-round-tools",
+  "request": {
+    "conversation_history": [],
+    "session_id": "fixed-session-0005",
+    "user_input": "add twice"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

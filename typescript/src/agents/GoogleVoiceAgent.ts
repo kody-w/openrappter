@@ -33,55 +33,65 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { GoogleVoiceWatcher, loadState, STATE_PATH } from '../telephony/watcher.js';
 import type { InboxMessage } from '../telephony/watch.js';
+import {
+  GREETING, ThreadMemory, createAssistantResponder, isAutomated, toSms,
+} from '../telephony/reply.js';
+import type { LLMProvider } from '../providers/types.js';
 
 export interface GoogleVoiceAgentOptions {
   /** Answers an inbound message. Returning null means "say nothing". */
   respond?: (message: InboxMessage) => Promise<string | null>;
   port?: number;
   statePath?: string;
+  /**
+   * Where to get a model. Defaults to the same backend selection the daemon
+   * uses, so the agent answers with whatever rung is actually working.
+   */
+  provider?: LLMProvider | (() => Promise<LLMProvider | null>);
+  /** Live agent roster, so "what can you do" is answered from fact. */
+  capabilities?: string[];
+  /** Remembers the thread across ticks — each cron wake is a fresh process. */
+  memory?: ThreadMemory;
 }
 
 /**
- * The default reply.
+ * The reply of last resort.
  *
- * Deliberately conservative, and deliberately replaceable — the interesting
- * version of this hands the message to a model or to the negotiation CallAgent.
- * What it must never do is answer an automated sender: a verification code is
- * not a conversation, and quoting one back is how a security code ends up in a
- * thread it was never meant to leave.
+ * This is what the agent says when there is no model to reach: the greeting,
+ * once, which is true. For a long time it was also the answer to *everything* —
+ * a real thread went "What else" → greeting → "Okay well list 10 things you can
+ * do" → "You there?" → the same greeting again. The message was never read.
+ *
+ * It still refuses automated senders before anything else, because a
+ * verification code is not a conversation and quoting one back puts a security
+ * code in a thread it was never meant to leave.
  */
 export async function defaultResponder(message: InboxMessage): Promise<string | null> {
-  const text = (message.text || '').toLowerCase();
-  // These patterns are taken from messages actually sitting in a real Google
-  // Voice inbox, not invented. The first version matched "do not share" and
-  // missed "Don't share it with anyone" — which is the exact wording Apple
-  // uses, and was sitting in the inbox this was written against. A near-miss
-  // here means an agent replying to a security code, in a thread that code was
-  // never meant to leave.
-  const AUTOMATED = [
-    /verification code/,
-    /security code/,
-    /account code/,
-    /one-?time (code|passcode|password)/,
-    /passcode/,
-    /\b2fa\b/,
-    /do ?n['’]?o?t share/,
-    /never share/,
-    /is your .{0,20}code\b/,
-    /\bcode is:? ?\d/,
-    /reply stop to/,
-    /do not reply/,
-  ];
-  if (AUTOMATED.some((p) => p.test(text))) return null;
-  return (
-    'This is an openrappter agent on this number. It read your message and can '
-    + 'answer, negotiate against limits its owner set, or hand off when a reply '
-    + 'needs a person.'
-  );
+  if (isAutomated(message.text || '')) return null;
+  return toSms(GREETING);
+}
+
+/**
+ * The responder the agent actually uses: reads the message, answers it, and
+ * falls back to `defaultResponder`'s greeting only when no model can be reached.
+ *
+ * Kept lazy — resolving a backend costs a token exchange or a CLI probe, and a
+ * tick that finds an empty inbox should not pay for one.
+ */
+async function defaultProvider(): Promise<LLMProvider | null> {
+  const { selectBackend } = await import('../providers/backend-select.js');
+  const choice = await selectBackend({});
+  return choice.provider;
 }
 
 export class GoogleVoiceAgent extends BasicAgent {
   private readonly options: GoogleVoiceAgentOptions;
+  /**
+   * Thread memory lives on the agent, not inside a tick. A cron wake-up is a
+   * fresh call but the same process, and without this a follow-up like
+   * "What else" arrives with no idea what it is following.
+   */
+  private readonly memory: ThreadMemory;
 
   constructor(options: GoogleVoiceAgentOptions = {}) {
     const metadata: AgentMetadata = {
@@ -108,6 +118,20 @@ export class GoogleVoiceAgent extends BasicAgent {
     };
     super('GoogleVoice', metadata);
     this.options = options;
+    this.memory = options.memory ?? new ThreadMemory();
+  }
+
+  /**
+   * Read the message and answer it. Only falls back to the greeting when there
+   * is no model to reach — which is a real condition, not the normal path.
+   */
+  private responder(): (m: InboxMessage) => Promise<string | null> {
+    if (this.options.respond) return this.options.respond;
+    return createAssistantResponder({
+      provider: this.options.provider ?? defaultProvider,
+      capabilities: this.options.capabilities,
+      memory: this.memory,
+    });
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
@@ -131,7 +155,7 @@ export class GoogleVoiceAgent extends BasicAgent {
       port: this.options.port,
       statePath,
       dryRun: kwargs.dryRun === true,
-      respond: this.options.respond ?? defaultResponder,
+      respond: this.options.respond ?? this.responder(),
       log: (line) => lines.push(line),
     });
 

@@ -120,9 +120,18 @@ async function startGatewayInProcess(opts?: {
     console.warn(`${EMOJI} ${backend.remedy.detail}`);
   }
 
+  // What this instance is called. `openrappter` is the product; the called name
+  // and designation belong to this organism, derived from its own rappid.
+  const { readAnatomy } = await import('./gateway/anatomy.js');
+  const vitals = readAnatomy().vitals;
+  const calledName = vitals.name ?? NAME;
+  log(`${EMOJI} ${calledName} · ${vitals.designation ?? 'no designation'}`);
+
   const assistant = new Assistant(agents, {
-    name: NAME,
-    description: 'a helpful local-first AI assistant with shell, memory, and skill agents',
+    name: calledName,
+    description: `a local-first AI assistant. Your name is ${calledName}`
+      + `${vitals.designation ? ` and your full designation is ${vitals.designation}` : ''}. `
+      + 'You have shell, memory, and skill agents.',
     model: process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,

@@ -27,6 +27,7 @@
  */
 
 import fs from 'fs';
+import { nameFor, mintTail, type OrganismName } from '../identity/name.js';
 import path from 'path';
 import os from 'os';
 
@@ -61,6 +62,8 @@ export interface Organ {
 
 export interface VitalSigns {
   awake: boolean;
+  /** `openrappter-RX-4471` — formal identity, derived, never renamed. */
+  designation?: string;
   /** Chosen rung of the backend ladder, and why. */
   backend: string;
   backendReason: string;
@@ -165,26 +168,65 @@ export function readAnatomy(
   const identityNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md'];
   const identityFiles = identityNames.map(n => fileOf(home, n));
   const presentIdentity = identityFiles.filter(f => !f.missing && f.bytes > 0);
-  const soulName = (() => {
+  const chosenName = (() => {
     const soul = path.join(home, 'SOUL.md');
     try {
       const first = fs.readFileSync(soul, 'utf-8').split('\n').find(l => l.trim().length > 0);
       return first ? first.replace(/^#+\s*/, '').trim().slice(0, 60) : null;
     } catch { return null; }
   })();
+
+  // Every organism has a name, because its identity already determines one.
+  // The tail is minted once and then never re-rolled (RAPP/1 §6.2), so this
+  // reads it and only mints when there is genuinely nothing there.
+  const identity: OrganismName = (() => {
+    const tailPath = path.join(home, 'rappid.tail');
+    let tail: string | null = null;
+    try {
+      const raw = fs.readFileSync(tailPath, 'utf-8').trim();
+      if (/^[0-9a-f]{64}$/.test(raw)) tail = raw;
+    } catch { tail = null; }
+    if (!tail) {
+      tail = mintTail();
+      try {
+        // 0600: the tail is the GOD-layer secret every public value derives
+        // from. It is written once and never displayed.
+        fs.mkdirSync(home, { recursive: true });
+        fs.writeFileSync(tailPath, tail + '\n', { mode: 0o600, flag: 'wx' });
+      } catch {
+        // Another process won the race, or the disk is read-only. Re-read
+        // rather than keep a tail that was never persisted — a name that
+        // changes on restart is worse than no name.
+        try {
+          const raw = fs.readFileSync(tailPath, 'utf-8').trim();
+          if (/^[0-9a-f]{64}$/.test(raw)) tail = raw;
+        } catch { /* keep the in-memory one for this read */ }
+      }
+    }
+    return nameFor(tail, chosenName);
+  })();
+  const soulName = identity.called;
   organs.push({
     id: 'skull',
     anatomical: 'Cranium',
     plain: 'Soul',
-    state: presentIdentity.length > 0 ? 'alive' : 'absent',
-    reading: presentIdentity.length > 0 ? `${presentIdentity.length} of 4 written` : 'unwritten',
-    consequence: presentIdentity.length > 0
-      ? 'It knows who it is. This is read into every prompt it sends.'
-      : 'This organism has no name. It will sound like every other assistant until you give it one.',
-    detail: identityFiles.map(f => ({
-      label: f.name.replace('.md', ''),
-      sub: f.missing ? 'missing' : `${f.bytes} B`,
-    })),
+    // It always knows its designation — that is derived, not written. What the
+    // identity files add is everything ELSE it believes about itself.
+    state: 'alive',
+    reading: identity.called,
+    consequence: identity.chosen
+      ? `You named it ${identity.called}. Its designation is ${identity.designation}, and that never changes.`
+      : presentIdentity.length > 0
+        ? `It answers to ${identity.called}, derived from its own identity. ${presentIdentity.length} of 4 identity files written.`
+        : `It answers to ${identity.called} — derived from its rappid, the way Finn came from FN-2187. Write a SOUL.md to call it something else; the designation stays.`,
+    detail: [
+      { label: identity.designation, sub: 'designation — derived, permanent' },
+      { label: identity.called, sub: identity.chosen ? 'chosen in SOUL.md' : 'called name — derived' },
+      ...identityFiles.map(f => ({
+        label: f.name.replace('.md', ''),
+        sub: f.missing ? 'missing' : `${f.bytes} B`,
+      })),
+    ],
     files: identityFiles,
   });
 
@@ -398,6 +440,7 @@ export function readAnatomy(
     uptime: live.startedAt ? humanDuration(Date.now() - live.startedAt) : '—',
     agentCount: liveAgents.length || agentFiles.length,
     name: soulName,
+    designation: identity.designation,
     version: live.version ?? 'unknown',
     heartbeat: nextFire ? relativeTime(nextFire) : (live.awake ? 'no schedule' : 'none'),
   };

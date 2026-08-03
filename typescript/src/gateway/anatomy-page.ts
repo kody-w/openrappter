@@ -60,6 +60,7 @@ export function renderAnatomyPage(a: Anatomy): string {
     return ` st-${o.state}${o.state === 'alive' ? ' glow' : ''}`;
   };
   const title = a.vitals.name ?? 'openrappter';
+  const designation = a.vitals.designation ?? '';
 
   // ── Callout pins + leader lines ────────────────────────────────────────────
   const callouts = a.organs
@@ -117,7 +118,7 @@ export function renderAnatomyPage(a: Anatomy): string {
     ['uptime', a.vitals.uptime, 'plain'],
     ['next beat', a.vitals.heartbeat, 'plain'],
     ['capabilities', String(a.vitals.agentCount), 'plain'],
-    ['name', a.vitals.name ?? 'unnamed', a.vitals.name ? 'ok' : 'warn'],
+    ['called', a.vitals.name ?? 'unnamed', a.vitals.name ? 'ok' : 'warn'],
   ];
 
   const dinoMood = !a.vitals.awake ? '😴' : a.vitals.backend === 'none' ? '🦖' : '🦖';
@@ -174,6 +175,7 @@ export function renderAnatomyPage(a: Anatomy): string {
   h1 { font-family: var(--display); font-size: 50px; font-weight: 400; letter-spacing: -0.005em;
        line-height: 1.06; margin: 22px 0 5px; color: var(--bone); }
   .sub { font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
+  .designation { color: var(--bone); user-select: all; }
 
   /* ── the patient chart ── */
   .vitals { display: flex; flex-wrap: wrap; margin: 26px 0 8px;
@@ -332,7 +334,7 @@ export function renderAnatomyPage(a: Anatomy): string {
   <div class="rule"></div>
 
   <h1>${esc(title)}</h1>
-  <div class="sub">${a.vitals.awake ? 'A living specimen, read from this machine just now.' : 'Asleep — bones intact, no pulse.'}</div>
+  <div class="sub">${designation ? `<span class="designation" title="derived from its rappid; never changes">${esc(designation)}</span> · ` : ''}${a.vitals.awake ? 'read from this machine just now' : 'asleep — bones intact, no pulse'}</div>
 
   <div class="vitals">
     ${vitalItems.map(([label, value, tone]) => `

@@ -132,6 +132,25 @@ async function startGatewayInProcess(opts?: {
   // instead of a transport error.
   server.setBackendStatus?.({ kind: backend.kind, reason: backend.reason, remedy: backend.remedy });
 
+  // ── Drag-and-drop hot-load ────────────────────────────────────────────────
+  // The importer writes, verifies by loading, and then hands the refreshed map
+  // to the assistant. That last step is what makes "hot" true: without it the
+  // file is on disk and the running conversation still cannot call it.
+  server.setAgentImporter(async (filename, contents) => {
+    const { importAgentFile } = await import('./agents/agent-import.js');
+    const result = await importAgentFile(filename, contents, registry);
+    if (result.status === 'ok') {
+      assistant.setAgents(await registry.getAllAgents());
+      const learned = (result.learned ?? []).map(l => l.name).join(', ');
+      // getAllAgents() hands back the registry's own Map, so the assistant and
+      // the gateway's agent list both observe the new entry without rewiring.
+      // The explicit setAgents call is kept anyway: relying on a shared mutable
+      // reference is exactly the kind of implicit coupling that breaks silently.
+      log(`${EMOJI} Learned ${learned} from ${result.file} — usable now, no restart`);
+    }
+    return result;
+  });
+
   // Set up RappterManager — multi-soul brainstem with persisted souls
   const { RappterManager } = await import('./gateway/rappter-manager.js');
   const { SoulStore } = await import('./gateway/soul-store.js');

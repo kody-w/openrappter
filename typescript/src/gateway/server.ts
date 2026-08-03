@@ -30,6 +30,8 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { readAnatomy } from './anatomy.js';
+import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
@@ -178,7 +180,7 @@ export class GatewayServer {
     getChannelConfig(type: string): { config: Record<string, unknown>; fields: { key: string; label: string; type: string; required: boolean }[] };
   };
   private cronService?: {
-    list(): { id: string; name: string; schedule: string; enabled: boolean }[];
+    list(): { id: string; name: string; schedule: string; enabled: boolean; agentId?: string; nextRun?: string | null; lastRun?: string | null }[];
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
@@ -234,6 +236,25 @@ export class GatewayServer {
     this.saveCronStore();
     return { ...stored, scheduled: false, note: 'saved to disk; will not run until the daemon restarts' };
   };
+
+  /**
+   * Installs a dropped agent into the running organism.
+   *
+   * Injected rather than constructed here because only the daemon owns the live
+   * registry; a gateway that wrote files without reaching that registry would be
+   * able to report success for an agent that is not actually usable.
+   */
+  private agentImporter?: (filename: string, contents: Buffer) => Promise<{
+    status: 'ok' | 'error';
+    learned?: { name: string; description: string }[];
+    file?: string;
+    error?: string;
+    replaced?: boolean;
+  }>;
+
+  setAgentImporter(fn: NonNullable<GatewayServer['agentImporter']>): void {
+    this.agentImporter = fn;
+  }
 
   /* ---- persistence ---- */
 
@@ -400,7 +421,7 @@ export class GatewayServer {
   }
 
   setCronService(service: {
-    list(): { id: string; name: string; schedule: string; enabled: boolean }[];
+    list(): { id: string; name: string; schedule: string; enabled: boolean; agentId?: string; nextRun?: string | null; lastRun?: string | null }[];
     run(id: string): Promise<void>;
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
@@ -564,6 +585,37 @@ export class GatewayServer {
     this.startedAt = null;
     this.metrics.stop();
     logGatewayLifecycle('gateway', 'stop', 'Gateway server stopped');
+  }
+
+  /**
+   * Everything the anatomy page can only learn from a running daemon.
+   *
+   * Read at request time rather than cached: a number that moves is what proves
+   * the organism is alive, and a stale one would be a quiet lie.
+   */
+  private liveSignals(): import('./anatomy.js').LiveSignals {
+    const agents = this.agentList?.() ?? [];
+    return {
+      awake: true,
+      backend: this.backendStatus
+        ? { kind: this.backendStatus.kind, reason: this.backendStatus.reason }
+        : undefined,
+      startedAt: this.startedAt ?? undefined,
+      agents: agents.map(a => ({ id: a.id, name: a.id, description: a.description })),
+      connections: this.connections.size,
+      port: this.config.port,
+      version: VERSION,
+      cron: this.cronService?.list().map(j => ({
+        name: j.name,
+        agentId: j.agentId,
+        nextRun: j.nextRun ?? null,
+        lastRun: j.lastRun ?? null,
+        enabled: j.enabled,
+      })),
+      channels: agents.length
+        ? agents.flatMap(a => a.channels ?? []).map(c => ({ type: c.type, connected: c.connected }))
+        : undefined,
+    };
   }
 
   getStatus(): GatewayStatus {
@@ -758,6 +810,25 @@ export class GatewayServer {
       res.end(JSON.stringify(this.getStatus()));
       return;
     }
+
+    // ── The anatomy page ──────────────────────────────────────────────────
+    // One page, three surfaces: this URL, the dino's WKWebView, and the chat
+    // surface. Served rather than duplicated so the three cannot drift.
+    // Match on the PATH, not the raw URL. `/bones?organ=heart` is the same page
+    // as `/bones`; comparing the whole request target made the deep link fall
+    // through to the SPA, which silently served a different page.
+    const pathOnly = (req.url ?? '').split('?')[0];
+    if ((pathOnly === '/bones' || pathOnly === '/bones/' || pathOnly === '/anatomy') && req.method === 'GET') {
+      const page = renderAnatomyPage(readAnatomy(undefined, this.liveSignals()));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders });
+      res.end(page);
+      return;
+    }
+    if (pathOnly === '/anatomy.json' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+      res.end(JSON.stringify(readAnatomy(undefined, this.liveSignals())));
+      return;
+    }
     // Voice UI (the rappter-vui fauna player) — served same-origin so it can
     // reach this gateway over WebSocket without mixed-content blocking.
     if ((req.url === '/vui' || req.url === '/vui/' || req.url === '/vui/index.html') && req.method === 'GET') {
@@ -791,6 +862,31 @@ export class GatewayServer {
           }
 
           const parsed = JSON.parse(body);
+
+          // ── Hot-load a dropped agent ────────────────────────────────────
+          // Mirrors the grail brainstem's /agents/import: verify by loading,
+          // roll back on failure, refuse name collisions. "Hot" means usable in
+          // the very next message — the handler is what makes that true, by
+          // reaching the live registry rather than only the disk.
+          if (req.url === '/agents/import') {
+            if (!this.agentImporter) {
+              res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ status: 'error', error: 'This daemon cannot install agents.' }));
+              return;
+            }
+            const filename = typeof parsed.filename === 'string' ? parsed.filename : '';
+            const contents = typeof parsed.contents === 'string' ? parsed.contents : '';
+            if (!filename || !contents) {
+              res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ status: 'error', error: 'filename and contents are required' }));
+              return;
+            }
+            const result = await this.agentImporter(filename, Buffer.from(contents, 'utf-8'));
+            res.writeHead(result.status === 'ok' ? 200 : 400, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify(result));
+            return;
+          }
+
           if (req.url === '/chat') {
             const authenticated = this.resolveHttpAuthenticated(req, parsed);
             if (!authenticated) {

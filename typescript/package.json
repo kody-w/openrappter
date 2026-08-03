@@ -1,7 +1,7 @@
 {
   "name": "openrappter",
   "version": "1.10.0",
-  "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
+  "description": "\ud83e\udd96 Local-first AI agent powered by GitHub Copilot SDK \u2014 no API keys required",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build:server": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "build:server": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc && npm run copy:assets",
     "build:ui": "node scripts/build-ui.mjs",
     "build": "npm run build:server && npm run build:ui",
     "dev": "tsx watch src/index.ts",
@@ -22,7 +22,8 @@
     "demo:ouroboros": "tsx examples/ouroboros.ts",
     "demo:learn": "tsx examples/learn-new.ts",
     "format": "prettier --write .",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/agents/python',{recursive:true});fs.copyFileSync('src/agents/python/runner.py','dist/agents/python/runner.py')\""
   },
   "keywords": [
     "ai",

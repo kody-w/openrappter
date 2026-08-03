@@ -19,7 +19,7 @@ func runBonesWindowTests() async {
             let controller = await MainActor.run { BonesWindowController() }
             await MainActor.run { controller.show() }
 
-            let window = await MainActor.run { NSApp.windows.first { $0.title.contains("bones") } }
+            let window = await MainActor.run { NSApp.windows.first { $0.title.contains("Anatomy") } }
             try expectNotNil(window, "show() must produce a window")
             let w = window!
             try expect(w.frame.width > 400, "window is \(w.frame.width) wide — too narrow to read")
@@ -30,9 +30,9 @@ func runBonesWindowTests() async {
         await test("reopening reuses the window rather than stacking duplicates") {
             let controller = await MainActor.run { BonesWindowController() }
             await MainActor.run { controller.show() }
-            let first = await MainActor.run { NSApp.windows.filter { $0.title.contains("bones") }.count }
+            let first = await MainActor.run { NSApp.windows.filter { $0.title.contains("Anatomy") }.count }
             await MainActor.run { controller.show() }
-            let second = await MainActor.run { NSApp.windows.filter { $0.title.contains("bones") }.count }
+            let second = await MainActor.run { NSApp.windows.filter { $0.title.contains("Anatomy") }.count }
             try expectEqual(second, first, "a second show() must not open another window")
         }
 
@@ -43,6 +43,39 @@ func runBonesWindowTests() async {
             try expect(bones.home.hasSuffix(".openrappter"),
                        "must read the real runtime dir, got \(bones.home)")
             try expect(!bones.sections.isEmpty, "must have sections to draw")
+        }
+
+        // ── the native drop ────────────────────────────────────────────────
+        //
+        // Dropping an agent on the menu-bar app must do the same thing as
+        // dropping it in the browser. It cannot write the file itself: only the
+        // daemon owns the live registry, so a local write would produce an agent
+        // that is installed and not usable — the exact failure the feature
+        // exists to prevent. So the install path is an HTTP call, and when
+        // nothing is listening it has to say so in the organism's voice rather
+        // than fail silently.
+
+        await test("a drop with no daemon refuses honestly instead of failing silently") {
+            // Port 1 is reserved and nothing can be listening on it.
+            let result = await AgentInstaller.install(
+                filename: "probe_agent.py",
+                contents: "from agents.basic_agent import BasicAgent\n",
+                port: 1
+            )
+            var refusal: String? = nil
+            if case .refused(let reason) = result { refusal = reason }
+            try expectNotNil(refusal, "claimed to learn an agent with no daemon running")
+            try expect(refusal!.lowercased().contains("not running"),
+                       "the refusal must say why, got: \(refusal!)")
+        }
+
+        await test("only .py and .js are treated as agents") {
+            // The drop filter is what stands between a stray screenshot and an
+            // attempt to execute it.
+            try expect(AgentDropWebView.isAgentFile(URL(fileURLWithPath: "/tmp/x_agent.py")))
+            try expect(AgentDropWebView.isAgentFile(URL(fileURLWithPath: "/tmp/x_agent.js")))
+            try expect(!AgentDropWebView.isAgentFile(URL(fileURLWithPath: "/tmp/photo.png")))
+            try expect(!AgentDropWebView.isAgentFile(URL(fileURLWithPath: "/tmp/notes.txt")))
         }
     }
 }

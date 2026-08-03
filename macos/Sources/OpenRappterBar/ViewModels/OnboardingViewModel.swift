@@ -273,7 +273,21 @@ public final class OnboardingViewModel {
     private func installLaunchAgent() {
         let plistPath = NSHomeDirectory() + "/Library/LaunchAgents/com.openrappter.daemon.plist"
         let nodePath = resolveNodePath()
-        let indexPath = homeDir + "/typescript/dist/index.js"
+        // Resolve the CODE directory, which is not the data directory.
+        //
+        // This used to hardcode `homeDir + "/typescript/dist/index.js"`, where
+        // homeDir is ~/.openrappter — the runtime DATA dir. That directory also
+        // happened to contain an old checkout, so onboarding quietly pinned the
+        // daemon to a build that stopped updating months ago while its data half
+        // kept being written. Deploys landed in git and never reached the
+        // machine. `resolveProjectPath()` already ranks the released build above
+        // that directory; it simply was not being asked.
+        let projectPath = ProcessManager.resolveProjectPath()
+        let indexPath = projectPath + "/typescript/dist/index.js"
+        let fallbackIndexPath = projectPath + "/dist/index.js"
+        // A deployed release has dist/ at its root; a source checkout has it
+        // under typescript/. Pick whichever actually exists rather than assuming.
+        let resolvedIndex = FileManager.default.fileExists(atPath: indexPath) ? indexPath : fallbackIndexPath
         let logPath = homeDir + "/daemon.log"
 
         // PATH comes from `nodeSearchPath()`, not from this app's own
@@ -289,7 +303,7 @@ public final class OnboardingViewModel {
             <key>Label</key><string>com.openrappter.daemon</string>
             <key>ProgramArguments</key><array>
                 <string>\(nodePath)</string>
-                <string>\(indexPath)</string>
+                <string>\(resolvedIndex)</string>
                 <string>--daemon</string>
             </array>
             <key>RunAtLoad</key><true/>

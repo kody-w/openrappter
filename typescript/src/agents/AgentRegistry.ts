@@ -10,6 +10,7 @@ import path from 'path';
 import os from 'os';
 import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
+import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
 import type { AgentInfo } from './types.js';
 
 export class AgentRegistry {
@@ -24,6 +25,28 @@ export class AgentRegistry {
   ) {
     this.agentsDir = agentsDir;
     this.userAgentsDir = userAgentsDir;
+  }
+
+  /**
+   * Re-scan the user agents directory and pick up anything new.
+   *
+   * `discoverAgents()` latches on `loaded` so the built-in sweep runs once —
+   * which is right for agents compiled into the build, and wrong for the ones a
+   * person drops in while the daemon is running. Without this, a dropped agent
+   * was only visible after a restart, which is not what "hot" means.
+   *
+   * Returns the names that appeared, so the caller can say what was learned
+   * rather than claiming success and hoping.
+   */
+  async reloadUserAgents(): Promise<string[]> {
+    const before = new Set(this.agents.keys());
+    await this.discoverUserAgents();
+    return Array.from(this.agents.keys()).filter(n => !before.has(n));
+  }
+
+  /** Drop an agent from the live map, so a replaced file does not leave a ghost. */
+  forget(name: string): boolean {
+    return this.agents.delete(name);
   }
 
   async discoverAgents(): Promise<void> {
@@ -70,6 +93,7 @@ export class AgentRegistry {
 
   /** Load user-generated agents (LearnNew factory pattern) from ~/.openrappter/agents/ */
   private async discoverUserAgents(): Promise<void> {
+    await this.discoverPythonAgents();
     try {
       const files = await fs.readdir(this.userAgentsDir);
       const agentFiles = files.filter(f => f.endsWith('_agent.js'));
@@ -94,6 +118,40 @@ export class AgentRegistry {
       }
     } catch {
       // Directory doesn't exist yet
+    }
+  }
+
+  /**
+   * Load `.py` agents from the user directory through the Python bridge.
+   *
+   * The grail brainstem and the RAR catalog are Python, so most agents a person
+   * already has are `.py`. Refusing them would have meant "hot-load works, but
+   * not for the agents you own".
+   */
+  private async discoverPythonAgents(): Promise<void> {
+    let files: string[];
+    try {
+      files = await fs.readdir(this.userAgentsDir);
+    } catch {
+      return; // directory doesn't exist yet
+    }
+
+    for (const file of files.filter(f => f.endsWith('.py') && f !== 'basic_agent.py')) {
+      const filePath = path.join(this.userAgentsDir, file);
+      try {
+        const found = await introspectPythonAgents(filePath);
+        if (!found.ok) continue; // a broken file is not a reason to fail the sweep
+        for (const descriptor of found.agents) {
+          // A re-dropped file must replace its own agent rather than being
+          // ignored as a duplicate, or editing an agent would never take.
+          const existing = this.agents.get(descriptor.name);
+          const isOurs = existing instanceof PythonAgent && existing.sourceFile === filePath;
+          if (existing && !isOurs) continue;
+          this.agents.set(descriptor.name, new PythonAgent(filePath, descriptor));
+        }
+      } catch {
+        // Skip agents that fail to load
+      }
     }
   }
 

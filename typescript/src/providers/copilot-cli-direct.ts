@@ -16,6 +16,7 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './types.js';
+import { writeMcpBridgeConfig, toolArgsFor, copilotHomeDir, type McpBridgeConfig } from './copilot-cli-mcp.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,6 +61,14 @@ export interface CopilotCliDirectOptions {
   model?: string;
   timeoutMs?: number;
   runner?: CopilotCliDirectRunner;
+  /**
+   * Expose the agent registry to the CLI over MCP.
+   *
+   * The CLI takes tools only through MCP, so without this it is run with an
+   * empty allow-list and cannot invoke a single agent — which makes hot-loading
+   * an agent the assistant then cannot call a feature that does nothing.
+   */
+  exposeAgents?: boolean;
 }
 
 export type CopilotCliDirectRunner = (
@@ -76,8 +85,12 @@ export class CopilotCliDirectProvider implements LLMProvider {
   private model: string;
   private timeoutMs: number;
   private runner: CopilotCliDirectRunner;
+  private readonly exposeAgents: boolean;
+  private mcpBridge: McpBridgeConfig | null = null;
+  private mcpBridgeResolved = false;
 
   constructor(config?: CopilotCliDirectOptions) {
+    this.exposeAgents = config?.exposeAgents ?? false;
     this.cliPath = config?.cliPath || CopilotCliDirectProvider.findCLI() || 'copilot';
     this.model = config?.model?.trim() || 'auto';
     this.timeoutMs = config?.timeoutMs ?? 120_000;
@@ -91,6 +104,22 @@ export class CopilotCliDirectProvider implements LLMProvider {
         { ...options, env: { ...process.env, PATH: resolveSpawnPath() } },
       )
     );
+  }
+
+  /**
+   * Tool arguments for a run: the MCP bridge when agents are exposed, the
+   * original empty allow-list when they are not.
+   *
+   * Resolved lazily and once — the built entry point does not exist in every
+   * context this provider is constructed in.
+   */
+  private toolArgs(): string[] {
+    if (!this.exposeAgents) return ['--available-tools='];
+    if (!this.mcpBridgeResolved) {
+      this.mcpBridge = writeMcpBridgeConfig(copilotHomeDir());
+      this.mcpBridgeResolved = true;
+    }
+    return toolArgsFor(this.mcpBridge);
   }
 
   setGithubToken(_token: string): void { /* CLI owns its own credential */ }
@@ -157,7 +186,7 @@ export class CopilotCliDirectProvider implements LLMProvider {
           '--no-ask-user',
           '--model',
           this.model,
-          '--available-tools=',
+          ...this.toolArgs(),
         ],
         { timeout: this.timeoutMs, maxBuffer: 20 * 1024 * 1024 },
       );
@@ -177,7 +206,17 @@ export class CopilotCliDirectProvider implements LLMProvider {
     const convo = messages.filter(m => m.role === 'user' || m.role === 'assistant');
     let prompt = '';
     if (system) prompt += system + '\n\n';
-    prompt += 'Continue the conversation below as the assistant. Reply with only your next message — no tool use, no preamble.\n\n';
+    // "no tool use" was correct while the CLI ran with an empty allow-list —
+    // it stopped the model narrating tools it could not call. Now that the agent
+    // registry is exposed over MCP, that same sentence actively suppresses the
+    // organism's own capabilities: the model would invent an answer rather than
+    // call the agent that knows it. Instruct the opposite when tools are live.
+    prompt += this.exposeAgents
+      ? 'Continue the conversation below as the assistant. You have tools available that are this '
+        + 'assistant\'s own capabilities — prefer calling one over answering from memory whenever a '
+        + 'tool covers the question, and never invent a value a tool could return. '
+        + 'Reply with only your next message, no preamble.\n\n'
+      : 'Continue the conversation below as the assistant. Reply with only your next message — no tool use, no preamble.\n\n';
     for (const m of convo) {
       prompt += `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}\n`;
     }

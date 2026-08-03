@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { writeMcpBridgeConfig, toolArgsFor, type McpBridgeConfig } from './copilot-cli-mcp.js';
 import type {
   ChatOptions,
   LLMProvider,
@@ -82,6 +83,14 @@ export type CopilotCliPromptAttachmentPreparer = (
 
 export interface CopilotCliProviderOptions {
   executable?: string;
+  /**
+   * Expose the agent registry to the CLI over MCP.
+   *
+   * Off by default so nothing changes for callers that only want prose. The
+   * daemon turns it on, because a backend that cannot call agents makes
+   * hot-loading pointless.
+   */
+  exposeAgents?: boolean;
   copilotHome?: string;
   model?: string;
   timeoutMs?: number;
@@ -389,6 +398,9 @@ export class CopilotCliProvider implements LLMProvider {
 
   private readonly executable: string;
   private readonly copilotHome: string;
+  private readonly exposeAgents: boolean;
+  private mcpBridge: McpBridgeConfig | null = null;
+  private mcpBridgeResolved = false;
   private readonly model: string;
   private readonly timeoutMs: number;
   private readonly maxPromptBytes: number;
@@ -400,6 +412,7 @@ export class CopilotCliProvider implements LLMProvider {
   private readonly promptAttachmentPreparer: CopilotCliPromptAttachmentPreparer;
 
   constructor(options: CopilotCliProviderOptions = {}) {
+    this.exposeAgents = options.exposeAgents ?? false;
     this.sourceEnv = { ...(options.env ?? process.env) };
     this.executable =
       options.executable?.trim()
@@ -441,6 +454,19 @@ export class CopilotCliProvider implements LLMProvider {
     if (normalized) {
       this.sourceEnv.COPILOT_GITHUB_TOKEN = normalized;
     }
+  }
+
+  /**
+   * Tool arguments for a run: the MCP bridge when agents are exposed, the
+   * original empty allow-list when they are not.
+   */
+  private toolArgs(): string[] {
+    if (!this.exposeAgents) return ['--available-tools='];
+    if (!this.mcpBridgeResolved) {
+      this.mcpBridge = writeMcpBridgeConfig(this.copilotHome);
+      this.mcpBridgeResolved = true;
+    }
+    return toolArgsFor(this.mcpBridge);
   }
 
   async chat(
@@ -496,7 +522,7 @@ export class CopilotCliProvider implements LLMProvider {
           ...(model ? ['--model', model] : []),
           '--effort',
           'max',
-          '--available-tools=',
+          ...this.toolArgs(),
         ];
 
         let result: CopilotCliRunResult;

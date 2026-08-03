@@ -103,7 +103,9 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
   if (pinned === 'copilot-cli') {
     return {
       kind: 'copilot-cli',
-      provider: new CopilotCliDirectProvider({ model }),
+      // exposeAgents: without it the CLI runs with an empty tool allow-list
+      // and cannot invoke a single agent, which makes hot-loading pointless.
+      provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
       reason: 'OPENRAPPTER_AI_BACKEND=copilot-cli',
     };
   }
@@ -132,7 +134,9 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
   if (await probeCli()) {
     return {
       kind: 'copilot-cli',
-      provider: new CopilotCliDirectProvider({ model }),
+      // exposeAgents: without it the CLI runs with an empty tool allow-list
+      // and cannot invoke a single agent, which makes hot-loading pointless.
+      provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
       reason: token
         ? 'GitHub token has no Copilot access — fell back to the Copilot CLI'
         : 'no GitHub token — using the Copilot CLI, which holds its own sign-in',

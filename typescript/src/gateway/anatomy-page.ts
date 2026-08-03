@@ -51,6 +51,14 @@ const STATE_WORD: Record<string, string> = {
 
 export function renderAnatomyPage(a: Anatomy): string {
   const organById = new Map(a.organs.map(o => [o.id, o]));
+  /** Put each organ's live state onto its SVG group so the drawing reports health. */
+  const stateClass = (id: string): string => {
+    const o = organById.get(id);
+    if (!o) return ' st-absent';
+    // Only living organs glow. If everything bloomed, the bloom would stop
+    // meaning "this part is alive".
+    return ` st-${o.state}${o.state === 'alive' ? ' glow' : ''}`;
+  };
   const title = a.vitals.name ?? 'openrappter';
 
   // ── Callout pins + leader lines ────────────────────────────────────────────
@@ -64,7 +72,7 @@ export function renderAnatomyPage(a: Anatomy): string {
       // straight tether: out horizontally from the pin, then to the anchor.
       const midX = p.side === 'r' ? px - 28 : px + 28;
       return `
-      <g class="callout" data-organ="${esc(o.id)}">
+      <g class="callout st-${esc(o.state)}" data-organ="${esc(o.id)}">
         <path class="leader" d="M ${px} ${py} L ${midX} ${py} L ${ax} ${ay}" />
         <circle class="pin-dot" cx="${ax}" cy="${ay}" r="4.5" />
         <circle class="pin-ring" cx="${px}" cy="${py}" r="15" />
@@ -105,7 +113,7 @@ export function renderAnatomyPage(a: Anatomy): string {
 
   const vitalItems: [string, string, string][] = [
     ['state', a.vitals.awake ? 'awake' : 'asleep', a.vitals.awake ? 'ok' : 'warn'],
-    ['mind', a.vitals.backend, a.vitals.awake ? 'ok' : 'warn'],
+    ['mind', a.vitals.backend, a.vitals.awake && a.vitals.backend !== 'none' ? 'ok' : 'warn'],
     ['uptime', a.vitals.uptime, 'plain'],
     ['next beat', a.vitals.heartbeat, 'plain'],
     ['capabilities', String(a.vitals.agentCount), 'plain'],
@@ -121,140 +129,195 @@ export function renderAnatomyPage(a: Anatomy): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Anatomy of a rappter</title>
 <style>
-  /* Editorial system from frame.md. Font stacks are local-only on purpose —
-     the page must render with the network off. */
+  /* openrappter's own identity: a lit specimen case in a natural-history hall
+     after hours, with one exhibit still glowing — because that exhibit is alive,
+     on this machine, right now.
+
+     Colour is semantic here, never decorative. The alive green appears on nothing
+     that is not actually alive; if the whole page were green it would stop
+     meaning anything. You should be able to read the organism's health from the
+     drawing before you read a single word.
+
+     Font stacks are local-only on purpose — the page must render with the
+     network off, because that is the entire product thesis. */
   :root {
-    --ink: #141413;
-    --cream: #FAF9F5;
-    --tile: #EFE9DE;
-    --coral: #CC785C;
-    --coral-deep: #9A5233;
-    --navy: #181715;
-    --hair: rgba(20,20,19,0.12);
-    --hair-strong: rgba(20,20,19,0.20);
-    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --ground:   #0B0F0D;   /* near-black with a faint cool-green cast */
+    --case:     #141A17;   /* the panel the specimen sits in */
+    --rule:     #232C27;   /* hairlines, callout leaders */
+    --bone:     #E8E4D9;   /* the specimen line work, and primary text */
+    --muted:    #7C8981;   /* secondary text, latin names */
+
+    --alive:    #4FD08A;   /* the rappter's own green. ONLY living organs. */
+    --degraded: #E0A340;   /* working, but not the way it should */
+    /* Two slates, because the two uses have different contrast floors: line
+       work is a graphic (3:1) and clears at #55625C, but the same value as
+       CHIP TEXT measures 3.02:1 against 4.5:1 required. Measured, not eyeballed. */
+    --absent:      #55625C;   /* the bone that is not there — drawing only */
+    --absent-text: #77867F;   /* the same slate, readable as text */
+    --sealed:   #B08D57;   /* present, deliberately not opened */
+
+    /* A slab with visible personality — this must not read as the previous page
+       in dark mode. */
+    --display: "Rockwell", "Bookman Old Style", "Superclarendon", "Georgia", serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { background: var(--cream); color: var(--ink); }
-  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; padding: 40px 44px 60px; }
+  html, body { background: var(--ground); color: var(--bone); }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; padding: 38px 42px 56px; }
 
-  .kicker { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.16em;
-            text-transform: uppercase; display: flex; align-items: center; gap: 12px; }
-  .spike { color: var(--coral); }
-  .rule { height: 1px; background: var(--hair); margin: 14px 0 0; }
+  .kicker { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.22em;
+            text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 12px; }
+  .spike { color: var(--alive); }
+  .rule { height: 1px; background: var(--rule); margin: 14px 0 0; }
 
-  h1 { font-family: var(--serif); font-size: 54px; font-weight: 400; letter-spacing: -0.02em;
-       line-height: 1.04; margin: 22px 0 4px; }
-  .sub { font-family: var(--serif); font-style: italic; font-size: 21px; color: rgba(20,20,19,0.66); }
+  h1 { font-family: var(--display); font-size: 50px; font-weight: 400; letter-spacing: -0.005em;
+       line-height: 1.06; margin: 22px 0 5px; color: var(--bone); }
+  .sub { font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
 
   /* ── the patient chart ── */
-  .vitals { display: flex; flex-wrap: wrap; gap: 0; margin: 26px 0 8px;
-            border: 1px solid var(--hair); border-radius: 10px; background: var(--tile); overflow: hidden; }
-  .vital { flex: 1 1 150px; padding: 14px 18px; border-right: 1px solid var(--hair); }
+  .vitals { display: flex; flex-wrap: wrap; margin: 26px 0 8px;
+            border: 1px solid var(--rule); border-radius: 4px; background: var(--case); overflow: hidden; }
+  .vital { flex: 1 1 150px; padding: 14px 18px; border-right: 1px solid var(--rule); }
   .vital:last-child { border-right: 0; }
-  .v-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
-             color: rgba(20,20,19,0.5); }
-  .v-value { font-family: var(--serif); font-size: 27px; line-height: 1.15; margin-top: 5px; }
-  .v-value.warn { color: var(--coral-deep); }
-  .v-why { font-family: var(--mono); font-size: 11px; color: rgba(20,20,19,0.55); margin-top: 4px; }
+  .v-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+             color: var(--muted); }
+  .v-value { font-family: var(--display); font-size: 25px; line-height: 1.2; margin-top: 6px; color: var(--bone); }
+  .v-value.ok { color: var(--alive); }
+  .v-value.warn { color: var(--degraded); }
+  .v-why { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; padding: 6px 2px 0; }
 
-  /* ── the plate ── */
-  .plate { display: grid; grid-template-columns: minmax(0,1fr) 372px; gap: 30px; margin-top: 26px; align-items: start; }
-  .specimen { border: 1px solid var(--hair); border-radius: 12px; background: var(--tile);
-              position: relative; overflow: hidden; }
-  .specimen-cap { position: absolute; left: 20px; top: 16px; font-family: var(--mono); font-size: 10.5px;
-                  letter-spacing: 0.16em; text-transform: uppercase; color: rgba(20,20,19,0.45); }
+  /* ── the case ── */
+  .plate { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 28px; margin-top: 24px; align-items: start; }
+  .specimen { border: 1px solid var(--rule); border-radius: 4px; position: relative; overflow: hidden;
+              background:
+                radial-gradient(115% 85% at 50% 42%, rgba(79,208,138,0.055) 0%, rgba(79,208,138,0) 62%),
+                var(--case); }
+  .specimen-cap { position: absolute; left: 20px; top: 15px; font-family: var(--mono); font-size: 10px;
+                  letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
   svg.figure { display: block; width: 100%; height: auto; }
 
-  /* body */
-  .body-fill { fill: var(--navy); }
-  .body-line { fill: none; stroke: var(--navy); stroke-width: 2; }
+  /* ── the animal: bone line work on dark, an anatomical plate ── */
+  .body-line { fill: none; stroke: var(--bone); stroke-width: 1.6; stroke-linejoin: round;
+               stroke-linecap: round; opacity: 0.92; }
+  .body-line.faint { opacity: 0.4; stroke-width: 1.2; }
+  .body-hatch { fill: none; stroke: var(--bone); stroke-width: 0.8; opacity: 0.17; }
 
-  /* organs sit inside the silhouette as a cutaway */
-  .organ { cursor: pointer; transition: opacity 140ms ease; }
-  .organ .shape { fill: rgba(250,249,245,0.22); stroke: rgba(250,249,245,0.45); stroke-width: 1.4;
-                  transition: fill 160ms ease, stroke 160ms ease; }
-  .organ .shape.vessel { fill: none; stroke-width: 2.2; }
-  .organ.outside .shape { fill: none; stroke: rgba(20,20,19,0.3); stroke-width: 2.4; }
-  .body-far { fill: rgba(20,20,19,0.42); }
-  .jaw { fill: rgba(20,20,19,0.72); }
-  .organ:hover .shape, .organ.on .shape { fill: var(--coral); stroke: var(--coral); }
-  .organ.on.sealed .shape { fill: rgba(204,120,92,0.35); stroke: var(--coral); }
+  /* ── organs carry their own state, so the body is readable at a glance ── */
+  .organ { cursor: pointer; }
+  .organ .shape { fill: none; stroke-width: 1.5; transition: opacity 160ms ease; }
 
+  .organ.st-alive .shape    { stroke: var(--alive); fill: rgba(79,208,138,0.13); }
+  .organ.st-degraded .shape { stroke: var(--degraded); fill: rgba(224,163,64,0.11);
+                              animation: breathe 2.8s ease-in-out infinite; }
+  /* Absent organs are drawn as the bone that is NOT there — visible absence
+     beats a missing shape, which would read as a drawing error. */
+  .organ.st-absent .shape   { stroke: var(--absent); fill: none; stroke-dasharray: 4 5; opacity: 0.75; }
+  /* The Vault is drawn closed. The refusal is part of the illustration. */
+  .organ.st-sealed .shape   { stroke: var(--sealed); fill: rgba(176,141,87,0.14); }
+
+  /* Open paths — vessels, the hide outline — are line work, not areas. Filling
+     them paints the whole implied region, which is how the first attempt turned
+     most of the animal green and made the colour stop meaning anything. */
+  .organ .shape.vessel,
+  .organ.st-alive .shape.vessel,
+  .organ.st-degraded .shape.vessel,
+  .organ.st-absent .shape.vessel,
+  .organ.st-sealed .shape.vessel { fill: none; stroke-width: 2; }
+  .organ:hover .shape.vessel, .organ.on .shape.vessel { stroke-width: 3; }
+
+  @keyframes breathe { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+  @keyframes beat    { 0%,100% { transform: scale(1); } 12% { transform: scale(1.07); } 26% { transform: scale(1); } }
+
+  .organ.st-alive.pulse .shape { transform-box: fill-box; transform-origin: center;
+                                 animation: beat var(--beat, 4s) ease-in-out infinite; }
+
+  .organ:hover .shape, .organ.on .shape { fill-opacity: 0.42; stroke-width: 2.3; }
+  .glow { filter: url(#bloom); }
+
+  /* ── callouts: the plate convention ── */
   .callout { cursor: pointer; }
-  .leader { fill: none; stroke: var(--hair-strong); stroke-width: 1; }
-  .pin-dot { fill: rgba(20,20,19,0.35); }
-  .pin-ring { fill: var(--cream); stroke: var(--hair-strong); stroke-width: 1; }
-  .pin-num { font-family: var(--mono); font-size: 12px; font-weight: 600; text-anchor: middle; fill: var(--ink); }
-  .pin-label { font-family: var(--serif); font-size: 19px; fill: var(--ink); }
-  .pin-sub { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-             fill: rgba(20,20,19,0.45); }
+  .leader { fill: none; stroke: var(--rule); stroke-width: 1; }
+  .pin-dot { fill: var(--muted); }
+  .pin-ring { fill: var(--ground); stroke: var(--rule); stroke-width: 1; }
+  .pin-num { font-family: var(--mono); font-size: 11px; font-weight: 600; text-anchor: middle; fill: var(--muted); }
+  .pin-label { font-family: var(--display); font-size: 18px; fill: var(--bone); }
+  .pin-sub { font-family: var(--mono); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+             fill: var(--muted); }
   .pin-label.ll, .pin-sub.ll { text-anchor: end; }
-  .callout.on .leader { stroke: var(--coral); }
-  .callout.on .pin-ring { stroke: var(--coral); fill: var(--coral); }
-  .callout.on .pin-num { fill: var(--cream); }
-  .callout.on .pin-dot { fill: var(--coral); }
-  .callout.on .pin-label { fill: var(--coral-deep); }
+  .callout.on .leader { stroke: var(--bone); opacity: 0.6; }
+  .callout.on .pin-ring { stroke: var(--bone); }
+  .callout.on .pin-num { fill: var(--bone); }
+  .callout.on .pin-label { fill: var(--bone); }
+
+  /* state tints the callout too, so the legend and the body agree */
+  .callout.st-alive .pin-dot    { fill: var(--alive); }
+  .callout.st-degraded .pin-dot { fill: var(--degraded); }
+  .callout.st-absent .pin-dot   { fill: var(--absent); }
+  .callout.st-sealed .pin-dot   { fill: var(--sealed); }
 
   /* ── placard column ── */
-  .placards { position: sticky; top: 40px; }
-  .placard { display: none; border: 1px solid var(--hair); border-radius: 12px; background: var(--cream);
-             padding: 22px 22px 18px; box-shadow: 0 1px 3px rgba(20,20,19,0.07), 0 6px 22px rgba(20,20,19,0.05); }
+  .placards { position: sticky; top: 38px; }
+  .placard { display: none; border: 1px solid var(--rule); border-radius: 4px; background: var(--case);
+             padding: 22px 22px 18px; }
   .placard.on { display: block; }
   .pc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;
-             border-bottom: 1px solid var(--hair); padding-bottom: 13px; }
-  .pc-anat { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
-             color: rgba(20,20,19,0.45); }
-  .pc-plain { font-family: var(--serif); font-size: 33px; line-height: 1.1; margin-top: 3px; }
-  .pc-state { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
-              padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
-  .s-alive { background: rgba(20,20,19,0.06); color: rgba(20,20,19,0.7); }
-  .s-degraded, .s-absent { background: rgba(204,120,92,0.16); color: var(--coral-deep); }
-  .s-sealed { background: var(--navy); color: var(--cream); }
-  .pc-reading { font-family: var(--mono); font-size: 16px; margin-top: 14px; color: var(--ink); }
-  .pc-consequence { font-size: 15.5px; line-height: 1.5; color: rgba(20,20,19,0.78); margin-top: 10px; }
-  .pc-detail { list-style: none; margin-top: 16px; border-top: 1px solid var(--hair); }
-  .pc-detail li { display: block; padding: 9px 0; border-bottom: 1px solid var(--hair); }
-  .d-label { font-family: var(--sans); font-size: 14.5px; font-weight: 500; display: block; }
-  .d-sub { font-family: var(--mono); font-size: 11.5px; line-height: 1.45; color: rgba(20,20,19,0.55);
-           display: block; margin-top: 2px; }
-  .pc-detail { max-height: 340px; overflow-y: auto; }
+             border-bottom: 1px solid var(--rule); padding-bottom: 13px; }
+  .pc-anat { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+             color: var(--muted); }
+  .pc-plain { font-family: var(--display); font-size: 31px; line-height: 1.1; margin-top: 4px; color: var(--bone); }
+  .pc-state { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+              padding: 5px 10px; border-radius: 2px; white-space: nowrap; border: 1px solid; }
+  .s-alive    { color: var(--alive);    border-color: rgba(79,208,138,0.45);  background: rgba(79,208,138,0.10); }
+  .s-degraded { color: var(--degraded); border-color: rgba(224,163,64,0.45);  background: rgba(224,163,64,0.10); }
+  .s-absent   { color: var(--absent-text); border-color: rgba(85,98,92,0.6); background: rgba(85,98,92,0.14); }
+  .s-sealed   { color: var(--sealed);   border-color: rgba(176,141,87,0.45);  background: rgba(176,141,87,0.10); }
+  .pc-reading { font-family: var(--mono); font-size: 15px; margin-top: 14px; color: var(--bone); }
+  .pc-consequence { font-size: 15px; line-height: 1.55; color: var(--muted); margin-top: 10px; }
+  .pc-detail { list-style: none; margin-top: 16px; border-top: 1px solid var(--rule);
+               max-height: 330px; overflow-y: auto; }
+  .pc-detail li { display: block; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+  .d-label { font-family: var(--sans); font-size: 14px; font-weight: 500; display: block; color: var(--bone); }
+  .d-sub { font-family: var(--mono); font-size: 11px; line-height: 1.45; color: var(--muted);
+           display: block; margin-top: 3px; }
   .pc-files { margin-top: 16px; }
-  .pc-files-h { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
-                color: rgba(20,20,19,0.4); margin-bottom: 7px; }
-  .pc-file { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px;
-             color: rgba(20,20,19,0.62); padding: 3px 0; }
-  .pc-file.missing .f-name { text-decoration: line-through; opacity: 0.55; }
-  .pc-file.missing .f-meta, .pc-file.sealed .f-meta { color: var(--coral-deep); }
+  .pc-files-h { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+                color: var(--muted); margin-bottom: 7px; }
+  .pc-file { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px;
+             color: var(--muted); padding: 3px 0; }
+  .pc-file.missing .f-name { text-decoration: line-through; opacity: 0.6; }
+  .pc-file.missing .f-meta { color: var(--absent-text); }
+  .pc-file.sealed .f-meta { color: var(--sealed); }
 
-  .hint { font-family: var(--mono); font-size: 11.5px; color: rgba(20,20,19,0.45); text-align: center;
-          margin-top: 14px; letter-spacing: 0.05em; }
+  .hint { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center;
+          margin-top: 14px; letter-spacing: 0.08em; }
 
   /* ── drop overlay ── */
-  #drop { position: fixed; inset: 0; background: rgba(250,249,245,0.94); display: none;
+  #drop { position: fixed; inset: 0; background: rgba(11,15,13,0.93); display: none;
           align-items: center; justify-content: center; z-index: 50; }
   #drop.on { display: flex; }
-  .drop-card { border: 2px dashed var(--coral); border-radius: 16px; padding: 54px 66px; text-align: center;
-               background: var(--cream); }
-  .drop-title { font-family: var(--serif); font-size: 42px; }
-  .drop-sub { font-family: var(--mono); font-size: 13px; color: rgba(20,20,19,0.6); margin-top: 12px;
-              letter-spacing: 0.04em; }
-  .drop-warn { font-family: var(--mono); font-size: 11.5px; color: var(--coral-deep); margin-top: 18px; }
+  .drop-card { border: 1px dashed var(--alive); border-radius: 4px; padding: 50px 62px; text-align: center;
+               background: var(--case); }
+  .drop-title { font-family: var(--display); font-size: 38px; color: var(--bone); }
+  .drop-sub { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 12px;
+              letter-spacing: 0.06em; }
+  .drop-warn { font-family: var(--mono); font-size: 11px; color: var(--degraded); margin-top: 18px; }
 
-  #toast { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 60;
-           max-width: 640px; display: none; border: 1px solid var(--hair); border-radius: 12px;
-           background: var(--navy); color: var(--cream); padding: 18px 22px;
-           box-shadow: 0 8px 34px rgba(20,20,19,0.22); }
+  /* Inline, non-blocking. A modal here made the drop path undrivable by a
+     headless test, and untestable is how features on this project went
+     unverified for days. */
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 60;
+           max-width: 660px; display: none; border: 1px solid var(--rule); border-left: 3px solid var(--alive);
+           border-radius: 4px; background: var(--case); padding: 17px 22px; }
   #toast.on { display: block; }
-  #toast .t-title { font-family: var(--serif); font-size: 22px; }
-  #toast .t-body { font-family: var(--sans); font-size: 14.5px; margin-top: 6px; color: rgba(250,249,245,0.82);
+  #toast .t-title { font-family: var(--display); font-size: 20px; color: var(--bone); }
+  #toast .t-body { font-family: var(--sans); font-size: 14px; margin-top: 5px; color: var(--muted);
                    line-height: 1.45; }
-  #toast.bad { background: var(--coral-deep); }
+  #toast.bad { border-left-color: var(--degraded); }
+  #toast.bad .t-title { color: var(--degraded); }
 
-  footer { margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--hair);
-           font-family: var(--mono); font-size: 11px; color: rgba(20,20,19,0.42);
+  footer { margin-top: 32px; padding-top: 15px; border-top: 1px solid var(--rule);
+           font-family: var(--mono); font-size: 10.5px; color: var(--muted);
            display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 
   @media (max-width: 1040px) {
@@ -275,7 +338,7 @@ export function renderAnatomyPage(a: Anatomy): string {
     ${vitalItems.map(([label, value, tone]) => `
     <div class="vital">
       <div class="v-label">${esc(label)}</div>
-      <div class="v-value ${tone === 'warn' ? 'warn' : ''}">${esc(value)}</div>
+      <div class="v-value ${tone === 'warn' ? 'warn' : tone === 'ok' ? 'ok' : ''}">${esc(value)}</div>
     </div>`).join('')}
   </div>
   <div class="v-why" style="padding: 6px 2px 0">${esc(a.vitals.backendReason)}</div>
@@ -284,19 +347,25 @@ export function renderAnatomyPage(a: Anatomy): string {
     <div class="specimen">
       <div class="specimen-cap">SPECIMEN · ${esc(a.home)}</div>
       <svg class="figure" viewBox="0 0 1120 580" role="img" aria-label="Anatomical figure of a rappter">
+        <defs>
+          <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="2.6" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
 
         <!-- ── the animal ───────────────────────────────────────────────── -->
         <g class="beast">
           <!-- far leg, set back and darkened so the stance reads as depth -->
-          <path class="body-far" d="M 448 330 C 470 348 482 384 482 424 C 482 452 476 474 466 490
+          <path class="body-line faint" d="M 448 330 C 470 348 482 384 482 424 C 482 452 476 474 466 490
                                     L 508 490 C 516 470 520 446 520 420 C 520 380 510 348 494 326 Z" />
-          <path class="body-far" d="M 456 484 C 444 494 440 504 444 512 L 524 512 C 526 500 518 490 506 484 Z" />
+          <path class="body-line faint" d="M 456 484 C 444 494 440 504 444 512 L 524 512 C 526 500 518 490 506 484 Z" />
 
           <!-- One continuous silhouette. Back line and belly line are kept far
                apart on purpose: the first attempt drew them close together and
                the animal came out as a thin diagonal band rather than a
                deep-chested biped. -->
-          <path class="body-fill" d="
+          <path class="body-line" d="
             M 906 170
             C 902 150 888 132 864 120
             C 836 106 800 102 772 110
@@ -320,64 +389,64 @@ export function renderAnatomyPage(a: Anatomy): string {
           <!-- the mouth line: without it the wedge reads as a beak -->
           <path class="body-line" d="M 906 170 C 868 180 822 186 778 186 L 748 184" />
           <!-- lower jaw, giving the head depth -->
-          <path class="body-fill jaw" d="M 748 184 C 792 198 848 194 906 170
+          <path class="body-line" d="M 748 184 C 792 198 848 194 906 170
                                          C 880 184 842 192 800 198 L 752 210 Z" />
           <path class="body-line" d="M 828 116 C 850 124 870 138 882 154" />
 
           <!-- near leg -->
-          <path class="body-fill" d="M 496 330 C 534 342 562 370 570 406
+          <path class="body-line" d="M 496 330 C 534 342 562 370 570 406
                                      C 578 444 570 480 550 508 L 604 508
                                      C 622 472 628 430 618 390 C 606 342 570 312 522 306 Z" />
-          <path class="body-fill" d="M 540 502 C 526 514 522 526 526 536 L 622 536
+          <path class="body-line" d="M 540 502 C 526 514 522 526 526 536 L 622 536
                                      C 624 522 616 510 600 502 Z" />
 
           <!-- forelimb: small, two-clawed -->
-          <path class="body-fill" d="M 662 284 C 682 292 698 306 706 322
+          <path class="body-line" d="M 662 284 C 682 292 698 306 706 322
                                      C 710 330 706 336 700 334 C 688 330 676 316 666 302 Z" />
           <path class="body-line" d="M 704 328 L 722 340 M 700 334 L 714 348" />
         </g>
 
-        <!-- ── organs, as a cutaway ─────────────────────────────────────── -->
-        <g class="organ" data-organ="skull">
+        <!-- ── organs: each carries its own state, so the body is readable ── -->
+        <g class="organ${stateClass('skull')}" data-organ="skull">
           <path class="shape" d="M 900 170 C 896 150 882 134 860 124 C 834 112 800 108 774 116
                                  C 752 124 740 138 738 156 C 736 172 744 184 760 190
                                  C 800 196 850 188 900 170 Z" />
         </g>
-        <g class="organ" data-organ="brain">
+        <g class="organ${stateClass('brain')}" data-organ="brain">
           <ellipse class="shape" cx="792" cy="146" rx="26" ry="18" />
         </g>
-        <g class="organ" data-organ="senses">
+        <g class="organ${stateClass('senses')}" data-organ="senses">
           <circle class="shape" cx="836" cy="146" r="10" />
           <path class="shape" d="M 878 158 C 890 158 898 162 900 170 C 890 176 878 176 870 172 Z" />
         </g>
-        <g class="organ" data-organ="spine">
+        <g class="organ${stateClass('spine')}" data-organ="spine">
           <path class="shape" d="M 726 176 C 712 196 692 210 668 222 C 626 242 578 250 526 256
                                  C 464 262 410 268 360 278 L 356 264 C 406 254 462 248 524 242
                                  C 576 236 622 228 660 210 C 686 198 704 184 716 166 Z" />
         </g>
-        <g class="organ" data-organ="heart">
+        <g class="organ${stateClass('heart')} pulse" data-organ="heart">
           <path class="shape" d="M 606 276 C 616 262 634 264 638 278 C 642 264 660 262 668 276
                                  C 676 292 652 316 636 326 C 618 316 598 292 606 276 Z" />
         </g>
-        <g class="organ" data-organ="blood">
+        <g class="organ${stateClass('blood')}" data-organ="blood">
           <path class="shape vessel" d="M 610 288 C 566 296 516 306 470 316" />
           <path class="shape vessel" d="M 618 314 C 580 332 536 348 494 358" />
           <path class="shape vessel" d="M 650 274 C 676 266 696 248 710 224" />
           <path class="shape vessel" d="M 470 316 C 416 320 356 316 306 306" />
         </g>
-        <g class="organ" data-organ="gut">
+        <g class="organ${stateClass('gut')}" data-organ="gut">
           <path class="shape" d="M 432 306 C 468 298 516 302 546 320 C 576 338 574 366 546 376
                                  C 510 388 458 378 434 358 C 416 344 414 316 432 306 Z" />
         </g>
-        <g class="organ" data-organ="vault">
+        <g class="organ${stateClass('vault')}" data-organ="vault">
           <path class="shape" d="M 384 292 L 430 292 L 440 320 L 422 348 L 384 348 L 372 320 Z" />
           <path class="shape" d="M 396 312 L 416 312 L 416 332 L 396 332 Z" fill="none" />
         </g>
-        <g class="organ" data-organ="claws">
+        <g class="organ${stateClass('claws')}" data-organ="claws">
           <path class="shape" d="M 664 286 C 684 294 700 308 708 324 C 712 332 708 338 702 336
                                  C 690 332 678 318 668 304 Z" />
         </g>
-        <g class="organ outside" data-organ="hide">
+        <g class="organ${stateClass('hide')}" data-organ="hide">
           <path class="shape vessel" d="M 762 124 C 744 136 734 150 730 166 C 722 186 706 202 686 214
                                         C 652 234 606 244 552 250 C 496 256 442 262 392 272
                                         C 320 268 216 276 132 296 C 96 304 64 314 44 322" />
@@ -415,6 +484,7 @@ export function renderAnatomyPage(a: Anatomy): string {
 <script>
 (function () {
   // ── hover to explore ──────────────────────────────────────────────────────
+  var pinned = null;
   var organs = document.querySelectorAll('[data-organ]');
   var hint = document.querySelector('.hint');
   var current = null;
@@ -434,17 +504,23 @@ export function renderAnatomyPage(a: Anatomy): string {
     document.querySelectorAll('.organ.on, .callout.on').forEach(function (n) { n.classList.remove('on'); });
     if (hint) hint.style.display = '';
   }
-  organs.forEach(function (el) {
-    el.addEventListener('mouseenter', function () { show(el.getAttribute('data-organ')); });
-    el.addEventListener('click', function () { show(el.getAttribute('data-organ')); });
-  });
-  var plate = document.querySelector('.specimen');
-  if (plate) plate.addEventListener('mouseleave', function () { if (!pinned) clear(); });
-
+  function wireHover() {
+    document.querySelectorAll('[data-organ]').forEach(function (el) {
+      if (el.dataset.wired) return;
+      el.dataset.wired = '1';
+      el.addEventListener('mouseenter', function () { show(el.getAttribute('data-organ')); });
+      el.addEventListener('click', function () { show(el.getAttribute('data-organ')); });
+    });
+    var sp = document.querySelector('.specimen');
+    if (sp && !sp.dataset.wired) {
+      sp.dataset.wired = '1';
+      sp.addEventListener('mouseleave', function () { if (!pinned) clear(); });
+    }
+  }
+  wireHover();
   // Deep link to one organ: /bones?organ=heart. Makes a specific finding
   // linkable, and gives the acceptance check something to assert against
   // without driving a synthetic mouse.
-  var pinned = null;
   var wanted = new URLSearchParams(location.search).get('organ');
   if (wanted && document.getElementById('pc-' + wanted)) { pinned = wanted; show(wanted); }
 
@@ -479,6 +555,22 @@ export function renderAnatomyPage(a: Anatomy): string {
     }
   });
 
+  // Re-read the anatomy and swap the specimen + placards in place. A full
+  // reload would drop the confirmation the organism just gave, and a modal
+  // would make the whole path undrivable by a headless test.
+  async function refreshFigure() {
+    try {
+      var res = await fetch('/bones', { cache: 'no-store' });
+      var html = await res.text();
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var freshPlate = doc.querySelector('.plate');
+      var freshVitals = doc.querySelector('.vitals');
+      if (freshPlate) document.querySelector('.plate').replaceWith(freshPlate);
+      if (freshVitals) document.querySelector('.vitals').replaceWith(freshVitals);
+      wireHover();
+    } catch (err) { /* the confirmation still stands; the figure refreshes next open */ }
+  }
+
   window.addEventListener('drop', async function (e) {
     e.preventDefault();
     overlay.classList.remove('on');
@@ -505,11 +597,17 @@ export function renderAnatomyPage(a: Anatomy): string {
         if (data.status === 'ok') {
           var names = (data.learned || []).map(function (l) { return l.name; }).join(', ');
           var what = (data.learned || [])[0];
+          // Lower-casing the description to fit "I can ..." produced
+          // "I can reports aurora visibility." Let the capability speak in its
+          // own words instead of forcing it into a sentence frame.
           say(
-            'I can ' + (what && what.description ? what.description.charAt(0).toLowerCase() + what.description.slice(1).replace(/\\.$/, '') : 'do something new') + '.',
-            'Learned ' + names + ' from ' + data.file + '. Ask me in your next message — no restart needed.'
+            'I learned ' + names + '.',
+            (what && what.description ? what.description.replace(/\\.?$/, '. ') : '')
+              + 'Ask me in your next message — no restart needed.'
           );
-          setTimeout(function () { location.reload(); }, 2200);
+          // Refresh the figure in place so the new claw appears under Hands,
+          // without a modal and without losing the message.
+          refreshFigure();
         } else {
           say('I could not learn that', data.error || 'unknown error', true);
         }

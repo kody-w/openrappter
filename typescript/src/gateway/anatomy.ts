@@ -60,8 +60,33 @@ export interface Organ {
   files: OrganFile[];
 }
 
+/**
+ * What we actually learned when we looked for the organism.
+ *
+ * Three states, not two. `burrow.js` is the canonical implementation of this
+ * pattern and its header is the spec: *"A 403 is an answer. Silence is not.
+ * That distinction is the whole detector."*
+ *
+ *   awake    it answered. Observed.
+ *   asleep   it refused, fast. Observed, normal, never an error.
+ *   blocked  we were not allowed to look. We learned NOTHING — reporting this
+ *            as asleep would tell someone with a live organism that they have
+ *            none, which is the exact lie the third state exists to prevent.
+ *
+ * `certain` is false for `blocked`, and false for a timeout: loopback refuses in
+ * ~3ms and a live brainstem answers in ~236ms, so an expired deadline is a
+ * missing verdict rather than an observed absence.
+ */
+export type LivenessState = 'awake' | 'asleep' | 'blocked';
+
 export interface VitalSigns {
   awake: boolean;
+  /** The three-state reading. `awake` is kept as the boolean view of it. */
+  liveness: LivenessState;
+  /** False when we did not observe a verdict — a block, or an expired deadline. */
+  certain: boolean;
+  /** Why we believe this, in the organism's own words. */
+  livenessReason: string;
   /** `openrappter-RX-4471` — formal identity, derived, never renamed. */
   designation?: string;
   /** Chosen rung of the backend ladder, and why. */
@@ -148,6 +173,10 @@ function relativeTime(ms: number): string {
 /** Live signals the gateway can supply. Absent when the daemon is asleep. */
 export interface LiveSignals {
   awake: boolean;
+  /** Set when the caller could not complete the look. Never rendered as asleep. */
+  blocked?: boolean;
+  /** Set when a probe expired rather than being refused. */
+  timedOut?: boolean;
   backend?: { kind: string; reason: string };
   startedAt?: number;
   agents?: { name: string; description?: string }[];
@@ -433,8 +462,25 @@ export function readAnatomy(
     files: [logFile],
   });
 
+  // Mirror burrow.js's classification rather than reinventing it: if openrappter
+  // and vbrainstem disagree about what "I don't know" looks like, the membrane
+  // is not one pattern.
+  const liveness: LivenessState = live.awake ? 'awake' : live.blocked ? 'blocked' : 'asleep';
+  const certain = liveness === 'awake' ? true : liveness === 'blocked' ? false : !live.timedOut;
+  const livenessReason =
+    liveness === 'awake'
+      ? 'It answered.'
+      : liveness === 'blocked'
+        ? 'Something refused to let us look, so nothing was learned about whether it is running.'
+        : live.timedOut
+          ? 'Nothing answered in time. The probe expired rather than being refused, so this is not conclusive.'
+          : 'Nothing answered. This is the normal state when the daemon is not running.';
+
   const vitals: VitalSigns = {
     awake: live.awake,
+    liveness,
+    certain,
+    livenessReason,
     backend: live.awake ? backendKind : 'asleep',
     backendReason: live.backend?.reason ?? 'no daemon is running',
     uptime: live.startedAt ? humanDuration(Date.now() - live.startedAt) : '—',

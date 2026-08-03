@@ -248,14 +248,37 @@ def _load_agent_from_file(filepath):
     return agents
 
 
+# KERNEL §2.3 freezes these as reserved names a conforming kernel will never
+# auto-load. Honouring them is not a spec nicety: without it, moving an agent
+# into disabled_agents/ does not disable it, which is the very next thing a user
+# tries after drag-and-drop loading.
+RESERVED_AGENT_DIRS = ("experimental_agents", "disabled_agents")
+
+
+def is_reserved_agent_path(filepath, root):
+    """True when filepath sits inside a reserved subdirectory of the agents tree."""
+    try:
+        rel = Path(filepath).resolve().relative_to(Path(root).resolve())
+    except (ValueError, OSError):
+        return False
+    return any(part in RESERVED_AGENT_DIRS for part in rel.parts[:-1])
+
+
 def load_agents():
     """Packaged OpenRappter agents form the default pool; user drop-ins in the
-    brainstem agents dir override by name (hot-loaded on every request)."""
+    brainstem agents dir override by name (hot-loaded on every request).
+
+    KERNEL §2.3 allows subdirectories for swarms and stacks, so discovery walks
+    the tree — and walking is what makes the reserved-dir exclusion mean
+    something. A flat glob never returns a path inside disabled_agents/, so the
+    guard would be unreachable and the rule unenforced."""
     agents = {}
     packaged = Path(__file__).parent / "agents"
     for source_dir in (packaged, AGENTS_PATH):
-        for filepath in sorted(glob.glob(str(source_dir / "*_agent.py"))):
+        for filepath in sorted(glob.glob(str(source_dir / "**" / "*_agent.py"), recursive=True)):
             if os.path.basename(filepath) == "basic_agent.py":
+                continue
+            if is_reserved_agent_path(filepath, source_dir):
                 continue
             agents.update(_load_agent_from_file(filepath))
     return agents
@@ -587,6 +610,53 @@ def llm_chat(messages, tools):
     return data["choices"][0]["message"]
 
 
+# ── The frozen /chat envelope (rapp-runtime-parity/1.0 §2.4) ─────────────────
+#
+# Six keys are required: response, session_id, agent_logs, voice_mode, model,
+# requested_model. This runtime emitted four; the TypeScript one emitted three.
+# Two substrates of the SAME product answering differently fails parity before
+# the estate is even involved, so both now build the envelope the same way.
+#
+# §2.4 also requires splitting the voice seam: when the reply carries the
+# |||VOICE||| sentinel, `response` is the text before it and `voice_response`
+# the text after. Shipping the raw marker inside `response` was both a spec
+# violation and a visible product bug.
+#
+# KERNEL §2.2: there is no `assistant_response` key. This never emits one.
+
+VOICE_SENTINEL = "|||VOICE|||"
+
+
+def build_chat_envelope(content, session_id, agent_logs=None, model=None,
+                        requested_model=None, extra=None):
+    """Build the frozen /chat envelope, splitting the voice seam."""
+    raw = content or ""
+    spoken, voice = raw, ""
+    if VOICE_SENTINEL in raw:
+        head, _, tail = raw.partition(VOICE_SENTINEL)
+        spoken = head.strip()
+        # A reply may carry further |||TAG||| projections after the voice block;
+        # the spoken part ends at the next marker.
+        nxt = tail.find("|||")
+        voice = (tail[:nxt] if nxt != -1 else tail).strip()
+
+    chosen = model or MODEL
+    envelope = {
+        "response": spoken,
+        "session_id": session_id,
+        "agent_logs": "\n".join(agent_logs or []),
+        "voice_mode": bool(voice),
+        "model": chosen,
+        # §2.4: equal when the runtime performed no fallback.
+        "requested_model": requested_model or chosen,
+    }
+    if voice:
+        envelope["voice_response"] = voice
+    if extra:
+        envelope.update(extra)
+    return envelope
+
+
 def run_chat(user_input, history, session_id, trusted_context=None):
     """The kernel's /chat tool loop: soul + agents-as-tools + tool_call rounds."""
     agents = load_agents()
@@ -640,12 +710,9 @@ def run_chat(user_input, history, session_id, trusted_context=None):
         reply = llm_chat(messages, tools)
         calls = reply.get("tool_calls")
         if not calls:
-            return {
-                "response": reply.get("content", ""),
-                "agent_logs": "\n".join(agent_logs),
-                "model": MODEL,
-                "session_id": session_id,
-            }
+            return build_chat_envelope(
+                reply.get("content", ""), session_id, agent_logs
+            )
         messages.append(reply)
         for call in calls:
             name = call["function"]["name"]
@@ -671,12 +738,7 @@ def run_chat(user_input, history, session_id, trusted_context=None):
             agent_logs.append(f"[{name}] {result}")
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
 
-    return {
-        "response": "Tool loop limit reached.",
-        "agent_logs": "\n".join(agent_logs),
-        "model": MODEL,
-        "session_id": session_id,
-    }
+    return build_chat_envelope("Tool loop limit reached.", session_id, agent_logs)
 
 
 # ── HTTP server (stdlib — the wire is the contract, not the framework) ───────

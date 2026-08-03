@@ -113,7 +113,11 @@ export function renderAnatomyPage(a: Anatomy): string {
     .join('');
 
   const vitalItems: [string, string, string][] = [
-    ['state', a.vitals.awake ? 'awake' : 'asleep', a.vitals.awake ? 'ok' : 'warn'],
+    // Three states, not two. Rendering "blocked" as "asleep" would assert an
+    // absence nobody observed — the exact failure the third state prevents.
+    ['state',
+      a.vitals.liveness === 'blocked' ? 'could not tell' : a.vitals.liveness,
+      a.vitals.liveness === 'awake' ? 'ok' : 'warn'],
     ['mind', a.vitals.backend, a.vitals.awake && a.vitals.backend !== 'none' ? 'ok' : 'warn'],
     ['uptime', a.vitals.uptime, 'plain'],
     ['next beat', a.vitals.heartbeat, 'plain'],
@@ -334,7 +338,13 @@ export function renderAnatomyPage(a: Anatomy): string {
   <div class="rule"></div>
 
   <h1>${esc(title)}</h1>
-  <div class="sub">${designation ? `<span class="designation" title="derived from its rappid; never changes">${esc(designation)}</span> · ` : ''}${a.vitals.awake ? 'read from this machine just now' : 'asleep — bones intact, no pulse'}</div>
+  <div class="sub">${designation ? `<span class="designation" title="derived from its rappid; never changes">${esc(designation)}</span> · ` : ''}${a.vitals.liveness === 'awake'
+      ? 'read from this machine just now'
+      : a.vitals.liveness === 'blocked'
+        ? 'could not tell — nothing was learned about whether it is running'
+        : a.vitals.certain
+          ? 'asleep — bones intact, no pulse'
+          : 'no answer in time — not conclusive'}</div>
 
   <div class="vitals">
     ${vitalItems.map(([label, value, tone]) => `
@@ -343,7 +353,9 @@ export function renderAnatomyPage(a: Anatomy): string {
       <div class="v-value ${tone === 'warn' ? 'warn' : tone === 'ok' ? 'ok' : ''}">${esc(value)}</div>
     </div>`).join('')}
   </div>
-  <div class="v-why" style="padding: 6px 2px 0">${esc(a.vitals.backendReason)}</div>
+  <div class="v-why" style="padding: 6px 2px 0">${esc(a.vitals.backendReason)}${
+    a.vitals.certain ? '' : ` · ${esc(a.vitals.livenessReason)}`
+  }</div>
 
   <div class="plate">
     <div class="specimen">

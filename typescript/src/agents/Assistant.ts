@@ -210,6 +210,11 @@ export class Assistant {
         signal,
       });
 
+      // Some providers run their own tool loop and report what ran instead of
+      // handing back tool_calls. Without this the CLI backend produced an empty
+      // agent_logs for a turn in which an agent demonstrably ran.
+      if (response.agent_logs?.length) agentLogs.push(...response.agent_logs);
+
       // If the LLM responded with tool calls, execute them
       if (response.tool_calls && response.tool_calls.length > 0) {
         // Add assistant message with tool calls to history

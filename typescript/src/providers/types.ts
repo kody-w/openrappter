@@ -34,6 +34,15 @@ export interface ProviderResponse {
     input_tokens: number;
     output_tokens: number;
   };
+  /**
+   * Tool-call log lines, for providers that run their own tool loop.
+   *
+   * The Copilot CLI executes tools inside itself and returns only prose, so it
+   * has no `tool_calls` to hand back — but the calls still went through our MCP
+   * server. This carries them so `agent_logs` (PARITY §2.3) is not empty for a
+   * turn in which an agent demonstrably ran.
+   */
+  agent_logs?: string[];
 }
 
 export interface ChatOptions {

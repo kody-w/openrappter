@@ -8,6 +8,7 @@
 import { createInterface } from 'readline';
 import { BasicAgent } from '../agents/BasicAgent.js';
 import { VERSION } from '../version.js';
+import { recordInvocation } from '../agents/invocation-journal.js';
 
 // ── MCP Protocol Types ──────────────────────────────────────────────
 
@@ -156,6 +157,11 @@ export class McpServer {
 
     try {
       const resultStr = await agent.execute(args);
+      // The CLI backend runs its tool loop inside itself, so the Assistant loop
+      // never sees these calls and `agent_logs` came back empty even when an
+      // agent had demonstrably run. Journal it here — this is the only place
+      // that observes the invocation.
+      recordInvocation(toolName, resultStr);
       let content: unknown;
       try {
         content = JSON.parse(resultStr);
@@ -171,6 +177,7 @@ export class McpServer {
       };
     } catch (e) {
       const error = e as Error;
+      recordInvocation(toolName, error.message, true);
       return {
         jsonrpc: '2.0',
         id: request.id,

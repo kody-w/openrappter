@@ -44,6 +44,14 @@ export type BackendKind = 'copilot-sdk' | 'copilot-cli' | 'none';
 export interface BackendChoice {
   kind: BackendKind;
   provider: LLMProvider | null;
+  /**
+   * The model that will actually answer.
+   *
+   * PARITY §2.4 requires the envelope to report this, and to report it honestly:
+   * clients attribute answers by it, so a rung that resolves its own model must
+   * say which one rather than echoing the request.
+   */
+  model?: string;
   /** Why this rung was chosen — for the startup log. */
   reason: string;
   /**
@@ -106,6 +114,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
       // exposeAgents: without it the CLI runs with an empty tool allow-list
       // and cannot invoke a single agent, which makes hot-loading pointless.
       provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
+      model: model ?? 'auto',
       reason: 'OPENRAPPTER_AI_BACKEND=copilot-cli',
     };
   }
@@ -137,6 +146,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
       // exposeAgents: without it the CLI runs with an empty tool allow-list
       // and cannot invoke a single agent, which makes hot-loading pointless.
       provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
+      model: model ?? 'auto',
       reason: token
         ? 'GitHub token has no Copilot access — fell back to the Copilot CLI'
         : 'no GitHub token — using the Copilot CLI, which holds its own sign-in',

@@ -13,6 +13,51 @@ import { BasicAgent } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
 import type { AgentInfo } from './types.js';
 
+/**
+ * Subdirectories a conforming kernel never auto-loads.
+ *
+ * KERNEL §2.3 freezes both names. Honouring them is not a spec nicety: without
+ * it, moving an agent into `disabled_agents/` does not disable it, and "how do I
+ * turn one off" is the very next question after drag-and-drop loading.
+ */
+export const RESERVED_AGENT_DIRS = ['experimental_agents', 'disabled_agents'] as const;
+
+/** True when `file` sits inside a reserved subdirectory of the agents tree. */
+export function isReservedAgentPath(relativePath: string): boolean {
+  const parts = relativePath.split(/[\\/]/);
+  return parts.some(seg => (RESERVED_AGENT_DIRS as readonly string[]).includes(seg));
+}
+
+/**
+ * Every agent file under `dir`, relative to it, excluding reserved directories.
+ *
+ * KERNEL §2.3 allows subdirectories for swarms and stacks, so discovery has to
+ * walk the tree — and walking is what makes the reserved-dir exclusion mean
+ * something. A flat readdir never returns a path inside `disabled_agents/`, so
+ * the guard would have been unreachable and the rule unenforced.
+ */
+async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if ((RESERVED_AGENT_DIRS as readonly string[]).includes(entry.name)) continue;
+      // node_modules under a user agents dir is never an agent tree.
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      out.push(...await walkAgentFiles(path.join(dir, entry.name), rel));
+    } else {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
 export class AgentRegistry {
   private agentsDir: string;
   private userAgentsDir: string;
@@ -95,8 +140,8 @@ export class AgentRegistry {
   private async discoverUserAgents(): Promise<void> {
     await this.discoverPythonAgents();
     try {
-      const files = await fs.readdir(this.userAgentsDir);
-      const agentFiles = files.filter(f => f.endsWith('_agent.js'));
+      const files = await walkAgentFiles(this.userAgentsDir);
+      const agentFiles = files.filter(f => f.endsWith('_agent.js') && !isReservedAgentPath(f));
 
       for (const file of agentFiles) {
         try {
@@ -129,14 +174,11 @@ export class AgentRegistry {
    * not for the agents you own".
    */
   private async discoverPythonAgents(): Promise<void> {
-    let files: string[];
-    try {
-      files = await fs.readdir(this.userAgentsDir);
-    } catch {
-      return; // directory doesn't exist yet
-    }
+    const files = await walkAgentFiles(this.userAgentsDir);
 
-    for (const file of files.filter(f => f.endsWith('.py') && f !== 'basic_agent.py')) {
+    for (const file of files.filter(f =>
+      f.endsWith('.py') && f !== 'basic_agent.py' && !isReservedAgentPath(f)
+    )) {
       const filePath = path.join(this.userAgentsDir, file);
       try {
         const found = await introspectPythonAgents(filePath);

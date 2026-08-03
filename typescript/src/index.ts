@@ -139,12 +139,35 @@ async function startGatewayInProcess(opts?: {
   });
   // Carried so the gateway can answer "why can't it talk?" with a remedy
   // instead of a transport error.
-  server.setBackendStatus?.({ kind: backend.kind, reason: backend.reason, remedy: backend.remedy });
+  server.setBackendStatus?.({
+    kind: backend.kind,
+    reason: backend.reason,
+    remedy: backend.remedy,
+    // PARITY §2.4 requires reporting the model that actually answered, and what
+    // was asked for. They differ only when our own fallback logic switched.
+    model: backend.model ?? process.env.OPENRAPPTER_MODEL ?? backend.kind,
+    requestedModel: process.env.OPENRAPPTER_MODEL ?? backend.model ?? backend.kind,
+  });
 
   // ── Drag-and-drop hot-load ────────────────────────────────────────────────
   // The importer writes, verifies by loading, and then hands the refreshed map
   // to the assistant. That last step is what makes "hot" true: without it the
   // file is on disk and the running conversation still cannot call it.
+  // Be findable. burrow.js probes 7071 and 7081-7083; we listen on 18790, so a
+  // user with openrappter running was told `unburrowed` — the exact lie the
+  // detector exists to prevent. The beacon takes a FREE probed port and never
+  // displaces the grail or its twins.
+  try {
+    const { startBurrowBeacon } = await import('./gateway/burrow-beacon.js');
+    const beacon = await startBurrowBeacon(undefined, {
+      name: calledName,
+      designation: vitals.designation,
+      gatewayPort: port,
+    });
+    if (beacon) log(`${EMOJI} discoverable on :${beacon.port} (burrow probe)`);
+    else log(`${EMOJI} burrow probe ports all busy — something else already answers there`);
+  } catch { /* presence is a nicety; never let it stop the daemon */ }
+
   server.setAgentImporter(async (filename, contents) => {
     const { importAgentFile } = await import('./agents/agent-import.js');
     const result = await importAgentFile(filename, contents, registry);

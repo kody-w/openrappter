@@ -17,6 +17,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './types.js';
 import { writeMcpBridgeConfig, toolArgsFor, copilotHomeDir, type McpBridgeConfig } from './copilot-cli-mcp.js';
+import { invocationsSince } from '../agents/invocation-journal.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -170,6 +171,7 @@ export class CopilotCliDirectProvider implements LLMProvider {
   }
 
   async chat(messages: Message[], _options?: ChatOptions): Promise<ProviderResponse> {
+    const startedAt = Date.now();
     const prompt = this.buildPrompt(messages);
     try {
       const { stdout } = await this.runner(
@@ -191,7 +193,11 @@ export class CopilotCliDirectProvider implements LLMProvider {
         { timeout: this.timeoutMs, maxBuffer: 20 * 1024 * 1024 },
       );
       const content = this.cleanOutput(stdout);
-      return { content: content || null, tool_calls: null };
+      // Tools ran inside the CLI, so there are no tool_calls to hand back — but
+      // they reached the agents through our MCP server, which journalled them.
+      // Reporting them is what makes `agent_logs` true for this backend.
+      const ranAgents = this.exposeAgents ? invocationsSince(startedAt) : [];
+      return { content: content || null, tool_calls: null, agent_logs: ranAgents };
     } catch (error) {
       const err = error as NodeJS.ErrnoException & { stderr?: string };
       if (err.stderr?.includes('No authentication information found')) {

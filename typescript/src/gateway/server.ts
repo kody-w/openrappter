@@ -35,6 +35,7 @@ import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
+import { buildChatEnvelope } from './chat-envelope.js';
 import {
   GatewayMetrics,
   GatewayTimeoutError,
@@ -968,17 +969,18 @@ export class GatewayServer {
                   ? parsed.user_id
                   : undefined,
               });
-              return {
-                schema: 'rapp-chat/1.0',
-                status: 'success',
-                response: result.content,
+              // One builder for both runtimes, so the two cannot drift apart
+              // again. It also splits the voice seam, which is why the raw
+              // |||VOICE||| marker no longer reaches the caller.
+              return buildChatEnvelope({
                 content: result.content,
-                session_id: result.sessionId,
                 sessionId: result.sessionId,
-                agent_logs: result.agentLogs?.join('\n')
-                  ?? (result.toolCalls ? JSON.stringify(result.toolCalls) : ''),
-                ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
-              };
+                agentLogs: result.agentLogs
+                  ?? (result.toolCalls ? [JSON.stringify(result.toolCalls)] : []),
+                model: this.backendStatus?.model,
+                requestedModel: this.backendStatus?.requestedModel,
+                extra: idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
+              });
             };
 
             let responsePromise: Promise<Record<string, unknown>>;
@@ -1682,12 +1684,18 @@ export class GatewayServer {
     kind: string;
     reason: string;
     remedy?: { title: string; detail: string; action: string };
+    model?: string;
+    requestedModel?: string;
   } = { kind: 'unknown', reason: 'not yet determined' };
 
   setBackendStatus(status: {
     kind: string;
     reason: string;
     remedy?: { title: string; detail: string; action: string };
+    /** The model that actually answers — PARITY §2.4 requires reporting it. */
+    model?: string;
+    /** What was asked for. Differs from `model` only when fallback fired. */
+    requestedModel?: string;
   }): void {
     this.backendStatus = status;
   }

@@ -7,7 +7,7 @@
 openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses GitHub Copilot as the cloud AI backbone — your agent data (memory, config, state) stays local in `~/.openrappter/`. Copilot handles inference; everything else runs on the user's machine.
 
 - **Repo**: `https://github.com/kody-w/openrappter`
-- **License**: MIT
+- **License**: Apache-2.0
 - **TypeScript Version**: 1.8.0
 - **Python Version**: 1.8.0
 

@@ -35,8 +35,8 @@
     "llm",
     "assistant"
   ],
-  "author": "Kody W",
-  "license": "MIT",
+  "author": "Wildhaven Homes LLC",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/kody-w/openrappter.git",

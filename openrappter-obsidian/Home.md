@@ -3,7 +3,7 @@
 > Local-first AI agent framework powered by GitHub Copilot SDK — no API keys required.
 
 **Version**: 1.9.3 (TypeScript) / 1.9.1 (Python)
-**License**: MIT
+**License**: Apache-2.0
 **Repo**: [github.com/kody-w/openrappter](https://github.com/kody-w/openrappter)
 
 ---

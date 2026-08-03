@@ -6,7 +6,7 @@
 
 **No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
@@ -575,7 +575,16 @@ cd ../typescript && npm install && npm run build
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Copyright 2026 Wildhaven Homes LLC.
+
+openrappter was previously distributed under MIT. That change is not
+retroactive: copies obtained under MIT stay MIT-licensed and those rights
+cannot be revoked. Apache-2.0 governs this and every later version.
+
+Apache-2.0 §6 does not grant trademark rights. The name and marks are covered
+separately by [TRADEMARK.md](TRADEMARK.md), which is unchanged.
 
 
 ---
@@ -588,4 +597,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-<sub>OpenRappter is a trademark of Wildhaven Homes LLC. Code is MIT licensed; the license does not grant rights to the name. [Trademark notice](TRADEMARK.md)</sub>
+<sub>OpenRappter is a trademark of Wildhaven Homes LLC. Code is Apache-2.0 licensed; §6 does not grant rights to the name. [Trademark notice](TRADEMARK.md)</sub>

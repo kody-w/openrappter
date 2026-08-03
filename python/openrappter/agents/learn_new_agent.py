@@ -8,6 +8,7 @@ containing documentation, metadata contract, and deterministic code.
 """
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -79,6 +80,10 @@ class {class_name}(BasicAgent):
     
     def __init__(self):
         self.name = 'LearnNew'
+        # True when the last created agent was a scaffold rather than a real
+        # implementation. "Creates new agents" overstates a template that echoes
+        # its input, and the caller must not claim more than was produced.
+        self.last_generation_was_template = True
         self.metadata = {
             "name": self.name,
             "description": "Creates new agents from natural language descriptions. Describe what you want the agent to do and it will generate, save, and hot-load it.",
@@ -173,8 +178,21 @@ class {class_name}(BasicAgent):
             "agent_name": name,
             "file_path": str(file_path),
             "hot_loaded": hot_load_result.get("success", False),
-            "description": description[:200]
+            "description": description[:200],
+            # What was actually produced. A scaffold echoes its input; saying
+            # otherwise would have the UI claim an implementation that is not
+            # there. Mirrors the TypeScript runtime's field exactly.
+            "implementation": (
+                "scaffold" if getattr(self, "last_generation_was_template", True)
+                else "generated"
+            ),
         }
+        if getattr(self, "last_generation_was_template", True):
+            result["warning"] = (
+                "A scaffold was written — it echoes its input rather than "
+                "implementing the description. No model was available to "
+                "generate the body."
+            )
         
         # Include dependency info if any were installed
         if hot_load_result.get("installed_deps"):
@@ -303,44 +321,88 @@ class {class_name}(BasicAgent):
         return extra
     
     def _generate_perform_body(self, description: str) -> str:
-        """Generate the perform method body using Copilot."""
-        try:
-            prompt = f"""Generate ONLY the Python code for the body of a perform() method for an agent that: {description}
+        """Generate the perform() body with a model, falling back to a scaffold.
+
+        This shelled out to `copilot --message`, which is not a flag the CLI has
+        — it exits with "unknown option". Every call therefore failed, and a bare
+        `except: pass` swallowed it, so this runtime had never once generated an
+        agent body: it silently wrote the echo scaffold every time while the
+        TypeScript runtime generated real ones. Sets `last_generation_was_template`
+        so the caller can report which of the two it actually produced.
+        """
+        self.last_generation_was_template = True
+        prompt = f"""Generate ONLY the Python code for the body of a perform() method for an agent that: {description}
 
 Rules:
 - Return a JSON string with status and result
 - Use kwargs.get() to access parameters
-- Keep it simple and functional
+- The user's input is already available as the local variable `query`
+- Keep it simple, functional, and dependency-free (standard library only)
 - Do NOT include the method signature, just the body
-- Indent with 8 spaces
+- Do NOT wrap the answer in markdown fences
+- Indent every line with 8 spaces
 
 Example format:
         # Process the query
         result = "processed: " + query
         return json.dumps({{"status": "success", "result": result}})"""
-            
+
+        try:
             result = subprocess.run(
-                ['copilot', '--message', prompt],
-                capture_output=True, text=True, timeout=30
+                [
+                    "copilot",
+                    "--prompt", prompt,
+                    "--silent",
+                    "--no-color",
+                    "--no-auto-update",
+                    "--no-custom-instructions",
+                    "--no-ask-user",
+                    "--model", os.environ.get("OPENRAPPTER_MODEL", "auto"),
+                ],
+                capture_output=True, text=True, timeout=120,
             )
-            
-            if result.returncode == 0 and result.stdout.strip():
-                body = result.stdout.strip()
-                # Extract code if wrapped in markdown
-                if '```python' in body:
-                    body = body.split('```python')[1].split('```')[0]
-                elif '```' in body:
-                    body = body.split('```')[1].split('```')[0]
-                
-                # Ensure proper indentation (8 spaces)
-                lines = body.strip().split('\n')
-                indented = '\n'.join('        ' + line.lstrip() if line.strip() else '' for line in lines)
-                if indented.strip():
-                    return indented
-        except:
-            pass
-        
-        # Fallback: simple echo implementation
+        except (OSError, subprocess.SubprocessError):
+            # No CLI on the box, or it never returned. The scaffold is the
+            # honest outcome; the caller says so rather than claiming an
+            # implementation that is not there.
+            return self._scaffold_perform_body()
+
+        if result.returncode != 0 or not result.stdout.strip():
+            return self._scaffold_perform_body()
+
+        body = result.stdout.strip()
+        if "```python" in body:
+            body = body.split("```python")[1].split("```")[0]
+        elif "```" in body:
+            body = body.split("```")[1].split("```")[0]
+
+        lines = [ln for ln in body.strip().split("\n")]
+        indented = "\n".join(
+            "        " + ln.lstrip() if ln.strip() else "" for ln in lines
+        )
+        if not indented.strip():
+            return self._scaffold_perform_body()
+
+        # A body that never returns is not an implementation, and writing it
+        # would produce an agent whose perform() yields None.
+        if "return" not in indented:
+            return self._scaffold_perform_body()
+
+        # Refuse to write a body that will not import. A SyntaxError here
+        # becomes a broken agent on disk that fails at hot-load instead.
+        try:
+            compile(
+                "def _probe(self, query, **kwargs):\n" + indented,
+                "<generated>", "exec",
+            )
+        except SyntaxError:
+            return self._scaffold_perform_body()
+
+        self.last_generation_was_template = False
+        return indented
+
+    def _scaffold_perform_body(self) -> str:
+        """The echo body. Named so callers cannot mistake it for generated code."""
         return '''        # Default implementation - echo the query
         if not query:
             return json.dumps({

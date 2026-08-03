@@ -9,9 +9,9 @@ openrappter is a **substrate-distro**: a consumer-facing machine AI that runs th
 `/chat` tool-calling loop locally, in two interchangeable runtimes (TypeScript and Python),
 and hot-loads single-file `*_agent.py` cartridges.
 
-This document is the canonical material for `protocol:kody-w/openrappter/entry`. It states
-what openrappter conforms to, what it does not, and how to check either without trusting
-this file.
+This document is the canonical material for `protocol:kody-w/openrappter/openrappter-runtime/1.0`.
+It states what openrappter conforms to, what it does not, and how to check either without
+trusting this file.
 
 ---
 

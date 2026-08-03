@@ -979,6 +979,9 @@ export class GatewayServer {
                   ?? (result.toolCalls ? [JSON.stringify(result.toolCalls)] : []),
                 model: this.backendStatus?.model,
                 requestedModel: this.backendStatus?.requestedModel,
+                // Lets the envelope explain an unattributed model instead of
+                // reporting the bare word "unknown".
+                backendKind: this.backendStatus?.kind,
                 extra: idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
               });
             };

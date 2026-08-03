@@ -574,6 +574,13 @@ def login_status():
 
 
 def llm_chat(messages, tools):
+    """Return ``(message, served_model)``.
+
+    The API response names the model that actually served the request, which is
+    the only authoritative answer to PARITY §2.4's first question. Discarding it
+    and reporting the module-level ``MODEL`` instead is how this runtime came to
+    report ``claude-sonnet-5`` for replies that ``gpt-4o`` had answered.
+    """
     session = copilot_session()
     if not session:
         raise RuntimeError("Copilot not authenticated — set GITHUB_TOKEN or run `gh auth login`")
@@ -607,7 +614,9 @@ def llm_chat(messages, tools):
         raise RuntimeError(f"Copilot chat failed: HTTP {e.code}") from e
     if status != 200:
         raise RuntimeError(f"Copilot chat failed: HTTP {status}")
-    return data["choices"][0]["message"]
+    # The server names what served the request; prefer it over what we asked for.
+    served = data.get("model") if isinstance(data, dict) else None
+    return data["choices"][0]["message"], (served or model)
 
 
 # ── The frozen /chat envelope (rapp-runtime-parity/1.0 §2.4) ─────────────────
@@ -626,9 +635,30 @@ def llm_chat(messages, tools):
 
 VOICE_SENTINEL = "|||VOICE|||"
 
+# The backend this runtime talks to. Named so the envelope can explain an
+# unattributed model rather than shrugging with the word "unknown".
+BACKEND_KIND = "copilot-api"
+
+
+def unattributed_model(backend_kind, requested):
+    """Name the answering model when the backend did not report one.
+
+    `"unknown"` was the wrong answer twice over: it was returned for *both*
+    keys, so a caller could not tell whether the request had been honoured, and
+    it gave them nothing to do about it. These two cases differ and a caller can
+    act on each:
+
+    - ``<kind>:auto``       — we let the backend choose and it did not say which.
+                              Pin ``OPENRAPPTER_MODEL`` to make this attributable.
+    - ``<kind>:unreported`` — we asked for a specific model and the backend did
+                              not confirm which one served. Attribution unproven.
+    """
+    kind = backend_kind or "no-backend"
+    return f"{kind}:{'auto' if requested == 'auto' else 'unreported'}"
+
 
 def build_chat_envelope(content, session_id, agent_logs=None, model=None,
-                        requested_model=None, extra=None):
+                        requested_model=None, backend_kind=None, extra=None):
     """Build the frozen /chat envelope, splitting the voice seam."""
     raw = content or ""
     spoken, voice = raw, ""
@@ -640,7 +670,11 @@ def build_chat_envelope(content, session_id, agent_logs=None, model=None,
         nxt = tail.find("|||")
         voice = (tail[:nxt] if nxt != -1 else tail).strip()
 
-    chosen = model or MODEL
+    requested = requested_model or MODEL
+    # Never fall back to the *requested* model here. Reporting what we asked for
+    # as though it had answered is the easier lie and the worse one: attribution
+    # looks solid while being unverified.
+    chosen = model or unattributed_model(backend_kind or BACKEND_KIND, requested)
     envelope = {
         "response": spoken,
         "session_id": session_id,
@@ -648,7 +682,7 @@ def build_chat_envelope(content, session_id, agent_logs=None, model=None,
         "voice_mode": bool(voice),
         "model": chosen,
         # §2.4: equal when the runtime performed no fallback.
-        "requested_model": requested_model or chosen,
+        "requested_model": requested,
     }
     if voice:
         envelope["voice_response"] = voice
@@ -706,12 +740,14 @@ def run_chat(user_input, history, session_id, trusted_context=None):
     messages.append({"role": "user", "content": user_input})
 
     agent_logs = []
+    served_model = None
     for _ in range(MAX_TOOL_ROUNDS):
-        reply = llm_chat(messages, tools)
+        reply, served_model = llm_chat(messages, tools)
         calls = reply.get("tool_calls")
         if not calls:
             return build_chat_envelope(
-                reply.get("content", ""), session_id, agent_logs
+                reply.get("content", ""), session_id, agent_logs,
+                model=served_model,
             )
         messages.append(reply)
         for call in calls:
@@ -738,7 +774,9 @@ def run_chat(user_input, history, session_id, trusted_context=None):
             agent_logs.append(f"[{name}] {result}")
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": result})
 
-    return build_chat_envelope("Tool loop limit reached.", session_id, agent_logs)
+    return build_chat_envelope(
+        "Tool loop limit reached.", session_id, agent_logs, model=served_model,
+    )
 
 
 # ── HTTP server (stdlib — the wire is the contract, not the framework) ───────

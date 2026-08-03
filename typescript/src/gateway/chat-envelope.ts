@@ -29,10 +29,15 @@ export interface EnvelopeInput {
   sessionId: string;
   /** Tool-call log lines, in execution order. Joined with "\n" per §2.3. */
   agentLogs?: string[];
-  /** The model that actually answered. */
+  /** The model that actually answered, when the backend reports one. */
   model?: string;
   /** The model that was asked for — differs from `model` only on fallback. */
   requestedModel?: string;
+  /**
+   * Which rung answered. Used to describe *why* a model is unattributed, so an
+   * unreported model is still an actionable answer rather than a shrug.
+   */
+  backendKind?: string;
   /** Extra keys the caller wants carried (idempotency_key, etc). */
   extra?: Record<string, unknown>;
 }
@@ -55,6 +60,30 @@ export interface ChatEnvelope extends Record<string, unknown> {
 export const ENVELOPE_REQUIRED_KEYS = [
   'response', 'session_id', 'agent_logs', 'voice_mode', 'model', 'requested_model',
 ] as const;
+
+/**
+ * Name the answering model when the backend did not report one.
+ *
+ * `"unknown"` was the wrong answer twice over: it was returned for *both* keys,
+ * so a caller could not even tell whether the request had been honoured, and it
+ * gave them nothing to do about it. These two cases are genuinely different and
+ * a caller can act on each:
+ *
+ * - `<kind>:auto` — we asked the backend to choose (`--model auto`). Which one
+ *   it picked is decided inside that process and is not returned on the wire.
+ *   **Pin `OPENRAPPTER_MODEL` to make this attributable.**
+ * - `<kind>:unreported` — we asked for a specific model and the backend
+ *   answered without confirming which one served it. The request is in
+ *   `requested_model`; treat attribution as unproven.
+ *
+ * Reporting the *requested* model as though it were the answering model would
+ * be the easier lie and a worse one: attribution would look solid while being
+ * unverified.
+ */
+export function unattributedModel(backendKind: string | undefined, requested: string): string {
+  const kind = backendKind && backendKind !== 'unknown' ? backendKind : 'no-backend';
+  return `${kind}:${requested === 'auto' ? 'auto' : 'unreported'}`;
+}
 
 /**
  * Build the envelope, splitting the voice seam.
@@ -81,7 +110,8 @@ export function buildChatEnvelope(input: EnvelopeInput): ChatEnvelope {
   // this is a no-op for replies that carry no senses at all.
   const spoken = raw.includes('|||') ? parsed.text : raw;
 
-  const model = input.model ?? 'unknown';
+  const requested = input.requestedModel ?? input.model ?? 'auto';
+  const model = input.model ?? unattributedModel(input.backendKind, requested);
   const envelope: ChatEnvelope = {
     schema: 'rapp-chat/1.0',
     status: 'success',
@@ -95,7 +125,7 @@ export function buildChatEnvelope(input: EnvelopeInput): ChatEnvelope {
     voice_mode: voice.length > 0,
     model,
     // §2.4: equal when the runtime performed no fallback.
-    requested_model: input.requestedModel ?? model,
+    requested_model: requested,
     ...(input.extra ?? {}),
   };
   if (voice) envelope.voice_response = voice;

@@ -35,7 +35,7 @@
  * to say "your Copilot sign-in expired — reconnect", not echo a command line.
  */
 
-import { CopilotProvider } from './copilot.js';
+import { CopilotProvider, COPILOT_DEFAULT_MODEL } from './copilot.js';
 import { CopilotCliDirectProvider } from './copilot-cli-direct.js';
 import type { LLMProvider } from './types.js';
 
@@ -50,6 +50,11 @@ export interface BackendChoice {
    * PARITY §2.4 requires the envelope to report this, and to report it honestly:
    * clients attribute answers by it, so a rung that resolves its own model must
    * say which one rather than echoing the request.
+   *
+   * Left **undefined** when the rung delegates the choice. The Copilot CLI run
+   * with `--model auto` picks inside its own process and does not return the
+   * choice, so there is nothing truthful to put here — and `"auto"` would be a
+   * selection policy wearing a model's name.
    */
   model?: string;
   /** Why this rung was chosen — for the startup log. */
@@ -114,7 +119,9 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
       // exposeAgents: without it the CLI runs with an empty tool allow-list
       // and cannot invoke a single agent, which makes hot-loading pointless.
       provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
-      model: model ?? 'auto',
+      // Only claimed when pinned. Unpinned we send `--model auto` and the CLI
+      // decides without telling us.
+      model,
       reason: 'OPENRAPPTER_AI_BACKEND=copilot-cli',
     };
   }
@@ -122,6 +129,9 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
     return {
       kind: 'copilot-sdk',
       provider: new CopilotProvider({ githubToken: options.githubToken }),
+      // The SDK rung sends an explicit model on every request, so unlike the
+      // CLI it always knows which one was asked to answer.
+      model: model ?? COPILOT_DEFAULT_MODEL,
       reason: 'OPENRAPPTER_AI_BACKEND=copilot-sdk',
     };
   }
@@ -134,6 +144,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
     return {
       kind: 'copilot-sdk',
       provider: new CopilotProvider({ githubToken: token }),
+      model: model ?? COPILOT_DEFAULT_MODEL,
       reason: 'GitHub token has Copilot API access',
     };
   }
@@ -146,7 +157,8 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
       // exposeAgents: without it the CLI runs with an empty tool allow-list
       // and cannot invoke a single agent, which makes hot-loading pointless.
       provider: new CopilotCliDirectProvider({ model, exposeAgents: true }),
-      model: model ?? 'auto',
+      // Undefined unless the operator pinned one — see the field's contract.
+      model,
       reason: token
         ? 'GitHub token has no Copilot access — fell back to the Copilot CLI'
         : 'no GitHub token — using the Copilot CLI, which holds its own sign-in',

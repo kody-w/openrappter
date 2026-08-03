@@ -145,8 +145,11 @@ async function startGatewayInProcess(opts?: {
     remedy: backend.remedy,
     // PARITY §2.4 requires reporting the model that actually answered, and what
     // was asked for. They differ only when our own fallback logic switched.
-    model: backend.model ?? process.env.OPENRAPPTER_MODEL ?? backend.kind,
-    requestedModel: process.env.OPENRAPPTER_MODEL ?? backend.model ?? backend.kind,
+    // Neither falls back to `backend.kind`: "copilot-cli" is a rung, not a
+    // model, and putting it in this field would make an unattributed answer
+    // look attributed. Left undefined, the envelope says so explicitly.
+    model: backend.model ?? process.env.OPENRAPPTER_MODEL,
+    requestedModel: process.env.OPENRAPPTER_MODEL ?? backend.model,
   });
 
   // ── Drag-and-drop hot-load ────────────────────────────────────────────────
@@ -547,7 +550,17 @@ async function startGatewayInProcess(opts?: {
         } else {
           log(`${EMOJI} Stored Copilot profile is stale and no backend can answer`);
         }
-        server.setBackendStatus?.({ kind: next.kind, reason: next.reason, remedy: next.remedy });
+        server.setBackendStatus?.({
+          kind: next.kind,
+          reason: next.reason,
+          remedy: next.remedy,
+          // Re-selection has to carry these too. Dropping them here is what put
+          // `"model":"unknown"` on every reply: the startup path set them
+          // correctly, then this fallback replaced the whole record with one
+          // that had no model in it at all.
+          model: next.model ?? process.env.OPENRAPPTER_MODEL,
+          requestedModel: process.env.OPENRAPPTER_MODEL ?? next.model,
+        });
       });
     updateIMessageToken?.(token);
     log(`${EMOJI} Copilot token updated from profile store`);

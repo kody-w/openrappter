@@ -164,7 +164,7 @@ def test_rapp_chat_v1_contract(server, monkeypatch):
     monkeypatch.setattr(
         brainstem,
         "llm_chat",
-        lambda _messages, _tools: {"role": "assistant", "content": "canonical"},
+        lambda _messages, _tools: ({"role": "assistant", "content": "canonical"}, "gpt-4o"),
     )
     status, body = post_json(f"{server}/chat", {
         "schema": "rapp-chat/1.0",
@@ -186,7 +186,7 @@ def test_rapp_chat_idempotency_prevents_duplicate_execution(server, monkeypatch)
 
     def fake_llm(_messages, _tools):
         calls["count"] += 1
-        return {"role": "assistant", "content": "once"}
+        return {"role": "assistant", "content": "once"}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
     payload = {
@@ -231,10 +231,10 @@ def test_chat_tool_loop_executes_agents(server, tmp_path, monkeypatch):
             assert any(t["function"]["name"] == "DropIn" for t in tools)
             return {"role": "assistant", "content": None, "tool_calls": [
                 {"id": "call_1", "type": "function",
-                 "function": {"name": "DropIn", "arguments": json.dumps({"query": "ping"})}}]}
+                 "function": {"name": "DropIn", "arguments": json.dumps({"query": "ping"})}}]}, "gpt-4o"
         tool_msgs = [m for m in messages if m.get("role") == "tool"]
         assert "ping" in tool_msgs[-1]["content"]
-        return {"role": "assistant", "content": "DropIn echoed ping."}
+        return {"role": "assistant", "content": "DropIn echoed ping."}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
 
@@ -259,7 +259,7 @@ def test_trusted_context_injects_only_authorized_memory(monkeypatch):
     def fake_llm(messages, tools):
         captured["system"] = messages[0]["content"]
         captured["messages"] = messages
-        return {"role": "assistant", "content": "safe"}
+        return {"role": "assistant", "content": "safe"}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
     result = brainstem.run_chat(
@@ -318,8 +318,8 @@ def test_runtime_overwrites_spoofed_memory_context(monkeypatch):
                         }),
                     },
                 }],
-            }
-        return {"role": "assistant", "content": "done"}
+            }, "gpt-4o"
+        return {"role": "assistant", "content": "done"}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "load_agents", lambda: {"ManageMemory": MemoryAgent()})
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
@@ -361,7 +361,7 @@ def test_non_owner_trusted_turn_exposes_only_allowed_agents(monkeypatch):
 
     def fake_llm(messages, tools):
         captured["tools"] = [tool["function"]["name"] for tool in tools]
-        return {"role": "assistant", "content": "safe"}
+        return {"role": "assistant", "content": "safe"}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
     result = brainstem.run_chat(
@@ -420,8 +420,8 @@ def test_normal_chat_strips_model_supplied_reserved_context(monkeypatch):
                         }),
                     },
                 }],
-            }
-        return {"role": "assistant", "content": "done"}
+            }, "gpt-4o"
+        return {"role": "assistant", "content": "done"}, "gpt-4o"
 
     monkeypatch.setattr(brainstem, "load_agents", lambda: {"ManageMemory": MemoryAgent()})
     monkeypatch.setattr(brainstem, "llm_chat", fake_llm)
@@ -551,8 +551,10 @@ def test_direct_capi_chat_uses_supported_model_and_body(monkeypatch):
         }
 
     monkeypatch.setattr(brainstem, "_http_json", fake_http)
-    reply = brainstem.llm_chat([{"role": "user", "content": "hello"}], [])
+    reply, served = brainstem.llm_chat([{"role": "user", "content": "hello"}], [])
     assert reply["content"] == "ok"
+    # No `model` in the response body, so it falls back to what was requested.
+    assert served == "gpt-4o"
     assert captured["url"].endswith("/chat/completions")
     assert captured["payload"]["model"] == "gpt-4o"
     assert "max_tokens" not in captured["payload"]

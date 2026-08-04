@@ -40,6 +40,48 @@ __manifest__ = {
     "requires_env": []
 }
 
+def py_string_literal(value: str, max_length: int = None) -> str:
+    """Truncate first, then encode as a Python string literal.
+
+    The order is the whole point, and it used to be the other way round. The
+    previous code escaped quotes and then sliced the result at 200 characters,
+    which can cut between a backslash and the character it escapes. The
+    generated module then ends
+
+        "description": "AAAA\\",
+
+    and Python says exactly what happened:
+
+        unterminated string literal ... perhaps you escaped the end quote?
+
+    Truncating first means the escaping is applied to final text and can never
+    be sliced in half. json.dumps also covers what the hand-rolled version
+    missed -- backslashes, control characters, line separators -- none of which
+    were escaped when only quotes were replaced.
+    """
+    text = value if max_length is None else value[:max_length]
+    return json.dumps(text, ensure_ascii=False)
+
+
+def docstring_safe(value: str) -> str:
+    '''Make text safe to sit inside a triple-quoted docstring.
+
+    A description containing a triple quote closed the module docstring, and
+    everything after it became module-level code that ran on import. This was
+    reachable from an ordinary "create an agent that ..." request.
+
+    A docstring is a string literal, not a comment, which is where this differs
+    from the JavaScript runtime's equivalent: Python processes escapes inside
+    it. A description containing a backslash therefore produces
+    ``SyntaxWarning: invalid escape sequence``, and a NUL byte will not compile
+    at all. So backslashes are escaped first -- before the ones this function
+    introduces for the terminator -- and control characters are dropped.
+    '''
+    escaped = value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    flattened = escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return "".join(" " if ch < " " or ch == "\x7f" else ch for ch in flattened)
+
+
 class LearnNewAgent(BasicAgent):
     
     AGENT_TEMPLATE = '''""\"
@@ -57,7 +99,7 @@ class {class_name}(BasicAgent):
         self.name = '{agent_name}'
         self.metadata = {{
             "name": self.name,
-            "description": "{agent_description}",
+            "description": {agent_description},
             "parameters": {{
                 "type": "object",
                 "properties": {{
@@ -257,8 +299,6 @@ class {class_name}(BasicAgent):
         extra_params_yaml = self._generate_extra_params(description)
         extra_imports = self._generate_extra_imports(description)
         
-        # Escape quotes in description for string literals
-        safe_desc = description.replace('"', '\\"').replace('\n', ' ')
         
         # Generate tags from description keywords
         tags = self._generate_tags(description)
@@ -267,11 +307,11 @@ class {class_name}(BasicAgent):
         extra_params = self._generate_extra_params(description)
         
         return self.AGENT_TEMPLATE.format(
-            description=description,
+            description=docstring_safe(description),
             date=datetime.now().strftime("%Y-%m-%d %H:%M"),
             class_name=class_name,
             agent_name=name,
-            agent_description=safe_desc[:200],
+            agent_description=py_string_literal(description, 200),
             extra_imports=extra_imports,
             extra_params=extra_params,
             perform_body=perform_body,

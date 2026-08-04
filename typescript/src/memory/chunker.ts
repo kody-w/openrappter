@@ -2,6 +2,8 @@
  * Content chunking utilities for memory system
  */
 
+import { createHash } from 'crypto';
+
 import type { ChunkOptions } from './types.js';
 
 const DEFAULT_CHUNK_SIZE = 512;
@@ -111,14 +113,28 @@ export function generateSnippet(
 }
 
 /**
- * Compute simple hash for content (for embedding cache)
+ * Content hash used as the embedding cache key.
+ *
+ * This was `hash * 31 + char` truncated to 32 bits and then passed through
+ * `Math.abs`, which is the classic Java string hash with half its range thrown
+ * away. It is not a hash you can key a cache on:
+ *
+ *     hashContent('Ea') === hashContent('FB')            // '1q4'
+ *     hashContent('hello Ea world') === hashContent('hello FB world')
+ *
+ * The collisions compose, so they survive being embedded in real text rather
+ * than only appearing in two-character strings. A collision is silent and
+ * wrong in the worst way: `embeddingCache.get(key)` returns the *other*
+ * chunk's vector, the provider is never called, and that chunk is then
+ * retrieved by similarity to text it does not contain.
+ *
+ * Beyond the crafted pairs, synthetic chunks began colliding naturally at
+ * 42,484 entries — about what the birthday bound predicts once `Math.abs`
+ * folds the space to 2^31.
+ *
+ * SHA-256 costs microseconds next to an embedding call, and the cache is
+ * in-memory only, so nothing persisted depends on the old key.
  */
 export function hashContent(content: string): string {
-  let hash = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return Math.abs(hash).toString(36);
+  return createHash('sha256').update(content, 'utf8').digest('hex');
 }

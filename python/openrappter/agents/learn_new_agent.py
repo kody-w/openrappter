@@ -357,7 +357,19 @@ Example format:
                     "--no-auto-update",
                     "--no-custom-instructions",
                     "--no-ask-user",
-                    "--model", os.environ.get("OPENRAPPTER_MODEL", "auto"),
+                    # Deliberately NOT os.environ.get("OPENRAPPTER_MODEL").
+                    #
+                    # This agent generates other agents. Reading the process
+                    # environment is the surface the capability manifest exists
+                    # to govern, and `os.environ.get` cannot be distinguished
+                    # from harvesting secrets — so declaring `credential-access`
+                    # here would hand the agent-generator a credential capability
+                    # to buy a model-pinning convenience. That trade is not
+                    # worth making. `auto` lets the CLI choose, which is what
+                    # the runtime's own backend ladder does when nothing is
+                    # pinned; an operator who wants a specific model pins it in
+                    # the Copilot CLI's own configuration.
+                    "--model", "auto",
                 ],
                 capture_output=True, text=True, timeout=120,
             )

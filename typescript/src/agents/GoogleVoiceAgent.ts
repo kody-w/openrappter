@@ -38,6 +38,40 @@ import {
 } from '../telephony/reply.js';
 import type { LLMProvider } from '../providers/types.js';
 
+/**
+ * Conformance R2/R3: every agent declares a manifest so a strain can govern it
+ * without reading the source. This file had none.
+ */
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/google-voice',
+  version: '1.0.0',
+  display_name: 'Google Voice',
+  description:
+    'Watches a Google Voice inbox and answers texts under the reply policy — '
+    + 'rate limits, self-reply and loop guards, quiet hours.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  // Declared from what this actually reaches through `../telephony/watcher.js`:
+  //   network           — drives Google Voice in a Chrome CDP session
+  //   filesystem-write  — persists poll state so a restart cannot re-answer
+  //                       years of history
+  // The decision half is the Python google_voice_agent, which reaches neither
+  // and declares nothing.
+  capabilities: [
+    'network',
+    'filesystem-write',
+  ],
+  tags: [
+    'openrappter',
+    'google-voice',
+    'telephony',
+  ],
+  category: 'communication',
+  quality_tier: 'official',
+  requires_env: [],
+} as const;
+
 export interface GoogleVoiceAgentOptions {
   /** Answers an inbound message. Returning null means "say nothing". */
   respond?: (message: InboxMessage) => Promise<string | null>;

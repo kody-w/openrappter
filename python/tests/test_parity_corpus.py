@@ -15,6 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -94,7 +96,23 @@ class TestParityCorpus:
         assert report["summary"]["tier_satisfied"] is True
 
     def test_full_tier_passes_on_both_runtimes(self, tmp_path):
-        """Parity means the two runtimes agree, not that one of them works."""
+        """Parity means the two runtimes agree, not that one of them works.
+
+        Needs the TypeScript build, which the Python CI job does not produce.
+        Skipping is safe *only* because this is not the enforcement point: the
+        `parity` job in `.github/workflows/rapp-conformance.yml` builds both and
+        runs exactly this command on every push and pull request, and fails the
+        build. If that job is ever removed, this skip stops being harmless — so
+        the skip reason names it.
+        """
+        ts_build = ROOT / "typescript/dist/agents/Assistant.js"
+        if not ts_build.exists():
+            pytest.skip(
+                "typescript/dist is not built; the both-runtimes assertion is "
+                "enforced by the `parity` job in rapp-conformance.yml, which "
+                "builds it. Run `cd typescript && npm ci && npm run build` to "
+                "exercise it here."
+            )
         report_path = tmp_path / "report.json"
         result = _run("full", report_path, runtime="both")
         assert result.returncode == 0, result.stdout + result.stderr

@@ -44,11 +44,28 @@ __manifest__ = {
     "description": "The operator's digital twin — the GOD half, read from the device vault, never published.",
     "author": "Kody Wildfeuer",
     "ring": "ga",
-    "capabilities": ["filesystem-read"],
+    # `credential-access` is declared because this agent reads the process
+    # environment (`RAPP_TWIN_HOME`, named in `requires_env` below). It reads a
+    # directory path, not a secret — but `os.environ.get` cannot be
+    # distinguished from harvesting secrets, and a capability contract should
+    # not try: the honest declaration is that this agent can reach the
+    # environment surface, with `requires_env` naming exactly which variable so
+    # the access is auditable rather than silent.
+    #
+    # The override is load-bearing rather than a convenience: three test files
+    # relocate the vault through it, including the path-traversal case that
+    # checks a twin cannot be read from outside its own directory. Removing the
+    # reach would delete a security test, so it is declared instead.
+    #
+    # `filesystem-read` was declared here and is gone: the strain contract
+    # governs five classes (network, process-exec, credential-access,
+    # filesystem-write, dynamic-code) and read is not one of them, so the claim
+    # named nothing and R5 was right to flag it.
+    "capabilities": ["credential-access"],
     "tags": ["twin", "identity", "local-first", "article-lvi"],
     "category": "identity",
     "quality_tier": "official",
-    "requires_env": [],
+    "requires_env": ["RAPP_TWIN_HOME"],
 }
 
 SHAPE_SPEC = "rapp-twin-shape/1.0"

@@ -216,7 +216,9 @@ describe('Assistant (direct Copilot API)', () => {
     const result = await assistant.getResponse('break');
 
     expect(result.content).toBe('The agent encountered an error.');
-    expect(result.agentLogs[0]).toContain('Error: Something broke');
+    // PARITY §2.3 fixes the shape: "[<fn_name>] ERROR: <e>". This asserted the
+    // old openrappter-only wording, so it was pinning the divergence in place.
+    expect(result.agentLogs[0]).toBe('[Broken] ERROR: Something broke');
   });
 
   it('returns non-streaming content from response', async () => {
@@ -353,7 +355,8 @@ describe('Assistant (direct Copilot API)', () => {
     const result = await assistant.getResponse('test');
 
     expect(result.content).toBe('Agent not found.');
-    expect(result.agentLogs[0]).toContain('Unknown agent: NonExistent');
+    // §2.3: result and log are both "Agent '<fn_name>' not found."
+    expect(result.agentLogs[0]).toBe("[NonExistent] Agent 'NonExistent' not found.");
   });
 
   it('respects maxToolRounds limit', async () => {

@@ -15,20 +15,46 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The credential scan (R9) needs the broker; without it R9 reports SKIP
-      # rather than passing silently.
+      # The credential scan (R9) needs the broker. This used to be
+      # `continue-on-error: true`, which meant a broken installer silently
+      # downgraded R9 to SKIP — and conformance.py exits 0 on skips, so the
+      # credential scan could stop running entirely behind a green build. A
+      # security check that can quietly disappear is not a security check.
       - name: Install RAPP Keyring
         run: curl -fsSL https://kody-w.github.io/rapp-keyring/install.sh | bash
-        continue-on-error: true
+
+      # Fail here, legibly, rather than as an unexplained SKIP three steps
+      # later. R9 looks on PATH and then at ~/.local/bin, which is where the
+      # installer puts it.
+      - name: Verify the credential broker is present
+        run: |
+          test -x "$HOME/.local/bin/rapp-keyring" \
+            || { echo "rapp-keyring is not installed; the R9 credential scan cannot run"; exit 1; }
+          "$HOME/.local/bin/rapp-keyring" version
 
       - name: RAPP conformance
         run: |
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           python3 conformance.py
 
-      - name: Conformance report
+      # conformance.py exits 0 on a SKIP. That is right for it — a skip is not a
+      # failed assertion — but it means CI must check separately that nothing
+      # was skipped, or a check that stops running looks identical to one that
+      # passes.
+      - name: Assert every check actually ran
         if: always()
-        run: python3 conformance.py --json > rapp-conformance.json || true
+        run: |
+          python3 conformance.py --json > rapp-conformance.json || true
+          python3 - <<'PY'
+          import json, sys
+          r = json.load(open("rapp-conformance.json"))
+          skipped = [c["id"] for c in r["checks"] if c["status"] == "SKIP"]
+          if skipped:
+              print(f"::error::conformance checks did not run: {', '.join(skipped)}")
+              print("A skipped check is not a passing check.")
+              sys.exit(1)
+          print(f"all {len(r['checks'])} conformance checks executed")
+          PY
 
       - uses: actions/upload-artifact@v4
         if: always()

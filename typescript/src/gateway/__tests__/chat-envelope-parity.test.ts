@@ -62,10 +62,29 @@ print(json.dumps(mod.build_chat_envelope(
   }
 }
 
-/** The keys both runtimes must agree on. Extra axes are free per §3. */
+/**
+ * The keys both runtimes must agree on. Extra axes are free per §3.
+ *
+ * `model` and `requested_model` are deliberately excluded from the *value*
+ * diff. PARITY §6.1: the harness compares the envelope "**modulo out-of-scope
+ * keys** (`model`, `requested_model`, and any value the vector marks
+ * `ignore`)". They report what this runtime, on this machine, with this
+ * configuration, actually asked for and got — the Python tier defaults to
+ * `claude-sonnet-5` against the Copilot API, the TypeScript tier to `auto`
+ * against the CLI — so requiring the two to emit identical strings would fail
+ * on a difference the spec explicitly says is not drift.
+ *
+ * Their *presence* is still required by §2.4 and is asserted separately below;
+ * only the value is out of scope.
+ */
+const OUT_OF_SCOPE_KEYS = new Set(['model', 'requested_model']);
+
 function frozenView(e: Record<string, unknown>): Record<string, unknown> {
   const view: Record<string, unknown> = {};
-  for (const k of ENVELOPE_REQUIRED_KEYS) view[k] = e[k];
+  for (const k of ENVELOPE_REQUIRED_KEYS) {
+    if (OUT_OF_SCOPE_KEYS.has(k)) continue;
+    view[k] = e[k];
+  }
   if ('voice_response' in e) view.voice_response = e.voice_response;
   return view;
 }
@@ -168,12 +187,30 @@ describe('TypeScript and Python agree on the wire', () => {
       // literal string — that relationship is what §2.4 actually freezes.
       expect(Object.keys(py)).toEqual(expect.arrayContaining([...ENVELOPE_REQUIRED_KEYS]));
       expect(typeof py.model).toBe('string');
-      expect(py.requested_model).toBe(py.model);
-      expect(ts.requested_model).toBe(ts.model);
+
+      // §2.4: "A runtime with no fallback sets them equal." No fallback happens
+      // in these cases, so the two must agree — UNLESS the backend never told us
+      // which model answered, which §2.4 does not contemplate. Both runtimes
+      // then emit an explicit `<backend>:auto` / `<backend>:unreported` marker
+      // rather than echoing the request back as though it had been confirmed,
+      // so a caller can distinguish "a fallback switched models" from "nobody
+      // said". Asserting bare equality here would have forced that echo, which
+      // is the false attribution the marker exists to avoid.
+      const unattributed = /^[a-z0-9-]+:(auto|unreported)$/;
+      for (const [runtime, env] of [['python', py], ['typescript', ts]] as const) {
+        const model = env.model as string;
+        const requested = env.requested_model as string;
+        if (unattributed.test(model)) {
+          // The marker must not masquerade as a real model id.
+          expect(model, `${runtime}: unattributed marker names the request`)
+            .not.toBe(requested);
+        } else {
+          expect(requested, `${runtime}: no fallback, so §2.4 requires equality`)
+            .toBe(model);
+        }
+      }
 
       const a = frozenView(ts); const b = frozenView(py);
-      delete a.model; delete b.model;
-      delete a.requested_model; delete b.requested_model;
       expect(b).toEqual(a);
     }, 40_000);
   }

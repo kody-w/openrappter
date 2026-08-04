@@ -49,7 +49,19 @@ __manifest__ = {
     ),
     "author": "Kody Wildfeuer",
     "ring": "ga",
-    "capabilities": ["network-access", "credential-access"],
+    # Empty deliberately. This agent is the *decision core*: it decides whether
+    # a call is within the owner's limits, negotiates, and stops for approval.
+    # It imports nothing but the standard library (datetime, hashlib, json, re,
+    # uuid) and reaches no network and no credential — the placing of a call is
+    # done by the channel that calls it, which declares its own capabilities.
+    #
+    # It previously claimed ["network-access", "credential-access"]. Neither was
+    # reachable, and `network-access` is not even a class name in the strain
+    # contract — the class is `network`. A claim that cannot be satisfied is
+    # worse than no claim: it teaches an owner that the declarations are
+    # decorative, so a strain that withholds this agent for network access
+    # withholds it for nothing.
+    "capabilities": [],
     "tags": ["openrappter", "phone", "telephony", "second-brain"],
     "category": "communication",
     "quality_tier": "official",

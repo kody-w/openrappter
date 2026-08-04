@@ -38,6 +38,43 @@ interface RunnerErr { status: 'error'; error: string; }
 /** Default ceiling for one agent call. Long enough for real work, short enough to not wedge a chat turn. */
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * Conformance R2/R3: every agent declares a manifest so a strain can govern it
+ * without reading the source. This file had none — which mattered more here
+ * than anywhere else in the repo, because this is the agent that runs other
+ * people's code.
+ */
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/python',
+  version: '1.0.0',
+  display_name: 'Python',
+  description:
+    'Runs a single-file Python agent in a subprocess, so a Python cartridge is '
+    + 'callable from the TypeScript runtime without being rewritten.',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  // The two most consequential capabilities in the contract, and both are
+  // exactly what this agent is for:
+  //   process-exec  — `spawn('python3', [runner.py, ...])` on every call
+  //   dynamic-code  — the runner loads an arbitrary .py file by path and calls
+  //                   into it, so the code executed is not this file's code
+  // A strain that forbids either MUST withhold this agent. Undeclared, it would
+  // have been the quietest way in the repo to run arbitrary code.
+  capabilities: [
+    'process-exec',
+    'dynamic-code',
+  ],
+  tags: [
+    'openrappter',
+    'python',
+    'bridge',
+  ],
+  category: 'meta',
+  quality_tier: 'official',
+  requires_env: [],
+} as const;
+
 function runPython(
   args: string[],
   stdin: string | null,

@@ -38,6 +38,32 @@ import json
 
 from agents.basic_agent import BasicAgent
 
+# Every agent in the repo has to declare one of these (conformance R2/R3) so a
+# strain can govern it without reading the source. This file had none.
+__manifest__ = {
+    "schema": "rapp-agent/1.0",
+    "name": "@openrappter/google-voice",
+    "version": "1.0.0",
+    "display_name": "Google Voice",
+    "description": (
+        "Decides whether an inbound text may be answered — rate limits, self-reply "
+        "and loop guards, quiet hours — and returns the decision. It never sends."
+    ),
+    "author": "Kody Wildfeuer",
+    "ring": "ga",
+    # Empty, and provably so: this file imports `json` and the agent base class
+    # and nothing else. It is the decision core described at the top of this
+    # module — "no browser, no subprocess, and no socket to give" — so the
+    # sending, the polling and the state are all somebody else's capability to
+    # declare. The TypeScript GoogleVoiceAgent is the half that touches the
+    # world, and it declares network and filesystem-write.
+    "capabilities": [],
+    "tags": ["openrappter", "google-voice", "telephony", "safety"],
+    "category": "communication",
+    "quality_tier": "official",
+    "requires_env": [],
+}
+
 DEFAULT_POLICY = {
     # Four replies an hour to one number is plenty for a negotiation and nowhere
     # near enough to be a nuisance if something goes wrong.

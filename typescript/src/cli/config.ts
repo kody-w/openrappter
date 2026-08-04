@@ -16,12 +16,12 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
+import { isSecretKey } from '../security/secret-keys.js';
 
 const CONFIG_DIR = join(homedir(), '.openrappter');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 /** Fields whose values should be redacted in display output */
-const SECRET_KEY_PATTERNS = ['token', 'password', 'key', 'secret', 'apikey', 'api_key'];
 
 async function loadConfig(): Promise<Record<string, unknown>> {
   try {
@@ -61,8 +61,7 @@ export function redactSecrets(obj: unknown, depth = 0): unknown {
 
   const result: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    const keyLower = k.toLowerCase();
-    const isSecret = SECRET_KEY_PATTERNS.some((p) => keyLower.includes(p));
+    const isSecret = isSecretKey(k);
     if (isSecret && typeof v === 'string' && v.length > 0) {
       result[k] = '***REDACTED***';
     } else {

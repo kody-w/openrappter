@@ -495,6 +495,35 @@ describe('Gateway Observability', () => {
       expect(line).not.toContain('Bearer abc');
     });
 
+    it('redacts key-shaped field names, which it used to write in the clear', () => {
+      // The test above uses `token` and `authorization`. Both were matched by
+      // the old pattern, so it passed whether or not anything else was covered.
+      // These are the names that actually leaked: the logger's pattern was
+      // token|password|secret|credential|authorization and did not include
+      // `key`, while config display did.
+      process.env.OPENRAPPTER_LOG_FORMAT = 'json';
+      logGatewayLifecycle('gateway', 'start', 'msg', {
+        apiKey: 'ak-leaked',
+        privateKey: 'pk-leaked',
+        signingKey: 'sk-leaked',
+        sessionKey: 'sess-leaked',
+        durationMs: 12,
+      });
+
+      const line = logSpy.mock.calls[0][0] as string;
+      const parsed = JSON.parse(line);
+
+      expect(parsed.apiKey).toBe('[REDACTED]');
+      expect(parsed.privateKey).toBe('[REDACTED]');
+      expect(parsed.signingKey).toBe('[REDACTED]');
+      expect(parsed.sessionKey).toBe('[REDACTED]');
+      for (const secret of ['ak-leaked', 'pk-leaked', 'sk-leaked', 'sess-leaked']) {
+        expect(line).not.toContain(secret);
+      }
+      // And an ordinary field is still readable, or the log is worthless.
+      expect(parsed.durationMs).toBe(12);
+    });
+
     it('suppresses per-request logs by default (no console noise unless JSON mode is explicitly enabled)', () => {
       delete process.env.OPENRAPPTER_LOG_FORMAT;
       logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'success', durationMs: 3 });

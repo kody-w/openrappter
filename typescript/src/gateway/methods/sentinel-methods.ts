@@ -79,6 +79,9 @@ export interface SentinelStatus {
   direction: Direction | null;
   integrity: 'verified' | 'revised' | 'truncated' | 'unknown';
   last_tick: string | null;
+  /** When the cached verdict was produced, and how old that makes it. */
+  verdict_at: string | null;
+  verdict_age_minutes: number | null;
 }
 
 const DEFAULT_HOME = join(homedir(), 'rapp-sentinel');
@@ -130,6 +133,15 @@ function runPy(home: string, args: string[], timeoutMs = 120_000): Promise<unkno
   });
 }
 
+function readJson(f: string): Record<string, any> | null {
+  if (!existsSync(f)) return null;
+  try {
+    return JSON.parse(readFileSync(f, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
 function readDirection(home: string): Direction | null {
   const f = join(home, 'direction.json');
   if (!existsSync(f)) return null;
@@ -151,13 +163,19 @@ export function registerSentinelMethods(server: MethodRegistrar): void {
           summary: 'No sentinel is installed yet.',
           checks: [], watchers: [], peers: {},
           direction: null, integrity: 'unknown', last_tick: null,
+          verdict_at: null, verdict_age_minutes: null,
         };
       }
 
-      const [verdict, roll, anchors] = await Promise.all([
-        runPy(home, ['health.py']).catch(() => null),
-        runPy(home, ['neighborhood.py', 'roll-call']).catch(() => ({})),
-        runPy(home, ['neighborhood.py', 'anchors']).catch(() => ({})),
+      // Deliberately cached. A live health run takes ~10s because it makes
+      // real network calls, and a view that blocks that long teaches people to
+      // stop opening it. The freshness of this verdict is reported instead of
+      // hidden, so a stale answer is visible AS stale rather than mistaken for
+      // a current one. `sentinel.check` forces a fresh run.
+      const verdict = readJson(join(home, 'state', 'last_verdict.json'));
+      const [roll, anchors] = await Promise.all([
+        runPy(home, ['neighborhood.py', 'roll-call'], 15_000).catch(() => ({})),
+        runPy(home, ['neighborhood.py', 'anchors'], 15_000).catch(() => ({})),
       ]);
 
       const v = (verdict ?? {}) as Record<string, any>;
@@ -192,11 +210,18 @@ export function registerSentinelMethods(server: MethodRegistrar): void {
         ).at ?? null;
       } catch { /* first run */ }
 
+      const genAt: string | null = v.generated ?? null;
+      const ageMin = genAt
+        ? Math.round((Date.now() - Date.parse(genAt)) / 60_000)
+        : null;
+
       return {
         installed: true,
         home,
         status: (v.status ?? 'unknown') as SentinelStatus['status'],
-        summary: v.summary ?? 'no verdict',
+        summary: v.summary ?? (v.checks ? `${(v.checks as any[]).filter((c) => c.ok).length}/${(v.checks as any[]).length} checks passing` : 'no verdict yet'),
+        verdict_at: genAt,
+        verdict_age_minutes: ageMin,
         checks: v.checks ?? [],
         watchers,
         peers: {},
@@ -268,6 +293,15 @@ export function registerSentinelMethods(server: MethodRegistrar): void {
         p.stderr.on('data', (d) => (out += d));
         p.on('close', (code) => resolve({ ok: code === 0, output: out.slice(-4000) }));
       });
+    },
+  );
+
+  server.registerMethod<Record<string, never>, Record<string, unknown>>(
+    'sentinel.check',
+    async () => {
+      const home = sentinelHome();
+      if (!home) throw new Error('no sentinel installed');
+      return (await runPy(home, ['health.py'], 180_000)) as Record<string, unknown>;
     },
   );
 

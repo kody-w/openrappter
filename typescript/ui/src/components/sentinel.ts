@@ -30,6 +30,8 @@ interface Status {
   watchers: Watcher[]; direction: Direction | null;
   integrity: 'verified' | 'revised' | 'truncated' | 'unknown';
   last_tick: string | null;
+  verdict_at: string | null;
+  verdict_age_minutes: number | null;
 }
 interface Frame {
   watcher: string; kind: string; seq: number; utc: string;
@@ -115,26 +117,57 @@ export class OpenRappterSentinel extends LitElement {
   @state() private frames: Frame[] = [];
   @state() private busy = false;
   @state() private draft: Direction | null = null;
+  /** Never swallowed. A view that hides its own failure behind a spinner is the
+   *  exact defect this whole surface exists to make visible. */
+  @state() private error: string | null = null;
+  @state() private tries = 0;
+  @state() private waiting = true;
 
   connectedCallback() {
     super.connectedCallback();
+    // The gateway handshake may not have finished when this mounts, so poll
+    // briefly at first rather than sitting on a stale spinner for 20 seconds.
     this.refresh();
+    this.fast = window.setInterval(() => {
+      if (this.st || (!this.waiting && this.tries > 12)) {
+        window.clearInterval(this.fast);
+        this.fast = undefined;
+        return;
+      }
+      this.refresh();
+    }, 1200);
     this.timer = window.setInterval(() => this.refresh(), 20_000);
   }
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.timer) window.clearInterval(this.timer);
+    if (this.fast) window.clearInterval(this.fast);
   }
   private timer?: number;
+  private fast?: number;
 
   private async refresh() {
+    // The app owns the gateway handshake and the single onStatusChange slot,
+    // so poll the connection rather than clobbering its handler. A call issued
+    // before the socket is up fails with "Not connected", which is a fact about
+    // this component's timing, not about the sentinel.
+    if (!gateway.isConnected) {
+      this.error = null;
+      this.waiting = true;
+      return;
+    }
+    this.waiting = false;
+    this.tries += 1;
     try {
       const st = (await gateway.call('sentinel.status')) as Status;
       this.st = st;
+      this.error = null;
       if (!this.draft) this.draft = st.direction ?? null;
       const f = (await gateway.call('sentinel.frames', { limit: 60 })) as { frames: Frame[] };
       this.frames = f.frames ?? [];
-    } catch { /* gateway will retry */ }
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   private async save() {
@@ -144,6 +177,14 @@ export class OpenRappterSentinel extends LitElement {
       await gateway.call('sentinel.direction.set', { ...this.draft });
       await this.refresh();
     } finally { this.busy = false; }
+  }
+
+  /** A live health run makes real network calls and takes ~10s, so it is opt-in
+   *  and the cached verdict says how old it is rather than pretending to be now. */
+  private async check() {
+    this.busy = true;
+    try { await gateway.call('sentinel.check'); await this.refresh(); }
+    finally { this.busy = false; }
   }
 
   private async tick() {
@@ -205,7 +246,20 @@ export class OpenRappterSentinel extends LitElement {
 
   render() {
     const st = this.st;
-    if (!st) return html`<div class="empty">Connecting…</div>`;
+    if (!st) {
+      // Say which of the two it is. "Connecting…" forever is a lie by omission.
+      if (this.error && this.tries > 3) {
+        return html`<h2>Sentinel</h2>
+          <div class="banner bad"><strong>The sentinel did not answer.</strong>
+            <span class="sub">${this.error}</span>
+            <span class="sub">The gateway connection is open, so this is the
+              sentinel methods failing — not the socket. Tried ${this.tries} times.</span></div>
+          <button class="ghost" @click=${() => this.refresh()}>Retry</button>`;
+      }
+      return html`<div class="empty">${this.waiting
+        ? 'Waiting for the gateway connection…'
+        : 'Loading sentinel…'}</div>`;
+    }
 
     if (!st.installed) {
       return html`
@@ -275,8 +329,11 @@ export class OpenRappterSentinel extends LitElement {
             ${dirty ? 'Save direction' : 'Saved'}
           </button>
           <button class="ghost" ?disabled=${this.busy} @click=${this.tick}>Run a cycle now</button>
+          <button class="ghost" ?disabled=${this.busy} @click=${this.check}>Re-check now</button>
           <span class="hint" style="margin:0">
-            ${st.summary} · last cycle ${st.last_tick ?? 'never'}
+            ${st.summary}${st.verdict_age_minutes !== null
+              ? html` · <strong>as of ${st.verdict_age_minutes}m ago</strong>`
+              : ''} · last cycle ${st.last_tick ?? 'never'}
           </span>
         </div>
       </div>

@@ -46,7 +46,10 @@ if [[ -n "${PREV}" && -d "${PREV}/node_modules" ]] \
   cp -R "${PREV}/node_modules" "${TARGET}/node_modules"
 else
   echo "==> installing production deps"
-  ( cd "${TARGET}" && npm ci --omit=dev --silent )
+  # --ignore-scripts: package.json has a `prepare` hook that runs tsc, which is
+  # a devDependency and is not present in a production install. dist/ is already
+  # built and copied in above, so there is nothing for it to do anyway.
+  ( cd "${TARGET}" && npm ci --omit=dev --ignore-scripts --silent )
 fi
 
 ln -sfn "${TARGET}" "${SHARE}/current"

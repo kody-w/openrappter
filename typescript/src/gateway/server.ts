@@ -36,6 +36,7 @@ import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
+import { parseChatRequest } from './chat-request.js';
 import {
   GatewayMetrics,
   GatewayTimeoutError,
@@ -908,26 +909,23 @@ export class GatewayServer {
               }));
               return;
             }
-            const rawMessage = typeof parsed.message === 'string'
-              ? parsed.message
-              : parsed.user_input;
-            const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
-            if (!message) {
+            // One validator, shared with the grail brainstem's `chat()`. It
+            // reports the same faults in the same order and the same words —
+            // and, critically, REFUSES a malformed conversation_history instead
+            // of silently dropping it and answering 200 as though it had read
+            // the transcript.
+            const parsedRequest = parseChatRequest(parsed);
+            if (!parsedRequest.ok) {
               res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
               res.end(JSON.stringify({
                 schema: 'rapp-chat/1.0',
                 status: 'error',
-                error: 'message is required',
+                error: parsedRequest.error,
               }));
               return;
             }
-            const sessionId = (
-              typeof parsed.session_id === 'string'
-                ? parsed.session_id
-                : typeof parsed.sessionId === 'string'
-                  ? parsed.sessionId
-                  : randomUUID()
-            );
+            const message = parsedRequest.value.userInput;
+            const sessionId = parsedRequest.value.sessionId ?? randomUUID();
             const idempotencyKey = (
               typeof parsed.idempotency_key === 'string'
                 ? parsed.idempotency_key
@@ -935,24 +933,9 @@ export class GatewayServer {
                   ? parsed.idempotencyKey
                   : undefined
             );
-            const historyValue = Array.isArray(parsed.conversation_history)
-              ? parsed.conversation_history
-              : Array.isArray(parsed.history)
-                ? parsed.history
-                : undefined;
-            const conversationHistory = historyValue?.filter(
-              (entry: unknown): entry is { role: 'user' | 'assistant'; content: string } => {
-                if (!entry || typeof entry !== 'object') return false;
-                const item = entry as Record<string, unknown>;
-                return (
-                  (item.role === 'user' || item.role === 'assistant')
-                  && typeof item.content === 'string'
-                );
-              }
-            ).map((entry: { role: 'user' | 'assistant'; content: string }) => ({
-              role: entry.role,
-              content: entry.content,
-            }));
+            const conversationHistory = parsedRequest.value.conversationHistory.length > 0
+              ? parsedRequest.value.conversationHistory
+              : undefined;
             const agentHandler = this.agentHandler;
             const executeChat = async (): Promise<Record<string, unknown>> => {
               const result = await agentHandler({
@@ -1117,8 +1100,16 @@ export class GatewayServer {
             res.end(JSON.stringify({ response: `Received: ${chatMsg}`, status }));
           }
         } catch {
+          // The brainstem answers malformed JSON with the same sentence it uses
+          // for a non-object body — `get_json(silent=True)` yields None and
+          // falls into the same branch. A `/chat` caller must not be able to
+          // tell the two runtimes apart by their parse errors either.
           res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          res.end(JSON.stringify(
+            (req.url ?? '').split('?')[0] === '/chat'
+              ? { schema: 'rapp-chat/1.0', status: 'error', error: 'Request body must be a JSON object' }
+              : { error: 'Invalid JSON' },
+          ));
         }
       });
       return;

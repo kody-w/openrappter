@@ -61,7 +61,12 @@ export interface AssistantResponse {
 }
 
 export interface AssistantConversationMessage {
-  role: 'user' | 'assistant';
+  /**
+   * `tool` is accepted because the `/chat` wire accepts it. A transcript
+   * replayed from a brainstem client carries tool turns, and dropping them
+   * leaves the model reasoning about results it can no longer see.
+   */
+  role: 'user' | 'assistant' | 'tool';
   content: string;
 }
 
@@ -466,7 +471,7 @@ export class Assistant {
     const imported = messages
       .filter(
         (message): message is AssistantConversationMessage =>
-          (message.role === 'user' || message.role === 'assistant')
+          (message.role === 'user' || message.role === 'assistant' || message.role === 'tool')
           && typeof message.content === 'string',
       )
       .slice(-40)

@@ -152,7 +152,10 @@ export interface AgentRequest {
   channelId?: string;
   userId?: string;
   conversationHistory?: Array<{
-    role: 'user' | 'assistant';
+    // `tool` is here because the brainstem accepts it. A transcript replayed
+    // from a brainstem client carries tool turns, and dropping them silently
+    // leaves the model reasoning about results it can no longer see.
+    role: 'user' | 'assistant' | 'tool';
     content: string;
   }>;
   attachments?: Attachment[];

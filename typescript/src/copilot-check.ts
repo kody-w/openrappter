@@ -157,35 +157,73 @@ export async function resolveGithubToken(): Promise<string | null> {
 }
 
 /**
- * Run inline device code auth when no cached token exists.
- * Saves the token to credentials file and .env for future use.
- * Returns the token or null if the flow was skipped/failed.
+ * Why authentication did not produce a usable Copilot token.
+ *
+ * These are genuinely different failures with different fixes, and collapsing
+ * them into `null` made the daemon report the wrong one. A token that Copilot
+ * *rejected* was announced as "No GitHub token found", which sends an operator
+ * to `onboard` to fix an absence that is not the problem — the token is present
+ * and stale. Under launchd there is no TTY either, so the re-auth that message
+ * implies cannot run at all.
  */
-export async function autoAuthIfNeeded(options?: {
+export type CopilotAuthOutcome =
+  /** A token was obtained and Copilot accepted it. */
+  | { status: 'authenticated'; token: string; source: 'cache' | 'device-code' }
+  /** A token was found, Copilot refused it, and no TTY was available to redo it. */
+  | { status: 'rejected'; interactive: false }
+  /** No token was discovered anywhere, and no TTY was available to obtain one. */
+  | { status: 'missing'; interactive: false }
+  /** Interactive auth ran and failed. */
+  | { status: 'failed'; error: string };
+
+/**
+ * Resolve a Copilot-capable GitHub token, saying *why* when it cannot.
+ *
+ * Prefer this over {@link autoAuthIfNeeded} when the caller reports the result
+ * to a human: it is the difference between "no token" and "the token you have
+ * is no longer good", which are not the same instruction.
+ */
+export async function resolveCopilotAuth(options?: {
   silent?: boolean;
-}): Promise<string | null> {
-  const existing = await resolveGithubToken();
+  /** Test seam: how a token is discovered. Defaults to {@link resolveGithubToken}. */
+  discoverToken?: () => Promise<string | null>;
+  /** Test seam: how a token is checked against Copilot. Rejects when unusable. */
+  validateToken?: (token: string) => Promise<void>;
+  /** Test seam: whether an interactive prompt is possible. Defaults to `stdin.isTTY`. */
+  interactive?: boolean;
+}): Promise<CopilotAuthOutcome> {
+  let rejected = false;
+  const existing = await (options?.discoverToken ?? resolveGithubToken)();
   if (existing) {
     // Validate the existing token actually works with Copilot
     try {
-      const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
-      await resolveCopilotApiToken({ githubToken: existing });
+      if (options?.validateToken) {
+        await options.validateToken(existing);
+      } else {
+        const { resolveCopilotApiToken } = await import('./providers/copilot-token.js');
+        await resolveCopilotApiToken({ githubToken: existing });
+      }
       // Token is valid and cached — save to credentials file if not already there
       if (!loadCachedGitHubToken()) {
         saveGitHubToken(existing, 'env');
       }
-      return existing;
+      return { status: 'authenticated', token: existing, source: 'cache' };
     } catch {
       // Token exists but doesn't work with Copilot — fall through to re-auth
+      rejected = true;
       if (!options?.silent) {
         console.warn('🦖 Cached GitHub token rejected by Copilot API — re-authenticating…');
       }
     }
   }
 
-  // No TTY = can't do interactive auth
-  if (!process.stdin.isTTY) {
-    return null;
+  // No TTY = can't do interactive auth. Report which of the two states we are
+  // in, because the remedy differs and the caller cannot tell from `null`.
+  const interactive = options?.interactive ?? Boolean(process.stdin.isTTY);
+  if (!interactive) {
+    return rejected
+      ? { status: 'rejected', interactive: false }
+      : { status: 'missing', interactive: false };
   }
 
   try {
@@ -233,14 +271,28 @@ export async function autoAuthIfNeeded(options?: {
       console.log(chalk.green('\n  ✓ Authenticated! Token cached locally.\n'));
     }
 
-    return token;
+    return { status: 'authenticated', token, source: 'device-code' };
   } catch (err) {
+    const error = (err as Error).message;
     if (!options?.silent) {
-      console.warn(`🦖 Auth failed: ${(err as Error).message}`);
+      console.warn(`🦖 Auth failed: ${error}`);
       console.warn("🦖 Run 'openrappter onboard' for full setup.\n");
     }
-    return null;
+    return { status: 'failed', error };
   }
+}
+
+/**
+ * Back-compatible wrapper: the token, or `null` for every failure.
+ *
+ * Callers that report to a human should use {@link resolveCopilotAuth} instead,
+ * so they can name the actual cause.
+ */
+export async function autoAuthIfNeeded(
+  options?: Parameters<typeof resolveCopilotAuth>[0],
+): Promise<string | null> {
+  const outcome = await resolveCopilotAuth(options);
+  return outcome.status === 'authenticated' ? outcome.token : null;
 }
 
 export async function validateTelegramToken(token: string): Promise<{ valid: boolean; username?: string; error?: string }> {

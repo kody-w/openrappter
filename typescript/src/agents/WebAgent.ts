@@ -9,6 +9,7 @@
 
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
+import { lookup } from 'dns/promises';
 
 
 export const __manifest__ = {
@@ -102,60 +103,115 @@ export class WebAgent extends BasicAgent {
 
   private static readonly MAX_REDIRECTS = 5;
 
+  /**
+   * Test seam. Which loopback address a name resolves to is a property of the
+   * machine, not of this code: `localtest.me` gives 127.0.0.1 on one host and
+   * ::1 on another, and a test that pinned either one failed on the other.
+   */
+  protected async lookupHost(hostname: string): Promise<Array<{ address: string }>> {
+    return lookup(hostname, { all: true });
+  }
+
+  private static readonly BLOCKED_HOST_PATTERNS = [
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[01])\./,
+    /^192\.168\./,
+    /^127\./,
+    /^0\./,
+    /^169\.254\./,
+    /^::1$/,
+    /^::$/,
+    /^fc[0-9a-f]{2}:/,
+    /^fd[0-9a-f]{2}:/,
+    /^fe80:/,
+  ];
+
+  /**
+   * Reduce a URL hostname or a resolved address to something the patterns can
+   * match.
+   *
+   * `URL.hostname` keeps the brackets on an IPv6 literal, so `http://[::1]/`
+   * arrives as `"[::1]"` and `/^::1$/` never fires. Every IPv6 rule in this
+   * list was unreachable for that reason — `[::1]`, `[fe80::1]` and
+   * `[::ffff:127.0.0.1]` were all allowed through.
+   *
+   * IPv4-mapped addresses are folded back to dotted quad so the IPv4 rules
+   * apply to them: `::ffff:7f00:1` is 127.0.0.1 wearing a different hat.
+   */
+  private static normaliseHost(host: string): string {
+    const bare = host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
+
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(bare);
+    if (mapped) {
+      const high = parseInt(mapped[1], 16);
+      const low = parseInt(mapped[2], 16);
+      return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
+    }
+    const mappedDotted = /^::ffff:((?:[0-9]{1,3}\.){3}[0-9]{1,3})$/.exec(bare);
+    if (mappedDotted) return mappedDotted[1];
+
+    return bare;
+  }
+
+  private static isBlockedHost(host: string): boolean {
+    const normalised = WebAgent.normaliseHost(host);
+    if (normalised === 'localhost' || normalised.endsWith('.local')) return true;
+    return WebAgent.BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(normalised));
+  }
+
   private validateUrl(url: string): void {
     const parsed = new URL(url);
-    const hostname = parsed.hostname;
 
-    // Block private IP ranges (SSRF protection)
-    const privatePatterns = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[01])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^0\./,
-      /^169\.254\./,
-      /^::1$/,
-      /^fc00:/,
-      /^fe80:/,
-    ];
-
-    for (const pattern of privatePatterns) {
-      if (pattern.test(hostname)) {
-        throw new Error(`Access to private IP range blocked: ${hostname}`);
-      }
+    // A web fetcher has no business on any other scheme. `data:` URLs are
+    // fetchable by Node and would let a caller feed arbitrary content back to
+    // the model as though it had been retrieved; `file:` is refused by fetch
+    // today, which is a property of fetch rather than a decision made here.
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Unsupported URL scheme: ${parsed.protocol}`);
     }
 
-    // Block localhost
-    if (hostname === 'localhost' || hostname.endsWith('.local')) {
-      throw new Error(`Access to localhost blocked: ${hostname}`);
+    if (WebAgent.isBlockedHost(parsed.hostname)) {
+      throw new Error(`Access to private IP range blocked: ${parsed.hostname}`);
     }
   }
 
   /**
-   * Fetch, validating every hop rather than only the first.
+   * Resolve the host and check where it actually points.
    *
-   * `validateUrl` was called once, on the URL the caller supplied, and then
-   * `fetch` was left to follow redirects on its own. Redirects are followed by
-   * default, so the check only ever covered the first hop:
+   * The checks above read the hostname as text, so any public name that
+   * resolves inward walked straight past them. `localtest.me` is a real public
+   * DNS name that resolves to 127.0.0.1, and fetching it returned the body of a
+   * loopback server on this machine — the whole protection bypassed without a
+   * redirect or a malformed address.
    *
-   *     caller asks for   http://public.example/go
-   *     validateUrl       passes — the host is public
-   *     server replies    302 Location: http://127.0.0.1:18790/
-   *     fetch follows     and returns the local gateway's response
-   *
-   * Verified against a local pair of servers: the redirect was followed and the
-   * blocked host's body came back. Every address this class exists to refuse —
-   * loopback, link-local, RFC 1918, cloud metadata at 169.254.169.254 — was
-   * reachable by asking a public host to point there.
-   *
-   * Redirects are now resolved by hand so the same validation runs on each
-   * target, with a hop limit so a redirect cycle cannot spin.
+   * DNS can still change between this lookup and the connection. That race is
+   * narrower than the hole it closes, and closing it completely means pinning
+   * the resolved address through the socket, which fetch does not expose.
    */
+  private async assertHostResolvesPublicly(url: string): Promise<void> {
+    const { hostname } = new URL(url);
+    let resolved: Array<{ address: string }>;
+    try {
+      resolved = await this.lookupHost(hostname);
+    } catch {
+      return;  // Unresolvable; fetch will fail on its own terms.
+    }
+
+    for (const { address } of resolved) {
+      if (WebAgent.isBlockedHost(address)) {
+        throw new Error(
+          `Access to private IP range blocked: ${hostname} resolves to ${address}`,
+        );
+      }
+    }
+  }
+
   private async fetchWithValidatedRedirects(url: string): Promise<Response> {
     let target = url;
 
     for (let hop = 0; hop <= WebAgent.MAX_REDIRECTS; hop++) {
       this.validateUrl(target);
+      await this.assertHostResolvesPublicly(target);
       const response = await fetch(target, { redirect: 'manual' });
 
       const isRedirect = response.status >= 300 && response.status < 400;

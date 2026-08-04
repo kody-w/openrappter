@@ -34,6 +34,25 @@ async function fetchVia(agent: WebAgent, url: string): Promise<Record<string, un
   return JSON.parse(raw) as Record<string, unknown>;
 }
 
+/**
+ * Loopback is the only address a test can bind, so tests about *redirect*
+ * behaviour have to neutralise the address checks to reach the behaviour they
+ * are actually about. Both guards, or the DNS one still refuses the fixture.
+ */
+function allowLoopback(agent: WebAgent, exceptAfterFirstHop = false): void {
+  const internals = agent as unknown as {
+    validateUrl(url: string): void;
+    assertHostResolvesPublicly(url: string): Promise<void>;
+  };
+  const realValidate = internals.validateUrl.bind(internals);
+  let first = true;
+  internals.validateUrl = (url: string) => {
+    if (exceptAfterFirstHop && !first) { realValidate(url); return; }
+    first = false;
+  };
+  internals.assertHostResolvesPublicly = async () => undefined;
+}
+
 afterEach(async () => {
   while (servers.length > 0) {
     await new Promise<void>((resolve) => servers.pop()!.close(() => resolve()));
@@ -51,13 +70,7 @@ describe('WebAgent redirect handling', () => {
     // The first hop has to pass validation for this to test the second one, so
     // the redirector is reached through a host the validator accepts.
     const agent = new WebAgent();
-    const permissive = agent as unknown as { validateUrl(url: string): void };
-    const realValidate = permissive.validateUrl.bind(permissive);
-    let firstCall = true;
-    permissive.validateUrl = (url: string) => {
-      if (firstCall) { firstCall = false; return; }  // stand in for a public host
-      realValidate(url);
-    };
+    allowLoopback(agent, true);
 
     await expect(fetchVia(agent, `http://127.0.0.1:${redirector}/`))
       .rejects.toThrow(/blocked/i);
@@ -71,13 +84,7 @@ describe('WebAgent redirect handling', () => {
     });
 
     const agent = new WebAgent();
-    const permissive = agent as unknown as { validateUrl(url: string): void };
-    const realValidate = permissive.validateUrl.bind(permissive);
-    let firstCall = true;
-    permissive.validateUrl = (url: string) => {
-      if (firstCall) { firstCall = false; return; }
-      realValidate(url);
-    };
+    allowLoopback(agent, true);
 
     await expect(fetchVia(agent, `http://127.0.0.1:${redirector}/`))
       .rejects.toThrow();
@@ -97,8 +104,7 @@ describe('WebAgent redirect handling', () => {
     });
 
     const agent = new WebAgent();
-    const permissive = agent as unknown as { validateUrl(url: string): void };
-    permissive.validateUrl = () => undefined;  // allow every hop
+    allowLoopback(agent);
 
     await expect(fetchVia(agent, `http://127.0.0.1:${port}/`))
       .rejects.toThrow(/too many redirects/i);
@@ -119,8 +125,7 @@ describe('WebAgent redirect handling', () => {
     });
 
     const agent = new WebAgent();
-    const permissive = agent as unknown as { validateUrl(url: string): void };
-    permissive.validateUrl = () => undefined;
+    allowLoopback(agent);
 
     const result = await fetchVia(agent, `http://127.0.0.1:${redirector}/`);
     expect(result.status).toBe('success');
@@ -134,10 +139,128 @@ describe('WebAgent redirect handling', () => {
     });
 
     const agent = new WebAgent();
-    (agent as unknown as { validateUrl(url: string): void }).validateUrl = () => undefined;
+    allowLoopback(agent);
 
     const result = await fetchVia(agent, `http://127.0.0.1:${port}/`);
     expect(result.status).toBe('success');
     expect(String(result.content)).toContain('DIRECT');
+  });
+});
+
+/**
+ * The address checks read `URL.hostname` as text. Three ways past that:
+ *
+ *   1. IPv6 literals keep their brackets, so `[::1]` never matched `/^::1$/`.
+ *      Every IPv6 rule in the list was unreachable.
+ *   2. A public DNS name can resolve inward. `localtest.me` is a real name
+ *      that resolves to 127.0.0.1; fetching it returned the body of a loopback
+ *      server on this machine.
+ *   3. The scheme was never checked, and Node fetches `data:` URLs.
+ */
+describe('WebAgent address validation', () => {
+  function validate(url: string): void {
+    (new WebAgent() as unknown as { validateUrl(u: string): void }).validateUrl(url);
+  }
+
+  it.each([
+    ['IPv6 loopback', 'http://[::1]/'],
+    ['IPv6 unspecified', 'http://[::]/'],
+    ['IPv6 link-local', 'http://[fe80::1]/'],
+    ['IPv6 unique-local fc00', 'http://[fc00::1]/'],
+    ['IPv6 unique-local fd00', 'http://[fd12::1]/'],
+    ['IPv4-mapped loopback', 'http://[::ffff:127.0.0.1]/'],
+  ])('blocks %s', (_label, url) => {
+    expect(() => validate(url)).toThrow(/blocked/i);
+  });
+
+  it.each([
+    ['IPv4 loopback', 'http://127.0.0.1/'],
+    ['RFC 1918 ten', 'http://10.1.2.3/'],
+    ['RFC 1918 one-nine-two', 'http://192.168.1.1/'],
+    ['cloud metadata', 'http://169.254.169.254/latest/meta-data/'],
+    ['localhost by name', 'http://localhost/'],
+  ])('still blocks %s', (_label, url) => {
+    expect(() => validate(url)).toThrow(/blocked/i);
+  });
+
+  it.each([
+    ['file', 'file:///etc/passwd'],
+    ['data', 'data:text/plain,hello'],
+    ['ftp', 'ftp://example.com/x'],
+  ])('refuses the %s scheme', (_label, url) => {
+    expect(() => validate(url)).toThrow(/unsupported url scheme/i);
+  });
+
+  it.each([
+    'http://example.com/',
+    'https://example.com/path?q=1',
+    'http://93.184.216.34/',
+    'http://[2606:2800:220:1:248:1893:25c8:1946]/',
+  ])('still allows the public address %s', (url) => {
+    expect(() => validate(url)).not.toThrow();
+  });
+});
+
+describe('WebAgent DNS resolution', () => {
+  it.each([
+    ['IPv4 loopback', '127.0.0.1'],
+    ['IPv6 loopback', '::1'],
+    ['RFC 1918', '10.0.0.5'],
+    ['cloud metadata', '169.254.169.254'],
+  ])('blocks a public name that resolves to %s', async (_label, address) => {
+    // Hermetic on purpose. The first version of this test used localtest.me, a
+    // real name pointing at loopback — it passed locally, where that is
+    // 127.0.0.1, and failed on CI, where it is ::1. Which family a machine
+    // answers with is not what this test is about.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address }];
+      }
+    }
+    const agent = new Resolving() as unknown as { fetchUrl(u: string): Promise<string> };
+
+    await expect(agent.fetchUrl('http://public-looking.example/'))
+      .rejects.toThrow(/resolves to/i);
+  });
+
+  it('allows a public name that resolves to a public address', async () => {
+    // Positive control: refusing every resolved address would pass the four
+    // cases above and block the entire web.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address: '93.184.216.34' }];
+      }
+    }
+    const agent = new Resolving() as unknown as {
+      assertHostResolvesPublicly(u: string): Promise<void>;
+    };
+    await expect(agent.assertHostResolvesPublicly('http://example.com/'))
+      .resolves.toBeUndefined();
+  });
+
+  it('blocks when any one of several resolved addresses is private', async () => {
+    // A name can answer with more than one address, and one bad answer is
+    // enough — checking only the first would miss it.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address: '93.184.216.34' }, { address: '127.0.0.1' }];
+      }
+    }
+    const agent = new Resolving() as unknown as {
+      assertHostResolvesPublicly(u: string): Promise<void>;
+    };
+    await expect(agent.assertHostResolvesPublicly('http://public-looking.example/'))
+      .rejects.toThrow(/resolves to 127\.0\.0\.1/);
+  });
+
+  it('does not reject a name it cannot resolve, leaving that to fetch', async () => {
+    // Failing closed on every lookup error would break offline and flaky-DNS
+    // use for hosts that were never private to begin with.
+    const agent = new WebAgent() as unknown as {
+      assertHostResolvesPublicly(u: string): Promise<void>;
+    };
+    await expect(
+      agent.assertHostResolvesPublicly('http://this-name-does-not-exist.invalid/'),
+    ).resolves.toBeUndefined();
   });
 });

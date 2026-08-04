@@ -1,3 +1,5 @@
+
+import { isSecretKey } from '../security/secret-keys.js';
 /**
  * Gateway observability: bounded in-memory counters and centralized
  * structured logging for the WebSocket/HTTP gateway.
@@ -148,8 +150,6 @@ export class GatewayMetrics {
 export type GatewayLogLevel = 'info' | 'warn' | 'error';
 export type GatewayLogFields = Record<string, string | number | boolean | undefined>;
 
-/** Keys that must never appear verbatim in a structured log line. */
-const SECRET_KEY_PATTERN = /token|password|secret|credential|authorization/i;
 
 function isJsonLogFormat(): boolean {
   return (process.env.OPENRAPPTER_LOG_FORMAT || '').trim().toLowerCase() === 'json';
@@ -165,7 +165,7 @@ function redactFields(fields?: GatewayLogFields): Record<string, string | number
   if (!fields) return safe;
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
-    safe[key] = SECRET_KEY_PATTERN.test(key) ? '[REDACTED]' : value;
+    safe[key] = isSecretKey(key) ? '[REDACTED]' : value;
   }
   return safe;
 }

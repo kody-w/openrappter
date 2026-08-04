@@ -439,6 +439,56 @@ describe('IMessageStateStore legacy migration and privacy', () => {
     await store.close();
   });
 
+  it('does not split a grapheme cluster when chunking a migrated reply', async () => {
+    // The migration had its own chunker, slicing code points at 3,000 — the
+    // behaviour the live chunker had before openrappter#58. The existing
+    // migration case above uses 'x'.repeat(3001), which cannot tell the two
+    // apart. This one puts a family emoji across the boundary, where the old
+    // code produced a chunk ending "a<man><zwj><woman>" and a next chunk
+    // beginning on a stray joiner. The outbox is what gets sent.
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    const content = `${'a'.repeat(2998)}${family}${'b'.repeat(20)}`;
+
+    const root = await temporaryRoot();
+    const directory = path.join(root, '.openrappter');
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(
+      path.join(directory, 'imessage-state.json'),
+      JSON.stringify({ version: 1, appleRowId: 7 }),
+    );
+    await fs.writeFile(
+      path.join(directory, 'imessage-conversations.json'),
+      JSON.stringify({
+        version: 1,
+        conversations: {},
+        deliveries: {
+          emoji: {
+            status: 'ready',
+            updatedAt: '2026-07-16T21:01:00.000Z',
+            conversationKey: 'imessage:iMessage;-;chat-a',
+            reply: { target: '+15551234567', content, replyTo: 'emoji' },
+          },
+        },
+      }),
+    );
+
+    const store = new IMessageStateStore({ homeDirectory: root, now: () => NOW });
+    await store.initialize();
+
+    const first = await store.getOutbox('emoji:0');
+    const second = await store.getOutbox('emoji:1');
+    const chunks = [first?.content ?? '', second?.content ?? ''];
+
+    expect(chunks.join('')).toBe(content);
+    expect(chunks.some(chunk => chunk.includes(family))).toBe(true);
+    for (const chunk of chunks) {
+      expect(chunk.endsWith('\u200D')).toBe(false);
+      expect(/^[\u200D]/u.test(chunk)).toBe(false);
+    }
+
+    await store.close();
+  });
+
   it('fails explicitly without deleting corrupt legacy rollback data', async () => {
     const root = await temporaryRoot();
     const directory = path.join(root, '.openrappter');

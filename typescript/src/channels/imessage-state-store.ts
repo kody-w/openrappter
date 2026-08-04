@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { AssistantConversationMessage } from '../agents/Assistant.js';
 import type { IncomingMessage } from './types.js';
+import { chunkIMessageText, IMESSAGE_MAX_CHUNK_LENGTH } from './imessage-chunking.js';
 
 export const IMESSAGE_STATE_SCHEMA_VERSION = 1;
 export const IMESSAGE_DEFAULT_STALE_AFTER_MS = 30 * 60 * 1000;
@@ -304,14 +305,18 @@ function validIsoTimestamp(value: string, fallback: string): string {
   return Number.isFinite(Date.parse(value)) ? value : fallback;
 }
 
+/**
+ * Split a migrated reply the same way a live one is split.
+ *
+ * This used to slice code points at 3,000, which is what the live chunker did
+ * before openrappter#58 taught it about grapheme clusters. That fix never
+ * reached here, so a migrated reply crossing the boundary mid-cluster went into
+ * the outbox broken — a family emoji arriving as `a<man><zwj><woman>` followed
+ * by a chunk starting on a stray joiner. The outbox is what gets sent, so the
+ * recipient saw it.
+ */
 function chunkLegacyReply(content: string): string[] {
-  const characters = Array.from(content);
-  if (characters.length === 0) return [''];
-  const chunks: string[] = [];
-  for (let index = 0; index < characters.length; index += 3_000) {
-    chunks.push(characters.slice(index, index + 3_000).join(''));
-  }
-  return chunks;
+  return chunkIMessageText(content, IMESSAGE_MAX_CHUNK_LENGTH);
 }
 
 function safeJsonParse<T>(content: string, description: string): T {

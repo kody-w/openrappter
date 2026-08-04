@@ -28,11 +28,14 @@ die()  { printf '[openrappter] ERROR: %s\n' "$*" >&2; exit 1; }
 # bytes or an error. `main`, `HEAD` and `latest` are refused by shape, not by
 # name, so a new mutable ref cannot slip through an allowlist nobody updated.
 [ -n "$COMMIT" ] || die "OPENRAPPTER_COMMIT is required (an exact 40-character commit)."
+# Echo what the caller typed, not the case-folded value: lowercasing HEAD
+# reports it back as "Head", which reads like a bug in the installer.
+COMMIT_INPUT="$COMMIT"
 COMMIT="$(printf '%s' "$COMMIT" | tr 'A-F' 'a-f')"
 case "$COMMIT" in
-  *[!0-9a-f]* | "") die "OPENRAPPTER_COMMIT must be 40 hex characters, got: $COMMIT" ;;
+  *[!0-9a-f]* | "") die "OPENRAPPTER_COMMIT must be 40 hex characters, got: $COMMIT_INPUT" ;;
 esac
-[ "${#COMMIT}" -eq 40 ] || die "OPENRAPPTER_COMMIT must be exactly 40 characters, got ${#COMMIT}."
+[ "${#COMMIT}" -eq 40 ] || die "OPENRAPPTER_COMMIT must be exactly 40 characters, got ${#COMMIT} ($COMMIT_INPUT)."
 
 # ── 4.1/4.2/4.3 Enumerate, normalise, then refuse ────────────────────────────
 SYSTEM="$(uname -s)"

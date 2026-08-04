@@ -93,19 +93,19 @@ class TestSsrfProtection:
 
     def test_blocks_private_ip_127(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="127.0.0.1"):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("127.0.0.1", 0))]):
             with pytest.raises(ValueError, match="private"):
                 agent._validate_url("http://internal-host.example.com/")
 
     def test_blocks_private_ip_192_168(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="192.168.1.100"):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("192.168.1.100", 0))]):
             with pytest.raises(ValueError, match="private"):
                 agent._validate_url("http://myrouter.example.com/")
 
     def test_blocks_private_ip_10_x(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="10.0.0.5"):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("10.0.0.5", 0))]):
             with pytest.raises(ValueError, match="private"):
                 agent._validate_url("http://corp.example.com/api")
 
@@ -117,7 +117,7 @@ class TestSsrfProtection:
     def test_public_ip_passes_validation(self):
         agent = WebAgent()
         # 8.8.8.8 is a public IP — validation should not raise
-        with patch("socket.gethostbyname", return_value="8.8.8.8"):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("8.8.8.8", 0))]):
             agent._validate_url("http://example.com/page")  # should not raise
 
 
@@ -129,8 +129,8 @@ class TestFetchSuccess:
     def test_fetch_returns_success_status(self):
         agent = WebAgent()
         html = "<html><body><p>Hello world</p></body></html>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert result["status"] == "success"
         assert result["action"] == "fetch"
@@ -138,16 +138,16 @@ class TestFetchSuccess:
     def test_fetch_returns_text_content(self):
         agent = WebAgent()
         html = "<html><body><p>Hello world</p></body></html>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert "Hello world" in result["content"]
 
     def test_fetch_strips_html_tags(self):
         agent = WebAgent()
         html = "<html><body><b>Bold</b> text</body></html>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert "<b>" not in result["content"]
         assert "Bold" in result["content"]
@@ -155,8 +155,8 @@ class TestFetchSuccess:
     def test_fetch_strips_script_tags(self):
         agent = WebAgent()
         html = "<html><body><script>alert('xss')</script><p>Safe</p></body></html>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert "alert" not in result["content"]
         assert "Safe" in result["content"]
@@ -164,16 +164,16 @@ class TestFetchSuccess:
     def test_fetch_strips_style_tags(self):
         agent = WebAgent()
         html = "<html><head><style>body{color:red}</style></head><body>Content</body></html>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert "color:red" not in result["content"]
 
     def test_fetch_not_truncated_for_short_content(self):
         agent = WebAgent()
         html = "<p>Short</p>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert result["truncated"] is False
 
@@ -181,23 +181,23 @@ class TestFetchSuccess:
         agent = WebAgent()
         # 6000 chars of text content (stripped HTML)
         html = "<p>" + "x" * 6000 + "</p>"
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert result["truncated"] is True
         assert len(result["content"]) <= 5000
 
     def test_fetch_url_in_result(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response("<p>hi</p>")):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response("<p>hi</p>")):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert result["url"] == "http://example.com/"
 
     def test_fetch_length_in_result(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", return_value=make_response("<p>hello</p>")):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", return_value=make_response("<p>hello</p>")):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert "length" in result
         assert isinstance(result["length"], int)
@@ -210,8 +210,8 @@ class TestFetchSuccess:
 class TestFetchErrors:
     def test_fetch_handles_url_error(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", return_value="1.2.3.4"), \
-             patch("urllib.request.urlopen", side_effect=URLError("connection refused")):
+        with patch("socket.getaddrinfo", return_value=[(0, 0, 0, "", ("1.2.3.4", 0))]), \
+             patch("urllib.request.OpenerDirector.open", side_effect=URLError("connection refused")):
             result = json.loads(agent.perform(action="fetch", url="http://example.com/"))
         assert result["status"] == "error"
 
@@ -222,8 +222,8 @@ class TestFetchErrors:
 
     def test_fetch_dns_failure_does_not_crash(self):
         agent = WebAgent()
-        with patch("socket.gethostbyname", side_effect=socket.gaierror("no such host")), \
-             patch("urllib.request.urlopen", side_effect=URLError("name resolution failed")):
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("no such host")), \
+             patch("urllib.request.OpenerDirector.open", side_effect=URLError("name resolution failed")):
             result = json.loads(agent.perform(action="fetch", url="http://nonexistent-domain-xyz.example/"))
         assert result["status"] == "error"
 
@@ -260,21 +260,21 @@ class TestSearchSuccess:
     def test_search_returns_success_status(self):
         agent = WebAgent()
         html = self._make_ddg_html(count=2)
-        with patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="search", query="python"))
         assert result["status"] == "success"
         assert result["action"] == "search"
 
     def test_search_returns_query_in_result(self):
         agent = WebAgent()
-        with patch("urllib.request.urlopen", return_value=make_response(self._make_ddg_html())):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response(self._make_ddg_html())):
             result = json.loads(agent.perform(action="search", query="openai"))
         assert result["query"] == "openai"
 
     def test_search_parses_results(self):
         agent = WebAgent()
         html = self._make_ddg_html(count=3)
-        with patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="search", query="test"))
         assert result["count"] == 3
         assert len(result["results"]) == 3
@@ -282,7 +282,7 @@ class TestSearchSuccess:
     def test_search_result_has_title_url_snippet(self):
         agent = WebAgent()
         html = self._make_ddg_html(count=1)
-        with patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="search", query="test"))
         entry = result["results"][0]
         assert "title" in entry
@@ -292,13 +292,13 @@ class TestSearchSuccess:
     def test_search_caps_results_at_10(self):
         agent = WebAgent()
         html = self._make_ddg_html(count=15)
-        with patch("urllib.request.urlopen", return_value=make_response(html)):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response(html)):
             result = json.loads(agent.perform(action="search", query="test"))
         assert result["count"] <= 10
 
     def test_search_empty_results_when_no_html_matches(self):
         agent = WebAgent()
-        with patch("urllib.request.urlopen", return_value=make_response("<html><body>nothing here</body></html>")):
+        with patch("urllib.request.OpenerDirector.open", return_value=make_response("<html><body>nothing here</body></html>")):
             result = json.loads(agent.perform(action="search", query="obscure"))
         assert result["count"] == 0
         assert result["results"] == []
@@ -311,6 +311,6 @@ class TestSearchSuccess:
 class TestSearchErrors:
     def test_search_handles_network_error(self):
         agent = WebAgent()
-        with patch("urllib.request.urlopen", side_effect=URLError("network error")):
+        with patch("urllib.request.OpenerDirector.open", side_effect=URLError("network error")):
             result = json.loads(agent.perform(action="search", query="test"))
         assert result["status"] == "error"

@@ -13,9 +13,10 @@ import ipaddress
 import json
 import re
 import socket
+import urllib.error
 import urllib.request
 from datetime import datetime
-from urllib.parse import urlparse, quote
+from urllib.parse import urljoin, urlparse, quote
 
 from openrappter.agents.basic_agent import BasicAgent
 
@@ -40,6 +41,13 @@ __manifest__ = {
     "quality_tier": "official",
     "requires_env": []
 }
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Stop urllib following redirects so each hop can be validated first."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 
 class WebAgent(BasicAgent):
     def __init__(self):
@@ -101,11 +109,32 @@ class WebAgent(BasicAgent):
                 "message": str(e)
             })
 
+    _ALLOWED_SCHEMES = ('http', 'https')
+    _MAX_REDIRECTS = 5
+
+    def _resolve_addresses(self, hostname):
+        """Every address a host answers with, IPv4 and IPv6.
+
+        `socket.gethostbyname` returns one IPv4 address and nothing else. A name
+        published only as AAAA raised gaierror and was waved through, and a name
+        answering with several addresses was judged by whichever came first.
+        `getaddrinfo` asks for all of them.
+        """
+        infos = socket.getaddrinfo(hostname, None)
+        return [info[4][0] for info in infos]
+
     def _validate_url(self, url):
         """Validate URL against SSRF attacks by checking for private IP ranges."""
         parsed = urlparse(url)
-        hostname = parsed.hostname
 
+        # A web fetcher has no business on any other scheme. urllib will happily
+        # open file:// and read from disk; that is currently refused only
+        # because such URLs have no hostname, which is an accident rather than a
+        # decision.
+        if parsed.scheme not in self._ALLOWED_SCHEMES:
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme or '(none)'}")
+
+        hostname = parsed.hostname
         if not hostname:
             raise ValueError(f"Invalid URL: {url}")
 
@@ -113,23 +142,56 @@ class WebAgent(BasicAgent):
         if hostname == 'localhost' or hostname.endswith('.local'):
             raise ValueError(f"Access to localhost blocked: {hostname}")
 
-        # Resolve hostname and check IP
+        # Resolve hostname and check every address it answers with
         try:
-            ip_str = socket.gethostbyname(hostname)
-            ip = ipaddress.ip_address(ip_str)
-
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
-                raise ValueError(f"Access to private IP range blocked: {hostname}")
+            addresses = self._resolve_addresses(hostname)
         except socket.gaierror:
             # If DNS resolution fails, let the fetch fail naturally
-            pass
+            return
+
+        for address in addresses:
+            ip = ipaddress.ip_address(address)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise ValueError(
+                    f"Access to private IP range blocked: {hostname} resolves to {address}"
+                )
+
+    def _open_validating_redirects(self, url):
+        """Open a URL, validating every hop rather than only the first.
+
+        `urlopen` follows redirects on its own, so the check above only ever
+        covered the URL the caller supplied. A public host replying
+        `302 Location: http://127.0.0.1:.../` had its target fetched and the
+        body returned — verified against a local pair of servers, which handed
+        back the internal service's content.
+
+        Redirects are resolved by hand so the same validation runs on each
+        target, with a hop limit so a redirect cycle cannot spin.
+        """
+        opener = urllib.request.build_opener(_NoRedirect)
+        target = url
+
+        for _ in range(self._MAX_REDIRECTS + 1):
+            self._validate_url(target)
+            req = urllib.request.Request(
+                target, headers={'User-Agent': 'OpenRappter/1.0'}
+            )
+            try:
+                return opener.open(req, timeout=10)
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (301, 302, 303, 307, 308):
+                    raise
+                location = exc.headers.get('Location')
+                if not location:
+                    raise
+                # Resolve a relative Location against the hop it came from.
+                target = urljoin(target, location)
+
+        raise ValueError(f"Too many redirects (limit {self._MAX_REDIRECTS}): {url}")
 
     def _fetch_url(self, url):
         """Fetch a URL and return stripped text content."""
-        self._validate_url(url)
-
-        req = urllib.request.Request(url, headers={'User-Agent': 'OpenRappter/1.0'})
-        response = urllib.request.urlopen(req, timeout=10)
+        response = self._open_validating_redirects(url)
 
         if response.status != 200:
             return json.dumps({

@@ -1,8 +1,52 @@
 """Shared fixtures for openrappter tests."""
 
 import json
+import sys
 import pytest
 from pathlib import Path
+
+#: Mirrors ``requires-python`` in pyproject.toml. Kept in sync by a test.
+MIN_PYTHON = (3, 10)
+
+
+def unsupported_python_message(version_info, executable="python3", platform=sys.platform):
+    """Explain an unsupported interpreter, or return ``None`` when it is fine.
+
+    macOS still ships 3.9 as ``/usr/bin/python3``, so this is the interpreter a
+    contributor gets by default. The suite does not merely fail there, it fails
+    *misleadingly*: ``GatewayServer.__init__`` constructs an ``asyncio.Lock()``,
+    and on 3.9 a Lock binds an event loop at construction, so once any earlier
+    test has finished an ``asyncio.run()`` — which clears the current loop — the
+    next construction raises
+
+        RuntimeError: There is no current event loop in thread 'MainThread'.
+
+    That reads like a product bug in the gateway. It is not; the loop parameter
+    was removed from ``asyncio.Lock`` in 3.10 and the binding became lazy. The
+    failure is also order-dependent, so the file passes 31/31 on its own and
+    fails only in a full run — which sends you looking for a race that is not
+    there. Say what is actually wrong instead.
+    """
+    if version_info >= MIN_PYTHON:
+        return None
+    running = ".".join(str(part) for part in version_info[:3])
+    wanted = ".".join(str(part) for part in MIN_PYTHON)
+    lines = [
+        f"openrappter requires Python {wanted}+ and this is {running} ({executable}).",
+        "",
+        "pyproject.toml declares requires-python = \">=%s\", so pip refuses to" % wanted,
+        "install here; running the suite from a source checkout is the one path that",
+        "gets this far. It would fail deep inside asyncio with",
+        "\"There is no current event loop\", which looks like a gateway bug and is not:",
+        f"asyncio.Lock binds a loop at construction before {wanted}.",
+    ]
+    if platform == "darwin":
+        lines += [
+            "",
+            "macOS ships 3.9 as /usr/bin/python3. Use a newer one, e.g.:",
+            "    brew install python@3.12 && python3.12 -m pytest tests/",
+        ]
+    return "\n".join(lines)
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +79,9 @@ def no_live_model_generation(monkeypatch, request):
 
 
 def pytest_configure(config):
+    message = unsupported_python_message(sys.version_info, sys.executable)
+    if message is not None:
+        pytest.exit(message, returncode=pytest.ExitCode.USAGE_ERROR)
     config.addinivalue_line(
         "markers", "live_model: test calls a real model and may be slow",
     )

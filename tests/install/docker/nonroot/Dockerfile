@@ -21,6 +21,11 @@ WORKDIR /home/testuser
 
 # Test: source the installer functions as non-root on Linux
 # This tests: OS detection, build tool detection, npm prefix logic, PATH helpers
+# Fresh systems default to git, not npm, since afa4649 ("chore: default install
+# method to git (npm publish paused)"). This asserted the pre-March npm default
+# and never caught the drift: the Docker jobs need [unit-tests, shellcheck], and
+# unit-tests was failing on the docs/install.sh sync, so this file had not run
+# in months.
 RUN bash -c '\
   export OPENRAPPTER_INSTALL_SH_NO_RUN=1 && \
   source /tmp/install.sh && \
@@ -52,7 +57,7 @@ RUN bash -c '\
   OPT_NO_PROMPT=true && \
   choose_install_method && \
   echo "chosen=$INSTALL_METHOD" && \
-  test "$INSTALL_METHOD" = "npm" && echo "default to npm on fresh system OK" && \
+  test "$INSTALL_METHOD" = "git" && echo "default to git on fresh system OK" && \
   echo "=== Taglines ===" && \
   tagline="$(pick_tagline)" && test -n "$tagline" && echo "pick_tagline OK" && \
   echo "=== All non-root Linux tests passed ==="'

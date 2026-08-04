@@ -158,6 +158,42 @@ function attributedBodyHex(content: string): string {
   ]).toString('hex');
 }
 
+/**
+ * Build an attributedBody of any length, including the multi-byte length
+ * prefixes real messages use.
+ *
+ * The helper above refuses anything over 0x7f, so every message longer than 127
+ * bytes decoded through code no test had ever run — which is most of them, on a
+ * modern macOS where the text lives in attributedBody rather than the `text`
+ * column.
+ */
+function longAttributedBodyHex(content: string, prefixOverride?: Buffer): string {
+  const text = Buffer.from(content, 'utf8');
+  const n = text.length;
+  let prefix: Buffer;
+  if (prefixOverride) {
+    prefix = prefixOverride;
+  } else if (n <= 0x7f) {
+    prefix = Buffer.from([n]);
+  } else if (n <= 0xff) {
+    prefix = Buffer.from([0x81, n]);
+  } else if (n <= 0xffff) {
+    prefix = Buffer.alloc(3);
+    prefix[0] = 0x82;
+    prefix.writeUInt16LE(n, 1);
+  } else {
+    prefix = Buffer.alloc(4);
+    prefix[0] = 0x83;
+    prefix.writeUIntLE(n, 1, 3);
+  }
+  return Buffer.concat([
+    Buffer.from('typedstream NSString metadata', 'utf8'),
+    Buffer.from([0x2b]),
+    prefix,
+    text,
+  ]).toString('hex');
+}
+
 describe('iMessage address normalization', () => {
   it('normalizes supported phones and emails deterministically', () => {
     expect(normalizeIMessageAddress('(555) 123-4567')).toBe('+15551234567');
@@ -183,6 +219,64 @@ describe('iMessage attributed body decoding', () => {
       .toBe('BLUE ORBIT 7421');
     expect(decodeAttributedBodyHex('not-hex')).toBeNull();
     expect(decodeAttributedBodyHex('00ff')).toBeNull();
+  });
+});
+
+describe('attributed body length prefixes', () => {
+  // Every case here exercises a branch that no test reached. Breaking the 0x81
+  // branch, reading 0x82 big-endian instead of little-endian, deleting the 0x83
+  // branch, or removing the bounds guard entirely all left the full suite green.
+
+  it.each([
+    ['127 bytes, length in the prefix byte', 127],
+    ['128 bytes, the first length needing 0x81', 128],
+    ['255 bytes, the largest 0x81 length', 255],
+    ['256 bytes, the first length needing 0x82', 256],
+    ['3000 bytes, a realistic long reply', 3000],
+    ['65535 bytes, the largest 0x82 length', 65535],
+    ['65536 bytes, the first length needing 0x83', 65536],
+  ])('round-trips %s', (_label, size) => {
+    const content = 'a'.repeat(size);
+    expect(decodeAttributedBodyHex(longAttributedBodyHex(content))).toBe(content);
+  });
+
+  it('measures the length in bytes, not characters', () => {
+    // 40 emoji are 160 bytes but 40 code points. A decoder that used character
+    // count would read the wrong number of bytes and truncate mid-sequence.
+    const emoji = '\u{1F600}'.repeat(40);
+    expect(Buffer.from(emoji, 'utf8').length).toBe(160);
+    expect(decodeAttributedBodyHex(longAttributedBodyHex(emoji))).toBe(emoji);
+
+    const accented = '\u00e9'.repeat(100);
+    expect(Buffer.from(accented, 'utf8').length).toBe(200);
+    expect(decodeAttributedBodyHex(longAttributedBodyHex(accented))).toBe(accented);
+  });
+
+  it('refuses a length that runs past the end of the blob', () => {
+    // The bounds guard is what stands between a malformed blob and returning
+    // whatever bytes happen to follow.
+    const overlong = Buffer.alloc(3);
+    overlong[0] = 0x82;
+    overlong.writeUInt16LE(0xffff, 1);
+
+    expect(decodeAttributedBodyHex(longAttributedBodyHex('short', overlong))).toBeNull();
+  });
+
+  it('refuses a truncated multi-byte length prefix', () => {
+    for (const marker of [0x81, 0x82, 0x83]) {
+      const hex = Buffer.concat([
+        Buffer.from('typedstream NSString metadata', 'utf8'),
+        Buffer.from([0x2b, marker]),
+      ]).toString('hex');
+      expect(decodeAttributedBodyHex(hex), `marker 0x${marker.toString(16)}`).toBeNull();
+    }
+  });
+
+  it('reads a 0x82 length little-endian', () => {
+    // 0x0100 little-endian is 256; big-endian it would be 1, and the decoder
+    // would return a single character instead of the message.
+    const content = 'b'.repeat(256);
+    expect(decodeAttributedBodyHex(longAttributedBodyHex(content))).toBe(content);
   });
 });
 

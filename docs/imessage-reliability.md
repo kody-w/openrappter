@@ -95,3 +95,58 @@ Every release must cover:
 Gateway ownership uses a dedicated SQLite `BEGIN EXCLUSIVE` transaction, which
 is released by the kernel on process death. `gateway.pid` remains advisory for
 the installer and is never the ownership primitive.
+
+## Sending attachments
+
+`send <alias> to <buddy>` in AppleScript returns cleanly and creates a real row
+in `chat.db`, but the attachment may never transfer. Twenty-four consecutive
+video sends failed this way over six days while every script reported success.
+
+A failed transfer is legible in `chat.db` and nowhere else:
+
+| field | delivered | failed |
+| --- | --- | --- |
+| `message.is_sent` | 1 | 0 |
+| `message.error` | 0 | 25 |
+| `attachment.transfer_state` | 5 | 6 |
+| `attachment.filename` | rewritten under `~/Library/Messages/Attachments/` | still the source path |
+
+The last row is the quickest check: on success Messages copies the file into its
+own store and rewrites the path, so a filename that still points at `~/Desktop`
+means the file was never ingested.
+
+The cause is `imagent`, which performs the transfer and cannot open the source
+file. Streaming its log during a send shows, repeatedly:
+
+```
+imagent (libcopyfile.dylib) open on /tmp/clip.mp4: Operation not permitted
+```
+
+`EPERM`, not `EACCES`, on a mode-0644 file: a sandbox refusal, not a POSIX one.
+`imagent` carries no general file-read grant. Its entitlements include
+`kTCCServicePhotos` and `kTCCServiceMediaLibrary`, which cover `~/Pictures`, and
+that is the entire rule. One send per location:
+
+| location | result |
+| --- | --- |
+| `~/Pictures` | `is_sent=1 error=0` |
+| `/tmp` | `error=25` |
+| `~/Desktop` | `error=25` |
+| `~/Documents` | `error=25` |
+| `~/Downloads` | `error=25` |
+| `~/Movies` | `error=25` |
+| `/Users/Shared` | `error=25` |
+
+**There is no permission to grant.** `imagent` is an Apple system daemon; it does
+not appear in Full Disk Access, and no Files-and-Folders entry exists for it or
+for Messages. Giving the calling process more access changes nothing, because
+the process that cannot open the file is `imagent`. Sending by hand has always
+worked because dragging a file into the Messages window hands `imagent` a
+powerbox grant for that one file, which an AppleScript send never obtains.
+
+Use `scripts/send-attachment.sh`, which stages the file in `~/Pictures`, sends,
+cleans up, and confirms delivery against `chat.db` rather than trusting the
+`osascript` exit code — the assumption that hid this for six days.
+
+Neither size nor file type is involved: successful sends have reached 478 MB,
+and a 311-byte PNG failed from `/tmp`.

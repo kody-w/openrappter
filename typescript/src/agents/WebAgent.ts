@@ -11,6 +11,11 @@ import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import { lookup } from 'dns/promises';
 
+import {
+  assertFetchableUrl,
+  assertHostResolvesPublicly,
+} from '../net/url-guard.js';
+
 
 export const __manifest__ = {
   schema: 'rapp-agent/1.0',
@@ -103,6 +108,11 @@ export class WebAgent extends BasicAgent {
 
   private static readonly MAX_REDIRECTS = 5;
 
+  /** Shared with ImageAgent so the two cannot drift apart again. */
+  private validateUrl(url: string): void {
+    assertFetchableUrl(url);
+  }
+
   /**
    * Test seam. Which loopback address a name resolves to is a property of the
    * machine, not of this code: `localtest.me` gives 127.0.0.1 on one host and
@@ -112,98 +122,8 @@ export class WebAgent extends BasicAgent {
     return lookup(hostname, { all: true });
   }
 
-  private static readonly BLOCKED_HOST_PATTERNS = [
-    /^10\./,
-    /^172\.(1[6-9]|2[0-9]|3[01])\./,
-    /^192\.168\./,
-    /^127\./,
-    /^0\./,
-    /^169\.254\./,
-    /^::1$/,
-    /^::$/,
-    /^fc[0-9a-f]{2}:/,
-    /^fd[0-9a-f]{2}:/,
-    /^fe80:/,
-  ];
-
-  /**
-   * Reduce a URL hostname or a resolved address to something the patterns can
-   * match.
-   *
-   * `URL.hostname` keeps the brackets on an IPv6 literal, so `http://[::1]/`
-   * arrives as `"[::1]"` and `/^::1$/` never fires. Every IPv6 rule in this
-   * list was unreachable for that reason — `[::1]`, `[fe80::1]` and
-   * `[::ffff:127.0.0.1]` were all allowed through.
-   *
-   * IPv4-mapped addresses are folded back to dotted quad so the IPv4 rules
-   * apply to them: `::ffff:7f00:1` is 127.0.0.1 wearing a different hat.
-   */
-  private static normaliseHost(host: string): string {
-    const bare = host.replace(/^\[/, '').replace(/\]$/, '').toLowerCase();
-
-    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(bare);
-    if (mapped) {
-      const high = parseInt(mapped[1], 16);
-      const low = parseInt(mapped[2], 16);
-      return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
-    }
-    const mappedDotted = /^::ffff:((?:[0-9]{1,3}\.){3}[0-9]{1,3})$/.exec(bare);
-    if (mappedDotted) return mappedDotted[1];
-
-    return bare;
-  }
-
-  private static isBlockedHost(host: string): boolean {
-    const normalised = WebAgent.normaliseHost(host);
-    if (normalised === 'localhost' || normalised.endsWith('.local')) return true;
-    return WebAgent.BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(normalised));
-  }
-
-  private validateUrl(url: string): void {
-    const parsed = new URL(url);
-
-    // A web fetcher has no business on any other scheme. `data:` URLs are
-    // fetchable by Node and would let a caller feed arbitrary content back to
-    // the model as though it had been retrieved; `file:` is refused by fetch
-    // today, which is a property of fetch rather than a decision made here.
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Unsupported URL scheme: ${parsed.protocol}`);
-    }
-
-    if (WebAgent.isBlockedHost(parsed.hostname)) {
-      throw new Error(`Access to private IP range blocked: ${parsed.hostname}`);
-    }
-  }
-
-  /**
-   * Resolve the host and check where it actually points.
-   *
-   * The checks above read the hostname as text, so any public name that
-   * resolves inward walked straight past them. `localtest.me` is a real public
-   * DNS name that resolves to 127.0.0.1, and fetching it returned the body of a
-   * loopback server on this machine — the whole protection bypassed without a
-   * redirect or a malformed address.
-   *
-   * DNS can still change between this lookup and the connection. That race is
-   * narrower than the hole it closes, and closing it completely means pinning
-   * the resolved address through the socket, which fetch does not expose.
-   */
   private async assertHostResolvesPublicly(url: string): Promise<void> {
-    const { hostname } = new URL(url);
-    let resolved: Array<{ address: string }>;
-    try {
-      resolved = await this.lookupHost(hostname);
-    } catch {
-      return;  // Unresolvable; fetch will fail on its own terms.
-    }
-
-    for (const { address } of resolved) {
-      if (WebAgent.isBlockedHost(address)) {
-        throw new Error(
-          `Access to private IP range blocked: ${hostname} resolves to ${address}`,
-        );
-      }
-    }
+    await assertHostResolvesPublicly(url, hostname => this.lookupHost(hostname));
   }
 
   private async fetchWithValidatedRedirects(url: string): Promise<Response> {

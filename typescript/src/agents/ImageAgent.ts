@@ -9,6 +9,7 @@
 
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
+import { assertFetchableUrl } from '../net/url-guard.js';
 
 
 export const __manifest__ = {
@@ -139,32 +140,14 @@ export class ImageAgent extends BasicAgent {
     }
   }
 
+  /**
+   * Shared with WebAgent. This was a character-for-character copy of that
+   * agent's checks, and when openrappter#72 fixed those, this one kept every
+   * hole: `http://[::1]/`, `http://localtest.me/`, `file://` and `data:` were
+   * all accepted here while the identical-looking function next door refused
+   * them.
+   */
   private validateUrl(url: string): void {
-    const parsed = new URL(url);
-    const hostname = parsed.hostname;
-
-    // Block private IP ranges (SSRF protection)
-    const privatePatterns = [
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[01])\./,
-      /^192\.168\./,
-      /^127\./,
-      /^0\./,
-      /^169\.254\./,
-      /^::1$/,
-      /^fc00:/,
-      /^fe80:/,
-    ];
-
-    for (const pattern of privatePatterns) {
-      if (pattern.test(hostname)) {
-        throw new Error(`Access to private IP range blocked: ${hostname}`);
-      }
-    }
-
-    // Block localhost
-    if (hostname === 'localhost' || hostname.endsWith('.local')) {
-      throw new Error(`Access to localhost blocked: ${hostname}`);
-    }
+    assertFetchableUrl(url);
   }
 }

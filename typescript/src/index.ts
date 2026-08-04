@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
-import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
+import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
@@ -1890,6 +1890,10 @@ imessageCommand
     }
     console.log(`${EMOJI} iMessage diagnostics: ${result.ready ? 'ready' : 'not ready'}`);
     console.log(`  Configured allowlist entries: ${result.allowlistEntries}`);
+    // Name the files that actually contributed. A zero allowlist because the
+    // config landed in a file this path never reads is indistinguishable from
+    // 'you forgot to configure it' without this line.
+    console.log(`  Config sources: ${(await resolvedConfigSources()).join(', ') || 'none found'}`);
     console.log(`  Messages database: ${result.databaseQueryable ? 'readable' : 'unavailable'}`);
     console.log(`  Messages automation: ${result.automationAvailable ? 'available' : 'unavailable'}`);
     console.log(`  Copilot token: ${result.tokenConfigured ? 'configured' : 'missing'}`);

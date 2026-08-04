@@ -10,6 +10,10 @@ session.
 
 Add this to `~/.openrappter/config.json`:
 
+> This file, not `config.json5`. The iMessage paths read `config.json`, while
+> the Zod config schema describes `config.json5` — configuration placed in the
+> latter is silently ignored ([#43](https://github.com/kody-w/openrappter/issues/43)).
+
 ```json
 {
   "channels": {
@@ -73,11 +77,75 @@ The process that actually owns the GUI LaunchAgent needs:
 
 1. **Full Disk Access** to read `~/Library/Messages/chat.db`.
 2. **Automation → Messages** access to send with Apple Events.
-3. A valid **GitHub Copilot token** available through OpenRappter's private
-   `.env` file or GitHub CLI authentication.
+3. A **GitHub Copilot token that the service itself can resolve** — see below.
 
 Run `imessage diagnose` after changing permissions. A terminal foreground probe
 does not prove that a background launch identity has the same TCC grants.
+
+### The token must be resolvable by the service, not just by your shell
+
+This is the most common fresh-install failure, and it looks like a model
+problem rather than a credential one.
+
+The `openrappter` wrapper script sources `~/.openrappter/.env` before exec, so
+every interactive command sees that token. **launchd does not.** It executes
+`node` directly with a fixed environment (`HOME`, `PATH`, `NODE_ENV`,
+`OPENRAPPTER_LAUNCHD`), so a token that lives only in `.env` never reaches the
+supervised daemon. The service then fails its model preflight forever, retrying
+every 60 seconds, and reports:
+
+```
+ready=false  reason=model_preflight_failed
+```
+
+Two further traps:
+
+- `imessage diagnose` prints `Copilot token: configured` when **the CLI
+  process** can resolve a token. The CLI has already been fed `.env` by the
+  wrapper, so this line can read green while the daemon that actually runs the
+  channel has nothing. Treat it the same way as the TCC caveat above: a
+  foreground probe does not prove the background identity is configured.
+- `gh auth token` commonly returns a `gho_` OAuth-App token, which has **no
+  Copilot access** — the exchange returns 401. Copilot requires a `ghu_` token
+  from a device-code flow.
+
+The reliable path is to make the token resolvable from OpenRappter's own
+credential stores, which the service reads at startup regardless of how it was
+launched: sign in through OpenRappter's device-code flow so a `copilot` profile
+is written to `~/.openrappter/auth-profiles.json`, then restart the service.
+`resolveGithubToken()` consults, in order, `COPILOT_GITHUB_TOKEN`, the cached
+credentials file, the auth profile store, and finally `.env`.
+
+Verify the service — not your shell — actually recovered:
+
+```bash
+node dist/index.js imessage diagnose      # expect: ready
+```
+
+## Troubleshooting a fresh install
+
+| Symptom | Actual cause |
+| --- | --- |
+| `channel_disabled`, `allowlist_empty` while your config looks correct | The iMessage paths read `~/.openrappter/config.json`. Config placed in `config.json5` is silently ignored, even though the Zod schema describes that file. |
+| `model_preflight_failed`, but the same `copilot --prompt …` command works in your terminal | The token is only in `.env`, which launchd does not source. See above. |
+| `install-service` reports `live, ready`, yet iMessage never becomes ready | Something else already owns the gateway. `install-service` sees a listener on the port and reports it, even when that process is not the agent it installed. |
+| Agent log repeats `Another OpenRappter gateway already owns the runtime lock` and `launchctl list` shows `last exit code = 1` | Another supervisor holds the exclusive gateway lock. Expected briefly during the documented system-daemon → GUI-agent handoff; persistent looping means the handoff never completed. |
+| An allowlisted contact gets no reply in a group thread | Working as designed. Only 1:1 conversations are authorized; see below. |
+
+## Allowlist semantics
+
+Worth stating explicitly, because it is the safety property people ask about
+before enabling this:
+
+- **Inbound** requires the normalized sender to be in `allowFrom` *and* the
+  conversation to have exactly one participant. Group chats are refused even
+  when an allowlisted person posts in them.
+- **Outbound** requires the recipient to be in `allowFrom` *and* to be an
+  already-established 1:1 reply target. The assistant cannot initiate a
+  conversation, message a stranger, or post into a group thread.
+- An empty `allowFrom` fails closed, so that list is the only thing that widens
+  reach.
+
 
 ## Mobile commands
 

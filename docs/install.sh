@@ -352,6 +352,20 @@ ui_stage() {
     ui_section "[${INSTALL_STAGE_CURRENT}/${INSTALL_STAGE_TOTAL}] ${title}"
 }
 
+# Set expectations before the first long step.
+#
+# The most common "it's broken" report is someone hitting Ctrl-C during a
+# perfectly healthy `pip install`. Saying up front how long this takes, and
+# that a spinner means progress, costs one line and prevents that.
+ui_patience_notice() {
+    [[ "$DRY_RUN" == "1" ]] && return 0
+    echo ""
+    echo -e "${MUTED}This part downloads and builds things, so it can take 1-5 minutes.${NC}"
+    echo -e "${MUTED}A spinner with a running clock means it is working — please don't quit.${NC}"
+    echo -e "${MUTED}Nothing is stuck unless the clock stops.${NC}"
+    echo ""
+}
+
 ui_kv() {
     local key="$1"
     local value="$2"
@@ -442,7 +456,146 @@ run_with_spinner() {
         return $?
     fi
 
-    "$@"
+    # No gum. A shell function must run in this shell to keep the state it
+    # sets, so it cannot be backgrounded — but it can still be announced.
+    if is_shell_function "${1:-}"; then
+        printf '%b·%b %s ...\n' "$MUTED" "$NC" "$title"
+        "$@"
+        return $?
+    fi
+
+    # In verbose mode the user asked to see the output, so let it through and
+    # just bracket it with a timed line rather than hiding it behind a spinner.
+    if [[ "${VERBOSE:-0}" == "1" ]]; then
+        printf '%b·%b %s ...\n' "$MUTED" "$NC" "$title"
+        local start=$SECONDS rc=0
+        "$@" || rc=$?
+        if (( rc == 0 )); then
+            printf '%b✓%b %s %b(%ds)%b\n' "$SUCCESS" "$NC" "$title" "$MUTED" "$((SECONDS - start))" "$NC"
+        fi
+        return $rc
+    fi
+
+    local log
+    log="$(mktempfile)"
+    run_with_progress "$title" "$log" "$@"
+}
+
+# ── Progress for long, silent steps ──────────────────────────────────────
+#
+# Most people install without gum, and the old fallback ran the command with no
+# output at all. `pip install` and `npm install -g` can sit silent for minutes,
+# which looks exactly like a hang — so people hit Ctrl-C and report it broken.
+#
+# This shows a live spinner with elapsed time, and after a while says out loud
+# that slow is expected. Everything degrades: no TTY prints plain progress
+# lines, so piped and CI output stays readable.
+
+SPINNER_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+# Steps that genuinely take minutes, so the copy can say so up front.
+step_is_slow() {
+    case "$1" in
+        *pip*|*Python*|*python*|*venv*|*npm*|*node*|*Node*|*download*|*Download*|*build*|*Build*|*Xcode*|*brew*)
+            return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Reassurance shown while a slow step runs, so silence reads as normal.
+spinner_reassurance() {
+    local elapsed="$1" title="$2"
+    if (( elapsed >= 180 )); then
+        printf 'still working — large downloads can take several minutes'
+    elif (( elapsed >= 60 )); then
+        if step_is_slow "$title"; then
+            printf 'this one is slow by nature — safe to leave running'
+        else
+            printf 'still going'
+        fi
+    elif (( elapsed >= 20 )); then
+        printf 'working'
+    fi
+}
+
+# Run a command with a live progress indicator. Returns the command's status.
+run_with_progress() {
+    local title="$1" log="$2"
+    shift 2
+
+    if ! gum_is_tty || [[ ! -t 1 && ! -t 2 ]]; then
+        # Not a terminal: no cursor tricks, just say what is happening. A
+        # heartbeat keeps CI logs from looking stalled too.
+        printf '%b·%b %s ... ' "$MUTED" "$NC" "$title"
+        local start_plain=$SECONDS
+        "$@" >"$log" 2>&1 &
+        local pid_plain=$!
+        local ticks=0
+        while kill -0 "$pid_plain" 2>/dev/null; do
+            sleep 1
+            ticks=$((ticks + 1))
+            # A heartbeat every 30s, so a piped or CI log never looks stalled
+            # without drowning it in noise.
+            if (( ticks % 30 == 0 )); then
+                printf '[%ds] ' "$((SECONDS - start_plain))"
+            fi
+        done
+        wait "$pid_plain"
+        local status_plain=$?
+        if (( status_plain == 0 )); then
+            printf 'done (%ds)\n' "$((SECONDS - start_plain))"
+        else
+            printf 'failed (%ds)\n' "$((SECONDS - start_plain))"
+        fi
+        return $status_plain
+    fi
+
+    "$@" >"$log" 2>&1 &
+    local pid=$!
+    local start=$SECONDS
+    local frame=0
+
+    # Never leave the cursor hidden if the user interrupts.
+    printf '\033[?25l'
+    trap 'printf "\033[?25h\n"; exit 130' INT TERM
+
+    while kill -0 "$pid" 2>/dev/null; do
+        local elapsed=$((SECONDS - start))
+        local char="${SPINNER_FRAMES:frame%10:1}"
+        local note
+        note="$(spinner_reassurance "$elapsed" "$title")"
+
+        if (( elapsed >= 10 )); then
+            printf '\r\033[K%b%s%b %s %b(%ds%s)%b' \
+                "$ACCENT" "$char" "$NC" "$title" \
+                "$MUTED" "$elapsed" "${note:+ · $note}" "$NC"
+        else
+            printf '\r\033[K%b%s%b %s' "$ACCENT" "$char" "$NC" "$title"
+        fi
+
+        frame=$((frame + 1))
+        sleep 0.1
+    done
+
+    wait "$pid"
+    local status=$?
+    local total=$((SECONDS - start))
+
+    trap - INT TERM
+    printf '\033[?25h'
+    printf '\r\033[K'
+
+    if (( status == 0 )); then
+        if (( total >= 5 )); then
+            printf '%b✓%b %s %b(%ds)%b\n' "$SUCCESS" "$NC" "$title" "$MUTED" "$total" "$NC"
+        else
+            printf '%b✓%b %s\n' "$SUCCESS" "$NC" "$title"
+        fi
+    else
+        printf '%b✗%b %s %b(%ds)%b\n' "$ERROR" "$NC" "$title" "$MUTED" "$total" "$NC"
+    fi
+
+    return $status
 }
 
 run_quiet_step() {
@@ -462,11 +615,20 @@ run_quiet_step() {
         local log_quoted=""
         printf -v cmd_quoted '%q ' "$@"
         printf -v log_quoted '%q' "$log"
-        if run_with_spinner "$title" bash -c "${cmd_quoted}>${log_quoted} 2>&1"; then
+        if "$GUM" spin --spinner dot --title "$title" -- bash -c "${cmd_quoted}>${log_quoted} 2>&1"; then
+            return 0
+        fi
+    elif is_shell_function "${1:-}"; then
+        # A shell function cannot be backgrounded into a subshell without
+        # losing the state it sets, so it runs inline — announced, not silent.
+        printf '%b·%b %s ...\n' "$MUTED" "$NC" "$title"
+        if "$@" >"$log" 2>&1; then
+            ui_success "$title"
             return 0
         fi
     else
-        if "$@" >"$log" 2>&1; then
+        # run_with_progress prints its own ✓/✗ line with timing.
+        if run_with_progress "$title" "$log" "$@"; then
             return 0
         fi
     fi
@@ -2256,6 +2418,7 @@ main() {
 
     # ── Stage 3: Install openrappter ──
     ui_stage "Installing openrappter"
+    ui_patience_notice
 
     if [[ "$INSTALL_METHOD" == "npm" ]]; then
         install_via_npm

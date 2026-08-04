@@ -30,6 +30,8 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from openrappter.security.secret_keys import is_secret_key
+
 # Mutually-exclusive classification of a single RPC dispatch attempt.
 RPC_OUTCOMES = ("success", "error", "auth_failure", "rate_limited", "timeout")
 
@@ -152,7 +154,6 @@ class GatewayMetrics:
 
 # ── Structured logging ───────────────────────────────────────────────────
 
-_SECRET_KEY_PATTERN = re.compile(r"token|password|secret|credential|authorization", re.IGNORECASE)
 
 
 def _is_json_log_format() -> bool:
@@ -169,7 +170,7 @@ def _redact_fields(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     for key, value in fields.items():
         if value is None:
             continue
-        safe[key] = "[REDACTED]" if _SECRET_KEY_PATTERN.search(key) else value
+        safe[key] = "[REDACTED]" if is_secret_key(key) else value
     return safe
 
 

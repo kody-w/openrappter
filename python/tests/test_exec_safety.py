@@ -2,8 +2,35 @@
 approval tokens — and its wiring into ShellAgent's real bash execution path."""
 
 import json
+import time
 
 import pytest
+
+from openrappter.security import exec_safety as exec_safety_module
+
+
+class _Clock:
+    """A clock ExecSafety reads, so TTL is tested by moving time, not sleeping.
+
+    Per-test state: an offset shared between tests silently expires tokens that
+    were meant to be fresh, which is how the first version of these tests
+    produced a false failure.
+    """
+
+    def __init__(self, monkeypatch):
+        self._base = time.time()
+        self._offset = 0.0
+        monkeypatch.setattr(
+            exec_safety_module.time, 'time', lambda: self._base + self._offset
+        )
+
+    def advance(self, seconds: float) -> None:
+        self._offset += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    return _Clock(monkeypatch)
 
 from openrappter.security.exec_safety import ExecSafety, create_exec_safety
 from openrappter.agents.shell_agent import ShellAgent
@@ -123,6 +150,73 @@ class TestApprovalTokens:
         replay = safety.consume_approval_token(token.id, 'rm -rf /tmp/scratch')
         assert replay.ok is False
         assert 'already used' in replay.reason
+
+    # --- TTL ---
+    #
+    # An approval token carries a deadline (default 300s) so that a human's
+    # "yes" cannot be banked and spent later. Every other property of these
+    # tokens was covered — replay, command binding, pending, rejected — but
+    # nothing exercised the clock. Two independent mutations, deleting the
+    # expiry branch in consume_approval_token and deleting the lazy transition
+    # that sets it, each left the whole suite green while an expired token was
+    # accepted and a dangerous command ran on stale consent.
+
+    def test_expired_token_is_refused_even_after_approval(self, safety, clock):
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+        assert safety.resolve_approval_token(token.id, True) is True
+
+        clock.advance(301)
+
+        result = safety.consume_approval_token(token.id, 'rm -rf /tmp/whatever')
+        assert result.ok is False
+        assert 'expired' in (result.reason or '').lower()
+
+    def test_consuming_an_expired_token_records_it_as_expired(self, safety, clock):
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+        safety.resolve_approval_token(token.id, True)
+        clock.advance(301)
+
+        safety.consume_approval_token(token.id, 'rm -rf /tmp/whatever')
+
+        assert safety.get_approval_token(token.id).status == 'expired'
+
+    def test_a_token_inside_its_ttl_still_works(self, safety, clock):
+        """Positive control: without it, the refusals above would pass if
+        consume_approval_token simply always failed."""
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+        safety.resolve_approval_token(token.id, True)
+
+        clock.advance(299)
+
+        assert safety.consume_approval_token(token.id, 'rm -rf /tmp/whatever').ok is True
+
+    def test_approval_cannot_be_granted_after_the_deadline(self, safety, clock):
+        """The deadline binds the approver too, not only the consumer."""
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+
+        clock.advance(301)
+
+        assert safety.resolve_approval_token(token.id, True) is False
+        assert safety.get_approval_token(token.id).status == 'expired'
+
+    def test_an_expired_token_cannot_be_revived_by_approving_it_again(self, safety, clock):
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+        clock.advance(301)
+        safety.resolve_approval_token(token.id, True)
+
+        # Even if the clock is wound back, an expired token stays expired.
+        clock.advance(-300)
+        assert safety.resolve_approval_token(token.id, True) is False
+        assert safety.consume_approval_token(token.id, 'rm -rf /tmp/whatever').ok is False
+
+    def test_expiry_is_reported_ahead_of_the_command_mismatch(self, safety, clock):
+        """A stale token must not leak whether some other command would match."""
+        token = safety.issue_approval_token('rm -rf /tmp/whatever', ttl_seconds=300.0)
+        safety.resolve_approval_token(token.id, True)
+        clock.advance(301)
+
+        result = safety.consume_approval_token(token.id, 'echo something-else')
+        assert 'expired' in (result.reason or '').lower()
 
     def test_unknown_token_rejected(self, safety):
         result = safety.consume_approval_token('nonexistent', 'echo hi')

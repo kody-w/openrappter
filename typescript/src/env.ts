@@ -43,6 +43,30 @@ export async function loadEnv(filePath: string = ENV_FILE): Promise<Record<strin
   }
 }
 
+/**
+ * Copy `~/.openrappter/.env` into `process.env` for keys that are not already
+ * set, and report which keys were applied.
+ *
+ * The `openrappter` shell wrapper sources `.env` before exec, so every
+ * interactive command sees it. launchd does not — it runs `node` directly with
+ * a fixed environment — so a supervised gateway started with none of it, the
+ * Copilot provider had no credential, and the iMessage model preflight failed
+ * forever while `diagnose` (running under the wrapper) reported the token as
+ * configured. Existing values always win, so this can never override a
+ * deliberately exported variable.
+ */
+export async function hydrateManagedEnv(filePath: string = ENV_FILE): Promise<string[]> {
+  const applied: string[] = [];
+  const managed = await loadEnv(filePath);
+  for (const [key, value] of Object.entries(managed)) {
+    if (!process.env[key]) {
+      process.env[key] = value;
+      applied.push(key);
+    }
+  }
+  return applied;
+}
+
 export async function saveEnv(env: Record<string, string>, filePath: string = ENV_FILE): Promise<void> {
   const dir = path.dirname(filePath);
   await fs.mkdir(dir, { recursive: true });

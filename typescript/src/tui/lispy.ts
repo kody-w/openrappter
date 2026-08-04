@@ -204,13 +204,25 @@ function evaluate(expr: LispVal, env: Env): LispVal {
       if (bvx === 0) return by;
       const ticks = (tx - bx) / bvx;
       if (ticks < 0) return by; // ball going away
-      let py = by + bvy * ticks;
-      // Bounce simulation
-      while (py < 0 || py >= fh) {
-        if (py < 0) py = -py;
-        if (py >= fh) py = 2 * (fh - 1) - py;
-      }
-      return py;
+      const py = by + bvy * ticks;
+      // Reflect into [0, fh - 1].
+      //
+      // This was a loop that repeatedly folded `py` back across each edge, and
+      // it could not always finish. With a field height of 1 the two folds undo
+      // each other, so `py` oscillates forever; with a height of 0 or less, or
+      // a fractional one, it diverges instead — at fh = 0 it walked to -200005
+      // in 100k iterations and kept going. Field height reaches here as a plain
+      // argument from a lispy program, so a script could spin the process.
+      //
+      // The fold is a triangle wave, which has a closed form. Verified against
+      // the loop over every integer position from -500 to 500 for heights 2 to
+      // 40 — 39,039 cases, no disagreement — so this is the same answer without
+      // the unbounded iteration.
+      const span = fh - 1;
+      if (!(span > 0)) return 0;
+      const period = 2 * span;
+      const folded = ((py % period) + period) % period;
+      return folded > span ? period - folded : folded;
     }
 
     default:

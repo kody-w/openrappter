@@ -378,6 +378,131 @@ describe('IMessageChannel Apple transport', () => {
     expect(harness.stateStore.value?.appleRowId).toBe(12);
   });
 
+  it('rejects a sender who is not on the allowlist', async () => {
+    // The allowlist is the primary control on who can reach the model at all.
+    // Until this test existed, deleting `allowedSenders.has(...)` from
+    // authorizeSender broke only a test about ROWID *ordering* — the property
+    // was protected by accident rather than on purpose.
+    const harness = appleHarness({
+      rows: [appleRow(11, { sender: '+15559999999' })],
+      allowFrom: ['(555) 123-4567'],
+    });
+    const delivered: string[] = [];
+    harness.channel.onMessage(async message => {
+      delivered.push(message.id);
+    });
+
+    await harness.channel.connect();
+    await harness.channel.pollNow();
+
+    expect(delivered).toEqual([]);
+    // Still acknowledged, so an unauthorized sender cannot wedge the cursor.
+    expect(harness.stateStore.value?.appleRowId).toBe(11);
+  });
+
+  it('refuses to send to an address that is not on the allowlist', async () => {
+    const harness = appleHarness({ rows: [appleRow(11)] });
+    harness.channel.onMessage(async () => undefined);
+    await harness.channel.connect();
+    await harness.channel.pollNow();
+
+    await expect(
+      harness.channel.send('+15559999999', { channel: 'imessage', content: 'hi' }),
+    ).rejects.toThrow(/not authorized/);
+
+    expect(
+      harness.calls.filter(call => call.executable === 'osascript' && call.args.length === 4),
+    ).toHaveLength(0);
+  });
+
+  it('refuses to open a conversation with an allowlisted address that never wrote first', async () => {
+    // Being on the allowlist grants the right to be *answered*, not to be
+    // contacted. Without this, an allowlisted address could be cold-messaged by
+    // anything that can reach send() — which is the difference between a reply
+    // bot and an outbound sender.
+    const harness = appleHarness({ rows: [] });
+    harness.channel.onMessage(async () => undefined);
+    await harness.channel.connect();
+
+    await expect(
+      harness.channel.send('(555) 123-4567', { channel: 'imessage', content: 'hi' }),
+    ).rejects.toThrow(/not authorized/);
+
+    expect(
+      harness.calls.filter(call => call.executable === 'osascript' && call.args.length === 4),
+    ).toHaveLength(0);
+  });
+
+  it('a group message does not establish a reply target for its sender', async () => {
+    // The two guards compose: a group message is refused on the way in, so it
+    // must not leave behind permission to send on the way out. Testing them
+    // separately would miss this.
+    const harness = appleHarness({
+      rows: [appleRow(11, { participant_count: 4 })],
+    });
+    harness.channel.onMessage(async () => undefined);
+    await harness.channel.connect();
+    await harness.channel.pollNow();
+
+    await expect(
+      harness.channel.send('(555) 123-4567', { channel: 'imessage', content: 'hi' }),
+    ).rejects.toThrow(/not authorized/);
+  });
+
+  it('only ever becomes willing to reply to senders that passed authorization', async () => {
+    // The egress allowlist check is redundant *given* this invariant: the only
+    // writer of allowedReplyTargets is authorizeSender, which already requires
+    // allowlist membership, and the config cannot be mutated at runtime. That
+    // makes the redundancy unreachable rather than untested — deleting it
+    // cannot be caught by any behavioural test.
+    //
+    // What can be pinned is the invariant itself. If a future change ever
+    // populates reply targets from another path, this fails and the redundant
+    // check stops being redundant.
+    const harness = appleHarness({
+      rows: [
+        appleRow(11, { sender: '+15551234567', participant_count: 1 }),   // authorized
+        appleRow(12, { sender: '+15551234567', participant_count: 5 }),   // group
+        appleRow(13, { sender: '+15559999999', participant_count: 1 }),   // not allowlisted
+      ],
+      allowFrom: ['(555) 123-4567'],
+    });
+    harness.channel.onMessage(async () => undefined);
+    await harness.channel.connect();
+    await harness.channel.pollNow();
+
+    // The one that passed authorization is replyable.
+    await harness.channel.send('(555) 123-4567', { channel: 'imessage', content: 'ok' });
+    // The one that never did is not, even though it appeared in the same batch.
+    await expect(
+      harness.channel.send('+15559999999', { channel: 'imessage', content: 'no' }),
+    ).rejects.toThrow(/not authorized/);
+
+    const sends = harness.calls.filter(
+      call => call.executable === 'osascript' && call.args.length === 4,
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.privateTarget).toBe('+15551234567');
+  });
+
+  it('does send to an allowlisted address that wrote first', async () => {
+    // Positive control. Without it the four refusals above would still pass if
+    // send() simply always threw.
+    const harness = appleHarness({ rows: [appleRow(11)] });
+    harness.channel.onMessage(async () => undefined);
+    await harness.channel.connect();
+    await harness.channel.pollNow();
+
+    await harness.channel.send('(555) 123-4567', { channel: 'imessage', content: 'hi' });
+
+    const sendCalls = harness.calls.filter(
+      call => call.executable === 'osascript' && call.args.length === 4,
+    );
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.privateTarget).toBe('+15551234567');
+    expect(sendCalls[0]?.privateContent).toBe('hi');
+  });
+
   it('does not acknowledge or mark an authorized row seen when its handler fails', async () => {
     const harness = appleHarness({ rows: [appleRow(11)] });
     let attempts = 0;

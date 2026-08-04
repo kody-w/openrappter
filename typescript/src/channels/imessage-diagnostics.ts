@@ -13,6 +13,8 @@ import {
   type IMessageConfig,
 } from './imessage.js';
 
+import { readGatewayLockOwner, type GatewayLockOwner } from '../infra/gateway-lock.js';
+
 export interface IMessageDiagnosticResult {
   platformSupported: boolean;
   enabled: boolean;
@@ -24,6 +26,8 @@ export interface IMessageDiagnosticResult {
   iMessageServiceCount?: number;
   tokenConfigured: boolean;
   service: IMessageServiceStatus;
+  /** Who the lock file says owns the gateway. */
+  lockOwner: GatewayLockOwner;
   ready: boolean;
   reasons: string[];
 }
@@ -31,6 +35,8 @@ export interface IMessageDiagnosticResult {
 export interface IMessageDiagnosticOptions {
   config: IMessageConfig;
   tokenConfigured: boolean;
+  /** Injectable for tests; defaults to reading the real lock file. */
+  lockOwnerReader?: () => GatewayLockOwner;
   platform?: NodeJS.Platform;
   homeDirectory?: string;
   commandRunner?: (
@@ -155,6 +161,14 @@ export async function diagnoseIMessage(
     reasons.push(service.readinessReason ?? 'gateway_not_ready');
   }
 
+  const lockOwner = (options.lockOwnerReader ?? readGatewayLockOwner)();
+  // A gateway held by a live process while the installed agent is not loaded
+  // means the listener belongs to something else. Without this the operator
+  // sees install-service report live/ready for a process it does not own.
+  if (lockOwner.alive && service.installed && !service.loaded) {
+    reasons.push('gateway_lock_foreign');
+  }
+
   return {
     platformSupported,
     enabled: options.config.enabled === true,
@@ -166,6 +180,7 @@ export async function diagnoseIMessage(
     iMessageServiceCount,
     tokenConfigured: options.tokenConfigured,
     service,
+    lockOwner,
     ready:
       platformSupported
       && options.config.enabled === true

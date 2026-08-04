@@ -1905,6 +1905,13 @@ imessageCommand
     console.log(`  Messages automation: ${result.automationAvailable ? 'available' : 'unavailable'}`);
     console.log(`  Copilot token: ${result.tokenConfigured ? 'configured' : 'missing'}`);
     console.log(`  Service: loaded=${result.service.loaded} live=${result.service.live} ready=${result.service.ready}`);
+    // Name who holds the gateway, so 'live' for a listener the installed
+    // agent does not own stops looking like a credential problem.
+    console.log(`  Gateway lock: ${
+      result.lockOwner.pid === null
+        ? 'unowned'
+        : `pid ${result.lockOwner.pid}${result.lockOwner.alive ? '' : ' (stale)'}`
+    }`);
     if (result.reasons.length > 0) {
       console.log(`  Reasons: ${result.reasons.join(', ')}`);
     }

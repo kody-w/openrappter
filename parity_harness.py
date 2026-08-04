@@ -30,6 +30,7 @@ import contextlib
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import threading
 import urllib.error
@@ -41,6 +42,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 VECTOR_DIR = ROOT / "parity_vectors"
+SPEC_MD = ROOT / "SPEC.md"
+TS_DRIVER = ROOT / "ts_parity_driver.mjs"
+TS_BUILD = ROOT / "typescript/dist/agents/Assistant.js"
 sys.path.insert(0, str(ROOT / "python"))
 
 SPEC = "rapp-runtime-parity/1.0"
@@ -191,19 +195,88 @@ def matches(expected, actual):
     return expected == actual
 
 
-def check(vector, base, model):
-    """Return a list of failure strings. Empty means the vector passed."""
-    request = dict(vector.get("request") or {})
+# ── One observation shape, however the runtime was driven ────────────────────
+
+
+class Observation:
+    """What a runtime did with one vector, in a runtime-neutral shape."""
+
+    __slots__ = ("status", "body", "rounds", "outbound", "tools_first_call")
+
+    def __init__(self, status, body, rounds=0, outbound=None, tools_first_call=None):
+        self.status = status
+        self.body = body or {}
+        self.rounds = rounds
+        self.outbound = outbound or []
+        self.tools_first_call = tools_first_call
+
+
+def observe_python(vector, brainstem):
+    """Drive the Python runtime over real HTTP with a scripted model."""
+    with runtime_under_test(vector, brainstem) as (base, model):
+        request = dict(vector.get("request") or {})
+        payload = {"user_input": request.get("user_input", "")}
+        if "session_id" in request:
+            payload["session_id"] = request["session_id"]
+        if request.get("conversation_history") is not None:
+            payload["conversation_history"] = request["conversation_history"]
+        status, body = post_chat(base, payload)
+        return Observation(
+            status=status,
+            body=body,
+            rounds=model.round,
+            outbound=model.outbound,
+            tools_first_call=model.tools_seen[0] if model.tools_seen else None,
+        )
+
+
+def observe_typescript(vector, driver=TS_DRIVER):
+    """Drive the TypeScript runtime through `ts_parity_driver.mjs`.
+
+    That driver injects the scripted responder at `Assistant.provider.chat()`,
+    this runtime's model-call seam, and builds the reply with the real
+    `buildChatEnvelope`. It is NOT driven over HTTP — see `--help` for what that
+    does and does not prove.
+    """
+    result = subprocess.run(
+        ["node", str(driver)],
+        input=json.dumps(vector),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(ROOT),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"typescript driver exited {result.returncode}: "
+            f"{(result.stderr or '').strip()[:400]}"
+        )
+    payload = json.loads(result.stdout or "{}")
+    status = payload.pop("__status", 200)
+    rounds = payload.pop("__rounds", 0)
+    outbound = payload.pop("__outbound", [])
+    tools_first = payload.pop("__toolsFirstCall", None)
+    payload.pop("__modelCalled", None)
+    error = payload.pop("__error", None)
+    body = payload.get("body") if "body" in payload else payload
+    if error:
+        body = dict(body or {})
+        body["_driver_error"] = error
+    return Observation(status, body, rounds, outbound, tools_first)
+
+
+def check(vector, obs):
+    """Judge one observation against one vector.
+
+    Takes an already-executed `Observation` rather than driving the runtime
+    itself, so every runtime is judged by exactly this code. Two drivers, one
+    comparator — otherwise a difference in the checker could be mistaken for a
+    difference in the runtimes, which is the very thing being measured.
+    """
     expect = vector.get("expect") or {}
     failures = []
 
-    payload = {"user_input": request.get("user_input", "")}
-    if "session_id" in request:
-        payload["session_id"] = request["session_id"]
-    if request.get("conversation_history") is not None:
-        payload["conversation_history"] = request["conversation_history"]
-
-    status, body = post_chat(base, payload)
+    status, body = obs.status, obs.body
 
     if "status" in expect and status != expect["status"]:
         failures.append(f"status: expected {expect['status']}, got {status}")
@@ -213,14 +286,14 @@ def check(vector, base, model):
             if not matches(want, body.get(key)):
                 failures.append(f"body.{key}: expected {want!r}, got {body.get(key)!r}")
 
-    if expect.get("model_called") is False and model.round != 0:
-        failures.append(f"model was called {model.round}x; vector expects no call")
+    if expect.get("model_called") is False and obs.rounds != 0:
+        failures.append(f"model was called {obs.rounds}x; vector expects no call")
 
-    if "rounds" in expect and model.round != expect["rounds"]:
-        failures.append(f"rounds: expected {expect['rounds']}, got {model.round}")
+    if "rounds" in expect and obs.rounds != expect["rounds"]:
+        failures.append(f"rounds: expected {expect['rounds']}, got {obs.rounds}")
 
-    if "tools_argument" in expect and model.tools_seen:
-        got = model.tools_seen[0]
+    if "tools_argument" in expect and obs.tools_first_call is not None:
+        got = obs.tools_first_call
         want = expect["tools_argument"]
         if want is None and got:
             failures.append(f"tools: expected null/empty, got {len(got)} tool(s)")
@@ -239,7 +312,7 @@ def check(vector, base, model):
 
     if "tool_call_sequence" in expect:
         called = []
-        for messages in model.outbound:
+        for messages in obs.outbound:
             for message in messages:
                 if message.get("role") == "tool":
                     called.append(message.get("_name"))
@@ -258,7 +331,7 @@ def check(vector, base, model):
     if "tool_messages_appended" in expect:
         appended = [
             message
-            for messages in model.outbound
+            for messages in obs.outbound
             for message in messages
             if message.get("role") == "tool"
         ]
@@ -275,8 +348,8 @@ def check(vector, base, model):
                 failures.append(f"tool message missing {missing} (§2.3 shape)")
                 break
 
-    if "outbound_history_roles" in expect and model.outbound:
-        first = model.outbound[0]
+    if "outbound_history_roles" in expect and obs.outbound:
+        first = obs.outbound[0]
         roles = [m.get("role") for m in first[1:-1]]
         if roles != expect["outbound_history_roles"]:
             failures.append(
@@ -284,12 +357,12 @@ def check(vector, base, model):
             )
 
     for needle in expect.get("outbound_must_not_contain", []):
-        if any(needle in json.dumps(messages) for messages in model.outbound):
+        if any(needle in json.dumps(messages) for messages in obs.outbound):
             failures.append(f"outbound carried {needle!r}, which should have been filtered")
 
     if "outbound_system_prompt_contains" in expect:
         needle = expect["outbound_system_prompt_contains"]
-        system = model.outbound[0][0].get("content", "") if model.outbound else ""
+        system = obs.outbound[0][0].get("content", "") if obs.outbound else ""
         if needle not in system:
             failures.append(f"system prompt missing {needle!r}")
 
@@ -300,70 +373,193 @@ def check(vector, base, model):
     return failures
 
 
+DECLARED_TIER_RE = re.compile(r"^##\s*\d+\.\s*Declared parity tier:\s*`([a-z]+)`", re.M)
+
+
+def declared_tier(spec_path=SPEC_MD):
+    """Read the tier openrappter declares, from SPEC.md.
+
+    Never defaulted and never hardcoded. A hardcoded tier lets the claim and
+    the test drift apart silently — the document could be edited to say `full`
+    while CI went on proving `core`, and the badge would stay green. If the
+    declaration cannot be read, that is a failure to report, not a value to
+    guess.
+    """
+    try:
+        text = Path(spec_path).read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"cannot read the declared tier from {spec_path}: {error}")
+    match = DECLARED_TIER_RE.search(text)
+    if not match:
+        raise SystemExit(
+            f"{spec_path} does not declare a parity tier in the expected form "
+            "('## 1. Declared parity tier: `core`'). Refusing to guess."
+        )
+    tier = match.group(1)
+    if tier not in ("core", "full", "edge"):
+        raise SystemExit(f"{spec_path} declares unknown parity tier {tier!r}")
+    return tier
+
+
+def select(vectors, tier):
+    if tier == "core":
+        return [v for v in vectors if v["tags"].get("core")]
+    if tier == "edge":
+        return [v for v in vectors if v["tags"].get("edge")]
+    return list(vectors)
+
+
+def needs_live_model(vector):
+    """A vector the harness cannot execute without a real model.
+
+    PARITY §5.2 mandates `model.kind = "scripted"` for the whole corpus, so
+    today this is empty — and that is a fact worth stating rather than a
+    category worth pretending is populated. It exists so that if a vector is
+    ever added that genuinely needs a model, it is reported as NOT EXECUTED
+    instead of quietly vanishing from the denominator.
+    """
+    return ((vector.get("fixture") or {}).get("model") or {}).get("kind") != "scripted"
+
+
+def run_runtime(name, vectors, brainstem_module):
+    """Execute the selected vectors against one runtime."""
+    results = []
+    for vector in vectors:
+        if needs_live_model(vector):
+            results.append({
+                "vector": vector["name"],
+                "status": "not_executed",
+                "reason": "needs a live model; CI runs no model",
+                "diff": None,
+            })
+            continue
+        try:
+            if name == "python":
+                obs = observe_python(vector, brainstem_module)
+            else:
+                obs = observe_typescript(vector)
+            failures = check(vector, obs)
+        except Exception as error:  # noqa: BLE001
+            failures = [f"harness error: {type(error).__name__}: {error}"]
+        results.append({
+            "vector": vector["name"],
+            "status": "passed" if not failures else "failed",
+            "diff": failures or None,
+        })
+    return results
+
+
+RUNTIME_PATHS = {
+    "python": "python/openrappter/brainstem.py",
+    "typescript": "typescript/src/agents/Assistant.ts + gateway/chat-envelope.ts",
+}
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--vectors", type=Path, default=VECTOR_DIR)
-    parser.add_argument("--tier", choices=["core", "full", "edge"], default="core")
+    parser.add_argument(
+        "--tier", choices=["core", "full", "edge"],
+        help="override the tier declared in SPEC.md (default: whatever it declares)",
+    )
+    parser.add_argument(
+        "--runtime", choices=["python", "typescript", "both"], default="python",
+        help="which runtime to measure. 'both' is what parity actually means.",
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
 
-    import openrappter.brainstem as brainstem  # noqa: E402
+    tier = args.tier or declared_tier()
+    tier_source = "--tier" if args.tier else f"declared in {SPEC_MD.name}"
 
     vectors = []
     for path in sorted(args.vectors.glob("*.json")):
         if path.name == "CORPUS.json":
             continue
         vectors.append(json.loads(path.read_text(encoding="utf-8")))
+    selected = select(vectors, tier)
 
-    if args.tier == "core":
-        selected = [v for v in vectors if v["tags"].get("core")]
-    elif args.tier == "edge":
-        selected = [v for v in vectors if v["tags"].get("edge")]
-    else:
-        selected = vectors
+    runtimes = ["python", "typescript"] if args.runtime == "both" else [args.runtime]
 
-    results = []
-    for vector in selected:
-        try:
-            with runtime_under_test(vector, brainstem) as (base, model):
-                failures = check(vector, base, model)
-        except Exception as error:  # noqa: BLE001
-            failures = [f"harness error: {type(error).__name__}: {error}"]
-        results.append({
-            "vector": vector["name"],
-            "pass": not failures,
-            "diff": failures or None,
-        })
+    brainstem = None
+    if "python" in runtimes:
+        import openrappter.brainstem as brainstem  # noqa: E402
+    if "typescript" in runtimes and not TS_BUILD.exists():
+        raise SystemExit(
+            f"the TypeScript runtime is not built ({TS_BUILD} is missing).\n"
+            "Run: cd typescript && npm ci && npm run build"
+        )
 
-    passed = sum(1 for r in results if r["pass"])
-    report = {
-        "spec": SPEC,
-        "runtime": "python/openrappter/brainstem.py",
-        "declared_tier": "core",
-        "corpus_sha256": corpus_sha256(vectors),
-        "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "summary": {
+    per_runtime = {}
+    for name in runtimes:
+        per_runtime[name] = run_runtime(name, selected, brainstem)
+
+    def tally(results):
+        passed = sum(1 for r in results if r["status"] == "passed")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        skipped = sum(1 for r in results if r["status"] == "not_executed")
+        return {
             "total": len(results),
             "passed": passed,
-            "failed": len(results) - passed,
-            "tier_satisfied": passed == len(results),
+            "failed": failed,
+            # Reported separately, never folded into `passed`. Silent skipping
+            # is exactly the failure this corpus exists to prevent.
+            "not_executed": skipped,
+            "tier_satisfied": failed == 0 and skipped == 0 and passed == len(results),
+        }
+
+    report = {
+        "spec": SPEC,
+        "declared_tier": tier,
+        "tier_source": tier_source,
+        "corpus_sha256": corpus_sha256(vectors),
+        "corpus_vectors": len(vectors),
+        "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "runtimes": {
+            name: {
+                "path": RUNTIME_PATHS[name],
+                "summary": tally(results),
+                "results": results,
+            }
+            for name, results in per_runtime.items()
         },
-        "results": results,
+    }
+    report["summary"] = {
+        "tier_satisfied": all(
+            report["runtimes"][n]["summary"]["tier_satisfied"] for n in runtimes
+        ),
+        "runtimes_measured": runtimes,
     }
 
-    for result in results:
-        mark = "PASS" if result["pass"] else "FAIL"
-        print(f"  {mark}  {result['vector']}")
-        for line in result["diff"] or []:
-            print(f"          {line}")
-    summary = report["summary"]
-    print(f"\n{summary['passed']}/{summary['total']} passed "
-          f"(tier={args.tier}, corpus={report['corpus_sha256'][:12]})")
+    mark = {"passed": "PASS", "failed": "FAIL", "not_executed": "NOT RUN"}
+    for name in runtimes:
+        block = report["runtimes"][name]
+        print(f"\n── {name} ── {block['path']}")
+        for result in block["results"]:
+            print(f"  {mark[result['status']]:>7}  {result['vector']}")
+            for line in result["diff"] or []:
+                print(f"           {line}")
+        s = block["summary"]
+        print(f"  {s['passed']}/{s['total']} passed, {s['failed']} failed, "
+              f"{s['not_executed']} not executed")
+
+    total_classes = len(vectors)
+    proven = {
+        n: report["runtimes"][n]["summary"]["passed"] for n in runtimes
+    }
+    print(f"\ntier {tier} ({tier_source}) · corpus {report['corpus_sha256'][:12]} "
+          f"· {len(selected)}/{total_classes} classes in tier")
+    for name in runtimes:
+        print(f"  {name}: CI proves {proven[name]} of the {total_classes} "
+              f"required classes")
+    print("PASS" if report["summary"]["tier_satisfied"] else "FAIL")
 
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
-    return 0 if summary["tier_satisfied"] else 1
+    return 0 if report["summary"]["tier_satisfied"] else 1
 
 
 if __name__ == "__main__":

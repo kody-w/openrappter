@@ -35,3 +35,77 @@ jobs:
         with:
           name: rapp-conformance
           path: rapp-conformance.json
+
+  # A second claim, gated the same way. conformance.py says it best: "Being
+  # 'built on RAPP' is a claim, and a claim needs a gate, or it decays into a
+  # sentence in a README that stopped being true six months ago." SPEC.md
+  # declares a `rapp-runtime-parity/1.0` tier, and until this ran the tier was
+  # proved exactly once, by hand, on one machine.
+  #
+  # A separate job rather than more steps in `conformance`: the two answer
+  # different specs, so a red X should say which claim broke, and this one
+  # needs Node and does not need the keyring.
+  parity:
+    name: Runtime parity (golden vectors)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      # The TypeScript runtime is measured through its compiled output, so it
+      # has to be built. Without this the harness refuses to run rather than
+      # reporting TypeScript as untested.
+      - name: Build the TypeScript runtime
+        working-directory: typescript
+        run: npm ci && npm run build
+
+      # Both runtimes, because parity means they agree with each other — not
+      # that one of them works. The tier is read from SPEC.md, never passed in,
+      # so the declaration and the test cannot drift apart.
+      - name: Golden parity vectors (both runtimes)
+        run: python3 parity_harness.py --runtime both --report parity-report.json
+
+      - name: Parity summary
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("parity-report.json")
+          if not p.exists():
+              print("## Runtime parity\n\nThe harness did not produce a report.")
+              raise SystemExit(0)
+          r = json.loads(p.read_text())
+          total = r["corpus_vectors"]
+          print("## Runtime parity — `%s`\n" % r["spec"])
+          print("Declared tier **%s** (%s) · corpus `%s`\n"
+                % (r["declared_tier"], r["tier_source"], r["corpus_sha256"][:12]))
+          print("| runtime | passed | failed | not executed | of %d classes |" % total)
+          print("|---|---|---|---|---|")
+          for name, block in r["runtimes"].items():
+              s = block["summary"]
+              print("| %s | %d | %d | %d | proves %d |"
+                    % (name, s["passed"], s["failed"], s["not_executed"], s["passed"]))
+          skipped = [
+              x["vector"]
+              for block in r["runtimes"].values()
+              for x in block["results"] if x["status"] == "not_executed"
+          ]
+          if skipped:
+              print("\n**Not executed** (reported as unproven, never as passed): %s"
+                    % ", ".join(sorted(set(skipped))))
+          else:
+              print("\nNo vector was skipped. Every class in the declared tier ran.")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-report
+          path: parity-report.json

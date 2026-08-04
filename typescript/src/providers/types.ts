@@ -7,6 +7,13 @@ export interface Message {
   content: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  /**
+   * The tool's name on a `role: 'tool'` result message.
+   *
+   * `rapp-runtime-parity/1.0` §2.3 fixes the tool result message shape exactly:
+   * `{ tool_call_id, role, name, content }`. We were omitting `name`.
+   */
+  name?: string;
 }
 
 export interface ToolCall {

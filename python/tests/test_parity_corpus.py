@@ -22,11 +22,11 @@ HARNESS = ROOT / "parity_harness.py"
 VECTORS = ROOT / "parity_vectors"
 
 
-def _run(tier, report=None):
-    cmd = [sys.executable, str(HARNESS), "--tier", tier]
+def _run(tier, report=None, runtime="python"):
+    cmd = [sys.executable, str(HARNESS), "--tier", tier, "--runtime", runtime]
     if report:
         cmd += ["--report", str(report)]
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=300)
+    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600)
 
 
 class TestParityCorpus:
@@ -68,18 +68,40 @@ class TestParityCorpus:
         )
         assert manifest["corpus_sha256"] == hashlib.sha256(lines.encode()).hexdigest()
 
-    def test_core_tier_passes(self, tmp_path):
+    def test_tier_comes_from_spec_md_not_a_constant(self):
+        """The declaration and the test must not be able to drift apart.
+
+        A hardcoded tier would let SPEC.md be edited to claim `full` while CI
+        went on proving `core`, and the badge would stay green.
+        """
+        sys.path.insert(0, str(ROOT))
+        import parity_harness
+
+        assert parity_harness.declared_tier() == "core"
+        spec = (ROOT / "SPEC.md").read_text(encoding="utf-8")
+        assert "Declared parity tier: `core`" in spec
+
+    def test_python_runtime_passes_its_declared_tier(self, tmp_path):
         report_path = tmp_path / "report.json"
-        result = _run("core", report_path)
+        result = _run("core", report_path, runtime="python")
         assert result.returncode == 0, result.stdout + result.stderr
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        assert report["summary"]["failed"] == 0, report["results"]
+        block = report["runtimes"]["python"]["summary"]
+        assert block["failed"] == 0, report["runtimes"]["python"]["results"]
+        # Never folded into `passed`: a silent skip is the failure the corpus
+        # exists to prevent.
+        assert block["not_executed"] == 0
         assert report["summary"]["tier_satisfied"] is True
 
-    def test_full_tier_passes(self, tmp_path):
+    def test_full_tier_passes_on_both_runtimes(self, tmp_path):
+        """Parity means the two runtimes agree, not that one of them works."""
         report_path = tmp_path / "report.json"
-        result = _run("full", report_path)
+        result = _run("full", report_path, runtime="both")
         assert result.returncode == 0, result.stdout + result.stderr
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        assert report["summary"]["total"] == 14
-        assert report["summary"]["failed"] == 0, report["results"]
+        assert set(report["summary"]["runtimes_measured"]) == {"python", "typescript"}
+        for name in ("python", "typescript"):
+            block = report["runtimes"][name]["summary"]
+            assert block["total"] == 14, name
+            assert block["failed"] == 0, (name, report["runtimes"][name]["results"])
+            assert block["not_executed"] == 0, name

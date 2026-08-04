@@ -41,23 +41,56 @@ So we wrote a candidate corpus and harness rather than leave the tier claim unfa
 - `parity_vectors/` — 14 vectors, one per class required by §5.3, to the §5.1 schema and
   content-addressed per §5. They carry nothing openrappter-specific and can be offered
   upstream unchanged. Corpus sha256 is in `parity_vectors/CORPUS.json`.
-- `parity_harness.py` — runs them against the Python runtime over real HTTP with a scripted
-  model injected at the model-call seam, as §5.2 requires.
-- `python/tests/test_parity_corpus.py` — runs the corpus in the test suite, so this is a
-  gate on every change rather than a one-off report.
+- `parity_harness.py` — runs them against **both runtimes**, with a scripted model injected
+  at each runtime's model-call seam as §5.2 requires.
+- `python/tests/test_parity_corpus.py` — runs the corpus in the test suite.
+- `.github/workflows/rapp-conformance.yml` (job `parity`) — runs it on **every push and
+  pull request**, and **fails the build** when a vector fails. A tier proved once by hand on
+  one machine is a tier that decays; this is what stops it.
 
 **Result on first run: 9/14.** The five failures were normative violations, since fixed:
 a 5-round tool loop where §2.2 freezes 3 and names looping 5 times as non-conformant; no
 `system_context()` concatenation at all; JSON error blobs where §2.3 fixes the `agent_logs`
 strings; and the wrong `400` body. A sixth — tool result messages missing the required
-`name` key — was found by tightening the harness after the first run. It is now 14/14 full,
-13/13 core.
+`name` key — was found by tightening the harness after the first run.
 
-**This measures the Python runtime only.** The TypeScript runtime is not yet covered by the
-harness and is known to diverge: its tool loop defaults to 10 rounds (`Assistant.ts`),
-against a cap §2.2 freezes at 3. Our two runtimes therefore do not currently agree on
-loop semantics, which fails parity inside this product before the estate is involved. That
-is stated here rather than left for someone to discover.
+**Both runtimes are now measured, and the TypeScript one failed 10 of 13 when first
+driven.** Every failure was a real divergence, since fixed: a 10-round loop against the cap
+§2.2 freezes at 3; `agent_logs` reading `Performed X → …` where §2.3 fixes `[X] <result>`;
+`Unknown agent: X` where §2.3 fixes `Agent 'X' not found.`; unparseable tool arguments
+falling back to `{query: <raw>}` instead of `{}`, inventing an argument the model never
+sent; tool result messages missing `name`; and `system_context()` never called at all.
+Both runtimes now pass 14/14 at `full` and 13/13 at `core`.
+
+**Run it yourself.** The corpus and harness are in this repository and need no credentials,
+no network and no model:
+
+```
+git clone https://github.com/kody-w/openrappter && cd openrappter
+cd typescript && npm ci && npm run build && cd ..
+python3 parity_harness.py --runtime both --report parity-report.json
+```
+
+Exit status is `0` only if every vector in the declared tier passed on every runtime
+measured. `--tier` is read from this document, never hardcoded, so the declaration and the
+test cannot drift apart. Point it at your own runtime by writing a driver like
+`ts_parity_driver.mjs`; the comparator is shared, so your runtime is judged by exactly the
+same code as ours.
+
+### What this does and does not prove
+
+- Every vector mocks the model (§5.2), because the model is an out-of-scope axis (§3).
+  These prove the **loop, the envelope and the ABI**. They prove nothing about model
+  quality, and nothing about the backends in §4.
+- No vector is skipped, and the harness reports `not_executed` separately from `passed` so
+  a skip can never be mistaken for a pass. Today that count is **0**: §5.2 mandates a
+  scripted model for the whole corpus, so there is no vector CI cannot run.
+- The TypeScript runtime is driven through `Assistant` + `buildChatEnvelope` — its real
+  loop and its real envelope builder — but **not over HTTP**, unlike the Python one. Its
+  HTTP layer is therefore not covered by these vectors.
+- **Nobody outside this project has assessed any of it.** The corpus is ours, the harness is
+  ours, and the runtime under test is ours. That is self-assessment with published evidence,
+  which is worth more than an unfalsifiable claim and less than an external audit.
 
 ---
 

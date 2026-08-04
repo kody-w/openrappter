@@ -18,6 +18,17 @@ import type { LLMProvider, Message, Tool, ToolCall } from '../providers/types.js
 import type { BasicAgent } from './BasicAgent.js';
 import { MemoryAgent } from './MemoryAgent.js';
 import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
+
+/**
+ * The tool-call round cap, frozen by `rapp-runtime-parity/1.0` §2.2.
+ *
+ * "Loop up to 3 rounds (MAX_ROUNDS = 3, frozen)… On the 3rd round the loop
+ * ends whether or not tools were requested; the last assistant content is the
+ * reply." This runtime defaulted to 10, so the two runtimes of one product did
+ * not agree on loop semantics — the golden corpus measured it at 4 rounds
+ * where the vector allows 3.
+ */
+const PARITY_MAX_ROUNDS = 3;
 import type { AgentIdentity } from './workspace.js';
 import { TwinVault, renderSoul } from '../twin/index.js';
 
@@ -41,7 +52,13 @@ export interface AssistantConfig {
   githubToken?: string;
   /** Whether to stream deltas (default true) */
   streaming?: boolean;
-  /** Max tool-call rounds before forcing a text response */
+  /**
+   * Max tool-call rounds before forcing a text response.
+   *
+   * PARITY §2.2 freezes this at 3 and names looping more as non-conformant:
+   * "a runtime that caches agents across requests, that loops 5 times, or that
+   * only triggers on finish_reason is non-conformant even if it works."
+   */
   maxToolRounds?: number;
   /** Override workspace directory (default: ~/.openrappter/workspace) */
   workspaceDir?: string;
@@ -90,7 +107,7 @@ export class Assistant {
       model: config?.model ?? COPILOT_DEFAULT_MODEL,
       githubToken: config?.githubToken,
       streaming: config?.streaming ?? true,
-      maxToolRounds: config?.maxToolRounds ?? 10,
+      maxToolRounds: config?.maxToolRounds ?? PARITY_MAX_ROUNDS,
       loadWorkspaceContext: config?.loadWorkspaceContext ?? true,
       loadMemoryContext: config?.loadMemoryContext ?? true,
     };
@@ -204,7 +221,7 @@ export class Assistant {
 
     // Tool-call loop
     let rounds = 0;
-    const maxRounds = this.config.maxToolRounds ?? 10;
+    const maxRounds = this.config.maxToolRounds ?? PARITY_MAX_ROUNDS;
 
     while (rounds < maxRounds) {
       rounds++;
@@ -235,6 +252,8 @@ export class Assistant {
             const result = await this.executeToolCall(tc, agentLogs);
             history.push({
               role: 'tool',
+              // §2.3 fixes this shape exactly, `name` included.
+              name: tc.function.name,
               content: result,
               tool_call_id: tc.id,
             });
@@ -243,6 +262,7 @@ export class Assistant {
             // "tool_call_id did not have response" API errors
             history.push({
               role: 'tool',
+              name: tc.function.name,
               content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
               tool_call_id: tc.id,
             });
@@ -328,7 +348,7 @@ export class Assistant {
     history.push({ role: 'user', content: message });
 
     let rounds = 0;
-    const maxRounds = this.config.maxToolRounds ?? 10;
+    const maxRounds = this.config.maxToolRounds ?? PARITY_MAX_ROUNDS;
 
     while (rounds < maxRounds) {
       rounds++;
@@ -404,12 +424,15 @@ export class Assistant {
             const result = await this.executeToolCall(tc, agentLogs);
             history.push({
               role: 'tool',
+              // §2.3 fixes this shape exactly, `name` included.
+              name: tc.function.name,
               content: result,
               tool_call_id: tc.id,
             });
           } catch (err) {
             history.push({
               role: 'tool',
+              name: tc.function.name,
               content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
               tool_call_id: tc.id,
             });
@@ -516,9 +539,14 @@ export class Assistant {
     const agentName = tc.function.name;
     const agent = this.agents.get(agentName);
 
+    // PARITY §2.3 fixes these strings exactly. `agent_logs` is contract, not
+    // cosmetics — Flight Recorder and rapp-god read it — and this runtime was
+    // emitting its own vocabulary ("Performed X → …", "Unknown agent: X")
+    // while the Python runtime emitted the spec's. Two substrates of the same
+    // product disagreeing on the wire is the failure PARITY §0 is about.
     if (!agent) {
-      const msg = `Unknown agent: ${agentName}`;
-      agentLogs.push(msg);
+      const msg = `Agent '${agentName}' not found.`;
+      agentLogs.push(`[${agentName}] ${msg}`);
       return msg;
     }
 
@@ -527,17 +555,22 @@ export class Assistant {
       try {
         params = JSON.parse(tc.function.arguments);
       } catch {
-        params = { query: tc.function.arguments };
+        // §2.3: on parse failure the arguments default to `{}`. Passing the
+        // raw unparsed string through as `query` invents an argument the model
+        // never sent, and the agent then acts on it.
+        params = {};
       }
 
       const result = await agent.execute(params);
       const resultStr = result == null ? 'Agent completed successfully' : String(result);
-      agentLogs.push(`Performed ${agentName} → ${truncate(resultStr, 200)}`);
+      // Not truncated: the log line is the tool result, and a reader that
+      // cannot reproduce it cannot verify anything from it.
+      agentLogs.push(`[${agentName}] ${resultStr}`);
       return resultStr;
     } catch (err) {
-      const errMsg = `Error: ${(err as Error).message}`;
-      agentLogs.push(`Performed ${agentName} → ${errMsg}`);
-      return errMsg;
+      const message = (err as Error).message;
+      agentLogs.push(`[${agentName}] ERROR: ${message}`);
+      return `Error: ${message}`;
     }
   }
 
@@ -588,7 +621,38 @@ export class Assistant {
     }
   }
 
+  /**
+   * Assemble the system prompt, including each agent's `system_context()`.
+   *
+   * PARITY §2.2: `[{"role":"system","content": soul + Σ system_context()}]` —
+   * "each agent's `system_context()` string is concatenated onto the system
+   * prompt (in agent-discovery order); failures in one agent's
+   * `system_context()` MUST NOT abort the turn."
+   *
+   * This runtime never called the hook at all, so an agent could not
+   * contribute standing context to its own turn. The hook is optional in the
+   * ABI (§4), so it is read defensively rather than declared on `BasicAgent`.
+   */
   private buildSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
+    let prompt = this.buildBaseSystemPrompt(memoryContext, workspaceContext);
+    for (const agent of this.agents.values()) {
+      const hook = (agent as unknown as { system_context?: () => unknown }).system_context;
+      if (typeof hook !== 'function') continue;
+      let extra: unknown;
+      try {
+        extra = hook.call(agent);
+      } catch {
+        // One agent's hook must not take down the turn.
+        continue;
+      }
+      if (typeof extra === 'string' && extra.trim()) {
+        prompt += `\n\n${extra.trim()}`;
+      }
+    }
+    return prompt;
+  }
+
+  private buildBaseSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
     const displayName = this.cachedIdentity?.name || this.config.name;
     const twinSoul = this.twinIdentity();
 

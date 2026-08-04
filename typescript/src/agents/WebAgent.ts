@@ -103,6 +103,15 @@ export class WebAgent extends BasicAgent {
 
   private static readonly MAX_REDIRECTS = 5;
 
+  /**
+   * Test seam. Which loopback address a name resolves to is a property of the
+   * machine, not of this code: `localtest.me` gives 127.0.0.1 on one host and
+   * ::1 on another, and a test that pinned either one failed on the other.
+   */
+  protected async lookupHost(hostname: string): Promise<Array<{ address: string }>> {
+    return lookup(hostname, { all: true });
+  }
+
   private static readonly BLOCKED_HOST_PATTERNS = [
     /^10\./,
     /^172\.(1[6-9]|2[0-9]|3[01])\./,
@@ -183,7 +192,7 @@ export class WebAgent extends BasicAgent {
     const { hostname } = new URL(url);
     let resolved: Array<{ address: string }>;
     try {
-      resolved = await lookup(hostname, { all: true });
+      resolved = await this.lookupHost(hostname);
     } catch {
       return;  // Unresolvable; fetch will fail on its own terms.
     }

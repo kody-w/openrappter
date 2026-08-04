@@ -202,15 +202,55 @@ describe('WebAgent address validation', () => {
 });
 
 describe('WebAgent DNS resolution', () => {
-  it('blocks a public name that resolves to a private address', async () => {
-    // localtest.me is a real public DNS name pointing at 127.0.0.1. Before the
-    // resolution check this fetched a loopback server's body.
-    const secret = await listen((_req, res) => { res.writeHead(200); res.end('LOOPBACK-REACHED'); });
+  it.each([
+    ['IPv4 loopback', '127.0.0.1'],
+    ['IPv6 loopback', '::1'],
+    ['RFC 1918', '10.0.0.5'],
+    ['cloud metadata', '169.254.169.254'],
+  ])('blocks a public name that resolves to %s', async (_label, address) => {
+    // Hermetic on purpose. The first version of this test used localtest.me, a
+    // real name pointing at loopback — it passed locally, where that is
+    // 127.0.0.1, and failed on CI, where it is ::1. Which family a machine
+    // answers with is not what this test is about.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address }];
+      }
+    }
+    const agent = new Resolving() as unknown as { fetchUrl(u: string): Promise<string> };
 
-    await expect(
-      (new WebAgent() as unknown as { fetchUrl(u: string): Promise<string> })
-        .fetchUrl(`http://localtest.me:${secret}/`),
-    ).rejects.toThrow(/resolves to 127\.0\.0\.1/);
+    await expect(agent.fetchUrl('http://public-looking.example/'))
+      .rejects.toThrow(/resolves to/i);
+  });
+
+  it('allows a public name that resolves to a public address', async () => {
+    // Positive control: refusing every resolved address would pass the four
+    // cases above and block the entire web.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address: '93.184.216.34' }];
+      }
+    }
+    const agent = new Resolving() as unknown as {
+      assertHostResolvesPublicly(u: string): Promise<void>;
+    };
+    await expect(agent.assertHostResolvesPublicly('http://example.com/'))
+      .resolves.toBeUndefined();
+  });
+
+  it('blocks when any one of several resolved addresses is private', async () => {
+    // A name can answer with more than one address, and one bad answer is
+    // enough — checking only the first would miss it.
+    class Resolving extends WebAgent {
+      protected async lookupHost(): Promise<Array<{ address: string }>> {
+        return [{ address: '93.184.216.34' }, { address: '127.0.0.1' }];
+      }
+    }
+    const agent = new Resolving() as unknown as {
+      assertHostResolvesPublicly(u: string): Promise<void>;
+    };
+    await expect(agent.assertHostResolvesPublicly('http://public-looking.example/'))
+      .rejects.toThrow(/resolves to 127\.0\.0\.1/);
   });
 
   it('does not reject a name it cannot resolve, leaving that to fetch', async () => {

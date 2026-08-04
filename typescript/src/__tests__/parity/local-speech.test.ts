@@ -353,3 +353,86 @@ describe('deriveSpokenLine — one seam rule for both faces', () => {
     expect(synth.spoken).toHaveLength(1);
   });
 });
+
+describe('local speech — late voices must not be latched', () => {
+  it('recovers when voices arrive after the deadline', async () => {
+    // Found in the wild: the page reported "No speech voices are installed on
+    // this device" on a machine that had 180 local voices a moment later. The
+    // first empty answer had been cached as final.
+    let list: FakeVoice[] = [];
+    let listener: (() => void) | null = null;
+    const synth = {
+      getVoices: () => list,
+      addEventListener: (_e: string, fn: () => void) => { listener = fn; },
+      removeEventListener: () => {},
+      cancel: () => {},
+      speak: () => {},
+    };
+    const seen: string[] = [];
+    const speech = createLocalSpeech({
+      synth: synth as unknown as SpeechSynthesis,
+      Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance,
+      storage: null,
+      voicesTimeoutMs: 20,
+      onState: (state: string) => seen.push(state),
+    });
+
+    const first = await speech.ready();
+    expect(first.state).toBe(SPEECH_STATES.UNAVAILABLE);
+    expect(speech.voice).toBeNull();
+
+    // The engine finishes loading, late.
+    list = [{ name: 'Samantha', lang: 'en-US', localService: true }];
+    (listener as unknown as (() => void) | null)?.();
+
+    // The surface is told, without anyone reloading the page.
+    expect(speech.voice).not.toBeNull();
+    expect(speech.voice!.name).toBe('Samantha');
+    expect(seen).toContain(SPEECH_STATES.IDLE);
+    expect(speech.status().state).toBe(SPEECH_STATES.IDLE);
+  });
+
+  it('re-checks on a later ready() call rather than replaying the empty answer', async () => {
+    let list: FakeVoice[] = [];
+    const synth = {
+      getVoices: () => list,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      cancel: () => {},
+      speak: () => {},
+    };
+    const speech = createLocalSpeech({
+      synth: synth as unknown as SpeechSynthesis,
+      Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance,
+      storage: null,
+      voicesTimeoutMs: 20,
+    });
+    expect((await speech.ready()).state).toBe(SPEECH_STATES.UNAVAILABLE);
+    list = [{ name: 'Daniel', lang: 'en-GB', localService: true }];
+    expect((await speech.ready()).state).not.toBe(SPEECH_STATES.UNAVAILABLE);
+    expect(speech.voice!.name).toBe('Daniel');
+  });
+
+  it('still refuses when the late arrivals are all network voices', async () => {
+    let list: FakeVoice[] = [];
+    const synth = {
+      getVoices: () => list,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      cancel: () => {},
+      speak: () => {},
+    };
+    const speech = createLocalSpeech({
+      synth: synth as unknown as SpeechSynthesis,
+      Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance,
+      storage: null,
+      voicesTimeoutMs: 20,
+    });
+    await speech.ready();
+    list = [{ name: 'Google US English', lang: 'en-US', localService: false }];
+    const again = await speech.ready();
+    expect(again.state).toBe(SPEECH_STATES.UNAVAILABLE);
+    expect(again.detail.reason).toContain('network-backed');
+    expect(speech.voice).toBeNull();
+  });
+});

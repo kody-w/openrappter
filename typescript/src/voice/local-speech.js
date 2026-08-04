@@ -187,6 +187,52 @@ export function createLocalSpeech(options = {}) {
   /** Chrome garbage-collects a live utterance mid-speech; holding it prevents that. */
   let held = null;
   let gestureSeen = false;
+  let watchingLate = false;
+
+  /**
+   * Re-check after we already answered "no local voice".
+   *
+   * The engine populates its list asynchronously and can miss any deadline on a
+   * cold start. Latching that first empty answer is how a machine with 180
+   * local voices ends up permanently told it has none.
+   */
+  function watchForLateVoices() {
+    if (watchingLate || !synth) return;
+    watchingLate = true;
+    const recheck = () => {
+      const list = synth.getVoices() || [];
+      const local = list.filter(v => v.localService === true);
+      if (!local.length) return;
+      voices = list;
+      const ranked = local
+        .map(v => ({ voice: v, score: scoreVoice(v, lang) }))
+        .sort((a, b) => b.score - a.score);
+      chosen = (ranked.find(r => r.score >= 0) ?? ranked[0]).voice;
+      loaded = true;
+      watchingLate = false;
+      clearInterval(poll);
+      try {
+        synth.removeEventListener('voiceschanged', recheck);
+      } catch {
+        synth.onvoiceschanged = null;
+      }
+      // Tell the surface, so it repaints instead of waiting for a reload.
+      setState(SPEECH_STATES.IDLE, {
+        voice: chosen.name,
+        localVoices: local.length,
+        networkVoices: list.length - local.length,
+        reason: 'voices finished loading after the initial check',
+      });
+    };
+    try {
+      synth.addEventListener('voiceschanged', recheck);
+    } catch {
+      synth.onvoiceschanged = recheck;
+    }
+    // Chrome does not always fire the event when the list fills in late.
+    const poll = setInterval(recheck, 400);
+    if (typeof poll?.unref === 'function') poll.unref();
+  }
 
   function setState(next, detail = {}) {
     state = next;
@@ -257,8 +303,18 @@ export function createLocalSpeech(options = {}) {
      * Discover voices and choose one deliberately.
      * Safe to call repeatedly; the work happens once.
      */
+    /**
+     * Discover voices and choose one deliberately.
+     *
+     * A negative answer is never cached. `voiceschanged` can fire well after
+     * our deadline on a cold start — verified in the wild: this returned "no
+     * voices are installed" on a machine that had 180 a moment later, and the
+     * surface stayed wrong forever because the empty result had been latched.
+     * So an empty list keeps listening, and a later arrival flips the state
+     * through `onState` rather than waiting for someone to reload the page.
+     */
     async ready() {
-      if (loaded) return this.status();
+      if (loaded && chosen) return this.status();
       if (!synth || !Utterance) {
         loaded = true;
         setState(SPEECH_STATES.UNAVAILABLE, {
@@ -268,12 +324,14 @@ export function createLocalSpeech(options = {}) {
       }
 
       voices = await loadVoices(synth, voicesTimeoutMs);
-      loaded = true;
 
       const local = voices.filter(v => v.localService === true);
       if (!local.length) {
         // Deliberately do NOT fall back to a network voice.
         const networkCount = voices.length;
+        // Keep listening. An empty list at this moment is not proof the device
+        // has no voices — only that none had loaded yet.
+        watchForLateVoices();
         setState(SPEECH_STATES.UNAVAILABLE, {
           reason: networkCount
             ? `This browser offers ${networkCount} voice(s), but all of them are `
@@ -285,6 +343,7 @@ export function createLocalSpeech(options = {}) {
         });
         return this.status();
       }
+      loaded = true;
 
       const ranked = local
         .map(v => ({ voice: v, score: scoreVoice(v, lang) }))

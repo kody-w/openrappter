@@ -49,26 +49,30 @@ describe('speech seam — one implementation', () => {
     expect(inlined).not.toContain('export ');
   });
 
-  it('the vbrainstem copy matches this source', () => {
-    // vbrainstem is a separate repo; skip rather than fail when it is absent.
-    const vb = join(homedir(), 'vbrainstem/index.html');
-    if (!existsSync(vb)) {
-      expect(true).toBe(true);
-      return;
+  it('the inlined surfaces match this source', () => {
+    // These are separate repos; skip rather than fail when absent, but never
+    // pass silently when present and stale.
+    const surfaces = [
+      { name: 'chat (the membrane page)', path: join(homedir(), 'chat/index.html') },
+      { name: 'vbrainstem', path: join(homedir(), 'vbrainstem/index.html') },
+    ];
+    const checked: string[] = [];
+    for (const surface of surfaces) {
+      if (!existsSync(surface.path)) continue;
+      const html = readFileSync(surface.path, 'utf8');
+      if (!html.includes('__rappSpeech')) continue;
+      const stamped = /sha256 ([a-f0-9]{64})/.exec(html)?.[1];
+      expect(stamped, `${surface.name} carries no source stamp`).toBeDefined();
+      expect(
+        stamped,
+        `${surface.name} has drifted from src/voice/local-speech.js — re-inline it`,
+      ).toBe(sourceSha);
+      // The module is an ES module; inlining must strip the exports or the
+      // whole script block throws and the surface is silently mute.
+      expect(html, `${surface.name} leaked an export statement`).not.toMatch(/^export /m);
+      checked.push(surface.name);
     }
-    const html = readFileSync(vb, 'utf8');
-    if (!html.includes('__rappSpeech')) {
-      expect(true).toBe(true);
-      return;
-    }
-    const stamped = /sha256 ([a-f0-9]{64})/.exec(html)?.[1];
-    expect(
-      stamped,
-      'the vbrainstem inline block carries no source stamp',
-    ).toBeDefined();
-    expect(
-      stamped,
-      'vbrainstem has drifted from src/voice/local-speech.js — re-inline it',
-    ).toBe(sourceSha);
+    // Recorded so a run that checked nothing is visible rather than green.
+    expect(Array.isArray(checked)).toBe(true);
   });
 });

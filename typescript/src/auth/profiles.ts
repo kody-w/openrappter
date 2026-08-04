@@ -129,6 +129,7 @@ export class AuthProfileStore {
       console.error('Failed to load auth profiles:', error);
       this.profiles = [];
     }
+    this.secureExistingFile();
   }
 
   save(): void {
@@ -138,8 +139,36 @@ export class AuthProfileStore {
         JSON.stringify(this.profiles, null, 2),
         { encoding: 'utf-8', mode: 0o600 }
       );
+      // The `mode` option above only applies when writeFileSync CREATES the
+      // file. On every subsequent save an existing file keeps whatever
+      // permissions it already had, so a profile store created before this
+      // option was added - or by an umask that allowed it - stays readable by
+      // everyone forever. Observed in the wild: -rw-r--r-- (0o644) on a file
+      // whose own writer specifies 0o600.
+      //
+      // chmod unconditionally. It is cheap, idempotent, and the failure it
+      // prevents is a credential file readable by every process on the box.
+      fs.chmodSync(this.profilesPath, 0o600);
     } catch (error) {
       console.error('Failed to save auth profiles:', error);
+    }
+  }
+
+  /**
+   * Repair permissions on an existing store without waiting for a write.
+   *
+   * Called at load time because the dangerous window is "the file already
+   * exists and nobody has saved since" - exactly the state a long-lived
+   * install sits in.
+   */
+  private secureExistingFile(): void {
+    try {
+      if (fs.existsSync(this.profilesPath)) {
+        const mode = fs.statSync(this.profilesPath).mode & 0o777;
+        if (mode !== 0o600) fs.chmodSync(this.profilesPath, 0o600);
+      }
+    } catch {
+      // Best effort: a store we cannot chmod is still a store we can read.
     }
   }
 }

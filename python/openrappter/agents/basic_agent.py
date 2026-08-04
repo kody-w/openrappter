@@ -88,7 +88,7 @@ class BasicAgent:
         interpreting between calls.
         """
         self._user_guid = kwargs.get('user_guid')
-        query = kwargs.get('query', kwargs.get('request', kwargs.get('user_input', '')))
+        query = self._resolve_slosh_query(kwargs)
 
         # Extract per-call overrides
         call_filter = kwargs.pop('_slosh_filter', None)
@@ -218,11 +218,36 @@ class BasicAgent:
         """Override this in subclasses. Context is available via self.context"""
         pass
     
+    @staticmethod
+    def _resolve_slosh_query(kwargs):
+        """Resolve the text used for data sloshing.
+
+        Tool arguments are usually produced by a model, so 'query' legitimately
+        arrives as an int, bool, list, or dict. Sloshing only needs text, and
+        perform() still receives the untouched original value, so each agent
+        keeps ownership of its own input contract instead of the framework
+        raising before perform() ever runs.
+
+        Missing/None keys fall through to the next candidate; a present but
+        non-string value sloshes as empty text.
+        """
+        for key in ('query', 'request', 'user_input'):
+            value = kwargs.get(key)
+            if value is None:
+                continue
+            return value if isinstance(value, str) else ''
+        return ''
+
     def slosh(self, query='', user_guid=None):
         """
         Data sloshing - gather contextual signals from multiple sources.
         Returns enriched context frame.
         """
+        # Defensive: slosh() is also callable directly, and every downstream
+        # signal helper assumes text. A non-string here must not crash the agent.
+        if not isinstance(query, str):
+            query = ''
+
         context = {
             'timestamp': datetime.now().isoformat(),
             'temporal': self._slosh_temporal(),

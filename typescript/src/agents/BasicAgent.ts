@@ -83,7 +83,7 @@ export abstract class BasicAgent {
    * interpreting between calls.
    */
   async execute(kwargs: Record<string, unknown> = {}): Promise<string> {
-    const query = (kwargs.query ?? kwargs.request ?? kwargs.user_input ?? '') as string;
+    const query = BasicAgent.resolveSloshQuery(kwargs);
 
     // Extract per-call overrides
     const callFilter = kwargs._sloshFilter as SloshFilter | undefined;
@@ -219,10 +219,35 @@ export abstract class BasicAgent {
   abstract perform(kwargs: Record<string, unknown>): Promise<string>;
 
   /**
+   * Resolve the text used for data sloshing.
+   *
+   * Tool arguments are usually produced by a model, so `query` legitimately
+   * arrives as a number, boolean, array, or object. Sloshing only needs text,
+   * and `perform()` still receives the untouched original value, so each agent
+   * keeps ownership of its own input contract instead of the framework
+   * throwing before `perform()` ever runs.
+   *
+   * Nullish keys fall through to the next candidate (matching the previous `??`
+   * chain); a present-but-non-string value sloshes as empty text.
+   */
+  protected static resolveSloshQuery(kwargs: Record<string, unknown>): string {
+    for (const key of ['query', 'request', 'user_input'] as const) {
+      const value = kwargs[key];
+      if (value === undefined || value === null) continue;
+      return typeof value === 'string' ? value : '';
+    }
+    return '';
+  }
+
+  /**
    * Data sloshing - gather contextual signals from multiple sources.
    * Returns enriched context frame.
    */
   slosh(query: string = ''): AgentContext {
+    // Defensive: slosh() is also callable directly, and every downstream
+    // signal helper assumes text. A non-string here must not crash the agent.
+    if (typeof query !== 'string') query = '';
+
     const context: AgentContext = {
       timestamp: new Date().toISOString(),
       temporal: this.sloshTemporal(),

@@ -10,7 +10,8 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
+import { hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
+import type { CopilotAuthOutcome } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
@@ -42,6 +43,34 @@ async function getGhToken(): Promise<string | null> {
 // ═══════════════════════════════════════════════════════════════════════════════
 // GATEWAY IN-PROCESS
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Turn an auth outcome into what an operator should actually do about it.
+ *
+ * The daemon runs under launchd with no controlling terminal, so any advice
+ * that requires a prompt has to say where to run it. Previously every failure
+ * printed "No GitHub token found", which named the wrong cause whenever a token
+ * was present but stale — the operator would onboard, obtain a fresh token, and
+ * still see the same line if the underlying entitlement was the problem.
+ */
+export function describeCopilotAuth(outcome: CopilotAuthOutcome): string[] {
+  switch (outcome.status) {
+    case 'authenticated':
+      return [`${EMOJI} Copilot token validated (${outcome.source})`];
+    case 'rejected':
+      return [
+        `${EMOJI} GitHub token found, but Copilot rejected it — it is stale or lacks Copilot access.`,
+        `${EMOJI} This process has no terminal, so it cannot re-authenticate. Run 'openrappter onboard' in a shell.`,
+      ];
+    case 'missing':
+      return [
+        `${EMOJI} No GitHub token found.`,
+        `${EMOJI} This process has no terminal, so it cannot prompt. Run 'openrappter onboard' in a shell.`,
+      ];
+    case 'failed':
+      return [`${EMOJI} Copilot authentication failed: ${outcome.error}`];
+  }
+}
 
 async function startGatewayInProcess(opts?: {
   silent?: boolean;
@@ -91,12 +120,14 @@ async function startGatewayInProcess(opts?: {
   // Create the Assistant powered by direct Copilot API (no CLI needed)
   const agents = await registry.getAllAgents();
 
-  // Auto-authenticate: try cached token first, then inline device code flow
-  const githubToken = await autoAuthIfNeeded({ silent: opts?.silent });
-  if (githubToken) {
-    log(`${EMOJI} Copilot token validated`);
-  } else {
-    console.warn(`${EMOJI} No GitHub token found. Run 'openrappter onboard' to set up Copilot.`);
+  // Auto-authenticate: try cached token first, then inline device code flow.
+  // Report which failure actually occurred — under launchd there is no TTY, so
+  // "run onboard" is advice the daemon itself cannot take, and a *rejected*
+  // token is not a *missing* one.
+  const auth = await resolveCopilotAuth({ silent: opts?.silent });
+  const githubToken = auth.status === 'authenticated' ? auth.token : null;
+  for (const line of describeCopilotAuth(auth)) {
+    if (auth.status === 'authenticated') log(line); else console.warn(line);
   }
 
   // Choose a backend that can actually answer.

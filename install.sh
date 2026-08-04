@@ -65,11 +65,56 @@ download_file() {
     wget -q --https-only --secure-protocol=TLSv1_2 --tries=3 --timeout=20 -O "$output" "$url"
 }
 
-run_remote_bash() {
-    local url="$1"
-    local tmp
+# Third-party bootstrap scripts, pinned to an immutable revision and hashed.
+# rapp-local-install/1.0 sections 3.1 (pin or refuse) and 3.2 (never execute an
+# unverified remote script). Refresh deliberately, after reading the diff:
+#
+#   commit="$(gh api repos/Homebrew/install/commits/HEAD --jq .sha)"
+#   curl -sS "https://raw.githubusercontent.com/Homebrew/install/$commit/install.sh" | shasum -a 256
+#
+# A tag is NOT a pin - tags move. Homebrew is pinned by commit; nvm publishes
+# immutable release tags but is hash-verified regardless, because the tag being
+# immutable is a promise rather than something we can check.
+HOMEBREW_INSTALL_COMMIT="609e8f75a42bcad1ce90acaf4e15fc89aebaf026"
+HOMEBREW_INSTALL_SHA256="12479a24be3f5307eecac7cde670fad7118640f031229e964f544b1367b52a41"
+NVM_INSTALL_REF="v0.40.1"
+NVM_INSTALL_SHA256="abdb525ee9f5b48b34d8ed9fc67c6013fb0f659712e401ecd88ab989b3af8f53"
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+# Download a script, verify it against an expected SHA-256, and only then run it.
+# Fails closed on every path, including the one where no hashing tool exists -
+# an unverifiable script is not a script we run.
+run_verified_remote_bash() {
+    local url="$1" expected="$2" label="${3:-remote script}"
+    case "$url" in
+        https://*) ;;
+        *) ui_error "Refusing non-HTTPS download for $label: $url"; return 1 ;;
+    esac
+
+    local tmp actual
     tmp="$(mktempfile)"
-    download_file "$url" "$tmp"
+    if ! download_file "$url" "$tmp"; then
+        ui_error "Could not download $label - refusing to continue"
+        return 1
+    fi
+    if ! actual="$(sha256_of "$tmp")" || [[ -z "$actual" ]]; then
+        ui_error "No SHA-256 tool available - refusing to run unverified $label"
+        return 1
+    fi
+    if [[ "$actual" != "$expected" ]]; then
+        ui_error "$label checksum mismatch (expected $expected, got $actual)"
+        ui_error "Upstream changed. Review the diff, then update the pin in install.sh."
+        return 1
+    fi
     /bin/bash "$tmp"
 }
 
@@ -936,7 +981,7 @@ install_homebrew() {
     if [[ "$OS" == "macos" ]]; then
         if ! command -v brew &> /dev/null; then
             ui_info "Homebrew not found, installing"
-            run_quiet_step "Installing Homebrew" run_remote_bash "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+            run_quiet_step "Installing Homebrew" run_verified_remote_bash "https://raw.githubusercontent.com/Homebrew/install/${HOMEBREW_INSTALL_COMMIT}/install.sh" "$HOMEBREW_INSTALL_SHA256" "Homebrew installer"
 
             if [[ -f "/opt/homebrew/bin/brew" ]]; then
                 eval "$(/opt/homebrew/bin/brew shellenv)"
@@ -1132,7 +1177,7 @@ install_node() {
 
 install_node_nvm() {
     if [[ ! -d "$HOME/.nvm" ]]; then
-        run_quiet_step "Installing nvm" run_remote_bash "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh"
+        run_quiet_step "Installing nvm" run_verified_remote_bash "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_INSTALL_REF}/install.sh" "$NVM_INSTALL_SHA256" "nvm installer"
     fi
 
     export NVM_DIR="$HOME/.nvm"
@@ -1288,29 +1333,51 @@ install_node_tarball() {
         fi
     fi
 
-    # Verify SHA-256
+    # Verify SHA-256 — FAIL CLOSED on every path (rapp-local-install/1.0 §3.3).
+    #
+    # This block used to fail OPEN three separate ways, each proceeding to
+    # install an unverified Node.js runtime:
+    #   1. checksum manifest could not be downloaded  -> warn, continue
+    #   2. tarball absent from the manifest            -> silently continue
+    #   3. neither sha256sum nor shasum on the machine -> actual_sha empty,
+    #      the != comparison never fired, silently continue
+    #
+    # The third is the one that hides: an empty computed hash compared against
+    # a real expected hash is not a match and must never be treated as "skip".
+    # A check that degrades to a no-op and reports success is worse than no
+    # check, because it also removes the suspicion that would make someone look.
     local shasums_tmp
     shasums_tmp="$(mktempfile)"
-    if download_file "https://nodejs.org/dist/v${node_ver}/SHASUMS256.txt" "$shasums_tmp" 2>/dev/null; then
-        local expected_sha actual_sha=""
-        expected_sha="$(grep "$tarball" "$shasums_tmp" | awk '{print $1}' | head -1)"
-        if [[ -n "$expected_sha" ]]; then
-            if command -v sha256sum &>/dev/null; then
-                actual_sha="$(sha256sum "$tmp_tar" | awk '{print $1}')"
-            elif command -v shasum &>/dev/null; then
-                actual_sha="$(shasum -a 256 "$tmp_tar" | awk '{print $1}')"
-            fi
-            if [[ -n "$actual_sha" && "$actual_sha" != "$expected_sha" ]]; then
-                ui_error "Node.js checksum mismatch (expected $expected_sha, got $actual_sha)"
-                return 1
-            fi
-            if [[ -n "$actual_sha" ]]; then
-                ui_success "Node.js checksum verified"
-            fi
-        fi
-    else
-        ui_warn "Could not download checksums — skipping verification"
+    if ! download_file "https://nodejs.org/dist/v${node_ver}/SHASUMS256.txt" "$shasums_tmp" 2>/dev/null; then
+        ui_error "Could not download Node.js checksums — refusing to install unverified runtime"
+        return 1
     fi
+
+    local expected_sha actual_sha=""
+    expected_sha="$(grep "$tarball" "$shasums_tmp" | awk '{print $1}' | head -1)"
+    if [[ -z "$expected_sha" ]]; then
+        ui_error "Node.js checksums do not list $tarball — refusing to install"
+        return 1
+    fi
+
+    if command -v sha256sum &>/dev/null; then
+        actual_sha="$(sha256sum "$tmp_tar" | awk '{print $1}')"
+    elif command -v shasum &>/dev/null; then
+        actual_sha="$(shasum -a 256 "$tmp_tar" | awk '{print $1}')"
+    else
+        ui_error "No SHA-256 tool available (sha256sum/shasum) — refusing to install unverified runtime"
+        return 1
+    fi
+
+    if [[ -z "$actual_sha" ]]; then
+        ui_error "Could not compute a SHA-256 for $tarball — refusing to install"
+        return 1
+    fi
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+        ui_error "Node.js checksum mismatch (expected $expected_sha, got $actual_sha)"
+        return 1
+    fi
+    ui_success "Node.js checksum verified"
 
     mkdir -p "$node_dir"
     if [[ "$use_xz" == "true" ]]; then

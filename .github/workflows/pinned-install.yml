@@ -1,0 +1,111 @@
+name: Pinned install
+
+# rapp-local-install/1.0 sections 3.10 and 4.8: run the REAL installer on every
+# supported platform, and prove the mutable-reference refusal by observing it
+# fire. Asserting that a guard exists is not the same as watching it work.
+
+on:
+  pull_request:
+    paths:
+      - 'install-pinned.sh'
+      - '.github/workflows/pinned-install.yml'
+      - 'typescript/package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - 'install-pinned.sh'
+  workflow_dispatch: {}
+
+concurrency:
+  group: pinned-install-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest    # Apple Silicon
+            name: macOS-arm64
+          # macos-13 was retired 2025-12-04; the job queued forever instead of
+          # failing, so the Intel leg looked green-adjacent while never running.
+          - os: macos-15-intel  # Intel
+            name: macOS-x64
+          - os: ubuntu-latest
+            name: Ubuntu-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: bash -n install-pinned.sh
+
+      # The negative test. If the installer ACCEPTS a branch name, two people
+      # running the same command a day apart get different bytes, and the whole
+      # pin is decoration. Fail loudly when that happens.
+      - name: Refuses a mutable reference
+        run: |
+          for ref in main HEAD latest v1.0.0 abc123; do
+            if OPENRAPPTER_COMMIT="$ref" bash install-pinned.sh >/dev/null 2>&1; then
+              echo "install-pinned.sh accepted a mutable source reference: $ref" >&2
+              exit 1
+            fi
+          done
+          echo "refused every mutable reference"
+
+      - name: Refuses a missing pin
+        run: |
+          if bash install-pinned.sh >/dev/null 2>&1; then
+            echo "install-pinned.sh installed with no pin" >&2
+            exit 1
+          fi
+          echo "refused an absent pin"
+
+      # And the positive test: the same script must still install for real.
+      - name: Installs the commit under test
+        env:
+          OPENRAPPTER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          OPENRAPPTER_INSTALL_ROOT: ${{ runner.temp }}/openrappter-install
+        run: bash install-pinned.sh
+
+      - name: Provenance record is written and well-formed
+        env:
+          OPENRAPPTER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          record="${{ runner.temp }}/openrappter-install/versions/$OPENRAPPTER_COMMIT/.rapp-install.json"
+          test -f "$record" || { echo "no provenance record at $record" >&2; exit 1; }
+          python3 - "$record" "$OPENRAPPTER_COMMIT" <<'PY'
+          import json, sys
+          record, pin = json.load(open(sys.argv[1])), sys.argv[2]
+          assert record["schema"] == "rapp-local-install/1.0", record["schema"]
+          assert record["pin"] == pin, (record["pin"], pin)
+          for field in ("lockfile_sha256", "installed_utc", "platform", "architecture"):
+              assert record.get(field), f"missing {field}"
+          assert record["runtime"]["binary_sha256"], "no runtime binary hash"
+          print("provenance OK:", record["pin"][:12], record["platform"], record["architecture"])
+          PY
+
+      # Second run must REUSE, not rebuild - that is the re-verification path.
+      - name: Re-runs idempotently
+        env:
+          OPENRAPPTER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          OPENRAPPTER_INSTALL_ROOT: ${{ runner.temp }}/openrappter-install
+        run: |
+          out="$(bash install-pinned.sh 2>&1)"
+          printf '%s\n' "$out"
+          printf '%s' "$out" | grep -q "Reusing verified install" \
+            || { echo "second run did not reuse the verified install" >&2; exit 1; }
+
+      - name: Nothing installed globally
+        run: |
+          if npm ls -g --depth=0 2>/dev/null | grep -q openrappter; then
+            echo "installer put openrappter in the global npm prefix" >&2
+            exit 1
+          fi
+          echo "no global footprint"

@@ -313,6 +313,92 @@ describe('Gateway Protocol (openclaw-compatible)', () => {
       expect(calls).toBe(1);
     });
 
+    it('rejects a reused idempotency key from a different session', async () => {
+      // The fingerprint exists so one key cannot stand for two different
+      // requests. Only `message` was covered: dropping `session_id` from it
+      // left every test passing, while a second session reusing a key would
+      // silently receive the first session's reply instead of a 409.
+      let calls = 0;
+      server.setAgentHandler(async req => {
+        calls += 1;
+        return {
+          sessionId: req.sessionId ?? 'generated',
+          content: `answer for ${req.sessionId}`,
+          finishReason: 'stop',
+        };
+      });
+      const send = (body: Record<string, unknown>) => fetch(
+        `http://127.0.0.1:${TEST_PORT}/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${TEST_TOKEN}`,
+            Connection: 'close',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const base = {
+        schema: 'rapp-chat/1.0',
+        message: 'same words',
+        idempotency_key: 'shared-key-across-sessions',
+      };
+
+      const first = await send({ ...base, session_id: 'session-a' });
+      expect(first.status).toBe(200);
+      expect((await first.json()).response).toBe('answer for session-a');
+
+      const second = await send({ ...base, session_id: 'session-b' });
+
+      expect(second.status).toBe(409);
+      expect(calls).toBe(1);
+    });
+
+    it('rejects a reused idempotency key carrying different conversation history', async () => {
+      let calls = 0;
+      server.setAgentHandler(async req => {
+        calls += 1;
+        return {
+          sessionId: req.sessionId ?? 'generated',
+          content: 'ok',
+          finishReason: 'stop',
+        };
+      });
+      const send = (body: Record<string, unknown>) => fetch(
+        `http://127.0.0.1:${TEST_PORT}/chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${TEST_TOKEN}`,
+            Connection: 'close',
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      const base = {
+        schema: 'rapp-chat/1.0',
+        message: 'same words',
+        session_id: 'history-session',
+        idempotency_key: 'shared-key-different-history',
+      };
+
+      const first = await send({
+        ...base,
+        conversation_history: [{ role: 'user', content: 'first turn' }],
+      });
+      expect(first.status).toBe(200);
+
+      const second = await send({
+        ...base,
+        conversation_history: [{ role: 'user', content: 'a different turn' }],
+      });
+
+      expect(second.status).toBe(409);
+      expect(calls).toBe(1);
+    });
+
     it('should preserve session history when history is omitted', async () => {
       const histories: unknown[] = [];
       server.setAgentHandler(async req => {

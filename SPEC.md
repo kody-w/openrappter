@@ -132,6 +132,17 @@ openrappter generalises this to `|||TAG|||` sense projections (`rapp-sense/1.0`)
 `HOLO`, and others — parsed by one shared parser. The envelope behaviour for `VOICE`
 matches PARITY §2.4 exactly, which is what the spec requires of an optional capability.
 
+**Both halves are trimmed.** PARITY §2.4 says "text before" and "text after" without
+saying what happens to whitespace around the sentinel, so a model that emits
+`written  |||VOICE|||  spoken` leaves the runtimes free to disagree. Both of ours trim,
+and the `voice-sentinel-split` vector now pins that: its fixture carries whitespace on
+both halves, so the two runtimes are compared on it rather than on a string where the
+question does not arise. Until that fixture changed, deleting `.strip()` from one runtime
+left the corpus reporting 14/14 on both while they disagreed on three inputs.
+
+This is a place where the two runtimes agree by choice and not by specification. It is
+worth raising upstream: §2.4 should say which it means.
+
 ---
 
 ## 4. Agent discovery

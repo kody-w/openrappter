@@ -1,6 +1,6 @@
 {
   "canonicalization": "sha256 over JSON with sorted keys and (',',':') separators, UTF-8",
-  "corpus_sha256": "571decb2d78d41e354008b182cef58d5d927dc3522c1194c66201ff4fb7dec0f",
+  "corpus_sha256": "f8f05099895e62966e354ba684e62c96291f674d9e21ce9b5d455c2af431ca4c",
   "spec": "rapp-runtime-parity/1.0",
   "vector_count": 14,
   "vectors": {
@@ -17,6 +17,6 @@
     "session-id-minted": "dda4a21939f679f806f2a47ca4625692cd45549df64e4a18cbd0ea285fb31822",
     "single-tool-then-answer": "b55e1d6043baa4afa6494b77de19fbd930003f2369bf8aef3da0c2de57f1fc7d",
     "system-context-injection": "a52b1c07b31842c6a6f918311b1ca6c53145086ce281ff34a0ad73a766d538ca",
-    "voice-sentinel-split": "6ef0e45fa778910ec3f1a30dc91d85b979cd4d0840adf28960adbd9454d1a82c"
+    "voice-sentinel-split": "6f12df957d953ec3e082fe062b62be32570762af5d5123d6aaea06773340f5aa"
   }
 }

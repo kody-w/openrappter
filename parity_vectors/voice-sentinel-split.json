@@ -29,7 +29,7 @@
   "model_script": [
     {
       "emit": {
-        "content": "written form|||VOICE|||spoken form"
+        "content": "  written form  |||VOICE|||  spoken form  "
       },
       "round": 1
     }

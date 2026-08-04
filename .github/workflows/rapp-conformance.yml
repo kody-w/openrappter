@@ -113,6 +113,21 @@ jobs:
       - name: Golden parity vectors (both runtimes)
         run: python3 parity_harness.py --runtime both --report parity-report.json
 
+      # SPEC.md §1 does not only declare a tier, it makes a second, narrower
+      # claim in prose: "The one `full`-only vector — `voice-sentinel-split` —
+      # we do in fact implement". The step above cannot check that, because the
+      # declared tier is `core` and that vector is tagged full-only, so it is
+      # selected out. Nothing else executed it either — the claim was written
+      # down and never measured.
+      #
+      # This does not raise the declared tier. The gating run above still reads
+      # its tier from SPEC.md and is still what the tier attestation rests on.
+      # This run exists so the *prose* claim is held to the same standard as the
+      # declaration: if the voice seam ever drifts between the two runtimes,
+      # SPEC.md becomes false and CI says so instead of staying quiet.
+      - name: Verify the full-only vectors SPEC.md claims to implement
+        run: python3 parity_harness.py --tier full --runtime both --report parity-report-full.json
+
       - name: Parity summary
         if: always()
         run: |

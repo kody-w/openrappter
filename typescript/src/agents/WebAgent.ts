@@ -100,6 +100,8 @@ export class WebAgent extends BasicAgent {
     }
   }
 
+  private static readonly MAX_REDIRECTS = 5;
+
   private validateUrl(url: string): void {
     const parsed = new URL(url);
     const hostname = parsed.hostname;
@@ -129,10 +131,48 @@ export class WebAgent extends BasicAgent {
     }
   }
 
-  private async fetchUrl(url: string): Promise<string> {
-    this.validateUrl(url);
+  /**
+   * Fetch, validating every hop rather than only the first.
+   *
+   * `validateUrl` was called once, on the URL the caller supplied, and then
+   * `fetch` was left to follow redirects on its own. Redirects are followed by
+   * default, so the check only ever covered the first hop:
+   *
+   *     caller asks for   http://public.example/go
+   *     validateUrl       passes — the host is public
+   *     server replies    302 Location: http://127.0.0.1:18790/
+   *     fetch follows     and returns the local gateway's response
+   *
+   * Verified against a local pair of servers: the redirect was followed and the
+   * blocked host's body came back. Every address this class exists to refuse —
+   * loopback, link-local, RFC 1918, cloud metadata at 169.254.169.254 — was
+   * reachable by asking a public host to point there.
+   *
+   * Redirects are now resolved by hand so the same validation runs on each
+   * target, with a hop limit so a redirect cycle cannot spin.
+   */
+  private async fetchWithValidatedRedirects(url: string): Promise<Response> {
+    let target = url;
 
-    const response = await fetch(url);
+    for (let hop = 0; hop <= WebAgent.MAX_REDIRECTS; hop++) {
+      this.validateUrl(target);
+      const response = await fetch(target, { redirect: 'manual' });
+
+      const isRedirect = response.status >= 300 && response.status < 400;
+      if (!isRedirect) return response;
+
+      const location = response.headers.get('location');
+      if (!location) return response;
+
+      // Resolve relative redirects against the hop they came from.
+      target = new URL(location, target).toString();
+    }
+
+    throw new Error(`Too many redirects (limit ${WebAgent.MAX_REDIRECTS}): ${url}`);
+  }
+
+  private async fetchUrl(url: string): Promise<string> {
+    const response = await this.fetchWithValidatedRedirects(url);
     if (!response.ok) {
       return JSON.stringify({
         status: 'error',

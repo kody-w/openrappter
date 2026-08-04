@@ -778,6 +778,77 @@ describe('IMessageChannel Apple transport', () => {
     expect(chunks.join('')).toBe(content);
   });
 
+  it('never splits a grapheme cluster while chunking', () => {
+    // Code-point slicing keeps surrogate pairs intact, but a code point is not
+    // a character. Each of these is one thing to the reader and several code
+    // points underneath, and the old chunker cut straight through them.
+    // maxLength is chosen per case to be large enough to hold the cluster.
+    const cases: Array<[string, string, number]> = [
+      ['family emoji', 'ab\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}cd', 8],
+      ['regional flag', 'ab\u{1F1FA}\u{1F1F8}cd', 3],
+      ['skin tone', 'ab\u{1F44D}\u{1F3FD}cd', 3],
+      ['combining accent', 'abe\u0301cd', 3],
+      ['devanagari cluster', 'ab\u0915\u094D\u0937cd', 4],
+    ];
+
+    for (const [label, content, maxLength] of cases) {
+      const chunks = chunkIMessageText(content, maxLength);
+      expect(chunks.join(''), label).toBe(content);
+      for (const chunk of chunks) {
+        // A chunk starting with a combining mark, joiner or modifier is a
+        // cluster that was cut: the mark is stranded from what it modifies.
+        expect(
+          /^[\u0300-\u036F\u094D\u200D\u{1F3FB}-\u{1F3FF}]/u.test(chunk),
+          `${label} starts mid-cluster: ${JSON.stringify(chunk)}`,
+        ).toBe(false);
+        expect(
+          chunk.endsWith('\u200D'),
+          `${label} ends on a joiner: ${JSON.stringify(chunk)}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('keeps a family emoji whole rather than scattering its members', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    const chunks = chunkIMessageText(`ab${family}cd`, 8);
+
+    expect(chunks.some(chunk => chunk.includes(family))).toBe(true);
+    expect(chunks.join('')).toBe(`ab${family}cd`);
+  });
+
+  it('keeps a flag whole rather than turning it into two letters', () => {
+    const flag = '\u{1F1FA}\u{1F1F8}';
+    const chunks = chunkIMessageText(`ab${flag}cd`, 3);
+
+    expect(chunks.some(chunk => chunk.includes(flag))).toBe(true);
+    expect(chunks.join('')).toBe(`ab${flag}cd`);
+  });
+
+  it('still respects the limit when one cluster cannot fit', () => {
+    // A family emoji is 7 code points. At maxLength 2 it cannot be kept whole,
+    // and exceeding the limit risks the send failing outright — so it is split.
+    // The function must still terminate and still reproduce the input.
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    const chunks = chunkIMessageText(family, 2);
+
+    expect(chunks.join('')).toBe(family);
+    for (const chunk of chunks) expect(Array.from(chunk).length).toBeLessThanOrEqual(2);
+  });
+
+  it('packs whole clusters up to the limit rather than one per chunk', () => {
+    // Guards against a fix that is "safe" by emitting one chunk per grapheme,
+    // which would turn a single message into hundreds.
+    const flags = '\u{1F1FA}\u{1F1F8}'.repeat(3);
+    expect(chunkIMessageText(flags, 6)).toEqual([flags]);
+  });
+
+  it('still chunks plain text exactly as before', () => {
+    expect(chunkIMessageText('abcdefg', 3)).toEqual(['abc', 'def', 'g']);
+    expect(chunkIMessageText('', 3)).toEqual(['']);
+    expect(chunkIMessageText('a'.repeat(6), 3)).toEqual(['aaa', 'aaa']);
+  });
+
   it('rejects BlueBubbles mode explicitly before transport access', async () => {
     const channel = new IMessageChannel(
       {

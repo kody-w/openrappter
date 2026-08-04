@@ -3,6 +3,7 @@
  */
 
 import './components/app.js';
+import './components/sentinel.js';
 import './components/sidebar.js';
 import './components/chat.js';
 import './components/channels.js';

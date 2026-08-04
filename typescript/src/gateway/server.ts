@@ -28,6 +28,7 @@ import { registerShowcaseMethods } from './methods/showcase-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
+import { registerSentinelMethods } from './methods/sentinel-methods.js';
 import type { RappterManager } from './rappter-manager.js';
 
 const DEFAULT_PORT = 18790;
@@ -971,6 +972,7 @@ export class GatewayServer {
 
     // Backup & restore methods
     registerBackupMethods(this);
+    registerSentinelMethods(this);
 
     // Rappter multi-soul methods
     if (this.rappterManager) {

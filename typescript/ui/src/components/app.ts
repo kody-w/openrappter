@@ -6,7 +6,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'sentinel' | 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -87,7 +87,7 @@ export class OpenRappterApp extends LitElement {
   `;
 
   @state()
-  private currentView: View = 'chat';
+  private currentView: View = 'sentinel';
 
   @state()
   private connected = false;
@@ -133,6 +133,8 @@ export class OpenRappterApp extends LitElement {
 
   private renderView() {
     switch (this.currentView) {
+      case 'sentinel':
+        return html`<openrappter-sentinel></openrappter-sentinel>`;
       case 'chat':
         return html`<openrappter-chat></openrappter-chat>`;
       case 'channels':
@@ -162,7 +164,7 @@ export class OpenRappterApp extends LitElement {
       case 'accounts':
         return html`<openrappter-accounts></openrappter-accounts>`;
       default:
-        return html`<openrappter-chat></openrappter-chat>`;
+        return html`<openrappter-sentinel></openrappter-sentinel>`;
     }
   }
 
@@ -192,6 +194,7 @@ export class OpenRappterApp extends LitElement {
 
   private getViewTitle(): string {
     const titles: Record<View, string> = {
+      sentinel: 'Sentinel',
       chat: 'Chat',
       channels: 'Channels',
       sessions: 'Sessions',

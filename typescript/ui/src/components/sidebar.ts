@@ -3,9 +3,9 @@
  */
 
 import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { customElement, property, state } from 'lit/decorators.js';
 
-type View = 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'sentinel' | 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 interface NavItem {
   id: View;
@@ -112,10 +112,49 @@ export class OpenRappterSidebar extends LitElement {
     .footer a:hover {
       text-decoration: underline;
     }
+
+    .nav-item.primary {
+      font-weight: 600;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: .35rem;
+    }
+
+    .nav-item.primary.active {
+      border-color: var(--accent);
+    }
+
+    .legacy-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .chev {
+      transition: transform .15s ease;
+      display: inline-block;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .chev.open {
+      transform: rotate(90deg);
+    }
   `;
 
   @property({ type: String })
-  currentView: View = 'chat';
+  currentView: View = 'sentinel';
+
+  @state()
+  private legacyOpen = false;
+
+  /** The front door. Everything below it is the older, manual way of driving
+   *  this system, kept intact as a fallback rather than removed. */
+  private primaryItems: NavItem[] = [
+    { id: 'sentinel', label: 'Sentinel', icon: '🛡️' },
+  ];
 
   private navItems: NavItem[] = [
     { id: 'chat', label: 'Chat', icon: '💬' },
@@ -153,11 +192,10 @@ export class OpenRappterSidebar extends LitElement {
 
       <nav>
         <div class="nav-section">
-          <div class="nav-section-title">Main</div>
-          ${this.navItems.slice(0, 8).map(
+          ${this.primaryItems.map(
             (item) => html`
               <div
-                class="nav-item ${this.currentView === item.id ? 'active' : ''}"
+                class="nav-item primary ${this.currentView === item.id ? 'active' : ''}"
                 @click=${() => this.handleClick(item.id)}
               >
                 <span class="nav-icon">${item.icon}</span>
@@ -168,18 +206,26 @@ export class OpenRappterSidebar extends LitElement {
         </div>
 
         <div class="nav-section">
-          <div class="nav-section-title">System</div>
-          ${this.navItems.slice(8).map(
-            (item) => html`
-              <div
-                class="nav-item ${this.currentView === item.id ? 'active' : ''}"
-                @click=${() => this.handleClick(item.id)}
-              >
-                <span class="nav-icon">${item.icon}</span>
-                <span class="nav-label">${item.label}</span>
-              </div>
-            `
-          )}
+          <div
+            class="nav-section-title legacy-toggle"
+            @click=${() => { this.legacyOpen = !this.legacyOpen; }}
+          >
+            <span>Legacy</span>
+            <span class="chev ${this.legacyOpen ? 'open' : ''}">›</span>
+          </div>
+          ${this.legacyOpen
+            ? this.navItems.map(
+                (item) => html`
+                  <div
+                    class="nav-item ${this.currentView === item.id ? 'active' : ''}"
+                    @click=${() => this.handleClick(item.id)}
+                  >
+                    <span class="nav-icon">${item.icon}</span>
+                    <span class="nav-label">${item.label}</span>
+                  </div>
+                `
+              )
+            : ''}
         </div>
       </nav>
 

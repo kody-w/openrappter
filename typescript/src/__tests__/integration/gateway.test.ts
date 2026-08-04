@@ -188,6 +188,54 @@ describe('Gateway Integration', () => {
       expect(handlerCalled).toBe(false);
     });
 
+    // The loopback comparison is only one of six checks on the Host header, and
+    // it was the only one anything exercised. Every value below parses with
+    // hostname 127.0.0.1, so the loopback check passes them all — the specific
+    // sub-condition is the only thing standing in the way. Deleting any of them
+    // left the full suite green.
+    //
+    // These are shapes a browser will never send. They matter because a proxy,
+    // cache or WAF in front of the gateway may disagree with WHATWG URL parsing
+    // about where the authority ends, and the one that disagrees is the one that
+    // decides where the request really goes.
+    it.each([
+      ['userinfo in the authority', (port: number) => `evil.example@127.0.0.1:${port}`],
+      // No username, so this isolates the password check rather than being
+      // caught by the username one first.
+      ['a password but no user in the authority', (port: number) => `:pass@127.0.0.1:${port}`],
+      ['a path appended to the authority', (port: number) => `127.0.0.1:${port}/evil`],
+      ['a query string appended to the authority', (port: number) => `127.0.0.1:${port}?x=1`],
+      ['a fragment appended to the authority', (port: number) => `127.0.0.1:${port}#frag`],
+    ])('rejects a Host header carrying %s', async (_label, build) => {
+      const port = await reserveTestPort();
+      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      await server.start();
+
+      const res = await rawHttpGet(port, { Host: build(port) });
+
+      expect(res.status).toBe(403);
+      expect(JSON.parse(res.body)).toMatchObject({ error: 'Forbidden request origin' });
+    });
+
+    // Not tested: the `hostHeader.length > 255` bound. Under a loopback bind any
+    // host long enough to trip it is also non-loopback, so the loopback check
+    // rejects it first and a test there would pass with the bound deleted.
+    // Isolating it needs `bind: 'all'`, which opens a genuinely public port for
+    // the sake of a pre-parse bound with no demonstrated security consequence.
+    // Recorded as unverified rather than covered by a test that proves nothing.
+
+    it('still accepts an ordinary loopback Host header', async () => {
+      // Positive control: without it, the six refusals above would all pass if
+      // validateRequestSource simply rejected everything.
+      const port = await reserveTestPort();
+      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      await server.start();
+
+      const res = await rawHttpGet(port, { Host: `127.0.0.1:${port}` });
+
+      expect(res.status).toBe(200);
+    });
+
     it('rejects a non-loopback Host header to prevent DNS rebinding', async () => {
       const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });

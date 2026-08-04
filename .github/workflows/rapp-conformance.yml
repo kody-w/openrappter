@@ -32,6 +32,21 @@ jobs:
             || { echo "rapp-keyring is not installed; the R9 credential scan cannot run"; exit 1; }
           "$HOME/.local/bin/rapp-keyring" version
 
+      - name: Prove the credential scan actually bites
+        run: |
+          set -o pipefail
+          pip install --quiet pytest
+          python3 -m pytest python/tests/test_conformance_r9.py -q -rs \
+            | tee "$RUNNER_TEMP/r9-tests.txt"
+          # Four of these ten pin the JSON contract R9 relies on against a real
+          # rapp-keyring, so they skip when the broker is absent. Here it is
+          # present, and a skip would mean the contract went unverified in the
+          # one job that can verify it.
+          if grep -q "skipped" "$RUNNER_TEMP/r9-tests.txt"; then
+            echo "::error::R9 contract tests skipped; the broker contract went unverified"
+            exit 1
+          fi
+
       - name: RAPP conformance
         run: |
           echo "$HOME/.local/bin" >> $GITHUB_PATH

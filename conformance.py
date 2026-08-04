@@ -367,22 +367,48 @@ def r9_no_secrets():
     broker = shutil.which("rapp-keyring") or \
         os.path.expanduser("~/.local/bin/rapp-keyring")
     if not (os.path.isfile(broker) and os.access(broker, os.X_OK)):
-        return None, "rapp-keyring not installed; cannot run the credential scan"
+        return None, ("rapp-keyring not installed; cannot run the credential scan "
+                      "(curl -fsSL https://kody-w.github.io/rapp-keyring/install.sh | bash)")
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT,
                              capture_output=True, text=True).stdout.split()
     if not tracked:
         return None, "not a git checkout"
-    # Scan in batches; this repo is large.
-    findings = 0
+    # Ask for JSON rather than reading the prose. The prose parse counted the
+    # remediation advice ("rotate the credential at its source — assume it
+    # already leaked") as a finding, and — the reason this matters — a broker
+    # that failed outright printed nothing at all, so nothing matched, the
+    # count stayed zero, and the check reported a clean bill of health over
+    # files it had never opened. A scanner that cannot run must never be
+    # indistinguishable from a scanner that ran and found nothing.
+    findings, suppressed = [], 0
     for i in range(0, len(tracked), 400):
-        proc = subprocess.run([broker, "scan"] + tracked[i:i + 400], cwd=ROOT,
-                              capture_output=True, text=True)
-        if proc.returncode != 0:
-            findings += sum(1 for line in proc.stdout.splitlines()
-                            if line.strip().startswith("./") or " — " in line)
+        proc = subprocess.run([broker, "scan", "--json"] + tracked[i:i + 400],
+                              cwd=ROOT, capture_output=True, text=True)
+        # rapp-keyring scan: 0 = clean, 1 = findings. Anything else is the
+        # broker itself failing, which is not evidence of an absence.
+        if proc.returncode not in (0, 1):
+            why = (proc.stderr or proc.stdout).strip().splitlines()
+            return False, ("scan did not complete — rapp-keyring exited %d (%s); "
+                           "this is not a finding of credentials, it is the "
+                           "absence of a verdict"
+                           % (proc.returncode, why[0][:90] if why else "no output"))
+        try:
+            report = json.loads(proc.stdout)
+        except ValueError:
+            return False, ("scan did not complete — rapp-keyring exited %d with "
+                           "output that is not the documented JSON; no verdict"
+                           % proc.returncode)
+        findings.extend(report.get("findings", []))
+        suppressed += len(report.get("suppressed", []))
     if findings:
-        return False, "%d file(s) contain something credential-shaped" % findings
-    return True, "%d tracked files scanned, no plaintext credential" % len(tracked)
+        files = sorted({str(f.get("file")) for f in findings})
+        return False, ("%d credential-shaped value(s) in %d file(s): %s"
+                       % (len(findings), len(files),
+                          ", ".join(files[:5]) + (" …" if len(files) > 5 else "")))
+    detail = "%d tracked files scanned, no plaintext credential" % len(tracked)
+    if suppressed:
+        detail += " (%d suppressed by an explicit allow pragma)" % suppressed
+    return True, detail
 
 
 # ── report ───────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ import { request as httpRequest } from 'http';
 import { GatewayServer as RuntimeGatewayServer } from '../../gateway/server.js';
 import type { GatewayConfig } from '../../gateway/types.js';
 import WebSocket, { type ClientOptions } from 'ws';
+import { reserveTestPort } from '../support/test-port.js';
 
 let testDataDir = '';
 
@@ -24,10 +25,6 @@ class GatewayServer extends RuntimeGatewayServer {
   constructor(config: Partial<GatewayConfig>) {
     super({ ...config, dataDir: testDataDir });
   }
-}
-
-function randomPort(): number {
-  return 30000 + Math.floor(Math.random() * 20000);
 }
 
 async function waitFor(predicate: () => boolean, message: string): Promise<void> {
@@ -118,7 +115,7 @@ describe('Gateway Integration', () => {
 
   describe('HTTP endpoints', () => {
     it('should respond to GET /health', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -132,7 +129,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should respond to GET /status', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -143,7 +140,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should return 404 for unknown paths', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -152,7 +149,7 @@ describe('Gateway Integration', () => {
     });
 
     it('allows the exact same browser origin without wildcard CORS', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       const origin = `http://127.0.0.1:${port}`;
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
@@ -164,7 +161,7 @@ describe('Gateway Integration', () => {
     });
 
     it('rejects a malicious browser origin before any loopback HTTP handler runs', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       let handlerCalled = false;
       server.registerMethod('protected.local', async () => {
@@ -192,7 +189,7 @@ describe('Gateway Integration', () => {
     });
 
     it('rejects a non-loopback Host header to prevent DNS rebinding', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -206,7 +203,7 @@ describe('Gateway Integration', () => {
 
   describe('WebSocket handshake', () => {
     it('should accept connect handshake (no auth)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -221,7 +218,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should reject non-connect messages before handshake', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -235,7 +232,7 @@ describe('Gateway Integration', () => {
     });
 
     it('rejects a malicious WebSocket Origin during the HTTP upgrade', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -245,7 +242,7 @@ describe('Gateway Integration', () => {
     });
 
     it('rejects a malicious WebSocket Host during the HTTP upgrade', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -256,7 +253,7 @@ describe('Gateway Integration', () => {
     });
 
     it('accepts 127.0.0.1 and localhost same-origin browser WebSockets plus native clients', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -277,7 +274,7 @@ describe('Gateway Integration', () => {
     });
 
     it('requires configured authentication before binding publicly', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'all', auth: { mode: 'none' } });
       await expect(server.start()).rejects.toThrow(/auth is required/i);
     });
@@ -287,7 +284,7 @@ describe('Gateway Integration', () => {
 
   describe('Auth modes', () => {
     it('should accept password auth', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -303,7 +300,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should reject wrong password', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -319,7 +316,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should reject wrong token', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -336,7 +333,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should keep separate clients isolated: one authenticated client does not grant access to another unauthenticated client', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -363,7 +360,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should not leak authenticated state across reconnects', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -391,7 +388,7 @@ describe('Gateway Integration', () => {
 
   describe('requiresAuth dispatch enforcement', () => {
     it('should let an authenticated client call a requiresAuth-protected method', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-1'] } });
       let handlerCalled = false;
       server.registerMethod('protected.action', async () => {
@@ -411,7 +408,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should let public (non-requiresAuth) methods remain callable after handshake', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-2'] } });
       await server.start();
 
@@ -425,7 +422,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should work with requiresAuth methods when auth mode is "none" (local trusted mode)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       let handlerCalled = false;
       server.registerMethod('protected.action', async () => {
@@ -445,7 +442,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should reject an unauthenticated caller of a requiresAuth method and never invoke the handler (regression guard for dead requiresAuth flag)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-3'] } });
       let handlerCalled = false;
       server.registerMethod('protected.dangerous', async () => {
@@ -509,7 +506,7 @@ describe('Gateway Integration', () => {
 
   describe('RPC methods', () => {
     it('should respond to ping', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -524,7 +521,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should respond to status', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -540,7 +537,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should list available methods', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -559,7 +556,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should return error for unknown methods', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -573,7 +570,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should support custom registered methods', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.registerMethod('custom.echo', async (params: { text: string }) => {
         return { echoed: params.text };
@@ -591,7 +588,7 @@ describe('Gateway Integration', () => {
     });
 
     it('streams real agent deltas and a terminal frame over the live socket', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async (_request, stream) => {
         stream?.({ id: '', streaming: true, chunk: 'hello ', done: false });
@@ -641,7 +638,7 @@ describe('Gateway Integration', () => {
     });
 
     it('settles provider output on done and emits one dispatcher-owned terminal frame', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async (_request, stream) => {
         stream?.({ id: '', streaming: true, chunk: 'before done', done: false });
@@ -690,7 +687,7 @@ describe('Gateway Integration', () => {
     });
 
     it('settles provider output on error and ignores all later callbacks', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async (_request, stream) => {
         stream?.({
@@ -736,7 +733,7 @@ describe('Gateway Integration', () => {
     });
 
     it('makes stream timeouts terminal and suppresses late provider chunks', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({
         port,
         bind: 'loopback',
@@ -786,7 +783,7 @@ describe('Gateway Integration', () => {
 
   describe('Server lifecycle', () => {
     it('should report status correctly', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback' });
 
       const beforeStart = server.getStatus();
@@ -807,7 +804,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should track connections', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -824,7 +821,7 @@ describe('Gateway Integration', () => {
     });
 
     it('should clean up on stop', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -838,7 +835,7 @@ describe('Gateway Integration', () => {
     });
 
     it('serializes an immediate restart behind an in-progress stop', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -852,7 +849,7 @@ describe('Gateway Integration', () => {
     });
 
     it('generation-fences an old chat completion across stop and restart', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       let releaseAgent: (() => void) | undefined;
       let markStarted: (() => void) | undefined;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
@@ -916,7 +913,7 @@ describe('Gateway Integration', () => {
     });
 
     it('does not let an old cron completion alter restarted metrics', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       let releaseCron: (() => void) | undefined;
       let markStarted: (() => void) | undefined;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
@@ -973,7 +970,7 @@ describe('Gateway Integration', () => {
     }
 
     it('blocks a protected HTTP call with no auth (token mode) and never invokes the handler', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -989,7 +986,7 @@ describe('Gateway Integration', () => {
     });
 
     it('blocks a protected HTTP call with a wrong bearer token and never invokes the handler', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -1005,7 +1002,7 @@ describe('Gateway Integration', () => {
     });
 
     it('allows a protected HTTP call with the correct Authorization: Bearer token', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -1021,7 +1018,7 @@ describe('Gateway Integration', () => {
     });
 
     it('rejects a wrong password sent in the JSON-RPC body auth field', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'password', password: 'secret-http' } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -1040,7 +1037,7 @@ describe('Gateway Integration', () => {
     });
 
     it('accepts a correct password sent in the JSON-RPC body auth field', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'password', password: 'secret-http' } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -1061,7 +1058,7 @@ describe('Gateway Integration', () => {
     });
 
     it('never synthesizes authenticated:true for protected methods over HTTP with no credential configured (auth mode none stays trusted, but requiresAuth is still enforced when a mode is configured)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['t1'] } });
       let receivedAuthenticated: boolean | undefined;
       server.registerMethod('protected.inspect', async (_params, conn: unknown) => {
@@ -1082,7 +1079,7 @@ describe('Gateway Integration', () => {
     });
 
     it('preserves loopback auth-none behavior for HTTP (protected methods work with no credential)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       let handlerCalled = false;
       server.registerMethod('protected.http', async () => {
@@ -1098,7 +1095,7 @@ describe('Gateway Integration', () => {
     });
 
     it('allows only the explicit public HTTP RPC allowlist without credentials', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       await server.start();
 
@@ -1110,7 +1107,7 @@ describe('Gateway Integration', () => {
     });
 
     it('does not let a replacement handler inherit a built-in public exemption', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       await server.start();
 
@@ -1136,7 +1133,7 @@ describe('Gateway Integration', () => {
     });
 
     it('protects sensitive HTTP method names and rejects untrusted origins even with a valid token', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['tok-http'] } });
       await server.start();
 
@@ -1184,7 +1181,7 @@ describe('Gateway Integration', () => {
     });
 
     it('never leaks the configured token/password in the error response', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['super-secret-token'] } });
       server.registerMethod('protected.http', async () => ({ ok: true }), { requiresAuth: true });
       await server.start();
@@ -1198,7 +1195,7 @@ describe('Gateway Integration', () => {
 
   describe('sessionKey/sessionId alias', () => {
     it('persists sessions only inside the injected gateway data directory', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -1212,7 +1209,7 @@ describe('Gateway Integration', () => {
     });
 
     it('scopes auth profiles and backups to the injected gateway data directory', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       fs.writeFileSync(path.join(testDataDir, 'test-state.json'), '{"isolated":true}');
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
@@ -1230,7 +1227,7 @@ describe('Gateway Integration', () => {
     });
 
     it('chat.messages accepts sessionId (canonical) for a session created via chat.send', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async (req) => ({ content: 'hi back', sessionId: req.sessionId ?? '', finishReason: 'stop' }));
       await server.start();
@@ -1252,7 +1249,7 @@ describe('Gateway Integration', () => {
     });
 
     it('chat.delete accepts sessionKey (legacy/native-client alias) for a session created via chat.session (sessionId)', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -1270,7 +1267,7 @@ describe('Gateway Integration', () => {
     });
 
     it('chat.session accepts sessionKey as an alias for sessionId', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -1289,7 +1286,7 @@ describe('Gateway Integration', () => {
 
   describe('chat.abort', () => {
     it('supports the UI runId-only abort contract', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async () => {
         await new Promise((r) => setTimeout(r, 200));
@@ -1313,7 +1310,7 @@ describe('Gateway Integration', () => {
     });
 
     it('supersedes concurrent runs in one session without overwriting runId tracking', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       const releases: Array<() => void> = [];
       server.setAgentHandler((req) => new Promise((resolve) => {
@@ -1360,7 +1357,7 @@ describe('Gateway Integration', () => {
     });
 
     it('returns aborted:false when there is no active run for the session', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
 
@@ -1375,7 +1372,7 @@ describe('Gateway Integration', () => {
     });
 
     it('cleans both runId and session indexes after a run finishes', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async (req) => ({
         content: 'done',
@@ -1407,7 +1404,7 @@ describe('Gateway Integration', () => {
     });
 
     it('does not broadcast an error when an aborted run later rejects', async () => {
-      const port = randomPort();
+      const port = await reserveTestPort();
       server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
       server.setAgentHandler(async () => {
         await new Promise((r) => setTimeout(r, 100));

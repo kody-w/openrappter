@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import fs from 'fs';
 import path from 'path';
 import { GatewayServer } from '../../gateway/server.js';
+import { reserveTestPort } from '../support/test-port.js';
 
 describe('Gateway static file serving', () => {
   let tmpDir: string;
@@ -23,8 +24,7 @@ describe('Gateway static file serving', () => {
   });
 
   beforeEach(async () => {
-    // Use a random high port
-    port = 19000 + Math.floor(Math.random() * 1000);
+    port = await reserveTestPort();
     server = new GatewayServer({
       port,
       bind: 'loopback',

@@ -16,6 +16,16 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.apiKey = options?.apiKey ?? process.env.OPENAI_API_KEY ?? '';
     this.dimensions = options?.dimensions ?? 1536;
     this.batchSize = options?.batchSize ?? 20;
+
+    // `embed` advances by this value. At zero the loop never advances and spins
+    // forever; below zero the index walks backwards away from the termination
+    // check while `results` keeps growing, so the process dies rather than
+    // hangs. Neither is something a caller can diagnose from the outside, so
+    // refuse it here where the value is set, the way chunkIMessageText refuses
+    // a non-positive chunk length.
+    if (!Number.isSafeInteger(this.batchSize) || this.batchSize < 1) {
+      throw new Error('embedding batchSize must be a positive integer');
+    }
   }
 
   async embed(texts: string[]): Promise<number[][]> {

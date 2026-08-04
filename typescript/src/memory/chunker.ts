@@ -17,12 +17,24 @@ export function chunkContent(
   const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const overlap = options.overlap ?? DEFAULT_OVERLAP;
 
+  // Empty content is no content. Returning [''] made an empty memory chunk,
+  // which the Python chunker has never produced.
+  if (content.length === 0) {
+    return [];
+  }
   if (content.length <= chunkSize) {
     return [content];
   }
 
   const chunks: string[] = [];
-  const step = chunkSize - overlap;
+  // A step of zero or less never advances. With `overlap >= chunkSize` — or a
+  // chunkSize of zero — the loop below ran forever, appending a chunk each
+  // time, until the process ran out of memory. Both values come straight from
+  // MemoryManagerOptions, so a caller could hang the runtime by configuring
+  // them. The Python chunker has clamped this since it was written:
+  //
+  //     step = max(1, chunk_size - overlap)
+  const step = Math.max(1, chunkSize - overlap);
 
   for (let i = 0; i < content.length; i += step) {
     const chunk = content.slice(i, i + chunkSize);

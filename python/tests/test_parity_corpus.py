@@ -48,6 +48,37 @@ class TestParityCorpus:
         }
         assert present == required
 
+    def test_voice_vector_can_actually_detect_a_trim_change(self):
+        """A vector that cannot fail is not coverage.
+
+        The fixture used to emit ``written form|||VOICE|||spoken form`` — no
+        whitespace anywhere — so whether a runtime trimmed the two halves was
+        unobservable. Deleting ``.strip()`` from the Python runtime left the
+        corpus reporting 14/14 PASS on both runtimes while they disagreed on
+        three whitespace inputs.
+
+        Pin the property that made it blind, so the fixture cannot quietly
+        revert to one that agrees with everything.
+        """
+        vector = json.loads(
+            (VECTORS / "voice-sentinel-split.json").read_text(encoding="utf-8")
+        )
+        content = vector["model_script"][0]["emit"]["content"]
+        written, _, spoken = content.partition("|||VOICE|||")
+
+        assert written != written.strip(), (
+            "the written half carries no surrounding whitespace, so trimming is "
+            "unobservable and the vector cannot detect a change to it"
+        )
+        assert spoken != spoken.strip(), (
+            "the spoken half carries no surrounding whitespace, so trimming is "
+            "unobservable and the vector cannot detect a change to it"
+        )
+        # And the expectation must be the trimmed form, or the assertion above
+        # would be satisfied by a vector that simply expects the raw text.
+        assert vector["expect"]["envelope"]["response"] == written.strip()
+        assert vector["expect"]["envelope"]["voice_response"] == spoken.strip()
+
     def test_corpus_digest_matches_the_vectors_on_disk(self):
         """A stale digest would let a runtime attest to a corpus it did not run."""
         import hashlib

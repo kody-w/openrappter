@@ -144,6 +144,48 @@ export function releaseLock(options: GatewayLockOptions = {}): void {
   heldLocks.delete(filePath);
 }
 
+export interface GatewayLockOwner {
+  /** PID recorded in the lock file, or null when absent/unreadable/malformed. */
+  pid: number | null;
+  /** Whether that recorded PID is a live process this user can signal. */
+  alive: boolean;
+}
+
+/**
+ * Report who the lock file says owns the gateway.
+ *
+ * `isGatewayRunning()` answers *whether* the gateway is held, which is not
+ * enough to debug the case that matters: another supervisor holding the lock
+ * while the installed launch agent loops on "Another OpenRappter gateway
+ * already owns the runtime lock". Then `install-service` reports live/ready for
+ * a listener it does not own, and the symptoms look like a credential problem
+ * instead of an ownership one.
+ */
+export function readGatewayLockOwner(options: GatewayLockOptions = {}): GatewayLockOwner {
+  const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
+  let pid: number | null = null;
+  try {
+    const raw = readFileSync(filePath, 'utf-8').trim();
+    // The file may carry trailing content; only a leading integer is meaningful.
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isSafeInteger(parsed) && parsed > 0) pid = parsed;
+  } catch {
+    return { pid: null, alive: false };
+  }
+  if (pid === null) return { pid: null, alive: false };
+
+  let alive = false;
+  try {
+    // Signal 0 tests for existence without delivering anything.
+    process.kill(pid, 0);
+    alive = true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else.
+    alive = (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+  return { pid, alive };
+}
+
 export function isGatewayRunning(options: GatewayLockOptions = {}): boolean {
   const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
   if (heldLocks.has(filePath)) return true;

@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
-import { ensureHomeDir, loadEnv, saveEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
+import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
 import { hasCopilotAvailable, autoAuthIfNeeded, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
@@ -68,6 +68,13 @@ async function startGatewayInProcess(opts?: {
     readIMessageConfig,
   } = await import('./channels/imessage-gateway.js');
   const { listBundledSkills } = await import('./skills/bundled.js');
+
+  // launchd runs `node` directly with a fixed environment, so a supervised
+  // gateway never sees ~/.openrappter/.env — the wrapper script is what sources
+  // it for interactive commands. Without this the Copilot provider starts with
+  // no credential and the iMessage model preflight fails forever, while
+  // `diagnose` (run under the wrapper) reports the token as configured. #44
+  await hydrateManagedEnv();
 
   const port = opts?.port ?? parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
   const token = process.env.OPENRAPPTER_TOKEN || undefined;

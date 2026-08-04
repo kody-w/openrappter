@@ -1890,10 +1890,28 @@ imessageCommand
     console.log(
       `${EMOJI} iMessage service: `
       + `installed=${status.installed} loaded=${status.loaded} `
+      + `running=${status.running} `
       + `supervisor=${status.supervisor} `
       + `live=${status.live} ready=${status.ready}`
       + (status.readinessReason ? ` reason=${status.readinessReason}` : ''),
     );
+    // `live` describes whoever answered the port. Say so when that is not the
+    // job just described, instead of letting the two readings sit side by side
+    // and imply each other.
+    if (status.servedByForeignProcess) {
+      console.warn(
+        `${EMOJI} The port is answered by pid ${status.servingPid}, which is not the `
+        + `supervised job (pid ${status.supervisedPid}). live/ready describe that other `
+        + `process, not the service you installed — it holds none of the config or `
+        + `credentials this install wrote.`,
+      );
+    } else if (status.loaded && !status.running) {
+      console.warn(
+        `${EMOJI} The job is registered with launchd but not running `
+        + `(loaded is registration, not execution). Check 'last exit code' via `
+        + `launchctl print.`,
+      );
+    }
   });
 
 imessageCommand

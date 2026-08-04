@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readGatewayLockOwner } from '../infra/gateway-lock.js';
 
 export const OPENRAPPTER_LAUNCH_AGENT_LABEL = 'com.openrappter.gateway';
 export const OPENRAPPTER_SYSTEM_DAEMON_LABEL = 'com.openrappter.rappterone';
@@ -51,14 +52,42 @@ export interface IMessageLaunchAgentOptions {
   healthTimeoutMs?: number;
   checkHttp?: boolean;
   delegateSystemService?: boolean;
+  /** Test seam: who holds the gateway runtime lock. Defaults to the real file. */
+  lockOwnerReader?: () => { pid: number | null; alive: boolean };
 }
 
 export interface IMessageServiceStatus {
   installed: boolean;
+  /**
+   * The job is registered with launchd.
+   *
+   * This is *not* "the job is running". `launchctl print` exits 0 for a loaded
+   * job that has never started, and did so on the machine that motivated this
+   * field — `state = not running`, `last exit code = (never exited)`, exit 0.
+   * Use {@link running} to ask whether anything is executing.
+   */
   loaded: boolean;
+  /** The supervised job is actually executing (`state = running`). */
+  running: boolean;
+  /** The pid launchd reports for the supervised job, when it has one. */
+  supervisedPid: number | null;
   supervisor: 'user' | 'system' | 'none';
   live: boolean;
   ready: boolean;
+  /**
+   * The pid holding the gateway runtime lock — i.e. what actually answered
+   * `live`/`ready`, which is not necessarily the job described above.
+   */
+  servingPid: number | null;
+  /**
+   * `live`/`ready` came from a process the supervisor above does not own.
+   *
+   * Each field on its own is defensible and the composite is still false: the
+   * port answers, so the service looks healthy, while the job you installed is
+   * not the thing answering and holds none of the config or credentials it was
+   * given.
+   */
+  servedByForeignProcess: boolean;
   readinessReason?: string;
 }
 
@@ -75,6 +104,7 @@ interface ResolvedLaunchAgentOptions {
   healthTimeoutMs: number;
   checkHttp: boolean;
   delegateSystemService: boolean;
+  lockOwnerReader: () => { pid: number | null; alive: boolean };
 }
 
 const defaultCommandRunner: LaunchdCommandRunner = (
@@ -165,6 +195,7 @@ function resolveOptions(
         : 180_000,
     checkHttp: options.checkHttp ?? true,
     delegateSystemService: options.delegateSystemService ?? true,
+    lockOwnerReader: options.lockOwnerReader ?? readGatewayLockOwner,
   };
 }
 
@@ -516,9 +547,16 @@ export async function getIMessageServiceStatus(
         fetchLocalStatus(resolved.port, '/readyz'),
       ])
     : [{ ok: false }, { ok: false }];
+  const supervisedPrint = print.exitCode === 0 ? print : systemPrint;
+  const supervisedPid = parseLaunchdPid(supervisedPrint.stdout);
+  const running = supervisedPrint.exitCode === 0 && isLaunchdRunning(supervisedPrint.stdout);
+  const servingPid = resolved.lockOwnerReader().pid;
+
   return {
     installed: installed || systemPrint.exitCode === 0,
     loaded: print.exitCode === 0 || systemPrint.exitCode === 0,
+    running,
+    supervisedPid,
     supervisor:
       print.exitCode === 0
         ? 'user'
@@ -527,11 +565,38 @@ export async function getIMessageServiceStatus(
           : 'none',
     live: liveResponse.ok,
     ready: readyResponse.ok,
+    servingPid,
+    // Only claim a foreign owner when we can see both pids and they differ.
+    // Absent evidence we say nothing rather than guess.
+    servedByForeignProcess:
+      liveResponse.ok
+      && servingPid !== null
+      && supervisedPid !== null
+      && servingPid !== supervisedPid,
     readinessReason:
       typeof readyResponse.body?.reason === 'string'
         ? readyResponse.body.reason
         : undefined,
   };
+}
+
+/**
+ * Pull `pid = N` out of `launchctl print` output.
+ *
+ * launchd prints the pid only while the job is executing, so its absence is
+ * itself the answer rather than a parse failure.
+ */
+export function parseLaunchdPid(stdout: string): number | null {
+  const match = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(stdout);
+  if (match === null) return null;
+  const pid = Number(match[1]);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+/** Read `state = running` from `launchctl print` output. */
+export function isLaunchdRunning(stdout: string): boolean {
+  const match = /^\s*state\s*=\s*(.+?)\s*$/m.exec(stdout);
+  return match !== null && match[1] === 'running';
 }
 
 async function fetchLocalStatus(

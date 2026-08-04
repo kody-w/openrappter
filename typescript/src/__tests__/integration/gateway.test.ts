@@ -224,6 +224,52 @@ describe('Gateway Integration', () => {
     // the sake of a pre-parse bound with no demonstrated security consequence.
     // Recorded as unverified rather than covered by a test that proves nothing.
 
+    // The Origin half of the same guard had the same problem, and worse. The
+    // one cross-origin test sends `https://malicious.example`, which trips the
+    // protocol check AND the host check at once — so neither is individually
+    // verified. Dropping the host comparison, the actual CORS boundary, left
+    // the full suite green.
+    //
+    // Each Origin below is chosen to fail exactly one condition.
+    it.each([
+      // http, so the protocol matches; only the host differs.
+      ['a different host', () => 'http://evil.example'],
+      // Host matches exactly; only the scheme differs.
+      ['a different scheme', (port: number) => `https://127.0.0.1:${port}`],
+      // Host and scheme match; carries userinfo.
+      ['userinfo', (port: number) => `http://user@127.0.0.1:${port}`],
+      // Host and scheme match; carries a path.
+      ['a path', (port: number) => `http://127.0.0.1:${port}/evil`],
+    ])('rejects a browser Origin with %s', async (_label, build) => {
+      const port = await reserveTestPort();
+      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      await server.start();
+
+      const res = await rawHttpGet(port, {
+        Host: `127.0.0.1:${port}`,
+        Origin: build(port),
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
+    it('accepts a browser Origin that matches the gateway exactly', async () => {
+      // Positive control. Without it the four refusals would pass if any Origin
+      // header at all were rejected, which would break the dashboard.
+      const port = await reserveTestPort();
+      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      await server.start();
+
+      const res = await rawHttpGet(port, {
+        Host: `127.0.0.1:${port}`,
+        Origin: `http://127.0.0.1:${port}`,
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe(`http://127.0.0.1:${port}`);
+    });
+
     it('still accepts an ordinary loopback Host header', async () => {
       // Positive control: without it, the six refusals above would all pass if
       // validateRequestSource simply rejected everything.

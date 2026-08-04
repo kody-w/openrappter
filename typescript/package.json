@@ -23,7 +23,7 @@
     "demo:learn": "tsx examples/learn-new.ts",
     "format": "prettier --write .",
     "prepack": "npm run build",
-    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/agents/python',{recursive:true});fs.copyFileSync('src/agents/python/runner.py','dist/agents/python/runner.py')\""
+    "copy:assets": "node -e \"const fs=require('fs');fs.mkdirSync('dist/agents/python',{recursive:true});fs.copyFileSync('src/agents/python/runner.py','dist/agents/python/runner.py');fs.mkdirSync('dist/voice',{recursive:true});fs.copyFileSync('src/voice/local-speech.js','dist/voice/local-speech.js')\""
   },
   "keywords": [
     "ai",

@@ -9,6 +9,7 @@ import { customElement, state, query } from 'lit/decorators.js';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { gateway } from '../services/gateway.js';
 import { renderMarkdown } from '../services/markdown.js';
+import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
@@ -845,6 +846,17 @@ export class OpenRappterChat extends LitElement {
   @state() private messages: Message[] = [];
   @state() private inputValue = '';
   @state() private sending = false;
+  @state() private speechEnabled = false;
+  @state() private speechStatus = 'idle';
+  @state() private speechDetail = '';
+
+  /** One speech seam for every surface — see src/voice/local-speech.js. */
+  private speech = createLocalSpeech({
+    onState: (state: string, detail: { reason?: string }) => {
+      this.speechStatus = state;
+      this.speechDetail = detail?.reason ?? '';
+    },
+  });
   @state() private sessionKey: string | null = null;
   @state() private activeRunId: string | null = null;
   @state() private error: string | null = null;
@@ -880,6 +892,78 @@ export class OpenRappterChat extends LitElement {
 
     // Listen for tool call events
     gateway.on('agent.tool', this.handleToolEvent);
+
+    // Discover voices up front: getVoices() is empty on first call in every
+    // major browser, so waiting until the first reply arrives guarantees the
+    // first line is silently dropped.
+    void this.speech.ready().then(status => {
+      this.speechStatus = status.state;
+      this.speechDetail = status.detail?.reason ?? '';
+      this.speechEnabled = this.speech.enabled;
+    });
+    // Browsers drop speech that was not started by a user gesture. Any click
+    // in this surface counts, so record them rather than gating on one button.
+    window.addEventListener('pointerdown', this.noteGesture, { capture: true });
+    window.addEventListener('keydown', this.noteGesture, { capture: true });
+  }
+
+  private noteGesture = () => {
+    this.speech.noteUserGesture();
+  };
+
+  /**
+   * Speak the spoken half of a reply.
+   *
+   * `spokenLineFrom` returns null when the reply carried no `voiceText`, and
+   * we stay quiet rather than falling back to the shown text — that fallback
+   * is what makes assistants read markdown asterisks aloud.
+   */
+  private async speakReply(data: { voiceText?: string }) {
+    const line = spokenLineFrom(data);
+    if (!line) return;
+    const result = await this.speech.speak(line);
+    this.speechStatus = result.state;
+    this.speechDetail = result.detail?.reason ?? '';
+  }
+
+  private toggleSpeech = () => {
+    this.speech.noteUserGesture();
+    this.speechEnabled = this.speech.setEnabled(!this.speech.enabled);
+  };
+
+  /**
+   * The toggle reports which of the three states speech is actually in, so a
+   * muted-looking button and a machine with no local voice are distinguishable
+   * without opening the console.
+   */
+  private renderSpeechToggle() {
+    const unavailable = this.speechStatus === 'not-available';
+    const blocked = this.speechStatus === 'blocked-or-unknown';
+    const speaking = this.speechStatus === 'speaking';
+    const voice = this.speech.voice?.name;
+
+    let glyph = '🔇';
+    if (unavailable) glyph = '🚫';
+    else if (speaking) glyph = '🔊';
+    else if (this.speechEnabled) glyph = '🔉';
+
+    let title: string;
+    if (unavailable) {
+      title = this.speechDetail || 'No local voice is available on this device.';
+    } else if (blocked) {
+      title = `Speech could not be confirmed — ${this.speechDetail}`;
+    } else if (this.speechEnabled) {
+      title = `Speaking replies with ${voice ?? 'a local voice'} (click to mute)`;
+    } else {
+      title = `Speak replies aloud${voice ? ` with ${voice}` : ''} (local voice only)`;
+    }
+
+    return html`<button
+      class="icon-btn ${this.speechEnabled && !unavailable ? 'active' : ''}"
+      ?disabled=${unavailable}
+      @click=${this.toggleSpeech}
+      title="${title}"
+    >${glyph}</button>`;
   }
 
   disconnectedCallback() {
@@ -978,6 +1062,12 @@ export class OpenRappterChat extends LitElement {
       sessionKey: string;
       state: 'delta' | 'final' | 'error' | 'aborted';
       message?: { role: string; content: Array<{ type: string; text?: string }> };
+      /**
+       * The spoken half of the reply, split at the `|||VOICE|||` seam by the
+       * gateway. It is NOT the same text as `message` — that one is shown and
+       * carries markdown; this one is short and conversational.
+       */
+      voiceText?: string;
       errorMessage?: string;
     };
     if (!data.runId || this.closedRunIds.has(data.runId)) return;
@@ -993,6 +1083,9 @@ export class OpenRappterChat extends LitElement {
           this.updateStreamingMessage(data.runId, text);
         }
         this.finishStreaming(data.runId);
+        // The gateway has always sent `voiceText`; nothing consumed it, so the
+        // spoken half of every reply was discarded on arrival.
+        void this.speakReply(data);
       }
     }
 
@@ -1612,6 +1705,7 @@ export class OpenRappterChat extends LitElement {
       <div class="chat-header">
         ${this.renderSessionPicker()}
         <div class="header-actions">
+          ${this.renderSpeechToggle()}
           <button
             class="icon-btn ${this.focusMode ? 'active' : ''}"
             @click=${this.toggleFocusMode}

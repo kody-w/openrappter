@@ -1,4 +1,9 @@
 node_modules/
 dist/
 src/**/*.js
+# …except the speech seam, which is deliberately plain JavaScript rather than
+# stray build output: the anatomy page and the vbrainstem are single-file
+# surfaces that inline these exact bytes, so there is one implementation
+# instead of a TypeScript original and a hand-copied twin that drifts.
+!src/voice/local-speech.js
 .env

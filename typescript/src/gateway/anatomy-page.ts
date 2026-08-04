@@ -15,7 +15,51 @@
  * the product has to render with the network off.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Anatomy } from './anatomy.js';
+
+/**
+ * The speech seam, inlined rather than re-implemented.
+ *
+ * `src/voice/local-speech.js` is the single implementation the web chat imports
+ * and the vbrainstem inlines. Reading it here — rather than keeping a second
+ * copy in this template — is what makes "one pattern" true instead of aspirational:
+ * there is no second copy to drift. `copy:assets` places it next to the compiled
+ * output so it survives deployment, and the page stays self-contained because the
+ * bytes are inlined at render time, not fetched.
+ */
+function speechModuleSource(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    join(here, '../voice/local-speech.js'),      // dist/gateway → dist/voice
+    join(here, '../../src/voice/local-speech.js'), // running from source
+  ]) {
+    try {
+      return readFileSync(candidate, 'utf8');
+    } catch {
+      // Try the next location.
+    }
+  }
+  return '';
+}
+
+/** Cached so a page render is not a disk read. */
+let speechSourceCache: string | null = null;
+
+function speechScript(): string {
+  if (speechSourceCache === null) speechSourceCache = speechModuleSource();
+  if (!speechSourceCache) return '';
+  // The file is an ES module; the page runs it as a classic script inside an
+  // IIFE, so the `export` keywords are stripped and the two entry points are
+  // hung off a namespace instead.
+  const body = speechSourceCache
+    .replace(/^export const /m, 'const ')
+    .replace(/^export function /gm, 'function ');
+  return `${body}
+window.__rappSpeech = { createLocalSpeech: createLocalSpeech, spokenLineFrom: spokenLineFrom, SPEECH_STATES: SPEECH_STATES };`;
+}
 
 function esc(s: string): string {
   return String(s)
@@ -181,6 +225,22 @@ export function renderAnatomyPage(a: Anatomy): string {
   .sub { font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
   .designation { color: var(--bone); user-select: all; }
 
+  /* ── voice: the specimen can be heard, on-device only ── */
+  .voicebar { display: flex; align-items: center; gap: 11px; margin-top: 14px; }
+  .voicebtn { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+              text-transform: uppercase; color: var(--bone); background: var(--case);
+              border: 1px solid var(--rule); border-radius: 3px; padding: 7px 13px;
+              cursor: pointer; transition: border-color .15s, color .15s; }
+  .voicebtn:hover:not(:disabled) { border-color: var(--alive); color: var(--alive); }
+  .voicebtn.on { border-color: var(--alive); color: var(--alive); }
+  .voicebtn.speaking { border-color: var(--alive); color: var(--alive);
+                       animation: voicepulse 1.1s ease-in-out infinite; }
+  .voicebtn:disabled { opacity: .45; cursor: not-allowed; }
+  @keyframes voicepulse { 0%,100% { opacity: .55 } 50% { opacity: 1 } }
+  .voicestate { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .voicestate.warn { color: var(--degraded); }
+  .voicestate.off { color: var(--absent-text, var(--muted)); }
+
   /* ── the patient chart ── */
   .vitals { display: flex; flex-wrap: wrap; margin: 26px 0 8px;
             border: 1px solid var(--rule); border-radius: 4px; background: var(--case); overflow: hidden; }
@@ -345,6 +405,10 @@ export function renderAnatomyPage(a: Anatomy): string {
         : a.vitals.certain
           ? 'asleep — bones intact, no pulse'
           : 'no answer in time — not conclusive'}</div>
+  <div class="voicebar">
+    <button id="speak-btn" class="voicebtn" type="button" aria-live="polite">hear it</button>
+    <span id="speak-state" class="voicestate">on-device voices only</span>
+  </div>
 
   <div class="vitals">
     ${vitalItems.map(([label, value, tone]) => `
@@ -495,6 +559,71 @@ export function renderAnatomyPage(a: Anatomy): string {
 
   <div id="toast"><div class="t-title"></div><div class="t-body"></div></div>
 
+<script>
+${speechScript()}
+</script>
+<script>
+(function () {
+  // ── voice: on-device only, and honest about all three outcomes ───────────
+  var speakBtn = document.getElementById('speak-btn');
+  var speakState = document.getElementById('speak-state');
+  var speech = window.__rappSpeech
+    ? window.__rappSpeech.createLocalSpeech({ storageKey: 'openrappter.bones.speech' })
+    : null;
+
+  function paint(status) {
+    if (!speakBtn || !speakState) return;
+    var state = status.state;
+    var detail = (status.detail && status.detail.reason) || '';
+    speakBtn.classList.toggle('speaking', state === 'speaking');
+    speakBtn.classList.toggle('on', speech ? speech.enabled : false);
+    speakState.classList.remove('warn', 'off');
+
+    if (state === 'not-available') {
+      speakBtn.disabled = true;
+      speakState.textContent = detail || 'no on-device voice available';
+      speakState.classList.add('warn');
+      return;
+    }
+    if (state === 'speaking') { speakState.textContent = 'speaking…'; return; }
+    if (state === 'spoke') {
+      speakState.textContent = 'spoke with ' + ((status.voice && status.voice.name) || 'a local voice');
+      return;
+    }
+    if (state === 'blocked-or-unknown') {
+      // Never render this as success. The engine did not confirm it spoke.
+      speakState.textContent = detail || 'could not confirm it spoke';
+      speakState.classList.add('warn');
+      return;
+    }
+    speakState.textContent = status.voice
+      ? 'on-device: ' + status.voice.name
+      : 'on-device voices only';
+  }
+
+  if (!speech) {
+    if (speakBtn) speakBtn.disabled = true;
+    if (speakState) { speakState.textContent = 'speech unavailable in this page'; }
+  } else {
+    speech.ready().then(paint);
+    speakBtn && speakBtn.addEventListener('click', function () {
+      // The click IS the gesture the autoplay policy requires.
+      speech.noteUserGesture();
+      if (!speech.enabled) speech.setEnabled(true);
+      // A short conversational line — the spoken register, never the page text.
+      var line = ${JSON.stringify(
+        `I am ${a.vitals.name ?? 'openrappter'}${a.vitals.designation ? `, designation ${a.vitals.designation}` : ''}. `
+        + (a.vitals.liveness === 'awake'
+          ? 'I am awake, and this is my anatomy.'
+          : 'This is my anatomy, read from bones rather than a pulse.')
+      )};
+      speech.speak(line).then(function (result) {
+        paint(Object.assign({}, speech.status(), result));
+      });
+    });
+  }
+})();
+</script>
 <script>
 (function () {
   // ── hover to explore ──────────────────────────────────────────────────────

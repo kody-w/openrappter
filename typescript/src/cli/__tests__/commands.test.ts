@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { redactSecrets } from '../../security/redact.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -310,24 +311,8 @@ describe('Config Dot-notation Logic', () => {
 // Secret Redaction Logic Tests
 // ---------------------------------------------------------------------------
 describe('Config Secret Redaction', () => {
-  const SECRET_KEYS = ['token', 'password', 'key', 'secret', 'apiKey', 'api_key'];
-
-  function redactSecrets(obj: unknown, depth = 0): unknown {
-    if (depth > 10) return obj;
-    if (typeof obj !== 'object' || obj === null) return obj;
-    if (Array.isArray(obj)) return obj.map((v) => redactSecrets(v, depth + 1));
-
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      const isSecret = SECRET_KEYS.some((sk) => k.toLowerCase().includes(sk.toLowerCase()));
-      if (isSecret && typeof v === 'string' && v.length > 0) {
-        result[k] = '***REDACTED***';
-      } else {
-        result[k] = redactSecrets(v, depth + 1);
-      }
-    }
-    return result;
-  }
+  // Was a private re-implementation with its own word list, so it asserted
+  // nothing about the redactor that actually ships. Use the real one.
 
   it('should redact token fields', () => {
     const cfg = { token: 'secret123' };

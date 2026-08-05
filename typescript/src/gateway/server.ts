@@ -1175,11 +1175,33 @@ export class GatewayServer {
               res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: RPC_ERROR.INTERNAL_ERROR, message: (error as Error).message } }));
             }
           } else {
-            // Plain chat message (backwards compatible) — not an RPC dispatch, not counted in metrics
-            const chatMsg = parsed.message || parsed.query || body;
-            const status = this.getStatus();
-            res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
-            res.end(JSON.stringify({ response: `Received: ${chatMsg}`, status }));
+            /**
+             * An unknown POST path is 404, not 200.
+             *
+             * This branch used to answer every unrecognised path with
+             * `200 {"response":"Received: …", "status":{…}}`, which broke two
+             * things at once on a wire meant for peers:
+             *
+             *   - CAPABILITY DETECTION. A peer asking whether this runtime
+             *     speaks the twin envelope would `POST /twin` and be told yes.
+             *     `/twin` does not exist. Neither did `/definitely-not-real`,
+             *     which also answered 200. Every probe succeeded, so no peer
+             *     could distinguish an implemented endpoint from an imaginary
+             *     one. The brainstem answers 404, as it should.
+             *
+             *   - IDENTITY. The echoed `status` carried port, uptime, version,
+             *     startedAt and metrics, unauthenticated, to anyone who POSTed
+             *     any path at all — a fingerprint handed over on request, on a
+             *     wire whose premise is that a peer cannot tell a rappter from
+             *     a brainstem from a person.
+             *
+             * It is also the branch `POST /chat?x=1` fell into before the route
+             * was matched on the path, which let a caller skip every validation
+             * rule in the contract and be told it had succeeded.
+             */
+            this.metrics.recordRequest('error');
+            res.writeHead(404, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify({ error: `No such endpoint: ${pathOnly}` }));
           }
         } catch {
           // The brainstem answers malformed JSON with the same sentence it uses

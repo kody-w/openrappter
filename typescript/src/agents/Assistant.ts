@@ -119,6 +119,11 @@ export class Assistant {
       maxToolRounds: config?.maxToolRounds ?? PARITY_MAX_ROUNDS,
       loadWorkspaceContext: config?.loadWorkspaceContext ?? true,
       loadMemoryContext: config?.loadMemoryContext ?? true,
+      // `useTwin: false` is a caller saying "do not put the owner's personal
+      // twin vault into this prompt". It was declared, documented and read at
+      // twinIdentity(), but never copied here — so it was permanently
+      // undefined and both documented behaviours inverted. #104
+      useTwin: config?.useTwin,
       // Which rappter this is. The constructor whitelists what it copies, so
       // an option that is not named here is silently dropped no matter what
       // the caller passed. #102

@@ -1174,6 +1174,7 @@ program
       const webRoot = path.resolve(__dirname, '../ui/dist');
       const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
       const { acquireLock, releaseLock, gatewayLockFileFor, gatewayPortFor, writeGatewayEndpoint } = await import('./infra/gateway-lock.js');
+      const { declareCurrentInstance } = await import('./infra/current-instance.js');
       // Scope the lock AND the port to THIS instance, so an alpha and its
       // hatched twins can run side by side on one device. The alpha resolves to
       // the original path and the original port, so an existing install is
@@ -1185,6 +1186,9 @@ program
       // EADDRINUSE stack trace. #101
       const lockInstance = (options.instance as string | undefined)
         ?? process.env.OPENRAPPTER_INSTANCE;
+      // Publish it. Anything in this process that needs to say which rappter
+      // it is reads this one derivation rather than repeating it. #129
+      declareCurrentInstance(lockInstance);
       const explicitPort = options.port
         ? Number(options.port)
         : (process.env.OPENRAPPTER_PORT ? Number(process.env.OPENRAPPTER_PORT) : undefined);

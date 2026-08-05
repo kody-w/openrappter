@@ -143,11 +143,39 @@ export class NeighborAgent extends BasicAgent {
 
     const { deviceRappid, sendTwin } = await import('../twin/send.js');
     const { canonicalInstanceKey } = await import('../infra/gateway-lock.js');
+    const { currentInstanceName, currentInstanceDeclared } = await import('../infra/current-instance.js');
     const slug = canonicalInstanceKey(to);
+
+    /**
+     * Say who is actually speaking. — #129
+     *
+     * This was `deviceRappid('kody-w', 'alpha')`, a literal, so a hatched twin
+     * told every neighbour it was the alpha. Measured from a real twin:
+     *
+     *   hatch pebble -> :19057;  pebble sends;  peer receives
+     *   from_rappid: rappid:@kody-w/alpha:f245acdb...
+     *
+     * It is not only a label. `sendTwin` uses the same value as `session_id`
+     * on the /chat fallback, so every twin on the device shared one
+     * conversation thread at every peer it spoke to.
+     *
+     * An undeclared process is not the alpha, it is a process that did not go
+     * through gateway startup. Defaulting there would restore the same
+     * confident-but-unchecked answer, so it refuses instead.
+     */
+    if (!currentInstanceDeclared()) {
+      return JSON.stringify({
+        status: 'error',
+        message:
+          'This process has not declared which rappter it is, so it cannot name '
+          + 'itself to a neighbour. Speaking as the alpha would be a guess.',
+      });
+    }
+    const me = canonicalInstanceKey(currentInstanceName() ?? 'alpha');
 
     const out = await sendTwin({
       to: url,
-      fromRappid: deviceRappid('kody-w', 'alpha'),
+      fromRappid: deviceRappid('kody-w', me),
       toRappid: deviceRappid('kody-w', slug),
       text,
     });

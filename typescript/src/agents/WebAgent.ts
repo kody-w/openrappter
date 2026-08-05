@@ -14,6 +14,7 @@ import { lookup } from 'dns/promises';
 import {
   assertFetchableUrl,
   assertHostResolvesPublicly,
+  fetchGuarded,
 } from '../net/url-guard.js';
 
 
@@ -127,24 +128,14 @@ export class WebAgent extends BasicAgent {
   }
 
   private async fetchWithValidatedRedirects(url: string): Promise<Response> {
-    let target = url;
-
-    for (let hop = 0; hop <= WebAgent.MAX_REDIRECTS; hop++) {
-      this.validateUrl(target);
-      await this.assertHostResolvesPublicly(target);
-      const response = await fetch(target, { redirect: 'manual' });
-
-      const isRedirect = response.status >= 300 && response.status < 400;
-      if (!isRedirect) return response;
-
-      const location = response.headers.get('location');
-      if (!location) return response;
-
-      // Resolve relative redirects against the hop they came from.
-      target = new URL(location, target).toString();
-    }
-
-    throw new Error(`Too many redirects (limit ${WebAgent.MAX_REDIRECTS}): ${url}`);
+    // Pass this agent's own checks through, so a caller that overrides them —
+    // tests reaching loopback on purpose — still overrides the whole path.
+    return fetchGuarded(
+      url,
+      undefined,
+      hostname => this.lookupHost(hostname),
+      target => this.validateUrl(target),
+    );
   }
 
   private async fetchUrl(url: string): Promise<string> {

@@ -43,7 +43,11 @@ function allowLoopback(agent: WebAgent, exceptAfterFirstHop = false): void {
   const internals = agent as unknown as {
     validateUrl(url: string): void;
     assertHostResolvesPublicly(url: string): Promise<void>;
+    lookupHost(hostname: string): Promise<Array<{ address: string }>>;
   };
+  // Resolution is now checked inside the shared fetch path, so the seam that
+  // has to be neutralised is the lookup itself, not the agent's wrapper.
+  internals.lookupHost = async () => [{ address: '93.184.216.34' }];
   const realValidate = internals.validateUrl.bind(internals);
   let first = true;
   internals.validateUrl = (url: string) => {

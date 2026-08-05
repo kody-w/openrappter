@@ -74,3 +74,68 @@ describe('a hatched twin does not duplicate the alpha\'s outbound channels', () 
     expect(indexSource).not.toMatch(/imessageConfig\.enabled && false/);
   });
 });
+
+/**
+ * The rule has to survive the NEXT channel, not just the ones known today. — #115
+ *
+ * #103 guarded iMessage and cron and stated the rule generally: *"Hatching a
+ * twin must not duplicate any channel that speaks to someone outside this
+ * device."* The comment shipped with it claims *"A twin is a peer on /chat and
+ * /twin and nothing else."*
+ *
+ * Telegram was not guarded. `isTwin` appeared five times in index.ts — the
+ * definition, the assistant identity, iMessage, cron, and a status label — and
+ * the Telegram auto-connect was not among them. Two rappters would poll and
+ * answer the same bot account with separate histories, neither able to see what
+ * the other had already said to a real person.
+ *
+ * It was latent only because TELEGRAM_BOT_TOKEN is unset on the machine this
+ * was found on. That is configuration, not design: `hydrateManagedEnv()` runs
+ * for every gateway process including twins, and `hatch` spawns the child
+ * without an env override, so the token reaches a twin readily.
+ *
+ * Guarding one more channel by name would leave the same hole for the next one.
+ * The last test here pins the STRUCTURE instead: every `.connect()` on the
+ * gateway startup path must be reachable only when this process is not a twin.
+ */
+describe('no channel connects on a twin, including ones added later', () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.ts'),
+    'utf8',
+  );
+
+  it('does not connect Telegram on a twin', () => {
+    expect(source).toMatch(
+      /const telegramToken = isTwin \? undefined : process\.env\.TELEGRAM_BOT_TOKEN/,
+    );
+  });
+
+  it('leaves the alpha connecting exactly as before', () => {
+    // isTwin is false for the alpha, so the expression collapses to the
+    // original `process.env.TELEGRAM_BOT_TOKEN`. Guard against a rewrite that
+    // also silences the alpha.
+    expect(source).not.toMatch(/const telegramToken = undefined/);
+    expect(source).toContain('await telegram.connect();');
+  });
+
+  it('has no .connect() beyond the one known, twin-gated channel', () => {
+    // The structural check, and it is deliberately dumb.
+    //
+    // The first version of this test searched the twelve lines above each
+    // `.connect()` for `isTwin`. It passed when a simulated unguarded
+    // `discordChannel.connect()` was inserted just after the Telegram block —
+    // because the window found TELEGRAM's guard and accepted it. A proximity
+    // heuristic sees what you expected it to see, which is the failure this
+    // whole file exists to document.
+    //
+    // So instead: pin the exact set of connect sites. Adding any channel that
+    // auto-connects fails here until someone consciously decides whether a twin
+    // may hold it — which is the decision that was skipped for Telegram.
+    const connects = source
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /\.connect\(\)/.test(line));
+
+    expect(connects).toEqual(['await telegram.connect();']);
+  });
+});

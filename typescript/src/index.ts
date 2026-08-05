@@ -406,8 +406,16 @@ async function startGatewayInProcess(opts?: {
     }
   });
 
-  // Auto-connect Telegram if token is set
-  const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+  // Auto-connect Telegram if token is set — but never on a twin.
+  //
+  // A twin shares the device, never a MOUTH (#103). That rule was applied to
+  // iMessage and cron and missed here, so two rappters would poll and answer
+  // the SAME bot account with separate histories, neither able to see what the
+  // other had already said to a real person. It was latent only because
+  // TELEGRAM_BOT_TOKEN happens to be unset on this machine — configuration, not
+  // design. The token reaches a twin readily: `hydrateManagedEnv()` runs for
+  // every gateway process, and `hatch` spawns without an env override. #115
+  const telegramToken = isTwin ? undefined : process.env.TELEGRAM_BOT_TOKEN;
   if (telegramToken) {
     try {
       await telegram.connect();

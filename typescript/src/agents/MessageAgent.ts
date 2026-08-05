@@ -122,22 +122,54 @@ export class MessageAgent extends BasicAgent {
     }
   }
 
+  /** Aliases callers use for a channel the registry holds under another id. */
+  private static readonly CHANNEL_ALIASES: Record<string, string> = {
+    tg: 'telegram',
+    imsg: 'imessage',
+  };
+
   private async sendMessage(channelId: string, conversationId: string, content: string): Promise<string> {
+    // Resolve an alias to the id the registry actually holds. `tg` used to miss
+    // `get('telegram')` and fall through to the direct sender below, which
+    // routes around both the channel's own connection guard and the rule that a
+    // twin never holds a mouth. #121
+    const resolved = MessageAgent.CHANNEL_ALIASES[channelId.toLowerCase()] ?? channelId;
+
     // Try channel registry first (daemon mode)
     if (this.channelRegistry) {
-      if (this.channelRegistry.get(channelId)) {
-        await this.channelRegistry.sendMessage({ channelId, conversationId, content });
+      if (this.channelRegistry.get(resolved)) {
+        await this.channelRegistry.sendMessage({ channelId: resolved, conversationId, content });
         return JSON.stringify({
           status: 'success',
           action: 'send',
-          channelId,
+          channelId: resolved,
           conversationId,
           message: 'Message sent successfully',
         });
       }
+
+      /**
+       * A registry exists and does not have this channel. That is a "no", not
+       * an invitation to send by another road. #121
+       *
+       * The direct path below reads TELEGRAM_BOT_TOKEN straight from the
+       * environment and POSTs to the Telegram API — no registry, no connection
+       * check, no twin awareness. Reached via `tg`, it let a hatched twin
+       * message a person despite #115 refusing to connect Telegram at all, and
+       * let the alpha send through a channel deliberately disconnected. It
+       * stopped only because the token happened to be unset, which is the same
+       * configuration accident that hid #115.
+       *
+       * The fallback is legitimate ONLY where there is no registry: interactive
+       * mode. So it is gated on that, rather than on a lookup miss.
+       */
+      return JSON.stringify({
+        status: 'error',
+        message: `Channel not found: ${channelId}`,
+      });
     }
 
-    // Fallback: send directly via platform APIs (interactive mode)
+    // Fallback: send directly via platform APIs (interactive mode, no registry)
     const ch = channelId.toLowerCase();
     if (ch === 'imessage' || ch === 'imsg') {
       return JSON.stringify({

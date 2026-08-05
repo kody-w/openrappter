@@ -1,117 +1,153 @@
 /**
- * Can a peer tell which runtime answered?
+ * Can a peer tell which runtime answered? — asked of the real server.
  *
- * These tests exist because of two defects that a previous change claimed to
- * have ruled out, and had not. The claim was checked with an instrument that
- * compared the HTTP status and the `error` STRING of each reply — and by that
- * measure openrappter and the brainstem agreed twelve times out of twelve.
- * Both defects were invisible to it:
+ * THIS FILE REPLACES ONE THAT PROVED NOTHING.
  *
- *   1. The error BODY differed. openrappter wrapped every 400 in
- *      `{schema, status, error}`; the brainstem writes `{error}` alone. Reading
- *      only `.error` could never see the two extra keys, so one malformed
- *      request was enough to fingerprint the runtime.
+ * A previous version asserted against `parseChatRequest` and a local
+ * `asFlaskWouldSee()` helper written inside the test file. Both defects it
+ * claimed to cover lived in `server.ts` — in how a rejection is WRITTEN and how
+ * a request target is MATCHED — so the tests exercised a pure function and a
+ * re-implementation of the correct behaviour. Checked out at the parent commit,
+ * all fourteen passed against the broken code.
  *
- *   2. `POST /chat?x=1` was not treated as `/chat` at all. The route compared
- *      the raw request target to the string '/chat', so any query string fell
- *      through to the generic echo branch and returned **200 `Received: …`** —
- *      skipping every validation rule in the contract and telling the caller it
- *      had succeeded. The instrument never sent a query string.
+ * That is the same failure as the bug they were written for, one level up: a
+ * check that is its own witness. So these boot an actual GatewayServer and read
+ * the actual bytes off an actual socket, and the negative control is part of the
+ * job — a test that cannot fail on the old code is decoration.
  *
- * Neither was found by the author. Both were found by a reader who was handed
- * the wire and told nothing about what to conclude.
- *
- * The lesson worth keeping is about the measurement, not the code: an
- * instrument that can only observe the axis you already thought about will
- * confirm whatever you already believed. So these assert on whole bodies and on
- * request targets nobody had tried.
- */
-
-import { describe, expect, it } from 'vitest';
-import { parseChatRequest } from '../chat-request.js';
-
-/**
- * Exactly what `brainstem.py` puts on the wire for a rejected request:
+ * Ground truth is `brainstem.py`, whose rejection is
  * `return jsonify({"error": ...}), 400` — one key, nothing else.
  */
-function brainstemRejection(error: string): Record<string, unknown> {
-  return { error };
+
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { GatewayServer } from '../server.js';
+import type { AgentRequest } from '../types.js';
+
+const PORT = 19811;
+const BASE = `http://127.0.0.1:${PORT}`;
+
+let server: GatewayServer;
+let dataDir: string;
+
+beforeAll(async () => {
+  dataDir = mkdtempSync(join(tmpdir(), 'gw-indist-'));
+  server = new GatewayServer({
+    port: PORT,
+    bind: 'loopback',
+    // Open, as the brainstem is to a loopback caller. Otherwise every request
+    // under test is answered by the auth gate instead of the contract, and the
+    // contract is what is on trial.
+    auth: { mode: 'none' },
+    heartbeatInterval: 60000,
+    dataDir,
+  });
+  server.setAgentHandler(async (req: AgentRequest) => ({
+    sessionId: req.sessionId ?? 'generated',
+    content: `Echo: ${req.message}`,
+    finishReason: 'stop',
+  }));
+  await server.start();
+});
+
+afterAll(async () => {
+  await server.stop();
+  rmSync(dataDir, { recursive: true, force: true });
+});
+
+/** Send a raw string body, exactly as a foreign client would. */
+async function post(target: string, raw: string): Promise<{ status: number; body: unknown; text: string }> {
+  const res = await fetch(BASE + target, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Connection: 'close' },
+    body: raw,
+  });
+  const text = await res.text();
+  let body: unknown;
+  try { body = JSON.parse(text); } catch { body = text; }
+  return { status: res.status, body, text };
 }
 
-/** What the gateway now writes for the same rejection. */
-function openrappterRejection(body: unknown): Record<string, unknown> {
-  const parsed = parseChatRequest(body);
-  if (parsed.ok) throw new Error('expected this body to be rejected');
-  return { error: parsed.error };
-}
+/** Exactly what brainstem.py writes for a rejected request. */
+const brainstemRejects = (error: string) => ({ status: 400, body: { error } });
 
-const REJECTED_BODIES: Array<[label: string, body: unknown, error: string]> = [
-  ['a non-object body', [], 'Request body must be a JSON object'],
-  ['a non-string user_input', { user_input: 123 }, 'user_input must be a string'],
-  ['an empty user_input', { user_input: '   ' }, 'user_input is required'],
-  ['a non-array history', { user_input: 'hi', conversation_history: 'nope' }, 'conversation_history must be an array'],
-  ['a bad history role', { user_input: 'hi', conversation_history: [{ role: 'bogus', content: 'x' }] }, 'conversation_history[0].role is invalid'],
-  ['a non-string history content', { user_input: 'hi', conversation_history: [{ role: 'tool', content: 123 }] }, 'conversation_history[0].content must be a string'],
+const REJECTIONS: Array<[label: string, raw: string, error: string]> = [
+  ['a non-object body', '[]', 'Request body must be a JSON object'],
+  ['a bare string body', '"hello"', 'Request body must be a JSON object'],
+  ['unparseable JSON', 'not json at all', 'Request body must be a JSON object'],
+  ['a non-string user_input', '{"user_input":123}', 'user_input must be a string'],
+  ['a null user_input', '{"user_input":null}', 'user_input must be a string'],
+  ['whitespace-only input', '{"user_input":"   "}', 'user_input is required'],
+  ['no input at all', '{}', 'user_input is required'],
+  ['a non-array history', '{"user_input":"hi","conversation_history":"nope"}', 'conversation_history must be an array'],
+  ['a non-object history entry', '{"user_input":"hi","conversation_history":["x"]}', 'conversation_history[0] must be an object'],
+  ['an unknown history role', '{"user_input":"hi","conversation_history":[{"role":"bogus","content":"x"}]}', 'conversation_history[0].role is invalid'],
+  ['non-string history content', '{"user_input":"hi","conversation_history":[{"role":"tool","content":123}]}', 'conversation_history[0].content must be a string'],
 ];
 
-describe('a rejection must be byte-identical, not merely similar', () => {
-  for (const [label, body, error] of REJECTED_BODIES) {
-    it(`answers ${label} with the brainstem's whole body`, () => {
-      const ours = openrappterRejection(body);
-      const theirs = brainstemRejection(error);
-
-      // The assertion the old instrument could not make. Comparing `.error`
-      // alone passed while `schema` and `status` sat beside it in the response.
-      expect(ours).toEqual(theirs);
-      expect(Object.keys(ours).sort()).toEqual(['error']);
+describe('a rejection carries nothing that names the runtime', () => {
+  for (const [label, raw, error] of REJECTIONS) {
+    it(`rejects ${label} with the brainstem's whole body`, async () => {
+      const got = await post('/chat', raw);
+      // The assertion the old instrument could not make: the WHOLE body.
+      // Comparing only `.error` passed while `schema` and `status` sat beside it.
+      expect({ status: got.status, body: got.body }).toEqual(brainstemRejects(error));
+      expect(Object.keys(got.body as object)).toEqual(['error']);
     });
   }
 
-  it('carries no key that identifies the runtime', () => {
-    const ours = openrappterRejection({ user_input: 123 });
-    for (const tell of ['schema', 'status', 'content', 'sessionId', 'runtime', 'openrappter']) {
-      expect(ours).not.toHaveProperty(tell);
+  it('leaks no fingerprint key on any rejection', async () => {
+    for (const [, raw] of REJECTIONS) {
+      const got = await post('/chat', raw);
+      for (const tell of ['schema', 'status', 'content', 'sessionId', 'session_id']) {
+        expect(got.body, `${tell} present for body ${raw}`).not.toHaveProperty(tell);
+      }
     }
-  });
-
-  // Serialised, not just deep-equal: key ORDER is observable on the wire, and
-  // a single-key object leaves nowhere for order to differ.
-  it('serialises to the same bytes', () => {
-    expect(JSON.stringify(openrappterRejection({})))
-      .toBe(JSON.stringify(brainstemRejection('user_input is required')));
   });
 });
 
-/**
- * Flask routes on the path; `/chat?x=1` is `/chat`. Node hands you the raw
- * target, and the old code compared it to '/chat' with `===`.
- */
 describe('a query string does not change which endpoint this is', () => {
-  const asFlaskWouldSee = (url: string) => url.split('?')[0];
-
-  for (const target of ['/chat', '/chat?x=1', '/chat?', '/chat?debug=true&x=2']) {
-    it(`treats ${target} as /chat`, () => {
-      expect(asFlaskWouldSee(target)).toBe('/chat');
+  // The target the old instrument never sent. Before the fix this fell past the
+  // /chat handler entirely and was answered 200 `Received: …`, so a caller could
+  // skip every rule in the contract by appending ?x=1 and be told it worked.
+  for (const target of ['/chat?x=1', '/chat?debug=true&x=2', '/chat?']) {
+    it(`validates ${target} exactly as /chat`, async () => {
+      const got = await post(target, '{"user_input":"hi","conversation_history":"nope"}');
+      expect({ status: got.status, body: got.body })
+        .toEqual(brainstemRejects('conversation_history must be an array'));
+      // The old fallthrough is unmistakable in the bytes.
+      expect(got.text).not.toContain('Received:');
     });
   }
 
-  it('does not treat a different path as /chat', () => {
-    for (const target of ['/chatter', '/chat/stream', '/v2/chat']) {
-      expect(asFlaskWouldSee(target)).not.toBe('/chat');
-    }
+  it('still answers a well-formed request sent through a query string', async () => {
+    const got = await post('/chat?x=1', '{"user_input":"hello","session_id":"qs-1"}');
+    expect(got.status).toBe(200);
+    const body = got.body as Record<string, unknown>;
+    expect(body.response).toBe('Echo: hello');
+    expect(body.session_id).toBe('qs-1');
   });
 
-  // The consequence, stated plainly: whatever the router decides, the SAME
-  // validation must run. A body that is rejected without a query string must be
-  // rejected with one — the old behaviour answered 200 `Received: …` instead.
-  it('applies identical validation regardless of the request target', () => {
-    const body = { user_input: 'hi', conversation_history: 'nope' };
-    const expected = 'conversation_history must be an array';
-    for (const target of ['/chat', '/chat?x=1', '/chat?debug=true']) {
-      expect(asFlaskWouldSee(target)).toBe('/chat');
-      const parsed = parseChatRequest(body);
-      expect(parsed.ok).toBe(false);
-      expect(parsed.ok === false && parsed.error).toBe(expected);
+  it('does not treat a neighbouring path as /chat', async () => {
+    const got = await post('/chatter', '{"user_input":123}');
+    expect(got.body).not.toEqual({ error: 'user_input must be a string' });
+  });
+});
+
+describe('the success envelope still carries what its own callers read', () => {
+  // The extra axes are legitimate on success (PARITY §3). This is here so that
+  // tightening the ERROR body cannot quietly strip the success body too.
+  it('keeps schema, status and the six frozen keys', async () => {
+    const got = await post('/chat', '{"user_input":"hello","session_id":"s-1"}');
+    expect(got.status).toBe(200);
+    const body = got.body as Record<string, unknown>;
+    for (const k of ['response', 'session_id', 'agent_logs', 'voice_mode', 'model', 'requested_model']) {
+      expect(body, `missing ${k}`).toHaveProperty(k);
     }
+    expect(body.schema).toBe('rapp-chat/1.0');
+    expect(body.status).toBe('success');
+    expect(body).not.toHaveProperty('assistant_response');
   });
 });

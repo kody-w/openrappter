@@ -916,6 +916,11 @@ program
   .option('-t, --task <task>', 'Run a single task')
   .option('-e, --evolve <n>', 'Run N evolution ticks', parseInt)
   .option('-d, --daemon', 'Run as background daemon')
+  .option(
+    '--instance <id>',
+    'Name this rappter, so an alpha and its hatched twins can run on one device. '
+    + 'Omit it for the alpha. Also settable as OPENRAPPTER_INSTANCE.',
+  )
   .option('--port <port>', 'Gateway port', (value: string) => {
     const port = Number.parseInt(value, 10);
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
@@ -1125,9 +1130,20 @@ program
     if (options.daemon) {
       const webRoot = path.resolve(__dirname, '../ui/dist');
       const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
-      const { acquireLock, releaseLock } = await import('./infra/gateway-lock.js');
-      if (!acquireLock()) {
-        console.error(`${EMOJI} Another OpenRappter gateway already owns the runtime lock.`);
+      const { acquireLock, releaseLock, gatewayLockFileFor } = await import('./infra/gateway-lock.js');
+      // Scope the lock to THIS instance, so an alpha and its hatched twins can
+      // run side by side on one device. The alpha resolves to the original
+      // path, so an existing install is untouched.
+      const lockPort = options.port
+        ? Number(options.port)
+        : Number(process.env.OPENRAPPTER_PORT ?? 18790);
+      const lockInstance = (options.instance as string | undefined)
+        ?? process.env.OPENRAPPTER_INSTANCE;
+      const lockFile = gatewayLockFileFor({ instance: lockInstance, port: lockPort });
+      if (!acquireLock({ filePath: lockFile })) {
+        console.error(
+          `${EMOJI} Another OpenRappter gateway already owns this instance's runtime lock (${lockFile}).`,
+        );
         process.exitCode = 1;
         return;
       }
@@ -1136,7 +1152,7 @@ program
         const { port, cleanup } = await startGatewayInProcess({
           ...(hasWebUI ? { webRoot } : {}),
           port: options.port,
-          releaseProcessLock: releaseLock,
+          releaseProcessLock: () => releaseLock({ filePath: lockFile }),
         });
         lockHandedToGateway = true;
         if (
@@ -1162,7 +1178,7 @@ program
         if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
         console.log('Press Ctrl+C to stop\n');
       } finally {
-        if (!lockHandedToGateway) releaseLock();
+        if (!lockHandedToGateway) releaseLock({ filePath: lockFile });
       }
       return;
     }

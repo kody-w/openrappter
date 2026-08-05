@@ -18,6 +18,48 @@ export const DEFAULT_GATEWAY_LOCK_FILE = join(
   'gateway.pid',
 );
 
+/** The port the alpha listens on when nothing says otherwise. */
+export const ALPHA_GATEWAY_PORT = 18790;
+
+/**
+ * Where a given rappter keeps its runtime lock.
+ *
+ * The lock used to be one file per home directory with no port or instance in
+ * the path, so a machine could run exactly ONE rappter. That is incompatible
+ * with the thing this product is for: a device runs an alpha plus any number of
+ * hatched twins, exactly as a brainstem hatches twins, and they meet as peers
+ * over /twin and /chat.
+ *
+ * It also produced a failure nobody could read. `com.openrappter.gateway`
+ * started seven times and exited 1 every time — not an orphan, not a stale job,
+ * just a second instance being refused by the singleton — and three separate
+ * diagnoses of that were wrong before the cause was found.
+ *
+ * The ALPHA keeps the original path byte for byte, so nothing already installed
+ * moves or has to be migrated. Every other instance is keyed by its explicit id
+ * when it has one, and otherwise by the port it listens on — which is already
+ * unique per instance on a machine, because two servers cannot share it.
+ */
+export function gatewayLockFileFor(options: {
+  instance?: string;
+  port?: number;
+} = {}): string {
+  const instance = (options.instance ?? '').trim();
+  if (!instance && (options.port === undefined || options.port === ALPHA_GATEWAY_PORT)) {
+    return DEFAULT_GATEWAY_LOCK_FILE;
+  }
+  // Anything that reaches a filesystem path from user input gets flattened, so
+  // an id like `../../alpha` cannot walk out of the instances directory and
+  // seize the alpha's lock. Replacing separators is not sufficient on its own:
+  // an id of exactly `..` survives that untouched and resolves the join
+  // straight back to ~/.openrappter/gateway.pid — the alpha's file. So a key
+  // that is only dots is rejected outright. Caught by its own test.
+  const raw = instance || String(options.port);
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_');
+  const key = /^\.+$/.test(cleaned) || cleaned === '' ? `_${Buffer.from(raw).toString('hex')}` : cleaned;
+  return join(homedir(), '.openrappter', 'instances', key, 'gateway.pid');
+}
+
 export interface GatewayLockOptions {
   filePath?: string;
   pid?: number;

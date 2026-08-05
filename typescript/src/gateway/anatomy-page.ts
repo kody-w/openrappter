@@ -106,6 +106,27 @@ export function renderAnatomyPage(a: Anatomy): string {
   const title = a.vitals.name ?? 'openrappter';
   const designation = a.vitals.designation ?? '';
 
+  /**
+   * Say which rappter this page belongs to. — #138
+   *
+   * Every instance on a device derives its designation and called name from the
+   * DEVICE tail, so a hatched twin's page was byte-identical to the alpha's:
+   * same designation, same name, nothing to tell them apart. Measured live,
+   * alpha beside a twin called `slate`, both read `openrappter-RM-0059 / Rame`.
+   *
+   * Whether a twin should have a designation of its own is a one-way door and
+   * the owner's to decide. Being able to see WHICH rappter you are reading is
+   * not, so the page says it — and the tooltip stops asserting a derivation
+   * that is not true on a twin.
+   */
+  const isTwin = Boolean(a.vitals.instance) && a.vitals.instance !== 'alpha';
+  const instanceTag = isTwin
+    ? ` <span class="twintag" title="a hatched twin on this device">twin · ${esc(a.vitals.instance!)}</span>`
+    : '';
+  const twinNote = isTwin
+    ? 'derived from this device, and shared with the alpha — see issue #138'
+    : 'derived from its rappid; never changes';
+
   // ── Callout pins + leader lines ────────────────────────────────────────────
   const callouts = a.organs
     .filter(o => PINS[o.id])
@@ -224,6 +245,10 @@ export function renderAnatomyPage(a: Anatomy): string {
        line-height: 1.06; margin: 22px 0 5px; color: var(--bone); }
   .sub { font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: 0.04em; }
   .designation { color: var(--bone); user-select: all; }
+  .twintag {
+    color: var(--bone); border: 1px solid currentColor; border-radius: 999px;
+    padding: 0 .45em; font-size: .8em; opacity: .85; white-space: nowrap;
+  }
 
   /* ── voice: the specimen can be heard, on-device only ── */
   .voicebar { display: flex; align-items: center; gap: 11px; margin-top: 14px; }
@@ -398,7 +423,7 @@ export function renderAnatomyPage(a: Anatomy): string {
   <div class="rule"></div>
 
   <h1>${esc(title)}</h1>
-  <div class="sub">${designation ? `<span class="designation" title="derived from its rappid; never changes">${esc(designation)}</span> · ` : ''}${a.vitals.liveness === 'awake'
+  <div class="sub">${designation ? `<span class="designation" title="${twinNote}">${esc(designation)}</span>${instanceTag} · ` : ''}${a.vitals.liveness === 'awake'
       ? 'read from this machine just now'
       : a.vitals.liveness === 'blocked'
         ? 'could not tell — nothing was learned about whether it is running'

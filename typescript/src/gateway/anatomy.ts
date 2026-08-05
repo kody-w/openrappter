@@ -28,6 +28,7 @@
 
 import fs from 'fs';
 import { nameFor, mintTail, type OrganismName } from '../identity/name.js';
+import { currentInstanceDeclared, currentInstanceName } from '../infra/current-instance.js';
 import path from 'path';
 import os from 'os';
 
@@ -89,6 +90,24 @@ export interface VitalSigns {
   livenessReason: string;
   /** `openrappter-RX-4471` — formal identity, derived, never renamed. */
   designation?: string;
+  /**
+   * Which rappter on this device this page belongs to: a twin's name, or
+   * `alpha`. #138
+   *
+   * Every instance derives its designation and called name from the DEVICE
+   * tail (`~/.openrappter/rappid.tail`), so a twin's page was byte-identical
+   * to the alpha's — measured on a live twin:
+   *
+   *   alpha  designation=openrappter-RM-0059  name=Rame
+   *   slate  designation=openrappter-RM-0059  name=Rame
+   *
+   * Whether a twin should have a designation of its own is a one-way door and
+   * the owner's call. Being able to tell WHICH rappter you are reading is not.
+   *
+   * Absent when nothing has declared — never guessed as `alpha`, which is the
+   * collapse #129 and #131 were both about.
+   */
+  instance?: string;
   /** Chosen rung of the backend ladder, and why. */
   backend: string;
   backendReason: string;
@@ -487,6 +506,9 @@ export function readAnatomy(
     agentCount: liveAgents.length || agentFiles.length,
     name: soulName,
     designation: identity.designation,
+    // Which rappter is answering. Read from the one published derivation
+    // (#129) rather than re-derived here. #138
+    ...(currentInstanceDeclared() ? { instance: currentInstanceName() ?? 'alpha' } : {}),
     version: live.version ?? 'unknown',
     heartbeat: nextFire ? relativeTime(nextFire) : (live.awake ? 'no schedule' : 'none'),
   };

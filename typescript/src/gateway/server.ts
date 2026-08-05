@@ -870,7 +870,13 @@ export class GatewayServer {
           // roll back on failure, refuse name collisions. "Hot" means usable in
           // the very next message — the handler is what makes that true, by
           // reaching the live registry rather than only the disk.
-          if (req.url === '/agents/import') {
+          // Match on the PATH, not the raw URL — the same lesson `/bones`
+          // already learned above. `POST /chat?x=1` compared unequal to
+          // '/chat', fell past this handler entirely, and was answered by the
+          // generic echo branch below with a 200 and `Received: …`. A caller
+          // could therefore skip every validation rule in the contract by
+          // adding a query string, and would be told it had succeeded.
+          if (pathOnly === '/agents/import') {
             if (!this.agentImporter) {
               res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
               res.end(JSON.stringify({ status: 'error', error: 'This daemon cannot install agents.' }));
@@ -889,7 +895,7 @@ export class GatewayServer {
             return;
           }
 
-          if (req.url === '/chat') {
+          if (pathOnly === '/chat') {
             const authenticated = this.resolveHttpAuthenticated(req, parsed);
             if (!authenticated) {
               res.writeHead(401, { 'Content-Type': 'application/json', ...corsHeaders });
@@ -916,12 +922,16 @@ export class GatewayServer {
             // the transcript.
             const parsedRequest = parseChatRequest(parsed);
             if (!parsedRequest.ok) {
+              // Bare `{error}`, exactly as the brainstem writes it. PARITY §3
+              // permits extra axes, but the goal on this wire is stronger than
+              // §3: a peer must not be able to tell which runtime answered. A
+              // single malformed request was enough to fingerprint us, because
+              // ours carried `schema` and `status` and the brainstem's does not.
+              // Those keys survive on the paths the brainstem has no
+              // counterpart for (401 auth, 503, 409, 504) — nothing can be
+              // compared there, so nothing diverges.
               res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({
-                schema: 'rapp-chat/1.0',
-                status: 'error',
-                error: parsedRequest.error,
-              }));
+              res.end(JSON.stringify({ error: parsedRequest.error }));
               return;
             }
             const message = parsedRequest.value.userInput;
@@ -1106,8 +1116,8 @@ export class GatewayServer {
           // tell the two runtimes apart by their parse errors either.
           res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
           res.end(JSON.stringify(
-            (req.url ?? '').split('?')[0] === '/chat'
-              ? { schema: 'rapp-chat/1.0', status: 'error', error: 'Request body must be a JSON object' }
+            pathOnly === '/chat'
+              ? { error: 'Request body must be a JSON object' }
               : { error: 'Invalid JSON' },
           ));
         }

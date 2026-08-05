@@ -30,6 +30,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
+from openrappter.security.redact import redact_secrets
 from openrappter.security.secret_keys import is_secret_key
 
 # Mutually-exclusive classification of a single RPC dispatch attempt.
@@ -170,7 +171,13 @@ def _redact_fields(fields: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     for key, value in fields.items():
         if value is None:
             continue
-        safe[key] = "[REDACTED]" if is_secret_key(key) else value
+        if is_secret_key(key):
+            safe[key] = "[REDACTED]"
+            continue
+        # Unlike the TypeScript side, nothing here stops a caller passing a
+        # nested dict, so a mislabeled field one level down has to be caught
+        # at runtime or not at all.
+        safe[key] = redact_secrets(value, "[REDACTED]", 1)
     return safe
 
 

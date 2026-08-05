@@ -3,6 +3,7 @@ import {
   closeSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -13,13 +14,21 @@ import { createRequire } from 'module';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 
-export const DEFAULT_GATEWAY_LOCK_FILE = join(
-  homedir(),
-  '.openrappter',
-  'gateway.pid',
-);
+/**
+ * The alpha's runtime lock.
+ *
+ * A FUNCTION, not a constant, so that home is resolved at the same moment as
+ * every other path this module produces. It used to be computed once at import
+ * time while `gatewayLockFileFor({ instance })` re-read `homedir()` on every
+ * call — so redirecting HOME moved every twin's files and left the alpha's
+ * behind, and a test that believed it was isolated wrote a fixture into the
+ * operator's real ~/.openrappter/endpoint.json. That corrupted the live roster,
+ * which then reported a running alpha as dead. #110
+ */
+export function defaultGatewayLockFile(): string {
+  return join(homedir(), '.openrappter', 'gateway.pid');
+}
 
-/** The port the alpha listens on when nothing says otherwise. */
 export const ALPHA_GATEWAY_PORT = 18790;
 
 /**
@@ -102,7 +111,7 @@ export function gatewayLockFileFor(options: {
 } = {}): string {
   const instance = (options.instance ?? '').trim();
   if (!instance && (options.port === undefined || options.port === ALPHA_GATEWAY_PORT)) {
-    return DEFAULT_GATEWAY_LOCK_FILE;
+    return defaultGatewayLockFile();
   }
   // Anything that reaches a filesystem path from user input gets flattened, so
   // an id like `../../alpha` cannot walk out of the instances directory and
@@ -174,6 +183,50 @@ export function readGatewayEndpoint(file: string): GatewayEndpoint | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The runtime lock belonging to whichever rappter is on this port.
+ *
+ * A caller that has a port and wants "who is actually serving it" cannot get
+ * there by derivation: a twin's lock is keyed by its NAME
+ * (`instances/scout/gateway.pid`) and a name cannot be recovered from a port.
+ * Only the endpoint record each rappter writes at startup connects the two.
+ *
+ * Without this, `getIMessageServiceStatus` read the ALPHA's lock for every
+ * port. Measured with a twin on 19509: `live` was fetched from 19509 and
+ * answered by pid 71257, while `servingPid` came back 66014 — the alpha. The
+ * two fields described different rappters, and `servedByForeignProcess`, whose
+ * only job is to notice that the port is being served by something other than
+ * the supervised job, was structurally unable to fire. #109
+ */
+export function gatewayLockFileForPort(port: number): string {
+  // Check the alpha's own record first, so an alpha started on a non-default
+  // port is still recognised as the alpha rather than searched for as a twin.
+  const alpha = readGatewayEndpoint(gatewayEndpointFileFor({}));
+  if (alpha ? alpha.port === port : port === ALPHA_GATEWAY_PORT) {
+    return defaultGatewayLockFile();
+  }
+
+  try {
+    const root = join(homedir(), '.openrappter', 'instances');
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const record = readGatewayEndpoint(gatewayEndpointFileFor({ instance: entry.name }));
+      if (record?.port === port) return gatewayLockFileFor({ instance: entry.name });
+    }
+  } catch {
+    // No instances directory yet: nothing has ever been hatched.
+  }
+
+  // Nothing claims this port. Key the fallback by the port as an instance, so
+  // it can never collapse back to the alpha's file — which would attribute a
+  // stranger's port to the alpha, the exact failure this function exists to
+  // end. That collapse is real: `gatewayLockFileFor({ port: 18790 })` returns
+  // the alpha's path by its own contract, so an alpha that had moved to
+  // another port would still be named as the owner of 18790. Caught by its own
+  // test.
+  return gatewayLockFileFor({ instance: String(port) });
 }
 
 export interface GatewayLockOptions {  filePath?: string;
@@ -255,7 +308,7 @@ function readOwner(filePath: string): number | null {
 }
 
 export function acquireLock(options: GatewayLockOptions = {}): boolean {
-  const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
+  const filePath = options.filePath ?? defaultGatewayLockFile();
   const pid = options.pid ?? process.pid;
   const held = heldLocks.get(filePath);
   if (held) return held.pid === pid;
@@ -280,7 +333,7 @@ export function acquireLock(options: GatewayLockOptions = {}): boolean {
 }
 
 export function releaseLock(options: GatewayLockOptions = {}): void {
-  const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
+  const filePath = options.filePath ?? defaultGatewayLockFile();
   const pid = options.pid ?? process.pid;
   const held = heldLocks.get(filePath);
   if (!held || held.pid !== pid) return;
@@ -319,7 +372,7 @@ export interface GatewayLockOwner {
  * instead of an ownership one.
  */
 export function readGatewayLockOwner(options: GatewayLockOptions = {}): GatewayLockOwner {
-  const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
+  const filePath = options.filePath ?? defaultGatewayLockFile();
   let pid: number | null = null;
   try {
     const raw = readFileSync(filePath, 'utf-8').trim();
@@ -344,7 +397,7 @@ export function readGatewayLockOwner(options: GatewayLockOptions = {}): GatewayL
 }
 
 export function isGatewayRunning(options: GatewayLockOptions = {}): boolean {
-  const filePath = options.filePath ?? DEFAULT_GATEWAY_LOCK_FILE;
+  const filePath = options.filePath ?? defaultGatewayLockFile();
   if (heldLocks.has(filePath)) return true;
 
   mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });

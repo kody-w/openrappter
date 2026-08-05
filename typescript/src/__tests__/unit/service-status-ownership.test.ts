@@ -185,3 +185,102 @@ describe('getIMessageServiceStatus ownership', () => {
     expect(status.servedByForeignProcess).toBe(false);
   });
 });
+
+/**
+ * The lock owner is read for the PORT being asked about. — #109
+ *
+ * `servingPid` is documented as "the pid holding the gateway runtime lock —
+ * i.e. what actually answered live/ready". It read the ALPHA's lock whatever
+ * port was passed. Measured against a real twin:
+ *
+ *   alpha  18790 -> pid 66014
+ *   scout  19509 -> pid 71257
+ *
+ *   --port 18790 => live=True servingPid=66014
+ *   --port 19509 => live=True servingPid=66014   <- scout answered, alpha named
+ *
+ * `servedByForeignProcess` is built on that value, and its only job is to
+ * notice that a port is being served by something other than the supervised
+ * job. Fed the wrong pid it could not fire for any non-alpha port, and a check
+ * that cannot fail reads as a pass.
+ *
+ * The live re-probe after the fix shows servingPid tracking the port (71257 for
+ * 19509), but it cannot exercise the composite, because launchd reports no pid
+ * for the job on this machine and the composite correctly abstains without one.
+ * So the composite is proved here, where both inputs can be supplied.
+ */
+describe('the lock owner is resolved per port', () => {
+  it('asks for the port it was given, not for the alpha', async () => {
+    const home = await homeWithPlist();
+    const asked: number[] = [];
+
+    await getIMessageServiceStatus({
+      homeDirectory: home,
+      checkHttp: false,
+      port: 19509,
+      lockOwnerReader: (port: number) => {
+        asked.push(port);
+        return { pid: 71257, alive: true };
+      },
+      commandRunner: async (_exe: string, args: readonly string[]) =>
+        (args[1]?.startsWith('system/')
+          ? { stdout: '', exitCode: 113 }
+          : { stdout: RUNNING, exitCode: 0 }),
+    } as never);
+
+    // Before the fix this reader took no argument at all and the alpha's
+    // default path was used regardless.
+    expect(asked).toEqual([19509]);
+  });
+
+  it('reports the pid serving THAT port', async () => {
+    const home = await homeWithPlist();
+    const status = await getIMessageServiceStatus({
+      homeDirectory: home,
+      checkHttp: false,
+      port: 19509,
+      lockOwnerReader: (port: number) => ({
+        pid: port === 19509 ? 71257 : 66014,
+        alive: true,
+      }),
+      commandRunner: async (_exe: string, args: readonly string[]) =>
+        (args[1]?.startsWith('system/')
+          ? { stdout: '', exitCode: 113 }
+          : { stdout: RUNNING, exitCode: 0 }),
+    } as never);
+
+    expect(status.servingPid).toBe(71257);
+    expect(status.servingPid).not.toBe(66014);
+  });
+
+  it('feeds the composite the right pid, though this harness cannot observe liveness', async () => {
+    // The supervised job is 44229; the process actually answering 19509 is
+    // 71257. That difference is precisely what `servedByForeignProcess` exists
+    // to surface, and with the alpha's pid substituted in it was undetectable.
+    //
+    // The composite ALSO requires that the port was observed to answer, and
+    // this harness cannot supply that: `checkHttp` is a boolean, so liveness is
+    // either a real socket call or forced false. Asserting a true composite
+    // here would mean pretending to a liveness that was never observed, so what
+    // is asserted is the input that was wrong and the abstention that is right.
+    const home = await homeWithPlist();
+    const status = await getIMessageServiceStatus({
+      homeDirectory: home,
+      port: 19509,
+      lockOwnerReader: () => ({ pid: 71257, alive: true }),
+      checkHttp: false,
+      commandRunner: async (_exe: string, args: readonly string[]) =>
+        (args[1]?.startsWith('system/')
+          ? { stdout: '', exitCode: 113 }
+          : { stdout: RUNNING, exitCode: 0 }),
+    } as never);
+
+    expect(status.supervisedPid).toBe(44229);
+    // The input that used to be the alpha's pid no matter what.
+    expect(status.servingPid).toBe(71257);
+    expect(status.servingPid).not.toBe(status.supervisedPid);
+    // No observed liveness, so no claim. "Absent evidence we say nothing."
+    expect(status.live).toBe(false);
+    expect(status.servedByForeignProcess).toBe(false);
+  });
+});

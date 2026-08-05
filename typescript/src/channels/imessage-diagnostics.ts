@@ -13,7 +13,12 @@ import {
   type IMessageConfig,
 } from './imessage.js';
 
-import { readGatewayLockOwner, type GatewayLockOwner } from '../infra/gateway-lock.js';
+import {
+  ALPHA_GATEWAY_PORT,
+  gatewayLockFileForPort,
+  readGatewayLockOwner,
+  type GatewayLockOwner,
+} from '../infra/gateway-lock.js';
 
 export interface IMessageDiagnosticResult {
   platformSupported: boolean;
@@ -35,8 +40,13 @@ export interface IMessageDiagnosticResult {
 export interface IMessageDiagnosticOptions {
   config: IMessageConfig;
   tokenConfigured: boolean;
-  /** Injectable for tests; defaults to reading the real lock file. */
-  lockOwnerReader?: () => GatewayLockOwner;
+  /**
+   * Injectable for tests; defaults to reading the lock of whichever rappter is
+   * on the port being diagnosed. Takes the port for the same reason
+   * `getIMessageServiceStatus` does: reading the alpha's lock for every port
+   * made `gateway_lock_foreign` describe a rappter nobody asked about. #109
+   */
+  lockOwnerReader?: (port: number) => GatewayLockOwner;
   platform?: NodeJS.Platform;
   homeDirectory?: string;
   commandRunner?: (
@@ -161,7 +171,15 @@ export async function diagnoseIMessage(
     reasons.push(service.readinessReason ?? 'gateway_not_ready');
   }
 
-  const lockOwner = (options.lockOwnerReader ?? readGatewayLockOwner)();
+  // The same port the service status above was computed for, so the lock
+  // owner and the liveness it is compared against describe one rappter. #109
+  const diagnosedPort = options.launchAgent?.port ?? ALPHA_GATEWAY_PORT;
+  const lockOwner = (
+    options.lockOwnerReader
+    ?? ((port: number) => readGatewayLockOwner({
+      filePath: gatewayLockFileForPort(port),
+    }))
+  )(diagnosedPort);
   // A gateway held by a live process while the installed agent is not loaded
   // means the listener belongs to something else. Without this the operator
   // sees install-service report live/ready for a process it does not own.

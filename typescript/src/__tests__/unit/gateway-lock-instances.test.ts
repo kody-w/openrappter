@@ -29,7 +29,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   ALPHA_GATEWAY_PORT,
-  DEFAULT_GATEWAY_LOCK_FILE,
+  defaultGatewayLockFile,
   acquireLock,
   gatewayLockFileFor,
   releaseLock,
@@ -50,20 +50,20 @@ function take(filePath: string, pid: number): boolean {
 
 describe('the alpha is exactly where it always was', () => {
   it('resolves to the original path with no arguments', () => {
-    expect(gatewayLockFileFor()).toBe(DEFAULT_GATEWAY_LOCK_FILE);
-    expect(DEFAULT_GATEWAY_LOCK_FILE).toBe(join(homedir(), '.openrappter', 'gateway.pid'));
+    expect(gatewayLockFileFor()).toBe(defaultGatewayLockFile());
+    expect(defaultGatewayLockFile()).toBe(join(homedir(), '.openrappter', 'gateway.pid'));
   });
 
   // An existing install passes its port explicitly; it must not be migrated.
   it('resolves to the original path on the default port', () => {
-    expect(gatewayLockFileFor({ port: ALPHA_GATEWAY_PORT })).toBe(DEFAULT_GATEWAY_LOCK_FILE);
+    expect(gatewayLockFileFor({ port: ALPHA_GATEWAY_PORT })).toBe(defaultGatewayLockFile());
   });
 });
 
 describe('a twin gets its own', () => {
   it('keys by port when no id is given', () => {
     const twin = gatewayLockFileFor({ port: 19901 });
-    expect(twin).not.toBe(DEFAULT_GATEWAY_LOCK_FILE);
+    expect(twin).not.toBe(defaultGatewayLockFile());
     expect(twin).toBe(join(homedir(), '.openrappter', 'instances', '19901', 'gateway.pid'));
   });
 
@@ -77,7 +77,7 @@ describe('a twin gets its own', () => {
   it('cannot escape the instances directory', () => {
     for (const evilId of ['../../gateway', '..', '../..', '/etc/passwd', '']) {
       const p = gatewayLockFileFor({ instance: evilId, port: 19901 });
-      expect(p, evilId).not.toBe(DEFAULT_GATEWAY_LOCK_FILE);
+      expect(p, evilId).not.toBe(defaultGatewayLockFile());
       expect(p, evilId).toContain(join('.openrappter', 'instances'));
     }
   });
@@ -87,7 +87,7 @@ describe('a twin gets its own', () => {
   it('does not let an id of only dots resolve to the alpha', () => {
     for (const dots of ['..', '.', '...']) {
       const p = gatewayLockFileFor({ instance: dots, port: 19901 });
-      expect(p, dots).not.toBe(DEFAULT_GATEWAY_LOCK_FILE);
+      expect(p, dots).not.toBe(defaultGatewayLockFile());
       expect(p, dots).toContain(join('.openrappter', 'instances'));
     }
   });

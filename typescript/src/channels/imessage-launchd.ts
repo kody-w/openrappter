@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { readGatewayLockOwner } from '../infra/gateway-lock.js';
+import { gatewayLockFileForPort, readGatewayLockOwner } from '../infra/gateway-lock.js';
 
 export const OPENRAPPTER_LAUNCH_AGENT_LABEL = 'com.openrappter.gateway';
 export const OPENRAPPTER_SYSTEM_DAEMON_LABEL = 'com.openrappter.rappterone';
@@ -53,7 +53,12 @@ export interface IMessageLaunchAgentOptions {
   checkHttp?: boolean;
   delegateSystemService?: boolean;
   /** Test seam: who holds the gateway runtime lock. Defaults to the real file. */
-  lockOwnerReader?: () => { pid: number | null; alive: boolean };
+  /**
+   * Who holds the runtime lock for a given PORT. Takes the port because the
+   * answer differs per rappter, and reading the alpha's lock for every port is
+   * what made `servedByForeignProcess` unable to fire for a twin. #109
+   */
+  lockOwnerReader?: (port: number) => { pid: number | null; alive: boolean };
 }
 
 export interface IMessageServiceStatus {
@@ -104,7 +109,7 @@ interface ResolvedLaunchAgentOptions {
   healthTimeoutMs: number;
   checkHttp: boolean;
   delegateSystemService: boolean;
-  lockOwnerReader: () => { pid: number | null; alive: boolean };
+  lockOwnerReader: (port: number) => { pid: number | null; alive: boolean };
 }
 
 const defaultCommandRunner: LaunchdCommandRunner = (
@@ -195,7 +200,13 @@ function resolveOptions(
         : 180_000,
     checkHttp: options.checkHttp ?? true,
     delegateSystemService: options.delegateSystemService ?? true,
-    lockOwnerReader: options.lockOwnerReader ?? readGatewayLockOwner,
+    lockOwnerReader:
+      options.lockOwnerReader
+      // Resolve the lock that belongs to the port being asked about, so
+      // `servingPid` and `live` always describe the same process. #109
+      ?? ((port: number) => readGatewayLockOwner({
+        filePath: gatewayLockFileForPort(port),
+      })),
   };
 }
 
@@ -550,7 +561,7 @@ export async function getIMessageServiceStatus(
   const supervisedPrint = print.exitCode === 0 ? print : systemPrint;
   const supervisedPid = parseLaunchdPid(supervisedPrint.stdout);
   const running = supervisedPrint.exitCode === 0 && isLaunchdRunning(supervisedPrint.stdout);
-  const servingPid = resolved.lockOwnerReader().pid;
+  const servingPid = resolved.lockOwnerReader(resolved.port).pid;
 
   return {
     installed: installed || systemPrint.exitCode === 0,

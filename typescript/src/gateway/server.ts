@@ -143,6 +143,18 @@ export class GatewayServer {
   private methods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private publicHttpMethods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private rateLimits = new Map<string, RateLimitEntry>();
+  /**
+   * Largest HTTP POST body this gateway will read, in bytes.
+   *
+   * 2 MB is generous for a chat turn carrying forty turns of history and far
+   * below anything a model API will accept, so the cap never bites a real
+   * request — it only stops the ones that were never going to work.
+   * Override with OPENRAPPTER_MAX_BODY_BYTES.
+   */
+  private readonly maxHttpBodyBytes: number = (() => {
+    const raw = Number(process.env.OPENRAPPTER_MAX_BODY_BYTES);
+    return Number.isFinite(raw) && raw > 0 ? raw : 2 * 1024 * 1024;
+  })();
   private config: GatewayConfig;
   private startedAt: number | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -851,8 +863,49 @@ export class GatewayServer {
     if (req.method === 'POST') {
       const requestGeneration = this.generation;
       let body = '';
-      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      let bodyBytes = 0;
+      let bodyTooLarge = false;
+      /**
+       * Cap the read. `body += chunk.toString()` had no limit, so a single
+       * untrusted POST could grow a string until the daemon died — and this
+       * gateway is meant to face peers on a shared wire, where "untrusted" is
+       * the normal case rather than the exception.
+       *
+       * Measured before writing this, against both runtimes on this machine:
+       * a 10 MB body was accepted by BOTH, buffered whole, and forwarded to
+       * the paid model API, which rejected it with 413. So the old behaviour
+       * did not merely risk memory — it spent an upstream call on garbage, and
+       * the two runtimes then disagreed about the wreckage (brainstem 502,
+       * openrappter 503). Rejecting at the door costs nothing and is the same
+       * answer every time.
+       *
+       * This is a DELIBERATE divergence from the brainstem, which has no cap.
+       * Everywhere else on /chat the rule is to match it exactly; here matching
+       * it would mean copying a hole. The brainstem should adopt the same cap —
+       * it is a different repository and not mine to change.
+       */
+      req.on('data', (chunk: Buffer) => {
+        if (bodyTooLarge) return;
+        bodyBytes += chunk.length;
+        if (bodyBytes > this.maxHttpBodyBytes) {
+          bodyTooLarge = true;
+          const isChat = (req.url ?? '').split('?')[0] === '/chat';
+          if (!res.writableEnded) {
+            res.writeHead(413, { 'Content-Type': 'application/json', ...corsHeaders });
+            // Bare `{error}` on /chat, like every other rejection on that wire.
+            res.end(JSON.stringify(isChat
+              ? { error: 'Request body too large' }
+              : { error: 'Request body too large', limit_bytes: this.maxHttpBodyBytes }));
+          }
+          // Stop reading. Without this the socket keeps delivering the rest of
+          // the upload into a buffer nobody will ever look at.
+          req.destroy();
+          return;
+        }
+        body += chunk.toString();
+      });
       req.on('end', async () => {
+        if (bodyTooLarge) return;
         const dispatchStartedAt = Date.now();
         try {
           if (!this.isGenerationActive(requestGeneration)) {

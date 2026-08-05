@@ -25,9 +25,20 @@ import re
 
 #: Whole words that make a field a secret.
 _SECRET_WORDS = frozenset({
-    "apikey", "auth", "authorization", "credential", "credentials", "cookie",
-    "key", "keys", "passphrase", "passwd", "password", "pat", "secret",
+    "apikey", "auth", "authorization", "bearer", "credential", "credentials",
+    "cookie", "jwt", "passphrase", "passwd", "password", "pat", "pem", "secret",
     "secrets", "signature", "token", "tokens",
+})
+
+#: Words that make a trailing ``key`` secret.
+#:
+#: ``key`` on its own is too blunt in both directions. As a whole word it
+#: blanked ``keyCount``, ``keyId`` and ``publicKey``; dropping it would let
+#: ``apiKey`` and ``privateKey`` through. So it counts when it is what the field
+#: *is* — the last word, qualified by something that makes it sensitive.
+_SECRET_KEY_QUALIFIERS = frozenset({
+    "access", "api", "app", "auth", "client", "encryption", "master", "private",
+    "secret", "session", "signing", "ssh", "token",
 })
 
 #: Fragments unambiguous even when glued to other text.
@@ -50,7 +61,16 @@ def _split_words(key: str) -> list:
 
 def is_secret_key(key: str) -> bool:
     """True when a field of this name must never be logged verbatim."""
-    if any(word in _SECRET_WORDS for word in _split_words(key)):
+    words = _split_words(key)
+    if any(word in _SECRET_WORDS for word in words):
         return True
+
+    if words and words[-1] in ("key", "keys"):
+        # A field named exactly ``key`` is a value, not a label for one.
+        if len(words) == 1:
+            return True
+        if any(word in _SECRET_KEY_QUALIFIERS for word in words[:-1]):
+            return True
+
     lowered = key.lower()
     return any(fragment in lowered for fragment in _SECRET_FRAGMENTS)

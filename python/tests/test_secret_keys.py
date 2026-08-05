@@ -28,12 +28,18 @@ SECRET_NAMES = [
     "credential", "credentials", "authorization",
     "api_key", "api-key", "ACCESS_TOKEN", "refresh_token", "passphrase",
     "authToken", "Cookie", "signature",
+    # Missed until an outside review checked.
+    "jwt", "bearerToken", "privatePem",
+    # A trailing `key` with a qualifier that makes it sensitive.
+    "accessKey", "encryptionKey", "masterKey", "sshKey", "key", "keys",
 ]
 
 BENIGN_NAMES = [
     "monkey", "keyword", "keyboard", "author",
     "name", "port", "host", "model", "sessionId", "requestId",
     "durationMs", "outcome",
+    # Blanked by the previous rule, which counted `key` anywhere in the name.
+    "keyCount", "keyId", "publicKey", "keyspace",
 ]
 
 
@@ -91,8 +97,14 @@ class TestRuntimeAgreement:
         )
         source = ts_path.read_text(encoding="utf-8")
 
-        from openrappter.security.secret_keys import _SECRET_WORDS, _SECRET_FRAGMENTS
+        from openrappter.security.secret_keys import (
+            _SECRET_FRAGMENTS,
+            _SECRET_KEY_QUALIFIERS,
+            _SECRET_WORDS,
+        )
 
+        for word in _SECRET_KEY_QUALIFIERS:
+            assert f"'{word}'" in source, f"TypeScript is missing the qualifier {word!r}"
         for word in _SECRET_WORDS:
             assert f"'{word}'" in source, f"TypeScript is missing the word {word!r}"
         for fragment in _SECRET_FRAGMENTS:

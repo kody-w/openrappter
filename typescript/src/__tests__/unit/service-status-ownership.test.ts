@@ -284,3 +284,84 @@ describe('the lock owner is resolved per port', () => {
     expect(status.servedByForeignProcess).toBe(false);
   });
 });
+
+/**
+ * A dead pid is not a serving process. — #112
+ *
+ * `releaseLock` never runs on SIGKILL, a crash, an OOM kill or a power loss, so
+ * the pid file outlives the process it names. Measured with a real twin:
+ *
+ *   $ openrappter hatch scout      -> Hatching scout on :19509 (pid 96785)
+ *   $ kill -9 96785
+ *   $ cat ~/.openrappter/instances/scout/gateway.pid   -> 96785
+ *   $ ps -p 96785                                      -> no such process
+ *   $ lsof -ti :19509 -sTCP:LISTEN                     -> nothing
+ *
+ *   $ openrappter twins
+ *     ○ scout  :19509  not running                     <- correct, it probes
+ *
+ *   $ openrappter imessage service-status --port 19509 --json
+ *     "live": false,
+ *     "servingPid": 96785,                             <- a dead process
+ *
+ * One object saying nothing answered while naming something as serving it.
+ *
+ * `readGatewayLockOwner` already tests liveness with `process.kill(pid, 0)` and
+ * returns `{ pid, alive }`. The flag was simply being dropped here, while
+ * `index.ts` prints "(stale)" from it and `imessage-diagnostics.ts` gates on it.
+ */
+describe('a stale pid file is not a serving process', () => {
+  const runner = async (_exe: string, args: readonly string[]) =>
+    (args[1]?.startsWith('system/')
+      ? { stdout: '', exitCode: 113 }
+      : { stdout: RUNNING, exitCode: 0 });
+
+  it('reports null rather than the pid of a dead process', async () => {
+    const home = await homeWithPlist();
+    const status = await getIMessageServiceStatus({
+      homeDirectory: home,
+      checkHttp: false,
+      port: 19509,
+      // Exactly what the reader returns for a pid file left by a crash: a
+      // parseable pid that no longer names anything.
+      lockOwnerReader: () => ({ pid: 96785, alive: false }),
+      commandRunner: runner,
+    } as never);
+
+    expect(status.servingPid).toBeNull();
+  });
+
+  it('still reports a live owner', async () => {
+    // The fix must not blind the field it is correcting.
+    const home = await homeWithPlist();
+    const status = await getIMessageServiceStatus({
+      homeDirectory: home,
+      checkHttp: false,
+      port: 19509,
+      lockOwnerReader: () => ({ pid: 71257, alive: true }),
+      commandRunner: runner,
+    } as never);
+
+    expect(status.servingPid).toBe(71257);
+  });
+
+  it('does not blame a dead pid for serving a port something else took over', async () => {
+    // The consequence that matters. If a crashed twin's port is later taken by
+    // an unrelated process, a stale pid would differ from the supervised pid
+    // and fire `servedByForeignProcess` while naming a process that does not
+    // exist — a true alarm carrying false evidence, which teaches an operator
+    // to ignore it.
+    const home = await homeWithPlist();
+    const status = await getIMessageServiceStatus({
+      homeDirectory: home,
+      checkHttp: false,
+      port: 19509,
+      lockOwnerReader: () => ({ pid: 96785, alive: false }),
+      commandRunner: runner,
+    } as never);
+
+    expect(status.supervisedPid).toBe(44229);
+    expect(status.servingPid).toBeNull();
+    expect(status.servedByForeignProcess).toBe(false);
+  });
+});

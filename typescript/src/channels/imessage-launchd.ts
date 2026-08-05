@@ -561,7 +561,17 @@ export async function getIMessageServiceStatus(
   const supervisedPrint = print.exitCode === 0 ? print : systemPrint;
   const supervisedPid = parseLaunchdPid(supervisedPrint.stdout);
   const running = supervisedPrint.exitCode === 0 && isLaunchdRunning(supervisedPrint.stdout);
-  const servingPid = resolved.lockOwnerReader(resolved.port).pid;
+  const lockOwner = resolved.lockOwnerReader(resolved.port);
+  // A pid file left behind by a dead process is not evidence of a serving
+  // process. `releaseLock` never runs on SIGKILL, a crash, an OOM kill or a
+  // power loss, so the file outlives the process — and this reported that pid
+  // as the server indefinitely, alongside `live: false`, which cannot both be
+  // true. The reader already tests liveness with `process.kill(pid, 0)` and
+  // hands back the answer; it was simply being dropped. #112
+  //
+  // Absent evidence we say nothing rather than guess, which is already this
+  // function's stated rule for `servedByForeignProcess` below.
+  const servingPid = lockOwner.alive ? lockOwner.pid : null;
 
   return {
     installed: installed || systemPrint.exitCode === 0,

@@ -10,11 +10,34 @@
  *
  * WHAT THIS DELIBERATELY REFUSES
  *
- * `console` operates a neighbor's runtime and is SEALED-ONLY (§8/§11). This
- * gateway has no seal: no ECDSA P-256 verification, no PBKDF2 channel key.
- * So a `console` envelope is refused outright. Accepting an unsealed one —
+ * `console` operates a neighbor's runtime and is SEALED-ONLY (§8/§11). The
+ * sealed codec is `rapp-sealed/1.0`, which rides the envelope inside a signed
+ * `{ts, kind, body, sig}` and needs ECDSA-P256. This gateway implements none of
+ * it, so a `console` envelope is refused outright. Accepting an unsealed one —
  * or worse, executing it — would be the single worst thing this endpoint could
  * do, and "we'll add the seal later" is exactly how that ships.
+ *
+ * ECDSA-P256 is sourced: `rapp-sentinel/neighborhood.py` describes the same
+ * codec and the same requirement, and refuses for the same reason — "it rejects
+ * `console` kind outright rather than pretending to seal it … it is a gap, and
+ * it is written down rather than glossed." Two implementations refusing on the
+ * same stated grounds is corroboration, not coincidence.
+ *
+ * This comment previously also named a "PBKDF2 channel key". That could not be
+ * sourced anywhere — not in `SPEC-rapp1.md`, not in `neighborhood.py`, not in
+ * any document on this machine — and no copy of `rapp-neighborhood-protocol/1.0`
+ * is present to confirm or deny it. A comment naming a cryptographic primitive
+ * is a specification to whoever implements it next, so an unsourceable one is
+ * removed rather than left to be built. If the protocol does require a derived
+ * channel key, that belongs here with a citation. #124
+ *
+ * Do not reach for `SPEC-rapp1.md` §10 when implementing this. That specifies
+ * JWS (detached, unencoded, EdDSA or ES256) with key discovery through the §13
+ * registry, and it governs FRAMES ON STREAMS — a different layer from the
+ * `console` envelope. Its verifier must also refuse on registry absence, and no
+ * `rapp-map/ecosystem-spec.json` exists here, so on that layer refusing is the
+ * specified outcome too. Two layers, two mechanisms; conflating them sends an
+ * implementer to the wrong one.
  *
  * Nothing here verifies a signature, and nothing here should be read as having
  * authenticated the sender. `from_rappid` is a claim, not proof.

@@ -8,6 +8,7 @@ import {
   rejectProcedure,
   sendTurn as requestSurgeonTurn,
 } from '../services/surgeon.js';
+import { askPatient } from '../services/patient.js';
 import type {
   SurgeonCase,
   SurgeonOption,
@@ -962,6 +963,16 @@ export class OpenRappterSurgeon extends LitElement {
   @state() private error: string | null = null;
   @state() private confirmation = '';
   @state() private voiceEnabled = false;
+  /**
+   * Which voice the composer is speaking to. #99.
+   *
+   * 'surgeon' is Copilot examining the patient — what this screen has always
+   * done. 'patient' is OpenRappter answering for itself, which it could not do
+   * here at all: every turn went to surgeon.turn and nothing reached the agent.
+   */
+  @state() private mode: 'surgeon' | 'patient' = 'surgeon';
+  @state() private patientTurns: Array<{ q: string; a: string; model?: string }> = [];
+  @state() private patientSession = '';
 
   private readonly starterOptions: SurgeonOption[] = [
     {
@@ -1013,7 +1024,30 @@ export class OpenRappterSurgeon extends LitElement {
     this.error = null;
   }
 
+  /** Ask the patient directly, over the same public /chat wire a neighbor uses. */
+  private async askThePatient(value: string): Promise<void> {
+    const q = value.trim();
+    if (!q || this.busy) return;
+    this.busy = true;
+    this.error = null;
+    this.input = '';
+    try {
+      const reply = await askPatient(q, this.patientSession || undefined);
+      this.patientSession = reply.session_id || this.patientSession;
+      this.patientTurns = [...this.patientTurns, { q, a: reply.response, model: reply.model }];
+      this.speak(reply.voice_response ?? reply.response);
+      await this.updateComplete;
+      const t = this.shadowRoot?.querySelector('.transcript');
+      if (t) t.scrollTo({ top: t.scrollHeight, behavior: 'smooth' });
+    } catch (error) {
+      this.error = (error as Error).message;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async sendTurn(value = this.input): Promise<void> {
+    if (this.mode === 'patient') return this.askThePatient(value);
     const userInput = value.trim();
     if (!userInput || this.busy) return;
     this.busy = true;
@@ -1265,7 +1299,41 @@ export class OpenRappterSurgeon extends LitElement {
     return turns.at(-1)?.turn.id === turn.id;
   }
 
+  private renderPatientTranscript(): unknown {
+    if (this.patientTurns.length === 0) {
+      return html`
+        <div class="welcome">
+          <span class="eyebrow">Direct line</span>
+          <h2>Ask OpenRappter itself.</h2>
+          <p>
+            This goes over <code>POST /chat</code> — the same public wire a
+            brainstem or any neighbor would use, not a private back channel.
+            Copilot is not in this conversation.
+          </p>
+          <div class="starter-portals">
+            ${[
+              { label: 'Ask what it can do', value: 'What can you actually do? Answer from your real agent list, not in general terms.' },
+              { label: 'Look inside its head', value: 'What is in your memory right now, and where is it stored?' },
+              { label: 'Trust, then verify', value: 'Name one thing you believe about your own state that you cannot prove, and say why.' },
+            ].map(o => html`
+              <button class="portal" ?disabled=${this.busy} @click=${() => this.askThePatient(o.value)}>
+                <span>${o.label}</span><span class="arrow">↗</span>
+              </button>`)}
+          </div>
+        </div>`;
+    }
+    return html`${this.patientTurns.map(t => html`
+      <div class="turn">
+        <div class="ask">${t.q}</div>
+        <div class="answer">
+          <span class="eyebrow">OpenRappter${t.model ? html` · <span class="bn">${t.model}</span>` : nothing}</span>
+          <p>${t.a}</p>
+        </div>
+      </div>`)}`;
+  }
+
   private renderTranscript(): unknown {
+    if (this.mode === 'patient') return this.renderPatientTranscript();
     const turns = this.patientCase?.turns ?? [];
     if (turns.length === 0) {
       return html`
@@ -1352,13 +1420,31 @@ export class OpenRappterSurgeon extends LitElement {
 
           <section class="surgeon-wing">
             <header class="surgeon-header">
-              <div class="copilot">⌘</div>
+              <div class="copilot">${this.mode === 'patient' ? '🦖' : '⌘'}</div>
               <div class="surgeon-title">
-                <b>GitHub Copilot</b>
-                <span>Brain surgeon · adaptive agent mode</span>
+                <b>${this.mode === 'patient' ? 'OpenRappter' : 'GitHub Copilot'}</b>
+                <span>${this.mode === 'patient'
+                  ? 'the patient, answering for itself · over POST /chat'
+                  : 'Brain surgeon · adaptive agent mode'}</span>
+              </div>
+              <div class="toolbar" role="group" aria-label="Who you are talking to">
+                <button
+                  class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
+                  aria-pressed=${this.mode === 'surgeon'}
+                  ?disabled=${this.busy}
+                  @click=${() => { this.mode = 'surgeon'; this.error = null; }}
+                >⌘ Surgeon</button>
+                <button
+                  class="tbtn${this.mode === 'patient' ? ' on' : ''}"
+                  aria-pressed=${this.mode === 'patient'}
+                  ?disabled=${this.busy}
+                  @click=${() => { this.mode = 'patient'; this.error = null; }}
+                >🦖 Patient</button>
               </div>
               <span class="case-status">
-                ${this.patientCase?.status.replace('_', ' ') ?? 'ready'}
+                ${this.mode === 'patient'
+                  ? (this.patientSession ? 'in conversation' : 'ready')
+                  : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
               </span>
             </header>
 
@@ -1377,7 +1463,7 @@ export class OpenRappterSurgeon extends LitElement {
               ${this.busy ? html`
                 <div class="thinking">
                   <span class="pulse"><i></i><i></i><i></i></span>
-                  Copilot is examining OpenRappter…
+                  ${this.mode === 'patient' ? 'OpenRappter is answering…' : 'Copilot is examining OpenRappter…'}
                 </div>
               ` : nothing}
             </div>
@@ -1385,8 +1471,10 @@ export class OpenRappterSurgeon extends LitElement {
             <footer class="composer-wrap">
               <div class="composer">
                 <textarea
-                  aria-label="Ask the Copilot surgeon"
-                  placeholder="Describe what OpenRappter needs…"
+                  aria-label=${this.mode === 'patient' ? 'Ask OpenRappter directly' : 'Ask the Copilot surgeon'}
+                  placeholder=${this.mode === 'patient'
+                    ? 'Ask OpenRappter itself…'
+                    : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
                   ?disabled=${this.busy}
                   @input=${(event: Event) => {
@@ -1396,14 +1484,19 @@ export class OpenRappterSurgeon extends LitElement {
                 ></textarea>
                 <button
                   class="send"
-                  aria-label="Send to Copilot surgeon"
+                  aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
                   ?disabled=${this.busy || !this.input.trim()}
                   @click=${() => this.sendTurn()}
                 >↑</button>
               </div>
               <div class="composer-note">
-                <span>Copilot shapes the next interface from this turn.</span>
-                <span>Mutations require explicit approval.</span>
+                ${this.mode === 'patient' ? html`
+                  <span>Straight to the agent over <code>POST /chat</code> — the same wire a neighbor uses.</span>
+                  <span>Copilot is not in this conversation.</span>
+                ` : html`
+                  <span>Copilot shapes the next interface from this turn.</span>
+                  <span>Mutations require explicit approval.</span>
+                `}
               </div>
             </footer>
           </section>

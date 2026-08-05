@@ -45,7 +45,12 @@ class ReportAssemblerAgent extends BasicAgent {
   }
 }
 
-class ReportStorageAgent extends BasicAgent {
+/**
+ * Exported so the storage claim can be tested. #136 found it returning
+ * `stored: true` unconditionally, and it had no test because it was
+ * module-private and constructed internally.
+ */
+export class ReportStorageAgent extends BasicAgent {
   private memoryAgent: BasicAgent;
   constructor(memoryAgent?: BasicAgent) {
     const metadata: AgentMetadata = { name: 'ReportStorage', description: 'Stores the productivity report in memory.', parameters: { type: 'object', properties: {}, required: [] } };
@@ -57,7 +62,31 @@ class ReportStorageAgent extends BasicAgent {
     const reportSlush = upstream['report'] ?? {};
     const summary = (reportSlush['summary'] as string) || 'Productivity report (no summary)';
     const result = await this.memoryAgent.execute({ action: 'remember', message: `Productivity Report: ${summary}`, theme: 'productivity_report', tags: ['productivity', 'daily'], importance: 3 });
-    return JSON.stringify({ status: 'success', stored: true, memory_result: result });
+    /**
+     * Report what the store actually said. — #136
+     *
+     * This returned `{status:'success', stored:true}` unconditionally. Agents
+     * do not throw: `execute()` hands back a JSON document and `MemoryAgent`
+     * reports failure as `{"status":"error"}` inside it. So a report that was
+     * never stored was announced as stored, with the contradicting reply
+     * sitting right beside the claim in `memory_result` — and anything reading
+     * `stored` got the wrong answer.
+     */
+    let stored = false;
+    let storeError: string | undefined;
+    try {
+      const reply = JSON.parse(result) as { status?: string; message?: string };
+      if (reply.status === 'success') stored = true;
+      else storeError = reply.message ?? `memory reported status "${reply.status ?? 'unknown'}"`;
+    } catch {
+      storeError = `memory returned an unreadable reply: ${String(result).slice(0, 120)}`;
+    }
+    return JSON.stringify({
+      status: stored ? 'success' : 'error',
+      stored,
+      ...(storeError ? { error: storeError } : {}),
+      memory_result: result,
+    });
   }
 }
 

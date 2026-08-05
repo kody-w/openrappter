@@ -19,9 +19,26 @@
 
 /** Whole words that make a field a secret. */
 const SECRET_WORDS = new Set([
-  'apikey', 'auth', 'authorization', 'credential', 'credentials', 'cookie',
-  'key', 'keys', 'passphrase', 'passwd', 'password', 'pat', 'secret',
+  'apikey', 'auth', 'authorization', 'bearer', 'credential', 'credentials',
+  'cookie', 'jwt', 'passphrase', 'passwd', 'password', 'pat', 'pem', 'secret',
   'secrets', 'signature', 'token', 'tokens',
+]);
+
+/**
+ * Words that make a trailing `key` secret.
+ *
+ * `key` on its own is too blunt in both directions. Treating it as a whole word
+ * blanked `keyCount`, `keyId` and `publicKey` — this file's own commit claimed
+ * `keyCount` stayed readable, and it did not, which an outside review caught.
+ * Dropping it entirely would let `apiKey` and `privateKey` through, which is
+ * the bug the word was added for.
+ *
+ * So `key` counts when it is what the field *is* — the last word, qualified by
+ * something that makes it sensitive — and not when it merely appears.
+ */
+const SECRET_KEY_QUALIFIERS = new Set([
+  'access', 'api', 'app', 'auth', 'client', 'encryption', 'master', 'private',
+  'secret', 'session', 'signing', 'ssh', 'token',
 ]);
 
 /** Fragments that are unambiguous even when glued to other text. */
@@ -41,7 +58,16 @@ function splitWords(key: string): string[] {
 }
 
 export function isSecretKey(key: string): boolean {
-  if (splitWords(key).some(word => SECRET_WORDS.has(word))) return true;
+  const words = splitWords(key);
+  if (words.some(word => SECRET_WORDS.has(word))) return true;
+
+  const last = words[words.length - 1];
+  if (last === 'key' || last === 'keys') {
+    // A field named exactly `key` is a value, not a label for one.
+    if (words.length === 1) return true;
+    if (words.slice(0, -1).some(word => SECRET_KEY_QUALIFIERS.has(word))) return true;
+  }
+
   const lowered = key.toLowerCase();
   return SECRET_FRAGMENTS.some(fragment => lowered.includes(fragment));
 }

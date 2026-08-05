@@ -25,6 +25,10 @@ describe('isSecretKey', () => {
     // Spelling variants.
     'api_key', 'ACCESS_TOKEN', 'refresh_token', 'passphrase', 'authToken',
     'api-key', 'Cookie', 'signature',
+    // Missed until an outside review checked: no jwt, bearer or pem.
+    'jwt', 'bearerToken', 'privatePem',
+    // A trailing `key` with a qualifier that makes it sensitive.
+    'accessKey', 'encryptionKey', 'masterKey', 'sshKey', 'key', 'keys',
   ])('treats %s as secret', (key) => {
     expect(isSecretKey(key)).toBe(true);
   });
@@ -35,6 +39,10 @@ describe('isSecretKey', () => {
     // fields now that the gateway logger shares the same answer.
     'monkey', 'keyword', 'keyboard', 'author',
     'name', 'port', 'host', 'model', 'sessionId', 'requestId', 'durationMs', 'outcome',
+    // This file's own commit claimed keyCount stayed readable. It did not —
+    // `key` counted as a whole word anywhere in the name. An outside review
+    // caught the claim; these are the names it blanked.
+    'keyCount', 'keyId', 'publicKey', 'keyspace',
   ])('does not treat %s as secret', (key) => {
     expect(isSecretKey(key)).toBe(false);
   });

@@ -196,10 +196,22 @@ export function registerTwinCommands(program: Command): void {
       try {
         const out = await sendTwin({ to: url, fromRappid: from, toRappid: to, text: opts.text });
         if (out.status === 200 && out.said) {
-          console.log(`  ${peerSlug}: ${out.said}\n`);
+          console.log(`  ${peerSlug}: ${out.said}`);
+          // Say which wire answered. A /chat reply carries no rappid, no nonce
+          // and no envelope, so printing it identically to a /twin reply would
+          // claim an identity exchange that never happened. #125
+          if (out.wire === 'chat') {
+            console.log(chalk.dim('         (over /chat — this peer does not speak /twin, so no rappid was exchanged)'));
+          }
+          console.log('');
         } else {
           // Never print a reply that was not one. A refusal is information.
-          console.log(`  peer answered ${out.status}: ${JSON.stringify(out.body).slice(0, 300)}\n`);
+          // `rawBody` when the peer did not send JSON: reporting `{}` for an
+          // HTML error page told the reader the peer had said nothing. #125
+          const shown = out.rawBody !== undefined
+            ? `${out.rawBody.replace(/\s+/g, ' ').slice(0, 200)}  [not JSON]`
+            : JSON.stringify(out.body).slice(0, 300);
+          console.log(`  peer answered ${out.status}: ${shown}\n`);
           process.exitCode = 1;
         }
       } catch (e) {

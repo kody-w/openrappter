@@ -71,6 +71,23 @@ export interface TwinSendResult {
   said: string;
   /** The envelope that was sent, so a caller can log exactly what went out. */
   sent: Record<string, unknown>;
+  /**
+   * Which of the neighborhood's two wires answered.
+   *
+   * A `/chat` reply carries no rappid, no nonce and no envelope. Presenting it
+   * identically to a `/twin` reply would claim an identity exchange that never
+   * happened, so the caller is told which one it got. #125
+   */
+  wire: 'twin' | 'chat';
+  /**
+   * The peer's body verbatim when it was not JSON.
+   *
+   * A peer answering "this endpoint does not exist" in HTML — the most likely
+   * shape there is — used to be reported as `{}`, because that is what
+   * `JSON.stringify` makes of a parse failure. The status was right and the
+   * body was an invention of the display.
+   */
+  rawBody?: string;
 }
 
 export function buildTwinSay(options: {
@@ -87,6 +104,50 @@ export function buildTwinSay(options: {
     facets: [],
   };
 }
+
+/**
+ * The other wire. Plain `/chat`, the one every participant already answers.
+ *
+ * Deliberately carries no rappid and no envelope: `/chat` has no place to put
+ * them, and inventing a field would make a peer's reply look like an identity
+ * exchange. The caller is told `wire: 'chat'` so it can say so.
+ *
+ * Returns null when this wire does not answer either, so the original /twin
+ * result is reported rather than a second failure masking the first.
+ */
+async function sendChat(
+  options: TwinSendOptions,
+  doFetch: typeof fetch,
+  signal: AbortSignal,
+): Promise<Omit<TwinSendResult, 'sent'> | null> {
+  try {
+    const res = await doFetch(`${options.to.replace(/\/$/, '')}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_input: options.text,
+        conversation_history: [],
+        session_id: options.fromRappid,
+      }),
+      signal,
+    });
+    const text = await res.text();
+    let body: Record<string, unknown> = {};
+    let parsed = true;
+    try { body = JSON.parse(text) as Record<string, unknown>; } catch { parsed = false; }
+    if (res.status === 404) return null;
+    return {
+      status: res.status,
+      body,
+      said: typeof body.response === 'string' ? body.response : '',
+      wire: 'chat',
+      ...(parsed ? {} : { rawBody: text.slice(0, 400) }),
+    };
+  } catch {
+    return null;
+  }
+}
+
 
 export async function sendTwin(options: TwinSendOptions): Promise<TwinSendResult> {
   // Refused here as well as at the receiver. A sender that can emit `console`
@@ -115,7 +176,26 @@ export async function sendTwin(options: TwinSendOptions): Promise<TwinSendResult
     });
     const text = await res.text();
     let body: Record<string, unknown> = {};
-    try { body = JSON.parse(text) as Record<string, unknown>; } catch { /* left empty */ }
+    let parsed = true;
+    try { body = JSON.parse(text) as Record<string, unknown>; } catch { parsed = false; }
+
+    /**
+     * A peer that does not speak `/twin` is still in the neighborhood.
+     *
+     * The architecture names TWO wires — "they all interact over /twin and
+     * /chat" — and this sender spoke one, so a rappter could only ever reach
+     * other rappters. The brainstem answers /chat and 404s /twin, which made
+     * half the neighborhood unaddressable:
+     *
+     *   twin say --to http://127.0.0.1:7071  ->  peer answered 404: {}
+     *
+     * A neighborhood whose members are meant to be interchangeable should not
+     * require every member to speak every protocol. #125
+     */
+    if (res.status === 404) {
+      const viaChat = await sendChat(options, doFetch, controller.signal);
+      if (viaChat) return { ...viaChat, sent: envelope };
+    }
 
     const inner = (body.response ?? {}) as Record<string, unknown>;
     return {
@@ -123,6 +203,8 @@ export async function sendTwin(options: TwinSendOptions): Promise<TwinSendResult
       body,
       said: typeof inner.response === 'string' ? inner.response : '',
       sent: envelope,
+      wire: 'twin',
+      ...(parsed ? {} : { rawBody: text.slice(0, 400) }),
     };
   } finally {
     clearTimeout(timer);

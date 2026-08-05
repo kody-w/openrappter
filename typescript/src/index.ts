@@ -76,6 +76,7 @@ async function startGatewayInProcess(opts?: {
   silent?: boolean;
   webRoot?: string;
   port?: number;
+  instance?: string;
   releaseProcessLock?: () => void;
 }): Promise<{ port: number; cleanup: () => Promise<void> }> {
   const { GatewayServer } = await import('./gateway/server.js');
@@ -109,6 +110,21 @@ async function startGatewayInProcess(opts?: {
   const token = process.env.OPENRAPPTER_TOKEN || undefined;
   const silent = opts?.silent ?? false;
   const log = (...args: unknown[]) => { if (!silent) console.log(...args); };
+
+  /**
+   * Is this a hatched twin rather than the alpha?
+   *
+   * A twin shares the device. It must never share a MOUTH. Once #101 made
+   * hatching actually work, a twin booted the whole device runtime — it
+   * connected the iMessage transport with its own durable queue, scheduled the
+   * same cron jobs, and ran the GoogleVoice agent that answers strangers
+   * texting the owner's real number. Two rappters, one phone number, neither
+   * aware of what the other had already said. #103
+   *
+   * The alpha keeps everything it has today. A twin is a peer on /chat and
+   * /twin and nothing else.
+   */
+  const isTwin = Boolean((opts?.instance ?? '').trim());
 
   const server = new GatewayServer({
     port,
@@ -259,7 +275,11 @@ async function startGatewayInProcess(opts?: {
   channelRegistry.register(new CLIChannel());
   const rawConfig = await loadConfig(CONFIG_FILE);
   const imessageConfig = readIMessageConfig(rawConfig);
-  const imessageStore = imessageConfig.enabled
+  // A twin registers the channel so it still appears in its own UI, but never
+  // CONNECTS it. Showing "offline" is harmless; a second durable queue reading
+  // and answering the owner's messages is not. #103
+  const imessageEnabled = imessageConfig.enabled && !isTwin;
+  const imessageStore = imessageEnabled
     ? new IMessageStateStore({
         staleAfterMs: imessageConfig.staleAfterMs,
       })
@@ -276,7 +296,7 @@ async function startGatewayInProcess(opts?: {
   let imessageModelProbeController: AbortController | undefined;
   let imessageModelProbePromise: Promise<void> | undefined;
   let updateIMessageToken: ((token: string) => void) | undefined;
-  if (imessageConfig.enabled) {
+  if (imessageEnabled) {
     const { CopilotCliProvider } = await import('./providers/copilot-cli.js');
     const imessageModel =
       process.env.OPENRAPPTER_IMESSAGE_MODEL || 'gpt-5.6-sol';
@@ -538,7 +558,7 @@ async function startGatewayInProcess(opts?: {
                   : channel.type === 'slack'
                     ? Boolean(process.env.SLACK_BOT_TOKEN || process.env.SLACK_APP_TOKEN)
                     : channel.type === 'imessage'
-                      ? imessageConfig.enabled === true
+                      ? imessageEnabled === true
                       : false
             ),
             connected: channel.connected,
@@ -607,7 +627,12 @@ async function startGatewayInProcess(opts?: {
   await server.start();
 
   // ── Cron Service — load jobs and start scheduler ──
-  try {
+  // Not on a twin. Cron is where GoogleVoice runs, and a second scheduler means
+  // a stranger's text is a candidate for two independent replies from one
+  // number. #103
+  if (isTwin) {
+    log(`${EMOJI} Twin "${opts?.instance}" — cron and outbound channels stay with the alpha.`);
+  } else try {
     const { CronService } = await import('./cron/service.js');
     const cronService = new CronService();
     const cronFile = path.join(HOME_DIR, 'cron.json');
@@ -774,7 +799,12 @@ async function startGatewayInProcess(opts?: {
     if (!imessageRuntime) {
       return {
         state: 'offline',
-        reason: imessageConfig.enabled ? 'runtime_unavailable' : 'disabled',
+        // A twin has no iMessage runtime on purpose. Reporting
+        // 'runtime_unavailable' would describe a deliberate boundary as a
+        // fault, and send someone debugging a thing that is working. #103
+        reason: imessageEnabled
+          ? 'runtime_unavailable'
+          : (isTwin ? 'reserved_for_alpha' : 'disabled'),
       };
     }
     return imessageRuntime.getStatus();
@@ -1162,6 +1192,7 @@ program
           // The same number the lock was scoped to. Passing `options.port` here
           // instead is what made a named twin bind the alpha's port. #101
           port: lockPort,
+          ...(lockInstance ? { instance: lockInstance } : {}),
           releaseProcessLock: () => releaseLock({ filePath: lockFile }),
         });
         lockHandedToGateway = true;

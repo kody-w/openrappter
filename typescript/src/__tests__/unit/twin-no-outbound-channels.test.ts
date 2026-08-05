@@ -1,0 +1,76 @@
+/**
+ * A twin shares the device. It never shares a mouth. — #103
+ *
+ * #101 made hatching work, and a hatched twin immediately booted the entire
+ * device runtime. From a single twin's own startup log, with nothing
+ * configured — this was the default:
+ *
+ *   [channel:imessage] iMessage transport connected
+ *   Cron started — 2 jobs scheduled
+ *   Cron executing: agent=GoogleVoice message="Check Google Voice and answer
+ *                                              anything that deserves it"
+ *
+ * So while the alpha was running, a twin independently connected iMessage with
+ * its own durable queue and ran the agent that answers strangers texting the
+ * owner's real phone number. The queues are separate, so neither rappter can
+ * see what the other already sent. N twins means a stranger's message is a
+ * candidate for N replies from one number.
+ *
+ * That was harmless for exactly as long as a second rappter could not start.
+ *
+ * These assert the DECISION — which is the thing that was wrong. The decision
+ * is read out of the real source rather than restated here, because a test that
+ * restates the rule it is checking passes against code that does the opposite,
+ * and that has already happened once in this repo.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const indexSource = readFileSync(join(here, '..', '..', 'index.ts'), 'utf8');
+
+describe('a hatched twin does not duplicate the alpha\'s outbound channels', () => {
+  it('decides twin-ness from the instance name it was hatched under', () => {
+    expect(indexSource).toMatch(
+      /const isTwin = Boolean\(\(opts\?\.instance \?\? ''\)\.trim\(\)\)/,
+    );
+  });
+
+  it('passes the instance through to the runtime, not only to the lock and port', () => {
+    // The whole defect was that `--instance` reached the lock (#94) and the
+    // port (#101) and stopped. If it does not reach startGatewayInProcess,
+    // nothing downstream can know it is a twin.
+    expect(indexSource).toMatch(/\.\.\.\(lockInstance \? \{ instance: lockInstance \} : \{\}\)/);
+  });
+
+  it('never connects iMessage on a twin', () => {
+    expect(indexSource).toMatch(/const imessageEnabled = imessageConfig\.enabled && !isTwin/);
+    // Every gate that starts the runtime or its durable store must consult the
+    // twin-aware flag, not the raw config.
+    expect(indexSource).toMatch(/const imessageStore = imessageEnabled/);
+    expect(indexSource).toMatch(/if \(imessageEnabled\) \{/);
+  });
+
+  it('never starts cron on a twin — that is where GoogleVoice runs', () => {
+    expect(indexSource).toMatch(
+      /\/\/ ── Cron Service[\s\S]{0,600}?if \(isTwin\) \{[\s\S]{0,400}?\} else try \{/,
+    );
+  });
+
+  it('does not report a withheld channel as a fault', () => {
+    // 'runtime_unavailable' on a twin would describe a deliberate boundary as
+    // a malfunction and send someone debugging something that works.
+    expect(indexSource).toMatch(/isTwin \? 'reserved_for_alpha' : 'disabled'/);
+  });
+
+  it('leaves the alpha with everything it had', () => {
+    // isTwin is false when no instance is given, so every gate above collapses
+    // to the original expression for the alpha. Guard against the gate being
+    // rewritten into something that also catches the alpha.
+    expect(indexSource).not.toMatch(/const isTwin = true/);
+    expect(indexSource).not.toMatch(/imessageConfig\.enabled && false/);
+  });
+});

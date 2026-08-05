@@ -5,9 +5,13 @@ import { join } from 'path';
 /**
  * Parity Test: CLI Commands
  *
- * Validates the CLI command registration system structure by analyzing
- * the source files directly. This approach avoids import issues that
- * may occur during testing when some modules have unresolved dependencies.
+ * Checks the *shape* of the CLI source tree: that the command modules exist
+ * and export what index.ts re-exports.
+ *
+ * It deliberately does not tell you whether any of those commands is reachable.
+ * Reading the source cannot: twelve of these modules are fully implemented,
+ * exported, and never registered on the program, and every assertion here
+ * passes anyway. cli-registration.test.ts asks the CLI itself.
  */
 
 const CLI_DIR = join(__dirname, '../../cli');

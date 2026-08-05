@@ -69,9 +69,13 @@ async function post(target: string, raw: string) {
 }
 
 describe('a path this runtime does not implement', () => {
-  // /twin is the one that motivated this: a peer asking whether the twin
-  // envelope is supported must get an honest no until it is.
-  for (const target of ['/twin', '/definitely-not-real', '/rm-rf', '/chatter']) {
+  // /twin motivated this check and is deliberately NOT in this list any more:
+  // it was implemented in #96, so it is no longer an unknown path. The property
+  // under test is "a path this runtime does not implement answers 404", and
+  // /twin now answers 400 to a malformed envelope, which is the /twin contract
+  // rather than a regression here. Removing it is the honest update; leaving it
+  // would mean asserting an endpoint stays missing.
+  for (const target of ['/definitely-not-real', '/rm-rf', '/chatter']) {
     it(`answers 404 for ${target}`, async () => {
       const got = await post(target, '{"schema":"rapp-twin-chat/1.0","kind":"say"}');
       expect(got.status).toBe(404);
@@ -80,7 +84,7 @@ describe('a path this runtime does not implement', () => {
   }
 
   it('leaks no identity or state to an unauthenticated probe', async () => {
-    const got = await post('/twin', '{}');
+    const got = await post('/definitely-not-real', '{}');
     // The old body carried all of these to anyone who asked, on any path.
     for (const leak of ['uptime', 'version', 'startedAt', 'port', 'metrics', 'connections']) {
       expect(got.text, `${leak} leaked`).not.toContain(leak);

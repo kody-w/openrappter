@@ -37,6 +37,7 @@ import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
+import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
 import {
   GatewayMetrics,
   GatewayTimeoutError,
@@ -964,6 +965,71 @@ export class GatewayServer {
             const result = await this.agentImporter(filename, Buffer.from(contents, 'utf-8'));
             res.writeHead(result.status === 'ok' ? 200 : 400, { 'Content-Type': 'application/json', ...corsHeaders });
             res.end(JSON.stringify(result));
+            return;
+          }
+
+          if (pathOnly === '/twin') {
+            /**
+             * The neighborhood wire. #96.
+             *
+             * A `say` is a turn between two named peers, so it routes through
+             * the same agent handler `/chat` uses and returns the same four
+             * keys — nested in the §6e response envelope, which echoes the
+             * request so a peer can match a reply to what it sent.
+             *
+             * `console` is refused inside parseTwinEnvelope: it operates a
+             * neighbor's runtime and is sealed-only, and this gateway has no
+             * seal. Nothing below authenticates `from_rappid`; it is a claim.
+             */
+            const twin = parseTwinEnvelope(parsed);
+            if (!twin.ok) {
+              res.writeHead(twin.status, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: twin.error }));
+              return;
+            }
+            const env = twin.value;
+
+            // An ack is an acknowledgement, not a question. Answering it with a
+            // model call would be a way to bill someone for saying "got it".
+            if (env.kind === 'ack') {
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify(buildTwinResponse({
+                envelope: env, response: '', sessionId: env.nonce,
+              })));
+              return;
+            }
+
+            if (!this.agentHandler) {
+              res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: 'Agent handler not configured' }));
+              return;
+            }
+            const text = sayText(env);
+            if (!text) {
+              res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: 'payload carries no text' }));
+              return;
+            }
+            try {
+              // The nonce is the session key: it is unique per envelope and the
+              // peer already knows it, so a reply can be correlated without
+              // inventing an id neither side has seen.
+              const result = await this.runWithTimeout(this.agentHandler({
+                message: text,
+                sessionId: env.nonce,
+              }));
+              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify(buildTwinResponse({
+                envelope: env,
+                response: result.content,
+                sessionId: result.sessionId ?? env.nonce,
+                agentLogs: (result.agentLogs ?? []).join('\n'),
+              })));
+            } catch (error) {
+              res.writeHead(error instanceof GatewayTimeoutError ? 504 : 503,
+                { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: (error as Error).message }));
+            }
             return;
           }
 

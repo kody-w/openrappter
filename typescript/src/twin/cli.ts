@@ -143,7 +143,7 @@ export function registerTwinCommands(program: Command): void {
       to?: string; toInstance?: string; text: string; owner: string; as: string; toSlug: string;
     }) => {
       const { deviceRappid, sendTwin } = await import('./send.js');
-      const { urlForInstance } = await import('../infra/roster.js');
+      const { listRappters } = await import('../infra/roster.js');
       const { canonicalInstanceKey } = await import('../infra/gateway-lock.js');
 
       if (!opts.to && !opts.toInstance) {
@@ -157,7 +157,19 @@ export function registerTwinCommands(program: Command): void {
       // instead meant a twin hatched with an explicit --port could be SEEN by
       // name and not SPOKEN to by name — `twins` found archivist on :19950
       // while this tried :19591 and failed. #107
-      const url = opts.to ?? urlForInstance(opts.toInstance);
+      // Ask the ROSTER, not the record. A recorded port only proves a name
+      // once owned it; the roster additionally checks that the pid which wrote
+      // the record is the pid answering. Resolving from the record alone here
+      // is what let a message to the dead `thicket` be answered by `tender`,
+      // which had since taken its port — the roster had it right and this
+      // caller was still reading the raw record. One resolver, both callers.
+      // #118
+      let url: string | undefined = opts.to;
+      if (!url) {
+        const peer = (await listRappters({ names: [canonicalInstanceKey(opts.toInstance!)] }))
+          .find((e) => !e.isAlpha);
+        if (peer?.running) url = `http://127.0.0.1:${peer.port}`;
+      }
       if (!url) {
         // A twin with no endpoint record never owned a port, so there is no
         // address to send to. Deriving one here is what let a message addressed
@@ -165,7 +177,7 @@ export function registerTwinCommands(program: Command): void {
         // reply attributed to `thicket`. Refusing is the only honest option:
         // the alternative is quietly talking to someone else. #114
         console.error(
-          `\n  No rappter named "${opts.toInstance}" has ever started on this device.`,
+          `\n  No rappter named "${opts.toInstance}" is running on this device.`,
         );
         console.error('  Check `openrappter twins`, or address a peer directly with --to <url>.\n');
         process.exitCode = 1;

@@ -300,3 +300,80 @@ describe('a name with no endpoint record is not given someone else\'s port', () 
     expect(plannedPortFor('tender')).toBe(19_950);
   });
 });
+
+/**
+ * A record is an address only while its own pid is the one answering. — #118
+ *
+ * #114 replaced "derive a port from the name" with "read the port the twin
+ * recorded", closing the DERIVED route to a phantom twin. `releaseLock` unlinks
+ * `gateway.pid` and never `endpoint.json`, so a dead twin's record keeps naming
+ * a port somebody else may since have taken — and every symptom #114 claimed to
+ * end came back, with no `--port`, using the same two colliding names:
+ *
+ *   hatch thicket -> up on :19212 (pid 48774);  kill it; record REMAINS
+ *   hatch tender  -> up on :19212 (pid 49019)
+ *
+ *   twins   ● tender  :19212 pid 49019
+ *           ● thicket :19212 pid 49019     <- dead; that is tender's pid
+ *   twin say --to-instance thicket -> "tender"
+ *   hatch thicket -> "already running (pid 49019)"  -> can never be hatched again
+ *
+ * #114 reasoned about "a name that never started" and fixed exactly that. "A
+ * name that started once and died" is the same phantom by a different road, and
+ * the tests it shipped only ever exercised an ABSENT record — which is why 4328
+ * of them passed.
+ *
+ * The two numbers that tell the two apart were already being fetched and thrown
+ * away: the record's own pid, and whoever is actually listening.
+ */
+describe('a stale endpoint record is history, not an address', () => {
+  it('does not report a name as running when another process holds its port', async () => {
+    const home = isolatedHome();
+    // `ghost` recorded port 18790 under a pid that is not the alpha's. The
+    // alpha IS listening there, so the probe will find a healthy gateway —
+    // exactly the trap.
+    const file = gatewayEndpointFileFor({ instance: 'ghost' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: 'ghost', port: 18_790, pid: 999_999, startedAt: 'x',
+    }));
+
+    const rows = await listRappters({ names: ['ghost'] });
+    const ghost = rows.find((r) => r.name === 'ghost');
+
+    expect(ghost?.running).toBe(false);
+    expect(ghost?.stalePort).toBe(true);
+    // And it must not hand back the pid it has no claim to.
+    expect(ghost?.pid).toBeUndefined();
+    expect(ghost?.version).toBeUndefined();
+  });
+
+  it('still reports a live twin whose record matches the listener', async () => {
+    // The fix must not blind the roster to real twins. The alpha's own record
+    // names the pid that is actually serving 18790, so it stays visible.
+    isolatedHome();
+    const rows = await listRappters({ names: [] });
+    const alpha = rows.find((r) => r.isAlpha);
+    expect(alpha).toBeDefined();
+    // The alpha is exempt from the pid check by design: its port is a
+    // documented constant rather than a recorded claim.
+    expect(alpha?.stalePort).toBeUndefined();
+  });
+
+  it('trusts a record with no pid, so an upgrade does not report twins as dead', async () => {
+    const home = isolatedHome();
+    const file = gatewayEndpointFileFor({ instance: 'older-build' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    // Records written before the pid field existed.
+    writeFileSync(file, JSON.stringify({ instance: 'older-build', port: 18_790 }));
+
+    const rows = await listRappters({ names: ['older-build'] });
+    const row = rows.find((r) => r.name === 'older-build');
+    // No pid to compare, so no impostor claim — it is reported on what the
+    // probe alone can see, as before.
+    expect(row?.stalePort).toBeUndefined();
+    expect(row?.running).toBe(true);
+  });
+});

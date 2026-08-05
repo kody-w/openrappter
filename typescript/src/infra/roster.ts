@@ -54,6 +54,12 @@ export interface RappterStatus {
    */
   portTakenByOther?: boolean;
   /**
+   * This name's recorded port is now held by a different process. The record is
+   * history, not an address — the name last ran here and something else has the
+   * port now.
+   */
+  stalePort?: boolean;
+  /**
    * This name has no endpoint record, so it never successfully owned a port.
    * Its `port` is the one a new twin of that name WOULD try to claim, which is
    * a plan rather than an address — and may already belong to someone else.
@@ -71,6 +77,11 @@ export function knownInstanceNames(): string[] {
   } catch {
     return [];
   }
+}
+
+/** The whole endpoint record a rappter wrote for itself, if any. */
+export function recordFor(instance: string | undefined) {
+  return readGatewayEndpoint(gatewayEndpointFileFor(instance ? { instance } : {}));
 }
 
 /**
@@ -219,16 +230,44 @@ export async function listRappters(options: {
     }
 
     const [health, pid] = await Promise.all([probe(port), listenerPid(port)]);
-    const running = health !== null;
+
+    /**
+     * A record is an address only while the pid that wrote it is the pid
+     * answering. #118
+     *
+     * `releaseLock` unlinks `gateway.pid` and never `endpoint.json`, so a dead
+     * twin's record keeps naming a port somebody else may since have taken.
+     * #114 closed the DERIVED route to a phantom twin and left this one open,
+     * and every symptom it claimed to end came back — measured:
+     *
+     *   hatch thicket -> pid 48774; kill it; hatch tender -> pid 49019
+     *   twins    ● tender :19212 pid 49019   ● thicket :19212 pid 49019
+     *   twin say --to-instance thicket  ->  "tender"
+     *   hatch thicket -> "already running (pid 49019)", so it can never
+     *                    be hatched again
+     *
+     * The two numbers that tell them apart were already being fetched here and
+     * thrown away: the record's own pid, and whoever is actually listening.
+     *
+     * A record with no pid is from an older build; those are trusted, because
+     * refusing them would report working twins as dead on upgrade.
+     */
+    const recordedPid = instance === undefined ? undefined : recordFor(instance)?.pid;
+    const impostor = recordedPid !== undefined
+      && pid !== undefined
+      && recordedPid !== pid;
+    const running = health !== null && !impostor;
 
     return {
       name: instance ?? 'alpha',
       isAlpha: instance === undefined,
       port,
       running,
-      ...(pid !== undefined ? { pid } : {}),
-      ...(health?.version ? { version: health.version } : {}),
-      ...(typeof health?.metrics?.uptimeSeconds === 'number'
+      // Do not hand back a pid this name has no claim to.
+      ...(impostor ? { stalePort: true } : {}),
+      ...(pid !== undefined && !impostor ? { pid } : {}),
+      ...(health?.version && !impostor ? { version: health.version } : {}),
+      ...(typeof health?.metrics?.uptimeSeconds === 'number' && !impostor
         ? { uptimeSeconds: health.metrics.uptimeSeconds }
         : {}),
       // Something is holding the port, but it did not answer as a gateway.

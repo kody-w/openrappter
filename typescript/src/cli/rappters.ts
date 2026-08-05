@@ -42,9 +42,15 @@ function describe(entry: RappterStatus): string {
     return `  ${chalk.green('●')} ${label} :${entry.port}${pid}${up}`;
   }
 
+  if (entry.stalePort) {
+    // Its record names this port, but a different process answers there now.
+    return `  ${chalk.dim('○')} ${label} :${entry.port}  `
+      + chalk.yellow('not running — another process now holds its last port');
+  }
+
   if (entry.portTakenByOther) {
     return `  ${chalk.yellow('◍')} ${label} :${entry.port}  `
-      + chalk.yellow(`port held by pid ${entry.pid}, which is not a rappter`);
+      + chalk.yellow(`port held by pid ${entry.pid ?? 'unknown'}, which is not a rappter`);
   }
 
   return `  ${chalk.dim('○')} ${label} :${entry.port}  ${chalk.dim('not running')}`;

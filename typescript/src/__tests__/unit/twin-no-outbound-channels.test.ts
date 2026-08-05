@@ -118,7 +118,7 @@ describe('no channel connects on a twin, including ones added later', () => {
     expect(source).toContain('await telegram.connect();');
   });
 
-  it('has no .connect() beyond the one known, twin-gated channel', () => {
+  it('has no .connect( beyond the one known, twin-gated channel', () => {
     // The structural check, and it is deliberately dumb.
     //
     // The first version of this test searched the twelve lines above each
@@ -128,13 +128,20 @@ describe('no channel connects on a twin, including ones added later', () => {
     // heuristic sees what you expected it to see, which is the failure this
     // whole file exists to document.
     //
-    // So instead: pin the exact set of connect sites. Adding any channel that
-    // auto-connects fails here until someone consciously decides whether a twin
-    // may hold it — which is the decision that was skipped for Telegram.
+    // v2 pinned the exact set of call sites and matched `\.connect\(\)` with
+    // literal empty parentheses. It passed against
+    // `await discord.connect(discordToken)` — #115 reproduced exactly, an
+    // ungated outbound channel on the startup path, suite green. A connect
+    // taking an argument is the shape a token-bearing channel has, which is the
+    // most likely form of the thing this guards. #120
+    //
+    // Both earlier versions were verified against the single shape their author
+    // had in mind, and passed. This matches ANY argument list, and is checked
+    // against both shapes before being trusted.
     const connects = source
       .split('\n')
       .map((line) => line.trim())
-      .filter((line) => /\.connect\(\)/.test(line));
+      .filter((line) => /\.connect\(/.test(line));
 
     expect(connects).toEqual(['await telegram.connect();']);
   });

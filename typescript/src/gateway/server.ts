@@ -38,6 +38,7 @@ import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
+import { currentInstanceDeclared, currentInstanceName } from '../infra/current-instance.js';
 import {
   GatewayMetrics,
   GatewayTimeoutError,
@@ -1422,6 +1423,23 @@ export class GatewayServer {
     return {
       status: this.wss ? 'ok' : 'error',
       version: VERSION,
+      /**
+       * Which rappter is answering. — #131
+       *
+       * The roster decided whether an endpoint record was still an address by
+       * comparing the recorded pid to the pid holding the port, obtained from
+       * `lsof`. Where `lsof` cannot answer, that comparison was skipped and the
+       * record was certified anyway — the guard failed OPEN, which is the
+       * defect #118 exists to prevent.
+       *
+       * A listener saying its own name is better evidence than a pid lookup:
+       * a pid proves only "the same process wrote this record", while a name
+       * proves "you have reached the rappter you asked for". It also needs no
+       * external binary, so it holds on platforms where `lsof` is absent.
+       *
+       * `alpha` is a real answer, not a default — see infra/current-instance.
+       */
+      instance: currentInstanceDeclared() ? (currentInstanceName() ?? 'alpha') : undefined,
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0,
       timestamp: new Date().toISOString(),
       checks: {

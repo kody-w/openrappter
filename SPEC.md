@@ -6,8 +6,13 @@
 **raw_url:** `https://raw.githubusercontent.com/kody-w/openrappter/main/SPEC.md`
 
 openrappter is a **substrate-distro**: a consumer-facing machine AI that runs the RAPP
-`/chat` tool-calling loop locally, in two interchangeable runtimes (TypeScript and Python),
-and hot-loads single-file `*_agent.py` cartridges.
+`/chat` tool-calling loop locally, in two runtimes (TypeScript and Python), and hot-loads
+single-file `*_agent.py` cartridges.
+
+The two runtimes are interchangeable **on the loop, the envelope and the ABI** — the axes
+§1 declares and the corpus measures. They are **not currently interchangeable on the
+`/chat` request contract**: see §8. Saying "interchangeable" without that qualifier claimed
+more than is measured.
 
 This document is the canonical material for `protocol:kody-w/openrappter/openrappter-runtime/1.0`.
 It states what openrappter conforms to, what it does not, and how to check either without
@@ -228,3 +233,42 @@ Stated here rather than discovered later:
   against a live model on every release. This is why the declared tier is `core`.
 - The golden vector corpus does not exist upstream, so the tier is measured against §5.2's
   named cases rather than against content-addressed fixtures.
+
+### The two runtimes diverge on the `/chat` REQUEST contract
+
+Measured on 2026-08-05, both runtimes started locally on scratch ports, identical bodies:
+
+| request | Python | TypeScript |
+|---|---|---|
+| `{"conversation_history":"nope","user_input":"…"}` | `200` | `400 conversation_history must be an array` |
+| `{"conversation_history":[{"role":"bogus",…}],"user_input":"…"}` | `200` (role filtered) | `400 conversation_history[0].role is invalid` |
+| `{"message":"hi","user_input":""}` | `200` — `message` wins | `400 user_input is required` — `user_input` wins |
+| history containing `role: "tool"` | dropped (`brainstem.py` filters to user/assistant) | kept |
+| a `400` body | `{schema, status, error}` | bare `{error}` |
+
+The TypeScript side was transliterated from the reference RAPP brainstem in `1b94040`,
+condition for condition, and matches it exactly — verified live: the reference and the
+TypeScript runtime both answer `400 conversation_history[0].role is invalid` to the same
+body. The Python side was not changed and retains the older, permissive behaviour.
+
+**Which behaviour is correct is an open product question, not an oversight.** The reference
+brainstem rejects; the `history-role-filter` vector expects `200` with junk roles filtered.
+Both are deliberate and they disagree. Resolving it changes what the product accepts, so it
+is recorded here rather than settled quietly.
+
+### The parity harness cannot see the row above
+
+`parity_harness.py` drives the two runtimes at **different layers**:
+
+- `observe_python()` — *"Drive the Python runtime over real HTTP"*, so it exercises the
+  Python `/chat` handler including its validation and error shape.
+- `observe_typescript()` — imports `Assistant` and `buildChatEnvelope` directly, so
+  `parseChatRequest` is never on the measured path.
+
+One comparator, two layers. The harness therefore cannot detect a change to the TypeScript
+request contract by construction, which is why the divergence above landed without any
+vector failing. It also means `history-role-filter`'s expected `200` describes Python's HTTP
+behaviour specifically, and says nothing about TypeScript's.
+
+Making `observe_typescript()` drive real HTTP would close this, and would be expected to
+surface the divergence above as failures until it is resolved.

@@ -8,6 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'fs';
+import { createHash } from 'crypto';
 import { createRequire } from 'module';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
@@ -20,6 +21,61 @@ export const DEFAULT_GATEWAY_LOCK_FILE = join(
 
 /** The port the alpha listens on when nothing says otherwise. */
 export const ALPHA_GATEWAY_PORT = 18790;
+
+/**
+ * The band a hatched twin's port is drawn from.
+ *
+ * Chosen to sit clear of everything this machine already answers on: the alpha
+ * (18790), the brainstem (7071), the ports burrow.js probes (7081-7083), and
+ * the ephemeral range the kernel hands out for outbound sockets (49152+ on
+ * macOS). 900 slots is far more twins than a device will ever hatch.
+ */
+export const TWIN_PORT_BASE = 19000;
+export const TWIN_PORT_SPAN = 900;
+
+/**
+ * Which port a given rappter listens on.
+ *
+ * #94 scoped the runtime LOCK per instance and left the PORT device-global, so
+ * `--instance scout` — the flag whose own help text says it exists so an alpha
+ * and its hatched twins can share a device — acquired a lock of its own and
+ * then tried to bind the alpha's 18790. The lock said "you are a separate
+ * rappter" and the bind said "you are the alpha", and the disagreement reached
+ * the user as an unhandled EADDRINUSE stack trace. #101
+ *
+ * So this lives in the same module as `gatewayLockFileFor`, deliberately: the
+ * bug was two derivations of "which rappter am I" drifting apart, and the way
+ * to stop that recurring is to keep them where they cannot be changed
+ * independently.
+ *
+ * The port is derived from the instance NAME rather than assigned on a
+ * first-come basis, because a twin that lands on a different port each time it
+ * starts cannot be addressed by a neighbour — and being addressable is the
+ * entire point of hatching one. Same name, same port, every boot, on every
+ * device.
+ *
+ * The ALPHA is untouched: no instance and no explicit port still resolves to
+ * 18790, so nothing already installed moves.
+ */
+export function gatewayPortFor(options: {
+  instance?: string;
+  port?: number;
+} = {}): number {
+  // An explicit port is a direct instruction and always wins, including for a
+  // twin whose derived port happens to collide with something else.
+  if (options.port !== undefined && Number.isFinite(options.port)) {
+    return options.port;
+  }
+  const instance = (options.instance ?? '').trim();
+  if (!instance) return ALPHA_GATEWAY_PORT;
+
+  // sha256 rather than a hand-rolled string hash so the answer is identical
+  // across Node versions, architectures and machines. A twin's address is a
+  // fact two different programs have to agree on, so the derivation must not
+  // depend on anything local.
+  const digest = createHash('sha256').update(instance, 'utf8').digest();
+  return TWIN_PORT_BASE + (digest.readUInt32BE(0) % TWIN_PORT_SPAN);
+}
 
 /**
  * Where a given rappter keeps its runtime lock.

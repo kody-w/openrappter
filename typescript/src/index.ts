@@ -1130,15 +1130,22 @@ program
     if (options.daemon) {
       const webRoot = path.resolve(__dirname, '../ui/dist');
       const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
-      const { acquireLock, releaseLock, gatewayLockFileFor } = await import('./infra/gateway-lock.js');
-      // Scope the lock to THIS instance, so an alpha and its hatched twins can
-      // run side by side on one device. The alpha resolves to the original
-      // path, so an existing install is untouched.
-      const lockPort = options.port
-        ? Number(options.port)
-        : Number(process.env.OPENRAPPTER_PORT ?? 18790);
+      const { acquireLock, releaseLock, gatewayLockFileFor, gatewayPortFor } = await import('./infra/gateway-lock.js');
+      // Scope the lock AND the port to THIS instance, so an alpha and its
+      // hatched twins can run side by side on one device. The alpha resolves to
+      // the original path and the original port, so an existing install is
+      // untouched.
+      //
+      // These two must come from the same derivation. #94 scoped only the lock,
+      // which let a named twin acquire a lock of its own and then bind the
+      // alpha's port — a disagreement that reached the user as a raw
+      // EADDRINUSE stack trace. #101
       const lockInstance = (options.instance as string | undefined)
         ?? process.env.OPENRAPPTER_INSTANCE;
+      const explicitPort = options.port
+        ? Number(options.port)
+        : (process.env.OPENRAPPTER_PORT ? Number(process.env.OPENRAPPTER_PORT) : undefined);
+      const lockPort = gatewayPortFor({ instance: lockInstance, port: explicitPort });
       const lockFile = gatewayLockFileFor({ instance: lockInstance, port: lockPort });
       if (!acquireLock({ filePath: lockFile })) {
         console.error(
@@ -1148,10 +1155,13 @@ program
         return;
       }
       let lockHandedToGateway = false;
+      let startupFailed = false;
       try {
         const { port, cleanup } = await startGatewayInProcess({
           ...(hasWebUI ? { webRoot } : {}),
-          port: options.port,
+          // The same number the lock was scoped to. Passing `options.port` here
+          // instead is what made a named twin bind the alpha's port. #101
+          port: lockPort,
           releaseProcessLock: () => releaseLock({ filePath: lockFile }),
         });
         lockHandedToGateway = true;
@@ -1176,9 +1186,44 @@ program
         }
         console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
         if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
+        // A hatched twin is only useful if someone can reach it, so it says
+        // where it lives rather than leaving the owner to derive the port. #101
+        if (lockInstance) {
+          console.log(`${EMOJI} Hatched twin "${lockInstance}" — reach it with:`);
+          console.log(`   openrappter twin say --to-instance ${lockInstance} --text "hello"`);
+        }
         console.log('Press Ctrl+C to stop\n');
+      } catch (error) {
+        // Without this the failure arrived as a raw Node stack trace that never
+        // mentioned --port or --instance. A port collision is an ordinary thing
+        // to hit and deserves a sentence. #101
+        const err = error as NodeJS.ErrnoException;
+        if (err?.code === 'EADDRINUSE') {
+          const who = lockInstance ? `Twin "${lockInstance}"` : 'The alpha rappter';
+          console.error(`\n${EMOJI} ${who} could not start: port ${lockPort} is already in use.`);
+          console.error(
+            lockInstance
+              ? `   That port is derived from the name "${lockInstance}". Something else is on it.\n`
+                + `   Give this twin a different name, or pick a port: --instance ${lockInstance} --port <port>\n`
+              : `   Another process holds ${lockPort}. Stop it, or run this one on another port: --port <port>\n`,
+          );
+        } else {
+          console.error(`\n${EMOJI} Gateway failed to start: ${(error as Error).message}\n`);
+        }
+        process.exitCode = 1;
+        startupFailed = true;
       } finally {
         if (!lockHandedToGateway) releaseLock({ filePath: lockFile });
+      }
+      if (startupFailed) {
+        // `process.exitCode` alone is not enough here. By the time the listener
+        // fails the gateway has already started subsystems that hold the event
+        // loop open — timers, the iMessage runtime, channel clients — so the
+        // process lingers forever instead of exiting, holding those resources
+        // while serving nothing. Measured: a twin whose port was squatted
+        // printed the error and then stayed alive. Exit deliberately, after
+        // the lock has been released by the finally above.
+        process.exit(1);
       }
       return;
     }

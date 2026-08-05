@@ -133,29 +133,47 @@ export function registerTwinCommands(program: Command): void {
   twin
     .command('say')
     .description('Say something to another rappter, brainstem or person over /twin')
-    .requiredOption('--to <url>', 'peer base URL, e.g. http://127.0.0.1:19901')
+    .option('--to <url>', 'peer base URL, e.g. http://127.0.0.1:19901')
+    .option('--to-instance <name>', 'a hatched twin on THIS device, addressed by name')
     .requiredOption('--text <text>', 'what to say')
     .option('--owner <owner>', 'owner handle for this device\'s rappid', 'kody-w')
     .option('--as <slug>', 'which rappter is speaking', 'alpha')
     .option('--to-slug <slug>', 'the peer\'s slug, for its rappid', 'peer')
     .action(async (opts: {
-      to: string; text: string; owner: string; as: string; toSlug: string;
+      to?: string; toInstance?: string; text: string; owner: string; as: string; toSlug: string;
     }) => {
       const { deviceRappid, sendTwin } = await import('./send.js');
+      const { gatewayPortFor } = await import('../infra/gateway-lock.js');
+
+      if (!opts.to && !opts.toInstance) {
+        console.error('\n  Say it to whom? Pass --to <url> for any peer, or --to-instance <name> for a twin on this device.\n');
+        process.exitCode = 1;
+        return;
+      }
+
+      // A twin's address is derived from its name by the SAME function the
+      // gateway binds with, so the two halves of this cannot disagree about
+      // where a twin lives. Deriving it a second time here — even "obviously"
+      // correctly — is how a sender and a receiver drift apart. #101
+      const url = opts.to ?? `http://127.0.0.1:${gatewayPortFor({ instance: opts.toInstance })}`;
+      // When a peer is named, that name IS its slug; defaulting to "peer" would
+      // address a twin by a rappid it does not answer to.
+      const peerSlug = opts.to ? opts.toSlug : opts.toInstance!;
+
       const from = deviceRappid(opts.owner, opts.as);
-      const to = deviceRappid(opts.owner, opts.toSlug);
-      console.log(`\n  ${opts.as} → ${opts.to}`);
+      const to = deviceRappid(opts.owner, peerSlug);
+      console.log(`\n  ${opts.as} → ${opts.toInstance ?? opts.to}`);
       try {
-        const out = await sendTwin({ to: opts.to, fromRappid: from, toRappid: to, text: opts.text });
+        const out = await sendTwin({ to: url, fromRappid: from, toRappid: to, text: opts.text });
         if (out.status === 200 && out.said) {
-          console.log(`  ${opts.toSlug}: ${out.said}\n`);
+          console.log(`  ${peerSlug}: ${out.said}\n`);
         } else {
           // Never print a reply that was not one. A refusal is information.
           console.log(`  peer answered ${out.status}: ${JSON.stringify(out.body).slice(0, 300)}\n`);
           process.exitCode = 1;
         }
       } catch (e) {
-        console.log(`  could not reach ${opts.to}: ${(e as Error).message}\n`);
+        console.log(`  could not reach ${url}: ${(e as Error).message}\n`);
         process.exitCode = 1;
       }
     });

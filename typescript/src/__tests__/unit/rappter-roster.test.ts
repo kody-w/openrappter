@@ -130,18 +130,27 @@ describe('the roster refuses to infer life from the filesystem', () => {
   });
 });
 
-describe('a twin\'s address cannot be re-derived in general', () => {
-  it('the derivation disagrees with the lock path for a name outside [A-Za-z0-9._-]', () => {
-    // This is why the endpoint record exists at all. `gatewayPortFor` hashes
-    // the RAW name; `gatewayLockFileFor` sanitises it for a filesystem path. A
-    // roster that read the directory name back and re-hashed it would compute a
-    // different port than the running twin actually bound.
+describe('a twin\'s address still cannot always be re-derived', () => {
+  it('a name and its sanitised form now agree — that disagreement WAS a defect', () => {
+    // This test used to assert the opposite, and cited the disagreement as a
+    // reason the endpoint record exists. It was documenting a bug as a feature.
+    //
+    // `gatewayPortFor` hashed the RAW name while `gatewayLockFileFor` sanitised
+    // it, so `scout/two` and `scout_two` derived different ports and shared one
+    // lock, one endpoint record and one roster row. Live, `hatch "a b"` then
+    // `hatch a_b` reported "a_b is already running" and handed back the pid of
+    // a different twin that had never been asked for. Fixed in #111 by putting
+    // both through `canonicalInstanceKey`.
+    //
+    // The endpoint record is still necessary — see the next test — but for the
+    // other reason, not this one.
     const raw = 'scout/two';
     const sanitised = 'scout_two';
     expect(gatewayPortFor({ instance: raw }))
-      .not.toBe(gatewayPortFor({ instance: sanitised }));
+      .toBe(gatewayPortFor({ instance: sanitised }));
     expect(gatewayLockFileFor({ instance: raw }))
-      .toContain(sanitised);
+      .toBe(gatewayLockFileFor({ instance: sanitised }));
+    expect(gatewayLockFileFor({ instance: raw })).toContain(sanitised);
   });
 
   it('an explicit port beats the derivation, so only a record can find that twin', () => {

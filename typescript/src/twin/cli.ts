@@ -144,6 +144,7 @@ export function registerTwinCommands(program: Command): void {
     }) => {
       const { deviceRappid, sendTwin } = await import('./send.js');
       const { urlForInstance } = await import('../infra/roster.js');
+      const { canonicalInstanceKey } = await import('../infra/gateway-lock.js');
 
       if (!opts.to && !opts.toInstance) {
         console.error('\n  Say it to whom? Pass --to <url> for any peer, or --to-instance <name> for a twin on this device.\n');
@@ -158,8 +159,11 @@ export function registerTwinCommands(program: Command): void {
       // while this tried :19591 and failed. #107
       const url = opts.to ?? urlForInstance(opts.toInstance);
       // When a peer is named, that name IS its slug; defaulting to "peer" would
-      // address a twin by a rappid it does not answer to.
-      const peerSlug = opts.to ? opts.toSlug : opts.toInstance!;
+      // address a twin by a rappid it does not answer to. Canonicalised so the
+      // rappid matches the name the twin knows itself by. #111
+      const peerSlug = opts.to
+        ? opts.toSlug
+        : canonicalInstanceKey(opts.toInstance!);
 
       const from = deviceRappid(opts.owner, opts.as);
       const to = deviceRappid(opts.owner, peerSlug);

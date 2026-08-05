@@ -20,7 +20,7 @@ import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { listRappters, type RappterStatus } from '../infra/roster.js';
-import { gatewayPortFor } from '../infra/gateway-lock.js';
+import { canonicalInstanceKey, gatewayPortFor } from '../infra/gateway-lock.js';
 import { portTypedOnCommandLine } from '../infra/cli-port.js';
 
 const EMOJI = '🦖';
@@ -101,11 +101,18 @@ export function registerRappterCommand(program: Command): void {
       return port;
     })
     .action(async (name: string, options: { port?: number }, command: Command) => {
-      const instance = name.trim();
-      if (!instance) {
+      const typed = name.trim();
+      if (!typed) {
         console.error(`\n${EMOJI} A twin needs a name.\n`);
         process.exitCode = 1;
         return;
+      }
+      // One canonical key everywhere. Two names that flatten alike ARE one
+      // rappter now, so say which one is being made rather than quietly
+      // creating it under a spelling nobody typed. #111
+      const instance = canonicalInstanceKey(typed);
+      if (instance !== typed) {
+        console.log(`\n${EMOJI} "${typed}" is not a usable name on disk — using ${chalk.bold(instance)}.`);
       }
       if (instance.toLowerCase() === 'alpha') {
         // The alpha is not hatched, it simply is. Allowing this would create a

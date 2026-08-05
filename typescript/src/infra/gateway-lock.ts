@@ -78,11 +78,14 @@ export function gatewayPortFor(options: {
   const instance = (options.instance ?? '').trim();
   if (!instance) return ALPHA_GATEWAY_PORT;
 
+  // The SAME key the lock path uses. Hashing the raw name here is what let two
+  // names sharing a lock derive two different ports. #111
+  //
   // sha256 rather than a hand-rolled string hash so the answer is identical
   // across Node versions, architectures and machines. A twin's address is a
   // fact two different programs have to agree on, so the derivation must not
   // depend on anything local.
-  const digest = createHash('sha256').update(instance, 'utf8').digest();
+  const digest = createHash('sha256').update(canonicalInstanceKey(instance), 'utf8').digest();
   return TWIN_PORT_BASE + (digest.readUInt32BE(0) % TWIN_PORT_SPAN);
 }
 
@@ -105,6 +108,43 @@ export function gatewayPortFor(options: {
  * when it has one, and otherwise by the port it listens on — which is already
  * unique per instance on a machine, because two servers cannot share it.
  */
+/**
+ * The one name a rappter is known by, everywhere.
+ *
+ * Identity used to be computed two ways: `gatewayPortFor` hashed the RAW name
+ * while the lock path keyed on a SANITISED one. So `a b` and `a_b` derived
+ * different ports (19884 and 19291) and shared a single lock directory,
+ * endpoint record and roster row. Live consequence:
+ *
+ *   $ openrappter hatch "a b"   -> Hatching a b on :19884 (pid 85246)
+ *   $ openrappter hatch "a_b"   -> a_b is already running on :19884 (pid 85246)
+ *
+ * The second reported success about a DIFFERENT twin. `a_b` was never started.
+ *
+ * That is #101 again — the lock and the port disagreeing about which rappter a
+ * process is — surviving in the same module the fix put them in, because one
+ * side hashed the raw string and the other the cleaned one. Both now go through
+ * here, so there is nothing left to drift. #111
+ *
+ * Anything reaching a filesystem path from user input is flattened, so an id
+ * like `../../alpha` cannot walk out of the instances directory and seize the
+ * alpha's lock. Replacing separators is not sufficient on its own: an id of
+ * exactly `..` survives that untouched and resolves the join straight back to
+ * ~/.openrappter/gateway.pid — the alpha's file. So a key that is only dots is
+ * rejected outright. Caught by its own test.
+ *
+ * A name that is ALREADY canonical maps to itself unchanged, which is what
+ * keeps every existing twin on the port it has today.
+ */
+export function canonicalInstanceKey(name: string): string {
+  const raw = name.trim();
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_');
+  if (/^\.+$/.test(cleaned) || cleaned === '') {
+    return `_${Buffer.from(raw).toString('hex')}`;
+  }
+  return cleaned;
+}
+
 export function gatewayLockFileFor(options: {
   instance?: string;
   port?: number;
@@ -113,15 +153,7 @@ export function gatewayLockFileFor(options: {
   if (!instance && (options.port === undefined || options.port === ALPHA_GATEWAY_PORT)) {
     return defaultGatewayLockFile();
   }
-  // Anything that reaches a filesystem path from user input gets flattened, so
-  // an id like `../../alpha` cannot walk out of the instances directory and
-  // seize the alpha's lock. Replacing separators is not sufficient on its own:
-  // an id of exactly `..` survives that untouched and resolves the join
-  // straight back to ~/.openrappter/gateway.pid — the alpha's file. So a key
-  // that is only dots is rejected outright. Caught by its own test.
-  const raw = instance || String(options.port);
-  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_');
-  const key = /^\.+$/.test(cleaned) || cleaned === '' ? `_${Buffer.from(raw).toString('hex')}` : cleaned;
+  const key = canonicalInstanceKey(instance || String(options.port));
   return join(homedir(), '.openrappter', 'instances', key, 'gateway.pid');
 }
 

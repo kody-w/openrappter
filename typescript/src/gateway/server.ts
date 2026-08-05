@@ -981,6 +981,35 @@ export class GatewayServer {
              * neighbor's runtime and is sealed-only, and this gateway has no
              * seal. Nothing below authenticates `from_rappid`; it is a claim.
              */
+            /**
+             * The gateway's own credential, checked BEFORE the envelope is
+             * parsed. #113
+             *
+             * `/chat` has always enforced this and `/twin` did not, while both
+             * route into the same `agentHandler` — so `--bind all --token
+             * SECRET`, whose entire purpose is keeping strangers out of the
+             * agent, was closed on one path and open on the other. Measured on
+             * a real server: `/chat` without a token answered 401 and `/twin`
+             * without a token answered 200 with the agent having run.
+             *
+             * `validateRequestSource` does not cover this: its loopback check
+             * is gated on `bind === 'loopback'` and is skipped under
+             * `--bind all`, the only configuration where a token means
+             * anything.
+             *
+             * Refusing `console` is not a substitute — a `say` reaches the
+             * model just as surely.
+             *
+             * It runs before parsing so an unauthenticated caller learns
+             * nothing about envelope validity; otherwise the 400s become an
+             * oracle for probing the wire format without a credential.
+             */
+            if (!this.resolveHttpAuthenticated(req, parsed)) {
+              res.writeHead(401, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ error: 'Authentication required' }));
+              return;
+            }
+
             const twin = parseTwinEnvelope(parsed);
             if (!twin.ok) {
               res.writeHead(twin.status, { 'Content-Type': 'application/json', ...corsHeaders });

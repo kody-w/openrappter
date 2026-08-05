@@ -220,3 +220,106 @@ describe('the voice seam never reaches a peer', () => {
     expect(inner.voice_mode).toBe(false);
   });
 });
+
+/**
+ * /twin requires the same credential /chat does. — #113
+ *
+ * `openrappter gateway --bind all --token SECRET` exists so the agent is not
+ * reachable by anyone who can route to the port. `/chat` enforced it and
+ * `/twin` did not, while both route into the same `agentHandler` — the same
+ * model spend and the same tool loop.
+ *
+ * Measured on a real server before the fix:
+ *
+ *   POST /chat  no token  -> 401 Authentication required
+ *   POST /chat  w/ token  -> 200 agent ran
+ *   POST /twin  no token  -> 200 agent ran          <- walked past the credential
+ *
+ * `validateRequestSource` does not close it: its loopback check is gated on
+ * `bind === 'loopback'` and is skipped under `--bind all`, which is the only
+ * configuration in which a token means anything at all.
+ *
+ * Refusing `console` — which this endpoint already does — is not a substitute.
+ * A `say` reaches the model just as surely.
+ *
+ * The suite above runs with `auth: { mode: 'none' }`, so a separate server is
+ * needed here; a credential that is never configured cannot be shown to be
+ * enforced.
+ */
+describe('/twin and the gateway credential', () => {
+  const TOKEN = 'SECRET-TOKEN';
+  const AUTH_PORT = 18_795;
+  const AUTH_BASE = `http://127.0.0.1:${AUTH_PORT}`;
+  let guarded: GatewayServer;
+  let guardedDir: string;
+  let ran = 0;
+
+  beforeAll(async () => {
+    guardedDir = mkdtempSync(join(tmpdir(), 'gw-twin-auth-'));
+    guarded = new GatewayServer({
+      port: AUTH_PORT, bind: 'loopback',
+      auth: { mode: 'token', tokens: [TOKEN] },
+      heartbeatInterval: 60_000, dataDir: guardedDir,
+    });
+    guarded.setAgentHandler(async (req: AgentRequest) => {
+      ran += 1;
+      return { sessionId: req.sessionId ?? 'gen', content: 'AGENT RAN', finishReason: 'stop' };
+    });
+    await guarded.start();
+  });
+
+  afterAll(async () => {
+    await guarded.stop();
+    rmSync(guardedDir, { recursive: true, force: true });
+  });
+
+  async function postTo(headers: Record<string, string> = {}) {
+    return fetch(`${AUTH_BASE}/twin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Connection: 'close', ...headers },
+      body: JSON.stringify(envelope()),
+    });
+  }
+
+  it('refuses an unauthenticated say, and the agent does not run', async () => {
+    const before = ran;
+    const res = await postTo();
+    expect(res.status).toBe(401);
+    // The status alone is not the point. The point is that nothing reached the
+    // model — a 401 that still spent a model call would be a worse defect than
+    // the one being fixed.
+    expect(ran).toBe(before);
+  });
+
+  it('accepts the same say once the credential is presented', async () => {
+    const before = ran;
+    const res = await postTo({ Authorization: `Bearer ${TOKEN}` });
+    expect(res.status).toBe(200);
+    expect(ran).toBe(before + 1);
+  });
+
+  it('tells an unauthenticated caller nothing about envelope validity', async () => {
+    // The check runs before parsing on purpose. If a malformed envelope got a
+    // 400 while a well-formed one got a 401, the endpoint would be an oracle
+    // for probing the wire format without a credential.
+    const res = await fetch(`${AUTH_BASE}/twin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Connection: 'close' },
+      body: JSON.stringify({ schema: 'nonsense' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('still refuses console, with the credential presented', async () => {
+    // Authentication must not become a way in for the sealed-only kind.
+    const res = await fetch(`${AUTH_BASE}/twin`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', Connection: 'close',
+        Authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(envelope({ kind: 'console' })),
+    });
+    expect(res.status).toBe(403);
+  });
+});

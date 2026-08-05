@@ -60,6 +60,13 @@ export interface RappterStatus {
    */
   stalePort?: boolean;
   /**
+   * A healthy gateway answers here, but nothing could confirm it is this name:
+   * the listener does not report its instance (an older build) and the process
+   * holding the port could not be identified. The record is not certified —
+   * "I could not check" is not "the record is fine". #131
+   */
+  ownershipUnverified?: boolean;
+  /**
    * This name has no endpoint record, so it never successfully owned a port.
    * Its `port` is the one a new twin of that name WOULD try to claim, which is
    * a plan rather than an address — and may already belong to someone else.
@@ -150,19 +157,35 @@ export function urlForInstance(instance: string | undefined): string | undefined
  * 18790 it returns the daemon AND Microsoft Edge, which merely had the
  * dashboard open. That mistake has already been made once on this machine.
  */
-async function listenerPid(port: number): Promise<number | undefined> {
+/**
+ * Who is listening on this port, and did we manage to find out?
+ *
+ * `undefined` used to mean both "nothing is listening" and "I could not ask",
+ * and the caller treated the second as the first — so where `lsof` is absent
+ * the stale-record guard did not stop working, it failed OPEN and certified a
+ * record it had not checked. #131
+ */
+async function listenerPid(port: number): Promise<{ known: boolean; pid?: number }> {
   try {
     const { stdout } = await run('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], { timeout: 5_000 });
     const pid = Number.parseInt(stdout.trim().split(/\s+/)[0] ?? '', 10);
-    return Number.isSafeInteger(pid) ? pid : undefined;
-  } catch {
-    return undefined;
+    return { known: true, pid: Number.isSafeInteger(pid) ? pid : undefined };
+  } catch (error) {
+    // `lsof` exits non-zero with no output when nothing is listening, which is
+    // a real answer. Anything else — not installed, not permitted, timed out —
+    // is not an answer at all.
+    const failed = error as { code?: number | string; stdout?: string };
+    const exitedCleanlyWithNothing = typeof failed?.code === 'number'
+      && !((failed.stdout ?? '').trim());
+    return exitedCleanlyWithNothing ? { known: true, pid: undefined } : { known: false };
   }
 }
 
 interface HealthShape {
   status?: string;
   version?: string;
+  /** Which rappter is answering. Absent on builds predating #131. */
+  instance?: string;
   metrics?: { uptimeSeconds?: number };
   checks?: { gateway?: boolean };
 }
@@ -229,10 +252,11 @@ export async function listRappters(options: {
       };
     }
 
-    const [health, pid] = await Promise.all([probe(port), listenerPid(port)]);
+    const [health, listener] = await Promise.all([probe(port), listenerPid(port)]);
+    const pid = listener.pid;
 
     /**
-     * A record is an address only while the pid that wrote it is the pid
+     * A record is an address only while the rappter that wrote it is the one
      * answering. #118
      *
      * `releaseLock` unlinks `gateway.pid` and never `endpoint.json`, so a dead
@@ -246,17 +270,43 @@ export async function listRappters(options: {
      *   hatch thicket -> "already running (pid 49019)", so it can never
      *                    be hatched again
      *
-     * The two numbers that tell them apart were already being fetched here and
-     * thrown away: the record's own pid, and whoever is actually listening.
+     * Two independent ways to check, best evidence first. #131
      *
-     * A record with no pid is from an older build; those are trusted, because
-     * refusing them would report working twins as dead on upgrade.
+     * 1. The listener says its own name. This proves you reached the rappter
+     *    you asked for, needs no external binary, and is the only check that
+     *    works where `lsof` does not.
+     * 2. The recorded pid matches the pid holding the port. Weaker — it proves
+     *    only that the same process wrote the record — and unavailable when
+     *    `lsof` cannot answer.
+     *
+     * If neither can speak, the record is UNVERIFIED. It is not certified,
+     * because "I could not check" is not "the record is fine": that collapse
+     * reported a stale record as running and handed back a stranger's pid.
+     *
+     * A record with no pid is from an older build; those are trusted on the
+     * pid route, because refusing them would report working twins as dead on
+     * upgrade. The name route has no such exemption — a listener that names a
+     * different rappter is an impostor whatever the record omits.
      */
     const recordedPid = instance === undefined ? undefined : recordFor(instance)?.pid;
-    const impostor = recordedPid !== undefined
+    const claimedName = typeof health?.instance === 'string' ? health.instance : undefined;
+    const expectedName = instance ?? 'alpha';
+
+    const namedImpostor = claimedName !== undefined && claimedName !== expectedName;
+    const pidImpostor = recordedPid !== undefined
+      && listener.known
       && pid !== undefined
       && recordedPid !== pid;
-    const running = health !== null && !impostor;
+    const impostor = namedImpostor || pidImpostor;
+
+    // Nothing could vouch for this record: the listener does not say who it is
+    // (an older build) and we could not name the process holding the port.
+    const unverified = !impostor
+      && health !== null
+      && claimedName === undefined
+      && !listener.known;
+
+    const running = health !== null && !impostor && !unverified;
 
     return {
       name: instance ?? 'alpha',
@@ -265,9 +315,11 @@ export async function listRappters(options: {
       running,
       // Do not hand back a pid this name has no claim to.
       ...(impostor ? { stalePort: true } : {}),
-      ...(pid !== undefined && !impostor ? { pid } : {}),
-      ...(health?.version && !impostor ? { version: health.version } : {}),
-      ...(typeof health?.metrics?.uptimeSeconds === 'number' && !impostor
+      // Something healthy answers, but nothing could confirm it is this name.
+      ...(unverified ? { ownershipUnverified: true } : {}),
+      ...(pid !== undefined && !impostor && !unverified ? { pid } : {}),
+      ...(health?.version && !impostor && !unverified ? { version: health.version } : {}),
+      ...(typeof health?.metrics?.uptimeSeconds === 'number' && !impostor && !unverified
         ? { uptimeSeconds: health.metrics.uptimeSeconds }
         : {}),
       // Something is holding the port, but it did not answer as a gateway.

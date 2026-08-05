@@ -260,13 +260,19 @@ afterEach(async () => {
  * nothing else. The pid answering is then `process.pid`, which is what lets a
  * test say whether the roster can tell one owner from another.
  */
-async function gatewayServing(): Promise<number> {
+async function gatewayServing(options: { instance?: string } = {}): Promise<number> {
   const port = await reserveTestPort();
   const server = createServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok', version: 'test-fixture', checks: { gateway: true },
+        status: 'ok',
+        version: 'test-fixture',
+        // A real gateway names itself here (#131). Omitting it models a build
+        // that predates the field, which is a case the roster must still
+        // handle — not a shortcut for the fixture.
+        ...(options.instance === undefined ? {} : { instance: options.instance }),
+        checks: { gateway: true },
       }));
       return;
     }
@@ -276,6 +282,38 @@ async function gatewayServing(): Promise<number> {
   servers.push(server);
   await new Promise<void>((resolve) => { server.listen(port, '127.0.0.1', resolve); });
   return port;
+}
+
+/**
+ * Make it impossible to name the process holding a port. — #131
+ *
+ * `listenerPid` shells out to `lsof`; emptying PATH makes that fail with
+ * ENOENT on any machine, which is precisely the situation on a host that has
+ * no `lsof` — several Linux container images, and the case an independent
+ * reviewer reproduced. Doing it inside the test means the guarantee is proved
+ * everywhere the suite runs, rather than only where somebody remembered to
+ * uninstall a binary.
+ */
+/**
+ * Can this host name the process holding a port at all?
+ *
+ * The three tests below exercise the PID route specifically, and that route
+ * needs `lsof`. Rather than assume (which is how port 18790 got hardcoded) or
+ * skip silently (which reads exactly like a passing test), they measure the
+ * host and assert what is correct FOR it: the pid comparison where it can be
+ * made, and the fail-closed refusal where it cannot.
+ */
+async function canNamePids(): Promise<boolean> {
+  try {
+    await promisify(execFile)('lsof', ['-v'], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function withoutLsof(): void {
+  vi.stubEnv('PATH', '/nonexistent-for-this-test');
 }
 
 /**
@@ -374,22 +412,85 @@ describe('a name with no endpoint record is not given someone else\'s port', () 
  */
 describe('a stale endpoint record is history, not an address', () => {
   /**
-   * The dependency every guard in this block rests on. — #127
+   * The guard used to rest entirely on `lsof`. — #131
    *
-   * `listenerPid` shells out to `lsof`. If a machine has no `lsof`, it returns
-   * `undefined`, and `impostor` in roster.ts requires `pid !== undefined` — so
-   * the guard does not merely stop working, it fails OPEN: a dead twin's record
-   * is certified as a live address, which is the exact bug #118 exists to
-   * prevent. That would be invisible, because everything else still passes.
+   * `listenerPid` returned `undefined` both when nothing was listening and
+   * when it could not ask, and `impostor` required a pid — so on a host with
+   * no `lsof` the guard did not stop working, it failed OPEN and certified a
+   * record it had never checked. Measured before the fix, same commit, only
+   * `lsof` removed from PATH:
    *
-   * So measure it against a listener this test started, and say so out loud.
+   *     × does not report a name as running when another process holds its port
+   *         → expected true to be false        (ghost.running)
+   *         → expected undefined to be 38985   (ghost.pid)
+   *
+   * A listener that says its own name settles it without any external binary,
+   * and is better evidence besides: a pid proves only "the same process wrote
+   * this record", a name proves "you reached the rappter you asked for".
    */
-  it('can name the pid holding a port, or every guard below fails open', async () => {
+  it('unmasks an impostor with no way to name the process holding the port', async () => {
+    const home = isolatedHome();
+    withoutLsof();
+    // Somebody else's gateway is on this port, and it says so.
+    const port = await gatewayServing({ instance: 'someone-else' });
+    const file = gatewayEndpointFileFor({ instance: 'ghost' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: 'ghost', port, pid: 999_999, startedAt: 'x',
+    }));
+
+    const ghost = (await listRappters({ names: ['ghost'] })).find((r) => r.name === 'ghost');
+
+    expect(ghost?.running).toBe(false);
+    expect(ghost?.stalePort).toBe(true);
+    expect(ghost?.pid).toBeUndefined();
+    expect(ghost?.version).toBeUndefined();
+  });
+
+  it('recognises its own name with no way to name the process holding the port', async () => {
+    // The negative control for the case above: the same conditions, and the
+    // listener is who the record says. It must stay reachable — a guard that
+    // refuses everything on a host without `lsof` is not a fix.
+    const home = isolatedHome();
+    withoutLsof();
+    const port = await gatewayServing({ instance: 'live-twin' });
+    const file = gatewayEndpointFileFor({ instance: 'live-twin' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: 'live-twin', port, pid: 999_999, startedAt: 'x',
+    }));
+
+    const twin = (await listRappters({ names: ['live-twin'] })).find((r) => r.name === 'live-twin');
+
+    // The recorded pid is wrong and unverifiable, and it does not matter: the
+    // listener answered to the name.
+    expect(twin?.running).toBe(true);
+    expect(twin?.stalePort).toBeUndefined();
+    expect(twin?.ownershipUnverified).toBeUndefined();
+    expect(twin?.version).toBe('test-fixture');
+  });
+
+  it('refuses to certify a record nothing can vouch for', async () => {
+    // An older listener that does not name itself, on a host that cannot name
+    // the process either. Neither route can speak, so the record is not an
+    // address — "I could not check" is not "the record is fine".
+    const home = isolatedHome();
+    withoutLsof();
     const port = await gatewayServing();
-    const { stdout } = await promisify(execFile)(
-      'lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], { timeout: 5_000 },
-    );
-    expect(Number.parseInt(stdout.trim().split(/\s+/)[0] ?? '', 10)).toBe(process.pid);
+    const file = gatewayEndpointFileFor({ instance: 'unknowable' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ instance: 'unknowable', port, pid: 4242 }));
+
+    const row = (await listRappters({ names: ['unknowable'] })).find((r) => r.name === 'unknowable');
+
+    expect(row?.running).toBe(false);
+    expect(row?.ownershipUnverified).toBe(true);
+    // And it must not attribute a stranger's details to this name.
+    expect(row?.pid).toBeUndefined();
+    expect(row?.version).toBeUndefined();
   });
 
   it('does not report a name as running when another process holds its port', async () => {
@@ -408,8 +509,13 @@ describe('a stale endpoint record is history, not an address', () => {
     const rows = await listRappters({ names: ['ghost'] });
     const ghost = rows.find((r) => r.name === 'ghost');
 
+    // Either way it is refused; only the reason differs.
     expect(ghost?.running).toBe(false);
-    expect(ghost?.stalePort).toBe(true);
+    if (await canNamePids()) {
+      expect(ghost?.stalePort).toBe(true);
+    } else {
+      expect(ghost?.ownershipUnverified).toBe(true);
+    }
     // And it must not hand back the pid it has no claim to.
     expect(ghost?.pid).toBeUndefined();
     expect(ghost?.version).toBeUndefined();
@@ -431,10 +537,17 @@ describe('a stale endpoint record is history, not an address', () => {
     const rows = await listRappters({ names: ['live-twin'] });
     const twin = rows.find((r) => r.name === 'live-twin');
 
-    expect(twin?.running).toBe(true);
     expect(twin?.stalePort).toBeUndefined();
-    expect(twin?.pid).toBe(process.pid);
-    expect(twin?.version).toBe('test-fixture');
+    if (await canNamePids()) {
+      expect(twin?.running).toBe(true);
+      expect(twin?.pid).toBe(process.pid);
+      expect(twin?.version).toBe('test-fixture');
+    } else {
+      // This listener predates #131 and does not name itself, so on a host
+      // that cannot name the process either, nothing can vouch for it.
+      expect(twin?.running).toBe(false);
+      expect(twin?.ownershipUnverified).toBe(true);
+    }
   });
 
   it('trusts a record with no pid, so an upgrade does not report twins as dead', async () => {
@@ -451,6 +564,6 @@ describe('a stale endpoint record is history, not an address', () => {
     // No pid to compare, so no impostor claim — it is reported on what the
     // probe alone can see, as before.
     expect(row?.stalePort).toBeUndefined();
-    expect(row?.running).toBe(true);
+    expect(row?.running).toBe(await canNamePids());
   });
 });

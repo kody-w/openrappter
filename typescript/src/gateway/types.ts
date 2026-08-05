@@ -268,6 +268,14 @@ export type GatewayEventType = (typeof GatewayEvents)[keyof typeof GatewayEvents
 export interface HealthResponse {
   status: 'ok' | 'degraded' | 'error';
   version: string;
+  /**
+   * Which rappter is answering — a twin's name, or `alpha`. #131
+   *
+   * Absent from builds predating this field, and from any process that has not
+   * declared. Consumers must treat absence as "unknown", never as "alpha":
+   * that collapse is the fail-open this field exists to close.
+   */
+  instance?: string;
   uptime: number;
   timestamp: string;
   checks: {

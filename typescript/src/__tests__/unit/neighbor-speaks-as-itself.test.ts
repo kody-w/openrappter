@@ -178,3 +178,60 @@ describe('a rappter names itself to a neighbour', () => {
     expect(received.at(-1)!.session_id).not.toBe(deviceRappid('kody-w', 'alpha'));
   });
 });
+
+describe('a neighbour is somebody else', () => {
+  it('leaves itself out of the list of who it can reach', async () => {
+    // Measured on a live twin before this: `ember` listed alpha, ember and
+    // brainstem, and a model that took the list at face value spent a full
+    // model turn answering itself "Nope, I'm not you." #140
+    isolatedHome();
+    await neighbourNamed('peerling');
+    await neighbourNamed('ember');
+    declareCurrentInstance('ember');
+
+    const out = JSON.parse(await new NeighborAgent().perform({ action: 'list' }));
+    const names = (out.reachable as Array<{ name: string }>).map((r) => r.name);
+
+    expect(names).toContain('peerling');
+    expect(names).not.toContain('ember');
+  });
+
+  it('still lists the others when it is the alpha', async () => {
+    // The negative control: excluding yourself must not empty the list.
+    isolatedHome();
+    await neighbourNamed('peerling');
+    declareCurrentInstance(undefined);
+
+    const out = JSON.parse(await new NeighborAgent().perform({ action: 'list' }));
+    const names = (out.reachable as Array<{ name: string }>).map((r) => r.name);
+
+    expect(names).toContain('peerling');
+    expect(names).not.toContain('alpha');
+  });
+
+  it('refuses to say something to itself', async () => {
+    isolatedHome();
+    const peer = await neighbourNamed('ember');
+    declareCurrentInstance('ember');
+
+    const out = JSON.parse(await new NeighborAgent().perform({
+      action: 'say', to: 'ember', text: 'are you me',
+    }));
+
+    expect(out.status).toBe('error');
+    expect(String(out.message)).toMatch(/is this rappter/);
+    expect(peer.received).toHaveLength(0);
+  });
+
+  it('does not exclude anything when it does not know which rappter it is', async () => {
+    // An undeclared process must not start dropping names on a guess — the
+    // same collapse #129 and #131 were both about.
+    isolatedHome();
+    await neighbourNamed('peerling');
+
+    const out = JSON.parse(await new NeighborAgent().perform({ action: 'list' }));
+    const names = (out.reachable as Array<{ name: string }>).map((r) => r.name);
+
+    expect(names).toContain('peerling');
+  });
+});

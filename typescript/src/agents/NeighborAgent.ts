@@ -104,8 +104,14 @@ export class NeighborAgent extends BasicAgent {
   private async list(): Promise<string> {
     const { listRappters } = await import('../infra/roster.js');
     const rows = await listRappters();
+    const me = await this.whoAmI();
     const reachable = rows
       .filter((r) => r.running)
+      // A neighbour is somebody else. This listed the caller among the
+      // rappters it could talk to, and a model that took the list at face
+      // value spent a whole turn in a mirror — measured on a twin called
+      // `ember`, which answered itself "Nope, I'm not you." #140
+      .filter((r) => r.name !== me)
       .map((r) => ({ name: r.name, port: r.port }));
 
     // The brainstem is a neighbour and is not a rappter, so the roster does not
@@ -116,6 +122,21 @@ export class NeighborAgent extends BasicAgent {
     }
 
     return JSON.stringify({ status: 'success', action: 'list', reachable });
+  }
+
+  /**
+   * Which rappter is asking, by the name the roster uses.
+   *
+   * Read from the one published derivation (#129) rather than re-derived, and
+   * `undefined` when nothing declared — a process that does not know which
+   * rappter it is must not start excluding names on a guess.
+   */
+  private async whoAmI(): Promise<string | undefined> {
+    const { currentInstanceName, currentInstanceDeclared } =
+      await import('../infra/current-instance.js');
+    if (!currentInstanceDeclared()) return undefined;
+    const { canonicalInstanceKey } = await import('../infra/gateway-lock.js');
+    return canonicalInstanceKey(currentInstanceName() ?? 'alpha');
   }
 
   private async say(kwargs: Record<string, unknown>): Promise<string> {
@@ -131,6 +152,20 @@ export class NeighborAgent extends BasicAgent {
         status: 'error',
         message: 'Address a neighbour by name, not by URL. Use `list` to see who is reachable.',
       });
+    }
+
+    // Talking to yourself completes, which is what makes it worth refusing: it
+    // spends a whole model turn and reads, in the logs, exactly like two
+    // rappters holding a conversation. #140
+    const self = await this.whoAmI();
+    if (self !== undefined) {
+      const { canonicalInstanceKey: key } = await import('../infra/gateway-lock.js');
+      if (key(to) === self) {
+        return JSON.stringify({
+          status: 'error',
+          message: `"${to}" is this rappter. Use \`list\` to see the neighbours it can reach.`,
+        });
+      }
     }
 
     const url = await this.resolve(to);

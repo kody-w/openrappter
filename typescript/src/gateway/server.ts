@@ -865,6 +865,7 @@ export class GatewayServer {
       let body = '';
       let bodyBytes = 0;
       let bodyTooLarge = false;
+      let discarded = 0;
       /**
        * Cap the read. `body += chunk.toString()` had no limit, so a single
        * untrusted POST could grow a string until the daemon died — and this
@@ -885,27 +886,45 @@ export class GatewayServer {
        * it is a different repository and not mine to change.
        */
       req.on('data', (chunk: Buffer) => {
-        if (bodyTooLarge) return;
+        if (bodyTooLarge) {
+          // Keep DISCARDING, do not keep accumulating. Memory is protected the
+          // moment we stop appending; the rest is just politeness to the client.
+          discarded += chunk.length;
+          if (discarded > this.maxHttpBodyBytes * 8) req.destroy();
+          return;
+        }
         bodyBytes += chunk.length;
         if (bodyBytes > this.maxHttpBodyBytes) {
           bodyTooLarge = true;
-          const isChat = (req.url ?? '').split('?')[0] === '/chat';
-          if (!res.writableEnded) {
-            res.writeHead(413, { 'Content-Type': 'application/json', ...corsHeaders });
-            // Bare `{error}` on /chat, like every other rejection on that wire.
-            res.end(JSON.stringify(isChat
-              ? { error: 'Request body too large' }
-              : { error: 'Request body too large', limit_bytes: this.maxHttpBodyBytes }));
-          }
-          // Stop reading. Without this the socket keeps delivering the rest of
-          // the upload into a buffer nobody will ever look at.
-          req.destroy();
+          body = '';                       // release what was already buffered
           return;
         }
         body += chunk.toString();
       });
       req.on('end', async () => {
-        if (bodyTooLarge) return;
+        if (bodyTooLarge) {
+          /**
+           * Answered HERE, not the instant the limit was crossed.
+           *
+           * Ending the response while the client is still uploading resets the
+           * connection: the caller gets ECONNRESET instead of an answer. Found
+           * by probing a live daemon with 10 MB, after a unit test with a 2 MB
+           * overage passed — small bodies flush before the race can happen, so
+           * the first version of this looked correct and was not.
+           *
+           * Waiting costs nothing now that the payload is being discarded
+           * rather than buffered, and the caller gets a 413 it can actually
+           * read and act on.
+           */
+          const isChat = (req.url ?? '').split('?')[0] === '/chat';
+          if (!res.writableEnded) {
+            res.writeHead(413, { 'Content-Type': 'application/json', ...corsHeaders });
+            res.end(JSON.stringify(isChat
+              ? { error: 'Request body too large' }
+              : { error: 'Request body too large', limit_bytes: this.maxHttpBodyBytes }));
+          }
+          return;
+        }
         const dispatchStartedAt = Date.now();
         try {
           if (!this.isGenerationActive(requestGeneration)) {

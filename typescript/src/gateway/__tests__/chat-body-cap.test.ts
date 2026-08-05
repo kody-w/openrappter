@@ -80,6 +80,25 @@ describe('an oversized body is refused at the door', () => {
     expect(handlerCalls).toBe(before);
   });
 
+  /**
+   * The case the first version of this file missed.
+   *
+   * A 2 MB overage flushes before the response can race it, so destroying the
+   * socket on the first offending chunk still looked fine here — and then a
+   * live daemon, probed with 10 MB, returned a connection error instead of an
+   * answer. The limit must still produce a READABLE 413 when the client is
+   * mid-upload, which means draining rather than slamming the socket.
+   */
+  it('still delivers a readable 413 when the client is far over the limit', async () => {
+    const before = handlerCalls;
+    const enormous = JSON.stringify({ user_input: 'x'.repeat(CAP * 5) });
+    const got = await postRaw('/chat', enormous);
+
+    expect(got.status).toBe(413);
+    expect(got.body).toEqual({ error: 'Request body too large' });
+    expect(handlerCalls).toBe(before);
+  });
+
   it('refuses through a query string too, where /chat once stopped being /chat', async () => {
     const huge = JSON.stringify({ user_input: 'x'.repeat(CAP + 1024) });
     const got = await postRaw('/chat?x=1', huge);

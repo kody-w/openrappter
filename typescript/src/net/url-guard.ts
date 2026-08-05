@@ -109,3 +109,50 @@ export async function assertHostResolvesPublicly(
     }
   }
 }
+
+
+/** How many hops a redirect chain may take before we stop following it. */
+export const MAX_REDIRECTS = 5;
+
+/**
+ * Fetch, validating every hop.
+ *
+ * Sharing `assertFetchableUrl` was not enough, and openrappter#74 shipping only
+ * that is why: the checks that matter most — resolving the host, and
+ * re-checking after each redirect — live in the *fetch path*, not the
+ * predicate. WebAgent had them. ImageAgent got the predicate and kept fetching
+ * through `MediaProcessor`, which called plain `fetch` with default redirect
+ * following and no resolution at all, so this reached a loopback server while
+ * WebAgent refused the identical URL:
+ *
+ *     WebAgent   : blocked - localtest.me resolves to 127.0.0.1
+ *     ImageAgent : NOT BLOCKED (reached loopback)
+ *
+ * Every caller that fetches a URL a user supplied belongs here.
+ */
+export async function fetchGuarded(
+  url: string,
+  init?: RequestInit,
+  hostLookup?: HostLookup,
+  assertUrl: (url: string) => void = assertFetchableUrl,
+): Promise<Response> {
+  let target = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    assertUrl(target);
+    await assertHostResolvesPublicly(target, hostLookup);
+
+    const response = await fetch(target, { ...init, redirect: 'manual' });
+
+    const isRedirect = response.status >= 300 && response.status < 400;
+    if (!isRedirect) return response;
+
+    const location = response.headers.get('location');
+    if (!location) return response;
+
+    // Resolve a relative Location against the hop it came from.
+    target = new URL(location, target).toString();
+  }
+
+  throw new Error(`Too many redirects (limit ${MAX_REDIRECTS}): ${url}`);
+}

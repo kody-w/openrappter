@@ -4,6 +4,7 @@
  */
 
 import type { TranscriptionService } from '../voice/transcription.js';
+import { assertFetchableUrl, fetchGuarded } from '../net/url-guard.js';
 
 export interface MediaConfig {
   maxImageSize?: number;
@@ -53,15 +54,42 @@ export class MediaProcessor {
   /**
    * Process media from URL
    */
+  /**
+   * Domain allow/block policy configured on this processor.
+   *
+   * Separate from the address checks in url-guard: those decide whether a URL
+   * may be fetched at all, this decides whether *this* processor is permitted
+   * to fetch it. It is passed to `fetchGuarded` as the per-hop assertion, so
+   * unlike the code it replaces it now also applies after a redirect — a host
+   * outside the allowlist can no longer be reached by being redirected to.
+   */
+  private assertDomainPolicy(url: string): void {
+    const hostname = new URL(url).hostname.toLowerCase();
+
+    const { allowedDomains, blockedDomains } = this.config;
+    if (allowedDomains && allowedDomains.length > 0) {
+      if (!allowedDomains.some(domain => hostname.endsWith(domain))) {
+        throw new Error(`Domain ${hostname} is not in allowed list`);
+      }
+    }
+    if (blockedDomains && blockedDomains.some(domain => hostname.endsWith(domain))) {
+      throw new Error(`Domain ${hostname} is blocked`);
+    }
+  }
+
   async processUrl(url: string): Promise<ProcessedMedia> {
     // SSRF protection
-    this.validateUrl(url);
-
-    // Fetch with size limit
-    const response = await fetch(url, {
+    // Guarded fetch: scheme and address checked, host resolved, and every
+    // redirect hop re-checked. The local `validateUrl` this replaced ran once
+    // on the caller's URL and then let `fetch` follow redirects on its own, so
+    // a public host could point here at anything.
+    const response = await fetchGuarded(url, {
       headers: {
         'User-Agent': 'OpenRappter/1.0',
       },
+    }, undefined, target => {
+      assertFetchableUrl(target);
+      this.assertDomainPolicy(target);
     });
 
     if (!response.ok) {
@@ -350,64 +378,6 @@ export class MediaProcessor {
   /**
    * Validate URL for SSRF protection
    */
-  private validateUrl(url: string): void {
-    const parsed = new URL(url);
-
-    // Block local/private IPs
-    const hostname = parsed.hostname.toLowerCase();
-    const blockedPatterns = [
-      'localhost',
-      '127.',
-      '10.',
-      '172.16.',
-      '172.17.',
-      '172.18.',
-      '172.19.',
-      '172.20.',
-      '172.21.',
-      '172.22.',
-      '172.23.',
-      '172.24.',
-      '172.25.',
-      '172.26.',
-      '172.27.',
-      '172.28.',
-      '172.29.',
-      '172.30.',
-      '172.31.',
-      '192.168.',
-      '169.254.',
-      '0.',
-      '[::1]',
-      '::1',
-    ];
-
-    for (const pattern of blockedPatterns) {
-      if (hostname.startsWith(pattern) || hostname === pattern) {
-        throw new Error('Access to local/private addresses is blocked');
-      }
-    }
-
-    // Check allowed/blocked domains
-    if (this.config.allowedDomains && this.config.allowedDomains.length > 0) {
-      const allowed = this.config.allowedDomains.some((d) => hostname.endsWith(d));
-      if (!allowed) {
-        throw new Error(`Domain ${hostname} is not in allowed list`);
-      }
-    }
-
-    if (this.config.blockedDomains) {
-      const blocked = this.config.blockedDomains.some((d) => hostname.endsWith(d));
-      if (blocked) {
-        throw new Error(`Domain ${hostname} is blocked`);
-      }
-    }
-
-    // Only allow http/https
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Protocol ${parsed.protocol} is not allowed`);
-    }
-  }
 }
 
 export function createMediaProcessor(config?: Partial<MediaConfig>): MediaProcessor {

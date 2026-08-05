@@ -950,6 +950,34 @@ export class GatewayServer {
           // could therefore skip every validation rule in the contract by
           // adding a query string, and would be told it had succeeded.
           if (pathOnly === '/agents/import') {
+            /**
+             * The gateway's credential, checked before the importer is
+             * consulted at all. #119
+             *
+             * This was the third route in this dispatch block and the last one
+             * with no gate, after #113 closed `/twin`. Its sink is not model
+             * spend: `contents` is written to disk and then LOADED —
+             * `importAgentFile` -> `introspectPythonAgents` -> `runner.py`
+             * `spec.loader.exec_module`. Top-level code in an uploaded `.py`
+             * runs as the daemon user, and the `.js` branch reaches the same
+             * place through `reloadUserAgents()`.
+             *
+             * Measured on a token-mode server with a spy importer and no
+             * credential: `/chat` answered 401 with the agent never invoked,
+             * and `/agents/import` reached the importer. The 400 a caller sees
+             * is the importer's own validation error — by then it had already
+             * been given the payload.
+             *
+             * The gate is ahead of the `!this.agentImporter` 503 as well, so an
+             * unauthenticated caller cannot learn whether this daemon installs
+             * agents. Every hatched twin runs this same entry point, so each
+             * one exposed it on its own port.
+             */
+            if (!this.resolveHttpAuthenticated(req, parsed)) {
+              res.writeHead(401, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({ status: 'error', error: 'Authentication required' }));
+              return;
+            }
             if (!this.agentImporter) {
               res.writeHead(503, { 'Content-Type': 'application/json', ...corsHeaders });
               res.end(JSON.stringify({ status: 'error', error: 'This daemon cannot install agents.' }));
@@ -986,11 +1014,19 @@ export class GatewayServer {
              * parsed. #113
              *
              * `/chat` has always enforced this and `/twin` did not, while both
-             * route into the same `agentHandler` — so `--bind all --token
-             * SECRET`, whose entire purpose is keeping strangers out of the
-             * agent, was closed on one path and open on the other. Measured on
-             * a real server: `/chat` without a token answered 401 and `/twin`
-             * without a token answered 200 with the agent having run.
+             * route into the same `agentHandler` — so the gateway credential,
+             * whose entire purpose is keeping strangers out of the agent, was
+             * closed on one path and open on the other. Measured on a real
+             * server: `/chat` without a token answered 401 and `/twin` without
+             * a token answered 200 with the agent having run.
+             *
+             * This comment originally cited `openrappter gateway --bind all
+             * --token SECRET` as the configuration at risk. That command does
+             * not ship: `registerGatewayCommand` is exported from
+             * `cli/index.ts` and never called, and `gateway --bind all` answers
+             * `unknown option '--bind'`. The credential that DOES exist is
+             * `OPENRAPPTER_TOKEN` on the loopback daemon, which is the boundary
+             * this actually protects. #119
              *
              * `validateRequestSource` does not cover this: its loopback check
              * is gated on `bind === 'loopback'` and is skipped under

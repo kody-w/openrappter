@@ -1,4 +1,4 @@
-import { program } from 'commander';
+import { program, type Command } from 'commander';
 import { intro, outro, text, select, note, spinner, confirm, isCancel, log } from '@clack/prompts';
 import chalk from 'chalk';
 import { exec } from 'child_process';
@@ -18,6 +18,7 @@ import { registerTelephonyCommands } from './telephony/cli.js';
 import { registerTwinCommands } from './twin/index.js';
 import { registerCronCommand } from './cli/cron.js';
 import { registerRappterCommand } from './cli/rappters.js';
+import { portTypedOnCommandLine } from './infra/cli-port.js';
 
 const execAsync = promisify(exec);
 
@@ -1913,8 +1914,11 @@ serviceCommand
     }
     return port;
   }, 18790)
-  .action(async (options: { port: number }) => {
-    const status = await installManagedGatewayService(options.port, false);
+  .action(async (options: { port: number }, command: Command) => {
+    // The root's --port swallows this command's own, so ask where the user
+    // actually typed it before installing a service on the wrong port. #108
+    const port = portTypedOnCommandLine(command) ?? options.port;
+    const status = await installManagedGatewayService(port, false);
     console.log(
       `${EMOJI} Gateway service: supervisor=${status.supervisor} `
       + `live=${status.live} ready=${status.ready}`,
@@ -1946,7 +1950,8 @@ imessageCommand
     }
     return port;
   }, 18790)
-  .action(async (options: { port: number }) => {
+  .action(async (options: { port: number }, command: Command) => {
+    const port = portTypedOnCommandLine(command) ?? options.port;
     const { readIMessageConfig } = await import('./channels/imessage-gateway.js');
     const imessageConfig = readIMessageConfig(await loadConfig());
     if (!imessageConfig.enabled || (imessageConfig.allowFrom?.length ?? 0) === 0) {
@@ -1954,7 +1959,7 @@ imessageCommand
         'Enable channels.imessage with a non-empty allowFrom list before installing the service',
       );
     }
-    const status = await installManagedGatewayService(options.port, true);
+    const status = await installManagedGatewayService(port, true);
     console.log(
       `${EMOJI} iMessage service installed: `
       + `${status.live ? 'live' : 'not live'}, `
@@ -1984,11 +1989,12 @@ imessageCommand
     }
     return port;
   }, 18790)
-  .action(async (options: { json?: boolean; port: number }) => {
+  .action(async (options: { json?: boolean; port: number }, command: Command) => {
+    const port = portTypedOnCommandLine(command) ?? options.port;
     const { getIMessageServiceStatus } = await import(
       './channels/imessage-launchd.js'
     );
-    const status = await getIMessageServiceStatus({ port: options.port });
+    const status = await getIMessageServiceStatus({ port });
     if (options.json) {
       console.log(JSON.stringify(status, null, 2));
       return;
@@ -2031,7 +2037,8 @@ imessageCommand
     }
     return port;
   }, 18790)
-  .action(async (options: { json?: boolean; port: number }) => {
+  .action(async (options: { json?: boolean; port: number }, command: Command) => {
+    const port = portTypedOnCommandLine(command) ?? options.port;
     const managedEnv = await loadEnv();
     for (const [key, value] of Object.entries(managedEnv)) {
       if (!process.env[key]) process.env[key] = value;
@@ -2044,7 +2051,7 @@ imessageCommand
     const result = await diagnoseIMessage({
       config: readIMessageConfig(await loadConfig()),
       tokenConfigured,
-      launchAgent: { port: options.port },
+      launchAgent: { port },
     });
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));

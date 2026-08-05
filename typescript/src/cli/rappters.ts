@@ -21,6 +21,7 @@ import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { listRappters, type RappterStatus } from '../infra/roster.js';
 import { gatewayPortFor } from '../infra/gateway-lock.js';
+import { portTypedOnCommandLine } from '../infra/cli-port.js';
 
 const EMOJI = '🦖';
 
@@ -47,21 +48,14 @@ function describe(entry: RappterStatus): string {
 /**
  * The port the user actually typed, wherever Commander decided to put it.
  *
- * The root program declares `--port` for the default chat/daemon command, and
- * Commander gives that declaration precedence over a subcommand's own. So
- * `openrappter hatch archivist --port 19950` left this command's `opts` without
- * a port at all, and it silently hatched on the DERIVED port instead — no
- * error, just the wrong number. Reproduced in isolation and reported for four
- * pre-existing subcommands that have the same shape, in #108.
- *
- * Reading both places yields what the user typed without changing how anything
- * else in the CLI parses.
+ * `openrappter hatch archivist --port 19950` hatched on the DERIVED port with
+ * no error, because the root program's `--port` declaration takes precedence
+ * over this command's own. Shared with the four subcommands that had the same
+ * defect so there is one answer to "where did the user's port go". #107 / #108
  */
-export function explicitPort(options: { port?: number }, command: Command): number | undefined {
+function explicitPort(options: { port?: number }, command: Command): number | undefined {
   if (options.port !== undefined) return options.port;
-  const inherited = (command.parent?.opts() as { port?: unknown } | undefined)?.port;
-  const parsed = typeof inherited === 'string' ? Number.parseInt(inherited, 10) : inherited;
-  return typeof parsed === 'number' && Number.isSafeInteger(parsed) ? parsed : undefined;
+  return portTypedOnCommandLine(command);
 }
 
 export function registerRappterCommand(program: Command): void {

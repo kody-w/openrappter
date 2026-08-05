@@ -189,6 +189,9 @@ async function startGatewayInProcess(opts?: {
     model: process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
+    // Which rappter this is. Reached the lock, the port and the channels
+    // already; without this it never reached the thing that answers. #102
+    ...(isTwin ? { instance: (opts?.instance ?? '').trim() } : {}),
     ...(backend.provider ? { provider: backend.provider } : {}),
   });
   // Carried so the gateway can answer "why can't it talk?" with a remedy

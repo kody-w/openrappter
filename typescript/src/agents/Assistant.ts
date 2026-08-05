@@ -68,6 +68,15 @@ export interface AssistantConfig {
   loadWorkspaceContext?: boolean;
   /** Load global MemoryAgent facts into the system prompt (default true) */
   loadMemoryContext?: boolean;
+  /**
+   * Which rappter on this device this is: the hatched twin's name, or
+   * undefined for the alpha.
+   *
+   * A neighborhood is made of distinct participants, so a peer has to be able
+   * to say which one it is — otherwise "ask the archivist" and "ask the
+   * courier" are the same act. #102
+   */
+  instance?: string;
 }
 
 export interface AssistantResponse {
@@ -110,6 +119,10 @@ export class Assistant {
       maxToolRounds: config?.maxToolRounds ?? PARITY_MAX_ROUNDS,
       loadWorkspaceContext: config?.loadWorkspaceContext ?? true,
       loadMemoryContext: config?.loadMemoryContext ?? true,
+      // Which rappter this is. The constructor whitelists what it copies, so
+      // an option that is not named here is silently dropped no matter what
+      // the caller passed. #102
+      instance: config?.instance,
     };
     this.workspaceDir = config?.workspaceDir ?? WORKSPACE_DIR;
 
@@ -652,6 +665,44 @@ export class Assistant {
     return prompt;
   }
 
+  /**
+   * Which rappter this process is.
+   *
+   * `--instance` used to reach the runtime lock (#94), the listening port
+   * (#101) and the outbound channels (#103) and stop there. Nothing put the
+   * name into the assistant's own context, so a twin hatched as `scout`,
+   * running as its own process on its own port, answered:
+   *
+   *   "No, I'm the same rappter you're speaking with — I don't have a separate
+   *    internal identity or run parallel versions unless explicitly created as
+   *    another instance."
+   *
+   * False in every clause, including the last: it WAS explicitly created as
+   * another instance and was the thing answering. #102
+   *
+   * The closing paragraph is the load-bearing part. This product's whole point
+   * is that a peer cannot tell whether it is talking to a rappter, a brainstem
+   * or a person, and self-knowledge is one short step from presuming to know
+   * others. Knowing what you are and not presuming what anyone else is are
+   * different properties, and only the first one was missing.
+   */
+  private rappterSelf(): string {
+    const instance = (this.config.instance ?? '').trim();
+    const who = instance
+      ? `You are a hatched twin on this device, named "${instance}". You run as your own `
+        + 'process on your own port, alongside an alpha rappter and possibly other twins. '
+        + 'You are not the alpha, and you are not the same rappter as any peer that '
+        + 'contacts you.'
+      : 'You are the alpha rappter on this device — the original, not a hatched twin. '
+        + 'Other twins may be hatched alongside you, each its own process on its own port.';
+
+    return `<rappter_self>\n${who}\n\n`
+      + 'This says what YOU are. It says nothing about whoever contacts you: a message '
+      + 'arriving over /chat or /twin may come from a rappter, a brainstem, or a person, '
+      + 'and you cannot tell which. Never assume, and never claim to know.\n'
+      + '</rappter_self>';
+  }
+
   private buildBaseSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
     const displayName = this.cachedIdentity?.name || this.config.name;
     const twinSoul = this.twinIdentity();
@@ -671,9 +722,15 @@ export class Assistant {
     const identityBlock = twinSoul
       ? `<identity>\n${twinSoul}\n</identity>`
       : `<identity>\nYou are ${displayName}, ${this.config.description}.\n</identity>`;
+    // Additive, never a replacement. The persona above is WHO this rappter
+    // speaks as — often the owner's own twin. This is WHICH rappter on the
+    // device is doing the speaking. A twin can carry the owner's persona and
+    // still not be the alpha. #102
+    const selfBlock = this.rappterSelf();
 
     if (!agentList) {
       return `${identityBlock}
+${selfBlock}
 ${workspaceBlock}${memoryBlock}
 <conversation_mode>
 - Respond directly and conversationally.
@@ -682,6 +739,7 @@ ${workspaceBlock}${memoryBlock}
     }
 
     return `${identityBlock}
+${selfBlock}
 ${workspaceBlock}${memoryBlock}
 <available_agents>
 ${agentList}

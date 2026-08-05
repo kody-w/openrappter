@@ -178,3 +178,45 @@ describe('it did not disturb what already worked', () => {
     expect(got.body.schema).toBe('rapp-twin-chat-response/1.0');
   });
 });
+
+describe('the voice seam never reaches a peer', () => {
+  /**
+   * #97. The live daemon returned `'ok\n|||VOICE|||\nok'` to a peer immediately
+   * after /twin shipped: an internal marker, a duplicated answer, and a tell no
+   * brainstem would emit. The tests above could not see it — they inject a fake
+   * handler that returns plain text, so no marker is ever produced. Only a real
+   * model with VOICE_MODE emits one.
+   *
+   * So this one makes the handler behave like the real thing.
+   */
+  it('splits |||VOICE||| out of the reply, as /chat does', async () => {
+    server.setAgentHandler(async (req: AgentRequest) => ({
+      sessionId: req.sessionId ?? 'gen',
+      content: 'The full written answer.\n|||VOICE|||\nThe spoken one.',
+      finishReason: 'stop',
+    }));
+    try {
+      const got = await post(envelope());
+      const inner = got.body.response as Record<string, unknown>;
+
+      expect(inner.response).toBe('The full written answer.');
+      expect(String(inner.response)).not.toContain('|||VOICE|||');
+      expect(JSON.stringify(got.body)).not.toContain('|||VOICE|||');
+      expect(inner.voice_response).toBe('The spoken one.');
+      expect(inner.voice_mode).toBe(true);
+    } finally {
+      server.setAgentHandler(async (req: AgentRequest) => {
+        handlerCalls += 1;
+        return { sessionId: req.sessionId ?? 'gen', content: `Echo: ${req.message}`, finishReason: 'stop' };
+      });
+    }
+  });
+
+  it('leaves a reply with no marker exactly as it was', async () => {
+    const got = await post(envelope());
+    const inner = got.body.response as Record<string, unknown>;
+    expect(inner.response).toBe('Echo: are you there?');
+    expect(inner).not.toHaveProperty('voice_response');
+    expect(inner.voice_mode).toBe(false);
+  });
+});

@@ -33,6 +33,8 @@ export const TWIN_SCHEMA = 'rapp-twin-chat/1.0';
 export const TWIN_RESPONSE_SCHEMA = 'rapp-twin-chat-response/1.0';
 export const TWIN_CHANNEL = '5a-tether';
 
+import { parseSenses } from '../channels/senses.js';
+
 export interface TwinEnvelope {
   schema: string;
   from_rappid: string;
@@ -146,16 +148,30 @@ export function buildTwinResponse(input: {
   agentLogs?: string;
   voiceMode?: boolean;
 }): Record<string, unknown> {
+  // Split the voice seam, exactly as buildChatEnvelope does for /chat. #97.
+  //
+  // `|||VOICE|||` is an internal convention between the system prompt and the
+  // envelope builder. Returning `result.content` raw sent a peer
+  // `'ok\n|||VOICE|||\nok'` — an internal marker, a duplicated answer, and a
+  // tell that no brainstem would ever emit, on a wire whose premise is that a
+  // peer cannot identify the runtime that replied.
+  //
+  // The unit tests could not see it: they inject a fake handler that returns
+  // plain text, so no marker is ever produced. Only a real model with VOICE_MODE
+  // emits one, which is why this was found by a live probe after deploy.
+  const parsed = parseSenses(input.response ?? '');
+  const spoken = typeof parsed.senses?.voice === 'string' ? parsed.senses.voice : undefined;
   return {
     schema: TWIN_RESPONSE_SCHEMA,
     channel: TWIN_CHANNEL,
     envelope: input.envelope,
     status: input.status ?? 200,
     response: {
-      response: input.response,
+      response: parsed.text,
       session_id: input.sessionId,
       agent_logs: input.agentLogs ?? '',
-      voice_mode: input.voiceMode ?? false,
+      voice_mode: input.voiceMode ?? Boolean(spoken),
+      ...(spoken ? { voice_response: spoken } : {}),
     },
   };
 }

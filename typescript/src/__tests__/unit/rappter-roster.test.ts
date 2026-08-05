@@ -24,6 +24,13 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
+  listRappters,
+  plannedPortFor,
+  portForInstance,
+  recordedPortFor,
+  urlForInstance,
+} from '../../infra/roster.js';
+import {
   ALPHA_GATEWAY_PORT,
   gatewayEndpointFileFor,
   gatewayLockFileFor,
@@ -165,13 +172,131 @@ describe('a twin\'s address still cannot always be re-derived', () => {
     // `twin say --to-instance archivist` derived :19591 and could not reach it.
     // A twin that can be SEEN by name but not SPOKEN to by name breaks the
     // promise #101 made. One resolver, both callers.
+    //
+    // Both now return undefined for a name with no endpoint record rather than
+    // deriving a port that may belong to another rappter — see #114.
     const roster = await import('../../infra/roster.js');
-    expect(roster.urlForInstance('scout'))
-      .toBe(`http://127.0.0.1:${roster.portForInstance('scout')}`);
+    expect(roster.urlForInstance('no-such-twin-has-ever-run')).toBeUndefined();
+    expect(roster.portForInstance('no-such-twin-has-ever-run')).toBeUndefined();
+    // The alpha keeps its documented constant; that is not a guess.
     expect(roster.portForInstance(undefined)).toBe(ALPHA_GATEWAY_PORT);
+    expect(roster.urlForInstance(undefined)).toBe(`http://127.0.0.1:${ALPHA_GATEWAY_PORT}`);
   });
 
   it('the alpha still resolves to its original port with no record', () => {
     expect(gatewayPortFor({})).toBe(ALPHA_GATEWAY_PORT);
+  });
+});
+
+/**
+ * A name that never started is not answered for by somebody else. — #114
+ *
+ * `gatewayPortFor` maps a name into 900 slots. "Far more twins than a device
+ * will ever hatch" is true for capacity and irrelevant to collisions: measured,
+ * 4 collisions among 52 plausible names, including `twin-0` and `twin-38`.
+ *
+ * Reproduced live. `tender` and `thicket` both derive 19212:
+ *
+ *   $ openrappter hatch tender     -> Hatching tender on :19212 (pid 25383)
+ *   $ openrappter hatch thicket    -> Hatching thicket on :19212 (pid 25577)
+ *     ...pid 25577 died on EADDRINUSE, in a log nobody was watching
+ *
+ *   $ openrappter twins
+ *     ● tender    :19212  pid 25383  up 2m
+ *     ● thicket   :19212  pid 25383  up 2m        <- thicket was dead
+ *
+ *   $ openrappter twin say --to-instance thicket --text "your instance name?"
+ *     thicket: openrappter-RM-0059                <- tender answered
+ *
+ * Three running rappters reported where there were two, and a message to a
+ * rappter that had never existed was answered by a different one under its
+ * name. That is the sentence #111's own commit used, reached by the collision
+ * route instead of the sanitisation route.
+ *
+ * The evidence that settles it is on disk: a twin that listened has an
+ * `endpoint.json`; `thicket` had only `gateway.pid.sqlite`, because
+ * `acquireLock` mkdirs the directory before the bind is attempted. So the
+ * record — not the directory — is what proves a name ever owned a port.
+ */
+const sandboxes: string[] = [];
+afterEach(() => {
+  for (const dir of sandboxes.splice(0)) rmSync(dir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
+
+/** A private HOME so nothing here reads or writes the real machine. */
+function isolatedHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'roster-home-'));
+  sandboxes.push(home);
+  vi.stubEnv('HOME', home);
+  return home;
+}
+
+/**
+ * Write an endpoint record, refusing to leave the sandbox.
+ *
+ * The guard is not decoration. When `defaultGatewayLockFile()` froze home at
+ * import time (#110), the equivalent helper wrote its fixture into the
+ * operator's real ~/.openrappter/endpoint.json and the live roster began
+ * reporting a running alpha as dead. A regression should break this test, never
+ * the machine running it.
+ */
+function recordEndpoint(instance: string, port: number): void {
+  const file = gatewayEndpointFileFor({ instance });
+  const sandbox = sandboxes[sandboxes.length - 1];
+  if (!sandbox || !file.startsWith(sandbox)) {
+    throw new Error(`refusing to write outside the sandbox\n  sandbox: ${sandbox}\n  target: ${file}`);
+  }
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ instance, port, pid: 4242, startedAt: 'x' }));
+}
+
+describe('a name with no endpoint record is not given someone else\'s port', () => {
+  it('returns no port and no url for a name that never started', () => {
+    isolatedHome();
+    expect(portForInstance('never-hatched')).toBeUndefined();
+    expect(urlForInstance('never-hatched')).toBeUndefined();
+  });
+
+  it('still resolves a twin that DID record an address', () => {
+    // The fix must not blind the roster to real twins.
+    isolatedHome();
+    recordEndpoint('tender', 19_212);
+    expect(portForInstance('tender')).toBe(19_212);
+    expect(urlForInstance('tender')).toBe('http://127.0.0.1:19212');
+  });
+
+  it('keeps the alpha resolvable without a record — a constant is not a guess', () => {
+    isolatedHome();
+    expect(portForInstance(undefined)).toBe(ALPHA_GATEWAY_PORT);
+  });
+
+  it('reports a never-started name as not running, without probing', async () => {
+    // `tender` is recorded on 19212 and something may well be listening there.
+    // `thicket` must NOT inherit that liveness.
+    isolatedHome();
+    recordEndpoint('tender', 19_212);
+    const rows = await listRappters({ names: ['thicket'] });
+    const thicket = rows.find((r) => r.name === 'thicket');
+    expect(thicket?.running).toBe(false);
+    expect(thicket?.neverStarted).toBe(true);
+    // No pid borrowed from whoever holds the port.
+    expect(thicket?.pid).toBeUndefined();
+  });
+
+  it('still plans a port for a NEW twin of that name', () => {
+    // Planning where to put a twin and saying where one lives are different
+    // questions; conflating them is what let a guess be reported as a fact.
+    isolatedHome();
+    expect(plannedPortFor('thicket')).toBe(gatewayPortFor({ instance: 'thicket' }));
+    expect(plannedPortFor('tender')).toBe(gatewayPortFor({ instance: 'tender' }));
+    // tender and thicket genuinely collide — that is why hatch must check.
+    expect(plannedPortFor('tender')).toBe(plannedPortFor('thicket'));
+  });
+
+  it('prefers a recorded address over the derived plan', () => {
+    isolatedHome();
+    recordEndpoint('tender', 19_950);
+    expect(plannedPortFor('tender')).toBe(19_950);
   });
 });

@@ -158,6 +158,19 @@ export function registerTwinCommands(program: Command): void {
       // name and not SPOKEN to by name — `twins` found archivist on :19950
       // while this tried :19591 and failed. #107
       const url = opts.to ?? urlForInstance(opts.toInstance);
+      if (!url) {
+        // A twin with no endpoint record never owned a port, so there is no
+        // address to send to. Deriving one here is what let a message addressed
+        // to `thicket` be answered by `tender` on the port they share, with the
+        // reply attributed to `thicket`. Refusing is the only honest option:
+        // the alternative is quietly talking to someone else. #114
+        console.error(
+          `\n  No rappter named "${opts.toInstance}" has ever started on this device.`,
+        );
+        console.error('  Check `openrappter twins`, or address a peer directly with --to <url>.\n');
+        process.exitCode = 1;
+        return;
+      }
       // When a peer is named, that name IS its slug; defaulting to "peer" would
       // address a twin by a rappid it does not answer to. Canonicalised so the
       // rappid matches the name the twin knows itself by. #111

@@ -19,7 +19,12 @@ import { existsSync, mkdirSync, openSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { listRappters, type RappterStatus } from '../infra/roster.js';
+import {
+  listRappters,
+  plannedPortFor,
+  recordedPortFor,
+  type RappterStatus,
+} from '../infra/roster.js';
 import { canonicalInstanceKey, gatewayPortFor } from '../infra/gateway-lock.js';
 import { portTypedOnCommandLine } from '../infra/cli-port.js';
 
@@ -129,7 +134,29 @@ export function registerRappterCommand(program: Command): void {
         return;
       }
 
-      const port = explicitPort(options, command) ?? gatewayPortFor({ instance });
+      const port = explicitPort(options, command) ?? plannedPortFor(instance);
+
+      // Refuse a port another rappter already holds.
+      //
+      // The derivation has 900 slots, and the docstring's "far more twins than
+      // a device will ever hatch" is true for capacity and irrelevant to
+      // collisions: measured, 4 collisions among 52 plausible names, including
+      // `twin-0` and `twin-38`. Without this check `hatch thicket` printed
+      // "Hatching thicket on :19212 (pid N)" while the process died on
+      // EADDRINUSE in a log nobody was watching, and the roster then reported
+      // thicket as running on tender's pid. #114
+      const roster = await listRappters();
+      const holder = roster.find((e) => e.running && e.port === port && e.name !== instance);
+      if (holder) {
+        console.error(`\n${EMOJI} Port ${port} is already held by ${chalk.bold(holder.name)}`
+          + (holder.pid ? ` (pid ${holder.pid})` : '') + '.');
+        console.error(
+          `   "${instance}" and "${holder.name}" derive the same port from their names.\n`
+          + `   Give it a different name, or choose a port: --port <port>\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       const entry = resolve(fileURLToPath(import.meta.url), '..', '..', 'index.js');
       const logDir = join(homedir(), '.openrappter', 'logs');
       mkdirSync(logDir, { recursive: true });
@@ -154,7 +181,33 @@ export function registerRappterCommand(program: Command): void {
 
       console.log(`\n${EMOJI} Hatching ${chalk.bold(instance)} on :${port} (pid ${child.pid})`);
       console.log(chalk.dim(`   log: ${logFile}`));
-      console.log(chalk.dim('   It takes a moment to come up. Check with: openrappter twins'));
-      console.log(chalk.dim(`   Talk to it:  openrappter twin say --to-instance ${instance} --text "hello"\n`));
+
+      // Confirm it actually came up rather than reporting success on spawn.
+      //
+      // `hatch` detaches with stdio redirected to a log, so a twin that dies on
+      // startup does so silently — the terminal said "Hatching …" and nothing
+      // else, and the failure sat in a file. Announcing a birth we did not
+      // witness is the same class of claim as reporting a fix without
+      // re-probing. #114
+      const deadline = Date.now() + 90_000;
+      let up = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => { setTimeout(r, 3_000); });
+        if (recordedPortFor(instance) !== undefined) {
+          const now = (await listRappters({ names: [instance] })).find((e) => e.name === instance);
+          if (now?.running) { up = true; break; }
+        }
+        if (child.exitCode !== null || child.signalCode !== null) break;
+      }
+
+      if (up) {
+        console.log(chalk.green(`   ${instance} is up on :${port}`));
+        console.log(chalk.dim(`   Talk to it:  openrappter twin say --to-instance ${instance} --text "hello"\n`));
+        return;
+      }
+
+      console.error(chalk.yellow(`   ${instance} did not come up within 90s.`));
+      console.error(chalk.dim(`   The reason is in ${logFile}\n`));
+      process.exitCode = 1;
     });
 }

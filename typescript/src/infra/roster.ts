@@ -53,6 +53,12 @@ export interface RappterStatus {
    * running would hide why a twin cannot start.
    */
   portTakenByOther?: boolean;
+  /**
+   * This name has no endpoint record, so it never successfully owned a port.
+   * Its `port` is the one a new twin of that name WOULD try to claim, which is
+   * a plan rather than an address — and may already belong to someone else.
+   */
+  neverStarted?: boolean;
 }
 
 /** Every instance name this device has a directory for. */
@@ -67,23 +73,63 @@ export function knownInstanceNames(): string[] {
   }
 }
 
-/** Where a rappter said it landed, falling back to what its name implies. */
-export function portForInstance(instance: string | undefined): number {
+/**
+ * The port a rappter RECORDED for itself, or undefined when it never did.
+ *
+ * The record is written only after a successful listen, so its absence is
+ * meaningful: that name never got as far as owning a port. `acquireLock`
+ * mkdirs `instances/<name>/` before the bind is attempted, so a directory
+ * proves nothing — only the record does.
+ */
+export function recordedPortFor(instance: string | undefined): number | undefined {
   const file = gatewayEndpointFileFor(instance ? { instance } : {});
-  const recorded = readGatewayEndpoint(file);
-  if (recorded) return recorded.port;
-  // No record: the name is all there is. Correct for a twin on its derived
-  // port, and knowingly wrong for one started with an explicit --port, which
-  // is exactly why the record exists.
-  return instance ? gatewayPortFor({ instance }) : ALPHA_GATEWAY_PORT;
+  return readGatewayEndpoint(file)?.port;
 }
 
-/** The loopback base URL a named rappter on this device answers on. */
-export function urlForInstance(instance: string | undefined): string {
-  return `http://127.0.0.1:${portForInstance(instance)}`;
+/**
+ * Where a named rappter can actually be reached, or undefined.
+ *
+ * A twin with no endpoint record gets **undefined**, never a derived port.
+ * Deriving one is a guess, and 900 slots means guesses collide — measured, 4
+ * collisions among 52 plausible names, including `twin-0` and `twin-38`.
+ *
+ * When `thicket` failed to bind because `tender` already held their shared
+ * derived port, this function handed back that port anyway. The roster then
+ * probed it, found a healthy gateway, and reported:
+ *
+ *   ● tender    :19212  pid 25383  up 2m
+ *   ● thicket   :19212  pid 25383  up 2m      <- thicket was dead
+ *
+ * and `twin say --to-instance thicket` was answered by `tender`. A name that
+ * never started must not be answered for by somebody else. #114
+ *
+ * The ALPHA keeps its fallback: `ALPHA_GATEWAY_PORT` is a documented constant
+ * that every part of this product already agrees on, not a guess that might
+ * belong to another rappter.
+ */
+export function portForInstance(instance: string | undefined): number | undefined {
+  const recorded = recordedPortFor(instance);
+  if (recorded !== undefined) return recorded;
+  return instance ? undefined : ALPHA_GATEWAY_PORT;
 }
 
-const portFor = portForInstance;
+/**
+ * The port a NEW twin of this name would try to claim.
+ *
+ * Separate from `portForInstance` on purpose: planning where to put a twin is a
+ * different question from where an existing one lives, and conflating them is
+ * what let a guess be reported as a fact.
+ */
+export function plannedPortFor(instance: string): number {
+  return recordedPortFor(instance) ?? gatewayPortFor({ instance });
+}
+
+/** The loopback base URL a named rappter answers on, or undefined. */
+export function urlForInstance(instance: string | undefined): string | undefined {
+  const port = portForInstance(instance);
+  return port === undefined ? undefined : `http://127.0.0.1:${port}`;
+}
+
 
 /**
  * The PID listening on a port.
@@ -155,7 +201,23 @@ export async function listRappters(options: {
   const names: (string | undefined)[] = [undefined, ...instances];
 
   return Promise.all(names.map(async (instance): Promise<RappterStatus> => {
-    const port = portFor(instance);
+    const port = portForInstance(instance);
+
+    // No recorded address means this name never successfully owned a port, so
+    // there is nothing legitimate to probe. Probing a DERIVED port here is what
+    // made the roster report `thicket` as running with `tender`'s pid, on the
+    // port they happen to share. Report what is known — the name exists, it is
+    // not running — and never borrow another rappter's liveness. #114
+    if (port === undefined) {
+      return {
+        name: instance ?? 'alpha',
+        isAlpha: false,
+        port: gatewayPortFor({ instance: instance! }),
+        running: false,
+        neverStarted: true,
+      };
+    }
+
     const [health, pid] = await Promise.all([probe(port), listenerPid(port)]);
     const running = health !== null;
 

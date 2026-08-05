@@ -1804,8 +1804,26 @@ program
     try {
       const tipAgent = (await registry.getAgent('DailyTip'));
       if (tipAgent) {
-        await tipAgent.execute({ action: 'tip' });
-        log.success('Welcome notification sent — click it to open openrappter!');
+        /**
+         * Announce it only if it happened. — #136
+         *
+         * This was `await tipAgent.execute(…); log.success('Welcome
+         * notification sent…')`. Agents do not throw; `DailyTipAgent` reports
+         * failure as `{"status":"error"}` inside the string it returns. So the
+         * first sentence a new user read claimed a notification had been sent
+         * whether or not one had, and invited them to click something that may
+         * not exist.
+         */
+        const raw = await tipAgent.execute({ action: 'tip' });
+        let sent = false;
+        try {
+          sent = (JSON.parse(raw) as { status?: string }).status === 'success';
+        } catch { /* an unreadable reply is not a receipt */ }
+        if (sent) {
+          log.success('Welcome notification sent — click it to open openrappter!');
+        } else {
+          log.info('Welcome notification not sent (tips are still scheduled).');
+        }
       }
     } catch { /* non-critical */ }
 

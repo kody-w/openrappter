@@ -23,6 +23,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { createServer, type Server } from 'node:http';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { reserveTestPort } from '../support/test-port.js';
 import {
   listRappters,
   plannedPortFor,
@@ -232,6 +236,48 @@ function isolatedHome(): string {
   return home;
 }
 
+const servers: Server[] = [];
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => { s.close(() => r()); })));
+});
+
+/**
+ * A gateway this test owns. — #127
+ *
+ * The tests below used to write a record naming port 18790 and assert on what
+ * the roster concluded, without ever starting anything there. On the machine
+ * they were written on, the alpha daemon was listening — so they read the
+ * developer's machine and called it a result. Everywhere else, including every
+ * CI runner, `probe()` found nothing and both assertions inverted:
+ *
+ *   expected undefined to be true    rappter-roster.test.ts:346  (stalePort)
+ *   expected false to be true        rappter-roster.test.ts:377  (running)
+ *
+ * `main` was red for seven consecutive commits before anyone looked, because
+ * locally the same commit reported `19 passed (19)`.
+ *
+ * Binding our own listener makes the outcome depend on the code under test and
+ * nothing else. The pid answering is then `process.pid`, which is what lets a
+ * test say whether the roster can tell one owner from another.
+ */
+async function gatewayServing(): Promise<number> {
+  const port = await reserveTestPort();
+  const server = createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok', version: 'test-fixture', checks: { gateway: true },
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => { server.listen(port, '127.0.0.1', resolve); });
+  return port;
+}
+
 /**
  * Write an endpoint record, refusing to leave the sandbox.
  *
@@ -327,16 +373,36 @@ describe('a name with no endpoint record is not given someone else\'s port', () 
  * away: the record's own pid, and whoever is actually listening.
  */
 describe('a stale endpoint record is history, not an address', () => {
+  /**
+   * The dependency every guard in this block rests on. — #127
+   *
+   * `listenerPid` shells out to `lsof`. If a machine has no `lsof`, it returns
+   * `undefined`, and `impostor` in roster.ts requires `pid !== undefined` — so
+   * the guard does not merely stop working, it fails OPEN: a dead twin's record
+   * is certified as a live address, which is the exact bug #118 exists to
+   * prevent. That would be invisible, because everything else still passes.
+   *
+   * So measure it against a listener this test started, and say so out loud.
+   */
+  it('can name the pid holding a port, or every guard below fails open', async () => {
+    const port = await gatewayServing();
+    const { stdout } = await promisify(execFile)(
+      'lsof', ['-ti', `:${port}`, '-sTCP:LISTEN'], { timeout: 5_000 },
+    );
+    expect(Number.parseInt(stdout.trim().split(/\s+/)[0] ?? '', 10)).toBe(process.pid);
+  });
+
   it('does not report a name as running when another process holds its port', async () => {
     const home = isolatedHome();
-    // `ghost` recorded port 18790 under a pid that is not the alpha's. The
-    // alpha IS listening there, so the probe will find a healthy gateway —
-    // exactly the trap.
+    // `ghost` recorded a port under a pid that is not the one answering there.
+    // A healthy gateway IS serving it — this test started it — which is
+    // exactly the trap: liveness alone says "running".
+    const port = await gatewayServing();
     const file = gatewayEndpointFileFor({ instance: 'ghost' });
     expect(file.startsWith(home)).toBe(true);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({
-      instance: 'ghost', port: 18_790, pid: 999_999, startedAt: 'x',
+      instance: 'ghost', port, pid: 999_999, startedAt: 'x',
     }));
 
     const rows = await listRappters({ names: ['ghost'] });
@@ -349,25 +415,36 @@ describe('a stale endpoint record is history, not an address', () => {
     expect(ghost?.version).toBeUndefined();
   });
 
-  it('still reports a live twin whose record matches the listener', async () => {
-    // The fix must not blind the roster to real twins. The alpha's own record
-    // names the pid that is actually serving 18790, so it stays visible.
-    isolatedHome();
-    const rows = await listRappters({ names: [] });
-    const alpha = rows.find((r) => r.isAlpha);
-    expect(alpha).toBeDefined();
-    // The alpha is exempt from the pid check by design: its port is a
-    // documented constant rather than a recorded claim.
-    expect(alpha?.stalePort).toBeUndefined();
+  it('reports a twin whose record names the pid that is answering', async () => {
+    // The negative control for the case above, and the property no test
+    // covered: the fix must not blind the roster to real twins. Same fixture,
+    // one field different — the recorded pid is the one actually listening.
+    const home = isolatedHome();
+    const port = await gatewayServing();
+    const file = gatewayEndpointFileFor({ instance: 'live-twin' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: 'live-twin', port, pid: process.pid, startedAt: 'x',
+    }));
+
+    const rows = await listRappters({ names: ['live-twin'] });
+    const twin = rows.find((r) => r.name === 'live-twin');
+
+    expect(twin?.running).toBe(true);
+    expect(twin?.stalePort).toBeUndefined();
+    expect(twin?.pid).toBe(process.pid);
+    expect(twin?.version).toBe('test-fixture');
   });
 
   it('trusts a record with no pid, so an upgrade does not report twins as dead', async () => {
     const home = isolatedHome();
+    const port = await gatewayServing();
     const file = gatewayEndpointFileFor({ instance: 'older-build' });
     expect(file.startsWith(home)).toBe(true);
     mkdirSync(dirname(file), { recursive: true });
     // Records written before the pid field existed.
-    writeFileSync(file, JSON.stringify({ instance: 'older-build', port: 18_790 }));
+    writeFileSync(file, JSON.stringify({ instance: 'older-build', port }));
 
     const rows = await listRappters({ names: ['older-build'] });
     const row = rows.find((r) => r.name === 'older-build');

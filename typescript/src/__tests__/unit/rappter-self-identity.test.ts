@@ -98,3 +98,57 @@ describe('a rappter knows which rappter it is', () => {
     expect(prompt).toContain('<conversation_mode>');
   });
 });
+
+/**
+ * A twin is told which mouths are not its own. — #122
+ *
+ * #103's rule was enforced on channels, on cron, and on the channel registry.
+ * The AGENTS that drive those same single-owner resources stayed available.
+ * Measured on a live hatched twin:
+ *
+ *   Q: name your tools that can contact a person outside this machine
+ *   A: "Message, Phone."
+ *
+ *   Q: would you phone a restaurant for me, or is that reserved for another
+ *      rappter on this device?
+ *   A: "I can phone a restaurant on your behalf if you ask. This action isn't
+ *       reserved for another rappter; I have that capability directly."
+ *
+ * Every outbound capability on a twin has turned out to be stopped by
+ * CONFIGURATION rather than design — Telegram by an unset token (#115, #121),
+ * Phone by no provider, GoogleVoice by no Chrome endpoint. Four for four.
+ *
+ * THIS IS DISCLOSURE, NOT ENFORCEMENT. It is a sentence in a prompt. Anyone who
+ * can reach a twin's /chat can still ask it to try, and nothing mechanical stops
+ * the agent. Whether a twin should be blocked outright is recorded on #122 as
+ * the owner's decision, because it changes what a twin is. These tests pin what
+ * the twin is TOLD; they must not be read as proving it cannot act.
+ */
+describe('a twin is told the outbound channels are not its own', () => {
+  it('names the resources and says why there is only one of each', () => {
+    const prompt = systemPrompt({ instance: 'scout' });
+    expect(prompt).toContain('single-owner outbound channels');
+    // The reason, not just the rule — a twin that knows why can explain it.
+    expect(prompt).toMatch(/two rappters using one of them would talk over each other/);
+  });
+
+  it('tells it to decline and offer what it can still do', () => {
+    const prompt = systemPrompt({ instance: 'scout' });
+    expect(prompt).toMatch(/do not\s+place calls, send SMS, or message anyone outside this device/);
+    expect(prompt).toMatch(/offer to do the part that does not leave the machine/);
+  });
+
+  it('says none of this to the alpha, which does hold them', () => {
+    const prompt = systemPrompt({});
+    expect(prompt).not.toContain('single-owner outbound channels');
+    expect(prompt).toContain('You are the alpha rappter on this device');
+  });
+
+  it('still does not let a twin presume what a PEER is', () => {
+    // The property from #102 must survive this addition — knowing which mouths
+    // are yours is not knowing who is talking to you.
+    const prompt = systemPrompt({ instance: 'scout' });
+    expect(prompt).toMatch(/may come from a rappter, a brainstem, or a person/);
+    expect(prompt).toMatch(/Never assume, and never claim to know/);
+  });
+});

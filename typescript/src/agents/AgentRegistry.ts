@@ -63,6 +63,15 @@ export class AgentRegistry {
   private userAgentsDir: string;
   private agents: Map<string, BasicAgent> = new Map();
   private loaded = false;
+  /**
+   * Why a file on disk did not become an agent, keyed by path.
+   *
+   * A failed load used to be discarded, so a capability could disappear with
+   * no signal anywhere: the sweep is deliberately resilient, but resilient is
+   * not the same as silent. Keyed by path so a re-scan of a fixed file clears
+   * its own entry.
+   */
+  private loadFailures: Map<string, string> = new Map();
 
   constructor(
     agentsDir: string,
@@ -119,8 +128,9 @@ export class AgentRegistry {
               this.agents.set(instance.name, instance);
             }
           }
-        } catch {
-          // Skip agents that fail to load
+          this.loadFailures.delete(modulePath);
+        } catch (error) {
+          this.noteLoadFailure(path.join(this.agentsDir, file), error);
         }
       }
     } catch {
@@ -157,8 +167,9 @@ export class AgentRegistry {
               }
             }
           }
-        } catch {
-          // Skip agents that fail to load
+          this.loadFailures.delete(filePath);
+        } catch (error) {
+          this.noteLoadFailure(path.join(this.userAgentsDir, file), error);
         }
       }
     } catch {
@@ -182,7 +193,12 @@ export class AgentRegistry {
       const filePath = path.join(this.userAgentsDir, file);
       try {
         const found = await introspectPythonAgents(filePath);
-        if (!found.ok) continue; // a broken file is not a reason to fail the sweep
+        if (!found.ok) {
+          // A broken file is not a reason to fail the sweep, but it is a
+          // reason to be able to say which file and why.
+          this.loadFailures.set(filePath, found.error);
+          continue;
+        }
         for (const descriptor of found.agents) {
           // A re-dropped file must replace its own agent rather than being
           // ignored as a duplicate, or editing an agent would never take.
@@ -191,10 +207,26 @@ export class AgentRegistry {
           if (existing && !isOurs) continue;
           this.agents.set(descriptor.name, new PythonAgent(filePath, descriptor));
         }
-      } catch {
-        // Skip agents that fail to load
+        this.loadFailures.delete(filePath);
+      } catch (error) {
+        this.noteLoadFailure(filePath, error);
       }
     }
+  }
+
+  private noteLoadFailure(file: string, error: unknown): void {
+    this.loadFailures.set(file, error instanceof Error ? error.message : String(error));
+  }
+
+  /**
+   * Files that failed to become agents, and why.
+   *
+   * The sweep keeps going when a file is broken — one bad agent must not cost
+   * you the rest. This is how the failure stays visible instead of the
+   * capability just being absent.
+   */
+  getLoadFailures(): Array<{ file: string; reason: string }> {
+    return Array.from(this.loadFailures, ([file, reason]) => ({ file, reason }));
   }
 
   async getAgent(name: string): Promise<BasicAgent | undefined> {

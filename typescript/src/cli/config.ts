@@ -16,7 +16,8 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
-import { isSecretKey } from '../security/secret-keys.js';
+export { redactSecrets } from '../security/redact.js';
+import { redactSecrets } from '../security/redact.js';
 
 const CONFIG_DIR = join(homedir(), '.openrappter');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
@@ -49,26 +50,6 @@ export function setNestedValue(obj: Record<string, unknown>, path: string, value
     return curr[key];
   }, obj);
   target[last] = value;
-}
-
-/**
- * Recursively redact secret values in a config object for safe display.
- */
-export function redactSecrets(obj: unknown, depth = 0): unknown {
-  if (depth > 10) return obj;
-  if (typeof obj !== 'object' || obj === null) return obj;
-  if (Array.isArray(obj)) return obj.map((v) => redactSecrets(v, depth + 1));
-
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    const isSecret = isSecretKey(k);
-    if (isSecret && typeof v === 'string' && v.length > 0) {
-      result[k] = '***REDACTED***';
-    } else {
-      result[k] = redactSecrets(v, depth + 1);
-    }
-  }
-  return result;
 }
 
 const DEFAULT_CONFIG: Record<string, unknown> = {

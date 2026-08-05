@@ -14,6 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
+import { redactSecrets } from '../security/redact.js';
 
 // ── Log level ordering ────────────────────────────────────────────────────
 
@@ -228,6 +229,13 @@ export class JsonTransport implements Transport {
 
 // ── Logger ────────────────────────────────────────────────────────────────
 
+function redactData(
+  data?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!data) return data;
+  return redactSecrets(data) as Record<string, unknown>;
+}
+
 export class Logger {
   private level: LogLevel;
   private transports: Transport[];
@@ -340,7 +348,7 @@ export class Logger {
       timestamp: new Date().toISOString(),
       component: this.component,
       correlationId: this.correlationId,
-      data,
+      data: redactData(data),
     };
 
     this.dispatch(entry);
@@ -355,7 +363,7 @@ export class Logger {
       timestamp: new Date().toISOString(),
       component: this.component,
       correlationId: this.correlationId,
-      data,
+      data: redactData(data),
       error: {
         message: err.message,
         stack: err.stack,

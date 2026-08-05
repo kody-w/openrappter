@@ -50,7 +50,9 @@ param(
     [switch]$DryRun,
     [switch]$VerboseOutput,
 
-    [string]$Version = ""
+    [string]$Version = "",
+    [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
+    [string]$Channel = ""
 )
 
 # ── Strict mode ──────────────────────────────────────────────────────────────
@@ -91,6 +93,10 @@ $INSTALL_TOTAL  = 4
 # ── Environment variable overrides ──────────────────────────────────────────
 if ($env:OPENRAPPTER_INSTALL_METHOD) { $Method  = $env:OPENRAPPTER_INSTALL_METHOD }
 if ($env:OPENRAPPTER_VERSION)        { $Version = $env:OPENRAPPTER_VERSION }
+if (-not $Channel -and $env:OPENRAPPTER_CHANNEL) { $Channel = $env:OPENRAPPTER_CHANNEL }
+# OPENRAPPTER_BETA predates rings and resolved a dist-tag nothing published,
+# so it silently failed. Keep it working as an alias for the beta ring.
+if (-not $Channel -and $env:OPENRAPPTER_BETA -eq "1") { $Channel = "beta" }
 if ($env:OPENRAPPTER_HOME)           { $InstallDir = $env:OPENRAPPTER_HOME }
 if ($env:OPENRAPPTER_NO_PROMPT -eq "true") { $NoPrompt = $true }
 if (-not $InstallDir) { $InstallDir = $HOME_DIR }
@@ -280,12 +286,29 @@ function Get-ExistingInstall {
 
 # ── npm install ──────────────────────────────────────────────────────────────
 
+# Ring -> npm dist-tag. Only `stable` owns `latest`, so a prerelease ring can
+# never be served to a plain `npm install openrappter`.
+function Get-RingDistTag {
+    param([string]$Ring)
+    switch ($Ring) {
+        "canary"  { return "canary" }
+        "nightly" { return "nightly" }
+        "alpha"   { return "alpha" }
+        "beta"    { return "beta" }
+        "stable"  { return "latest" }
+        default   { return "latest" }
+    }
+}
+
 function Install-ViaNpm {
+    # Precedence: explicit version > ring dist-tag > stable.
     $pkg = $NPM_PACKAGE
     if ($Version) {
         $pkg = "${NPM_PACKAGE}@${Version}"
-    } elseif ($env:OPENRAPPTER_BETA -eq "1") {
-        $pkg = "${NPM_PACKAGE}@beta"
+    } else {
+        $ring = if ($Channel) { $Channel } else { "stable" }
+        $pkg = "${NPM_PACKAGE}@$(Get-RingDistTag $ring)"
+        Write-Info "Release ring: $ring"
     }
 
     Write-Info "Running: npm install -g $pkg"

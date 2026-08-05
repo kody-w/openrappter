@@ -386,6 +386,21 @@ export class OpenRappterSurgeon extends LitElement {
       gap: 12px;
       padding: 19px clamp(20px, 3vw, 38px);
       border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+
+    /* The title must be allowed to shrink, and the voice switch must be pushed
+       away from it. Without this the two buttons sat ON TOP of the subtitle —
+       visible immediately in a screenshot of the running page, and in nothing
+       else. */
+    .surgeon-header .surgeon-title {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+
+    .surgeon-header .toolbar {
+      margin-left: auto;
+      flex: 0 0 auto;
     }
 
     .copilot {

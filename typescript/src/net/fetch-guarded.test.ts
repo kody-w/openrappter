@@ -83,6 +83,31 @@ describe('agents that fetch a user-supplied URL', () => {
     await expect(web.fetchUrl(target)).rejects.toThrow(/blocked|resolves to/i);
   });
 
+  it('keeps the media processor domain policy, and applies it after a redirect too', async () => {
+    // Removing MediaProcessor's local validateUrl in the first version of this
+    // change took allowedDomains/blockedDomains with it, leaving both options
+    // declared and enforced nowhere. An outside reviewer caught that. The
+    // policy is now the per-hop assertion, so unlike the code it replaced it
+    // also applies to a redirect target.
+    const { MediaProcessor } = await import('../media/processor.js');
+
+    const secret = await listen((_req, res) => { res.writeHead(200); res.end('INTERNAL'); });
+    const redirector = await listen((_req, res) => {
+      res.writeHead(302, { Location: `http://localtest.me:${secret}/x.gif` });
+      res.end();
+    });
+
+    const processor = new MediaProcessor({ allowedDomains: ['example.com'] });
+
+    // Blocked on the first hop: the host is not in the allowlist.
+    await expect(processor.processUrl(`http://localtest.me:${redirector}/go`))
+      .rejects.toThrow(/not in allowed list/);
+
+    const blocking = new MediaProcessor({ blockedDomains: ['localtest.me'] });
+    await expect(blocking.processUrl(`http://localtest.me:${redirector}/go`))
+      .rejects.toThrow(/blocked/);
+  });
+
   it('both agents still accept an ordinary public URL shape', async () => {
     // Positive control. Refusing everything would satisfy the tests above and
     // break both agents entirely. No network call: the guard rejects before

@@ -4,7 +4,7 @@
  */
 
 import type { TranscriptionService } from '../voice/transcription.js';
-import { fetchGuarded } from '../net/url-guard.js';
+import { assertFetchableUrl, fetchGuarded } from '../net/url-guard.js';
 
 export interface MediaConfig {
   maxImageSize?: number;
@@ -54,6 +54,29 @@ export class MediaProcessor {
   /**
    * Process media from URL
    */
+  /**
+   * Domain allow/block policy configured on this processor.
+   *
+   * Separate from the address checks in url-guard: those decide whether a URL
+   * may be fetched at all, this decides whether *this* processor is permitted
+   * to fetch it. It is passed to `fetchGuarded` as the per-hop assertion, so
+   * unlike the code it replaces it now also applies after a redirect — a host
+   * outside the allowlist can no longer be reached by being redirected to.
+   */
+  private assertDomainPolicy(url: string): void {
+    const hostname = new URL(url).hostname.toLowerCase();
+
+    const { allowedDomains, blockedDomains } = this.config;
+    if (allowedDomains && allowedDomains.length > 0) {
+      if (!allowedDomains.some(domain => hostname.endsWith(domain))) {
+        throw new Error(`Domain ${hostname} is not in allowed list`);
+      }
+    }
+    if (blockedDomains && blockedDomains.some(domain => hostname.endsWith(domain))) {
+      throw new Error(`Domain ${hostname} is blocked`);
+    }
+  }
+
   async processUrl(url: string): Promise<ProcessedMedia> {
     // SSRF protection
     // Guarded fetch: scheme and address checked, host resolved, and every
@@ -64,6 +87,9 @@ export class MediaProcessor {
       headers: {
         'User-Agent': 'OpenRappter/1.0',
       },
+    }, undefined, target => {
+      assertFetchableUrl(target);
+      this.assertDomainPolicy(target);
     });
 
     if (!response.ok) {

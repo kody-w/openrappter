@@ -116,8 +116,67 @@ export function gatewayLockFileFor(options: {
   return join(homedir(), '.openrappter', 'instances', key, 'gateway.pid');
 }
 
-export interface GatewayLockOptions {
-  filePath?: string;
+/**
+ * Where a rappter writes down the address it actually reached.
+ *
+ * Deliberately derived from `gatewayLockFileFor`, so a rappter's lock and its
+ * endpoint record can never end up in different directories — the same reason
+ * `gatewayPortFor` lives in this file.
+ *
+ * The roster needs this because the port CANNOT be re-derived from the name in
+ * general. `gatewayPortFor` hashes the raw instance name while the lock path
+ * uses a sanitised form, so the two disagree for any name outside
+ * [A-Za-z0-9._-]; and an explicit `--port` overrides the derivation entirely.
+ * A roster that re-derived would report a twin started with `--port` as DEAD
+ * while it was serving. Reading back what the process wrote is the only answer
+ * that stays true in both cases. #107
+ */
+export function gatewayEndpointFileFor(options: {
+  instance?: string;
+  port?: number;
+} = {}): string {
+  return join(dirname(gatewayLockFileFor(options)), 'endpoint.json');
+}
+
+export interface GatewayEndpoint {
+  /** The hatched twin's name, or undefined for the alpha. */
+  instance?: string;
+  port: number;
+  pid: number;
+  startedAt: string;
+}
+
+/**
+ * Record where this rappter landed. Best effort: a rappter that cannot write
+ * its own endpoint must still serve, so every failure here is swallowed. The
+ * roster treats a missing record as "unknown", never as "not running" — the
+ * running/dead question is answered by probing, never by a file. #107
+ */
+export function writeGatewayEndpoint(endpoint: GatewayEndpoint): void {
+  try {
+    const file = gatewayEndpointFileFor({
+      ...(endpoint.instance ? { instance: endpoint.instance } : {}),
+      port: endpoint.port,
+    });
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(endpoint, null, 2), { mode: 0o600 });
+  } catch {
+    // Not being able to say where you are is not a reason to stop existing.
+  }
+}
+
+/** Read back an endpoint record, or null when there is none to read. */
+export function readGatewayEndpoint(file: string): GatewayEndpoint | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as GatewayEndpoint;
+    if (typeof parsed?.port !== 'number' || !Number.isFinite(parsed.port)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export interface GatewayLockOptions {  filePath?: string;
   pid?: number;
 }
 

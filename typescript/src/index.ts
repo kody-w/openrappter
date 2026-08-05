@@ -17,6 +17,7 @@ import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
 import { registerTwinCommands } from './twin/index.js';
 import { registerCronCommand } from './cli/cron.js';
+import { registerRappterCommand } from './cli/rappters.js';
 
 const execAsync = promisify(exec);
 
@@ -1163,7 +1164,7 @@ program
     if (options.daemon) {
       const webRoot = path.resolve(__dirname, '../ui/dist');
       const hasWebUI = fs.existsSync(path.join(webRoot, 'index.html'));
-      const { acquireLock, releaseLock, gatewayLockFileFor, gatewayPortFor } = await import('./infra/gateway-lock.js');
+      const { acquireLock, releaseLock, gatewayLockFileFor, gatewayPortFor, writeGatewayEndpoint } = await import('./infra/gateway-lock.js');
       // Scope the lock AND the port to THIS instance, so an alpha and its
       // hatched twins can run side by side on one device. The alpha resolves to
       // the original path and the original port, so an existing install is
@@ -1220,6 +1221,16 @@ program
         }
         console.log(`${EMOJI} ${NAME} gateway running on ws://127.0.0.1:${port}`);
         if (hasWebUI) console.log(`${EMOJI} Web UI: http://127.0.0.1:${port}`);
+        // Say where this rappter landed, so `openrappter twins` can find it
+        // again without re-deriving a port that an explicit --port may have
+        // overridden. Written only after a successful listen, so the record
+        // never describes a rappter that failed to start. #107
+        writeGatewayEndpoint({
+          ...(lockInstance ? { instance: lockInstance } : {}),
+          port,
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+        });
         // A hatched twin is only useful if someone can reach it, so it says
         // where it lives rather than leaving the owner to derive the port. #101
         if (lockInstance) {
@@ -2246,5 +2257,7 @@ registerTwinCommands(program);
 // message, which is why asking for `cron add --help` printed the top-level help
 // instead of an error.
 registerCronCommand(program);
+// Seeing and creating the rappters on this device. #107
+registerRappterCommand(program);
 
 program.parse();

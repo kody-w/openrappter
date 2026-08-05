@@ -143,7 +143,7 @@ export function registerTwinCommands(program: Command): void {
       to?: string; toInstance?: string; text: string; owner: string; as: string; toSlug: string;
     }) => {
       const { deviceRappid, sendTwin } = await import('./send.js');
-      const { gatewayPortFor } = await import('../infra/gateway-lock.js');
+      const { urlForInstance } = await import('../infra/roster.js');
 
       if (!opts.to && !opts.toInstance) {
         console.error('\n  Say it to whom? Pass --to <url> for any peer, or --to-instance <name> for a twin on this device.\n');
@@ -151,11 +151,12 @@ export function registerTwinCommands(program: Command): void {
         return;
       }
 
-      // A twin's address is derived from its name by the SAME function the
-      // gateway binds with, so the two halves of this cannot disagree about
-      // where a twin lives. Deriving it a second time here — even "obviously"
-      // correctly — is how a sender and a receiver drift apart. #101
-      const url = opts.to ?? `http://127.0.0.1:${gatewayPortFor({ instance: opts.toInstance })}`;
+      // Resolved the same way `openrappter twins` resolves it: the address the
+      // twin RECORDED, falling back to the one its name implies. Deriving here
+      // instead meant a twin hatched with an explicit --port could be SEEN by
+      // name and not SPOKEN to by name — `twins` found archivist on :19950
+      // while this tried :19591 and failed. #107
+      const url = opts.to ?? urlForInstance(opts.toInstance);
       // When a peer is named, that name IS its slug; defaulting to "peer" would
       // address a twin by a rappid it does not answer to.
       const peerSlug = opts.to ? opts.toSlug : opts.toInstance!;

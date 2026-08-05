@@ -23,8 +23,27 @@ concurrency:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
+    # "Not provisioned yet" and "provisioned and broken" are different facts and
+    # must not share a colour. Unset -> this job is SKIPPED, which GitHub shows
+    # as skipped rather than green: visibly not run, never falsely passing.
+    # Set -> it runs, and a missing token fails loudly below instead of dying on
+    # `gh: set the GH_TOKEN environment variable` with exit 4.
+    if: vars.RING_ENABLED == 'true'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Refuse to dispatch without the credential
+        env:
+          RING_DISPATCH_TOKEN: ${{ secrets.RING_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RING_DISPATCH_TOKEN}" ]; then
+            echo "::error::RING_ENABLED is true but RING_DISPATCH_TOKEN is not set." >&2
+            echo "Create a fine-grained PAT with contents:write on kody-w/openrappter-canary" >&2
+            echo "only, add it as the repository secret RING_DISPATCH_TOKEN, and re-run." >&2
+            exit 1
+          fi
+          echo "RING_DISPATCH_TOKEN present"
 
       - name: Record production latest so the ring can prove it did not move
         id: prod

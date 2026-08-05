@@ -60,6 +60,11 @@ export interface CheckResult {
   restarted: boolean;
   recovered: boolean;
   notified: boolean;
+  /**
+   * Why nobody was told, when `notified` is false. An operator who reads that
+   * an alert was not delivered can act on it; silence looks like success. #134
+   */
+  notifyError?: string;
   error?: string;
 }
 
@@ -332,17 +337,52 @@ export class SelfHealingCronAgent extends BasicAgent {
     }
 
     if (job.notifyChannel && job.conversationId) {
+      /**
+       * Believe the sender's answer, not the absence of an exception. — #134
+       *
+       * This used to be `await …execute(…); checkResult.notified = true;` in a
+       * try/catch. Agents in this codebase do not throw: `execute()` returns a
+       * JSON STRING, and `MessageAgent` reports every failure as
+       * `{"status":"error", …}` inside it. So an alert that was never sent —
+       * no channel configured, no token, the send refused — was recorded as
+       * delivered. Measured with fetch intercepted:
+       *
+       *     network_fetches=[]   reported_notified=true
+       *     alert=Service "probe" is DOWN — restart failed
+       *
+       * The whole point of the alert is that a human learns a service is down.
+       * `notified: true` when nothing was sent tells an operator the opposite
+       * of what happened, in the situation where they most need the truth.
+       */
       try {
-        await this.messageAgent.execute({
+        const raw = await this.messageAgent.execute({
           action: 'send',
           channelId: job.notifyChannel,
           conversationId: job.conversationId,
           content: alertMessage,
         });
-        checkResult.notified = true;
-      } catch {
-        // notification failed, still record the check
+        let reply: { status?: string; message?: string; error?: string } = {};
+        try {
+          reply = JSON.parse(raw) as typeof reply;
+        } catch {
+          // An unreadable answer is not a delivery receipt.
+          checkResult.notifyError = `sender returned an unreadable reply: ${String(raw).slice(0, 120)}`;
+        }
+        if (!checkResult.notifyError) {
+          if (reply.status === 'success') {
+            checkResult.notified = true;
+          } else {
+            checkResult.notifyError = reply.message
+              ?? reply.error
+              ?? `sender reported status "${reply.status ?? 'unknown'}"`;
+          }
+        }
+      } catch (error) {
+        checkResult.notifyError = (error as Error)?.message ?? 'notification threw';
       }
+    } else {
+      // Saying nobody was told is useful; saying nothing is not.
+      checkResult.notifyError = 'no notification channel is configured for this job';
     }
 
     this.pushCheckResult(name, checkResult);

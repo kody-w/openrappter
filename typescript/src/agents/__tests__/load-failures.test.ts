@@ -13,6 +13,7 @@ import os from 'os';
 import path from 'path';
 
 import { AgentRegistry } from '../AgentRegistry.js';
+import { logger, type LogEntry, type Transport } from '../../logging/logger.js';
 
 let dir = '';
 let registry: AgentRegistry;
@@ -43,6 +44,26 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+describe('the failure reaches an operator, not just an accessor', () => {
+  it('warns, the way the Python registry always has', async () => {
+    // getLoadFailures() only helps something that calls it, and nothing does.
+    const entries: LogEntry[] = [];
+    const capture: Transport = { write: (e) => entries.push(e) };
+    logger.addTransport(capture);
+    try {
+      await fs.writeFile(path.join(dir, 'broken_agent.py'), 'not python(\n');
+      await registry.reloadUserAgents();
+    } finally {
+      logger.removeTransport(capture);
+    }
+
+    const warning = entries.find((e) => e.level === 'warn' && e.component === 'agents');
+    expect(warning).toBeDefined();
+    expect(String(warning?.data?.file)).toContain('broken_agent.py');
+    expect(String(warning?.data?.reason).length).toBeGreaterThan(0);
+  });
 });
 
 describe('a file that cannot become an agent', () => {

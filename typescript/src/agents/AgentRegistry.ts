@@ -12,6 +12,7 @@ import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
 import type { AgentInfo } from './types.js';
+import { logger } from '../logging/logger.js';
 
 /**
  * Subdirectories a conforming kernel never auto-loads.
@@ -57,6 +58,8 @@ async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
   }
   return out;
 }
+
+const registryLog = logger.child('agents');
 
 export class AgentRegistry {
   private agentsDir: string;
@@ -196,7 +199,7 @@ export class AgentRegistry {
         if (!found.ok) {
           // A broken file is not a reason to fail the sweep, but it is a
           // reason to be able to say which file and why.
-          this.loadFailures.set(filePath, found.error);
+          this.noteLoadFailure(filePath, found.error);
           continue;
         }
         for (const descriptor of found.agents) {
@@ -215,7 +218,11 @@ export class AgentRegistry {
   }
 
   private noteLoadFailure(file: string, error: unknown): void {
-    this.loadFailures.set(file, error instanceof Error ? error.message : String(error));
+    const reason = error instanceof Error ? error.message : String(error);
+    this.loadFailures.set(file, reason);
+    // Recording it is not the same as anyone seeing it. The Python registry
+    // has always warned here; this is the half that reaches an operator.
+    registryLog.warn('Agent file failed to load', { file, reason });
   }
 
   /**

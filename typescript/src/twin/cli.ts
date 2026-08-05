@@ -122,6 +122,44 @@ export function registerTwinCommands(program: Command): void {
       }
     });
 
+  /**
+   * Speak to a peer. #100.
+   *
+   * Until this existed a rappter could be spoken to as a twin and could not
+   * speak — every member of the neighborhood could listen and none could
+   * initiate. The peer is addressed by base URL because that is what a twin on
+   * this device actually is: another instance on another port.
+   */
+  twin
+    .command('say')
+    .description('Say something to another rappter, brainstem or person over /twin')
+    .requiredOption('--to <url>', 'peer base URL, e.g. http://127.0.0.1:19901')
+    .requiredOption('--text <text>', 'what to say')
+    .option('--owner <owner>', 'owner handle for this device\'s rappid', 'kody-w')
+    .option('--as <slug>', 'which rappter is speaking', 'alpha')
+    .option('--to-slug <slug>', 'the peer\'s slug, for its rappid', 'peer')
+    .action(async (opts: {
+      to: string; text: string; owner: string; as: string; toSlug: string;
+    }) => {
+      const { deviceRappid, sendTwin } = await import('./send.js');
+      const from = deviceRappid(opts.owner, opts.as);
+      const to = deviceRappid(opts.owner, opts.toSlug);
+      console.log(`\n  ${opts.as} → ${opts.to}`);
+      try {
+        const out = await sendTwin({ to: opts.to, fromRappid: from, toRappid: to, text: opts.text });
+        if (out.status === 200 && out.said) {
+          console.log(`  ${opts.toSlug}: ${out.said}\n`);
+        } else {
+          // Never print a reply that was not one. A refusal is information.
+          console.log(`  peer answered ${out.status}: ${JSON.stringify(out.body).slice(0, 300)}\n`);
+          process.exitCode = 1;
+        }
+      } catch (e) {
+        console.log(`  could not reach ${opts.to}: ${(e as Error).message}\n`);
+        process.exitCode = 1;
+      }
+    });
+
   const set = twin.command('set').description('Set part of your twin');
 
   set

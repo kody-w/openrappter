@@ -24,7 +24,7 @@
  * Callers are expected to handle `undefined` by refusing, not by defaulting.
  */
 
-import { canonicalInstanceKey } from './gateway-lock.js';
+import { canonicalInstanceKey } from './instance-key.js';
 
 let current: string | undefined;
 let declared = false;

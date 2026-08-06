@@ -136,14 +136,11 @@ export function gatewayPortFor(options: {
  * A name that is ALREADY canonical maps to itself unchanged, which is what
  * keeps every existing twin on the port it has today.
  */
-export function canonicalInstanceKey(name: string): string {
-  const raw = name.trim();
-  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_');
-  if (/^\.+$/.test(cleaned) || cleaned === '') {
-    return `_${Buffer.from(raw).toString('hex')}`;
-  }
-  return cleaned;
-}
+// Re-exported, not reimplemented: it now lives in `instance-key.ts` so that
+// importing it does not drag this module's native `better-sqlite3` dependency
+// behind it. Every existing importer keeps working. #142
+export { canonicalInstanceKey } from './instance-key.js';
+import { canonicalInstanceKey } from './instance-key.js';
 
 export function gatewayLockFileFor(options: {
   instance?: string;

@@ -39,6 +39,7 @@ import {
   gatewayEndpointFileFor,
   gatewayLockFileFor,
   gatewayPortFor,
+  canonicalInstanceKey,
   readGatewayEndpoint,
   writeGatewayEndpoint,
 } from '../../infra/gateway-lock.js';
@@ -565,5 +566,67 @@ describe('a stale endpoint record is history, not an address', () => {
     // probe alone can see, as before.
     expect(row?.stalePort).toBeUndefined();
     expect(row?.running).toBe(await canNamePids());
+  });
+});
+
+/**
+ * One derivation of "which twin am I". — #142
+ *
+ * #131 taught the roster to believe the name a gateway reports on `/health`.
+ * That name was raw, while every name the roster expects is canonical, so any
+ * twin whose name contains a space (or `@`, or unicode) was judged an impostor
+ * by the check added to stop impostors being missed. Reproduced against a real
+ * gateway started with the documented flag:
+ *
+ *   /health           -> instance: "review demo twin"     (raw)
+ *   on disk           -> instances/review_demo_twin/…     (canonical)
+ *   record pid        == listening pid
+ *   openrappter twins -> ○ review_demo_twin  not running — another process
+ *                          now holds its last port
+ *
+ * The twin WAS the process holding that port. Same failure as #101, #111 and
+ * #118: two derivations of one fact drifting apart.
+ */
+describe('a twin is judged by the same name the roster calls it', () => {
+  it('does not call a live twin an impostor because its name needed escaping', async () => {
+    const home = isolatedHome();
+    withoutLsof();   // force the name route to be the only one that can speak
+    const raw = 'review demo twin';
+    // A real gateway publishes the RAW name it was started with.
+    const port = await gatewayServing({ instance: raw });
+    // The record lives under the CANONICAL name, because that is what
+    // `gatewayEndpointFileFor` derives.
+    const file = gatewayEndpointFileFor({ instance: raw });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: raw, port, pid: process.pid, startedAt: 'x',
+    }));
+
+    const rows = await listRappters({ names: [canonicalInstanceKey(raw)] });
+    const twin = rows.find((r) => r.name === canonicalInstanceKey(raw));
+
+    expect(twin?.running).toBe(true);
+    expect(twin?.stalePort).toBeUndefined();
+    expect(twin?.ownershipUnverified).toBeUndefined();
+  });
+
+  it('still unmasks a real impostor whose name needed escaping', async () => {
+    // The negative control: escaping must not become a way to be believed.
+    const home = isolatedHome();
+    withoutLsof();
+    const port = await gatewayServing({ instance: 'somebody else' });
+    const file = gatewayEndpointFileFor({ instance: 'review demo twin' });
+    expect(file.startsWith(home)).toBe(true);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({
+      instance: 'review demo twin', port, pid: process.pid, startedAt: 'x',
+    }));
+
+    const name = canonicalInstanceKey('review demo twin');
+    const row = (await listRappters({ names: [name] })).find((r) => r.name === name);
+
+    expect(row?.running).toBe(false);
+    expect(row?.stalePort).toBe(true);
   });
 });

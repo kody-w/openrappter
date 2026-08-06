@@ -24,15 +24,35 @@
  * Callers are expected to handle `undefined` by refusing, not by defaulting.
  */
 
+import { canonicalInstanceKey } from './gateway-lock.js';
+
 let current: string | undefined;
 let declared = false;
 
 /**
  * Record which rappter this process is serving as. `undefined` means the
  * alpha, which is a real answer — distinct from never having declared.
+ *
+ * The name is stored as the CANONICAL key, not as typed. #142
+ *
+ * It used to be stored raw, and #131 then taught the roster to believe the name
+ * a gateway reports on `/health`. Every name the roster expects is canonical,
+ * because that is what the instance directory and the lock are derived from —
+ * so a twin started as `--instance "review demo twin"` reported
+ * `"review demo twin"` while the roster looked for `review_demo_twin`, and the
+ * check written to catch impostors declared a live twin dead:
+ *
+ *   ○ review_demo_twin :19876  not running — another process now holds its
+ *                              last port
+ *
+ * The twin WAS the process holding that port. Canonicalising here rather than
+ * at each reader is the point: #101, #111 and #118 were all two derivations of
+ * one fact drifting apart, and a caller that must remember to convert is a
+ * second derivation waiting to happen.
  */
 export function declareCurrentInstance(instance: string | undefined): void {
-  current = instance && instance.trim() ? instance.trim() : undefined;
+  const named = instance && instance.trim() ? instance.trim() : undefined;
+  current = named === undefined ? undefined : canonicalInstanceKey(named);
   declared = true;
 }
 

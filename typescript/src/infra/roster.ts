@@ -30,6 +30,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
   ALPHA_GATEWAY_PORT,
+  canonicalInstanceKey,
   gatewayEndpointFileFor,
   gatewayPortFor,
   readGatewayEndpoint,
@@ -289,7 +290,22 @@ export async function listRappters(options: {
      * different rappter is an impostor whatever the record omits.
      */
     const recordedPid = instance === undefined ? undefined : recordFor(instance)?.pid;
-    const claimedName = typeof health?.instance === 'string' ? health.instance : undefined;
+    /**
+     * Compare names the roster's own way. #142
+     *
+     * `expectedName` is canonical — it comes from the instance directory, which
+     * `gatewayLockFileFor` derives through `canonicalInstanceKey`. `claimedName`
+     * arrives over HTTP from another process, which may be an older build that
+     * publishes the raw `--instance` string. Comparing them as typed made a
+     * live twin called "review demo twin" an impostor of `review_demo_twin`,
+     * and the check written to catch impostors reported it dead.
+     *
+     * Declaration canonicalises now (infra/current-instance), so a current
+     * gateway already agrees. This normalises the wire value as well, because a
+     * name that crossed a process boundary is input, not a fact.
+     */
+    const claimedRaw = typeof health?.instance === 'string' ? health.instance : undefined;
+    const claimedName = claimedRaw === undefined ? undefined : canonicalInstanceKey(claimedRaw);
     const expectedName = instance ?? 'alpha';
 
     const namedImpostor = claimedName !== undefined && claimedName !== expectedName;

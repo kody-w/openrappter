@@ -195,8 +195,8 @@ describe('Navigation consistency', () => {
 
 /* ── 5. Current release identity ── */
 describe('Current release identity', () => {
-  it('publishes the 1.10.0 Pages release', () => {
-    expect(CURRENT_VERSION).toBe('1.10.0');
+  it('publishes the 1.11.0 Pages release', () => {
+    expect(CURRENT_VERSION).toBe('1.11.0');
   });
 
   it('homepage badge derives from package metadata', () => {

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenRappter 1.11.0 Evolution Release Notes</title>
+  <meta name="description" content="Four autonomous consensus cycles transformed OpenRappter into a safer, observable, cross-runtime agent platform." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html { background: #09090b; scroll-behavior: smooth; }
+    body { background: #09090b; color: #fafafa; font-family: Inter, system-ui, sans-serif; }
+    .grid-bg {
+      background-image: radial-gradient(circle at 1px 1px, #27272a 1px, transparent 0);
+      background-size: 36px 36px;
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #10b981, #8b5cf6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .card {
+      border: 1px solid #27272a;
+      background: rgba(24, 24, 27, 0.72);
+      transition: border-color .2s ease, transform .2s ease;
+    }
+    .card:hover { border-color: rgba(16, 185, 129, .55); transform: translateY(-2px); }
+    code { font-family: "JetBrains Mono", monospace; }
+  </style>
+</head>
+<body class="antialiased">
+  <nav class="sticky top-0 z-50 border-b border-[#27272a] bg-[#09090b]/90 backdrop-blur-xl">
+    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+      <a href="index.html" class="flex items-center gap-2 font-bold">
+        <span class="text-2xl">🦖</span>
+        <span>openrappter</span>
+        <span class="rounded bg-[#10b981]/10 px-2 py-1 font-mono text-[10px] text-[#10b981]">v1.11.0</span>
+      </a>
+      <div class="flex items-center gap-5 text-sm text-[#a1a1aa]">
+        <a href="#why" class="hover:text-white">Why it matters</a>
+        <a href="#prompts" class="hover:text-white">10 prompts</a>
+        <a href="https://github.com/kody-w/openrappter" class="hover:text-white">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="grid-bg relative overflow-hidden border-b border-[#27272a]">
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(16,185,129,.16),transparent_45%)]"></div>
+    <div class="relative mx-auto max-w-5xl px-4 py-24 text-center">
+      <div class="mb-5 font-mono text-sm uppercase tracking-[.3em] text-[#10b981]">Evolution checkpoint · August 2026</div>
+      <h1 class="mb-7 text-5xl font-black leading-tight sm:text-7xl">
+        OpenRappter now pins <span class="gradient-text">the thing that thinks.</span>
+      </h1>
+      <p class="mx-auto max-w-3xl text-lg leading-8 text-[#a1a1aa]">
+        The GitHub Copilot CLI is no longer an ambient global that another tool can update
+        out from under a run. It ships with the commit, at a version the lockfile records,
+        with a digest that is checked again before it is allowed to answer.
+      </p>
+      <div class="mt-10 flex flex-wrap justify-center gap-3 font-mono text-xs">
+        <span class="rounded-full border border-[#10b981]/40 bg-[#10b981]/10 px-4 py-2 text-[#6ee7b7]">lockfile-pinned Copilot CLI</span>
+        <span class="rounded-full border border-[#8b5cf6]/40 bg-[#8b5cf6]/10 px-4 py-2 text-[#c4b5fd]">commit-pinned installs</span>
+        <span class="rounded-full border border-[#27272a] bg-[#18181b] px-4 py-2 text-[#d4d4d8]">re-verified on every run</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="mx-auto max-w-6xl px-4 py-20">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="card rounded-2xl p-6"><div class="text-2xl font-black text-[#10b981]">npm test</div><div class="mt-1 text-sm text-[#a1a1aa]">TypeScript validation</div></div>
+        <div class="card rounded-2xl p-6"><div class="text-2xl font-black text-[#10b981]">pytest</div><div class="mt-1 text-sm text-[#a1a1aa]">Python validation</div></div>
+        <div class="card rounded-2xl p-6"><div class="text-2xl font-black text-[#10b981]">RunTests</div><div class="mt-1 text-sm text-[#a1a1aa]">Native app validation</div></div>
+        <div class="card rounded-2xl p-6"><div class="text-2xl font-black text-[#10b981]">CI + smoke</div><div class="mt-1 text-sm text-[#a1a1aa]">Exact package installs</div></div>
+        <div class="card rounded-2xl p-6"><div class="text-2xl font-black text-[#10b981]">SHA-256</div><div class="mt-1 text-sm text-[#a1a1aa]">Artifact reconciliation</div></div>
+      </div>
+    </section>
+
+    <section id="why" class="border-y border-[#27272a] bg-[#111113]">
+      <div class="mx-auto max-w-6xl px-4 py-20">
+        <div class="mb-12 max-w-3xl">
+          <div class="mb-3 font-mono text-sm text-[#10b981]">WHY THIS RELEASE MATTERS</div>
+          <h2 class="text-4xl font-black">A pin nobody checks is only a claim about the past.</h2>
+        </div>
+        <div class="grid gap-5 md:grid-cols-2">
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">📌</div>
+            <h3 class="mb-2 text-xl font-bold">The Copilot CLI ships with the commit</h3>
+            <p class="text-[#a1a1aa]">OpenRappter reasons through the GitHub Copilot CLI. Until now it was found by searching machine-wide paths, so its version was decided by whoever last ran <code>copilot update</code>. It is now a lockfile-pinned dependency installed into the source tree by <code>npm ci</code>.</p>
+          </article>
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">🔍</div>
+            <h3 class="mb-2 text-xl font-bold">Resolution order is asserted, not incidental</h3>
+            <p class="text-[#a1a1aa]">An explicit operator override still wins, then the pinned copy, then the ambient globals. The order is covered by tests, because a resolver that merely <em>can</em> find the pinned binary while still letting a global win has changed nothing.</p>
+          </article>
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">🧾</div>
+            <h3 class="mb-2 text-xl font-bold">The digest is re-checked before reuse</h3>
+            <p class="text-[#a1a1aa]">The installer stamps the CLI's SHA-256 at build time and verifies it again before reusing an installation, so a binary substituted after install triggers a rebuild instead of being executed.</p>
+          </article>
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">🪪</div>
+            <h3 class="mb-2 text-xl font-bold">Status stopped misreporting</h3>
+            <p class="text-[#a1a1aa]"><code>--status</code> judged Copilot solely by <code>GITHUB_TOKEN</code>, so it reported Copilot unavailable while the gateway answered happily through the CLI backend, which carries its own credential. It now names the binary that will actually answer.</p>
+          </article>
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">🔗</div>
+            <h3 class="mb-2 text-xl font-bold">Releases are verifiable before execution</h3>
+            <p class="text-[#a1a1aa]">Installer digests are computed from the commit's git blob rather than the working tree, so a stale checkout or a local line-ending conversion cannot publish a hash for bytes that were never released.</p>
+          </article>
+          <article class="card rounded-2xl p-7">
+            <div class="mb-3 text-2xl">🤖</div>
+            <h3 class="mb-2 text-xl font-bold">Everything is drivable without the UI</h3>
+            <p class="text-[#a1a1aa]">One documented HTTP wire, JSON-RPC on the same port, and a headless CLI. A capability that can only be exercised by clicking is a capability that cannot be tested.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-4 py-20">
+      <div class="mb-12">
+        <div class="mb-3 font-mono text-sm text-[#8b5cf6]">WHAT CHANGED</div>
+        <h2 class="text-4xl font-black">Pin it, prove it, then let it answer.</h2>
+      </div>
+      <div class="grid gap-5 lg:grid-cols-4">
+        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">PIN</div><h3 class="my-3 text-lg font-bold">Local-repo dependency</h3><p class="text-sm text-[#a1a1aa]"><code>@github/copilot</code> is a lockfile dependency, resolved from this package&#39;s own <code>node_modules</code> rather than from PATH.</p></div>
+        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">ANCHOR</div><h3 class="my-3 text-lg font-bold">Resolved from the module</h3><p class="text-sm text-[#a1a1aa]">Anchored to the module&#39;s own location, not <code>process.cwd()</code> — the daemon is frequently started from somewhere else entirely.</p></div>
+        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">STAMP</div><h3 class="my-3 text-lg font-bold">Digest recorded</h3><p class="text-sm text-[#a1a1aa]">The installer writes the CLI&#39;s SHA-256 into the install and into <code>.rapp-install.json</code> provenance.</p></div>
+        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">VERIFY</div><h3 class="my-3 text-lg font-bold">Checked before reuse</h3><p class="text-sm text-[#a1a1aa]">A changed binary invalidates the install and forces a rebuild rather than being run.</p></div>
+      </div>
+    </section>
+
+    <section id="prompts" class="border-y border-[#27272a] bg-[#111113]">
+      <div class="mx-auto max-w-6xl px-4 py-20">
+        <div class="mb-12 max-w-3xl">
+          <div class="mb-3 font-mono text-sm text-[#10b981]">TRY THE POWER</div>
+          <h2 class="text-4xl font-black">10 prompts that make OpenRappter feel impossible.</h2>
+          <p class="mt-4 text-[#a1a1aa]">Paste one into your agent. Every prompt keeps mutations and external sends behind explicit approval.</p>
+        </div>
+        <div class="space-y-5">
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">1. The Autonomous CTO</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Audit this product through eight independent strategy lenses. Build a ranked consensus, implement the top three compatible improvements, validate every runtime, independently review the diff, and publish a release note explaining what changed and why. Checkpoint compact state after every phase.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">2. The Time-Travel Debugger</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Reproduce this intermittent bug, then fan out competing causal hypotheses across logs, traces, code history, race analysis, and protocol state. Build a timestamped execution narrative, eliminate hypotheses with experiments, fix the root cause, and add a regression test that fails if time ordering changes again.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">3. Build My Digital Twin</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Interview me to infer my priorities, working style, decision rules, recurring responsibilities, and communication preferences. Create a local soul, memory model, daily brief, and approval-gated automations. Show every inferred rule and let me accept, edit, or reject it before activation.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">4. The Zero-Downtime Self-Healer</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Turn this service into a self-healing system. Define health invariants, detect degraded states, trace the failure, attempt the safest repair, verify recovery, and escalate with evidence when repair fails. Simulate healthy, recoverable, and persistent-failure paths before enabling anything.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">5. Darwin's Agent Colosseum</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Create five radically different agents to solve this problem. Run them in parallel through hidden edge cases, have independent evaluators score correctness, safety, speed, and simplicity, evolve the weakest two, then synthesize a champion that preserves the best strategy from every contender.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">6. The Cross-Runtime Mirror Test</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Implement this capability independently in TypeScript and Python. Generate adversarial and property-based inputs, execute both runtimes in parallel, compare outputs, state transitions, errors, and performance, then resolve every semantic divergence without forcing one language into the other's idioms.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">7. The Local-First War Room</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Treat this incident description as a live war room. Inspect gateway health, active connections, traces, storage, channels, workers, and recent changes. Build a concise incident dashboard, identify blast radius, propose reversible mitigations, request approval for the safest one, execute it, and verify recovery.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">8. The Skill Forge</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Turn this plain-English capability into a single-file agent. Infer the minimal typed contract, generate deterministic implementation and tests, adversarially review its permissions and dependencies, quarantine it for inspection, request explicit approval, then hot-load it and demonstrate a real end-to-end call.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">9. My Personal Operations Command Center</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Using only my local memory, approved files, sessions, and connected channels, design a command center that produces a morning brief, identifies blocked work, drafts follow-ups, schedules recurring checks, and learns which signals I ignore. Never send or mutate externally without approval.</code></article>
+          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">10. The Ship of Theseus Refactor</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Modernize this application one subsystem at a time while keeping every observable behavior stable. Build contract tests first, replace internals behind compatibility boundaries, continuously compare old and new paths, visualize migration progress, and delete the legacy path only when parity is proven.</code></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-5xl px-4 py-20 text-center">
+      <h2 class="text-4xl font-black">The raptor now knows which brain it is using.</h2>
+      <p class="mx-auto mt-5 max-w-2xl text-lg text-[#a1a1aa]">Same commit, same lockfile, same binary, on every machine — and it says so out loud when it is not.</p>
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        <a href="docs.html" class="rounded-xl bg-[#10b981] px-6 py-3 font-bold text-[#09090b] hover:bg-[#059669]">Read the docs</a>
+        <a href="https://github.com/kody-w/openrappter" class="rounded-xl border border-[#3f3f46] px-6 py-3 font-semibold hover:border-[#10b981]">View the code</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-[#27272a] py-10 text-center text-sm text-[#71717a]">
+    <p>OpenRappter 1.11.0 · Local-first · MIT licensed · Built to evolve</p>
+  </footer>
+</body>
+</html>

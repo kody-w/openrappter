@@ -1,7 +1,7 @@
 {
   "name": "openrappter",
-  "version": "1.10.0",
-  "description": "\ud83e\udd96 Local-first AI agent powered by GitHub Copilot SDK \u2014 no API keys required",
+  "version": "1.11.0",
+  "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -59,6 +59,7 @@
   ],
   "dependencies": {
     "@clack/prompts": "^0.7.0",
+    "@github/copilot": "1.0.71",
     "@types/sharp": "^0.31.1",
     "@types/ws": "^8.18.1",
     "better-sqlite3": "^12.6.2",

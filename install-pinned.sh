@@ -163,6 +163,7 @@ LICENSE
 typescript/package.json
 typescript/package-lock.json
 typescript/dist/index.js
+typescript/dist/providers/copilot-cli-local.js
 "
 check_required_files() {
   local d="$1" rel
@@ -172,6 +173,41 @@ check_required_files() {
   done <<EOF
 $REQUIRED_FILES
 EOF
+}
+
+# ── The GitHub Copilot CLI is part of the pin ────────────────────────────────
+#
+# OpenRappter reasons through the Copilot CLI, so an install that pins the
+# source but leaves the CLI ambient has not pinned the thing that actually
+# decides the answers. `@github/copilot` is a lockfile dependency, so `npm ci`
+# already places it here; what remains is to record which bytes arrived and to
+# refuse them later if they change.
+copilot_binary() {
+  printf '%s\n' "$1/typescript/node_modules/@github/copilot-${PLATFORM}-${ARCH}/copilot"
+}
+
+# The stamp lives beside the package because that is where the runtime looks:
+# `packageRoot()` in copilot-cli-local.ts resolves to typescript/.
+copilot_stamp() { printf '%s\n' "$1/typescript/.openrappter-copilot-sha256"; }
+
+stamp_copilot_cli() {
+  local d="$1" binary
+  binary="$(copilot_binary "$d")"
+  [ -x "$binary" ] ||
+    die "The pinned GitHub Copilot CLI did not install for ${PLATFORM}-${ARCH}."
+  sha256_file "$binary" > "$(copilot_stamp "$d")"
+}
+
+# Re-checked on every run, not only at build time. A pin verified once is a
+# claim about the past; this makes it a claim about the binary about to run.
+verify_copilot_cli() {
+  local d="$1" binary expected
+  binary="$(copilot_binary "$d")"
+  expected="$(cat "$(copilot_stamp "$d")" 2>/dev/null || true)"
+  [ -n "$expected" ] || return 1
+  [ -x "$binary" ] || return 1
+  [ "$expected" = "$(sha256_file "$binary")" ] || return 1
+  return 0
 }
 
 # ── 3.5 Re-verify an existing install before reusing it ──────────────────────
@@ -184,6 +220,10 @@ validate_existing_install() {
   lock_expected="$("$NODE" -p "JSON.parse(require('fs').readFileSync('$record','utf8')).lockfile_sha256" 2>/dev/null || true)"
   lock_actual="$(sha256_file "$d/typescript/package-lock.json" 2>/dev/null || true)"
   [ -n "$lock_expected" ] && [ "$lock_expected" = "$lock_actual" ] || return 1
+  # A changed Copilot CLI invalidates the reuse just as a changed lockfile does.
+  # Returning 1 rebuilds from source rather than running a binary nobody vouched
+  # for — the failure mode this guards against is a substitution after install.
+  verify_copilot_cli "$d" || return 1
   check_required_files "$d"
   return 0
 }
@@ -207,6 +247,7 @@ build_from_source() {
   ( cd "$extracted/typescript" && npm run build >/dev/null ) \
     || die "Build failed for commit $COMMIT."
 
+  stamp_copilot_cli "$extracted"
   check_required_files "$extracted"
   rm -rf -- "$SOURCE_DIR"
   mkdir -p "$(dirname "$SOURCE_DIR")"
@@ -236,7 +277,12 @@ write_provenance() {
     "archive_sha256": "$(cat "$RUNTIME_DIR/.archive-sha256")",
     "binary_sha256": "$(cat "$RUNTIME_DIR/.node-sha256")"
   },
-  "lockfile_sha256": "$(sha256_file "$d/typescript/package-lock.json")"
+  "lockfile_sha256": "$(sha256_file "$d/typescript/package-lock.json")",
+  "copilot_cli": {
+    "package": "@github/copilot-${PLATFORM}-${ARCH}",
+    "path": "$(copilot_binary "$d")",
+    "sha256": "$(cat "$(copilot_stamp "$d")")"
+  }
 }
 JSON
 }
@@ -262,4 +308,6 @@ chmod +x "$INSTALL_ROOT/bin/openrappter"
 
 info "Installed $REPO@${COMMIT:0:12} (${PLATFORM}-${ARCH}, node $NODE_VERSION)."
 info "Launcher: $INSTALL_ROOT/bin/openrappter"
+info "Copilot CLI: $(copilot_binary "$SOURCE_DIR")"
+info "Copilot CLI sha256: $(cat "$(copilot_stamp "$SOURCE_DIR")")"
 info "Uninstall: rm -rf \"$INSTALL_ROOT\""

@@ -17,6 +17,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './types.js';
 import { writeMcpBridgeConfig, toolArgsFor, copilotHomeDir, type McpBridgeConfig } from './copilot-cli-mcp.js';
+import { resolveLocalCopilotCliPath } from './copilot-cli-local.js';
 import { invocationsSince } from '../agents/invocation-journal.js';
 
 const execFileAsync = promisify(execFile);
@@ -132,6 +133,14 @@ export class CopilotCliDirectProvider implements LLMProvider {
    * and an ordering that only exists inside a loop over the real filesystem
    * cannot be asserted on.
    *
+   * The FIRST entry is this repository's own lockfile-pinned copy. It leads
+   * because it is the binary that shipped with this commit, at a version the
+   * lockfile records, from its publisher — whereas everything below it is an
+   * ambient global whose version is decided by someone else's `copilot update`.
+   * Preferring the pin is what stops two machines on the same openrappter
+   * commit from silently running different CLIs. It is a preference and not a
+   * requirement: a checkout that never ran `npm ci` simply falls through.
+   *
    * The VS Code entry is not the CLI. It is a 300-byte shim that runs VS Code's
    * Electron helper, which then shells `copilot --version` to locate the real
    * binary — so preferring it takes a hard dependency on VS Code being installed
@@ -139,7 +148,9 @@ export class CopilotCliDirectProvider implements LLMProvider {
    * resort for machines where Copilot CLI only ever arrived through VS Code.
    */
   static candidatePaths(home: string = homedir()): string[] {
+    const pinned = resolveLocalCopilotCliPath();
     return [
+      ...(pinned ? [pinned] : []),
       '/opt/homebrew/bin/copilot',
       '/usr/local/bin/copilot',
       join(home, '.local/bin/copilot'),

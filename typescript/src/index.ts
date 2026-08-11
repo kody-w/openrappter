@@ -2166,6 +2166,8 @@ async function statusCommand(): Promise<void> {
   const config = await loadConfig();
   const agents = await registry.listAgents();
   const env = await loadEnv();
+  const { resolveLocalCopilotCli } = await import('./providers/copilot-cli-local.js');
+  const { CopilotCliDirectProvider } = await import('./providers/copilot-cli-direct.js');
 
   const hasTelegram = !!(env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
 
@@ -2173,6 +2175,24 @@ async function statusCommand(): Promise<void> {
   console.log(`  Version:  ${VERSION}`);
   console.log(`  Home:     ${HOME_DIR}`);
   console.log(`  Copilot:  ${copilotOk ? chalk.green('✅ Available (direct API)') : chalk.yellow('❌ No GitHub token — run: openrappter onboard')}`);
+  // The CLI backend carries its own credential, so a missing GITHUB_TOKEN does
+  // not mean this install cannot think. Reporting only the token left `--status`
+  // saying Copilot was unavailable while the gateway was answering happily
+  // through the pinned CLI — the one line an operator checks, disagreeing with
+  // the running system.
+  {
+    const pinned = resolveLocalCopilotCli();
+    if (pinned.path) {
+      const version = pinned.version ? ` v${pinned.version}` : '';
+      console.log(`  CLI:      ${chalk.green(`✅ Pinned in this install${version}`)}`);
+      console.log(`  ${chalk.dim(pinned.path)}`);
+    } else {
+      const ambient = CopilotCliDirectProvider.findCLI();
+      console.log(`  CLI:      ${ambient
+        ? chalk.yellow(`⚠  Ambient (unpinned): ${ambient}`)
+        : chalk.yellow('❌ Not found')}`);
+    }
+  }
   console.log(`  Telegram: ${hasTelegram ? chalk.green('✅ Connected') : chalk.dim('⬚  Not configured')}`);
   console.log(`  Setup:    ${config.setupComplete ? chalk.green('✅ Complete') : chalk.yellow('Not run — try: openrappter onboard')}`);
   console.log(`  Agents:   ${agents.length} loaded`);

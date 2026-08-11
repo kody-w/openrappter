@@ -29,6 +29,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CopilotCliDirectProvider, resolveSpawnPath } from '../copilot-cli-direct.js';
+import { resolveLocalCopilotCliPath } from '../copilot-cli-local.js';
 
 describe('resolveSpawnPath', () => {
   it('adds Homebrew when the inherited PATH is launchd-thin', () => {
@@ -65,7 +66,28 @@ describe('findCLI ordering', () => {
     expect(shim, 'the VS Code shim must be present as a fallback').toBeGreaterThan(-1);
     expect(shim, 'the shim must be last — it depends on the real CLI being on PATH')
       .toBe(order.length - 1);
-    expect(order[0]).toBe('/opt/homebrew/bin/copilot');
+    // Homebrew leads the AMBIENT globals, but it no longer leads the list: this
+    // repository's lockfile-pinned copy outranks every global when one exists.
+    // Asserting a relative position rather than index 0 keeps the guard true on
+    // a checkout that has not run `npm ci` and therefore has no pinned copy.
+    const homebrew = order.indexOf('/opt/homebrew/bin/copilot');
+    expect(homebrew, 'homebrew must still be a candidate').toBeGreaterThan(-1);
+    const globals = order.filter((p) => !p.includes('node_modules'));
+    expect(globals[0]).toBe('/opt/homebrew/bin/copilot');
+  });
+
+  it('prefers this repository\'s pinned CLI over any ambient global', () => {
+    // The point of the local-repo pattern: the binary that answers is the one
+    // the lockfile records, not the one another tool last updated.
+    const pinned = resolveLocalCopilotCliPath();
+    const order = CopilotCliDirectProvider.candidatePaths('/Users/x');
+    if (pinned) {
+      expect(order[0]).toBe(pinned);
+      expect(order.indexOf('/opt/homebrew/bin/copilot')).toBeGreaterThan(0);
+    } else {
+      // No pinned copy installed — the globals must still be reachable.
+      expect(order[0]).toBe('/opt/homebrew/bin/copilot');
+    }
   });
 
   it('honours an explicit override first', () => {

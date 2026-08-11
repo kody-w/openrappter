@@ -11,6 +11,7 @@ import {
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { writeMcpBridgeConfig, toolArgsFor, type McpBridgeConfig } from './copilot-cli-mcp.js';
+import { resolveLocalCopilotCliPath } from './copilot-cli-local.js';
 import type {
   ChatOptions,
   LLMProvider,
@@ -417,6 +418,11 @@ export class CopilotCliProvider implements LLMProvider {
     this.executable =
       options.executable?.trim()
       || this.sourceEnv.COPILOT_CLI_PATH?.trim()
+      // This repository's lockfile-pinned copy, before the bare name. Falling
+      // straight through to `'copilot'` delegated the single most important
+      // dependency in the product to whatever PATH happened to resolve — an
+      // unpinned global that another tool can update out from under a run.
+      || resolveLocalCopilotCliPath()
       || 'copilot';
     this.copilotHome =
       options.copilotHome?.trim()

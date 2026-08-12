@@ -448,7 +448,17 @@ test('macOS workflow validates the tag before checkout and never injects output 
     '^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-bar$',
   ));
   assert.doesNotMatch(workflow, /run:\s*VERSION=\$\{\{/);
-  assert.match(workflow, /VERSION="\$RELEASE_VERSION" bash scripts\/build-mac-app\.sh/);
+  // The guarded property is that the build reads the version from the quoted
+  // RELEASE_VERSION env var rather than an inlined ${{ }} expansion. It is not
+  // that the assignment and the command share a line: signing added
+  // REQUIRE_SIGNING and CODESIGN_IDENTITY as backslash-continued env prefixes,
+  // which broke this match and failed every Release run while the injection
+  // guard above still held. Cross newlines only through explicit `\`
+  // continuations, so this cannot drift into matching an unrelated block.
+  assert.match(
+    workflow,
+    /VERSION="\$RELEASE_VERSION"[^\n]*(?:\\\n[^\n]*)*bash scripts\/build-mac-app\.sh/,
+  );
 });
 
 test('registry publication reconciles exact artifacts and selects an explicit npm tag', () => {

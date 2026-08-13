@@ -87,7 +87,7 @@ jobs:
         working-directory: typescript
         run: |
           npx vitest run src/flight-recorder/windows-storage.test.ts
-          npm run build --silent
+          npm run build
 
       - name: Validate Python Windows storage
         working-directory: python

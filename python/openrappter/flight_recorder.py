@@ -605,22 +605,29 @@ try {
   exit 1
 }
 """
-        subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                command,
-            ],
-            check=True,
-            capture_output=True,
-            env={
-                **os.environ,
-                "HF_TARGET": str(directory),
-                "HF_USER": user,
-            },
-        )
+        try:
+            subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    command,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "HF_TARGET": str(directory),
+                    "HF_USER": user,
+                },
+            )
+        except subprocess.CalledProcessError as exc:
+            raise FlightRecorderError(
+                (exc.stderr or "").strip()
+                or "Flight Recorder ACL validation failed."
+            ) from exc
         return
     status = directory.lstat()
     if (

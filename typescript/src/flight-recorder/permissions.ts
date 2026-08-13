@@ -25,6 +25,9 @@ export function hardenPrivatePath(
   const securityType = directory
     ? "System.Security.AccessControl.DirectorySecurity"
     : "System.Security.AccessControl.FileSecurity";
+  const ioType = directory
+    ? "System.IO.DirectoryInfo"
+    : "System.IO.FileInfo";
   const inheritance = directory
     ? "[System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'"
     : "[System.Security.AccessControl.InheritanceFlags]::None";
@@ -38,9 +41,10 @@ try {
   $acl.SetAccessRuleProtection($true, $false)
   $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', ${inheritance}, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
   $acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $env:HF_TARGET -AclObject $acl -ErrorAction Stop
+  $item = New-Object ${ioType}($env:HF_TARGET)
+  $item.SetAccessControl($acl)
 
-  $actual = Get-Acl -LiteralPath $env:HF_TARGET -ErrorAction Stop
+  $actual = $item.GetAccessControl()
   $ownerSid = $actual.GetOwner([System.Security.Principal.SecurityIdentifier])
   $rules = @($actual.Access)
   $allowedOwners = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544')
@@ -107,7 +111,8 @@ try {
     [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
     [System.Security.AccessControl.FileSystemRights]::TakeOwnership
   )
-  $acl = Get-Acl -LiteralPath $env:HF_TARGET -ErrorAction Stop
+  $item = New-Object System.IO.DirectoryInfo($env:HF_TARGET)
+  $acl = $item.GetAccessControl()
   $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
   if ($allowed -notcontains $ownerSid.Value) {
     throw "Flight Recorder storage parent has untrusted owner $($ownerSid.Value)."

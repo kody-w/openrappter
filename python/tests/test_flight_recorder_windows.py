@@ -20,7 +20,10 @@ def _read_acl(target: Path):
             "-NonInteractive",
             "-Command",
             (
-                "$acl = Get-Acl -LiteralPath $env:HF_TARGET; "
+                "$item = if ([System.IO.Directory]::Exists($env:HF_TARGET)) "
+                "{ New-Object System.IO.DirectoryInfo($env:HF_TARGET) } "
+                "else { New-Object System.IO.FileInfo($env:HF_TARGET) }; "
+                "$acl = $item.GetAccessControl(); "
                 "[pscustomobject]@{ Protected = $acl.AreAccessRulesProtected; "
                 "Owner = $acl.Owner; "
                 "Access = @($acl.Access | ForEach-Object { "

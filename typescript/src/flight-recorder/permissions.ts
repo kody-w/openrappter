@@ -43,7 +43,8 @@ try {
   $actual = Get-Acl -LiteralPath $env:HF_TARGET -ErrorAction Stop
   $ownerSid = $actual.GetOwner([System.Security.Principal.SecurityIdentifier])
   $rules = @($actual.Access)
-  if (-not $actual.AreAccessRulesProtected -or $ownerSid.Value -ne $sid.Value -or $rules.Count -ne 1) {
+  $allowedOwners = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544')
+  if (-not $actual.AreAccessRulesProtected -or $allowedOwners -notcontains $ownerSid.Value -or $rules.Count -ne 1) {
     throw 'Flight Recorder ACL verification failed.'
   }
   $ruleSid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])

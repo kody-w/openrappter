@@ -48,7 +48,9 @@ def test_windows_private_storage_initializes(tmp_path: Path):
     recorder = FlightRecorder(enabled=True, database_path=database)
     try:
         recorder.initialize()
-        assert recorder.health()["initialized"] is True, recorder.health()
+        assert recorder.health()["initialized"] is True, (
+            recorder.health().get("lastError")
+        )
         recorder.run_trace({"traceId": "windows-storage"}, lambda: None)
         assert database.exists()
         assert Path(f"{database}.identity-key").exists()
@@ -89,7 +91,9 @@ def test_windows_reopen_materializes_private_sidecars(tmp_path: Path):
     database = directory / "flight.db"
     first = FlightRecorder(enabled=True, database_path=database)
     first.initialize()
-    assert first.health()["initialized"] is True, first.health()
+    assert first.health()["initialized"] is True, (
+        first.health().get("lastError")
+    )
     first.close()
     Path(f"{database}-wal").unlink(missing_ok=True)
     Path(f"{database}-shm").unlink(missing_ok=True)
@@ -97,7 +101,9 @@ def test_windows_reopen_materializes_private_sidecars(tmp_path: Path):
     second = FlightRecorder(enabled=True, database_path=database)
     try:
         second.initialize()
-        assert second.health()["initialized"] is True, second.health()
+        assert second.health()["initialized"] is True, (
+            second.health().get("lastError")
+        )
         for target in (
             Path(f"{database}-wal"),
             Path(f"{database}-shm"),

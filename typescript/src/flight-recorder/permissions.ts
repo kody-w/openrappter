@@ -61,7 +61,8 @@ try {
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", command],
     {
-      stdio: "ignore",
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       env: { ...process.env, HF_TARGET: target, HF_USER: user },
     },

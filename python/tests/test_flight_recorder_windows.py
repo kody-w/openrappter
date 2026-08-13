@@ -7,6 +7,7 @@ import pytest
 
 from openrappter.flight_recorder import (
     FlightRecorder,
+    _harden_private_path,
     _process_is_alive,
 )
 
@@ -37,7 +38,10 @@ def _read_acl(target: Path):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows-only ACL coverage")
 def test_windows_private_storage_initializes(tmp_path: Path):
-    database = tmp_path / "flight.db"
+    directory = tmp_path / "private"
+    directory.mkdir()
+    _harden_private_path(directory, directory=True)
+    database = directory / "flight.db"
     recorder = FlightRecorder(enabled=True, database_path=database)
     try:
         recorder.initialize()
@@ -75,7 +79,10 @@ def test_windows_private_storage_initializes(tmp_path: Path):
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows-only ACL coverage")
 def test_windows_reopen_materializes_private_sidecars(tmp_path: Path):
-    database = tmp_path / "flight.db"
+    directory = tmp_path / "private-reopen"
+    directory.mkdir()
+    _harden_private_path(directory, directory=True)
+    database = directory / "flight.db"
     first = FlightRecorder(enabled=True, database_path=database)
     first.initialize()
     first.close()

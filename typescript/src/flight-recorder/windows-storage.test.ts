@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FlightRecorder } from "./recorder.js";
+import { hardenPrivatePath } from "./permissions.js";
 
 interface AclSummary {
   Protected: boolean;
@@ -42,6 +43,7 @@ describe.skipIf(process.platform !== "win32")(
       const directory = mkdtempSync(
         path.join(os.tmpdir(), "openrappter-flight-win-"),
       );
+      hardenPrivatePath(directory, true);
       const databasePath = path.join(directory, "flight.db");
       const recorder = new FlightRecorder({ enabled: true, databasePath });
       try {
@@ -78,6 +80,7 @@ describe.skipIf(process.platform !== "win32")(
       const directory = mkdtempSync(
         path.join(os.tmpdir(), "openrappter-flight-win-reopen-"),
       );
+      hardenPrivatePath(directory, true);
       const databasePath = path.join(directory, "flight.db");
       const first = new FlightRecorder({ enabled: true, databasePath });
       await first.initialize();

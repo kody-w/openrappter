@@ -99,7 +99,7 @@ $ErrorActionPreference = 'Stop'
 try {
   $identity = New-Object System.Security.Principal.NTAccount($env:HF_USER)
   $sid = $identity.Translate([System.Security.Principal.SecurityIdentifier])
-  $allowed = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544')
+  $allowed = @($sid.Value, 'S-1-3-4', 'S-1-5-18', 'S-1-5-32-544')
   $writeRights = (
     [System.Security.AccessControl.FileSystemRights]::Write -bor
     [System.Security.AccessControl.FileSystemRights]::Modify -bor

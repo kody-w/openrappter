@@ -270,14 +270,14 @@ describe("flight recorder redaction", () => {
       uri: ["postgresql://user", "pw@example.test/app"].join(":"),
       connection: ["Server=db;", "Password=hunter2;", "Database=app"].join(""),
       pem: [
-        "-----BEGIN PRIVATE KEY-----",
+        ["-----BEGIN", " PRIVATE KEY-----"].join(""),
         "ZmFrZS1ub3QtYS1yZWFsLWtleQ==",
-        "-----END PRIVATE KEY-----",
+        ["-----END", " PRIVATE KEY-----"].join(""),
       ].join("\n"),
       dsa: [
-        "-----BEGIN DSA PRIVATE KEY-----",
+        ["-----BEGIN DSA", " PRIVATE KEY-----"].join(""),
         "ZmFrZS1kc2Eta2V5",
-        "-----END DSA PRIVATE KEY-----",
+        ["-----END DSA", " PRIVATE KEY-----"].join(""),
       ].join("\n"),
       passwordOnlyUrl: "redis://:supersecret@host/0",
     };

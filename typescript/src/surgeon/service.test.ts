@@ -8,6 +8,11 @@ import type {
   Message,
   ProviderResponse,
 } from '../providers/types.js';
+import {
+  FlightRecorder,
+  setFlightRecorder,
+} from '../flight-recorder/recorder.js';
+import type { FlightEvent } from '../flight-recorder/types.js';
 import { SurgeonService } from './service.js';
 import type { SurgeonPatientSnapshot } from './types.js';
 
@@ -221,16 +226,33 @@ describe('SurgeonService', () => {
     });
     expect(approved.status).toBe('approved');
 
-    const recovered = await service.operate({
-      caseId: consultationResult.case.id,
-      procedureId: procedure!.id,
-      digest: procedure!.digest,
-    });
+    const recorder = new FlightRecorder({ enabled: true, inMemory: true });
+    await recorder.initialize();
+    const previous = setFlightRecorder(recorder);
+    let recovered: Awaited<ReturnType<SurgeonService['operate']>>;
+    let operationEvents: FlightEvent[] = [];
+    try {
+      recovered = await service.operate({
+        caseId: consultationResult.case.id,
+        procedureId: procedure!.id,
+        digest: procedure!.digest,
+      });
+      operationEvents = await recorder.query();
+    } finally {
+      setFlightRecorder(previous);
+      await recorder.close();
+    }
 
     expect(executeProcedure).toHaveBeenCalledOnce();
     expect(recovered.status).toBe('recovered');
     expect(recovered.outcome?.status).toBe('recovered');
     expect(recovered.outcome?.evidence).toContain('Shell agent completed the bounded repair');
+    expect(new Set(operationEvents.map(event => event.traceId)).size).toBe(1);
+    expect(operationEvents.map(event => event.kind)).toContain(
+      'provider.attempt.completed',
+    );
+    expect(operationEvents[0].kind).toBe('trace.started');
+    expect(operationEvents.at(-1)?.kind).toBe('trace.completed');
   });
 
   it('never reports recovery when no OpenRappter tool actually ran', async () => {
@@ -476,12 +498,29 @@ describe('SurgeonService', () => {
       inspectPatient: async () => patient(),
     });
 
-    const result = await service.consult({ userInput: 'Inspect the patient.' });
+    const recorder = new FlightRecorder({ enabled: true, inMemory: true });
+    await recorder.initialize();
+    const previous = setFlightRecorder(recorder);
+    let result;
+    let events: FlightEvent[] = [];
+    try {
+      result = await service.consult({ userInput: 'Inspect the patient.' });
+      events = await recorder.query();
+    } finally {
+      setFlightRecorder(previous);
+      await recorder.close();
+    }
 
     expect(result.case.status).toBe('needs_attention');
     expect(result.turn.kind).toBe('error');
     expect(result.turn.response).toMatch(/could not be validated/i);
     expect(result.turn.options[0].value).toContain('try the examination again');
     expect(provider.messages).toHaveLength(2);
+    expect(new Set(events.map(event => event.traceId)).size).toBe(1);
+    expect(
+      events.filter(event => event.kind === 'provider.attempt.completed'),
+    ).toHaveLength(2);
+    expect(events[0].kind).toBe('trace.started');
+    expect(events.at(-1)?.kind).toBe('trace.completed');
   });
 });

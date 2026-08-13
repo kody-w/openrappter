@@ -8,6 +8,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { McpServer, createMcpServer } from '../../mcp/server.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata } from '../../agents/types.js';
+import { PassThrough } from 'node:stream';
+import { vi } from 'vitest';
 
 // ── Test helpers ──
 
@@ -96,6 +98,36 @@ describe('McpServer', () => {
     it('should create a server with defaults', () => {
       const s = new McpServer();
       expect(s.toolCount).toBe(0);
+    });
+
+    it('drains in-flight requests before EOF resolves serve()', async () => {
+      let completed = false;
+      const drainingServer = createMcpServer({
+        executeAgent: async (_name, _args, operation) => {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          const result = await operation();
+          completed = true;
+          return result;
+        },
+      });
+      drainingServer.registerAgent(new EchoAgent());
+      const input = new PassThrough();
+      const write = vi
+        .spyOn(process.stdout, 'write')
+        .mockImplementation(() => true);
+      try {
+        const serving = drainingServer.serve(input);
+        input.end(`${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'Echo', arguments: { query: 'slow' } },
+        })}\n`);
+        await serving;
+        expect(completed).toBe(true);
+      } finally {
+        write.mockRestore();
+      }
     });
 
     it('should create via factory function', () => {

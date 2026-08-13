@@ -1,25 +1,39 @@
-import chalk from 'chalk';
-import { AgentRegistry, BasicAgent } from './agents/index.js';
-import { hasCopilotAvailable, resolveGithubToken } from './copilot-check.js';
-import { deviceCodeLogin } from './providers/copilot-auth.js';
-import { saveEnv, loadEnv } from './env.js';
+import chalk from "chalk";
+import { AgentRegistry, BasicAgent } from "./agents/index.js";
+import { hasCopilotAvailable, resolveGithubToken } from "./copilot-check.js";
+import { deviceCodeLogin } from "./providers/copilot-auth.js";
+import { saveEnv, loadEnv } from "./env.js";
+import {
+  ensureFlightRecorderFromEnv,
+  getFlightRecorder,
+} from "./flight-recorder/index.js";
+import {
+  sanitizeFlightValue,
+  summarizeFlightError,
+} from "./flight-recorder/redaction.js";
+import { agentResultIsError } from "./agents/result-status.js";
 
-const NAME = 'openrappter';
-const EMOJI = '🦖';
+const NAME = "openrappter";
+const EMOJI = "🦖";
 
 /** Singleton CopilotProvider for quick chat (non-daemon mode) */
-let _chatProvider: import('./providers/copilot.js').CopilotProvider | null = null;
+let _chatProvider: import("./providers/copilot.js").CopilotProvider | null =
+  null;
 
 /** Reset the cached chat provider (e.g. after re-auth) */
 export function resetChatProvider(): void {
   _chatProvider = null;
 }
 
-export async function getChatProvider(): Promise<import('./providers/copilot.js').CopilotProvider> {
+export async function getChatProvider(): Promise<
+  import("./providers/copilot.js").CopilotProvider
+> {
   if (!_chatProvider) {
-    const { CopilotProvider } = await import('./providers/copilot.js');
+    const { CopilotProvider } = await import("./providers/copilot.js");
     const token = await resolveGithubToken();
-    _chatProvider = new CopilotProvider(token ? { githubToken: token } : undefined);
+    _chatProvider = new CopilotProvider(
+      token ? { githubToken: token } : undefined,
+    );
   }
   return _chatProvider;
 }
@@ -29,15 +43,24 @@ export async function getChatProvider(): Promise<import('./providers/copilot.js'
  */
 async function inlineAuth(): Promise<string | null> {
   try {
-    console.log(chalk.yellow('\nNo GitHub token found. Let\'s fix that now...\n'));
+    console.log(
+      chalk.yellow("\nNo GitHub token found. Let's fix that now...\n"),
+    );
     const token = await deviceCodeLogin((code, url) => {
       console.log(chalk.bold(`  Open: ${url}`));
       console.log(chalk.bold(`  Code: ${code}\n`));
       // Try to open browser
-      import('child_process').then(cp => {
-        const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-        cp.exec(`${cmd} ${url}`);
-      }).catch(() => {});
+      import("child_process")
+        .then((cp) => {
+          const cmd =
+            process.platform === "darwin"
+              ? "open"
+              : process.platform === "win32"
+                ? "start"
+                : "xdg-open";
+          cp.exec(`${cmd} ${url}`);
+        })
+        .catch(() => {});
     });
     // Persist the token
     const env = await loadEnv();
@@ -45,15 +68,33 @@ async function inlineAuth(): Promise<string | null> {
     await saveEnv(env);
     process.env.GITHUB_TOKEN = token;
     resetChatProvider();
-    console.log(chalk.green('  Authenticated successfully!\n'));
+    console.log(chalk.green("  Authenticated successfully!\n"));
     return token;
   } catch (err) {
-    console.error(chalk.red(`  Authentication failed: ${(err as Error).message}\n`));
+    console.error(
+      chalk.red(`  Authentication failed: ${(err as Error).message}\n`),
+    );
     return null;
   }
 }
 
-export async function chat(message: string, registry: AgentRegistry): Promise<string> {
+export async function chat(
+  message: string,
+  registry: AgentRegistry,
+): Promise<string> {
+  await ensureFlightRecorderFromEnv();
+  const recorder = getFlightRecorder();
+  if (recorder.currentTrace()) return chatWithinTrace(message, registry);
+  return recorder.runTrace(
+    { sessionId: "cli", workspaceId: process.cwd() },
+    () => chatWithinTrace(message, registry),
+  );
+}
+
+async function chatWithinTrace(
+  message: string,
+  registry: AgentRegistry,
+): Promise<string> {
   // First try to match an agent using keyword patterns (fallback mode)
   const agents = await registry.getAllAgents();
   const result = await matchAndExecuteAgent(message, agents);
@@ -72,15 +113,15 @@ export async function chat(message: string, registry: AgentRegistry): Promise<st
       }
       // Auth failed — fall back to agents-only response
       return JSON.stringify({
-        status: 'info',
-        response: 'Authentication was cancelled or failed.',
+        status: "info",
+        response: "Authentication was cancelled or failed.",
         agents: Array.from(agents.keys()),
       });
     }
     // No TTY — can't do interactive auth
     return JSON.stringify({
-      status: 'info',
-      response: 'No GitHub token. Run: openrappter onboard',
+      status: "info",
+      response: "No GitHub token. Run: openrappter onboard",
     });
   }
 
@@ -88,19 +129,73 @@ export async function chat(message: string, registry: AgentRegistry): Promise<st
 }
 
 async function chatWithProvider(message: string): Promise<string> {
+  const recorder = getFlightRecorder();
+  const startedAt = performance.now();
+  let provider: import("./providers/copilot.js").CopilotProvider | undefined;
+  let providerStartedId: string | undefined;
   try {
-    const provider = await getChatProvider();
-    const response = await provider.chat([
-      { role: 'system', content: `You are ${NAME}, a helpful local-first AI assistant.` },
-      { role: 'user', content: message },
-    ]);
-    return response.content ?? `${EMOJI} ${NAME}: I processed your request but got no response.`;
+    // Keep acquisition inside the historical catch boundary. Moving it above
+    // the try made token-resolution errors escape instead of returning the
+    // existing inline-auth/error response.
+    provider = await getChatProvider();
+    const startedEvent = await recorder.record({
+      kind: "provider.attempt.started",
+      source: "cli-chat",
+      status: "started",
+      providerId: provider.id,
+      metadata: { messageCount: 2, toolCount: 0 },
+      payload: () => ({ message }),
+    });
+    providerStartedId = startedEvent?.id;
+    return await recorder.withParent(startedEvent?.id ?? null, async () => {
+      const response = await provider!.chat([
+        {
+          role: "system",
+          content: `You are ${NAME}, a helpful local-first AI assistant.`,
+        },
+        { role: "user", content: message },
+      ]);
+      await recorder.record({
+        kind: "provider.attempt.completed",
+        source: "cli-chat",
+        status: "success",
+        providerId: provider!.id,
+        model: response.model,
+        durationMs: performance.now() - startedAt,
+        metadata: {
+          hadContent: Boolean(response.content),
+          usage: response.usage,
+        },
+        payload: () => ({ response: response.content }),
+      });
+      return (
+        response.content ??
+        `${EMOJI} ${NAME}: I processed your request but got no response.`
+      );
+    });
   } catch (error) {
     const err = error as Error;
-    if (err.message.includes('timeout')) {
+    await recorder.record({
+      kind: "provider.attempt.failed",
+      source: "cli-chat",
+      status: "error",
+      providerId: provider?.id ?? "copilot",
+      durationMs: performance.now() - startedAt,
+      metadata: {
+        phase: provider ? "chat" : "resolve-provider",
+        ...summarizeFlightError(err),
+      },
+      payload: { error: err },
+      parentId: providerStartedId,
+    });
+    if (err.message.includes("timeout")) {
       return `${EMOJI} ${NAME}: Request timed out. Try a simpler question.`;
     }
-    if (err.message.includes('404') || err.message.includes('401') || err.message.includes('403')) {
+    if (
+      err.message.includes("404") ||
+      err.message.includes("401") ||
+      err.message.includes("403")
+    ) {
       // Auth error — try inline re-auth if TTY available
       if (process.stdin.isTTY) {
         const token = await inlineAuth();
@@ -109,8 +204,8 @@ async function chatWithProvider(message: string): Promise<string> {
         }
       }
       return JSON.stringify({
-        status: 'error',
-        response: 'GitHub token expired or invalid. Run: openrappter onboard',
+        status: "error",
+        response: "GitHub token expired or invalid. Run: openrappter onboard",
       });
     }
     return `${EMOJI} ${NAME}: I couldn't process that. Error: ${err.message}`;
@@ -123,14 +218,35 @@ async function chatWithProvider(message: string): Promise<string> {
  */
 export async function matchAndExecuteAgent(
   message: string,
-  agents: Map<string, BasicAgent>
+  agents: Map<string, BasicAgent>,
 ): Promise<string | null> {
   const msgLower = message.toLowerCase();
 
   // Keyword patterns for core agents
   const patterns: Record<string, string[]> = {
-    Memory: ['remember', 'store', 'save', 'memorize', 'recall', 'what do you know', 'memory', 'remind me', 'forget'],
-    Shell: ['run', 'execute', 'bash', 'ls', 'cat', 'read file', 'write file', 'list dir', 'command', '$'],
+    Memory: [
+      "remember",
+      "store",
+      "save",
+      "memorize",
+      "recall",
+      "what do you know",
+      "memory",
+      "remind me",
+      "forget",
+    ],
+    Shell: [
+      "run",
+      "execute",
+      "bash",
+      "ls",
+      "cat",
+      "read file",
+      "write file",
+      "list dir",
+      "command",
+      "$",
+    ],
   };
 
   // Find best matching agent
@@ -139,7 +255,7 @@ export async function matchAndExecuteAgent(
 
   // Check patterns first
   for (const [agentName, keywords] of Object.entries(patterns)) {
-    const score = keywords.filter(kw => msgLower.includes(kw)).length;
+    const score = keywords.filter((kw) => msgLower.includes(kw)).length;
     if (score > bestScore && agents.has(agentName)) {
       bestScore = score;
       bestMatch = agentName;
@@ -148,17 +264,103 @@ export async function matchAndExecuteAgent(
 
   // Stop words — common English words that should never trigger agent routing
   const stopWords = new Set([
-    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
-    'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'some', 'them',
-    'than', 'its', 'over', 'such', 'that', 'this', 'with', 'will', 'each',
-    'make', 'like', 'from', 'just', 'into', 'about', 'what', 'which', 'when',
-    'who', 'how', 'where', 'why', 'should', 'could', 'would', 'there', 'their',
-    'been', 'more', 'most', 'then', 'also', 'they', 'very', 'after', 'before',
-    'other', 'right', 'think', 'given', 'kind', 'focus', 'things', 'today',
-    'work', 'help', 'need', 'want', 'know', 'good', 'best', 'use', 'using',
-    'does', 'doing', 'done', 'give', 'gave', 'take', 'took', 'come', 'came',
-    'going', 'now', 'still', 'back', 'well', 'way', 'look', 'only', 'new',
-    'really', 'something', 'anything', 'everything', 'nothing', 'please',
+    "the",
+    "and",
+    "for",
+    "are",
+    "but",
+    "not",
+    "you",
+    "all",
+    "can",
+    "had",
+    "her",
+    "was",
+    "one",
+    "our",
+    "out",
+    "has",
+    "have",
+    "been",
+    "some",
+    "them",
+    "than",
+    "its",
+    "over",
+    "such",
+    "that",
+    "this",
+    "with",
+    "will",
+    "each",
+    "make",
+    "like",
+    "from",
+    "just",
+    "into",
+    "about",
+    "what",
+    "which",
+    "when",
+    "who",
+    "how",
+    "where",
+    "why",
+    "should",
+    "could",
+    "would",
+    "there",
+    "their",
+    "been",
+    "more",
+    "most",
+    "then",
+    "also",
+    "they",
+    "very",
+    "after",
+    "before",
+    "other",
+    "right",
+    "think",
+    "given",
+    "kind",
+    "focus",
+    "things",
+    "today",
+    "work",
+    "help",
+    "need",
+    "want",
+    "know",
+    "good",
+    "best",
+    "use",
+    "using",
+    "does",
+    "doing",
+    "done",
+    "give",
+    "gave",
+    "take",
+    "took",
+    "come",
+    "came",
+    "going",
+    "now",
+    "still",
+    "back",
+    "well",
+    "way",
+    "look",
+    "only",
+    "new",
+    "really",
+    "something",
+    "anything",
+    "everything",
+    "nothing",
+    "please",
   ]);
 
   // Also check dynamically loaded agents by their descriptions
@@ -181,9 +383,11 @@ export async function matchAndExecuteAgent(
 
     // Description matching: filter out stop words and short words,
     // require at least 2 meaningful keyword matches
-    const desc = agent.metadata?.description?.toLowerCase() ?? '';
-    const words = msgLower.split(/\s+/).filter(w => w.length > 3 && !stopWords.has(w));
-    const score = words.filter(w => desc.includes(w)).length;
+    const desc = agent.metadata?.description?.toLowerCase() ?? "";
+    const words = msgLower
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !stopWords.has(w));
+    const score = words.filter((w) => desc.includes(w)).length;
 
     if (score >= 2 && score > bestScore) {
       bestScore = score;
@@ -195,16 +399,66 @@ export async function matchAndExecuteAgent(
   if (bestMatch && bestScore > 0) {
     const agent = agents.get(bestMatch);
     if (agent) {
+      const recorder = getFlightRecorder();
+      const startedAt = performance.now();
+      const startedEvent = await recorder.record({
+        kind: "tool.call.started",
+        source: "cli-keyword-router",
+        status: "started",
+        toolName: bestMatch,
+        metadata: { route: "keyword", score: bestScore },
+        payload: () => ({ message }),
+      });
       try {
         // Smart param injection based on agent + intent
         const params: Record<string, unknown> = { query: message };
-        if (bestMatch === 'HackerNews') {
-          params.action = 'fetch'; // Default to fetch, not post
+        if (bestMatch === "HackerNews") {
+          params.action = "fetch"; // Default to fetch, not post
         }
-        return await agent.execute(params);
+        return await recorder.withParent(startedEvent?.id ?? null, async () => {
+          const result = await agent.execute(params);
+          const failed = agentResultIsError(result);
+          let structuredResult: unknown = sanitizeFlightValue(result);
+          try {
+            structuredResult = sanitizeFlightValue(JSON.parse(result));
+          } catch {
+            // Non-JSON output remains a sanitized string.
+          }
+          await recorder.record({
+            kind: failed ? "tool.call.failed" : "tool.call.completed",
+            source: "cli-keyword-router",
+            status: failed ? "error" : "success",
+            toolName: bestMatch!,
+            durationMs: performance.now() - startedAt,
+            metadata: {
+              route: "keyword",
+              resultLength: result.length,
+              ...(failed ? { resultStatus: "error" } : {}),
+            },
+            payload: () => ({
+              params,
+              result: structuredResult,
+            }),
+          });
+          return result;
+        });
       } catch (e) {
+        await recorder.withParent(startedEvent?.id ?? null, () =>
+          recorder.record({
+            kind: "tool.call.failed",
+            source: "cli-keyword-router",
+            status: "error",
+            toolName: bestMatch!,
+            durationMs: performance.now() - startedAt,
+            metadata: {
+              route: "keyword",
+              ...summarizeFlightError(e),
+            },
+            payload: { error: e },
+          }),
+        );
         return JSON.stringify({
-          status: 'error',
+          status: "error",
           message: `Error executing ${bestMatch}: ${(e as Error).message}`,
         });
       }
@@ -227,18 +481,20 @@ export function displayResult(result: string): void {
     } else if (data.output) {
       console.log(`\n${data.output}\n`);
     } else if (data.content) {
-      console.log(`\n${data.content.slice(0, 1000)}${data.truncated ? '...' : ''}\n`);
+      console.log(
+        `\n${data.content.slice(0, 1000)}${data.truncated ? "..." : ""}\n`,
+      );
     } else if (data.items) {
       // Directory listing
       console.log(`\n${data.path}:`);
       for (const item of data.items) {
-        const icon = item.type === 'directory' ? '📁' : '📄';
+        const icon = item.type === "directory" ? "📁" : "📄";
         console.log(`  ${icon} ${item.name}`);
       }
       console.log();
     } else if (data.matches) {
       // Memory recall
-      console.log(`\n${EMOJI} ${data.message || 'Memories'}:`);
+      console.log(`\n${EMOJI} ${data.message || "Memories"}:`);
       for (const match of data.matches) {
         console.log(`  • ${match.message}`);
       }

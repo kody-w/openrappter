@@ -148,7 +148,7 @@ class OpenAICompatibleProvider:
 
         return ProviderResponse(
             content=message.get("content"),
-            model=data.get("model") or payload["model"],
+            model=data.get("model") or "",
             finish_reason=choices[0].get("finish_reason"),
             usage={
                 "input_tokens": int(usage.get("prompt_tokens", 0) or 0),

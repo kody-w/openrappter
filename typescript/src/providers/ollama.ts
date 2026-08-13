@@ -8,14 +8,14 @@ import type {
   ChatOptions,
   ProviderResponse,
   EmbeddingOptions,
-} from './types.js';
+} from "./types.js";
 
-const DEFAULT_OLLAMA_URL = 'http://localhost:11434';
-const DEFAULT_MODEL = 'llama3.2';
-const DEFAULT_EMBEDDING_MODEL = 'nomic-embed-text';
+const DEFAULT_OLLAMA_URL = "http://localhost:11434";
+const DEFAULT_MODEL = "llama3.2";
+const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
 
 interface OllamaMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -23,7 +23,7 @@ interface OllamaChatResponse {
   model: string;
   created_at: string;
   message: {
-    role: 'assistant';
+    role: "assistant";
     content: string;
   };
   done: boolean;
@@ -51,21 +51,22 @@ interface OllamaListResponse {
 }
 
 export class OllamaProvider implements LLMProvider {
-  id = 'ollama';
-  name = 'Ollama (Local)';
+  id = "ollama";
+  name = "Ollama (Local)";
 
   private baseUrl: string;
   private defaultModel: string;
 
   constructor(options?: { baseUrl?: string; model?: string }) {
-    this.baseUrl = options?.baseUrl ?? process.env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL;
+    this.baseUrl =
+      options?.baseUrl ?? process.env.OLLAMA_URL ?? DEFAULT_OLLAMA_URL;
     this.defaultModel = options?.model ?? DEFAULT_MODEL;
   }
 
   async isAvailable(): Promise<boolean> {
     try {
       const response = await fetch(`${this.baseUrl}/api/tags`, {
-        method: 'GET',
+        method: "GET",
         signal: AbortSignal.timeout(5000),
       });
       return response.ok;
@@ -86,12 +87,15 @@ export class OllamaProvider implements LLMProvider {
     return data.models;
   }
 
-  async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
+  async chat(
+    messages: Message[],
+    options?: ChatOptions,
+  ): Promise<ProviderResponse> {
     // Convert messages to Ollama format (no tool support in basic Ollama)
     const ollamaMessages: OllamaMessage[] = messages
-      .filter((m) => m.role !== 'tool')
+      .filter((m) => m.role !== "tool")
       .map((msg) => ({
-        role: msg.role === 'tool' ? 'user' : msg.role,
+        role: msg.role === "tool" ? "user" : msg.role,
         content: msg.content,
       }));
 
@@ -106,9 +110,9 @@ export class OllamaProvider implements LLMProvider {
     }
 
     const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
     });
@@ -123,6 +127,7 @@ export class OllamaProvider implements LLMProvider {
     return {
       content: data.message.content,
       tool_calls: null, // Ollama doesn't support tool calling natively
+      model: data.model,
       usage: {
         input_tokens: data.prompt_eval_count ?? 0,
         output_tokens: data.eval_count ?? 0,
@@ -130,16 +135,19 @@ export class OllamaProvider implements LLMProvider {
     };
   }
 
-  async embed(texts: string[], options?: EmbeddingOptions): Promise<number[][]> {
+  async embed(
+    texts: string[],
+    options?: EmbeddingOptions,
+  ): Promise<number[][]> {
     const model = options?.model ?? DEFAULT_EMBEDDING_MODEL;
     const embeddings: number[][] = [];
 
     // Ollama processes embeddings one at a time
     for (const text of texts) {
       const response = await fetch(`${this.baseUrl}/api/embeddings`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model,
@@ -149,7 +157,9 @@ export class OllamaProvider implements LLMProvider {
 
       if (!response.ok) {
         const error = await response.text();
-        throw new Error(`Ollama Embeddings API error: ${response.status} - ${error}`);
+        throw new Error(
+          `Ollama Embeddings API error: ${response.status} - ${error}`,
+        );
       }
 
       const data = (await response.json()) as OllamaEmbeddingResponse;

@@ -448,7 +448,19 @@ test('macOS workflow validates the tag before checkout and never injects output 
     '^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-bar$',
   ));
   assert.doesNotMatch(workflow, /run:\s*VERSION=\$\{\{/);
-  assert.match(workflow, /VERSION="\$RELEASE_VERSION" bash scripts\/build-mac-app\.sh/);
+  const versionedBuild =
+    /VERSION="\$RELEASE_VERSION"\s*\\\s*\n[\s\S]*?\bbash scripts\/build-mac-app\.sh/;
+  assert.match(workflow, versionedBuild);
+  // Prove the assertion is about the version wiring and the real build
+  // command, not merely two unrelated strings somewhere in the file.
+  assert.doesNotMatch(
+    workflow.replace('VERSION="$RELEASE_VERSION" \\', 'VERSION="1.2.3" \\'),
+    versionedBuild,
+  );
+  assert.doesNotMatch(
+    workflow.replace('bash scripts/build-mac-app.sh', 'bash scripts/other.sh'),
+    versionedBuild,
+  );
 });
 
 test('registry publication reconciles exact artifacts and selects an explicit npm tag', () => {

@@ -20,7 +20,14 @@ function parseHTML(filename: string): Document {
   return dom.window.document;
 }
 
-const HTML_FILES = ['index.html', 'docs.html', 'architecture.html', 'tutorial.html', 'changelog.html'];
+const HTML_FILES = [
+  'index.html',
+  'docs.html',
+  'architecture.html',
+  'tutorial.html',
+  'changelog.html',
+  CURRENT_RELEASE_FILE,
+];
 const DELETED_FILES = [
   'teach.html', 'single-file-agents.html', 'install.md', 'config.md',
   'skills.md', 'memory.md', 'api.md', 'agent-install.md',
@@ -94,8 +101,8 @@ describe('HTML well-formedness', () => {
       });
 
       it('links to styles.css', () => {
-        // index.html uses Tailwind CDN (self-contained), subpages use styles.css
-        if (file === 'index.html') {
+        // The homepage and release presentation are standalone Tailwind pages.
+        if (file === 'index.html' || file === CURRENT_RELEASE_FILE) {
           const tailwind = doc.querySelector('script[src*="tailwindcss"]');
           expect(tailwind).not.toBeNull();
         } else {
@@ -105,8 +112,8 @@ describe('HTML well-formedness', () => {
       });
 
       it('includes nav.js script', () => {
-        // index.html has inline nav JS, subpages use nav.js
-        if (file === 'index.html') return; // skip — nav is inline
+        // Standalone Tailwind pages keep their navigation behavior inline.
+        if (file === 'index.html' || file === CURRENT_RELEASE_FILE) return;
         const script = doc.querySelector('script[src="./nav.js"]');
         expect(script).not.toBeNull();
       });
@@ -195,8 +202,8 @@ describe('Navigation consistency', () => {
 
 /* ── 5. Current release identity ── */
 describe('Current release identity', () => {
-  it('publishes the 1.11.0 Pages release', () => {
-    expect(CURRENT_VERSION).toBe('1.11.0');
+  it('publishes the 1.12.0 Pages release', () => {
+    expect(CURRENT_VERSION).toBe('1.12.0');
   });
 
   it('homepage badge derives from package metadata', () => {
@@ -230,6 +237,17 @@ describe('Current release identity', () => {
     }
   });
 
+  it('presents Flight Recorder as private, provider-neutral evidence', () => {
+    const doc = parseHTML(CURRENT_RELEASE_FILE);
+    expect(doc.title).toContain('Flight Recorder');
+    const text = doc.body.textContent || '';
+    expect(text).toContain('OpenRappter can now explain itself.');
+    expect(text).toContain('provider-neutral');
+    expect(text).toContain('raw IO is off by default');
+    expect(text).toContain('openrappter-event/1.0');
+    expect(text).toContain('Copilot CLI child MCP');
+  });
+
   it('uses durable Bar release links instead of versioned DMG URLs', () => {
     const doc = parseHTML('index.html');
     const downloadLinks = Array.from(doc.querySelectorAll('a')).filter((link) =>
@@ -247,7 +265,15 @@ describe('Current release identity', () => {
 
   it('keeps release evidence tied to executable validation gates', () => {
     const text = parseHTML(CURRENT_RELEASE_FILE).body.textContent || '';
-    for (const evidence of ['npm test', 'pytest', 'RunTests', 'CI + smoke', 'SHA-256']) {
+    for (const evidence of [
+      'mutation tests',
+      'npm test',
+      'pytest',
+      'builds',
+      'lint',
+      'cold-start CLI smoke',
+      'SHA-256',
+    ]) {
       expect(text).toContain(evidence);
     }
     expect(text).not.toMatch(/3,210\+|849\+|Known dependency CVEs/);

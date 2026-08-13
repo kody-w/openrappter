@@ -22,6 +22,7 @@ import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
+import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 
 
 export const __manifest__ = {
@@ -364,10 +365,13 @@ Requirements:
 
 Generate ONLY the code. No markdown fences. No explanation.`;
 
-    const response = await this.provider.chat(
-      [{ role: 'user', content: prompt }],
-      { temperature: 0.7, max_tokens: 2000 },
-    );
+    const response = await chatWithFlightRecorder({
+      provider: this.provider,
+      messages: [{ role: 'user', content: prompt }],
+      options: { temperature: 0.7, max_tokens: 2000 },
+      source: "learn-new-agent",
+      attributes: { phase: "code-generation" },
+    });
 
     if (!response.content) return null;
 

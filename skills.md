@@ -210,6 +210,11 @@ python3 -m openrappter.cli [options]  # Direct
 | `-v, --version` | Show version |
 | `-h, --help` | Show help |
 | `onboard` | Run interactive setup wizard (TypeScript) |
+| `flight status` | Show Flight Recorder health and local event count |
+| `flight events [filters]` | List privacy-safe execution event summaries |
+| `flight export [filters]` | Export a versioned replay/eval bundle |
+| `flight import <path>` | Import an integrity-checked replay/eval bundle |
+| `flight clear --yes` | Delete the local event ledger |
 
 ### Interactive Mode Slash Commands
 

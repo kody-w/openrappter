@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenRappter 1.12.0 — Flight Recorder</title>
+  <meta name="description" content="OpenRappter 1.12.0 adds a local, private, provider-neutral Flight Recorder with durable traces, integrity-checked exports, and TypeScript/Python parity." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>" />
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--cp-bg); }
+    body {
+      margin: 0;
+      background: var(--cp-bg);
+      color: var(--cp-text);
+      font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    code, pre, .mono {
+      font-family: Consolas, "Courier New", Courier, monospace;
+    }
+    a { color: inherit; }
+    :focus-visible {
+      outline: 3px solid var(--cp-accent);
+      outline-offset: 3px;
+    }
+    .nav-shell {
+      background: var(--cp-overlay);
+      border-color: var(--cp-border);
+    }
+    .hero {
+      background:
+        linear-gradient(var(--cp-accent-soft), var(--cp-accent-soft)),
+        var(--cp-bg);
+      border-color: var(--cp-border);
+    }
+    .eyebrow, .accent { color: var(--cp-accent); }
+    .muted { color: var(--cp-text-muted); }
+    .soft { color: var(--cp-text-soft); }
+    .surface { background: var(--cp-surface); }
+    .surface-soft { background: var(--cp-surface-soft); }
+    .section-alt {
+      background: var(--cp-bg-elevated);
+      border-color: var(--cp-border);
+    }
+    .card {
+      background: var(--cp-surface);
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+    }
+    .card:hover { border-color: var(--cp-border-strong); }
+    .chip {
+      background: var(--cp-accent-soft);
+      border: 1px solid var(--cp-accent);
+      border-radius: 0.625rem;
+      color: var(--cp-accent);
+    }
+    .button-primary {
+      background: var(--cp-accent);
+      border: 1px solid var(--cp-accent);
+      border-radius: 0.625rem;
+      color: var(--cp-accent-fg);
+    }
+    .button-primary:hover { background: var(--cp-accent-hover); }
+    .button-secondary {
+      background: var(--cp-surface);
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 0.625rem;
+      color: var(--cp-text);
+    }
+    .button-secondary:hover { border-color: var(--cp-accent); }
+    .rule { border-color: var(--cp-border); }
+    .timeline-line { background: var(--cp-border); }
+    .timeline-dot {
+      background: var(--cp-accent);
+      border: 4px solid var(--cp-bg-elevated);
+    }
+    .command {
+      background: var(--cp-bg-elevated);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      color: var(--cp-text);
+    }
+    .prompt {
+      background: var(--cp-surface);
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+    }
+    .prompt code { color: var(--cp-text-soft); }
+    .copy-button {
+      background: var(--cp-surface-soft);
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      color: var(--cp-text-muted);
+    }
+    .copy-button:hover {
+      border-color: var(--cp-accent);
+      color: var(--cp-accent);
+    }
+    .success { color: var(--cp-success); }
+    .warning { color: var(--cp-warning); }
+    footer {
+      background: var(--cp-bg-elevated);
+      border-color: var(--cp-border);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body class="antialiased">
+  <nav class="nav-shell sticky top-0 z-50 border-b backdrop-blur-xl" aria-label="Release navigation">
+    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+      <a href="./" class="logo flex min-w-0 items-center gap-2 font-bold">
+        <span aria-hidden="true" class="text-2xl">🦖</span>
+        <span class="truncate">openrappter</span>
+        <span class="chip mono px-2 py-1 text-[10px]">v1.12.0</span>
+      </a>
+      <div class="flex items-center gap-4 text-sm">
+        <a href="#truth" class="hidden sm:inline muted hover:accent">Truth</a>
+        <a href="#privacy" class="hidden sm:inline muted hover:accent">Privacy</a>
+        <a href="#prompts" class="muted hover:accent">10 prompts</a>
+        <a href="./docs.html" class="muted hover:accent">Docs</a>
+        <a href="https://github.com/kody-w/openrappter" class="muted hover:accent">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero border-b">
+    <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
+      <div class="grid items-end gap-12 lg:grid-cols-[1.35fr_.65fr]">
+        <div>
+          <p class="eyebrow mono mb-5 text-sm font-bold uppercase tracking-[0.24em]">
+            Flight Recorder · OpenRappter 1.12.0
+          </p>
+          <h1 class="max-w-4xl text-5xl font-black leading-[0.98] tracking-tight sm:text-7xl">
+            OpenRappter can now explain itself.
+          </h1>
+          <p class="muted mt-7 max-w-3xl text-lg leading-8 sm:text-xl">
+            A local, provider-neutral Flight Recorder captures the evidence behind an agent run:
+            what happened, in what order, across which lifecycle, and whether the record remained intact.
+            Truth you can inspect. Privacy you can control. History you can replay.
+          </p>
+          <div class="mt-9 flex flex-wrap gap-3">
+            <a href="#what-shipped" class="button-primary px-5 py-3 font-bold">See what shipped</a>
+            <a href="#prompts" class="button-secondary px-5 py-3 font-semibold">Copy a forensic prompt</a>
+          </div>
+        </div>
+        <aside class="card p-6" aria-label="Flight Recorder summary">
+          <p class="mono accent text-xs font-bold uppercase tracking-[0.18em]">The black box is local</p>
+          <dl class="mt-6 space-y-5">
+            <div>
+              <dt class="muted text-sm">Event contract</dt>
+              <dd class="mono mt-1 font-bold">openrappter-event/1.0</dd>
+            </div>
+            <div>
+              <dt class="muted text-sm">Portable export</dt>
+              <dd class="mono mt-1 font-bold">openrappter-flight-export/1.0</dd>
+            </div>
+            <div>
+              <dt class="muted text-sm">Raw inputs and outputs</dt>
+              <dd class="success mt-1 font-bold">OFF by default</dd>
+            </div>
+            <div>
+              <dt class="muted text-sm">Runtime coverage</dt>
+              <dd class="mt-1 font-bold">TypeScript + Python</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="what-shipped" class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="mb-12 max-w-3xl">
+        <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">What shipped</p>
+        <h2 class="text-4xl font-black tracking-tight sm:text-5xl">Observability without provider lock-in.</h2>
+        <p class="muted mt-5 text-lg leading-8">
+          The same durable event model records OpenRappter behavior whether a run uses one provider,
+          crosses a failover boundary, invokes tools, or moves through an agent lifecycle.
+        </p>
+      </div>
+      <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">🧭</div>
+          <h3 class="text-xl font-bold">Provider-neutral traces</h3>
+          <p class="muted mt-3 leading-7">Assistant, provider, tool, agent, and context lifecycle events share one local record, including provider failover decisions.</p>
+        </article>
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">🔢</div>
+          <h3 class="text-xl font-bold">Trace-local sequence</h3>
+          <p class="muted mt-3 leading-7">Every trace carries its own ordered sequence, so forensic reconstruction does not depend on wall-clock luck or provider-specific logs.</p>
+        </article>
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">💾</div>
+          <h3 class="text-xl font-bold">Durable continuity</h3>
+          <p class="muted mt-3 leading-7">SQLite WAL preserves the record across process restarts, keeping the story available after the process that created it is gone.</p>
+        </article>
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">🧾</div>
+          <h3 class="text-xl font-bold">Integrity you can verify</h3>
+          <p class="muted mt-3 leading-7">SHA-256 integrity turns exported evidence into something that can be checked, not merely trusted.</p>
+        </article>
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">📦</div>
+          <h3 class="text-xl font-bold">Atomic portability</h3>
+          <p class="muted mt-3 leading-7">Import and export are atomic, with a versioned flight-export envelope for moving a trace without creating a half-written record.</p>
+        </article>
+        <article class="card p-6">
+          <div class="mb-4 text-3xl" aria-hidden="true">🐍</div>
+          <h3 class="text-xl font-bold">Python parity</h3>
+          <p class="muted mt-3 leading-7">The Flight Recorder is implemented in both TypeScript and Python, preserving the project’s interchangeable-runtime promise.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="truth" class="section-alt border-y">
+      <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div class="grid gap-14 lg:grid-cols-[.75fr_1.25fr]">
+          <div>
+            <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">Truth</p>
+            <h2 class="text-4xl font-black tracking-tight">From “it failed” to a sequence you can inspect.</h2>
+            <p class="muted mt-5 text-lg leading-8">
+              Flight Recorder captures decisions around the execution—not just the final answer—so a run
+              can be reconstructed from local evidence.
+            </p>
+          </div>
+          <div class="relative pl-8">
+            <div class="timeline-line absolute bottom-3 left-[7px] top-3 w-px"></div>
+            <div class="space-y-8">
+              <article class="relative">
+                <span class="timeline-dot absolute -left-8 top-1 h-4 w-4 rounded-full"></span>
+                <p class="mono accent text-xs font-bold">0001 · CONTEXT</p>
+                <h3 class="mt-1 text-lg font-bold">The working context is assembled</h3>
+                <p class="muted mt-2">Context lifecycle instrumentation records the boundaries around what the agent received.</p>
+              </article>
+              <article class="relative">
+                <span class="timeline-dot absolute -left-8 top-1 h-4 w-4 rounded-full"></span>
+                <p class="mono accent text-xs font-bold">0002 · PROVIDER</p>
+                <h3 class="mt-1 text-lg font-bold">A provider decision is made</h3>
+                <p class="muted mt-2">Provider selection and failover decisions become explicit events rather than hidden control flow.</p>
+              </article>
+              <article class="relative">
+                <span class="timeline-dot absolute -left-8 top-1 h-4 w-4 rounded-full"></span>
+                <p class="mono accent text-xs font-bold">0003 · TOOL / AGENT</p>
+                <h3 class="mt-1 text-lg font-bold">Work crosses lifecycle boundaries</h3>
+                <p class="muted mt-2">Tool and agent starts, completions, and failures stay correlated inside the trace.</p>
+              </article>
+              <article class="relative">
+                <span class="timeline-dot absolute -left-8 top-1 h-4 w-4 rounded-full"></span>
+                <p class="mono accent text-xs font-bold">0004 · ASSISTANT</p>
+                <h3 class="mt-1 text-lg font-bold">The result closes the loop</h3>
+                <p class="muted mt-2">Assistant lifecycle evidence completes a replayable narrative without requiring a provider dashboard.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy" class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="grid gap-12 lg:grid-cols-2">
+        <div>
+          <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">Privacy</p>
+          <h2 class="text-4xl font-black tracking-tight">Useful evidence. Deliberate exposure.</h2>
+          <p class="muted mt-5 text-lg leading-8">
+            Flight Recorder is local-first and conservative by default. The event structure is recorded;
+            raw IO is off by default.
+          </p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <article class="card p-6">
+            <p class="mono success text-xs font-bold uppercase">Default</p>
+            <h3 class="mt-3 text-xl font-bold">Raw IO stays off</h3>
+            <p class="muted mt-3 leading-7">Inputs and outputs are not captured unless the operator explicitly opts in.</p>
+          </article>
+          <article class="card p-6">
+            <p class="mono accent text-xs font-bold uppercase">When opted in</p>
+            <h3 class="mt-3 text-xl font-bold">Redaction is recursive</h3>
+            <p class="muted mt-3 leading-7">Secret and path redaction walks nested data rather than protecting only top-level fields.</p>
+          </article>
+          <article class="card p-6">
+            <p class="mono accent text-xs font-bold uppercase">Scoped identity</p>
+            <h3 class="mt-3 text-xl font-bold">Sessions and paths are hashed</h3>
+            <p class="muted mt-3 leading-7">Exports preserve correlation without publishing channel handles or absolute workspace paths.</p>
+          </article>
+          <article class="card p-6">
+            <p class="mono accent text-xs font-bold uppercase">Local storage</p>
+            <h3 class="mt-3 text-xl font-bold">Private file modes</h3>
+            <p class="muted mt-3 leading-7">The default directory is <code>0700</code>; the database, WAL/SHM sidecars, and atomic exports are <code>0600</code>.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-alt border-y">
+      <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div class="mb-12 max-w-3xl">
+          <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">Operate it</p>
+          <h2 class="text-4xl font-black tracking-tight">Four CLI verbs. One inspectable record.</h2>
+          <p class="muted mt-5 text-lg leading-8">Check health, inspect events, carry evidence out, or deliberately clear local history.</p>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="command p-5"><code><span class="accent">$</span> openrappter flight status</code><p class="muted mt-2 text-sm">Inspect recorder state and local continuity.</p></div>
+          <div class="command p-5"><code><span class="accent">$</span> openrappter flight events</code><p class="muted mt-2 text-sm">Read the ordered events behind recent traces.</p></div>
+          <div class="command p-5"><code><span class="accent">$</span> openrappter flight export</code><p class="muted mt-2 text-sm">Create an integrity-checked portable export.</p></div>
+          <div class="command p-5"><code><span class="accent">$</span> openrappter flight clear</code><p class="muted mt-2 text-sm">Explicitly remove the local recorder history.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+      <div class="grid gap-8 lg:grid-cols-[1.25fr_.75fr]">
+        <article class="card p-7 sm:p-9">
+          <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">Acceptance gate</p>
+          <h2 class="text-3xl font-black tracking-tight">Evidence for the evidence system.</h2>
+          <p class="muted mt-4 leading-7">
+            Release acceptance covers behavior, mutation, and parity suites—not a hand-curated happy path.
+          </p>
+          <ul class="mt-7 grid gap-3 sm:grid-cols-2">
+            <li class="surface-soft rounded-[0.625rem] p-4"><strong>mutation tests</strong><br /><span class="muted text-sm">Recorder fault resistance</span></li>
+            <li class="surface-soft rounded-[0.625rem] p-4"><strong>npm test</strong><br /><span class="muted text-sm">Full TypeScript suite, minus two proven environment-only baseline tests</span></li>
+            <li class="surface-soft rounded-[0.625rem] p-4"><strong>pytest</strong><br /><span class="muted text-sm">Full Python suite</span></li>
+            <li class="surface-soft rounded-[0.625rem] p-4"><strong>builds + lint</strong><br /><span class="muted text-sm">Both delivery surfaces checked</span></li>
+            <li class="surface-soft rounded-[0.625rem] p-4 sm:col-span-2"><strong>cold-start CLI smoke</strong><br /><span class="muted text-sm">The shipped command starts from a clean process boundary</span></li>
+          </ul>
+        </article>
+        <aside class="card p-7 sm:p-9">
+          <p class="mono warning mb-3 text-sm font-bold uppercase tracking-[0.2em]">Explicit limitation</p>
+          <h2 class="text-2xl font-black">One process boundary is not yet bridged.</h2>
+          <p class="muted mt-4 leading-7">
+            Copilot CLI child MCP cross-process trace correlation remains an explicit limitation.
+            The recorder does not pretend that child-process evidence is correlated when that propagation
+            boundary has not been completed.
+          </p>
+          <p class="mt-5 font-bold">A truthful gap is better than a fictional trace.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="prompts" class="section-alt border-y">
+      <div class="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div class="mb-12 max-w-3xl">
+          <p class="eyebrow mono mb-3 text-sm font-bold uppercase tracking-[0.2em]">Try the recorder</p>
+          <h2 class="text-4xl font-black tracking-tight sm:text-5xl">10 copy-paste prompts for evidence-led agents.</h2>
+          <p class="muted mt-5 text-lg leading-8">Each prompt asks OpenRappter to reason from its local Flight Recorder instead of guessing from the final output.</p>
+        </div>
+        <div class="space-y-5">
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">1. Forensic trace reconstruction</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Use the Flight Recorder to reconstruct the most recent failed run as an ordered forensic timeline. Identify the first anomalous event, every downstream consequence, the provider/tool/agent boundaries involved, and the smallest evidence-supported root cause. Separate recorded fact from inference.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">2. Provider comparison</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Compare recent traces across providers. Show differences in lifecycle shape, failover decisions, tool usage, latency signals available in the events, and final outcomes. Do not rank a provider unless the local evidence supports the conclusion.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">3. Privacy audit</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Audit my Flight Recorder privacy posture. Confirm whether raw IO capture is enabled, inspect exported nested fields for secret and path redaction, verify absolute workspace paths are hashed, and report any value that could identify a person, credential, or local filesystem location.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">4. Evidence replay</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Replay the evidence from this exported flight trace as a human-readable narrative. Preserve trace-local sequence, mark assistant/provider/tool/agent/context transitions, verify SHA-256 integrity first, and flag any gap where the export cannot prove what happened.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">5. Failed-agent diagnosis</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Find the latest agent lifecycle that ended in failure. Trace its parent context, tool calls, provider decisions, and assistant response. Propose a fix only after citing the exact event sequence that supports it, then list the regression trace we should expect after the fix.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">6. Context-budget investigation</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Investigate whether context growth contributed to recent failures or provider failover. Compare context lifecycle events across successful and failed traces, identify where the working set expanded, and recommend the smallest safe compaction point without claiming token data the recorder did not capture.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">7. Failover decision review</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Review every provider failover decision in the latest trace. Explain the triggering evidence, the selected fallback, and the resulting outcome. Highlight any failover that was unnecessary, late, or impossible to validate from the recorded events.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">8. Restart continuity proof</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Prove whether Flight Recorder continuity survived the last process restart. Use trace-local sequence and persisted SQLite history to show the final event before shutdown and the first event after startup. Report discontinuities without filling them in.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">9. Tool behavior audit</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Audit tool lifecycle events across the last ten traces. Group repeated failures, orphaned starts, slow completions, and provider-specific patterns. Produce a prioritized remediation list where every item links back to recorded evidence.</code>
+          </article>
+          <article class="prompt p-6">
+            <div class="flex items-start justify-between gap-4"><h3 class="text-xl font-bold">10. Export handoff packet</h3><button class="copy-button shrink-0 px-3 py-2 text-xs font-bold" type="button">Copy</button></div>
+            <code class="mt-4 block whitespace-pre-wrap leading-7">Prepare a privacy-safe incident handoff from this Flight Recorder export. Verify the export schema and SHA-256 integrity, summarize the trace, include the minimum relevant event sequence, confirm recursive redaction, and state the Copilot CLI child MCP cross-process correlation limitation.</code>
+          </article>
+        </div>
+        <p id="copyStatus" class="muted mt-5 min-h-6 text-center text-sm" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-5xl px-4 py-20 text-center sm:px-6">
+      <p class="eyebrow mono mb-4 text-sm font-bold uppercase tracking-[0.2em]">OpenRappter 1.12.0</p>
+      <h2 class="text-4xl font-black tracking-tight sm:text-5xl">Not just observable. Accountable.</h2>
+      <p class="muted mx-auto mt-5 max-w-2xl text-lg leading-8">
+        Local truth, privacy-first capture, portable evidence, and the same contract across providers and runtimes.
+      </p>
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        <a href="./docs.html" class="button-primary px-6 py-3 font-bold">Read the docs</a>
+        <a href="https://github.com/kody-w/openrappter" class="button-secondary px-6 py-3 font-semibold">View on GitHub</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t py-10">
+    <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-center text-sm sm:flex-row sm:px-6 sm:text-left">
+      <p class="muted">OpenRappter 1.12.0 · Flight Recorder · Local-first · Apache-2.0</p>
+      <a href="./" class="accent font-semibold">Back to openrappter</a>
+    </div>
+  </footer>
+
+  <script>
+    const status = document.getElementById("copyStatus");
+    document.querySelectorAll(".prompt").forEach((prompt) => {
+      const button = prompt.querySelector(".copy-button");
+      const code = prompt.querySelector("code");
+      button.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(code.textContent.trim());
+          button.textContent = "Copied";
+          status.textContent = `${prompt.querySelector("h3").textContent} copied to clipboard.`;
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1600);
+        } catch {
+          status.textContent = "Clipboard access was unavailable. Select the prompt text to copy it.";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

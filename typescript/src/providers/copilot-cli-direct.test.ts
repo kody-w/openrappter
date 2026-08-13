@@ -57,4 +57,24 @@ describe('CopilotCliDirectProvider', () => {
     expect(args).toContain('--no-ask-user');
     expect(args).not.toContain('--allow-all-tools');
   });
+
+  it('honors an explicit per-call model without claiming unreported identity', async () => {
+    const runner = vi.fn<CopilotCliDirectRunner>(
+      async () => ({ stdout: "answer", stderr: "" }),
+    );
+    const provider = new CopilotCliDirectProvider({
+      cliPath: "/usr/local/bin/copilot",
+      model: "auto",
+      runner,
+    });
+
+    const response = await provider.chat(
+      [{ role: "user", content: "hello" }],
+      { model: "gpt-5.6-sol" },
+    );
+
+    const args = runner.mock.calls[0][1];
+    expect(args[args.indexOf("--model") + 1]).toBe("gpt-5.6-sol");
+    expect(response.model).toBeUndefined();
+  });
 });

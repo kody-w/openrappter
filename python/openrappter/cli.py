@@ -30,11 +30,13 @@ import subprocess
 import sys
 import re
 import logging
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
 from openrappter import __version__
+from openrappter.result_status import agent_result_is_error
 
 # Package root for agent discovery
 PACKAGE_ROOT = Path(__file__).parent
@@ -249,6 +251,8 @@ class CopilotProvider:
     """
     
     def __init__(self):
+        self.id = "github-copilot"
+        self.model = "gpt-4.1"
         self._client = None
         self._session = None
         self._sdk_available = None
@@ -302,7 +306,7 @@ class CopilotProvider:
         client = await self._ensure_client()
         
         session_config = {
-            "model": "gpt-4.1",  # Fast and capable
+            "model": self.model,  # Fast and capable
         }
         
         # Convert our tool format to Copilot SDK format
@@ -387,7 +391,12 @@ class CopilotProvider:
                 try:
                     await asyncio.wait_for(done.wait(), timeout=60)
                 except asyncio.TimeoutError:
-                    pass
+                    await session.destroy()
+                    return {
+                        "content": None,
+                        "tool_calls": None,
+                        "error": "Copilot request timed out after 60 seconds",
+                    }
                 
                 await session.destroy()
                 
@@ -463,6 +472,22 @@ Be helpful, concise, and use the appropriate tool when needed.
         Process a user message, potentially calling agents via tool calling.
         Returns the response string.
         """
+        from openrappter.flight_recorder import ensure_flight_recorder_from_env
+
+        recorder = ensure_flight_recorder_from_env()
+        operation = lambda: self._process_message_within_trace(user_message)
+        if recorder.current_trace():
+            return operation()
+        return recorder.run_trace(
+            {
+                "sessionId": "python-cli",
+                "workspaceId": str(Path.cwd()),
+            },
+            operation,
+        )
+
+    def _process_message_within_trace(self, user_message: str) -> str:
+        """Process one message after its Flight Recorder trace is established."""
         # Add to conversation history
         self.conversation_history.append({
             "role": "user",
@@ -473,29 +498,177 @@ Be helpful, concise, and use the appropriate tool when needed.
         tools = self.registry.get_agent_metadata_tools()
         
         # Call Copilot with tools
-        response = self.copilot.chat(
-            message=user_message,
-            system_prompt=self.get_system_prompt(),
-            tools=tools if tools else None
+        from openrappter.flight_recorder import (
+            ensure_flight_recorder_from_env,
+            summarize_flight_error,
         )
+
+        recorder = ensure_flight_recorder_from_env()
+        started = time.monotonic()
+        system_prompt = self.get_system_prompt()
+        provider_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ]
+        model_policy = (
+            self.copilot.model.strip()
+            if isinstance(self.copilot.model, str)
+            and self.copilot.model.strip()
+            else None
+        )
+        recorder.record({
+            "kind": "context.assembled",
+            "source": "python-cli-assistant",
+            "status": "info",
+            "metadata": {
+                "sourceNames": ["system", "history", "tools"],
+                "categoryNames": [
+                    "system",
+                    "conversation",
+                    "tools",
+                ],
+                "systemChars": len(system_prompt),
+                "historyLength": len(self.conversation_history),
+                "toolCount": len(tools),
+            },
+            "payload": {
+                "messages": provider_messages,
+                "tools": tools,
+            },
+        })
+        started_event = recorder.record({
+            "kind": "provider.attempt.started",
+            "source": "python-cli-assistant",
+            "status": "started",
+            "providerId": self.copilot.id,
+            "metadata": {
+                "messageCount": len(provider_messages),
+                "toolCount": len(tools),
+                **({"modelPolicy": model_policy} if model_policy else {}),
+            },
+            "payload": {
+                "messages": provider_messages,
+                "tools": tools,
+            },
+        })
+        provider_parent_id = (
+            started_event.get("id") if started_event is not None else None
+        )
+        try:
+            response = self.copilot.chat(
+                message=user_message,
+                system_prompt=system_prompt,
+                tools=tools if tools else None
+            )
+        except Exception as exc:
+            recorder.record({
+                "kind": "provider.attempt.failed",
+                "source": "python-cli-assistant",
+                "status": "error",
+                **({"parentId": provider_parent_id} if provider_parent_id else {}),
+                "providerId": self.copilot.id,
+                "durationMs": (time.monotonic() - started) * 1000,
+                "metadata": {
+                    **summarize_flight_error(exc),
+                    **({"modelPolicy": model_policy} if model_policy else {}),
+                },
+                "payload": {
+                    "messages": provider_messages,
+                    "tools": tools,
+                    "error": exc,
+                },
+            })
+            raise
+
+        if response.get("error"):
+            failed_event = recorder.record({
+                "kind": "provider.attempt.failed",
+                "source": "python-cli-assistant",
+                "status": "error",
+                **({"parentId": provider_parent_id} if provider_parent_id else {}),
+                "providerId": self.copilot.id,
+                **(
+                    {"model": response.get("model")}
+                    if response.get("model")
+                    else {}
+                ),
+                "durationMs": (time.monotonic() - started) * 1000,
+                "metadata": {
+                    **summarize_flight_error(response.get("error")),
+                    **({"modelPolicy": model_policy} if model_policy else {}),
+                },
+                "payload": {
+                    "messages": provider_messages,
+                    "tools": tools,
+                    "response": response,
+                },
+            })
+            provider_completed_id = (
+                failed_event.get("id")
+                if failed_event is not None
+                else provider_parent_id
+            )
+        else:
+            completed_event = recorder.record({
+                "kind": "provider.attempt.completed",
+                "source": "python-cli-assistant",
+                "status": "success",
+                **({"parentId": provider_parent_id} if provider_parent_id else {}),
+                "providerId": self.copilot.id,
+                **(
+                    {"model": response.get("model")}
+                    if response.get("model")
+                    else {}
+                ),
+                "durationMs": (time.monotonic() - started) * 1000,
+                "metadata": {
+                    "hadContent": bool(response.get("content")),
+                    "hadToolCalls": bool(response.get("tool_calls")),
+                    **({"modelPolicy": model_policy} if model_policy else {}),
+                },
+                "payload": {
+                    "messages": provider_messages,
+                    "tools": tools,
+                    "response": response,
+                },
+            })
+            provider_completed_id = (
+                completed_event.get("id")
+                if completed_event is not None
+                else provider_parent_id
+            )
         
         # Handle errors
         if response.get('error'):
             # Fallback to direct agent execution for simple queries
-            return self._fallback_response(user_message)
+            return self._fallback_response(
+                user_message,
+                recorder,
+                provider_completed_id,
+            )
         
         # Check for tool calls
         if response.get('tool_calls'):
             tool_call = response['tool_calls'][0]
             agent_name = tool_call['name']
             
+            parse_success = True
             try:
                 arguments = json.loads(tool_call['arguments']) if tool_call['arguments'] else {}
             except json.JSONDecodeError:
                 arguments = {}
+                parse_success = False
             
-            # Execute the agent
-            result = self._execute_agent(agent_name, arguments, user_message)
+            result = self._run_agent_tool(
+                recorder,
+                agent_name,
+                arguments,
+                user_message,
+                provider_completed_id,
+                parse_success=parse_success,
+                argument_text=tool_call.get("arguments") or "",
+                route="provider-tool-call",
+            )
             
             # Add agent execution to history
             self.conversation_history.append({
@@ -546,8 +719,92 @@ Be helpful, concise, and use the appropriate tool when needed.
                 "status": "error",
                 "message": f"Error executing {agent_name}: {str(e)}"
             })
-    
-    def _fallback_response(self, message: str) -> str:
+
+    def _run_agent_tool(
+        self,
+        recorder,
+        agent_name: str,
+        arguments: dict,
+        original_query: str,
+        parent_id: Optional[str],
+        *,
+        parse_success: bool,
+        argument_text: str,
+        route: str,
+        route_score: Optional[int] = None,
+    ) -> str:
+        from openrappter.flight_recorder import sanitize_flight_value
+
+        tool_started_at = time.monotonic()
+        route_metadata = {
+            "route": route,
+            **({"routeScore": route_score} if route_score is not None else {}),
+        }
+        tool_started = recorder.record({
+            "kind": "tool.call.started",
+            "source": "python-cli-assistant",
+            "status": "started",
+            **({"parentId": parent_id} if parent_id else {}),
+            "toolName": agent_name,
+            "metadata": {
+                "parseSuccess": parse_success,
+                "argumentChars": len(argument_text),
+                **route_metadata,
+            },
+            "payload": {
+                "arguments": (
+                    arguments
+                    if parse_success
+                    else sanitize_flight_value(argument_text)
+                )
+            },
+        })
+        tool_parent_id = (
+            tool_started.get("id") if tool_started is not None else None
+        )
+        result = recorder.with_parent(
+            tool_parent_id,
+            lambda: self._execute_agent(agent_name, arguments, original_query),
+        )
+        failed = agent_result_is_error(result)
+        try:
+            parsed_result = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            parsed_result = sanitize_flight_value(result)
+        recorder.record({
+            "kind": (
+                "tool.call.failed"
+                if failed
+                else "tool.call.completed"
+            ),
+            "source": "python-cli-assistant",
+            "status": "error" if failed else "success",
+            **({"parentId": tool_parent_id} if tool_parent_id else {}),
+            "toolName": agent_name,
+            "durationMs": (time.monotonic() - tool_started_at) * 1000,
+            "metadata": {
+                "parseSuccess": parse_success,
+                "resultLength": len(result),
+                **({"resultStatus": "error"} if failed else {}),
+                **route_metadata,
+            },
+            "payload": {
+                "arguments": (
+                    arguments
+                    if parse_success
+                    else sanitize_flight_value(argument_text)
+                ),
+                "result": sanitize_flight_value(parsed_result),
+            },
+        })
+        return result
+
+    def _fallback_response(
+        self,
+        message: str,
+        recorder,
+        parent_id: Optional[str],
+    ) -> str:
         """Fallback when Copilot is unavailable - use smart agent matching."""
         msg_lower = message.lower()
         
@@ -598,9 +855,21 @@ Be helpful, concise, and use the appropriate tool when needed.
                         if prefix in msg_lower:
                             desc = message[msg_lower.find(prefix) + len(prefix):].strip()
                             break
-                    return agent.execute(description=desc, query=message)
+                    arguments = {"description": desc, "query": message}
                 else:
-                    return agent.execute(query=message)
+                    arguments = {"query": message}
+                argument_text = json.dumps(arguments, separators=(",", ":"))
+                return self._run_agent_tool(
+                    recorder,
+                    best_match,
+                    arguments,
+                    message,
+                    parent_id,
+                    parse_success=True,
+                    argument_text=argument_text,
+                    route="provider-error-fallback",
+                    route_score=best_score,
+                )
         
         # Default response
         return json.dumps({

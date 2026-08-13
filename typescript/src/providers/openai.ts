@@ -8,19 +8,19 @@ import type {
   ChatOptions,
   ProviderResponse,
   EmbeddingOptions,
-} from './types.js';
+} from "./types.js";
 
-const OPENAI_API_URL = 'https://api.openai.com/v1';
-const DEFAULT_MODEL = 'gpt-4o';
-const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
+const OPENAI_API_URL = "https://api.openai.com/v1";
+const DEFAULT_MODEL = "gpt-4o";
+const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
 const DEFAULT_MAX_TOKENS = 4096;
 
 interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
   tool_calls?: Array<{
     id: string;
-    type: 'function';
+    type: "function";
     function: { name: string; arguments: string };
   }>;
   tool_call_id?: string;
@@ -28,17 +28,17 @@ interface OpenAIMessage {
 
 interface OpenAIResponse {
   id: string;
-  object: 'chat.completion';
+  object: "chat.completion";
   created: number;
   model: string;
   choices: Array<{
     index: number;
     message: {
-      role: 'assistant';
+      role: "assistant";
       content: string | null;
       tool_calls?: Array<{
         id: string;
-        type: 'function';
+        type: "function";
         function: { name: string; arguments: string };
       }>;
     };
@@ -52,9 +52,9 @@ interface OpenAIResponse {
 }
 
 interface OpenAIEmbeddingResponse {
-  object: 'list';
+  object: "list";
   data: Array<{
-    object: 'embedding';
+    object: "embedding";
     index: number;
     embedding: number[];
   }>;
@@ -66,8 +66,8 @@ interface OpenAIEmbeddingResponse {
 }
 
 export class OpenAIProvider implements LLMProvider {
-  id = 'openai';
-  name = 'OpenAI';
+  id = "openai";
+  name = "OpenAI";
 
   private apiKey: string | null = null;
 
@@ -79,9 +79,12 @@ export class OpenAIProvider implements LLMProvider {
     return !!this.apiKey;
   }
 
-  async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
+  async chat(
+    messages: Message[],
+    options?: ChatOptions,
+  ): Promise<ProviderResponse> {
     if (!this.apiKey) {
-      throw new Error('OpenAI API key not configured');
+      throw new Error("OpenAI API key not configured");
     }
 
     const openaiMessages: OpenAIMessage[] = messages.map((msg) => ({
@@ -106,9 +109,9 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     const response = await fetch(`${OPENAI_API_URL}/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
@@ -125,6 +128,7 @@ export class OpenAIProvider implements LLMProvider {
     return {
       content: choice.message.content,
       tool_calls: choice.message.tool_calls ?? null,
+      model: data.model,
       usage: {
         input_tokens: data.usage.prompt_tokens,
         output_tokens: data.usage.completion_tokens,
@@ -132,9 +136,12 @@ export class OpenAIProvider implements LLMProvider {
     };
   }
 
-  async embed(texts: string[], options?: EmbeddingOptions): Promise<number[][]> {
+  async embed(
+    texts: string[],
+    options?: EmbeddingOptions,
+  ): Promise<number[][]> {
     if (!this.apiKey) {
-      throw new Error('OpenAI API key not configured');
+      throw new Error("OpenAI API key not configured");
     }
 
     const body: Record<string, unknown> = {
@@ -147,9 +154,9 @@ export class OpenAIProvider implements LLMProvider {
     }
 
     const response = await fetch(`${OPENAI_API_URL}/embeddings`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
@@ -157,7 +164,9 @@ export class OpenAIProvider implements LLMProvider {
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(`OpenAI Embeddings API error: ${response.status} - ${error}`);
+      throw new Error(
+        `OpenAI Embeddings API error: ${response.status} - ${error}`,
+      );
     }
 
     const data = (await response.json()) as OpenAIEmbeddingResponse;

@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [v1.10.0 Release Notes](./docs/release-notes-1.10.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Flight Recorder](./docs/flight-recorder.md) | [v1.12.0 Release Notes](./docs/release-notes-1.12.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -82,6 +82,28 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 ## What Is openrappter
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
+
+### Flight Recorder: one truthful local execution history
+
+Both runtimes keep a local, append-only SQLite event ledger for
+provider attempts, context assembly, tool calls, and agent execution. It gives
+every turn a correlated trace ID so a result can be explained and replayed
+instead of reconstructed from unrelated logs.
+
+Privacy is the default: raw prompts, responses, tool arguments, and file
+contents are **not persisted** unless `OPENRAPPTER_FLIGHT_RECORD_IO=1` is set.
+Metadata is recursively scrubbed for tokens, credentials, secret-shaped values,
+and sensitive paths such as `.env`, SSH keys, and cloud credential files.
+
+```bash
+openrappter flight status
+openrappter flight events --trace <trace-id>
+openrappter flight export --trace <trace-id> --output trace.json
+openrappter flight import trace.json
+```
+
+See [Flight Recorder](./docs/flight-recorder.md) for the event contract,
+privacy boundary, configuration, and replay/export format.
 
 ### Copilot Surgeon: the main interaction
 

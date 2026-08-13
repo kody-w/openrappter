@@ -24,6 +24,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loopback request implicitly; protected JSON-RPC and `/chat` calls now enforce
   configured credentials consistently with WebSocket authentication.
 
+## [1.12.0] - 2026-08-11
+
+### Added
+
+- **Provider-neutral Flight Recorder** in TypeScript and Python — a local
+  SQLite WAL ledger records correlated trace, context, provider, tool, and
+  agent lifecycle events under `openrappter-event/1.0`.
+- **Privacy-safe defaults** — raw prompts, responses, tool arguments, and file
+  contents are omitted unless explicitly enabled. Opt-in IO is recursively
+  scrubbed for secret keys, secret-shaped values, sensitive paths, circular
+  values, unsafe numbers, and bounded by a post-redaction byte cap.
+- **Integrity-checked replay bundles** — versioned
+  `openrappter-flight-export/1.0` export/import with SHA-256 event hashes,
+  atomic tamper rejection, durable sequence continuity, and a committed
+  TypeScript/Python golden vector.
+- **Flight Recorder CLI** — `flight status`, `events`, `export`, `import`, and
+  confirmation-gated `clear`.
+- **Release-enforced cross-runtime gate** — behavior, mutation, privacy,
+  causality, retention, package, TypeScript, and Python validation now block
+  release artifact publication.
+
+### Changed
+
+- Provider responses may report the concrete model that actually answered;
+  `auto` remains a routing policy in metadata instead of being persisted as a
+  false model identity.
+- Retention prunes whole completed traces and preserves active traces rather
+  than leaving replay fragments without their start/context events. Nested and
+  resumed activity is evaluated by lifecycle depth in trace sequence order.
+- Replay exports read one uncapped SQLite snapshot, while interactive queries
+  retain their 10,000-event safety cap.
+- Trace sequence allocation reloads after cross-process SQLite conflicts, and
+  long-trace recovery uses one descending lookup rather than capped paging.
+  Lifecycle durations use monotonic clocks rather than wall time.
+- Absolute workspace paths are persisted as stable SHA-256 scope identifiers,
+  not raw filesystem paths.
+- Session identifiers are persisted as stable SHA-256 scope identifiers so
+  channel keys cannot leak phone numbers, email addresses, or chat GUIDs.
+  A private per-installation HMAC key prevents offline dictionary reversal.
+
+### Security
+
+- Persisted error metadata contains only safe class/code/status, message hash,
+  and message length. Raw provider response bodies remain opt-in payload data.
+- Flight databases, live WAL/SHM sidecars, and atomically replaced export
+  bundles use private filesystem modes. Custom database paths do not chmod
+  caller-owned parent directories.
+- Session/channel identifiers are normalized at the recorder boundary, and
+  Python query aliases reject unknown filters instead of silently exporting an
+  over-broad history.
+- Secret-shaped and excluded-path property names are replaced with
+  collision-safe markers before hashing or persistence; contents under
+  excluded filenames such as `.pem`, `.p12`, and service-account files are
+  removed.
+- Direct provider calls in telephony, Surgeon, LearnNew, Ouroboros, and
+  iMessage readiness checks now emit the same provider lifecycle evidence as
+  Assistant turns.
+- The Copilot CLI MCP child initializes its own recorder, streaming preserves
+  provider-reported model identity, and unknown fallback models remain
+  explicitly unattributed.
+- Copilot CLI child tools inherit the originating trace/parent scope and record
+  a tool-to-agent causal subtree rather than a disconnected child trace.
+- Standalone records evict sequence caches, and explicit recorder installation
+  remains synchronized with environment bootstrap.
+
 ## [1.10.0] - 2026-07-11
 
 ### Added

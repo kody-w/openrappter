@@ -11,13 +11,42 @@
  * Uses direct GitHub token → Copilot API token exchange (no copilot binary needed).
  */
 
-import { CopilotProvider, COPILOT_DEFAULT_MODEL } from '../providers/copilot.js';
-import { CopilotCliDirectProvider } from '../providers/copilot-cli-direct.js';
-import { truncateHistory } from '../providers/messages.js';
-import type { LLMProvider, Message, Tool, ToolCall } from '../providers/types.js';
-import type { BasicAgent } from './BasicAgent.js';
-import { MemoryAgent } from './MemoryAgent.js';
-import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdentityMarkdown, isOnboardingCompleted, WORKSPACE_DIR } from './workspace.js';
+import {
+  CopilotProvider,
+  COPILOT_DEFAULT_MODEL,
+} from "../providers/copilot.js";
+import { CopilotCliDirectProvider } from "../providers/copilot-cli-direct.js";
+import { getFlightRecorder } from "../flight-recorder/recorder.js";
+import { normalizeFlightModelId } from "../flight-recorder/integrity.js";
+import { agentResultIsError } from "./result-status.js";
+import {
+  sanitizeFlightValue,
+  summarizeFlightError,
+} from "../flight-recorder/redaction.js";
+import { truncateHistory } from "../providers/messages.js";
+import {
+  flightMessages,
+  flightProviderResponse,
+  formatFlightAgentLog,
+  sanitizeFlightAgentLog,
+} from "../providers/flight-io.js";
+import type {
+  LLMProvider,
+  Message,
+  ProviderResponse,
+  Tool,
+  ToolCall,
+} from "../providers/types.js";
+import type { BasicAgent } from "./BasicAgent.js";
+import { MemoryAgent } from "./MemoryAgent.js";
+import {
+  ensureWorkspace,
+  loadWorkspaceFiles,
+  buildWorkspaceContext,
+  parseIdentityMarkdown,
+  isOnboardingCompleted,
+  WORKSPACE_DIR,
+} from "./workspace.js";
 
 /**
  * The tool-call round cap, frozen by `rapp-runtime-parity/1.0` §2.2.
@@ -29,8 +58,8 @@ import { ensureWorkspace, loadWorkspaceFiles, buildWorkspaceContext, parseIdenti
  * where the vector allows 3.
  */
 const PARITY_MAX_ROUNDS = 3;
-import type { AgentIdentity } from './workspace.js';
-import { TwinVault, renderSoul } from '../twin/index.js';
+import type { AgentIdentity } from "./workspace.js";
+import { TwinVault, renderSoul } from "../twin/index.js";
 
 export interface AssistantConfig {
   /** Display name shown in system prompt */
@@ -84,6 +113,10 @@ export interface AssistantResponse {
   content: string;
   /** Log of agent invocations during this turn */
   agentLogs: string[];
+  /** Concrete provider-reported model, absent when unreported. */
+  model?: string;
+  /** Model selection policy requested for this turn. */
+  requestedModel?: string;
 }
 
 export interface AssistantConversationMessage {
@@ -92,7 +125,7 @@ export interface AssistantConversationMessage {
    * replayed from a brainstem client carries tool turns, and dropping them
    * leaves the model reasoning about results it can no longer see.
    */
-  role: 'user' | 'assistant' | 'tool';
+  role: "user" | "assistant" | "tool";
   content: string;
 }
 
@@ -105,15 +138,17 @@ export class Assistant {
   private workspaceDir: string;
   private cachedIdentity: AgentIdentity | null = null;
 
-  constructor(
-    agents: Map<string, BasicAgent>,
-    config?: AssistantConfig,
-  ) {
+  constructor(agents: Map<string, BasicAgent>, config?: AssistantConfig) {
     this.agents = agents;
+    const defaultModel =
+      config?.provider instanceof CopilotCliDirectProvider
+      || process.env.OPENRAPPTER_AI_BACKEND === "copilot-cli"
+        ? "auto"
+        : COPILOT_DEFAULT_MODEL;
     this.config = {
-      name: config?.name ?? 'openrappter',
-      description: config?.description ?? 'a helpful local-first AI assistant',
-      model: config?.model ?? COPILOT_DEFAULT_MODEL,
+      name: config?.name ?? "openrappter",
+      description: config?.description ?? "a helpful local-first AI assistant",
+      model: config?.model ?? defaultModel,
       githubToken: config?.githubToken,
       streaming: config?.streaming ?? true,
       maxToolRounds: config?.maxToolRounds ?? PARITY_MAX_ROUNDS,
@@ -135,7 +170,7 @@ export class Assistant {
       config?.provider ??
       // Prefer the GitHub Copilot CLI when explicitly selected: it owns its own
       // auth + refresh, so openrappter never runs the flaky device-code flow.
-      (process.env.OPENRAPPTER_AI_BACKEND === 'copilot-cli'
+      (process.env.OPENRAPPTER_AI_BACKEND === "copilot-cli"
         ? new CopilotCliDirectProvider({ model: this.config.model })
         : new CopilotProvider({
             githubToken: config?.githubToken,
@@ -154,8 +189,11 @@ export class Assistant {
    * from without a restart — the daemon re-selects a working backend and hands
    * it here, instead of printing a warning and failing the next request.
    */
-  setProvider(provider: LLMProvider): void {
+  setProvider(provider: LLMProvider, modelPolicy?: string): void {
     this.provider = provider;
+    if (modelPolicy !== undefined) {
+      this.config.model = modelPolicy;
+    }
   }
 
   /** Reload agents (e.g. after hot-load) */
@@ -198,17 +236,34 @@ export class Assistant {
     conversationKey?: string,
     signal?: AbortSignal,
   ): Promise<AssistantResponse> {
+    const key = conversationKey ?? "default";
+    return this.runTurnTrace(key, () =>
+      this.getResponseWithinTrace(message, onDelta, memoryContext, key, signal),
+    );
+  }
+
+  private async getResponseWithinTrace(
+    message: string,
+    onDelta: ((text: string) => void) | undefined,
+    memoryContext: string | undefined,
+    conversationKey: string,
+    signal?: AbortSignal,
+  ): Promise<AssistantResponse> {
     const agentLogs: string[] = [];
+    const turnProvider = this.provider;
+    const turnModel = this.getModel();
 
     // Build tools from agent metadata
     const tools = this.buildTools();
 
-    let workspaceContext = '';
+    let workspaceContext = "";
     if (this.config.loadWorkspaceContext) {
       await ensureWorkspace(this.workspaceDir);
       const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
       const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
-      const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+      const identityFile = workspaceFiles.find(
+        (f) => f.name === "IDENTITY.md" && !f.missing,
+      );
       if (identityFile?.content) {
         this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
       }
@@ -221,55 +276,91 @@ export class Assistant {
     }
 
     // Build system prompt
-    const systemContent = this.buildSystemPrompt(memoryContext, workspaceContext);
+    const systemContent = this.buildSystemPrompt(
+      memoryContext,
+      workspaceContext,
+    );
 
     // Get or create conversation history
-    const key = conversationKey ?? 'default';
-    let history = this.conversations.get(key);
+    let history = this.conversations.get(conversationKey);
     if (!history) {
-      history = [{ role: 'system', content: systemContent }];
-      this.conversations.set(key, history);
+      history = [{ role: "system", content: systemContent }];
+      this.conversations.set(conversationKey, history);
     } else {
       // Refresh system prompt so new memories are always available
-      history[0] = { role: 'system', content: systemContent };
+      history[0] = { role: "system", content: systemContent };
     }
 
     // Add user message
-    history.push({ role: 'user', content: message });
+    history.push({ role: "user", content: message });
+
+    await getFlightRecorder().record({
+      kind: "context.assembled",
+      source: "assistant",
+      status: "info",
+      metadata: {
+        sourceNames: ["workspace", "memory", "system", "history", "tools"],
+        categoryNames: [
+          "workspace",
+          "memory",
+          "system",
+          "conversation",
+          "tools",
+        ],
+        workspaceChars: workspaceContext.length,
+        memoryChars: memoryContext?.length ?? 0,
+        systemChars: systemContent.length,
+        toolCount: tools.length,
+        historyLength: history.length,
+        workspaceEnabled: this.config.loadWorkspaceContext ?? true,
+        memoryEnabled: this.config.loadMemoryContext ?? true,
+      },
+    });
 
     // Tool-call loop
     let rounds = 0;
+    let reportedModel: string | undefined;
     const maxRounds = this.config.maxToolRounds ?? PARITY_MAX_ROUNDS;
 
     while (rounds < maxRounds) {
       rounds++;
 
-      const response = await this.provider.chat(history, {
-        model: this.config.model,
-        tools: tools.length > 0 ? tools : undefined,
+      const providerCall = await this.callProvider(
+        history,
+        tools,
+        rounds,
         signal,
-      });
+        turnProvider,
+        turnModel,
+      );
+      const response = providerCall.response;
+      reportedModel = response.model;
 
       // Some providers run their own tool loop and report what ran instead of
       // handing back tool_calls. Without this the CLI backend produced an empty
       // agent_logs for a turn in which an agent demonstrably ran.
-      if (response.agent_logs?.length) agentLogs.push(...response.agent_logs);
+      if (response.agent_logs?.length) {
+        agentLogs.push(...response.agent_logs.map(sanitizeFlightAgentLog));
+      }
 
       // If the LLM responded with tool calls, execute them
       if (response.tool_calls && response.tool_calls.length > 0) {
         // Add assistant message with tool calls to history
         history.push({
-          role: 'assistant',
-          content: response.content ?? '',
+          role: "assistant",
+          content: response.content ?? "",
           tool_calls: response.tool_calls,
         });
 
         // Execute each tool call
         for (const tc of response.tool_calls) {
           try {
-            const result = await this.executeToolCall(tc, agentLogs);
+            const result = await getFlightRecorder().withParent(
+              providerCall.parentEventId ?? null,
+              () => this.executeToolCall(tc, agentLogs),
+            );
             history.push({
-              role: 'tool',
+              role: "tool",
               // §2.3 fixes this shape exactly, `name` included.
               name: tc.function.name,
               content: result,
@@ -279,9 +370,9 @@ export class Assistant {
             // Always push a tool response — even on error — to prevent
             // "tool_call_id did not have response" API errors
             history.push({
-              role: 'tool',
+              role: "tool",
               name: tc.function.name,
-              content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
+              content: `Error: ${(err as Error).message ?? "Tool call failed"}`,
               tool_call_id: tc.id,
             });
           }
@@ -292,13 +383,13 @@ export class Assistant {
       }
 
       // No tool calls — this is the final text response
-      const content = response.content ?? '';
-      history.push({ role: 'assistant', content });
+      const content = response.content ?? "";
+      history.push({ role: "assistant", content });
 
       // Trim history if it gets too long (keep system + last 40 messages)
       if (history.length > 42) {
         history = truncateHistory(history, 40);
-        this.conversations.set(key, history);
+        this.conversations.set(conversationKey, history);
       }
 
       if (onDelta) onDelta(content);
@@ -306,14 +397,20 @@ export class Assistant {
       return {
         content,
         agentLogs,
+        model: reportedModel,
+        requestedModel: turnModel,
       };
     }
 
     // Max rounds exceeded — return whatever we have
-    const lastAssistant = history.filter(m => m.role === 'assistant').pop();
+    const lastAssistant = history.filter((m) => m.role === "assistant").pop();
     return {
-      content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
+      content:
+        lastAssistant?.content ||
+        "I ran out of tool-call rounds. Please try again.",
       agentLogs,
+      model: reportedModel,
+      requestedModel: turnModel,
     };
   }
 
@@ -327,8 +424,21 @@ export class Assistant {
     onDelta: (text: string) => void,
     conversationKey?: string,
   ): Promise<AssistantResponse> {
+    const key = conversationKey ?? "default";
+    return this.runTurnTrace(key, () =>
+      this.getResponseStreamingWithinTrace(message, onDelta, key),
+    );
+  }
+
+  private async getResponseStreamingWithinTrace(
+    message: string,
+    onDelta: (text: string) => void,
+    conversationKey: string,
+  ): Promise<AssistantResponse> {
     // Fall back to non-streaming if provider doesn't support chatStream
-    const chatStream = this.provider.chatStream;
+    const provider = this.provider;
+    const modelPolicy = this.config.model;
+    const chatStream = provider.chatStream;
     if (!chatStream) {
       return this.getResponse(message, onDelta, undefined, conversationKey);
     }
@@ -337,12 +447,14 @@ export class Assistant {
 
     const tools = this.buildTools();
 
-    let workspaceContext = '';
+    let workspaceContext = "";
     if (this.config.loadWorkspaceContext) {
       await ensureWorkspace(this.workspaceDir);
       const workspaceFiles = await loadWorkspaceFiles(this.workspaceDir);
       const onboardingDone = await isOnboardingCompleted(this.workspaceDir);
-      const identityFile = workspaceFiles.find(f => f.name === 'IDENTITY.md' && !f.missing);
+      const identityFile = workspaceFiles.find(
+        (f) => f.name === "IDENTITY.md" && !f.missing,
+      );
       if (identityFile?.content) {
         this.cachedIdentity = parseIdentityMarkdown(identityFile.content);
       }
@@ -352,75 +464,190 @@ export class Assistant {
     const memoryContext = this.config.loadMemoryContext
       ? await this.loadMemoryContext()
       : undefined;
-    const systemContent = this.buildSystemPrompt(memoryContext, workspaceContext);
+    const systemContent = this.buildSystemPrompt(
+      memoryContext,
+      workspaceContext,
+    );
 
-    const key = conversationKey ?? 'default';
-    let history = this.conversations.get(key);
+    let history = this.conversations.get(conversationKey);
     if (!history) {
-      history = [{ role: 'system', content: systemContent }];
-      this.conversations.set(key, history);
+      history = [{ role: "system", content: systemContent }];
+      this.conversations.set(conversationKey, history);
     } else {
-      history[0] = { role: 'system', content: systemContent };
+      history[0] = { role: "system", content: systemContent };
     }
 
-    history.push({ role: 'user', content: message });
+    history.push({ role: "user", content: message });
+
+    await getFlightRecorder().record({
+      kind: "context.assembled",
+      source: "assistant",
+      status: "info",
+      metadata: {
+        sourceNames: ["workspace", "memory", "system", "history", "tools"],
+        categoryNames: [
+          "workspace",
+          "memory",
+          "system",
+          "conversation",
+          "tools",
+        ],
+        workspaceChars: workspaceContext.length,
+        memoryChars: memoryContext?.length ?? 0,
+        systemChars: systemContent.length,
+        toolCount: tools.length,
+        historyLength: history.length,
+        workspaceEnabled: this.config.loadWorkspaceContext ?? true,
+        memoryEnabled: this.config.loadMemoryContext ?? true,
+      },
+    });
 
     let rounds = 0;
+    let finalReportedModel: string | undefined;
     const maxRounds = this.config.maxToolRounds ?? PARITY_MAX_ROUNDS;
+    // Preserve the post-initialization narrowing inside async retry closures.
+    const turnHistory = history;
 
     while (rounds < maxRounds) {
       rounds++;
 
-      let fullContent = '';
-      const toolCallAccumulator = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
+      let fullContent = "";
+      const toolCallAccumulator = new Map<
+        number,
+        {
+          id: string;
+          type: "function";
+          function: { name: string; arguments: string };
+        }
+      >();
+      let providerParentEventId: string | undefined;
 
       // Retry streaming call on transient fetch failures
       const maxRetries = 2;
       let lastError: Error | undefined;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        let reportedModel: string | undefined;
+        const attemptStarted = performance.now();
+        const recorder = getFlightRecorder();
+        const startedEvent = await recorder.record({
+          kind: "provider.attempt.started",
+          source: "assistant",
+          status: "started",
+          providerId: provider.id,
+          metadata: {
+            round: rounds,
+            attempt: attempt + 1,
+            messageCount: history.length,
+            toolCount: tools.length,
+            streaming: true,
+            modelPolicy,
+          },
+          payload: () => ({ messages: flightMessages(history!) }),
+        });
         try {
-          for await (const delta of chatStream.call(this.provider, history, {
-            model: this.config.model,
-            tools: tools.length > 0 ? tools : undefined,
-          })) {
-            if (delta.done) {
-              break;
-            }
+          await recorder.withParent(startedEvent?.id ?? null, async () => {
+            for await (const delta of chatStream.call(
+              provider,
+              turnHistory,
+              {
+                model: modelPolicy,
+                tools: tools.length > 0 ? tools : undefined,
+              },
+            )) {
+              if (delta.model) reportedModel = delta.model;
+              if (delta.done) {
+                break;
+              }
 
-            if (delta.content) {
-              fullContent += delta.content;
-              onDelta(delta.content);
-            }
+              if (delta.content) {
+                fullContent += delta.content;
+                onDelta(delta.content);
+              }
 
-            if (delta.tool_calls) {
-              for (const tc of delta.tool_calls) {
-                const existing = toolCallAccumulator.get(tc.index);
-                if (!existing && tc.id) {
-                  // Only create a new tool call entry when we have an ID
-                  toolCallAccumulator.set(tc.index, {
-                    id: tc.id,
-                    type: 'function',
-                    function: {
-                      name: tc.function?.name ?? '',
-                      arguments: tc.function?.arguments ?? '',
-                    },
-                  });
-                } else if (existing) {
-                  if (tc.id && !existing.id) existing.id = tc.id;
-                  if (tc.function?.name) existing.function.name += tc.function.name;
-                  if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+              if (delta.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const existing = toolCallAccumulator.get(tc.index);
+                  if (!existing && tc.id) {
+                    // Only create a new tool call entry when we have an ID
+                    toolCallAccumulator.set(tc.index, {
+                      id: tc.id,
+                      type: "function",
+                      function: {
+                        name: tc.function?.name ?? "",
+                        arguments: tc.function?.arguments ?? "",
+                      },
+                    });
+                  } else if (existing) {
+                    if (tc.id && !existing.id) existing.id = tc.id;
+                    if (tc.function?.name)
+                      existing.function.name += tc.function.name;
+                    if (tc.function?.arguments)
+                      existing.function.arguments += tc.function.arguments;
+                  }
                 }
               }
             }
-          }
+            const completedEvent = await recorder.record({
+              kind: "provider.attempt.completed",
+              source: "assistant",
+              status: "success",
+              providerId: provider.id,
+              model: normalizeFlightModelId(reportedModel),
+              durationMs: performance.now() - attemptStarted,
+              metadata: {
+                round: rounds,
+                attempt: attempt + 1,
+                messageCount: turnHistory.length,
+                toolCount: tools.length,
+                streaming: true,
+                modelPolicy,
+                toolCallsOccurred: toolCallAccumulator.size > 0,
+              },
+              payload: () => ({
+                messages: flightMessages(turnHistory),
+                response: flightProviderResponse({
+                  content: fullContent,
+                  tool_calls: Array.from(toolCallAccumulator.values()),
+                }),
+              }),
+            });
+            providerParentEventId = completedEvent?.id;
+          });
           lastError = undefined;
+          finalReportedModel = reportedModel;
           break; // Success — exit retry loop
         } catch (err) {
           lastError = err as Error;
-          if (attempt < maxRetries && (lastError.message.includes('fetch failed') || lastError.message.includes('HTTP 429'))) {
+          await recorder.withParent(startedEvent?.id ?? null, () =>
+            recorder.record({
+              kind: "provider.attempt.failed",
+              source: "assistant",
+              status: "error",
+              providerId: provider.id,
+              durationMs: performance.now() - attemptStarted,
+              metadata: {
+                round: rounds,
+                attempt: attempt + 1,
+                messageCount: turnHistory.length,
+                toolCount: tools.length,
+                streaming: true,
+                modelPolicy,
+                ...summarizeFlightError(lastError),
+              },
+              payload: () => ({
+                messages: flightMessages(turnHistory),
+                error: lastError,
+              }),
+            }),
+          );
+          if (
+            attempt < maxRetries &&
+            (lastError.message.includes("fetch failed") ||
+              lastError.message.includes("HTTP 429"))
+          ) {
             // Transient network error — wait briefly and retry
-            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-            fullContent = '';
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            fullContent = "";
             toolCallAccumulator.clear();
             continue;
           }
@@ -428,20 +655,25 @@ export class Assistant {
         }
       }
 
-      const assembledToolCalls = Array.from(toolCallAccumulator.values()).filter(tc => tc.id?.trim() !== '');
+      const assembledToolCalls = Array.from(
+        toolCallAccumulator.values(),
+      ).filter((tc) => tc.id?.trim() !== "");
 
       if (assembledToolCalls.length > 0) {
         history.push({
-          role: 'assistant',
-          content: fullContent || '',
+          role: "assistant",
+          content: fullContent || "",
           tool_calls: assembledToolCalls,
         });
 
         for (const tc of assembledToolCalls) {
           try {
-            const result = await this.executeToolCall(tc, agentLogs);
+            const result = await getFlightRecorder().withParent(
+              providerParentEventId ?? null,
+              () => this.executeToolCall(tc, agentLogs),
+            );
             history.push({
-              role: 'tool',
+              role: "tool",
               // §2.3 fixes this shape exactly, `name` included.
               name: tc.function.name,
               content: result,
@@ -449,9 +681,9 @@ export class Assistant {
             });
           } catch (err) {
             history.push({
-              role: 'tool',
+              role: "tool",
               name: tc.function.name,
-              content: `Error: ${(err as Error).message ?? 'Tool call failed'}`,
+              content: `Error: ${(err as Error).message ?? "Tool call failed"}`,
               tool_call_id: tc.id,
             });
           }
@@ -461,29 +693,35 @@ export class Assistant {
       }
 
       // No tool calls — final text response
-      history.push({ role: 'assistant', content: fullContent });
+      history.push({ role: "assistant", content: fullContent });
 
       if (history.length > 42) {
         history = truncateHistory(history, 40);
-        this.conversations.set(key, history);
+        this.conversations.set(conversationKey, history);
       }
 
       return {
         content: fullContent,
         agentLogs,
+        model: finalReportedModel,
+        requestedModel: modelPolicy,
       };
     }
 
-    const lastAssistant = history.filter(m => m.role === 'assistant').pop();
+    const lastAssistant = history.filter((m) => m.role === "assistant").pop();
     return {
-      content: lastAssistant?.content || 'I ran out of tool-call rounds. Please try again.',
+      content:
+        lastAssistant?.content ||
+        "I ran out of tool-call rounds. Please try again.",
       agentLogs,
+      model: finalReportedModel,
+      requestedModel: modelPolicy,
     };
   }
 
   /** Check if the provider supports streaming */
   private hasStreamSupport(): boolean {
-    return typeof this.provider.chatStream === 'function';
+    return typeof this.provider.chatStream === "function";
   }
 
   /** Clear a single conversation's history */
@@ -496,12 +734,12 @@ export class Assistant {
     const history = this.conversations.get(key) ?? [];
     return history
       .filter(
-        (message): message is Message & { role: 'user' | 'assistant' } =>
-          (message.role === 'user' || message.role === 'assistant')
-          && typeof message.content === 'string',
+        (message): message is Message & { role: "user" | "assistant" } =>
+          (message.role === "user" || message.role === "assistant") &&
+          typeof message.content === "string",
       )
       .slice(-40)
-      .map(message => ({ role: message.role, content: message.content }));
+      .map((message) => ({ role: message.role, content: message.content }));
   }
 
   /** Replace a conversation from a persisted user/assistant-only transcript. */
@@ -512,15 +750,14 @@ export class Assistant {
     const imported = messages
       .filter(
         (message): message is AssistantConversationMessage =>
-          (message.role === 'user' || message.role === 'assistant' || message.role === 'tool')
-          && typeof message.content === 'string',
+          (message.role === "user" ||
+            message.role === "assistant" ||
+            message.role === "tool") &&
+          typeof message.content === "string",
       )
       .slice(-40)
-      .map(message => ({ role: message.role, content: message.content }));
-    this.conversations.set(key, [
-      { role: 'system', content: '' },
-      ...imported,
-    ]);
+      .map((message) => ({ role: message.role, content: message.content }));
+    this.conversations.set(key, [{ role: "system", content: "" }, ...imported]);
   }
 
   /** Gracefully shut down */
@@ -530,6 +767,102 @@ export class Assistant {
 
   // ── Private helpers ───────────────────────────────────────────────────
 
+  private async runTurnTrace<T>(
+    conversationKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const recorder = getFlightRecorder();
+    if (recorder.currentTrace()) {
+      return operation();
+    }
+    return recorder.runTrace(
+      {
+        sessionId: conversationKey,
+        workspaceId: this.workspaceDir,
+      },
+      operation,
+    );
+  }
+
+  private async callProvider(
+    history: Message[],
+    tools: Tool[],
+    round: number,
+    signal?: AbortSignal,
+    provider: LLMProvider = this.provider,
+    modelPolicy: string = this.getModel(),
+  ): Promise<{ response: ProviderResponse; parentEventId?: string }> {
+    const recorder = getFlightRecorder();
+    const started = performance.now();
+    const startedEvent = await recorder.record({
+      kind: "provider.attempt.started",
+      source: "assistant",
+      status: "started",
+      providerId: provider.id,
+      metadata: {
+        round,
+        messageCount: history.length,
+        toolCount: tools.length,
+        streaming: false,
+        modelPolicy,
+      },
+      payload: () => ({ messages: flightMessages(history) }),
+    });
+
+    return recorder.withParent(startedEvent?.id ?? null, async () => {
+      try {
+        const response = await provider.chat(history, {
+          model: modelPolicy,
+          tools: tools.length > 0 ? tools : undefined,
+          signal,
+        });
+        const completedEvent = await recorder.record({
+          kind: "provider.attempt.completed",
+          source: "assistant",
+          status: "success",
+          providerId: provider.id,
+          model: normalizeFlightModelId(response.model),
+          durationMs: performance.now() - started,
+          metadata: {
+            round,
+            messageCount: history.length,
+            toolCount: tools.length,
+            streaming: false,
+            modelPolicy,
+            toolCallsOccurred: Boolean(response.tool_calls?.length),
+            ...(response.usage ? { usage: response.usage } : {}),
+          },
+          payload: () => ({
+            messages: flightMessages(history),
+            response: flightProviderResponse(response),
+          }),
+        });
+        return { response, parentEventId: completedEvent?.id };
+      } catch (error) {
+        await recorder.record({
+          kind: "provider.attempt.failed",
+          source: "assistant",
+          status: "error",
+          providerId: provider.id,
+          durationMs: performance.now() - started,
+          metadata: {
+            round,
+            messageCount: history.length,
+            toolCount: tools.length,
+            streaming: false,
+            modelPolicy,
+            ...summarizeFlightError(error),
+          },
+          payload: () => ({
+            messages: flightMessages(history),
+            error,
+          }),
+        });
+        throw error;
+      }
+    });
+  }
+
   /** Load persistent memories from disk and format as context string */
   private async loadMemoryContext(): Promise<string | undefined> {
     try {
@@ -538,58 +871,145 @@ export class Assistant {
       if (entries.length === 0) return undefined;
 
       // Sort by timestamp descending, take most recent 10
-      entries.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      entries.sort((a, b) =>
+        (b.timestamp || "").localeCompare(a.timestamp || ""),
+      );
       const recent = entries.slice(0, 10);
 
       const lines = recent.map((e) => {
-        const date = e.date || e.timestamp?.split('T')[0] || '';
+        const date = e.date || e.timestamp?.split("T")[0] || "";
         return `• [${e.theme}] ${e.message} (${date})`;
       });
 
-      return lines.join('\n');
+      return lines.join("\n");
     } catch {
       return undefined;
     }
   }
 
   /** Execute a single tool call by dispatching to the matching agent */
-  private async executeToolCall(tc: ToolCall, agentLogs: string[]): Promise<string> {
+  private async executeToolCall(
+    tc: ToolCall,
+    agentLogs: string[],
+  ): Promise<string> {
     const agentName = tc.function.name;
-    const agent = this.agents.get(agentName);
-
-    // PARITY §2.3 fixes these strings exactly. `agent_logs` is contract, not
-    // cosmetics — Flight Recorder and rapp-god read it — and this runtime was
-    // emitting its own vocabulary ("Performed X → …", "Unknown agent: X")
-    // while the Python runtime emitted the spec's. Two substrates of the same
-    // product disagreeing on the wire is the failure PARITY §0 is about.
-    if (!agent) {
-      const msg = `Agent '${agentName}' not found.`;
-      agentLogs.push(`[${agentName}] ${msg}`);
-      return msg;
-    }
-
+    const recorder = getFlightRecorder();
+    const started = performance.now();
+    let params: Record<string, unknown> = {};
+    let parseSuccess = true;
     try {
-      let params: Record<string, unknown> = {};
-      try {
-        params = JSON.parse(tc.function.arguments);
-      } catch {
-        // §2.3: on parse failure the arguments default to `{}`. Passing the
-        // raw unparsed string through as `query` invents an argument the model
-        // never sent, and the agent then acts on it.
-        params = {};
+      params = JSON.parse(tc.function.arguments);
+    } catch {
+      parseSuccess = false;
+    }
+    const recordedParams = structuredClone(params);
+
+    const startedEvent = await recorder.record({
+      kind: "tool.call.started",
+      source: "assistant",
+      status: "started",
+      toolName: agentName,
+      metadata: {
+        parseSuccess,
+        argumentChars: tc.function.arguments.length,
+      },
+      payload: {
+        arguments: parseSuccess
+          ? recordedParams
+          : sanitizeFlightValue(tc.function.arguments),
+      },
+    });
+
+    return recorder.withParent(startedEvent?.id ?? null, async () => {
+      const agent = this.agents.get(agentName);
+
+      // PARITY §2.3 fixes these strings exactly. `agent_logs` is contract, not
+      // cosmetics — Flight Recorder and rapp-god read it — and this runtime was
+      // emitting its own vocabulary ("Performed X → …", "Unknown agent: X")
+      // while the Python runtime emitted the spec's. Two substrates of the same
+      // product disagreeing on the wire is the failure PARITY §0 is about.
+      if (!agent) {
+        const msg = `Agent '${agentName}' not found.`;
+        agentLogs.push(formatFlightAgentLog(agentName, msg));
+        await recorder.record({
+          kind: "tool.call.failed",
+          source: "assistant",
+          status: "error",
+          toolName: agentName,
+          durationMs: performance.now() - started,
+          metadata: {
+            parseSuccess,
+            resultLength: msg.length,
+            errorName: "UnknownAgentError",
+            errorCode: "unknown-agent",
+          },
+          payload: {
+            arguments: parseSuccess
+              ? recordedParams
+              : sanitizeFlightValue(tc.function.arguments),
+          },
+        });
+        return msg;
       }
 
-      const result = await agent.execute(params);
-      const resultStr = result == null ? 'Agent completed successfully' : String(result);
-      // Not truncated: the log line is the tool result, and a reader that
-      // cannot reproduce it cannot verify anything from it.
-      agentLogs.push(`[${agentName}] ${resultStr}`);
-      return resultStr;
-    } catch (err) {
-      const message = (err as Error).message;
-      agentLogs.push(`[${agentName}] ERROR: ${message}`);
-      return `Error: ${message}`;
-    }
+      try {
+        const result = await agent.execute(params);
+        const resultStr =
+          result == null ? "Agent completed successfully" : String(result);
+        const failed = agentResultIsError(resultStr);
+        let structuredResult: unknown = sanitizeFlightValue(resultStr);
+        try {
+          structuredResult = sanitizeFlightValue(JSON.parse(resultStr));
+        } catch {
+          // Non-JSON agent output remains a sanitized string.
+        }
+        // Not truncated: the log line is the tool result, and a reader that
+        // cannot reproduce it cannot verify anything from it.
+        agentLogs.push(formatFlightAgentLog(agentName, resultStr));
+        await recorder.record({
+          kind: failed ? "tool.call.failed" : "tool.call.completed",
+          source: "assistant",
+          status: failed ? "error" : "success",
+          toolName: agentName,
+          durationMs: performance.now() - started,
+          metadata: {
+            parseSuccess,
+            resultLength: resultStr.length,
+            ...(failed ? { resultStatus: "error" } : {}),
+          },
+          payload: {
+            arguments: parseSuccess
+              ? recordedParams
+              : sanitizeFlightValue(tc.function.arguments),
+            result: structuredResult,
+          },
+        });
+        return resultStr;
+      } catch (err) {
+        const message = (err as Error).message;
+        agentLogs.push(formatFlightAgentLog(agentName, message, true));
+        const result = `Error: ${message}`;
+        await recorder.record({
+          kind: "tool.call.failed",
+          source: "assistant",
+          status: "error",
+          toolName: agentName,
+          durationMs: performance.now() - started,
+          metadata: {
+            parseSuccess,
+            resultLength: result.length,
+            ...summarizeFlightError(err),
+          },
+          payload: {
+            arguments: parseSuccess
+              ? recordedParams
+              : sanitizeFlightValue(tc.function.arguments),
+            result: sanitizeFlightValue(result),
+          },
+        });
+        return result;
+      }
+    });
   }
 
   /** Convert agent metadata into OpenAI-compatible tool definitions */
@@ -600,11 +1020,14 @@ export class Assistant {
       if (!agent.metadata) continue;
 
       tools.push({
-        type: 'function',
+        type: "function",
         function: {
           name: agent.metadata.name,
           description: agent.metadata.description,
-          parameters: agent.metadata.parameters as unknown as Record<string, unknown>,
+          parameters: agent.metadata.parameters as unknown as Record<
+            string,
+            unknown
+          >,
         },
       });
     }
@@ -625,14 +1048,16 @@ export class Assistant {
     // An explicitly configured persona always wins. Without this a test bot,
     // a named sub-agent, or any purpose-built assistant would quietly turn
     // into the owner's twin the moment a vault existed on the machine.
-    const explicitPersona = Boolean(this.config.name || this.config.description);
+    const explicitPersona = Boolean(
+      this.config.name || this.config.description,
+    );
     const wanted = this.config.useTwin ?? !explicitPersona;
     if (!wanted) return null;
 
     try {
       const vault = new TwinVault();
       if (!vault.exists()) return null;
-      return renderSoul(vault.load(), { audience: 'owner' });
+      return renderSoul(vault.load(), { audience: "owner" });
     } catch {
       // A broken twin must never take the assistant down with it.
       return null;
@@ -651,11 +1076,15 @@ export class Assistant {
    * contribute standing context to its own turn. The hook is optional in the
    * ABI (§4), so it is read defensively rather than declared on `BasicAgent`.
    */
-  private buildSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
+  private buildSystemPrompt(
+    memoryContext?: string,
+    workspaceContext?: string,
+  ): string {
     let prompt = this.buildBaseSystemPrompt(memoryContext, workspaceContext);
     for (const agent of this.agents.values()) {
-      const hook = (agent as unknown as { system_context?: () => unknown }).system_context;
-      if (typeof hook !== 'function') continue;
+      const hook = (agent as unknown as { system_context?: () => unknown })
+        .system_context;
+      if (typeof hook !== "function") continue;
       let extra: unknown;
       try {
         extra = hook.call(agent);
@@ -663,7 +1092,7 @@ export class Assistant {
         // One agent's hook must not take down the turn.
         continue;
       }
-      if (typeof extra === 'string' && extra.trim()) {
+      if (typeof extra === "string" && extra.trim()) {
         prompt += `\n\n${extra.trim()}`;
       }
     }
@@ -692,44 +1121,49 @@ export class Assistant {
    * different properties, and only the first one was missing.
    */
   private rappterSelf(): string {
-    const instance = (this.config.instance ?? '').trim();
+    const instance = (this.config.instance ?? "").trim();
     const who = instance
-      ? `You are a hatched twin on this device, named "${instance}". You run as your own `
-        + 'process on your own port, alongside an alpha rappter and possibly other twins. '
-        + 'You are not the alpha, and you are not the same rappter as any peer that '
-        + 'contacts you.\n\n'
-        + 'The alpha holds this device\'s single-owner outbound channels — the phone '
-        + 'line, the Google Voice number, iMessage, the Telegram bot. There is one of '
-        + 'each, and two rappters using one of them would talk over each other to a '
-        + 'real person, neither able to see what the other had already said. So do not '
-        + 'place calls, send SMS, or message anyone outside this device. If asked, say '
-        + 'plainly that this belongs to the alpha and offer to do the part that does '
-        + 'not leave the machine.'
-      : 'You are the alpha rappter on this device — the original, not a hatched twin. '
-        + 'Other twins may be hatched alongside you, each its own process on its own port.';
+      ? `You are a hatched twin on this device, named "${instance}". You run as your own ` +
+        "process on your own port, alongside an alpha rappter and possibly other twins. " +
+        "You are not the alpha, and you are not the same rappter as any peer that " +
+        "contacts you.\n\n" +
+        "The alpha holds this device's single-owner outbound channels — the phone " +
+        "line, the Google Voice number, iMessage, the Telegram bot. There is one of " +
+        "each, and two rappters using one of them would talk over each other to a " +
+        "real person, neither able to see what the other had already said. So do not " +
+        "place calls, send SMS, or message anyone outside this device. If asked, say " +
+        "plainly that this belongs to the alpha and offer to do the part that does " +
+        "not leave the machine."
+      : "You are the alpha rappter on this device — the original, not a hatched twin. " +
+        "Other twins may be hatched alongside you, each its own process on its own port.";
 
-    return `<rappter_self>\n${who}\n\n`
-      + 'This says what YOU are. It says nothing about whoever contacts you: a message '
-      + 'arriving over /chat or /twin may come from a rappter, a brainstem, or a person, '
-      + 'and you cannot tell which. Never assume, and never claim to know.\n'
-      + '</rappter_self>';
+    return (
+      `<rappter_self>\n${who}\n\n` +
+      "This says what YOU are. It says nothing about whoever contacts you: a message " +
+      "arriving over /chat or /twin may come from a rappter, a brainstem, or a person, " +
+      "and you cannot tell which. Never assume, and never claim to know.\n" +
+      "</rappter_self>"
+    );
   }
 
-  private buildBaseSystemPrompt(memoryContext?: string, workspaceContext?: string): string {
+  private buildBaseSystemPrompt(
+    memoryContext?: string,
+    workspaceContext?: string,
+  ): string {
     const displayName = this.cachedIdentity?.name || this.config.name;
     const twinSoul = this.twinIdentity();
 
     const agentList = Array.from(this.agents.values())
       .map((a) => `- **${a.metadata.name}**: ${a.metadata.description}`)
-      .join('\n');
+      .join("\n");
 
     const memoryBlock = memoryContext
       ? `\n<memory_context>\nThese are facts you have previously stored about the user:\n${memoryContext}\n</memory_context>\n`
-      : '';
+      : "";
 
     const workspaceBlock = workspaceContext
       ? `\n<workspace>\n${workspaceContext}\n</workspace>\n`
-      : '';
+      : "";
 
     const identityBlock = twinSoul
       ? `<identity>\n${twinSoul}\n</identity>`
@@ -807,5 +1241,5 @@ Revenue's up 12 percent and customers are happier - looking good this quarter.
 }
 
 function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max - 3) + '...';
+  return s.length <= max ? s : s.slice(0, max - 3) + "...";
 }

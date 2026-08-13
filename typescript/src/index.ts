@@ -18,12 +18,22 @@ import { registerTelephonyCommands } from './telephony/cli.js';
 import { registerTwinCommands } from './twin/index.js';
 import { registerCronCommand } from './cli/cron.js';
 import { registerRappterCommand } from './cli/rappters.js';
+import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { portTypedOnCommandLine } from './infra/cli-port.js';
+import {
+  ensureFlightRecorderFromEnv,
+  getFlightRecorder,
+} from './flight-recorder/index.js';
+import { chatWithFlightRecorder } from './providers/recorded-chat.js';
 
 const execAsync = promisify(exec);
 
 const EMOJI = '🦖';
 const NAME = 'openrappter';
+const GATEWAY_LIFECYCLE_LOCK = path.join(
+  HOME_DIR,
+  'gateway-lifecycle.pid',
+);
 
 // Initialize agent registry
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +91,10 @@ async function startGatewayInProcess(opts?: {
   instance?: string;
   releaseProcessLock?: () => void;
 }): Promise<{ port: number; cleanup: () => Promise<void> }> {
+  // launchd runs `node` directly with a fixed environment, so hydrate the
+  // managed .env before the recorder snapshots and caches its configuration.
+  await hydrateManagedEnv();
+  await ensureFlightRecorderFromEnv();
   const { GatewayServer } = await import('./gateway/server.js');
   const { Assistant } = await import('./agents/Assistant.js');
   const { ChannelRegistry } = await import('./channels/registry.js');
@@ -100,13 +114,6 @@ async function startGatewayInProcess(opts?: {
     readIMessageConfig,
   } = await import('./channels/imessage-gateway.js');
   const { listBundledSkills } = await import('./skills/bundled.js');
-
-  // launchd runs `node` directly with a fixed environment, so a supervised
-  // gateway never sees ~/.openrappter/.env — the wrapper script is what sources
-  // it for interactive commands. Without this the Copilot provider starts with
-  // no credential and the iMessage model preflight fails forever, while
-  // `diagnose` (run under the wrapper) reports the token as configured. #44
-  await hydrateManagedEnv();
 
   const port = opts?.port ?? parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
   const token = process.env.OPENRAPPTER_TOKEN || undefined;
@@ -188,7 +195,7 @@ async function startGatewayInProcess(opts?: {
     description: `a local-first AI assistant. Your name is ${calledName}`
       + `${vitals.designation ? ` and your full designation is ${vitals.designation}` : ''}. `
       + 'You have shell, memory, and skill agents.',
-    model: process.env.OPENRAPPTER_MODEL,
+    model: backend.model ?? process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
     // Which rappter this is. Reached the lock, the port and the channels
@@ -342,10 +349,17 @@ async function startGatewayInProcess(opts?: {
       const controller = new AbortController();
       imessageModelProbeController = controller;
       try {
-        const response = await imessageProvider.chat([{
-          role: 'user',
-          content: 'Reply exactly OPENRAPPTER_MODEL_READY and nothing else.',
-        }], { signal: controller.signal });
+        const response = await chatWithFlightRecorder({
+          provider: imessageProvider,
+          messages: [{
+            role: 'user',
+            content: 'Reply exactly OPENRAPPTER_MODEL_READY and nothing else.',
+          }],
+          options: { model: imessageModel, signal: controller.signal },
+          source: 'imessage-model-preflight',
+          scope: { sessionId: 'imessage-model-preflight' },
+          attributes: { phase: 'readiness-probe' },
+        });
         if (response.content?.trim() !== 'OPENRAPPTER_MODEL_READY') {
           throw new Error('unexpected model probe response');
         }
@@ -481,6 +495,8 @@ async function startGatewayInProcess(opts?: {
       sessionId: req.sessionId ?? 'default',
       content: result.content,
       agentLogs: result.agentLogs,
+      model: result.model,
+      requestedModel: result.requestedModel,
       finishReason: 'stop' as const,
     };
   });
@@ -616,7 +632,10 @@ async function startGatewayInProcess(opts?: {
         const next = await reselect({ githubToken: token, model: process.env.OPENRAPPTER_MODEL });
         if (next.provider) {
           surgeonService.setProvider(next.provider);
-          assistant.setProvider?.(next.provider);
+          assistant.setProvider?.(
+            next.provider,
+            next.model ?? (next.kind === 'copilot-cli' ? 'auto' : assistant.getModel()),
+          );
           log(`${EMOJI} Stored Copilot profile is stale — switched to ${next.kind}`);
         } else {
           log(`${EMOJI} Stored Copilot profile is stale and no backend can answer`);
@@ -852,6 +871,7 @@ async function startGatewayInProcess(opts?: {
 
     const oldModel = assistant.getModel();
     assistant.setModel(params.model);
+    process.env.OPENRAPPTER_MODEL = params.model;
 
     // Persist to .env so it survives restarts
     try {
@@ -1096,6 +1116,10 @@ program
       return;
     }
 
+    if (!options.web && !options.daemon) {
+      await ensureFlightRecorderFromEnv();
+    }
+
     // Initialize agents
     await registry.discoverAgents();
 
@@ -1158,9 +1182,64 @@ program
         console.log(`${EMOJI} Web UI assets available: ${webRoot}`);
         return;
       }
-      const { port } = await startGatewayInProcess({
-        webRoot,
-        port: options.port,
+      const {
+        acquireLock,
+        releaseLock,
+        gatewayLockFileFor,
+        gatewayPortFor,
+        writeGatewayEndpoint,
+      } = await import('./infra/gateway-lock.js');
+      const { declareCurrentInstance } = await import(
+        './infra/current-instance.js'
+      );
+      const lockInstance = (options.instance as string | undefined)
+        ?? process.env.OPENRAPPTER_INSTANCE;
+      declareCurrentInstance(lockInstance);
+      const explicitPort = options.port
+        ? Number(options.port)
+        : (process.env.OPENRAPPTER_PORT
+          ? Number(process.env.OPENRAPPTER_PORT)
+          : undefined);
+      const lockPort = gatewayPortFor({
+        instance: lockInstance,
+        port: explicitPort,
+      });
+      const lockFile = gatewayLockFileFor({
+        instance: lockInstance,
+        port: lockPort,
+      });
+      if (!acquireLock({ filePath: GATEWAY_LIFECYCLE_LOCK })) {
+        throw new Error('Another gateway lifecycle operation is in progress.');
+      }
+      try {
+        if (!acquireLock({ filePath: lockFile })) {
+          throw new Error(
+            `Another OpenRappter gateway owns the runtime lock (${lockFile}).`,
+          );
+        }
+      } finally {
+        releaseLock({ filePath: GATEWAY_LIFECYCLE_LOCK });
+      }
+      let handedOff = false;
+      let started: Awaited<ReturnType<typeof startGatewayInProcess>>;
+      try {
+        started = await startGatewayInProcess({
+          webRoot,
+          port: lockPort,
+          ...(lockInstance ? { instance: lockInstance } : {}),
+          releaseProcessLock: () =>
+            releaseLock({ filePath: lockFile }),
+        });
+        handedOff = true;
+      } finally {
+        if (!handedOff) releaseLock({ filePath: lockFile });
+      }
+      const { port } = started;
+      writeGatewayEndpoint({
+        ...(lockInstance ? { instance: lockInstance } : {}),
+        port,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
       });
       const url = `http://127.0.0.1:${port}`;
       console.log(`${EMOJI} Web UI: ${url}`);
@@ -1194,12 +1273,21 @@ program
         : (process.env.OPENRAPPTER_PORT ? Number(process.env.OPENRAPPTER_PORT) : undefined);
       const lockPort = gatewayPortFor({ instance: lockInstance, port: explicitPort });
       const lockFile = gatewayLockFileFor({ instance: lockInstance, port: lockPort });
-      if (!acquireLock({ filePath: lockFile })) {
-        console.error(
-          `${EMOJI} Another OpenRappter gateway already owns this instance's runtime lock (${lockFile}).`,
-        );
+      if (!acquireLock({ filePath: GATEWAY_LIFECYCLE_LOCK })) {
+        console.error(`${EMOJI} Another gateway lifecycle operation is in progress.`);
         process.exitCode = 1;
         return;
+      }
+      try {
+        if (!acquireLock({ filePath: lockFile })) {
+          console.error(
+            `${EMOJI} Another OpenRappter gateway already owns this instance's runtime lock (${lockFile}).`,
+          );
+          process.exitCode = 1;
+          return;
+        }
+      } finally {
+        releaseLock({ filePath: GATEWAY_LIFECYCLE_LOCK });
       }
       let lockHandedToGateway = false;
       let startupFailed = false;
@@ -2115,6 +2203,29 @@ program
   .description('Clear all credentials, config, and cached tokens for a fresh start')
   .option('-y, --yes', 'Skip confirmation')
   .action(async (options) => {
+    const listGatewayLockFiles = (): string[] => {
+      const lockFiles = [path.join(HOME_DIR, 'gateway.pid')];
+      const instancesDir = path.join(HOME_DIR, 'instances');
+      try {
+        for (const entry of fs.readdirSync(instancesDir, {
+          withFileTypes: true,
+        })) {
+          if (entry.isDirectory()) {
+            lockFiles.push(
+              path.join(instancesDir, entry.name, 'gateway.pid'),
+            );
+          }
+        }
+      } catch {
+        // No twins have been created.
+      }
+      return lockFiles;
+    };
+    const resetEnv = await loadEnv();
+    const recorderDatabase =
+      process.env.OPENRAPPTER_FLIGHT_DB
+      || resetEnv.OPENRAPPTER_FLIGHT_DB
+      || path.join(HOME_DIR, 'flight-recorder.db');
     const filesToDelete = [
       { path: ENV_FILE, label: '.env (credentials)' },
       { path: CONFIG_FILE, label: 'config.json' },
@@ -2122,6 +2233,9 @@ program
       { path: path.join(HOME_DIR, 'credentials', 'github-token.json'), label: 'cached GitHub token' },
       { path: path.join(HOME_DIR, 'memory.json'), label: 'memory store' },
       { path: path.join(HOME_DIR, 'sessions.json'), label: 'sessions' },
+      { path: recorderDatabase, label: 'Flight Recorder database' },
+      { path: `${recorderDatabase}-wal`, label: 'Flight Recorder WAL' },
+      { path: `${recorderDatabase}-shm`, label: 'Flight Recorder shared memory' },
     ];
 
     console.log(`\n${EMOJI} This will delete:\n`);
@@ -2143,21 +2257,111 @@ program
       }
     }
 
-    let deleted = 0;
-    for (const f of filesToDelete) {
-      try {
-        if (fs.existsSync(f.path)) {
-          fs.unlinkSync(f.path);
-          console.log(chalk.green(`  ✓ Deleted ${f.label}`));
-          deleted++;
+    const { acquireLock, readGatewayLockOwner, releaseLock } = await import(
+      './infra/gateway-lock.js'
+    );
+    const acquiredLocks: string[] = [];
+    let releaseRecorderBarrier: (() => void) | undefined;
+    try {
+      if (!acquireLock({ filePath: GATEWAY_LIFECYCLE_LOCK })) {
+        throw new Error(
+          'Refusing reset because a gateway lifecycle operation is in progress.',
+        );
+      }
+      acquiredLocks.push(GATEWAY_LIFECYCLE_LOCK);
+      for (const filePath of listGatewayLockFiles()) {
+        if (!acquireLock({ filePath })) {
+          const owner = readGatewayLockOwner({ filePath });
+          throw new Error(
+            `Refusing reset because the authoritative gateway lock ${
+              filePath
+            } is held${
+              owner.pid ? ` by PID ${owner.pid}` : ''
+            }.`,
+          );
         }
-      } catch (err) {
-        console.error(chalk.red(`  ✗ Failed to delete ${f.label}: ${(err as Error).message}`));
+        acquiredLocks.push(filePath);
+      }
+
+      const {
+        acquireRecorderResetBarrier,
+        listLiveRecorderOwners,
+        removeRecorderIdentityArtifacts,
+        removeRecorderOwnerDirectory,
+      } = await import('./flight-recorder/process-owner.js');
+      releaseRecorderBarrier = acquireRecorderResetBarrier(
+        recorderDatabase,
+      );
+      await getFlightRecorder().close();
+      for (const recorderPath of [
+        recorderDatabase,
+        `${recorderDatabase}-wal`,
+        `${recorderDatabase}-shm`,
+        `${recorderDatabase}.identity-key`,
+      ]) {
+        try {
+          if (fs.lstatSync(recorderPath).isSymbolicLink()) {
+            throw new Error(
+              `Refusing reset because Flight Recorder storage is symlinked: ${recorderPath}`,
+            );
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      const liveRecorders = listLiveRecorderOwners(recorderDatabase);
+      if (liveRecorders.length > 0) {
+        throw new Error(
+          `Refusing reset while Flight Recorder PID(s) ${
+            liveRecorders.join(', ')
+          } are active.`,
+        );
+      }
+      let deleted = 0;
+      for (const f of filesToDelete) {
+        try {
+          if (fs.existsSync(f.path)) {
+            fs.unlinkSync(f.path);
+            console.log(chalk.green(`  ✓ Deleted ${f.label}`));
+            deleted++;
+          }
+        } catch (err) {
+          console.error(chalk.red(`  ✗ Failed to delete ${f.label}: ${(err as Error).message}`));
+        }
+      }
+      const recorderFiles = [
+        recorderDatabase,
+        `${recorderDatabase}-wal`,
+        `${recorderDatabase}-shm`,
+      ];
+      const recorderRemnants = recorderFiles.filter((file) =>
+        fs.existsSync(file)
+      );
+      if (recorderRemnants.length > 0) {
+        throw new Error(
+          `Reset could not remove Flight Recorder storage: ${
+            recorderRemnants.join(', ')
+          }. The identity key was preserved.`,
+        );
+      }
+      const deletedIdentityArtifacts =
+        removeRecorderIdentityArtifacts(recorderDatabase);
+      if (deletedIdentityArtifacts > 0) {
+        deleted += deletedIdentityArtifacts;
+        console.log(chalk.green(
+          `  ✓ Deleted ${deletedIdentityArtifacts} Flight Recorder identity artifact(s)`,
+        ));
+      }
+      removeRecorderOwnerDirectory(recorderDatabase);
+
+      console.log(`\n${EMOJI} Reset complete (${deleted} files removed).`);
+      console.log(`  Run ${chalk.bold('openrappter onboard')} to set up again.\n`);
+    } finally {
+      releaseRecorderBarrier?.();
+      for (const filePath of acquiredLocks.reverse()) {
+        releaseLock({ filePath });
       }
     }
-
-    console.log(`\n${EMOJI} Reset complete (${deleted} files removed).`);
-    console.log(`  Run ${chalk.bold('openrappter onboard')} to set up again.\n`);
   });
 
 // Status command
@@ -2316,5 +2520,7 @@ registerTwinCommands(program);
 registerCronCommand(program);
 // Seeing and creating the rappters on this device. #107
 registerRappterCommand(program);
+registerFlightRecorderCommand(program);
 
+await hydrateManagedEnv();
 program.parse();

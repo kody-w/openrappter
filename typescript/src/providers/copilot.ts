@@ -8,12 +8,20 @@
  *   GITHUB_TOKEN → Copilot API token (cached) → OpenAI-compatible API
  */
 
-import type { LLMProvider, Message, ChatOptions, ProviderResponse, Tool, ToolCall, StreamDelta } from './types.js';
+import type {
+  LLMProvider,
+  Message,
+  ChatOptions,
+  ProviderResponse,
+  Tool,
+  ToolCall,
+  StreamDelta,
+} from "./types.js";
 import {
   resolveCopilotApiToken,
   clearCachedCopilotToken,
   type ResolvedCopilotToken,
-} from './copilot-token.js';
+} from "./copilot-token.js";
 
 // ── Default models ───────────────────────────────────────────────────────────
 
@@ -27,34 +35,34 @@ import {
  */
 export const COPILOT_DEFAULT_MODELS = [
   // GPT-4.1 family
-  'gpt-4.1',
-  'gpt-4.1-mini',
-  'gpt-4.1-nano',
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "gpt-4.1-nano",
   // GPT-4o family
-  'gpt-4o',
-  'gpt-4o-mini',
+  "gpt-4o",
+  "gpt-4o-mini",
   // Reasoning models
-  'o1',
-  'o1-mini',
-  'o3',
-  'o3-mini',
-  'o4-mini',
+  "o1",
+  "o1-mini",
+  "o3",
+  "o3-mini",
+  "o4-mini",
   // Claude (Copilot Pro / Business / Enterprise)
-  'claude-3.5-sonnet',
-  'claude-3.7-sonnet',
-  'claude-3.7-sonnet-thought',
-  'claude-sonnet-4',
+  "claude-3.5-sonnet",
+  "claude-3.7-sonnet",
+  "claude-3.7-sonnet-thought",
+  "claude-sonnet-4",
   // Gemini (Copilot Pro / Business / Enterprise)
-  'gemini-2.0-flash',
-  'gemini-2.5-pro',
+  "gemini-2.0-flash",
+  "gemini-2.5-pro",
 ] as const;
 
-export const COPILOT_DEFAULT_MODEL = 'gpt-4.1';
+export const COPILOT_DEFAULT_MODEL = "gpt-4.1";
 
 // ── OpenAI-compatible request/response types ─────────────────────────────────
 
 interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
+  role: "system" | "user" | "assistant" | "tool";
   content: string | null;
   tool_calls?: OpenAIToolCall[];
   tool_call_id?: string;
@@ -62,20 +70,25 @@ interface OpenAIMessage {
 
 interface OpenAIToolCall {
   id: string;
-  type: 'function';
+  type: "function";
   function: { name: string; arguments: string };
 }
 
 interface OpenAITool {
-  type: 'function';
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
 interface OpenAIChatResponse {
   id: string;
+  model?: string;
   choices: Array<{
     message: {
-      role: 'assistant';
+      role: "assistant";
       content: string | null;
       tool_calls?: OpenAIToolCall[];
     };
@@ -90,9 +103,11 @@ interface OpenAIChatResponse {
 
 // ── SSE Stream Parser ────────────────────────────────────────────────────────
 
-export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
+export async function* parseSSEStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<Record<string, unknown>> {
   const decoder = new TextDecoder();
-  let buffer = '';
+  let buffer = "";
   const reader = body.getReader();
   try {
     for (;;) {
@@ -100,12 +115,12 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
       if (done) break;
       buffer += decoder.decode(chunk, { stream: true });
       const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? '';
+      buffer = lines.pop() ?? "";
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;
-        if (trimmed === 'data: [DONE]') return;
-        if (trimmed.startsWith('data: ')) {
+        if (!trimmed || trimmed.startsWith(":")) continue;
+        if (trimmed === "data: [DONE]") return;
+        if (trimmed.startsWith("data: ")) {
           yield JSON.parse(trimmed.slice(6));
         }
       }
@@ -134,8 +149,8 @@ function parseRetryAfter(header: string | null): number | null {
 // ── Provider ─────────────────────────────────────────────────────────────────
 
 export class CopilotProvider implements LLMProvider {
-  readonly id = 'copilot';
-  readonly name = 'GitHub Copilot';
+  readonly id = "copilot";
+  readonly name = "GitHub Copilot";
 
   private githubToken: string | null = null;
   private resolvedToken: ResolvedCopilotToken | null = null;
@@ -175,14 +190,17 @@ export class CopilotProvider implements LLMProvider {
   /** Get a valid Copilot API token, exchanging if needed */
   private async ensureToken(): Promise<ResolvedCopilotToken> {
     // Return cached token if still valid
-    if (this.resolvedToken && this.resolvedToken.expiresAt - Date.now() > 5 * 60 * 1000) {
+    if (
+      this.resolvedToken &&
+      this.resolvedToken.expiresAt - Date.now() > 5 * 60 * 1000
+    ) {
       return this.resolvedToken;
     }
 
     const githubToken = this.getGithubToken();
     if (!githubToken) {
       throw new Error(
-        'No GitHub token found. Set GITHUB_TOKEN, run `gh auth login`, or run `openrappter onboard`.',
+        "No GitHub token found. Set GITHUB_TOKEN, run `gh auth login`, or run `openrappter onboard`.",
       );
     }
 
@@ -208,9 +226,10 @@ export class CopilotProvider implements LLMProvider {
       if (attempt === RATE_LIMIT_MAX_RETRIES) return res;
 
       const retryMs =
-        parseRetryAfter(res.headers.get('Retry-After')) ??
+        parseRetryAfter(res.headers.get("Retry-After")) ??
         Math.min(
-          RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt) + Math.random() * 1_000,
+          RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt) +
+            Math.random() * 1_000,
           RATE_LIMIT_MAX_DELAY_MS,
         );
 
@@ -218,10 +237,13 @@ export class CopilotProvider implements LLMProvider {
     }
 
     // unreachable, but satisfies tsc
-    throw new Error('Rate-limit retry loop exited unexpectedly');
+    throw new Error("Rate-limit retry loop exited unexpectedly");
   }
 
-  async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
+  async chat(
+    messages: Message[],
+    options?: ChatOptions,
+  ): Promise<ProviderResponse> {
     const { token, baseUrl } = await this.ensureToken();
     const model = options?.model ?? COPILOT_DEFAULT_MODEL;
 
@@ -239,14 +261,16 @@ export class CopilotProvider implements LLMProvider {
     };
 
     if (options?.tools && options.tools.length > 0) {
-      body.tools = options.tools.map((t: Tool): OpenAITool => ({
-        type: 'function',
-        function: {
-          name: t.function.name,
-          description: t.function.description,
-          parameters: t.function.parameters,
-        },
-      }));
+      body.tools = options.tools.map(
+        (t: Tool): OpenAITool => ({
+          type: "function",
+          function: {
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters,
+          },
+        }),
+      );
     }
 
     if (options?.temperature != null) body.temperature = options.temperature;
@@ -255,53 +279,66 @@ export class CopilotProvider implements LLMProvider {
     const url = `${baseUrl}/chat/completions`;
 
     const res = await this.fetchWithRateRetry(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Editor-Version': 'vscode/1.95.0',
-        'User-Agent': 'GitHubCopilotChat/0.22.2024',
-        'Copilot-Integration-Id': 'vscode-chat',
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        "Editor-Version": "vscode/1.95.0",
+        "User-Agent": "GitHubCopilotChat/0.22.2024",
+        "Copilot-Integration-Id": "vscode-chat",
       },
       body: JSON.stringify(body),
     });
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
+      const errBody = await res.text().catch(() => "");
       // On auth errors, invalidate the cached Copilot token and retry once.
       // The GitHub token may still be valid — just the short-lived Copilot API
       // token expired or was revoked server-side.
       if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
         this.invalidateToken();
-        return this.chat(messages, { ...options, _isRetry: true } as ChatOptions);
+        return this.chat(messages, {
+          ...options,
+          _isRetry: true,
+        } as ChatOptions);
       }
-      throw new Error(`Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ''}`);
+      throw new Error(
+        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
+      );
     }
 
     const data = (await res.json()) as OpenAIChatResponse;
     const choice = data.choices?.[0];
 
     if (!choice) {
-      throw new Error('Copilot API returned no choices');
+      throw new Error("Copilot API returned no choices");
     }
 
-    const toolCalls: ToolCall[] | null = choice.message.tool_calls?.map((tc) => ({
-      id: tc.id,
-      type: 'function' as const,
-      function: { name: tc.function.name, arguments: tc.function.arguments },
-    })) ?? null;
+    const toolCalls: ToolCall[] | null =
+      choice.message.tool_calls?.map((tc) => ({
+        id: tc.id,
+        type: "function" as const,
+        function: { name: tc.function.name, arguments: tc.function.arguments },
+      })) ?? null;
 
     return {
       content: choice.message.content,
       tool_calls: toolCalls,
+      model: data.model,
       usage: data.usage
-        ? { input_tokens: data.usage.prompt_tokens, output_tokens: data.usage.completion_tokens }
+        ? {
+            input_tokens: data.usage.prompt_tokens,
+            output_tokens: data.usage.completion_tokens,
+          }
         : undefined,
     };
   }
 
-  async *chatStream(messages: Message[], options?: ChatOptions): AsyncGenerator<StreamDelta> {
+  async *chatStream(
+    messages: Message[],
+    options?: ChatOptions,
+  ): AsyncGenerator<StreamDelta> {
     const { token, baseUrl } = await this.ensureToken();
     const model = options?.model ?? COPILOT_DEFAULT_MODEL;
 
@@ -319,14 +356,16 @@ export class CopilotProvider implements LLMProvider {
     };
 
     if (options?.tools && options.tools.length > 0) {
-      body.tools = options.tools.map((t: Tool): OpenAITool => ({
-        type: 'function',
-        function: {
-          name: t.function.name,
-          description: t.function.description,
-          parameters: t.function.parameters,
-        },
-      }));
+      body.tools = options.tools.map(
+        (t: Tool): OpenAITool => ({
+          type: "function",
+          function: {
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters,
+          },
+        }),
+      );
     }
 
     if (options?.temperature != null) body.temperature = options.temperature;
@@ -335,39 +374,58 @@ export class CopilotProvider implements LLMProvider {
     const url = `${baseUrl}/chat/completions`;
 
     const res = await this.fetchWithRateRetry(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'text/event-stream',
-        'Editor-Version': 'vscode/1.95.0',
-        'User-Agent': 'GitHubCopilotChat/0.22.2024',
-        'Copilot-Integration-Id': 'vscode-chat',
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+        "Editor-Version": "vscode/1.95.0",
+        "User-Agent": "GitHubCopilotChat/0.22.2024",
+        "Copilot-Integration-Id": "vscode-chat",
       },
       body: JSON.stringify(body),
     });
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
+      const errBody = await res.text().catch(() => "");
       if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
         this.invalidateToken();
-        yield* this.chatStream(messages, { ...options, _isRetry: true } as ChatOptions);
+        yield* this.chatStream(messages, {
+          ...options,
+          _isRetry: true,
+        } as ChatOptions);
         return;
       }
-      throw new Error(`Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ''}`);
+      throw new Error(
+        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
+      );
     }
 
     if (!res.body) {
-      throw new Error('Copilot API returned no response body');
+      throw new Error("Copilot API returned no response body");
     }
 
     let lastFinishReason: string | undefined;
+    let reportedModel: string | undefined;
 
     for await (const event of parseSSEStream(res.body)) {
-      const choices = event.choices as Array<{
-        delta?: { content?: string; tool_calls?: Array<{ index: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> };
-        finish_reason?: string;
-      }> | undefined;
+      if (typeof event.model === "string" && event.model.trim()) {
+        reportedModel = event.model.trim();
+      }
+      const choices = event.choices as
+        | Array<{
+            delta?: {
+              content?: string;
+              tool_calls?: Array<{
+                index: number;
+                id?: string;
+                type?: string;
+                function?: { name?: string; arguments?: string };
+              }>;
+            };
+            finish_reason?: string;
+          }>
+        | undefined;
 
       const choice = choices?.[0];
       if (!choice) continue;
@@ -384,17 +442,24 @@ export class CopilotProvider implements LLMProvider {
 
       yield {
         content: delta.content ?? undefined,
-        tool_calls: delta.tool_calls?.map(tc => ({
+        model: reportedModel,
+        tool_calls: delta.tool_calls?.map((tc) => ({
           index: tc.index,
           id: tc.id,
-          type: tc.type as 'function' | undefined,
-          function: tc.function ? { name: tc.function.name, arguments: tc.function.arguments } : undefined,
+          type: tc.type as "function" | undefined,
+          function: tc.function
+            ? { name: tc.function.name, arguments: tc.function.arguments }
+            : undefined,
         })),
         done: false,
       };
     }
 
-    yield { done: true, finish_reason: lastFinishReason };
+    yield {
+      done: true,
+      finish_reason: lastFinishReason,
+      model: reportedModel,
+    };
   }
 
   async isAvailable(): Promise<boolean> {
@@ -410,6 +475,8 @@ export class CopilotProvider implements LLMProvider {
   }
 }
 
-export function createCopilotProvider(options?: { githubToken?: string }): LLMProvider {
+export function createCopilotProvider(options?: {
+  githubToken?: string;
+}): LLMProvider {
   return new CopilotProvider(options);
 }

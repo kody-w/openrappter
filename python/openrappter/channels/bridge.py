@@ -14,12 +14,28 @@ other's internals: the channel only knows about ``IncomingMessage``/
 from __future__ import annotations
 
 import logging
+import time
+import json
 from typing import Callable, List, Optional
 
 from openrappter.channels.base import BaseChannel, IncomingMessage, OutgoingMessage
+from openrappter.flight_recorder import (
+    sanitize_flight_value,
+    summarize_flight_error,
+)
 from openrappter.providers.types import ChatOptions, ProviderError, ProviderMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _structured_content(value):
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            pass
+    return sanitize_flight_value(parsed)
 
 
 class ChannelDispatchError(Exception):
@@ -80,20 +96,124 @@ class ProviderChannelBridge:
         return messages
 
     def _on_incoming(self, incoming: IncomingMessage) -> None:
-        messages = self._build_messages(incoming)
-        try:
-            response = self.provider.chat(messages, self.chat_options)
-        except ProviderError as exc:
-            # Re-raised as a channel-domain error rather than swallowed, so
-            # the channel transport (e.g. WebhookChannel's HTTP response)
-            # can surface a bounded, explicit failure to the caller instead
-            # of silently answering with an empty/garbled message.
-            raise ChannelDispatchError(str(exc)) from exc
+        from openrappter.flight_recorder import ensure_flight_recorder_from_env
 
-        outgoing = OutgoingMessage(
-            channel_id=incoming.channel_id,
-            conversation_id=incoming.conversation_id,
-            content=response.content or "",
-            request_generation=incoming.request_generation,
+        recorder = ensure_flight_recorder_from_env()
+        operation = lambda: self._dispatch_incoming(incoming, recorder)
+        if recorder.current_trace():
+            return operation()
+        return recorder.run_trace(
+            {
+                "sessionId": incoming.conversation_id,
+                "workspaceId": f"channel:{incoming.channel_id}",
+            },
+            operation,
         )
-        self.channel.send(incoming.conversation_id, outgoing)
+
+    def _dispatch_incoming(self, incoming: IncomingMessage, recorder) -> None:
+        messages = self._build_messages(incoming)
+        provider_id = str(
+            getattr(self.provider, "id", None)
+            or getattr(self.provider, "name", None)
+            or self.provider.__class__.__name__
+        )
+        configured_model = (
+            getattr(self.chat_options, "model", None)
+            or getattr(self.provider, "model", None)
+        )
+        model_policy = (
+            configured_model.strip()
+            if isinstance(configured_model, str) and configured_model.strip()
+            else None
+        )
+        started = time.monotonic()
+        started_event = recorder.record({
+            "kind": "provider.attempt.started",
+            "source": "provider-channel-bridge",
+            "status": "started",
+            "providerId": provider_id,
+            "metadata": {
+                "messageCount": len(messages),
+                "channelType": self.channel.type,
+                **({"modelPolicy": model_policy} if model_policy else {}),
+            },
+            "payload": lambda: {
+                "messages": [
+                    {
+                        "role": message.role,
+                        "content": _structured_content(message.content),
+                    }
+                    for message in messages
+                ]
+            },
+        })
+
+        def within_provider():
+            try:
+                response = self.provider.chat(messages, self.chat_options)
+            except Exception as exc:
+                recorder.record({
+                    "kind": "provider.attempt.failed",
+                    "source": "provider-channel-bridge",
+                    "status": "error",
+                    "providerId": provider_id,
+                    "durationMs": (time.monotonic() - started) * 1000,
+                    "metadata": {
+                        **summarize_flight_error(exc),
+                        **({"modelPolicy": model_policy} if model_policy else {}),
+                    },
+                    "payload": lambda: {
+                        "messages": [
+                            {
+                                "role": message.role,
+                                "content": _structured_content(
+                                    message.content
+                                ),
+                            }
+                            for message in messages
+                        ],
+                        "error": exc,
+                    },
+                })
+                # Re-raised as a channel-domain error rather than swallowed, so
+                # the channel transport (e.g. WebhookChannel's HTTP response)
+                # can surface a bounded, explicit failure to the caller instead
+                # of silently answering with an empty/garbled message.
+                if isinstance(exc, ProviderError):
+                    raise ChannelDispatchError(str(exc)) from exc
+                raise
+
+            recorder.record({
+                "kind": "provider.attempt.completed",
+                "source": "provider-channel-bridge",
+                "status": "success",
+                "providerId": provider_id,
+                **({"model": response.model} if response.model else {}),
+                "durationMs": (time.monotonic() - started) * 1000,
+                "metadata": {
+                    "hadContent": bool(response.content),
+                    "finishReason": response.finish_reason,
+                    "usage": response.usage,
+                    **({"modelPolicy": model_policy} if model_policy else {}),
+                },
+                "payload": lambda: {
+                    "response": {
+                        "content": _structured_content(response.content),
+                        "model": response.model,
+                        "finishReason": response.finish_reason,
+                        "usage": response.usage,
+                    }
+                },
+            })
+            outgoing = OutgoingMessage(
+                channel_id=incoming.channel_id,
+                conversation_id=incoming.conversation_id,
+                content=response.content or "",
+                request_generation=incoming.request_generation,
+            )
+            self.channel.send(incoming.conversation_id, outgoing)
+
+        return recorder.with_parent(
+            started_event.get("id") if started_event is not None else None,
+            within_provider,
+        )

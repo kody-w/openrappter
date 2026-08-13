@@ -1,8 +1,13 @@
-import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './types.js';
+import type {
+  LLMProvider,
+  Message,
+  ChatOptions,
+  ProviderResponse,
+} from "./types.js";
 
 export class GeminiProvider implements LLMProvider {
-  readonly id = 'gemini';
-  readonly name = 'Google Gemini';
+  readonly id = "gemini";
+  readonly name = "Google Gemini";
   private apiKey?: string;
 
   constructor(apiKey?: string) {
@@ -11,19 +16,19 @@ export class GeminiProvider implements LLMProvider {
 
   async chat(
     messages: Message[],
-    options?: ChatOptions
+    options?: ChatOptions,
   ): Promise<ProviderResponse> {
     const apiKey = this.apiKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new Error('Gemini API key not configured');
+      throw new Error("Gemini API key not configured");
     }
 
-    const model = options?.model || 'gemini-2.0-flash';
+    const model = options?.model || "gemini-2.0-flash";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     // Convert OpenAI-style messages to Gemini format
     const contents = messages.map((msg) => ({
-      role: msg.role === 'assistant' ? 'model' : 'user',
+      role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }],
     }));
 
@@ -36,9 +41,9 @@ export class GeminiProvider implements LLMProvider {
     };
 
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
     });
@@ -59,15 +64,20 @@ export class GeminiProvider implements LLMProvider {
         candidatesTokenCount?: number;
         totalTokenCount?: number;
       };
+      modelVersion?: string;
     };
 
     // Extract the generated text from Gemini response
     const candidate = data.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text || '';
+    const text = candidate?.content?.parts?.[0]?.text || "";
 
     return {
       content: text,
       tool_calls: null,
+      model:
+        typeof data.modelVersion === "string" && data.modelVersion.trim()
+          ? data.modelVersion.trim()
+          : undefined,
       usage: {
         input_tokens: data.usageMetadata?.promptTokenCount || 0,
         output_tokens: data.usageMetadata?.candidatesTokenCount || 0,

@@ -38,6 +38,7 @@
  */
 
 import type { LLMProvider, Message } from '../providers/types.js';
+import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 
 /** One remembered turn in a thread. */
 export interface Turn {
@@ -258,7 +259,14 @@ export function createAssistantResponder(options: AssistantResponderOptions) {
     ];
 
     try {
-      const res = await provider.chat(messages, options.model ? { model: options.model } : undefined);
+      const res = await chatWithFlightRecorder({
+        provider,
+        messages,
+        options: options.model ? { model: options.model } : undefined,
+        source: "telephony-reply",
+        scope: { sessionId: message.threadId },
+        attributes: { phase: "compose" },
+      });
       const answer = toSms(res.content ?? '', maxChars);
       if (!answer) {
         log('[reply] model returned nothing usable — falling back to the greeting');

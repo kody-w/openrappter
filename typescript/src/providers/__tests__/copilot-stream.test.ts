@@ -140,7 +140,7 @@ describe('CopilotProvider.chatStream', () => {
   it('yields content deltas with done: false', async () => {
     mockFetchSSE([
       'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
-      'data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
+      'data: {"model":"actual-model","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}\n\n',
       'data: {"choices":[{"delta":{"content":" there"},"finish_reason":null}]}\n\n',
       'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
       'data: [DONE]\n\n',
@@ -158,6 +158,7 @@ describe('CopilotProvider.chatStream', () => {
     expect(contentDeltas[0].content).toBe('Hello');
     expect(contentDeltas[1].content).toBe(' there');
     expect(contentDeltas.every(d => d.done === false)).toBe(true);
+    expect(deltas.at(-1)?.model).toBe('actual-model');
   });
 
   it('assembles tool call chunks across deltas', async () => {

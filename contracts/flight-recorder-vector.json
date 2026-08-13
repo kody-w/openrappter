@@ -1,0 +1,45 @@
+{
+  "schema": "openrappter-event/1.0",
+  "id": "vector-alpha",
+  "sequence": 7,
+  "traceId": "trace-vector",
+  "parentId": null,
+  "sessionId": "session:e523e4096e6419b507b73af3",
+  "workspaceId": "workspace:9ae7af749ba270e5853be6ee",
+  "kind": "provider.attempt.completed",
+  "source": "parity-vector",
+  "status": "success",
+  "timestamp": "2026-08-11T12:34:56.789Z",
+  "durationMs": 12.5,
+  "providerId": "fixture",
+  "model": "gpt-test",
+  "agentName": "VectorAgent",
+  "toolName": "vector-tool",
+  "metadata": {
+    "unicode": "🦖 café",
+    "nested": {
+      "a": 1,
+      "b": [
+        true,
+        null,
+        2.5
+      ]
+    },
+    "numericEdges": [
+      1e-7,
+      2.5,
+      0,
+      "100000000000000000000n",
+      "1e+21n"
+    ],
+    "unicodeKeyOrder": {
+      "": "bmp-private-use",
+      "😀": "non-bmp"
+    }
+  },
+  "payload": {
+    "text": "hello",
+    "count": 3
+  },
+  "contentHash": "de428c9638474bb195bed10d8199559b949275465b1020f3c93c98ed2c362504"
+}

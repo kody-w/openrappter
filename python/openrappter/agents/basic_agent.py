@@ -31,10 +31,12 @@ Single File Agent Pattern:
 """
 
 import copy
+import contextvars
 import hashlib
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from collections import Counter
 
@@ -52,9 +54,13 @@ class BasicAgent:
     def __init__(self, name, metadata):
         self.name = name
         self.metadata = metadata
-        self.context = {}
+        self._invocation_state = contextvars.ContextVar(
+            f"openrappter_agent_{id(self)}",
+            default=None,
+        )
+        self._last_context = {}
+        self._last_user_guid = None
         self._storage_manager = None
-        self._user_guid = None
         self.slosh_filter = None
         self.slosh_preferences = None
         self.breadcrumbs = []
@@ -65,6 +71,38 @@ class BasicAgent:
         self.on_slosh_debug = None
         self.auto_suppress_threshold = -3
         self.signal_decay = 0.9
+
+    @property
+    def context(self):
+        state = self._invocation_state.get()
+        return (
+            state["context"]
+            if state is not None
+            else self._last_context
+        )
+
+    @context.setter
+    def context(self, value):
+        state = self._invocation_state.get()
+        if state is not None:
+            state["context"] = value
+        self._last_context = value
+
+    @property
+    def _user_guid(self):
+        state = self._invocation_state.get()
+        return (
+            state["user_guid"]
+            if state is not None
+            else self._last_user_guid
+        )
+
+    @_user_guid.setter
+    def _user_guid(self, value):
+        state = self._invocation_state.get()
+        if state is not None:
+            state["user_guid"] = value
+        self._last_user_guid = value
     
     @property
     def storage_manager(self):
@@ -87,6 +125,79 @@ class BasicAgent:
         so downstream agents are aware of upstream results without an LLM
         interpreting between calls.
         """
+        from openrappter.flight_recorder import (
+            ensure_flight_recorder_from_env,
+            summarize_flight_error,
+        )
+        from openrappter.result_status import agent_result_is_error
+
+        recorder = ensure_flight_recorder_from_env()
+
+        def operation():
+            started = time.monotonic()
+            started_event = recorder.record({
+                'kind': 'agent.execute.started',
+                'source': 'basic-agent',
+                'status': 'started',
+                'agentName': self.name,
+            })
+
+            def within_agent():
+                try:
+                    result = self._execute_within_trace(recorder, **kwargs)
+                    failed = agent_result_is_error(result)
+                    structured_result = result
+                    if isinstance(result, str):
+                        try:
+                            structured_result = json.loads(result)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    recorder.record({
+                        'kind': (
+                            'agent.execute.failed'
+                            if failed
+                            else 'agent.execute.completed'
+                        ),
+                        'source': 'basic-agent',
+                        'status': 'error' if failed else 'success',
+                        'agentName': self.name,
+                        'durationMs': (time.monotonic() - started) * 1000,
+                        'metadata': {
+                            'resultLength': len(result) if isinstance(result, str) else 0,
+                            **({'resultStatus': 'error'} if failed else {}),
+                        },
+                        'payload': {'result': structured_result},
+                    })
+                    return result
+                except Exception as exc:
+                    recorder.record({
+                        'kind': 'agent.execute.failed',
+                        'source': 'basic-agent',
+                        'status': 'error',
+                        'agentName': self.name,
+                        'durationMs': (time.monotonic() - started) * 1000,
+                        'metadata': summarize_flight_error(exc),
+                        'payload': {'error': exc},
+                    })
+                    raise
+
+            return recorder.with_parent(
+                started_event.get('id') if started_event is not None else None,
+                within_agent,
+            )
+
+        token = self._invocation_state.set(
+            {"context": {}, "user_guid": None}
+        )
+        try:
+            if recorder.current_trace():
+                return operation()
+            return recorder.run_trace({}, operation)
+        finally:
+            self._invocation_state.reset(token)
+
+    def _execute_within_trace(self, recorder, **kwargs):
+        """Execute the existing sloshing pipeline inside a correlated trace."""
         self._user_guid = kwargs.get('user_guid')
         query = self._resolve_slosh_query(kwargs)
 
@@ -136,6 +247,16 @@ class BasicAgent:
             self.context['upstream_slush'] = upstream
 
         kwargs['_context'] = self.context
+        recorder.record({
+            'kind': 'context.assembled',
+            'source': 'basic-agent',
+            'status': 'info',
+            'agentName': self.name,
+            'metadata': {
+                'categories': sorted(self.context.keys()),
+                'queryType': type(query).__name__,
+            },
+        })
 
         result = self.perform(**kwargs)
 

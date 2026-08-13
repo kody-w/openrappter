@@ -553,10 +553,14 @@ def test_direct_capi_chat_uses_supported_model_and_body(monkeypatch):
         }
 
     monkeypatch.setattr(brainstem, "_http_json", fake_http)
-    reply, served = brainstem.llm_chat([{"role": "user", "content": "hello"}], [])
+    reply, served, requested = brainstem.llm_chat(
+        [{"role": "user", "content": "hello"}],
+        [],
+    )
     assert reply["content"] == "ok"
-    # No `model` in the response body, so it falls back to what was requested.
-    assert served == "gpt-4o"
+    # The request policy is not evidence of which model served the response.
+    assert served is None
+    assert requested == "gpt-4o"
     assert captured["url"].endswith("/chat/completions")
     assert captured["payload"]["model"] == "gpt-4o"
     assert "max_tokens" not in captured["payload"]

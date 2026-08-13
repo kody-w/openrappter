@@ -3,7 +3,7 @@
  */
 
 export interface Message {
-  role: 'system' | 'user' | 'assistant' | 'tool';
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
@@ -18,7 +18,7 @@ export interface Message {
 
 export interface ToolCall {
   id: string;
-  type: 'function';
+  type: "function";
   function: {
     name: string;
     arguments: string;
@@ -26,7 +26,7 @@ export interface ToolCall {
 }
 
 export interface Tool {
-  type: 'function';
+  type: "function";
   function: {
     name: string;
     description: string;
@@ -37,6 +37,8 @@ export interface Tool {
 export interface ProviderResponse {
   content: string | null;
   tool_calls: ToolCall[] | null;
+  /** Concrete model reported by the provider, when the provider reveals it. */
+  model?: string;
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -65,10 +67,12 @@ export interface ChatOptions {
 
 export interface StreamDelta {
   content?: string;
+  /** Concrete provider-reported model, when present in the stream. */
+  model?: string;
   tool_calls?: Array<{
     index: number;
     id?: string;
-    type?: 'function';
+    type?: "function";
     function?: { name?: string; arguments?: string };
   }>;
   done: boolean;
@@ -98,7 +102,10 @@ export interface LLMProvider {
   /**
    * Stream a chat response when supported.
    */
-  chatStream?(messages: Message[], options?: ChatOptions): AsyncGenerator<StreamDelta>;
+  chatStream?(
+    messages: Message[],
+    options?: ChatOptions,
+  ): AsyncGenerator<StreamDelta>;
 
   /**
    * Generate embeddings for texts (optional)
@@ -119,7 +126,7 @@ export interface ProviderConfig {
   provider: string;
   model: string;
   auth: {
-    type: 'api-key' | 'oauth';
+    type: "api-key" | "oauth";
     token_env?: string;
     token?: string;
   };

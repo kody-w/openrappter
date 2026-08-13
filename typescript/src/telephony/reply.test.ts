@@ -12,6 +12,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import {
+  FlightRecorder,
+  setFlightRecorder,
+} from '../flight-recorder/recorder.js';
 import type { LLMProvider, Message } from '../providers/types.js';
 import {
   GREETING,
@@ -86,6 +90,33 @@ describe('answering a person', () => {
     // The model was actually shown the message — the failure being fixed was
     // that it never was.
     expect(seen[0].at(-1)).toEqual({ role: 'user', content: 'Okay well list 10 things you can do' });
+  });
+
+  it('records the direct telephony provider call under the thread session', async () => {
+    const recorder = new FlightRecorder({ enabled: true, inMemory: true });
+    await recorder.initialize();
+    const previous = setFlightRecorder(recorder);
+    try {
+      const { provider } = fakeProvider('Recorded answer.');
+      const respond = createAssistantResponder({ provider });
+
+      expect(await respond(msg('Are you there?', 'private-thread'))).toBe(
+        'Recorded answer.',
+      );
+      const events = await recorder.query();
+      const started = events.find(
+        (event) => event.kind === 'provider.attempt.started',
+      )!;
+      const completed = events.find(
+        (event) => event.kind === 'provider.attempt.completed',
+      )!;
+      expect(started.source).toBe('telephony-reply');
+      expect(completed.parentId).toBe(started.id);
+      expect(JSON.stringify(events)).not.toContain('private-thread');
+    } finally {
+      setFlightRecorder(previous);
+      await recorder.close();
+    }
   });
 
   it('carries the thread so a follow-up has something to follow', async () => {

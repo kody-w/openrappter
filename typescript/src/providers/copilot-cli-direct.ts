@@ -11,6 +11,7 @@
  */
 
 import { execFile, execSync } from 'child_process';
+import { randomUUID } from 'crypto';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
@@ -18,7 +19,11 @@ import { join } from 'path';
 import type { LLMProvider, Message, ChatOptions, ProviderResponse } from './types.js';
 import { writeMcpBridgeConfig, toolArgsFor, copilotHomeDir, type McpBridgeConfig } from './copilot-cli-mcp.js';
 import { resolveLocalCopilotCliPath } from './copilot-cli-local.js';
-import { invocationsSince } from '../agents/invocation-journal.js';
+import {
+  invocationsSince,
+  trimJournal,
+} from '../agents/invocation-journal.js';
+import { getFlightRecorder } from '../flight-recorder/recorder.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -76,7 +81,11 @@ export interface CopilotCliDirectOptions {
 export type CopilotCliDirectRunner = (
   executable: string,
   args: string[],
-  options: { timeout: number; maxBuffer: number },
+  options: {
+    timeout: number;
+    maxBuffer: number;
+    env?: NodeJS.ProcessEnv;
+  },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export class CopilotCliDirectProvider implements LLMProvider {
@@ -97,14 +106,27 @@ export class CopilotCliDirectProvider implements LLMProvider {
     this.model = config?.model?.trim() || 'auto';
     this.timeoutMs = config?.timeoutMs ?? 120_000;
     this.runner = config?.runner ?? (
-      async (executable, args, options) => execFileAsync(
-        executable,
-        args,
-        // Without an enriched PATH the CLI cannot find `node` (it is a
-        // `#!/usr/bin/env node` script), so a daemon started outside a shell
-        // fails before it ever reaches Copilot.
-        { ...options, env: { ...process.env, PATH: resolveSpawnPath() } },
-      )
+      async (executable, args, options) => {
+        const {
+          OPENRAPPTER_FLIGHT_ID_KEY: _privateIdentityKey,
+          ...safeEnvironment
+        } = process.env;
+        return execFileAsync(
+          executable,
+          args,
+          {
+            ...options,
+            env: {
+              ...safeEnvironment,
+              ...options.env,
+              PATH: resolveSpawnPath({
+                ...safeEnvironment,
+                ...options.env,
+              }),
+            },
+          },
+        );
+      }
     );
   }
 
@@ -176,14 +198,26 @@ export class CopilotCliDirectProvider implements LLMProvider {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await execFileAsync(this.cliPath, ['--version'], { timeout: 10_000 });
+      const {
+        OPENRAPPTER_FLIGHT_ID_KEY: _privateIdentityKey,
+        ...safeEnvironment
+      } = process.env;
+      await execFileAsync(this.cliPath, ['--version'], {
+        timeout: 10_000,
+        env: safeEnvironment,
+      });
       return true;
     } catch { return false; }
   }
 
-  async chat(messages: Message[], _options?: ChatOptions): Promise<ProviderResponse> {
+  async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
     const startedAt = Date.now();
+    const requestId = randomUUID();
+    trimJournal();
     const prompt = this.buildPrompt(messages);
+    const model = options?.model?.trim() || this.model;
+    const traceEnvironment =
+      getFlightRecorder().childProcessEnvironment();
     try {
       const { stdout } = await this.runner(
         this.cliPath,
@@ -198,18 +232,36 @@ export class CopilotCliDirectProvider implements LLMProvider {
           '--no-custom-instructions',
           '--no-ask-user',
           '--model',
-          this.model,
+          model,
           ...this.toolArgs(),
         ],
-        { timeout: this.timeoutMs, maxBuffer: 20 * 1024 * 1024 },
+        {
+          timeout: this.timeoutMs,
+          maxBuffer: 20 * 1024 * 1024,
+          env: {
+            ...traceEnvironment,
+            OPENRAPPTER_INVOCATION_REQUEST_ID: requestId,
+          },
+        },
       );
       const content = this.cleanOutput(stdout);
       // Tools ran inside the CLI, so there are no tool_calls to hand back — but
       // they reached the agents through our MCP server, which journalled them.
       // Reporting them is what makes `agent_logs` true for this backend.
-      const ranAgents = this.exposeAgents ? invocationsSince(startedAt) : [];
-      return { content: content || null, tool_calls: null, agent_logs: ranAgents };
+      const correlatedInvocations = invocationsSince(
+        startedAt,
+        requestId,
+      );
+      const ranAgents = this.exposeAgents
+        ? correlatedInvocations
+        : [];
+      return {
+        content: content || null,
+        tool_calls: null,
+        agent_logs: ranAgents,
+      };
     } catch (error) {
+      invocationsSince(startedAt, requestId);
       const err = error as NodeJS.ErrnoException & { stderr?: string };
       if (err.stderr?.includes('No authentication information found')) {
         throw new Error('Copilot CLI is not authenticated');

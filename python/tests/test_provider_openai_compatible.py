@@ -98,6 +98,43 @@ def test_chat_success_against_real_local_server():
         assert response.finish_reason == "stop"
 
 
+def test_missing_response_model_remains_unattributed():
+    @_quiet
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            payload = json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "answer",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ]
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    with _FakeOpenAIServer(Handler) as server:
+        provider = OpenAICompatibleProvider(
+            base_url=server.base_url,
+            model="requested-model",
+            timeout=5.0,
+        )
+        response = provider.chat(
+            [ProviderMessage(role="user", content="hello")]
+        )
+
+    assert response.model == ""
+
+
 def test_authorization_header_sent_but_never_raised_in_errors():
     captured: list = []
 

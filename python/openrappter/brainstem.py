@@ -42,6 +42,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from openrappter import __version__
+from openrappter.result_status import agent_result_is_error
 
 
 def _http_json(url, headers, payload=None, timeout=60):
@@ -516,6 +517,7 @@ def copilot_session():
     _copilot_cache["token"] = data.get("token")
     _copilot_cache["endpoint"] = (data.get("endpoints") or {}).get("api", "https://api.githubcopilot.com")
     _copilot_cache["expires_at"] = data.get("expires_at") or 0
+    _copilot_cache["direct_capi"] = False
     return _copilot_cache
 
 
@@ -577,7 +579,7 @@ def login_status():
 
 
 def llm_chat(messages, tools):
-    """Return ``(message, served_model)``.
+    """Return ``(message, served_model, requested_model)``.
 
     The API response names the model that actually served the request, which is
     the only authoritative answer to PARITY §2.4's first question. Discarding it
@@ -619,7 +621,7 @@ def llm_chat(messages, tools):
         raise RuntimeError(f"Copilot chat failed: HTTP {status}")
     # The server names what served the request; prefer it over what we asked for.
     served = data.get("model") if isinstance(data, dict) else None
-    return data["choices"][0]["message"], (served or model)
+    return data["choices"][0]["message"], served, model
 
 
 # ── The frozen /chat envelope (rapp-runtime-parity/1.0 §2.4) ─────────────────
@@ -695,6 +697,35 @@ def build_chat_envelope(content, session_id, agent_logs=None, model=None,
 
 
 def run_chat(user_input, history, session_id, trusted_context=None):
+    """Run one Brainstem turn inside the shared Flight Recorder contract."""
+    from openrappter.flight_recorder import ensure_flight_recorder_from_env
+
+    recorder = ensure_flight_recorder_from_env()
+    operation = lambda: _run_chat_within_trace(
+        user_input,
+        history,
+        session_id,
+        trusted_context,
+        recorder,
+    )
+    if recorder.current_trace():
+        return operation()
+    return recorder.run_trace(
+        {
+            "sessionId": session_id,
+            "workspaceId": str(Path.cwd()),
+        },
+        operation,
+    )
+
+
+def _run_chat_within_trace(
+    user_input,
+    history,
+    session_id,
+    trusted_context,
+    recorder,
+):
     """The kernel's /chat tool loop: soul + agents-as-tools + tool_call rounds."""
     agents = load_agents()
     trusted = dict(trusted_context) if isinstance(trusted_context, dict) else None
@@ -755,12 +786,132 @@ def run_chat(user_input, history, session_id, trusted_context=None):
         messages.append({"role": "user", "content": memory_data_message})
     messages.extend(h for h in history if isinstance(h, dict) and h.get("role") in ("user", "assistant"))
     messages.append({"role": "user", "content": user_input})
+    recorder.record(
+        {
+            "kind": "context.assembled",
+            "source": "python-brainstem",
+            "status": "info",
+            "metadata": {
+                "sourceNames": [
+                    "soul",
+                    "memory",
+                    "history",
+                    "tools",
+                ],
+                "categoryNames": [
+                    "system",
+                    "memory",
+                    "conversation",
+                    "tools",
+                ],
+                "systemChars": len(system_prompt),
+                "historyLength": len(messages),
+                "toolCount": len(tools),
+                "memoryIncluded": bool(memory_data_message),
+            },
+            "payload": {
+                "messages": messages,
+                "tools": tools,
+            },
+        }
+    )
 
     agent_logs = []
     served_model = None
+    requested_model = MODEL
     last_content = ""
     for _ in range(MAX_TOOL_ROUNDS):
-        reply, served_model = llm_chat(messages, tools)
+        policy_session = copilot_session()
+        requested_model = (
+            os.environ.get("OPENRAPPTER_CAPI_MODEL", "gpt-4o")
+            if policy_session and policy_session.get("direct_capi")
+            else MODEL
+        )
+        provider_started_at = time.monotonic()
+        provider_started = recorder.record(
+            {
+                "kind": "provider.attempt.started",
+                "source": "python-brainstem",
+                "status": "started",
+                "providerId": BACKEND_KIND or "copilot",
+                "metadata": {
+                    "messageCount": len(messages),
+                    "toolCount": len(tools),
+                    "modelPolicy": requested_model,
+                },
+                "payload": {
+                    "messages": messages,
+                    "tools": tools,
+                },
+            }
+        )
+        try:
+            chat_result = recorder.with_parent(
+                provider_started.get("id") if provider_started else None,
+                lambda: llm_chat(messages, tools),
+            )
+            if len(chat_result) == 3:
+                reply, served_model, requested_model = chat_result
+            else:
+                reply, served_model = chat_result
+                requested_model = MODEL
+        except Exception as exc:
+            from openrappter.flight_recorder import summarize_flight_error
+
+            recorder.record(
+                {
+                    "kind": "provider.attempt.failed",
+                    "source": "python-brainstem",
+                    "status": "error",
+                    "parentId": (
+                        provider_started.get("id")
+                        if provider_started
+                        else None
+                    ),
+                    "providerId": BACKEND_KIND or "copilot",
+                    "durationMs": (
+                        time.monotonic() - provider_started_at
+                    )
+                    * 1000,
+                    "metadata": {
+                        "modelPolicy": requested_model,
+                        **summarize_flight_error(exc),
+                    },
+                    "payload": {
+                        "messages": messages,
+                        "tools": tools,
+                        "error": exc,
+                    },
+                }
+            )
+            raise
+        provider_completed = recorder.record(
+            {
+                "kind": "provider.attempt.completed",
+                "source": "python-brainstem",
+                "status": "success",
+                "parentId": (
+                    provider_started.get("id")
+                    if provider_started
+                    else None
+                ),
+                "providerId": BACKEND_KIND or "copilot",
+                **({"model": served_model} if served_model else {}),
+                "durationMs": (
+                    time.monotonic() - provider_started_at
+                )
+                * 1000,
+                "metadata": {
+                    "modelPolicy": requested_model,
+                    "hadToolCalls": bool(reply.get("tool_calls")),
+                },
+                "payload": {
+                    "messages": messages,
+                    "tools": tools,
+                    "response": reply,
+                },
+            }
+        )
         if isinstance(reply.get("content"), str) and reply["content"]:
             last_content = reply["content"]
         calls = reply.get("tool_calls")
@@ -768,6 +919,7 @@ def run_chat(user_input, history, session_id, trusted_context=None):
             return build_chat_envelope(
                 reply.get("content", ""), session_id, agent_logs,
                 model=served_model,
+                requested_model=requested_model,
             )
         messages.append(reply)
         for call in calls:
@@ -780,23 +932,181 @@ def run_chat(user_input, history, session_id, trusted_context=None):
             kwargs.pop("_trusted_context", None)
             kwargs.pop("_transport_event_id", None)
             agent = agents.get(name)
+            tool_started_at = time.monotonic()
+            tool_started = recorder.record(
+                {
+                    "kind": "tool.call.started",
+                    "source": "python-brainstem",
+                    "status": "started",
+                    "parentId": (
+                        provider_completed.get("id")
+                        if provider_completed
+                        else None
+                    ),
+                    "toolName": name,
+                    "metadata": {
+                        "argumentKeys": sorted(kwargs),
+                    },
+                    "payload": {"arguments": kwargs},
+                }
+            )
             if agent is None:
                 # PARITY §2.3 fixes these strings: tooling (Flight Recorder,
                 # rapp-god) reads agent_logs, so the shape is contract, not
                 # cosmetics. We were emitting a JSON error blob instead.
                 result = f"Agent '{name}' not found."
                 log_line = result
+                failed = True
             else:
                 try:
                     if trusted and name in ("ManageMemory", "ContextMemory"):
                         # Reserved runtime context always wins over model arguments.
                         kwargs["_trusted_context"] = trusted
                         kwargs["_transport_event_id"] = trusted.get("transport_event_id")
-                    result = str(agent.perform(**kwargs))
+                    from openrappter.agents.basic_agent import BasicAgent
+
+                    execute = (
+                        agent.execute
+                        if isinstance(agent, BasicAgent)
+                        else None
+                    )
+
+                    def invoke_agent():
+                        if callable(execute):
+                            return execute(**kwargs)
+                        agent_started_at = time.monotonic()
+                        agent_started = recorder.record(
+                            {
+                                "kind": "agent.execute.started",
+                                "source": "python-brainstem-legacy",
+                                "status": "started",
+                                "agentName": name,
+                            }
+                        )
+
+                        def perform_legacy():
+                            try:
+                                legacy_result = str(agent.perform(**kwargs))
+                                try:
+                                    legacy_failed = (
+                                        str(
+                                            json.loads(legacy_result).get(
+                                                "status",
+                                                "",
+                                            )
+                                        ).lower()
+                                        == "error"
+                                    )
+                                except (
+                                    AttributeError,
+                                    TypeError,
+                                    ValueError,
+                                ):
+                                    legacy_failed = False
+                                recorder.record(
+                                    {
+                                        "kind": (
+                                            "agent.execute.failed"
+                                            if legacy_failed
+                                            else "agent.execute.completed"
+                                        ),
+                                        "source": "python-brainstem-legacy",
+                                        "status": (
+                                            "error"
+                                            if legacy_failed
+                                            else "success"
+                                        ),
+                                        "agentName": name,
+                                        "durationMs": (
+                                            time.monotonic()
+                                            - agent_started_at
+                                        )
+                                        * 1000,
+                                        "metadata": {
+                                            "resultLength": len(
+                                                legacy_result
+                                            ),
+                                        },
+                                    }
+                                )
+                                return legacy_result
+                            except Exception as legacy_error:
+                                from openrappter.flight_recorder import (
+                                    summarize_flight_error,
+                                )
+
+                                recorder.record(
+                                    {
+                                        "kind": "agent.execute.failed",
+                                        "source": "python-brainstem-legacy",
+                                        "status": "error",
+                                        "agentName": name,
+                                        "durationMs": (
+                                            time.monotonic()
+                                            - agent_started_at
+                                        )
+                                        * 1000,
+                                        "metadata": (
+                                            summarize_flight_error(
+                                                legacy_error
+                                            )
+                                        ),
+                                    }
+                                )
+                                raise
+
+                        return recorder.with_parent(
+                            (
+                                agent_started.get("id")
+                                if agent_started
+                                else None
+                            ),
+                            perform_legacy,
+                        )
+
+                    result = str(
+                        recorder.with_parent(
+                            tool_started.get("id")
+                            if tool_started
+                            else None,
+                            invoke_agent,
+                        )
+                    )
                     log_line = result
+                    failed = agent_result_is_error(result)
                 except Exception as e:  # noqa: BLE001
                     result = f"Error: {e}"
                     log_line = f"ERROR: {e}"
+                    failed = True
+            structured_result = result
+            if isinstance(result, str):
+                try:
+                    structured_result = json.loads(result)
+                except (TypeError, ValueError):
+                    pass
+            recorder.record(
+                {
+                    "kind": (
+                        "tool.call.failed"
+                        if failed
+                        else "tool.call.completed"
+                    ),
+                    "source": "python-brainstem",
+                    "status": "error" if failed else "success",
+                    "parentId": (
+                        tool_started.get("id")
+                        if tool_started
+                        else None
+                    ),
+                    "toolName": name,
+                    "durationMs": (
+                        time.monotonic() - tool_started_at
+                    )
+                    * 1000,
+                    "metadata": {"resultLength": len(result)},
+                    "payload": {"result": structured_result},
+                }
+            )
             agent_logs.append(f"[{name}] {log_line}")
             # §2.3 fixes the tool message shape, including `name`, which we omitted.
             messages.append({
@@ -810,7 +1120,11 @@ def run_chat(user_input, history, session_id, trusted_context=None):
     # requested; the last assistant `content` is the reply." A synthetic
     # "Tool loop limit reached." discards an answer the model actually gave.
     return build_chat_envelope(
-        last_content, session_id, agent_logs, model=served_model,
+        last_content,
+        session_id,
+        agent_logs,
+        model=served_model,
+        requested_model=requested_model,
     )
 
 
@@ -910,7 +1224,11 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             history_value = data.get("conversation_history", data.get("history"))
             history = history_value if isinstance(history_value, list) else []
             provided_session_id = data.get("session_id") or data.get("sessionId")
-            session_id = provided_session_id or str(uuid.uuid4())
+            session_id = (
+                str(provided_session_id)
+                if provided_session_id is not None
+                else str(uuid.uuid4())
+            )
             raw_idempotency_key = (
                 data.get("idempotency_key") or data.get("idempotencyKey")
             )

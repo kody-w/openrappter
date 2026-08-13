@@ -16,6 +16,7 @@
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 import type { LLMProvider } from '../providers/types.js';
+import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { execSync } from 'child_process';
@@ -350,6 +351,13 @@ function spliceEvolution(
 const _envJs = fileURLToPath(new URL('../env.js', import.meta.url));
 const _envTs = fileURLToPath(new URL('../env.ts', import.meta.url));
 const ENV_MODULE_PATH = existsSync(_envJs) ? _envJs : _envTs;
+const _recordedChatJs = fileURLToPath(
+  new URL('../providers/recorded-chat.js', import.meta.url),
+);
+const _recordedChatTs = fileURLToPath(
+  new URL('../providers/recorded-chat.ts', import.meta.url),
+);
+const RECORDED_CHAT_MODULE_PATH = existsSync(_recordedChatJs) ? _recordedChatJs : _recordedChatTs;
 
 // Persistent cache directory for evolved files (must precede fixImports so regex matches definition first)
 export const EVOLVED_DIR = join(HOME_DIR, 'evolved');
@@ -359,6 +367,9 @@ function fixImports(source: string): string {
   // ESM imports of absolute paths must use file:// URLs (Windows-safe: handles backslashes).
   const basicAgentImportSpec = pathToFileURL(BASIC_AGENT_PATH).href;
   const envModuleImportSpec = pathToFileURL(ENV_MODULE_PATH).href;
+  const recordedChatImportSpec = pathToFileURL(
+    RECORDED_CHAT_MODULE_PATH,
+  ).href;
   // Fix the BasicAgent import to absolute file:// URL
   result = result.replace(
     /from ['"]\.\/BasicAgent\.js['"]/,
@@ -374,10 +385,18 @@ function fixImports(source: string): string {
     /from ['"]\.\.\/env\.js['"]/,
     `from ${JSON.stringify(envModuleImportSpec)}`,
   );
+  result = result.replace(
+    /from ['"]\.\.\/providers\/recorded-chat\.js['"]/,
+    `from ${JSON.stringify(recordedChatImportSpec)}`,
+  );
   // Freeze the ENV_MODULE_PATH constant (filesystem path) so generated files don't need import.meta.url
   result = result.replace(
     /const ENV_MODULE_PATH = .+;/,
     `const ENV_MODULE_PATH = ${JSON.stringify(ENV_MODULE_PATH)};`,
+  );
+  result = result.replace(
+    /const RECORDED_CHAT_MODULE_PATH = .+;/,
+    `const RECORDED_CHAT_MODULE_PATH = ${JSON.stringify(RECORDED_CHAT_MODULE_PATH)};`,
   );
   // Freeze EVOLVED_DIR so generated files don't re-resolve
   result = result.replace(
@@ -886,9 +905,15 @@ async function enhanceWithLLM(
 
     const prompt = promptParts.join('\n');
 
-    const response = await provider.chat([{ role: 'user', content: prompt }], {
-      temperature: 0.7,
-      max_tokens: 500,
+    const response = await chatWithFlightRecorder({
+      provider,
+      messages: [{ role: 'user', content: prompt }],
+      options: {
+        temperature: 0.7,
+        max_tokens: 500,
+      },
+      source: "ouroboros-agent",
+      attributes: { phase: "judge-enhancement" },
     });
 
     if (!response.content) return false;

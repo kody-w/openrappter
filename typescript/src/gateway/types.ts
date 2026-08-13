@@ -185,6 +185,8 @@ export interface AgentResponse {
   usage?: TokenUsage;
   finishReason?: 'stop' | 'tool_calls' | 'length' | 'error';
   agentLogs?: string[];
+  model?: string;
+  requestedModel?: string;
 }
 
 export interface ToolCallResult {

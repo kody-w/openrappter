@@ -9,10 +9,17 @@ import type {
   ProviderResponse,
   EmbeddingOptions,
   ProviderConfig,
-} from './types.js';
-import { createAnthropicProvider } from './anthropic.js';
-import { createOpenAIProvider } from './openai.js';
-import { createOllamaProvider } from './ollama.js';
+} from "./types.js";
+import { createAnthropicProvider } from "./anthropic.js";
+import { createOpenAIProvider } from "./openai.js";
+import { createOllamaProvider } from "./ollama.js";
+import { getFlightRecorder } from "../flight-recorder/recorder.js";
+import { normalizeFlightModelId } from "../flight-recorder/integrity.js";
+import {
+  flightMessages,
+  flightProviderResponse,
+} from "./flight-io.js";
+import { summarizeFlightError } from "../flight-recorder/redaction.js";
 
 export interface FailoverOptions {
   maxRetries?: number;
@@ -87,31 +94,152 @@ export class ProviderRegistry {
     providerChain: string[],
     messages: Message[],
     options?: ChatOptions,
-    failoverOptions?: FailoverOptions
+    failoverOptions?: FailoverOptions,
+  ): Promise<ProviderResponse> {
+    const recorder = getFlightRecorder();
+    const operation = () =>
+      this.chatWithFailoverWithinTrace(
+        providerChain,
+        messages,
+        options,
+        failoverOptions,
+      );
+    if (recorder.currentTrace()) {
+      return operation();
+    }
+    return recorder.runTrace({}, operation);
+  }
+
+  private async chatWithFailoverWithinTrace(
+    providerChain: string[],
+    messages: Message[],
+    options?: ChatOptions,
+    failoverOptions?: FailoverOptions,
   ): Promise<ProviderResponse> {
     const opts = { ...DEFAULT_FAILOVER_OPTIONS, ...failoverOptions };
     const errors: Error[] = [];
+    const recorder = getFlightRecorder();
 
-    for (const providerId of providerChain) {
+    for (const [rungIndex, providerId] of providerChain.entries()) {
+      const rung = rungIndex + 1;
       const provider = this.providers.get(providerId);
 
       if (!provider) {
-        errors.push(new Error(`Provider '${providerId}' not found`));
+        const error = new Error(`Provider '${providerId}' not found`);
+        errors.push(error);
+        await recorder.record({
+          kind: "provider.attempt.failed",
+          source: "provider-registry",
+          status: "error",
+          providerId,
+          metadata: {
+            rung,
+            modelPolicy: options?.model,
+            reason: "missing",
+            ...summarizeFlightError(error),
+          },
+        });
         continue;
       }
 
       // Skip unavailable providers if configured
       if (opts.skipUnavailable && !(await provider.isAvailable())) {
-        errors.push(new Error(`Provider '${providerId}' is not available`));
+        const error = new Error(`Provider '${providerId}' is not available`);
+        errors.push(error);
+        await recorder.record({
+          kind: "provider.attempt.failed",
+          source: "provider-registry",
+          status: "error",
+          providerId,
+          metadata: {
+            rung,
+            modelPolicy: options?.model,
+            reason: "unavailable",
+            ...summarizeFlightError(error),
+          },
+        });
         continue;
       }
 
       // Try with retries
       for (let attempt = 0; attempt <= (opts.maxRetries ?? 0); attempt++) {
+        const started = performance.now();
+        const startedEvent = await recorder.record({
+          kind: "provider.attempt.started",
+          source: "provider-registry",
+          status: "started",
+          providerId,
+          metadata: {
+            rung,
+            attempt: attempt + 1,
+            modelPolicy: options?.model,
+            messageCount: messages.length,
+            toolCount: options?.tools?.length ?? 0,
+          },
+          payload: () => ({ messages: flightMessages(messages) }),
+        });
         try {
-          return await provider.chat(messages, options);
+          const response = await recorder.withParent(
+            startedEvent?.id ?? null,
+            () => provider.chat(messages, options),
+          );
+          const completedEvent = await recorder.record({
+            kind: "provider.attempt.completed",
+            source: "provider-registry",
+            status: "success",
+            providerId,
+            model: normalizeFlightModelId(response.model),
+            durationMs: performance.now() - started,
+            metadata: {
+              rung,
+              attempt: attempt + 1,
+              modelPolicy: options?.model,
+              messageCount: messages.length,
+              toolCount: options?.tools?.length ?? 0,
+              toolCallsOccurred: Boolean(response.tool_calls?.length),
+              ...(response.usage ? { usage: response.usage } : {}),
+            },
+            payload: () => ({
+              messages: flightMessages(messages),
+              response: flightProviderResponse(response),
+            }),
+            parentId: startedEvent?.id,
+          });
+          await recorder.record({
+            kind: "provider.selected",
+            source: "provider-registry",
+            status: "decision",
+            providerId,
+            model: normalizeFlightModelId(response.model),
+            metadata: {
+              rung,
+              attempt: attempt + 1,
+              modelPolicy: options?.model,
+            },
+            parentId: completedEvent?.id,
+          });
+          return response;
         } catch (error) {
-          errors.push(error as Error);
+          const providerError = error as Error;
+          errors.push(providerError);
+          await recorder.record({
+            kind: "provider.attempt.failed",
+            source: "provider-registry",
+            status: "error",
+            providerId,
+            durationMs: performance.now() - started,
+            metadata: {
+              rung,
+              attempt: attempt + 1,
+              modelPolicy: options?.model,
+              ...summarizeFlightError(providerError),
+            },
+            payload: () => ({
+              messages: flightMessages(messages),
+              error: providerError,
+            }),
+            parentId: startedEvent?.id,
+          });
 
           // Don't retry on last attempt
           if (attempt < (opts.maxRetries ?? 0)) {
@@ -122,7 +250,22 @@ export class ProviderRegistry {
     }
 
     // All providers failed
-    const errorMessages = errors.map((e) => e.message).join('; ');
+    const errorMessages = errors.map((e) => e.message).join("; ");
+    const terminalError = new Error(`All providers failed: ${errorMessages}`);
+    await recorder.record({
+      kind: "provider.attempt.failed",
+      source: "provider-registry",
+      status: "error",
+      providerId: providerChain.at(-1),
+      metadata: {
+        terminal: true,
+        modelPolicy: options?.model,
+        providerChain,
+        errorCount: errors.length,
+        ...summarizeFlightError(terminalError),
+      },
+      payload: { error: terminalError },
+    });
     throw new Error(`All providers failed: ${errorMessages}`);
   }
 
@@ -133,7 +276,7 @@ export class ProviderRegistry {
     providerChain: string[],
     texts: string[],
     options?: EmbeddingOptions,
-    failoverOptions?: FailoverOptions
+    failoverOptions?: FailoverOptions,
   ): Promise<number[][]> {
     const opts = { ...DEFAULT_FAILOVER_OPTIONS, ...failoverOptions };
     const errors: Error[] = [];
@@ -147,7 +290,9 @@ export class ProviderRegistry {
       }
 
       if (!provider.embed) {
-        errors.push(new Error(`Provider '${providerId}' does not support embeddings`));
+        errors.push(
+          new Error(`Provider '${providerId}' does not support embeddings`),
+        );
         continue;
       }
 
@@ -169,7 +314,7 @@ export class ProviderRegistry {
       }
     }
 
-    const errorMessages = errors.map((e) => e.message).join('; ');
+    const errorMessages = errors.map((e) => e.message).join("; ");
     throw new Error(`All embedding providers failed: ${errorMessages}`);
   }
 
@@ -195,22 +340,26 @@ export function createDefaultRegistry(): ProviderRegistry {
 /**
  * Create a registry from provider configs
  */
-export function createRegistryFromConfigs(configs: ProviderConfig[]): ProviderRegistry {
+export function createRegistryFromConfigs(
+  configs: ProviderConfig[],
+): ProviderRegistry {
   const registry = new ProviderRegistry();
 
   for (const config of configs) {
-    const apiKey = config.auth.token ?? (config.auth.token_env ? process.env[config.auth.token_env] : undefined);
+    const apiKey =
+      config.auth.token ??
+      (config.auth.token_env ? process.env[config.auth.token_env] : undefined);
 
     let provider: LLMProvider | null = null;
 
     switch (config.provider) {
-      case 'anthropic':
+      case "anthropic":
         provider = createAnthropicProvider(apiKey);
         break;
-      case 'openai':
+      case "openai":
         provider = createOpenAIProvider(apiKey);
         break;
-      case 'ollama':
+      case "ollama":
         provider = createOllamaProvider();
         break;
       default:

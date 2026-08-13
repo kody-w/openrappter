@@ -51,18 +51,25 @@ export interface McpServerOptions {
   name?: string;
   /** Server version (defaults to the package version) */
   version?: string;
+  executeAgent?: (
+    name: string,
+    args: Record<string, unknown>,
+    operation: () => Promise<string>,
+  ) => Promise<string>;
 }
 
 export class McpServer {
   private agents = new Map<string, BasicAgent>();
   private serverInfo: McpServerInfo;
   private initialized = false;
+  private readonly executeAgent?: McpServerOptions["executeAgent"];
 
   constructor(options?: McpServerOptions) {
     this.serverInfo = {
       name: options?.name ?? 'openrappter',
       version: options?.version ?? VERSION,
     };
+    this.executeAgent = options?.executeAgent;
   }
 
   /** Register an agent as an MCP tool */
@@ -156,7 +163,10 @@ export class McpServer {
     }
 
     try {
-      const resultStr = await agent.execute(args);
+      const operation = () => agent.execute(args);
+      const resultStr = this.executeAgent
+        ? await this.executeAgent(toolName, args, operation)
+        : await operation();
       // The CLI backend runs its tool loop inside itself, so the Assistant loop
       // never sees these calls and `agent_logs` came back empty even when an
       // agent had demonstrably run. Journal it here — this is the only place
@@ -190,39 +200,39 @@ export class McpServer {
   }
 
   /** Start the stdio transport — reads JSON-RPC from stdin, writes to stdout */
-  async serve(): Promise<void> {
-    const rl = createInterface({ input: process.stdin, terminal: false });
+  async serve(input: NodeJS.ReadableStream = process.stdin): Promise<void> {
+    const rl = createInterface({ input, terminal: false });
+    const pending = new Set<Promise<void>>();
 
-    rl.on('line', async (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
+    rl.on('line', (line) => {
+      const task = (async () => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
 
-      let request: JsonRpcRequest;
-      try {
-        request = JSON.parse(trimmed);
-      } catch {
-        const errorResponse: JsonRpcResponse = {
-          jsonrpc: '2.0',
-          id: null,
-          error: { code: -32700, message: 'Parse error' },
-        };
-        this.writeLine(JSON.stringify(errorResponse));
-        return;
-      }
+        let request: JsonRpcRequest;
+        try {
+          request = JSON.parse(trimmed);
+        } catch {
+          const errorResponse: JsonRpcResponse = {
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32700, message: 'Parse error' },
+          };
+          this.writeLine(JSON.stringify(errorResponse));
+          return;
+        }
 
-      // Handle notifications (no id) — just ignore
-      if (request.id === undefined || request.id === null) {
-        // It's a notification, no response needed
-        // But handle 'notifications/initialized' silently
-        return;
-      }
+        if (request.id === undefined || request.id === null) return;
 
-      const response = await this.handleRequest(request);
-      this.writeLine(JSON.stringify(response));
+        const response = await this.handleRequest(request);
+        this.writeLine(JSON.stringify(response));
+      })();
+      pending.add(task);
+      void task.finally(() => pending.delete(task));
     });
 
-    // Wait until stdin closes
     await new Promise<void>((resolve) => rl.on('close', resolve));
+    await Promise.allSettled([...pending]);
   }
 
   private writeLine(data: string): void {

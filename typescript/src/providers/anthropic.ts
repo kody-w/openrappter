@@ -9,15 +9,21 @@ import type {
   ProviderResponse,
   ToolCall,
   Tool,
-} from './types.js';
+} from "./types.js";
 
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
+const DEFAULT_MODEL = "claude-sonnet-4-20250514";
 const DEFAULT_MAX_TOKENS = 4096;
 
 interface AnthropicMessage {
-  role: 'user' | 'assistant';
-  content: string | Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown } | { type: 'tool_result'; tool_use_id: string; content: string }>;
+  role: "user" | "assistant";
+  content:
+    | string
+    | Array<
+        | { type: "text"; text: string }
+        | { type: "tool_use"; id: string; name: string; input: unknown }
+        | { type: "tool_result"; tool_use_id: string; content: string }
+      >;
 }
 
 interface AnthropicTool {
@@ -28,9 +34,12 @@ interface AnthropicTool {
 
 interface AnthropicResponse {
   id: string;
-  type: 'message';
-  role: 'assistant';
-  content: Array<{ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown }>;
+  type: "message";
+  role: "assistant";
+  content: Array<
+    | { type: "text"; text: string }
+    | { type: "tool_use"; id: string; name: string; input: unknown }
+  >;
   model: string;
   stop_reason: string;
   usage: {
@@ -40,8 +49,8 @@ interface AnthropicResponse {
 }
 
 export class AnthropicProvider implements LLMProvider {
-  id = 'anthropic';
-  name = 'Anthropic Claude';
+  id = "anthropic";
+  name = "Anthropic Claude";
 
   private apiKey: string | null = null;
 
@@ -53,14 +62,17 @@ export class AnthropicProvider implements LLMProvider {
     return !!this.apiKey;
   }
 
-  async chat(messages: Message[], options?: ChatOptions): Promise<ProviderResponse> {
+  async chat(
+    messages: Message[],
+    options?: ChatOptions,
+  ): Promise<ProviderResponse> {
     if (!this.apiKey) {
-      throw new Error('Anthropic API key not configured');
+      throw new Error("Anthropic API key not configured");
     }
 
     // Extract system message
-    const systemMessage = messages.find((m) => m.role === 'system');
-    const otherMessages = messages.filter((m) => m.role !== 'system');
+    const systemMessage = messages.find((m) => m.role === "system");
+    const otherMessages = messages.filter((m) => m.role !== "system");
 
     // Convert messages to Anthropic format
     const anthropicMessages = this.convertMessages(otherMessages);
@@ -89,11 +101,11 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
     });
@@ -111,38 +123,44 @@ export class AnthropicProvider implements LLMProvider {
     const result: AnthropicMessage[] = [];
 
     for (const msg of messages) {
-      if (msg.role === 'user') {
-        result.push({ role: 'user', content: msg.content });
-      } else if (msg.role === 'assistant') {
+      if (msg.role === "user") {
+        result.push({ role: "user", content: msg.content });
+      } else if (msg.role === "assistant") {
         if (msg.tool_calls && msg.tool_calls.length > 0) {
           // Assistant message with tool calls
           result.push({
-            role: 'assistant',
+            role: "assistant",
             content: msg.tool_calls.map((tc) => ({
-              type: 'tool_use' as const,
+              type: "tool_use" as const,
               id: tc.id,
               name: tc.function.name,
               input: JSON.parse(tc.function.arguments),
             })),
           });
         } else {
-          result.push({ role: 'assistant', content: msg.content });
+          result.push({ role: "assistant", content: msg.content });
         }
-      } else if (msg.role === 'tool' && msg.tool_call_id) {
+      } else if (msg.role === "tool" && msg.tool_call_id) {
         // Tool result - append to last user message or create new
         const lastMsg = result[result.length - 1];
-        if (lastMsg?.role === 'user' && Array.isArray(lastMsg.content)) {
-          (lastMsg.content as Array<{ type: 'tool_result'; tool_use_id: string; content: string }>).push({
-            type: 'tool_result',
+        if (lastMsg?.role === "user" && Array.isArray(lastMsg.content)) {
+          (
+            lastMsg.content as Array<{
+              type: "tool_result";
+              tool_use_id: string;
+              content: string;
+            }>
+          ).push({
+            type: "tool_result",
             tool_use_id: msg.tool_call_id,
             content: msg.content,
           });
         } else {
           result.push({
-            role: 'user',
+            role: "user",
             content: [
               {
-                type: 'tool_result',
+                type: "tool_result",
                 tool_use_id: msg.tool_call_id,
                 content: msg.content,
               },
@@ -168,12 +186,12 @@ export class AnthropicProvider implements LLMProvider {
     const toolCalls: ToolCall[] = [];
 
     for (const block of data.content) {
-      if (block.type === 'text') {
+      if (block.type === "text") {
         content = block.text;
-      } else if (block.type === 'tool_use') {
+      } else if (block.type === "tool_use") {
         toolCalls.push({
           id: block.id,
-          type: 'function',
+          type: "function",
           function: {
             name: block.name,
             arguments: JSON.stringify(block.input),
@@ -185,6 +203,7 @@ export class AnthropicProvider implements LLMProvider {
     return {
       content,
       tool_calls: toolCalls.length > 0 ? toolCalls : null,
+      model: data.model,
       usage: {
         input_tokens: data.usage.input_tokens,
         output_tokens: data.usage.output_tokens,

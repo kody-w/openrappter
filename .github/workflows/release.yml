@@ -65,9 +65,98 @@ jobs:
 
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+  flight-recorder-gate:
+    name: Flight Recorder cross-runtime gate
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python/pyproject.toml
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: npm ci
+
+      - name: Install Python runtime and test dependencies
+        run: python -m pip install -e 'python[dev]'
+
+      - name: Install required conformance binaries
+        run: |
+          RSB_SHA=7846dfdd5e2c74ea2201e1b141269df359b4ce5a
+          KEYRING_SHA=89386724e9bf8b365ce3bd2847fbcc06365953d5
+          curl -fsSL \
+            "https://raw.githubusercontent.com/kody-w/rapp-secondbrain/$RSB_SHA/install.sh" \
+            -o "$RUNNER_TEMP/rsb-install.sh"
+          echo "6fbe9cf84a2b911384957743250e09bacb2c03a5be917974589255e89334d848  $RUNNER_TEMP/rsb-install.sh" \
+            | sha256sum -c -
+          RSB_REF="$RSB_SHA" bash "$RUNNER_TEMP/rsb-install.sh"
+
+          curl -fsSL \
+            "https://raw.githubusercontent.com/kody-w/rapp-keyring/$KEYRING_SHA/install.sh" \
+            -o "$RUNNER_TEMP/keyring-install.sh"
+          echo "a41a8e50f7a1a29212a402024bb65b8e9060e2b6f3bc4594b16d066ff666542c  $RUNNER_TEMP/keyring-install.sh" \
+            | sha256sum -c -
+          sed -i \
+            "s|https://raw.githubusercontent.com/\${REPO}/main|https://raw.githubusercontent.com/\${REPO}/$KEYRING_SHA|" \
+            "$RUNNER_TEMP/keyring-install.sh"
+          bash "$RUNNER_TEMP/keyring-install.sh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          test -x "$HOME/.local/bin/rapp-keyring"
+          test -x "$HOME/.local/bin/rsb"
+
+      - name: Run the release acceptance gate
+        run: node tools/flight-recorder-gate.mjs
+
+  flight-recorder-windows:
+    name: Flight Recorder Windows storage gate
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python/pyproject.toml
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: npm ci
+
+      - name: Install Python runtime and test dependencies
+        run: python -m pip install -e "python[dev]"
+
+      - name: Validate TypeScript Windows storage
+        working-directory: typescript
+        run: |
+          npx vitest run src/flight-recorder/windows-storage.test.ts
+          npm run build --silent
+
+      - name: Validate Python Windows storage
+        working-directory: python
+        run: python -m pytest tests/test_flight_recorder_windows.py -q
+
   build-artifacts:
     name: Build release artifacts once
-    needs: preflight
+    needs: [preflight, flight-recorder-gate, flight-recorder-windows]
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}

@@ -1174,8 +1174,10 @@ export class GatewayServer {
                 sessionId: result.sessionId,
                 agentLogs: result.agentLogs
                   ?? (result.toolCalls ? [JSON.stringify(result.toolCalls)] : []),
-                model: this.backendStatus?.model,
-                requestedModel: this.backendStatus?.requestedModel,
+                model: result.model,
+                requestedModel:
+                  result.requestedModel ??
+                  this.backendStatus?.requestedModel,
                 // Lets the envelope explain an unattributed model instead of
                 // reporting the bare word "unknown".
                 backendKind: this.backendStatus?.kind,

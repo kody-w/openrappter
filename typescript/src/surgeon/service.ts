@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { CopilotCliDirectProvider } from '../providers/copilot-cli-direct.js';
+import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
+import { getFlightRecorder } from '../flight-recorder/index.js';
 import type { LLMProvider, Message } from '../providers/types.js';
 import type {
   SurgeonCase,
@@ -148,6 +150,21 @@ export class SurgeonService {
     const current = request.caseId
       ? this.requireCase(request.caseId)
       : this.createCase(patient);
+    const recorder = getFlightRecorder();
+    const operation = () =>
+      this.consultWithinTrace(userInput, patient, current);
+    if (recorder.currentTrace()) return operation();
+    return recorder.runTrace(
+      { sessionId: `surgeon_${current.id}` },
+      operation,
+    );
+  }
+
+  private async consultWithinTrace(
+    userInput: string,
+    patient: SurgeonPatientSnapshot,
+    current: SurgeonCase,
+  ): Promise<SurgeonConsultResult> {
     this.assertCaseNotInSurgery(current);
     if (this.consultingCases.has(current.id)) {
       throw new Error('This patient case is already being examined');
@@ -157,25 +174,36 @@ export class SurgeonService {
     let candidate;
     let parsed;
     try {
-      candidate = await this.provider.chat(
-        this.consultMessages(current, patient, userInput),
-        { model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto' },
-      );
+      candidate = await chatWithFlightRecorder({
+        provider: this.provider,
+        messages: this.consultMessages(current, patient, userInput),
+        options: { model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto' },
+        source: "surgeon-service",
+        scope: { sessionId: current.id },
+        attributes: { phase: "consult" },
+      });
       parsed = parseModelTurn(candidate.content);
 
       if (!parsed) {
-        const repair = await this.provider.chat([
-          { role: 'system', content: REPAIR_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              candidate: normalizeText(candidate.content ?? '', 9_000),
-              current_request: userInput,
-            }),
+        const repair = await chatWithFlightRecorder({
+          provider: this.provider,
+          messages: [
+            { role: 'system', content: REPAIR_SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                candidate: normalizeText(candidate.content ?? '', 9_000),
+                current_request: userInput,
+              }),
+            },
+          ],
+          options: {
+            model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
+            temperature: 0,
           },
-        ], {
-          model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
-          temperature: 0,
+          source: "surgeon-service",
+          scope: { sessionId: current.id },
+          attributes: { phase: "repair" },
         });
         parsed = parseModelTurn(repair.content);
       }
@@ -261,6 +289,19 @@ export class SurgeonService {
 
   async operate(approval: SurgeonProcedureApproval): Promise<SurgeonCase> {
     const current = this.requireCase(approval.caseId);
+    const recorder = getFlightRecorder();
+    const operation = () => this.operateWithinTrace(approval, current);
+    if (recorder.currentTrace()) return operation();
+    return recorder.runTrace(
+      { sessionId: `surgeon_${current.id}` },
+      operation,
+    );
+  }
+
+  private async operateWithinTrace(
+    approval: SurgeonProcedureApproval,
+    current: SurgeonCase,
+  ): Promise<SurgeonCase> {
     const procedure = this.requireProcedure(current, approval);
     if (current.status === 'recovered' && procedure.status === 'recovered') {
       return cloneCase(current);
@@ -323,21 +364,28 @@ export class SurgeonService {
       current.updatedAt = this.timestamp();
       this.save();
 
-      const verificationResponse = await this.provider.chat([
-        { role: 'system', content: VERIFY_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            procedure: procedureForDigest(procedure),
-            executor_summary: normalizeText(evidence.summary, 6_000),
-            tool_evidence: evidence.agentLogs.map(entry => normalizeText(entry, 2_000)).slice(0, 30),
-            patient_before: current.patientAtDiagnosis,
-            patient_after: patientAfter,
-          }),
+      const verificationResponse = await chatWithFlightRecorder({
+        provider: this.provider,
+        messages: [
+          { role: 'system', content: VERIFY_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              procedure: procedureForDigest(procedure),
+              executor_summary: normalizeText(evidence.summary, 6_000),
+              tool_evidence: evidence.agentLogs.map(entry => normalizeText(entry, 2_000)).slice(0, 30),
+              patient_before: current.patientAtDiagnosis,
+              patient_after: patientAfter,
+            }),
+          },
+        ],
+        options: {
+          model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
+          temperature: 0,
         },
-      ], {
-        model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
-        temperature: 0,
+        source: "surgeon-service",
+        scope: { sessionId: current.id },
+        attributes: { phase: "verify" },
       });
       const verification = parseVerification(verificationResponse.content);
       if (!verification) {

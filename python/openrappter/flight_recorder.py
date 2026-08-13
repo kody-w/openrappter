@@ -4560,6 +4560,7 @@ class FlightRecorder:
                 self._sequence_in_flight.add(trace_id)
                 try:
                     conflict_attempt = 0
+                    busy_attempt = 0
                     while not self._closed:
                         previous = self._sequence_by_trace.get(trace_id)
                         if previous is None:
@@ -4691,6 +4692,21 @@ class FlightRecorder:
                             self._sequence_by_trace.pop(trace_id, None)
                             conflict_attempt += 1
                             time.sleep(min(conflict_attempt / 1000, 0.01))
+                            continue
+                        except sqlite3.OperationalError as exc:
+                            if (
+                                busy_attempt >= 10
+                                or not re.search(
+                                    r"(?:locked|busy)",
+                                    str(exc),
+                                    re.I,
+                                )
+                            ):
+                                raise
+                            busy_attempt += 1
+                            time.sleep(
+                                min(busy_attempt / 1000, 0.01)
+                            )
                             continue
                         self._sequence_by_trace[trace_id] = sequence
                         try:

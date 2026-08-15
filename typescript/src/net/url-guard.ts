@@ -23,7 +23,8 @@ const BLOCKED_HOST_PATTERNS = [
   /^::$/,
   /^fc[0-9a-f]{2}:/,
   /^fd[0-9a-f]{2}:/,
-  /^fe80:/,
+  // IPv6 link-local is fe80::/10, spanning fe80 through febf.
+  /^fe[89ab][0-9a-f]:/,
 ];
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);

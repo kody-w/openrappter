@@ -147,6 +147,17 @@ try {
   );
 
   const installedRoot = path.join(installRoot, "node_modules", "openrappter");
+  const { hardenPrivatePath } = await import(
+    pathToFileURL(
+      path.join(
+        installedRoot,
+        "dist",
+        "flight-recorder",
+        "permissions.js",
+      ),
+    ).href
+  );
+  hardenPrivatePath(home, true);
   const installedIndex = path.join(installedRoot, "ui", "dist", "index.html");
   if (
     !existsSync(installedIndex) ||

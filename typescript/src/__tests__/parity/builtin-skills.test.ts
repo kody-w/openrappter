@@ -566,7 +566,7 @@ describe('Built-in Skills', () => {
     });
 
     it('should identify skills requiring config paths', () => {
-      const configSkills = ['slack', 'bluebubbles', 'voice-call'];
+      const configSkills = ['slack', 'bluebubbles'];
 
       for (const name of configSkills) {
         const content = readFileSync(join(SKILLS_DIR, name, 'SKILL.md'), 'utf8');

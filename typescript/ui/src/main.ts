@@ -6,6 +6,7 @@ import './components/app.js';
 import './components/sidebar.js';
 import './components/surgeon.js';
 import './components/chat.js';
+import './components/show-and-tell.js';
 import './components/channels.js';
 import './components/sessions.js';
 import './components/cron.js';
@@ -19,5 +20,7 @@ import './components/zen.js';
 import './components/accounts.js';
 import './components/presence.js';
 import './components/debug.js';
+import { installDesktopCommandHandler } from './services/desktop-control.js';
 
+installDesktopCommandHandler();
 console.log('OpenRappter UI initialized');

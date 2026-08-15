@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Flight Recorder](./docs/flight-recorder.md) | [v1.12.0 Release Notes](./docs/release-notes-1.12.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -105,6 +105,77 @@ openrappter flight import trace.json
 See [Flight Recorder](./docs/flight-recorder.md) for the event contract,
 privacy boundary, configuration, and replay/export format.
 
+### Show-and-Tell: demonstrate once, reuse safely
+
+Show-and-Tell records active application/window changes, optional narration
+notes, OpenRappter ComputerUse actions, and only the screenshots you explicitly
+request. Stop the recording, review the reconstructed intent and ordered steps,
+then build a reusable `SKILL.md`, a disabled automation, or both.
+
+Recording, approval, optional Copilot enhancement, and deletion each have
+separate local consent gates. Typed text is never persisted, browser query
+strings are removed, credential-looking windows refuse screenshots, and raw
+frames never leave the machine.
+
+```bash
+openrappter show-and-tell start --intent "Publish a verified release"
+openrappter show-and-tell note "I check every required workflow before tagging"
+openrappter show-and-tell capture --label "All checks are green"
+openrappter show-and-tell stop
+openrappter show-and-tell analyze
+openrappter show-and-tell approve
+openrappter show-and-tell build --target all
+openrappter show-and-tell test
+```
+
+See [Show-and-Tell](./docs/show-and-tell.md) for the lifecycle, privacy boundary,
+cross-runtime contract, and artifact formats.
+
+### Electron Desktop: Skill Recorder ergonomics, OpenRappter core
+
+OpenRappter Desktop is an Electron shell over the same headless gateway and
+dual-runtime core. It does not fork the product. The packaged app always loads
+its own current Lit UI, reuses or launches the local gateway, and exposes one
+context-isolated IPC bridge for Show-and-Tell.
+
+```bash
+cd typescript
+npm install
+npm run build
+
+cd desktop
+npm install
+npm start
+```
+
+The renderer has no Node.js access. Recording, active-window capture, workflow
+approval, and deletion use native Electron confirmation dialogs in the main
+process. The Electron runtime carries its own packed OpenRappter installation
+and its own SQLite native binding, so it cannot corrupt the system Node runtime.
+
+Chat can operate the visible app while you watch. `DesktopControl` snapshots
+the composed Lit/shadow-DOM surface and returns semantic refs for navigation,
+clicks, inputs, selects, scrolling, and waits. Any hot-loaded `.py` or
+`*_agent.ts` agent can return bounded `ui_commands`; TypeScript sources are
+compiled before import, capabilities are scanned, and native approval is
+required before code is installed.
+
+The local voice loop is self-bootstrapping:
+
+- **Tell:** multilingual Whisper Small q8, ~252 MB, downloaded once and used
+  offline for Show-and-Tell microphone narration.
+- **Voice:** Microsoft VibeVoice Realtime 0.5B, ~2.04 GB model weights, pinned
+  source/model revisions, isolated Python 3.11 environment, and a loopback-only
+  MPS/CUDA/CPU sidecar.
+
+Electron also includes a native tray for quick chat, Show-and-Tell, voice
+status, and login startup. On macOS, the existing OpenRappter Bar discovers
+Electron's private authenticated endpoint and attaches to the same gateway
+instead of starting a second organism.
+
+See [Electron Desktop](./docs/electron-desktop.md) for development, packaging,
+security boundaries, and platform targets.
+
 ### Copilot Surgeon: the main interaction
 
 **OpenRappter is the patient. Copilot is the surgeon. It’s above that.**
@@ -160,6 +231,10 @@ openrappter --exec Shell "ls -la"
 | **RappterHub** | Install community agents with `openrappter rappterhub install author/agent` |
 | **ClawHub Compatible** | OpenClaw skills work here too — `openrappter clawhub install author/skill` |
 | **Runtime Agent Generation** | `LearnNew` agent creates new agents from natural language descriptions |
+| **Show-and-Tell** | Record a real workflow, review its reconstructed intent and steps, then build a reusable skill or disabled automation |
+| **Electron Desktop** | Native desktop shell with a sandboxed renderer, current packaged UI, gateway reuse, and visual Show-and-Tell controls |
+| **Autonomous UI Control** | Chat and approved hot-loaded agents drive the visible Electron UI through semantic snapshots and refs |
+| **Local Voice Loop** | On-device Whisper narration and optional VibeVoice speech with self-bootstrapping model caches |
 | **Background Daemon** | Runs persistently via launchd — cron jobs, Telegram bot, and gateway always alive |
 | **Cron Scheduling** | Built-in cron with agent executor — schedule any agent to run on any schedule |
 | **Dream Mode** | Memory consolidation agent — deduplicates, prunes stale facts, logs what it cleaned |
@@ -290,6 +365,7 @@ VERSION=1.10.0 ./scripts/build-mac-app.sh
 | `ManageMemory` | Store important information with content, importance, tags |
 | `ContextMemory` | Recall and provide context from stored memories |
 | `LearnNew` | Generate new agents from natural language — writes code, hot-loads, installs deps |
+| `ShowAndTell` | Record, analyze, approve, and package a demonstrated workflow |
 | `Pokemon` | Let Copilot play a local Pokemon Red ROM with save states, MP4 clips, and a live viewer |
 
 Install the optional emulator support, then start or control the player through
@@ -326,6 +402,7 @@ state, recordings, and the viewer data stay under
 | `HackerNews` | Fetch top Hacker News stories |
 | `Image` | Analyze and process images from URLs |
 | `LearnNew` | Generate new agents from natural language descriptions at runtime |
+| `ShowAndTell` | Record, analyze, approve, and package a demonstrated workflow |
 | `Message` | Multi-channel messaging — Telegram, Slack, Discord, and more |
 | `Ouroboros` | Self-evolving agent — reads its own source, generates improved versions across 5 generations |
 | `Pipeline` | Declarative multi-agent pipeline runner with data_slush threading |

@@ -1,0 +1,90 @@
+{
+  "schema": "openrappter-show-and-tell-contract/1.0",
+  "session": {
+    "schema": "openrappter-show-and-tell/1.0",
+    "states": [
+      "recording",
+      "stopping",
+      "stopped",
+      "failed"
+    ],
+    "capture": {
+      "default": "context",
+      "context": "Polls active application, window title, and a privacy-reduced browser URL.",
+      "frames": "Screenshots are captured only after an explicit local capture action.",
+      "computer_actions": "OpenRappter ComputerUse actions are recorded while a session is active, but typed text is never persisted."
+    }
+  },
+  "event": {
+    "required": [
+      "id",
+      "sessionId",
+      "sequence",
+      "timestamp",
+      "type",
+      "source",
+      "data"
+    ],
+    "types": [
+      "session.started",
+      "session.note",
+      "session.stop.requested",
+      "session.stopped",
+      "app.activate",
+      "browser.url",
+      "frame.captured",
+      "narration.transcribed",
+      "manual.observation",
+      "computer.action",
+      "collector.started",
+      "collector.heartbeat",
+      "collector.stopped",
+      "collector.error"
+    ]
+  },
+  "analysis": {
+    "schema": "openrappter-show-and-tell-analysis/1.0",
+    "required": [
+      "sessionId",
+      "revision",
+      "title",
+      "intent",
+      "intentRationale",
+      "intentConfidence",
+      "steps",
+      "approved",
+      "createdAt"
+    ],
+    "confidence": [
+      "high",
+      "medium",
+      "low"
+    ],
+    "approval": "Approval requires a short-lived, single-use token issued by an interactive local CLI or a native Electron main-process confirmation.",
+    "modelEnhancement": "Sending the privacy-safe textual event summary to Copilot is optional and requires a separate local consent token. Raw frames are never sent."
+  },
+  "artifacts": {
+    "skill": {
+      "files": [
+        "SKILL.md",
+        "manifest.json"
+      ],
+      "installRoot": "~/.openrappter/skills"
+    },
+    "automation": {
+      "file": "automation.json",
+      "installRoot": "~/.openrappter/automations",
+      "enabledByDefault": false
+    },
+    "rule": "Artifacts are generated only from an approved analysis and are rejected if privacy scanning changes their content."
+  },
+  "privacy": {
+    "localOnly": true,
+    "rawFramesSentToModel": false,
+    "browserQueryAndFragmentStored": false,
+    "typedTextStored": false,
+    "narration": "Optional microphone audio is transcribed on-device with Whisper Small q8; the cached model is approximately 252 MB.",
+    "directoryMode": "0700",
+    "fileMode": "0600"
+  }
+}

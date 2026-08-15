@@ -14,6 +14,7 @@
  */
 
 import { spawn } from 'child_process';
+import { existsSync } from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { BasicAgent } from './BasicAgent.js';
@@ -23,7 +24,16 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /** Where runner.py lives. It sits next to the compiled output as a static asset. */
 export function runnerPath(): string {
-  return path.join(HERE, 'python', 'runner.py');
+  const bundled = path.join(HERE, 'python', 'runner.py');
+  const marker = `${path.sep}app.asar${path.sep}`;
+  if (bundled.includes(marker)) {
+    const unpacked = bundled.replace(
+      marker,
+      `${path.sep}app.asar.unpacked${path.sep}`,
+    );
+    if (existsSync(unpacked)) return unpacked;
+  }
+  return bundled;
 }
 
 export interface PythonAgentDescriptor {

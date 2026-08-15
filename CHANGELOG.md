@@ -24,6 +24,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loopback request implicitly; protected JSON-RPC and `/chat` calls now enforce
   configured credentials consistently with WebSocket authentication.
 
+## [1.13.0] - 2026-08-14
+
+### Added
+
+- **Show-and-Tell mode** in TypeScript and Python — record a real workflow,
+  reconstruct its intent and ordered semantic steps, review it, and build a
+  portable `SKILL.md`, a disabled automation, or both.
+- **Cross-runtime recording store** — a private SQLite WAL database gives
+  TypeScript and Python the same session, event, analysis, consent, and artifact
+  contract with transactionally allocated event order.
+- **Detached context collectors** — macOS, Windows, and Linux adapters capture
+  active app/window context after the CLI exits. Browser URLs lose query and
+  fragment data, and screenshots are explicit-only.
+- **Local consent boundaries** — recording, optional Copilot analysis,
+  approval, and deletion each require a short-lived, one-use token issued by an
+  interactive local terminal.
+- **Safe workflow packaging** — generated skills include manifests understood
+  by both runtimes; automations are disabled by default; replay is a dry run
+  rather than coordinate playback.
+- **Electron desktop shell** — packages the current OpenRappter UI and runtime
+  behind a sandboxed, context-isolated renderer, launches or reuses the local
+  gateway, and adds a visual Skill Recorder-style Show-and-Tell workspace.
+- **Native desktop consent** — recording, scoped active-window capture,
+  workflow approval, and deletion use Electron main-process confirmation
+  dialogs; consent tokens and filesystem paths never reach the renderer.
+- **Chat-driven desktop control** — the `DesktopControl` agent snapshots the
+  composed shadow-DOM UI and drives navigation, clicks, fields, selection,
+  scrolling, and waits through semantic refs while the user watches.
+- **Approved agent injection** — `.py` and `*_agent.ts` sources can be supplied
+  through chat, capability-scanned, hash-disclosed, natively approved, compiled
+  when needed, verified by loading, and hot-added to the live assistant.
+- **On-device narration** — Whisper Small q8 downloads once (~252 MB), records
+  optional microphone narration, transcribes locally, and adds the transcript
+  to the active Show-and-Tell timeline.
+- **On-device voice preview** — pinned Microsoft VibeVoice Realtime 0.5B source
+  and model (~2.04 GB weights) self-bootstrap into a private Python 3.11
+  environment and loopback-only server; VibeVoice generated WAV audio
+  successfully on Apple MPS.
+- **Unified tray and Bar** — Electron provides quick chat/recording/voice tray
+  actions and publishes a private authenticated endpoint that the Swift
+  OpenRappter Bar prefers over launching a competing gateway.
+
+### Security
+
+- Typed ComputerUse text is represented only by length, never content.
+- Credential- and sign-in-looking windows refuse screenshot capture.
+- Raw frames and frame paths are never sent to Copilot; only the separately
+  approved privacy-safe textual event summary can leave the machine.
+- Session roots, databases, frames, skills, manifests, and automation bundles
+  use owner-only permissions and reject symlinked destinations.
+- Electron carries an isolated packed runtime and Electron-ABI SQLite binding;
+  the system Node binding is never rebuilt or shared.
+- The desktop gateway uses a random per-process bearer token and a dedicated
+  loopback port. The endpoint file is private, bounded, and removed only by its
+  owning process.
+- VibeVoice is an opt-in preview with explicit responsible-use disclosure; the
+  server is loopback-only, access logs are disabled, text is bounded, and
+  source/model/tokenizer revisions are pinned.
+
 ## [1.12.0] - 2026-08-11
 
 ### Added

@@ -71,7 +71,7 @@ jobs:
           node-version: 22
       - name: Build npm tarball
         if: inputs.release_artifact_name == ''
-        run: cd typescript && npm install --no-fund --no-audit && npm run build && npm pack
+        run: cd typescript && npm install --no-fund --no-audit && npm run build && npm run pack:locked
       - name: Download already-built release tarball
         if: inputs.release_artifact_name != ''
         uses: actions/download-artifact@v4

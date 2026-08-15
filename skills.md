@@ -8,8 +8,8 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: Apache-2.0
-- **TypeScript Version**: 1.8.0
-- **Python Version**: 1.8.0
+- **TypeScript Version**: 1.13.0
+- **Python Version**: 1.13.0
 
 ---
 
@@ -49,6 +49,41 @@ cd typescript
 npm install
 npm run build
 ```
+
+### Electron Desktop
+
+The Electron shell reuses the same OpenRappter gateway and packaged UI:
+
+```bash
+cd typescript
+npm install
+npm run build
+cd desktop
+npm install
+npm start
+```
+
+`npm run dist -- --dir` builds an unpacked platform application. The desktop
+installer generates an isolated packed OpenRappter runtime and rebuilds only
+that runtime's SQLite binding for Electron.
+
+Desktop chat includes the `DesktopControl` agent:
+
+```text
+Use DesktopControl to snapshot the visible UI, navigate to Show-and-Tell,
+fill the intent field, and verify the value.
+```
+
+Supported operations are `snapshot`, `navigate`, `click`, `input`, `select`,
+`scroll`, `wait`, and approval-gated `install_agent`. Hot-loaded agents can
+return `ui_commands` using the same non-install operations.
+
+Local model bootstrapping is opt-in:
+
+- Show-and-Tell narration downloads `Xenova/whisper-small` q8 (~252 MB).
+- Chat voice downloads pinned `microsoft/VibeVoice-Realtime-0.5B` (~2.04 GB)
+  plus its pinned tokenizer, installs a private Python 3.11 runtime, and binds
+  its audio server only to `127.0.0.1`.
 
 ### Python Runtime
 
@@ -215,6 +250,15 @@ python3 -m openrappter.cli [options]  # Direct
 | `flight export [filters]` | Export a versioned replay/eval bundle |
 | `flight import <path>` | Import an integrity-checked replay/eval bundle |
 | `flight clear --yes` | Delete the local event ledger |
+| `show-and-tell start [--intent "..."]` | Start a consent-gated local demonstration |
+| `show-and-tell note <text>` | Add narration explaining a demonstrated step |
+| `show-and-tell capture [--label "..."]` | Capture one explicit local reference frame |
+| `show-and-tell stop` | Stop the active demonstration |
+| `show-and-tell analyze [--enhance]` | Reconstruct intent and ordered steps; optional Copilot refinement never sends frames |
+| `show-and-tell approve` | Locally approve the reviewed analysis |
+| `show-and-tell build --target <skill|automation|all>` | Build portable artifacts from the approved analysis |
+| `show-and-tell replay` | Preview a side-effect-free replay plan |
+| `show-and-tell test` | Validate artifact integrity, privacy, and disabled defaults |
 
 ### Interactive Mode Slash Commands
 

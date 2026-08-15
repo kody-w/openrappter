@@ -94,8 +94,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         observeViewModel()
         registerAsLoginItem()
 
-        // Auto-start gateway if configured (starts process then connects)
-        if settingsViewModel.settingsStore.autoStartGateway {
+        // Electron publishes a private endpoint. Prefer it over starting a
+        // competing gateway so the window and menu bar share one organism.
+        if let desktop = DesktopGatewayDiscovery.current() {
+            viewModel.connectToGateway(host: desktop.host, port: desktop.port)
+        } else if settingsViewModel.settingsStore.autoStartGateway {
             viewModel.startGateway()
         } else if settingsViewModel.settingsStore.autoConnect {
             // Only auto-connect standalone when not auto-starting

@@ -202,8 +202,8 @@ describe('Navigation consistency', () => {
 
 /* ── 5. Current release identity ── */
 describe('Current release identity', () => {
-  it('publishes the 1.12.0 Pages release', () => {
-    expect(CURRENT_VERSION).toBe('1.12.0');
+  it('publishes the 1.13.0 Pages release', () => {
+    expect(CURRENT_VERSION).toBe('1.13.0');
   });
 
   it('homepage badge derives from package metadata', () => {
@@ -237,15 +237,15 @@ describe('Current release identity', () => {
     }
   });
 
-  it('presents Flight Recorder as private, provider-neutral evidence', () => {
+  it('presents Show-and-Tell as consent-bound reusable learning', () => {
     const doc = parseHTML(CURRENT_RELEASE_FILE);
-    expect(doc.title).toContain('Flight Recorder');
+    expect(doc.title).toContain('Show-and-Tell');
     const text = doc.body.textContent || '';
-    expect(text).toContain('OpenRappter can now explain itself.');
-    expect(text).toContain('provider-neutral');
-    expect(text).toContain('raw IO is off by default');
-    expect(text).toContain('openrappter-event/1.0');
-    expect(text).toContain('Copilot CLI child MCP');
+    expect(text).toContain('Show it once.');
+    expect(text).toContain('Context, not surveillance');
+    expect(text).toContain('Screenshots are explicit-only');
+    expect(text).toContain('one-use local token');
+    expect(text).toContain('Native tools over pixel replay');
   });
 
   it('uses durable Bar release links instead of versioned DMG URLs', () => {

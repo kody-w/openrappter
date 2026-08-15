@@ -169,10 +169,14 @@ export class GatewayClient {
   constructor(opts?: GatewayClientOptions) {
     const configuredUrl = import.meta.env.VITE_GATEWAY_URL;
     const configuredPath = import.meta.env.VITE_GATEWAY_PATH;
+    const desktopUrl = globalThis.window?.openrappterDesktop?.gatewayUrl;
+    const desktopToken = globalThis.window?.openrappterDesktop?.gatewayToken;
     this.url = opts?.url
+      ?? desktopUrl
       ?? configuredUrl
       ?? gatewayUrlFromLocation(globalThis.location, configuredPath);
     this.token = opts?.token
+      ?? desktopToken
       ?? import.meta.env.VITE_GATEWAY_TOKEN
       ?? null;
     this.password = opts?.password

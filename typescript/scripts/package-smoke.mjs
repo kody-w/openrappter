@@ -11,13 +11,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
 const scratch = mkdtempSync(path.join(packageRoot, ".package-smoke-"));
 
 function run(command, args, options = {}) {
@@ -27,6 +28,7 @@ function run(command, args, options = {}) {
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
       [
@@ -39,6 +41,16 @@ function run(command, args, options = {}) {
     );
   }
   return result;
+}
+
+function runNpm(args, options = {}) {
+  if (npmCli) {
+    return run(process.execPath, [npmCli, ...args], options);
+  }
+  return run(npm, args, {
+    shell: process.platform === "win32",
+    ...options,
+  });
 }
 
 function parsePackResult(output) {
@@ -85,7 +97,12 @@ function parseJsonValue(output, opening, closing) {
 }
 
 try {
-  const packed = run(npm, ["pack", "--json", "--pack-destination", scratch]);
+  const packed = run(process.execPath, [
+    path.join(packageRoot, "scripts", "pack-locked.mjs"),
+    "--json",
+    "--pack-destination",
+    scratch,
+  ]);
   const packResult = parsePackResult(packed.stdout);
   const artifact = packResult[0];
   if (!artifact?.filename) throw new Error("npm pack did not report a tarball");
@@ -95,6 +112,21 @@ try {
   );
   if (!packedFiles.has("ui/dist/index.html")) {
     throw new Error("Tarball does not contain ui/dist/index.html");
+  }
+  if (!packedFiles.has("npm-shrinkwrap.json")) {
+    throw new Error("Tarball does not contain the reviewed dependency lock");
+  }
+  for (const required of [
+    "dist/agents/ShowAndTellAgent.js",
+    "dist/agents/DesktopControlAgent.js",
+    "dist/desktop-control/queue.js",
+    "dist/show-and-tell/store.js",
+    "dist/show-and-tell/worker.js",
+    "dist/cli/show-and-tell.js",
+  ]) {
+    if (!packedFiles.has(required)) {
+      throw new Error(`Tarball does not contain ${required}`);
+    }
   }
 
   const tarball = path.join(scratch, artifact.filename);
@@ -109,8 +141,7 @@ try {
     JSON.stringify({ name: "openrappter-package-smoke", private: true }),
   );
 
-  run(
-    npm,
+  runNpm(
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
     { cwd: installRoot },
   );
@@ -147,8 +178,91 @@ try {
   // Flight Recorder uses better-sqlite3, whose native binding is prepared by
   // its install script. Rebuild only that reviewed dependency before testing
   // the runtime path an ordinary npm install provides.
-  run(npm, ["rebuild", "better-sqlite3"], { cwd: installRoot });
+  runNpm(["rebuild", "better-sqlite3"], { cwd: installRoot });
 
+  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
+  const showHelp = run(process.execPath, [binary, "show", "--help"], {
+    cwd: installRoot,
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      OPENRAPPTER_FLIGHT_RECORDER: "0",
+      OPENRAPPTER_SHOW_TEST_MODE: "1",
+    },
+  });
+  if (!/show-and-tell/i.test(showHelp.stdout)) {
+    throw new Error("Installed package does not expose the Show-and-Tell CLI");
+  }
+
+  const installedStore = pathToFileURL(
+    path.join(installedRoot, "dist", "show-and-tell", "store.js"),
+  ).href;
+  const installedAgent = pathToFileURL(
+    path.join(installedRoot, "dist", "agents", "ShowAndTellAgent.js"),
+  ).href;
+  const showRoot = path.join(scratch, "installed-show-and-tell");
+  const showScript = `
+    import { createHash, randomBytes } from "node:crypto";
+    import { ShowAndTellStore } from ${JSON.stringify(installedStore)};
+    import { ShowAndTellAgent } from ${JSON.stringify(installedAgent)};
+    const store = new ShowAndTellStore(${JSON.stringify(showRoot)});
+    await store.initialize();
+    const token = randomBytes(32).toString("hex");
+    const now = Date.now();
+    store.database()
+      .prepare("INSERT INTO show_consents(token_hash, purpose, issued_at, expires_at) VALUES (?, ?, ?, ?)")
+      .run(createHash("sha256").update(token).digest("hex"), "start", now, now + 60000);
+    const agent = new ShowAndTellAgent({ store, localSurface: true });
+    const started = JSON.parse(await agent.perform({
+      action: "start",
+      intent: "Package smoke",
+      poll_interval_ms: 60000,
+      max_duration_ms: 60000,
+      consent_token: token,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const live = JSON.parse(await agent.perform({
+      action: "status",
+      session_id: started.session.id,
+    }));
+    const stopped = JSON.parse(await agent.perform({
+      action: "stop",
+      session_id: started.session.id,
+    }));
+    process.stdout.write(JSON.stringify({
+      started: started.status,
+      healthy: live.collector_healthy,
+      stopped: stopped.session.state,
+    }));
+    store.close();
+  `;
+  const showSmoke = run(
+    process.execPath,
+    ["--input-type=module", "--eval", showScript],
+    {
+      cwd: installRoot,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        OPENRAPPTER_FLIGHT_RECORDER: "0",
+        OPENRAPPTER_SHOW_TEST_MODE: "1",
+      },
+    },
+  );
+  const showStatus = parseJsonValue(showSmoke.stdout, "{", "}");
+  if (
+    showStatus.started !== "success" ||
+    showStatus.healthy !== true ||
+    showStatus.stopped !== "stopped"
+  ) {
+    throw new Error(
+      `Installed Show-and-Tell worker failed:\n${showSmoke.stdout}`,
+    );
+  }
+
+  if (process.platform !== "win32") {
   const flightDb = path.join(home, "flight.db");
   const flightEnv = {
     ...process.env,
@@ -158,7 +272,6 @@ try {
     OPENRAPPTER_FLIGHT_RECORDER: "1",
     OPENRAPPTER_FLIGHT_DB: flightDb,
   };
-  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
   const managedHome = path.join(scratch, "managed-home");
   mkdirSync(managedHome, { recursive: true, mode: 0o755 });
   chmodSync(managedHome, 0o755);
@@ -178,17 +291,19 @@ try {
   });
   const managedDirectory = path.join(managedHome, ".openrappter");
   const managedDatabase = path.join(managedDirectory, "flight-recorder.db");
-  if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
-    throw new Error("Packaged default Flight Recorder directory is not 0700");
-  }
-  if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
-    throw new Error("Packaged default Flight Recorder database is not 0600");
-  }
-  if (
-    (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
-    0o600
-  ) {
-    throw new Error("Packaged Flight Recorder identity key is not 0600");
+  if (process.platform !== "win32") {
+    if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
+      throw new Error("Packaged default Flight Recorder directory is not 0700");
+    }
+    if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
+      throw new Error("Packaged default Flight Recorder database is not 0600");
+    }
+    if (
+      (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
+      0o600
+    ) {
+      throw new Error("Packaged Flight Recorder identity key is not 0600");
+    }
   }
 
   // ShellAgent is deterministic and needs no provider credential.
@@ -381,7 +496,10 @@ try {
   if (exported.schema !== "openrappter-flight-export/1.0") {
     throw new Error("Packaged flight export has the wrong schema");
   }
-  if ((statSync(exportPath).mode & 0o777) !== 0o600) {
+  if (
+    process.platform !== "win32" &&
+    (statSync(exportPath).mode & 0o777) !== 0o600
+  ) {
     throw new Error("Packaged flight export overwrite is not mode 0600");
   }
 
@@ -431,10 +549,16 @@ try {
       throw new Error(`Packaged reset left Flight Recorder state: ${resetPath}`);
     }
   }
+  }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI and Flight Recorder`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, and Show-and-Tell`,
   );
 } finally {
-  rmSync(scratch, { recursive: true, force: true });
+  rmSync(scratch, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 250,
+  });
 }

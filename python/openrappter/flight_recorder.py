@@ -39,6 +39,7 @@ MAX_SANITIZE_BYTES = 256 * 1024
 TRAVERSAL_LIMIT = "[truncated:budget]"
 BUSY_TIMEOUT_MS = 5_000
 RUNTIME_BUSY_TIMEOUT_MS = 25
+RUNTIME_BUSY_RETRIES = 50
 MAX_BUSY_RETRIES = 4
 MAX_QUERY_LIMIT = 10_000
 MAX_QUERY_OFFSET = 1_000_000
@@ -4702,7 +4703,7 @@ class FlightRecorder:
                             continue
                         except sqlite3.OperationalError as exc:
                             if (
-                                busy_attempt >= 10
+                                busy_attempt >= RUNTIME_BUSY_RETRIES
                                 or not re.search(
                                     r"(?:locked|busy)",
                                     str(exc),
@@ -4712,7 +4713,7 @@ class FlightRecorder:
                                 raise
                             busy_attempt += 1
                             time.sleep(
-                                min(busy_attempt / 1000, 0.01)
+                                min(busy_attempt / 500, 0.025)
                             )
                             continue
                         self._sequence_by_trace[trace_id] = sequence

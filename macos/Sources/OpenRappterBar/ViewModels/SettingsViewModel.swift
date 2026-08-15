@@ -27,16 +27,25 @@ public final class SettingsViewModel {
         self.init(settingsStore: SettingsStore())
     }
 
-    public func configure(rpcClient: RpcClient) {
+    public func configure(
+        rpcClient: RpcClient,
+        useGatewayAuthentication: Bool = true
+    ) {
         self.rpcClient = rpcClient
+        accountViewModel.configure(
+            rpcClient: useGatewayAuthentication ? rpcClient : nil
+        )
         channelsViewModel.configure(rpcClient: rpcClient)
         cronViewModel.configure(rpcClient: rpcClient)
         skillsViewModel.configure(rpcClient: rpcClient)
         approvalViewModel.configure(rpcClient: rpcClient)
     }
 
-    public func clearConfiguration() {
+    public func clearConfiguration(clearAccountAuthentication: Bool = true) {
         rpcClient = nil
+        if clearAccountAuthentication {
+            accountViewModel.configure(rpcClient: nil)
+        }
         channelsViewModel.clearConfiguration()
         cronViewModel.clearConfiguration()
         skillsViewModel.clearConfiguration()

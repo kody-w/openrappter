@@ -49,16 +49,23 @@ public enum ChatState: Sendable {
 @Observable
 @MainActor
 public final class AppViewModel {
-    public typealias ConnectionFactory = @MainActor (_ host: String, _ port: Int) -> GatewayConnection
+    public typealias ConnectionFactory = @MainActor (
+        _ host: String,
+        _ port: Int,
+        _ desktopEndpoint: DesktopGatewayEndpoint?
+    ) -> GatewayConnection
+    public typealias DesktopEndpointProvider = @MainActor () -> DesktopGatewayEndpoint?
 
     private struct GatewayEndpoint: Equatable {
         let host: String
         let port: Int
+        let desktopEndpoint: DesktopGatewayEndpoint?
     }
 
     private enum GatewayLifecycleOperation: Equatable {
         case start
         case stop
+        case desktopTakeover(GatewayEndpoint)
         case authenticationRestart(GatewayEndpoint)
     }
 
@@ -85,6 +92,7 @@ public final class AppViewModel {
 
     // Process
     public var processState: ProcessManager.ProcessState = .stopped
+    public private(set) var usesDesktopGateway = false
 
     // Heartbeat
     public var heartbeatHealth: HeartbeatHealth = .healthy
@@ -118,6 +126,7 @@ public final class AppViewModel {
     let eventBus: EventBus
     let sessionStore: SessionStore
     private let connectionFactory: ConnectionFactory
+    private let desktopEndpointProvider: DesktopEndpointProvider
 
     // Legacy chat state (forwarded from ChatViewModel for existing views)
     public var chatInput: String {
@@ -179,8 +188,16 @@ public final class AppViewModel {
         self.eventBus = bus
         self.processManager = ProcessManager()
         self.sessionStore = SessionStore()
-        self.connectionFactory = { host, port in
-            GatewayConnection(host: host, port: port)
+        self.connectionFactory = { host, port, desktopEndpoint in
+            GatewayConnection(
+                host: host,
+                port: port,
+                desktopEndpoint: desktopEndpoint,
+                discoverDesktopEndpoint: desktopEndpoint != nil
+            )
+        }
+        self.desktopEndpointProvider = {
+            DesktopGatewayDiscovery.current()
         }
         Task { await sessionStore.load() }
         // Start fleet live polling
@@ -191,6 +208,10 @@ public final class AppViewModel {
     /// Detect a running gateway and connect to it automatically.
     public func detectAndConnect(host: String = AppConstants.defaultHost, port: Int = AppConstants.defaultPort) {
         guard !isShuttingDown else { return }
+        if desktopEndpointProvider() != nil {
+            connectUsingPreferredGateway(fallbackHost: host, fallbackPort: port)
+            return
+        }
         gatewayLifecycleGeneration &+= 1
         let generation = gatewayLifecycleGeneration
         Task {
@@ -208,17 +229,90 @@ public final class AppViewModel {
         processManager: ProcessManager,
         eventBus: EventBus,
         sessionStore: SessionStore? = nil,
-        connectionFactory: @escaping ConnectionFactory = { host, port in
-            GatewayConnection(host: host, port: port)
-        }
+        connectionFactory: @escaping ConnectionFactory = { host, port, desktopEndpoint in
+            GatewayConnection(
+                host: host,
+                port: port,
+                desktopEndpoint: desktopEndpoint,
+                discoverDesktopEndpoint: desktopEndpoint != nil
+            )
+        },
+        desktopEndpointProvider: @escaping DesktopEndpointProvider = { nil }
     ) {
         self.processManager = processManager
         self.eventBus = eventBus
         self.sessionStore = sessionStore ?? SessionStore()
         self.connectionFactory = connectionFactory
+        self.desktopEndpointProvider = desktopEndpointProvider
     }
 
     // MARK: - Actions
+
+    /// Prefer Electron's private authenticated gateway and only fall back to
+    /// the standalone endpoint when no live desktop owner is available.
+    @discardableResult
+    public func connectUsingPreferredGateway(
+        fallbackHost: String = AppConstants.defaultHost,
+        fallbackPort: Int = AppConstants.defaultPort
+    ) -> Task<Void, Never> {
+        if let endpoint = desktopEndpointProvider() {
+            let gatewayEndpoint = GatewayEndpoint(
+                host: endpoint.host,
+                port: endpoint.port,
+                desktopEndpoint: endpoint
+            )
+            let operation = GatewayLifecycleOperation.desktopTakeover(gatewayEndpoint)
+            if gatewayLifecycleOperation == operation, let gatewayLifecycleTask {
+                return gatewayLifecycleTask
+            }
+
+            gatewayLifecycleGeneration &+= 1
+            let generation = gatewayLifecycleGeneration
+            let supersededLifecycle = gatewayLifecycleTask
+            supersededLifecycle?.cancel()
+            usesDesktopGateway = true
+            let task = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    if generation == self.gatewayLifecycleGeneration {
+                        self.gatewayLifecycleTask = nil
+                        self.gatewayLifecycleOperation = nil
+                    }
+                }
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+
+                await self.disconnectFromGateway()
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+
+                self.processState = .stopping
+                _ = await self.processManager.stop()
+                await supersededLifecycle?.value
+                guard generation == self.gatewayLifecycleGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+
+                self.processState = self.processManager.state
+                self.addActivity(type: .system, text: "Using OpenRappter Desktop gateway")
+                let connectionTask = self.connectToEndpoint(
+                    host: endpoint.host,
+                    port: endpoint.port,
+                    desktopEndpoint: endpoint
+                )
+                await connectionTask.value
+            }
+            gatewayLifecycleOperation = operation
+            gatewayLifecycleTask = task
+            return task
+        }
+        return connectToGateway(
+            host: fallbackHost,
+            port: fallbackPort
+        )
+    }
 
     /// Connect to the gateway.
     ///
@@ -232,8 +326,47 @@ public final class AppViewModel {
         host: String = AppConstants.defaultHost,
         port: Int = AppConstants.defaultPort
     ) -> Task<Void, Never> {
+        let supersededLifecycle = gatewayLifecycleTask
+        if supersededLifecycle != nil {
+            gatewayLifecycleGeneration &+= 1
+            gatewayLifecycleTask = nil
+            gatewayLifecycleOperation = nil
+            supersededLifecycle?.cancel()
+        }
+        usesDesktopGateway = false
+        if let supersededLifecycle {
+            let generation = gatewayLifecycleGeneration
+            let connectionIntentGeneration = connectGeneration
+            return Task { [weak self] in
+                guard let self else { return }
+                await supersededLifecycle.value
+                guard generation == self.gatewayLifecycleGeneration,
+                      connectionIntentGeneration == self.connectGeneration,
+                      !self.isShuttingDown,
+                      !Task.isCancelled else { return }
+                let connectionTask = self.connectToEndpoint(
+                    host: host,
+                    port: port,
+                    desktopEndpoint: nil
+                )
+                await connectionTask.value
+            }
+        }
+        return connectToEndpoint(host: host, port: port, desktopEndpoint: nil)
+    }
+
+    @discardableResult
+    private func connectToEndpoint(
+        host: String,
+        port: Int,
+        desktopEndpoint: DesktopGatewayEndpoint?
+    ) -> Task<Void, Never> {
         guard !isShuttingDown else { return Task {} }
-        let endpoint = GatewayEndpoint(host: host, port: port)
+        let endpoint = GatewayEndpoint(
+            host: host,
+            port: port,
+            desktopEndpoint: desktopEndpoint
+        )
         if let connectTask, connectEndpoint == endpoint {
             return connectTask
         }
@@ -248,6 +381,7 @@ public final class AppViewModel {
             await self.performConnect(
                 host: host,
                 port: port,
+                desktopEndpoint: desktopEndpoint,
                 generation: generation,
                 supersededTask: supersededTask
             )
@@ -263,6 +397,7 @@ public final class AppViewModel {
     private func performConnect(
         host: String,
         port: Int,
+        desktopEndpoint: DesktopGatewayEndpoint?,
         generation: UInt,
         supersededTask: Task<Void, Never>?
     ) async {
@@ -282,7 +417,7 @@ public final class AppViewModel {
 
         await supersededTask?.value
         guard generation == connectGeneration, !Task.isCancelled else { return }
-        let conn = connectionFactory(host, port)
+        let conn = connectionFactory(host, port, desktopEndpoint)
         connection = conn
 
         await conn.setStateHandler { [weak self, weak conn] state in
@@ -389,6 +524,9 @@ public final class AppViewModel {
     @discardableResult
     public func startGateway() -> Task<Void, Never> {
         guard !isShuttingDown else { return Task {} }
+        if usesDesktopGateway || desktopEndpointProvider() != nil {
+            return connectUsingPreferredGateway()
+        }
         if gatewayLifecycleOperation == .start, let gatewayLifecycleTask {
             return gatewayLifecycleTask
         }
@@ -415,7 +553,12 @@ public final class AppViewModel {
                       result != .superseded else { return }
                 self.processState = self.processManager.state
                 self.addActivity(type: .system, text: "Gateway started")
-                self.connectToGateway()
+                let connectionTask = self.connectToEndpoint(
+                    host: AppConstants.defaultHost,
+                    port: AppConstants.defaultPort,
+                    desktopEndpoint: nil
+                )
+                await connectionTask.value
             } catch {
                 guard generation == self.gatewayLifecycleGeneration,
                       !self.isShuttingDown,
@@ -431,6 +574,35 @@ public final class AppViewModel {
 
     @discardableResult
     public func stopGateway() -> Task<Void, Never> {
+        if usesDesktopGateway {
+            if gatewayLifecycleOperation == .stop, let gatewayLifecycleTask {
+                return gatewayLifecycleTask
+            }
+            gatewayLifecycleGeneration &+= 1
+            let generation = gatewayLifecycleGeneration
+            let supersededLifecycle = gatewayLifecycleTask
+            supersededLifecycle?.cancel()
+            let task = Task { [weak self] in
+                guard let self else { return }
+                defer {
+                    if generation == self.gatewayLifecycleGeneration {
+                        self.gatewayLifecycleTask = nil
+                        self.gatewayLifecycleOperation = nil
+                    }
+                }
+                guard generation == self.gatewayLifecycleGeneration else { return }
+                await self.disconnectFromGateway()
+                guard generation == self.gatewayLifecycleGeneration else { return }
+                _ = await self.processManager.stop()
+                await supersededLifecycle?.value
+                guard generation == self.gatewayLifecycleGeneration else { return }
+                self.processState = self.processManager.state
+                self.addActivity(type: .system, text: "Disconnected from OpenRappter Desktop")
+            }
+            gatewayLifecycleOperation = .stop
+            gatewayLifecycleTask = task
+            return task
+        }
         if gatewayLifecycleOperation == .stop, let gatewayLifecycleTask {
             return gatewayLifecycleTask
         }
@@ -471,7 +643,15 @@ public final class AppViewModel {
         port: Int = AppConstants.defaultPort
     ) -> Task<Void, Never> {
         guard !isShuttingDown else { return Task {} }
-        let endpoint = GatewayEndpoint(host: host, port: port)
+        if usesDesktopGateway {
+            addActivity(type: .system, text: "Desktop gateway authentication updated")
+            return Task {}
+        }
+        let endpoint = GatewayEndpoint(
+            host: host,
+            port: port,
+            desktopEndpoint: nil
+        )
         let operation = GatewayLifecycleOperation.authenticationRestart(endpoint)
         if gatewayLifecycleOperation == operation, let gatewayLifecycleTask {
             return gatewayLifecycleTask
@@ -511,7 +691,11 @@ public final class AppViewModel {
 
                 self.processState = self.processManager.state
                 self.addActivity(type: .system, text: "Gateway restarted after authentication")
-                let connectionTask = self.connectToGateway(host: host, port: port)
+                let connectionTask = self.connectToEndpoint(
+                    host: host,
+                    port: port,
+                    desktopEndpoint: nil
+                )
                 await connectionTask.value
             } catch {
                 guard generation == self.gatewayLifecycleGeneration,

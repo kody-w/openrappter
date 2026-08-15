@@ -154,23 +154,33 @@ export class CopilotProvider implements LLMProvider {
 
   private githubToken: string | null = null;
   private resolvedToken: ResolvedCopilotToken | null = null;
+  private allowAmbientCredentials: boolean;
 
-  constructor(options?: { githubToken?: string }) {
+  constructor(options?: {
+    githubToken?: string;
+    allowAmbientCredentials?: boolean;
+  }) {
     this.githubToken = options?.githubToken ?? null;
+    this.allowAmbientCredentials = options?.allowAmbientCredentials ?? true;
   }
 
   /**
    * Update the GitHub token at runtime (e.g. after device-code login).
    * Clears the cached Copilot API token so the next call re-exchanges.
    */
-  setGithubToken(token: string): void {
+  setGithubToken(
+    token: string | null,
+    allowAmbientCredentials = true,
+  ): void {
     this.githubToken = token;
+    this.allowAmbientCredentials = allowAmbientCredentials;
     this.resolvedToken = null;
   }
 
   /** Resolve the GitHub token from constructor, env, or gh CLI */
   private getGithubToken(): string | null {
     if (this.githubToken) return this.githubToken;
+    if (!this.allowAmbientCredentials) return null;
 
     // Check environment variables (same order as openclaw)
     return (

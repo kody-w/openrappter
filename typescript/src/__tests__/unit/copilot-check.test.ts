@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'fs';
 import { hasCopilotAvailable, resolveGithubToken } from '../../copilot-check.js';
 
 // Mock child_process exec
@@ -43,6 +44,10 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     default: {
       ...actual,
+      existsSync: vi.fn().mockImplementation((filePath: string) => {
+        if (filePath.includes('auth-profiles.json')) return false;
+        return actual.existsSync(filePath);
+      }),
       readFileSync: vi.fn().mockImplementation((...args: unknown[]) => {
         const filePath = args[0] as string;
         // Block reads to credentials and .env files — let other fs reads through
@@ -52,6 +57,10 @@ vi.mock('fs', async (importOriginal) => {
         return actual.readFileSync(...(args as Parameters<typeof actual.readFileSync>));
       }),
     },
+    existsSync: vi.fn().mockImplementation((filePath: string) => {
+      if (filePath.includes('auth-profiles.json')) return false;
+      return actual.existsSync(filePath);
+    }),
     readFileSync: vi.fn().mockImplementation((...args: unknown[]) => {
       const filePath = args[0] as string;
       if (filePath.includes('github-token.json') || filePath.includes('.openrappter/.env')) {
@@ -70,6 +79,7 @@ beforeEach(() => {
   delete process.env.COPILOT_GITHUB_TOKEN;
   delete process.env.GH_TOKEN;
   delete process.env.GITHUB_TOKEN;
+  delete process.env.OPENRAPPTER_DESKTOP_OWNER_PID;
 });
 
 afterEach(() => {
@@ -124,6 +134,20 @@ describe('resolveGithubToken', () => {
   it('should return null when every discovered token fails validation', async () => {
     process.env.COPILOT_GITHUB_TOKEN = 'bad_stale_token';
     process.env.GH_TOKEN = 'bad_other_token';
+    expect(await resolveGithubToken()).toBeNull();
+  });
+
+  it('treats an explicit empty profile store as signed out', async () => {
+    process.env.GITHUB_TOKEN = 'ambient-token';
+    process.env.OPENRAPPTER_DESKTOP_OWNER_PID = '1234';
+    vi.mocked(fs.existsSync).mockImplementation((filePath) =>
+      String(filePath).includes('auth-profiles.json')
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((filePath, ...args) => {
+      if (String(filePath).includes('auth-profiles.json')) return '[]';
+      throw new Error(`Unexpected read: ${String(filePath)} ${String(args)}`);
+    });
+
     expect(await resolveGithubToken()).toBeNull();
   });
 });

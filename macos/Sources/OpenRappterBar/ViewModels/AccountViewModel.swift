@@ -21,9 +21,17 @@ public final class AccountViewModel {
         authService.checkAuthStatus()
     }
 
+    public func configure(rpcClient: RpcClient?) {
+        authService.configure(rpcClient: rpcClient)
+    }
+
     /// Returns the coordinator-owned task so callers can await completion.
     @discardableResult
     public func restartGatewayAfterAuth() -> Task<Void, Never> {
+        guard !authService.usingGatewayAuthentication else {
+            Log.auth.info("Gateway-managed authentication updated without a restart")
+            return Task {}
+        }
         Log.auth.info("Restarting gateway to pick up new GitHub token")
         return restartGateway?() ?? Task {}
     }

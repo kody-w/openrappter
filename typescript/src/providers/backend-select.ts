@@ -79,6 +79,10 @@ export interface SelectBackendOptions {
   /** Injected so selection can be tested without network or a CLI on disk. */
   probeSdk?: (token: string) => Promise<boolean>;
   probeCli?: () => Promise<boolean>;
+  /** Disable silent use of a separately authenticated CLI account. */
+  allowIndependentCli?: boolean;
+  /** Disable SDK fallback to GITHUB_TOKEN/GH_TOKEN. */
+  allowAmbientCredentials?: boolean;
 }
 
 /** Does this GitHub token really exchange for a Copilot API token? */
@@ -108,12 +112,26 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
   const env = options.env ?? process.env;
   const probeSdk = options.probeSdk ?? defaultProbeSdk;
   const probeCli = options.probeCli ?? defaultProbeCli;
+  const allowIndependentCli = options.allowIndependentCli ?? true;
+  const allowAmbientCredentials = options.allowAmbientCredentials ?? true;
   const model = options.model;
 
   // 1. An explicit choice is honoured without probing. If an operator pins a
   //    backend, silently using a different one would be worse than failing.
   const pinned = env.OPENRAPPTER_AI_BACKEND;
   if (pinned === 'copilot-cli') {
+    if (!allowIndependentCli) {
+      return {
+        kind: 'none',
+        provider: null,
+        reason: 'Desktop profile authority has no active account',
+        remedy: {
+          title: 'Connect a GitHub account',
+          detail: 'Open Accounts and sign in before using Copilot.',
+          action: 'reconnect-github',
+        },
+      };
+    }
     return {
       kind: 'copilot-cli',
       // exposeAgents: without it the CLI runs with an empty tool allow-list
@@ -126,9 +144,24 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
     };
   }
   if (pinned === 'copilot-sdk' || pinned === 'copilot') {
+    if (!options.githubToken && !allowAmbientCredentials) {
+      return {
+        kind: 'none',
+        provider: null,
+        reason: 'Desktop profile authority has no active account',
+        remedy: {
+          title: 'Connect a GitHub account',
+          detail: 'Open Accounts and sign in before using Copilot.',
+          action: 'reconnect-github',
+        },
+      };
+    }
     return {
       kind: 'copilot-sdk',
-      provider: new CopilotProvider({ githubToken: options.githubToken }),
+      provider: new CopilotProvider({
+        githubToken: options.githubToken,
+        allowAmbientCredentials,
+      }),
       // The SDK rung sends an explicit model on every request, so unlike the
       // CLI it always knows which one was asked to answer.
       model: model ?? COPILOT_DEFAULT_MODEL,
@@ -139,11 +172,18 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
   // 2. The SDK, but only on proof. Holding a token is not the same as the token
   //    working — that assumption is exactly what produced the 401 on every
   //    message while a usable CLI sat unused on the same disk.
-  const token = options.githubToken ?? env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const token = options.githubToken ?? (
+    allowAmbientCredentials
+      ? env.GITHUB_TOKEN ?? env.GH_TOKEN ?? ''
+      : ''
+  );
   if (token && (await probeSdk(token))) {
     return {
       kind: 'copilot-sdk',
-      provider: new CopilotProvider({ githubToken: token }),
+      provider: new CopilotProvider({
+        githubToken: token,
+        allowAmbientCredentials,
+      }),
       model: model ?? COPILOT_DEFAULT_MODEL,
       reason: 'GitHub token has Copilot API access',
     };
@@ -151,7 +191,7 @@ export async function selectBackend(options: SelectBackendOptions = {}): Promise
 
   // 3. The local rung. The CLI owns its own credential and refresh, so it keeps
   //    working when the GitHub token does not.
-  if (await probeCli()) {
+  if (allowIndependentCli && await probeCli()) {
     return {
       kind: 'copilot-cli',
       // exposeAgents: without it the CLI runs with an empty tool allow-list

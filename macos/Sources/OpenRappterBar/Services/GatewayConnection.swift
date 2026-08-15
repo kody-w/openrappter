@@ -116,6 +116,8 @@ public actor GatewayConnection: GatewayConnectionProtocol {
         host: String = AppConstants.defaultHost,
         port: Int = AppConstants.defaultPort,
         authToken: String? = nil,
+        desktopEndpoint: DesktopGatewayEndpoint? = nil,
+        discoverDesktopEndpoint: Bool = true,
         transportFactory: TransportFactory? = nil,
         reconnectDelayProvider: @escaping ReconnectDelayProvider = {
             GatewayConnection.backoffDelay(attempt: $0)
@@ -125,17 +127,21 @@ public actor GatewayConnection: GatewayConnectionProtocol {
         },
         postHandshakeHook: @escaping PostHandshakeHook = {}
     ) {
-        let desktop = DesktopGatewayDiscovery.current()
-        self.url = URL(string: "ws://\(host):\(port)")!
-        self.authToken = authToken ?? (
-            desktop?.host == host && desktop?.port == port
-                ? desktop?.token
+        let discoveredDesktop = discoverDesktopEndpoint
+            ? DesktopGatewayDiscovery.current()
+            : nil
+        let desktop = desktopEndpoint ?? (
+            authToken == nil
+                && discoveredDesktop?.host == host
+                && discoveredDesktop?.port == port
+                ? discoveredDesktop
                 : nil
         )
-        self.followsDesktopEndpoint =
-            authToken == nil
-            && desktop?.host == host
-            && desktop?.port == port
+        self.url = URL(
+            string: "ws://\(desktop?.host ?? host):\(desktop?.port ?? port)"
+        )!
+        self.authToken = desktop?.token ?? authToken
+        self.followsDesktopEndpoint = desktop != nil
         self.transportFactory = transportFactory ?? { url in URLSessionWebSocket(url: url) }
         self.reconnectDelayProvider = reconnectDelayProvider
         self.reconnectSleeper = reconnectSleeper

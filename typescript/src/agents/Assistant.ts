@@ -79,6 +79,8 @@ export interface AssistantConfig {
   model?: string;
   /** GitHub token for Copilot API (falls back to env vars) */
   githubToken?: string;
+  /** Whether a missing explicit token may fall back to process credentials. */
+  allowAmbientCredentials?: boolean;
   /** Whether to stream deltas (default true) */
   streaming?: boolean;
   /**
@@ -151,6 +153,7 @@ export class Assistant {
       description: config?.description ?? "a helpful local-first AI assistant",
       model: config?.model ?? defaultModel,
       githubToken: config?.githubToken,
+      allowAmbientCredentials: config?.allowAmbientCredentials ?? true,
       streaming: config?.streaming ?? true,
       maxToolRounds: config?.maxToolRounds ?? PARITY_MAX_ROUNDS,
       loadWorkspaceContext: config?.loadWorkspaceContext ?? true,
@@ -171,10 +174,13 @@ export class Assistant {
       config?.provider ??
       // Prefer the GitHub Copilot CLI when explicitly selected: it owns its own
       // auth + refresh, so openrappter never runs the flaky device-code flow.
-      (process.env.OPENRAPPTER_AI_BACKEND === "copilot-cli"
+      (
+        process.env.OPENRAPPTER_AI_BACKEND === "copilot-cli"
+        && (config?.allowAmbientCredentials ?? true)
         ? new CopilotCliDirectProvider({ model: this.config.model })
         : new CopilotProvider({
             githubToken: config?.githubToken,
+            allowAmbientCredentials: config?.allowAmbientCredentials,
           }));
   }
 
@@ -203,10 +209,22 @@ export class Assistant {
   }
 
   /** Update the GitHub token at runtime (e.g. after device-code login) */
-  setGithubToken(token: string): void {
-    this.config.githubToken = token;
+  setGithubToken(
+    token: string | null,
+    allowAmbientCredentials?: boolean,
+  ): void {
+    const ambientPolicy =
+      allowAmbientCredentials
+      ?? this.config.allowAmbientCredentials
+      ?? true;
+    this.config.allowAmbientCredentials = ambientPolicy;
+    if (token) {
+      this.config.githubToken = token;
+    } else {
+      delete this.config.githubToken;
+    }
     if (this.provider instanceof CopilotProvider) {
-      this.provider.setGithubToken(token);
+      this.provider.setGithubToken(token, ambientPolicy);
     }
   }
 

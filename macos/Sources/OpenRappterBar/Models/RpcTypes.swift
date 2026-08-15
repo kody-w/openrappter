@@ -157,6 +157,28 @@ public enum RpcErrorCode {
     public static let rateLimited = -32001
 }
 
+public struct GatewayAuthLoginResponse: Codable, Sendable {
+    public let userCode: String
+    public let verificationUri: String
+    public let deviceCode: String
+}
+
+public struct GatewayAuthPollResponse: Codable, Sendable {
+    public let status: String
+    public let username: String?
+    public let error: String?
+}
+
+public struct GatewayAuthCancelResponse: Codable, Sendable {
+    public let ok: Bool
+    public let status: String
+}
+
+public struct GatewayAuthProfile: Codable, Sendable {
+    public let id: String
+    public let username: String?
+}
+
 // MARK: - Encoding Helpers
 
 public extension RpcRequestFrame {

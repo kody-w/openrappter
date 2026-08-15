@@ -8,6 +8,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ export interface CachedCopilotToken {
   expiresAt: number;
   /** milliseconds since epoch */
   updatedAt: number;
+  /** Binds this API token to the GitHub credential that produced it. */
+  githubTokenFingerprint?: string;
 }
 
 export interface ResolvedCopilotToken {
@@ -72,6 +75,10 @@ export function clearCachedCopilotToken(cachePath?: string): void {
 
 function isTokenUsable(cache: CachedCopilotToken, now = Date.now()): boolean {
   return cache.expiresAt - now > TOKEN_SAFETY_MARGIN_MS;
+}
+
+function githubTokenFingerprint(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 // ── Base URL extraction ──────────────────────────────────────────────────────
@@ -166,13 +173,22 @@ export async function resolveCopilotApiToken(params: {
   githubToken: string;
   cachePath?: string;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 }): Promise<ResolvedCopilotToken> {
   const cachePath = params.cachePath ?? getDefaultCachePath();
   const fetchImpl = params.fetchImpl ?? fetch;
+  const sourceFingerprint = githubTokenFingerprint(params.githubToken);
+  if (params.signal?.aborted) {
+    throw new DOMException('Copilot token exchange cancelled', 'AbortError');
+  }
 
   // 1. Try cache
   const cached = loadCachedToken(cachePath);
-  if (cached && isTokenUsable(cached)) {
+  if (
+    cached
+    && cached.githubTokenFingerprint === sourceFingerprint
+    && isTokenUsable(cached)
+  ) {
     return {
       token: cached.token,
       expiresAt: cached.expiresAt,
@@ -193,6 +209,7 @@ export async function resolveCopilotApiToken(params: {
       'Editor-Plugin-Version': 'copilot/1.0.0',
       'User-Agent': 'GitHubCopilotChat/0.22.2024',
     },
+    signal: params.signal,
   });
 
   if (!res.ok) {
@@ -207,12 +224,16 @@ export async function resolveCopilotApiToken(params: {
   }
 
   const parsed = parseCopilotTokenResponse(await res.json());
+  if (params.signal?.aborted) {
+    throw new DOMException('Copilot token exchange cancelled', 'AbortError');
+  }
 
   // 3. Cache
   const payload: CachedCopilotToken = {
     token: parsed.token,
     expiresAt: parsed.expiresAt,
     updatedAt: Date.now(),
+    githubTokenFingerprint: sourceFingerprint,
   };
   saveCachedToken(cachePath, payload);
 

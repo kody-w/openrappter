@@ -95,6 +95,66 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         return try decodePayload(response)
     }
 
+    public func beginGatewayAuthentication() async throws -> GatewayAuthLoginResponse {
+        let response = try await connection.sendRequest(method: "auth.login")
+        return try decodePayload(response)
+    }
+
+    public func pollGatewayAuthentication(
+        deviceCode: String
+    ) async throws -> GatewayAuthPollResponse {
+        let response = try await connection.sendRequest(
+            method: "auth.poll",
+            params: ["deviceCode": AnyCodable(deviceCode)]
+        )
+        return try decodePayload(response)
+    }
+
+    public func cancelGatewayAuthentication(
+        deviceCode: String
+    ) async throws -> GatewayAuthCancelResponse {
+        let response = try await connection.sendRequest(
+            method: "auth.cancel",
+            params: ["deviceCode": AnyCodable(deviceCode)]
+        )
+        return try decodePayload(response)
+    }
+
+    public func activeGatewayAuthProfile() async throws -> GatewayAuthProfile? {
+        let response = try await connection.sendRequest(method: "auth.active")
+        guard response.ok else {
+            let detail = response.error ?? RpcErrorDetail(code: -1, message: "Unknown error")
+            throw GatewayConnectionError.serverError(
+                code: detail.code,
+                message: detail.message
+            )
+        }
+        guard response.payload != nil else { return nil }
+        return try decodePayload(response)
+    }
+
+    public func removeGatewayAuthProfile(id: String) async throws {
+        let response = try await connection.sendRequest(
+            method: "auth.remove",
+            params: ["id": AnyCodable(id)]
+        )
+        let result: [String: Bool] = try decodePayload(response)
+        guard result["ok"] == true else {
+            throw RpcClientError.decodingFailed("Gateway refused to remove auth profile")
+        }
+    }
+
+    public func switchGatewayAuthProfile(id: String) async throws {
+        let response = try await connection.sendRequest(
+            method: "auth.switch",
+            params: ["id": AnyCodable(id)]
+        )
+        let result: [String: Bool] = try decodePayload(response)
+        guard result["ok"] == true else {
+            throw RpcClientError.decodingFailed("Gateway refused to switch auth profile")
+        }
+    }
+
     public func sendChat(message: String, sessionKey: String? = nil) async throws -> ChatAccepted {
         var params: [String: AnyCodable] = [
             "message": AnyCodable(message)

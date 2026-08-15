@@ -29,8 +29,12 @@ function loadCachedGitHubToken(): string | null {
   return null;
 }
 
-/** Load a token from auth-profiles.json (saved by device-code flow via auth.login RPC) */
-function loadAuthProfileToken(): string | null {
+/** An existing profile store is authoritative, including an explicit empty store. */
+function loadAuthProfileState(): { authoritative: boolean; token: string | null } {
+  if (!fs.existsSync(AUTH_PROFILES_FILE)) {
+    return { authoritative: false, token: null };
+  }
+
   try {
     const data = fs.readFileSync(AUTH_PROFILES_FILE, 'utf-8');
     const profiles = JSON.parse(data) as Array<{
@@ -42,14 +46,23 @@ function loadAuthProfileToken(): string | null {
     const defaultCopilot = profiles.find(
       (p) => p.provider === 'copilot' && p.default && typeof p.token === 'string' && p.token.length > 10
     );
-    if (defaultCopilot?.token) return defaultCopilot.token;
+    if (defaultCopilot?.token) {
+      return { authoritative: true, token: defaultCopilot.token };
+    }
     // Fall back to any copilot profile with a real token
     const anyCopilot = profiles.find(
       (p) => p.provider === 'copilot' && typeof p.token === 'string' && p.token.length > 10
     );
-    if (anyCopilot?.token) return anyCopilot.token;
-  } catch { /* no auth profiles */ }
-  return null;
+    if (anyCopilot?.token) {
+      return { authoritative: true, token: anyCopilot.token };
+    }
+  } catch { /* a corrupt explicit store must not restore ambient credentials */ }
+  return { authoritative: true, token: null };
+}
+
+export function hasAuthProfileAuthority(): boolean {
+  return Boolean(process.env.OPENRAPPTER_DESKTOP_OWNER_PID)
+    && loadAuthProfileState().authoritative;
 }
 
 /** Save a GitHub token to the credentials file */
@@ -68,65 +81,62 @@ export async function hasCopilotAvailable(): Promise<boolean> {
 }
 
 /**
- * Resolve a GitHub token from (in priority order):
- * 1. COPILOT_GITHUB_TOKEN env var (explicit Copilot token always wins)
- * 2. Cached credentials file (~/.openrappter/credentials/github-token.json)
- * 3. Auth profiles store (~/.openrappter/auth-profiles.json — copilot provider)
- * 4. ~/.openrappter/.env file (saved by onboard/installer device code flow)
- * 5. GH_TOKEN / GITHUB_TOKEN env vars (may be from gh CLI — different OAuth app)
- * 6. gh CLI token (least preferred — usually doesn't have Copilot access)
- *
- * Note: Steps 2-4 are prioritized over generic env vars because the
- * onboard/installer device code flow produces tokens with Copilot access,
- * while GH_TOKEN/GITHUB_TOKEN from gh CLI typically do not.
+ * A Desktop-owned gateway treats auth-profiles.json as the sole account
+ * authority, including an empty store created by explicit sign-out. Standalone
+ * runtimes retain legacy env, credential-cache, .env, and gh CLI discovery.
  */
 export async function resolveGithubToken(): Promise<string | null> {
   // Collect all candidate tokens in priority order, validate the first one that works
   const candidates: { token: string; source: string }[] = [];
+  const profileState = loadAuthProfileState();
+  const profileIsAuthoritative =
+    Boolean(process.env.OPENRAPPTER_DESKTOP_OWNER_PID)
+    && profileState.authoritative;
 
-  // 1. Explicit Copilot token always wins
-  if (process.env.COPILOT_GITHUB_TOKEN) {
-    candidates.push({ token: process.env.COPILOT_GITHUB_TOKEN, source: 'env:COPILOT_GITHUB_TOKEN' });
-  }
+  if (profileIsAuthoritative) {
+    if (profileState.token) {
+      candidates.push({ token: profileState.token, source: 'auth-profile' });
+    }
+  } else {
+    // Legacy discovery remains available until the first profile-store action.
+    if (process.env.COPILOT_GITHUB_TOKEN) {
+      candidates.push({ token: process.env.COPILOT_GITHUB_TOKEN, source: 'env:COPILOT_GITHUB_TOKEN' });
+    }
 
-  // 2. Cached credentials file (saved by device code flow or onboard)
-  const cached = loadCachedGitHubToken();
-  if (cached) candidates.push({ token: cached, source: 'credentials' });
+    const cached = loadCachedGitHubToken();
+    if (cached) candidates.push({ token: cached, source: 'credentials' });
+    if (profileState.token) {
+      candidates.push({ token: profileState.token, source: 'auth-profile' });
+    }
 
-  // 3. Auth profiles store (saved by auth.login RPC or web UI device-code flow)
-  const profileToken = loadAuthProfileToken();
-  if (profileToken) candidates.push({ token: profileToken, source: 'auth-profile' });
-
-  // 4. ~/.openrappter/.env file (saved by installer/onboard — has Copilot access)
-  try {
-    const envFile = path.join(os.homedir(), '.openrappter', '.env');
-    const data = fs.readFileSync(envFile, 'utf-8');
-    for (const line of data.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      const prefixes = ['COPILOT_GITHUB_TOKEN=', 'GITHUB_TOKEN='];
-      for (const prefix of prefixes) {
-        if (trimmed.startsWith(prefix)) {
-          let val = trimmed.slice(prefix.length).trim();
-          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-          }
-          if (val.length > 0) {
-            candidates.push({ token: val, source: `env-file:${prefix.replace('=', '')}` });
+    try {
+      const envFile = path.join(os.homedir(), '.openrappter', '.env');
+      const data = fs.readFileSync(envFile, 'utf-8');
+      for (const line of data.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        const prefixes = ['COPILOT_GITHUB_TOKEN=', 'GITHUB_TOKEN='];
+        for (const prefix of prefixes) {
+          if (trimmed.startsWith(prefix)) {
+            let val = trimmed.slice(prefix.length).trim();
+            if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+              val = val.slice(1, -1);
+            }
+            if (val.length > 0) {
+              candidates.push({ token: val, source: `env-file:${prefix.replace('=', '')}` });
+            }
           }
         }
       }
-    }
-  } catch { /* no .env file */ }
+    } catch { /* no .env file */ }
 
-  // 5. Generic env vars (may not have Copilot access)
-  const envToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (envToken) candidates.push({ token: envToken, source: 'env:GH_TOKEN|GITHUB_TOKEN' });
+    const envToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+    if (envToken) candidates.push({ token: envToken, source: 'env:GH_TOKEN|GITHUB_TOKEN' });
 
-  // 6. gh CLI token (least preferred — usually different OAuth app)
-  try {
-    const { stdout } = await execAsync('gh auth token 2>/dev/null');
-    if (stdout.trim()) candidates.push({ token: stdout.trim(), source: 'gh-cli' });
-  } catch { /* gh not available */ }
+    try {
+      const { stdout } = await execAsync('gh auth token 2>/dev/null');
+      if (stdout.trim()) candidates.push({ token: stdout.trim(), source: 'gh-cli' });
+    } catch { /* gh not available */ }
+  }
 
   // Deduplicate by token value, preserving priority order
   const seen = new Set<string>();

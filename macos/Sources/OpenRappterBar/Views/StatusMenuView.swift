@@ -76,13 +76,18 @@ public struct StatusMenuView: View {
                 Text(viewModel.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if viewModel.usesDesktopGateway {
+                    Text("OpenRappter Desktop gateway")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
 
             if viewModel.connectionState == .disconnected {
                 Button("Connect") {
-                    viewModel.connectToGateway()
+                    viewModel.connectUsingPreferredGateway()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -93,7 +98,11 @@ public struct StatusMenuView: View {
 
     private var footerButtons: some View {
         HStack {
-            if viewModel.processState == .stopped {
+            if viewModel.usesDesktopGateway {
+                Label("Managed by Desktop", systemImage: "macwindow")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if viewModel.processState == .stopped {
                 Button {
                     viewModel.startGateway()
                 } label: {

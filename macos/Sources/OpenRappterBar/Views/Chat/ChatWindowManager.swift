@@ -80,7 +80,10 @@ public final class ChatWindowManager {
             }
 
             if auth.authState == .authenticated {
-                viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
+                let message = auth.usingGatewayAuthentication
+                    ? "✅ Authenticated through OpenRappter Desktop."
+                    : "✅ Authenticated! Restarting gateway…"
+                viewModel.chatViewModel.addSystemMessage(message)
                 await settingsViewModel.accountViewModel.restartGatewayAfterAuth().value
             } else if let error = auth.error {
                 viewModel.chatViewModel.addSystemMessage("❌ Auth failed: \(error)")
@@ -182,10 +185,9 @@ public final class ChatWindowManager {
                         onReauth: { [weak self] in self?.handleReauth() }
                     )
                     panel.contentView = NSHostingView(rootView: chatView)
-                    // Reconnect to gateway since daemon was just started
-                    self.viewModel.connectToGateway(
-                        host: self.settingsViewModel.settingsStore.host,
-                        port: self.settingsViewModel.settingsStore.port
+                    self.viewModel.connectUsingPreferredGateway(
+                        fallbackHost: self.settingsViewModel.settingsStore.host,
+                        fallbackPort: self.settingsViewModel.settingsStore.port
                     )
                 }
             )

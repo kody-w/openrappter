@@ -35,7 +35,7 @@ try {
       'INSERT INTO show_consents(token_hash, purpose, issued_at, expires_at) VALUES (?, ?, ?, ?)',
     )
     .run(createHash('sha256').update(token).digest('hex'), 'start', now, now + 60_000);
-  const agent = new ShowAndTellAgent({ root: tempRoot });
+  const agent = new ShowAndTellAgent({ store, localSurface: true });
   const started = JSON.parse(
     await agent.perform({
       action: 'start',
@@ -94,6 +94,7 @@ print(json.dumps({
     "healthy": live["collector_healthy"],
     "stopped": stopped["session"]["state"],
 }))
+agent.store.close()
 store.close()
 `;
   const pythonRoot = path.join(tempRoot, 'python');
@@ -116,5 +117,10 @@ store.close()
     'Show-and-Tell smoke passed: TypeScript worker, Python worker, heartbeats, and clean stop.\n',
   );
 } finally {
-  rmSync(tempRoot, { recursive: true, force: true });
+  rmSync(tempRoot, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 250,
+  });
 }

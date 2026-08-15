@@ -16,6 +16,7 @@ const runtime = path.join(desktop, 'runtime');
 const packageRoot = path.join(runtime, 'node_modules', 'openrappter');
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'openrappter-desktop-runtime-'));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npmCli = process.env.npm_execpath;
 const tar = process.platform === 'win32' ? 'tar.exe' : 'tar';
 const metadata = JSON.parse(
   readFileSync(path.join(desktop, 'package.json'), 'utf8'),
@@ -28,6 +29,7 @@ function runCommand(command, args, options = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     ...options,
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
       `${command} ${args.join(' ')} failed (${result.status ?? 'unknown'}):\n` +
@@ -38,7 +40,13 @@ function runCommand(command, args, options = {}) {
 }
 
 function run(args, options = {}) {
-  return runCommand(npm, args, options);
+  if (npmCli) {
+    return runCommand(process.execPath, [npmCli, ...args], options);
+  }
+  return runCommand(npm, args, {
+    shell: process.platform === 'win32',
+    ...options,
+  });
 }
 
 function parsePackResult(output) {
@@ -154,5 +162,10 @@ try {
     },
   });
 } finally {
-  rmSync(scratch, { recursive: true, force: true });
+  rmSync(scratch, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 250,
+  });
 }

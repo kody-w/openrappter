@@ -28,15 +28,20 @@ import {
 } from './types.js';
 
 const MAX_COMMAND_BYTES = 1_500_000;
+const hardenedDirectories = new Set<string>();
 
 function privateDirectory(directory: string): void {
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const linked = lstatSync(directory);
+  const resolved = path.resolve(directory);
+  mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  const linked = lstatSync(resolved);
   if (linked.isSymbolicLink() || !linked.isDirectory()) {
-    throw new Error(`Desktop control path is not a directory: ${directory}`);
+    throw new Error(`Desktop control path is not a directory: ${resolved}`);
   }
-  hardenPrivatePath(directory, true);
-  assertPrivateDirectory(directory);
+  if (!hardenedDirectories.has(resolved)) {
+    hardenPrivatePath(resolved, true);
+    assertPrivateDirectory(resolved);
+    hardenedDirectories.add(resolved);
+  }
 }
 
 function atomicPrivateJson(file: string, value: unknown): void {
@@ -46,9 +51,8 @@ function atomicPrivateJson(file: string, value: unknown): void {
   }
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   writeFileSync(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  hardenPrivatePath(temporary);
+  if (process.platform !== 'win32') hardenPrivatePath(temporary);
   renameSync(temporary, file);
-  hardenPrivatePath(file);
   syncParentDirectory(path.dirname(file));
 }
 

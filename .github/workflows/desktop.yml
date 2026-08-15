@@ -66,6 +66,7 @@ jobs:
         shell: pwsh
         run: |
           $env:OPENRAPPTER_DESKTOP_SMOKE = "1"
+          $env:OPENRAPPTER_DESKTOP_SMOKE_SCOPE = "boot"
           .\node_modules\.bin\electron.cmd .
 
       - name: Build unpacked macOS application

@@ -186,7 +186,7 @@ async function publishDesktopEndpoint(): Promise<void> {
     })}\n`,
     { mode: 0o600 },
   );
-  hardenPrivatePath(temporary);
+  if (process.platform !== 'win32') hardenPrivatePath(temporary);
   if (existsSync(endpointFile)) {
     const linked = lstatSync(endpointFile);
     if (linked.isSymbolicLink() || !linked.isFile()) {
@@ -195,7 +195,6 @@ async function publishDesktopEndpoint(): Promise<void> {
     if (process.platform === 'win32') unlinkSync(endpointFile);
   }
   renameSync(temporary, endpointFile);
-  hardenPrivatePath(endpointFile);
 }
 
 async function waitForRenderer(window: BrowserWindow): Promise<void> {
@@ -716,11 +715,13 @@ async function loadDesktopControlRuntime() {
     import(pathToFileURL(
       path.join(packageRoot, 'dist', 'agents', 'DesktopControlAgent.js'),
     ).href) as Promise<{
-      DesktopControlAgent: new () => NonNullable<typeof desktopControlAgent>;
+      DesktopControlAgent: new (
+        queue?: NonNullable<typeof desktopQueue>,
+      ) => NonNullable<typeof desktopControlAgent>;
     }>,
   ]);
   desktopQueue = new DesktopCommandQueue();
-  desktopControlAgent = new DesktopControlAgent();
+  desktopControlAgent = new DesktopControlAgent(desktopQueue);
   return { queue: desktopQueue!, agent: desktopControlAgent! };
 }
 
@@ -1162,18 +1163,36 @@ function createWindow(): BrowserWindow {
           const status = await window.openrappterDesktop.showAndTell({
             action: 'status'
           });
+          const narrationStatus = await window.openrappterDesktop.narration({
+            action: 'status'
+          });
+          const voiceStatus = await window.openrappterDesktop.voice({
+            action: 'status'
+          });
+          if (${JSON.stringify(
+            process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
+          )} === 'boot') {
+            return {
+              smokeScope: 'boot',
+              bridge: Boolean(window.openrappterDesktop),
+              component: Boolean(customElements.get('openrappter-show-and-tell')),
+              recorderSurface: /Show it once/.test(
+                recorder?.shadowRoot?.textContent || ''
+              ),
+              recorderStatus: status.status,
+              narrationBridge: Boolean(narrationStatus.model),
+              voiceBridge: Boolean(voiceStatus.state),
+              gatewayUrl: window.openrappterDesktop.gatewayUrl,
+              platform: info.platform,
+              protocol: location.protocol,
+            };
+          }
           const controlSnapshot = await window.openrappterDesktop.desktopControl({
             action: 'snapshot'
           });
           const controlled = await window.openrappterDesktop.desktopControl({
             action: 'navigate',
             view: 'show-and-tell'
-          });
-          const narrationStatus = await window.openrappterDesktop.narration({
-            action: 'status'
-          });
-          const voiceStatus = await window.openrappterDesktop.voice({
-            action: 'status'
           });
           const installed = await window.openrappterDesktop.desktopControl({
             action: 'install_agent',
@@ -1231,6 +1250,7 @@ function createWindow(): BrowserWindow {
             session_id: started.session.id
           });
           return {
+            smokeScope: 'full',
             bridge: Boolean(window.openrappterDesktop),
             component: Boolean(customElements.get('openrappter-show-and-tell')),
             recorderSurface: /Show it once/.test(
@@ -1269,16 +1289,22 @@ function createWindow(): BrowserWindow {
           'bridge',
           'component',
           'recorderSurface',
-          'desktopControl',
-          'hotLoadedAgents',
           'narrationBridge',
           'voiceBridge',
+        ] as const;
+        const fullRequired = [
+          'desktopControl',
+          'hotLoadedAgents',
           'recorderLifecycle',
         ] as const;
         if (
           result.recorderStatus !== 'success' ||
           result.protocol !== 'file:' ||
-          !required.every((key) => result[key] === true)
+          !required.every((key) => result[key] === true) ||
+          (
+            result.smokeScope !== 'boot' &&
+            !fullRequired.every((key) => result[key] === true)
+          )
         ) {
           process.exitCode = 1;
         }

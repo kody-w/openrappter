@@ -364,7 +364,11 @@ async function ensureGateway(): Promise<void> {
         OPENRAPPTER_PORT: String(gatewayPort),
         OPENRAPPTER_TOKEN: gatewayToken,
         ...(smokeRoot
-          ? { HOME: smokeRoot, USERPROFILE: smokeRoot }
+          ? {
+              HOME: smokeRoot,
+              USERPROFILE: smokeRoot,
+              OPENRAPPTER_FLIGHT_RECORDER: '0',
+            }
           : {}),
       },
     },
@@ -1152,34 +1156,31 @@ function createWindow(): BrowserWindow {
           if (/patient is unreachable/.test(appElement.shadowRoot.textContent || '')) {
             throw new Error('OpenRappter UI could not connect to the gateway');
           }
-          appElement.currentView = 'show-and-tell';
-          appElement.requestUpdate();
-          await appElement.updateComplete;
-          const recorder = appElement.shadowRoot.querySelector(
-            'openrappter-show-and-tell'
-          );
-          await recorder?.updateComplete;
+          const smokeScope = ${JSON.stringify(
+            process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
+          )};
+          let recorder = null;
+          if (smokeScope !== 'boot') {
+            appElement.currentView = 'show-and-tell';
+            appElement.requestUpdate();
+            await appElement.updateComplete;
+            recorder = appElement.shadowRoot.querySelector(
+              'openrappter-show-and-tell'
+            );
+            await recorder?.updateComplete;
+          }
           const info = await window.openrappterDesktop.getInfo();
-          const status = await window.openrappterDesktop.showAndTell({
-            action: 'status'
-          });
           const narrationStatus = await window.openrappterDesktop.narration({
             action: 'status'
           });
           const voiceStatus = await window.openrappterDesktop.voice({
             action: 'status'
           });
-          if (${JSON.stringify(
-            process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE ?? 'full',
-          )} === 'boot') {
+          if (smokeScope === 'boot') {
             return {
               smokeScope: 'boot',
               bridge: Boolean(window.openrappterDesktop),
               component: Boolean(customElements.get('openrappter-show-and-tell')),
-              recorderSurface: /Show it once/.test(
-                recorder?.shadowRoot?.textContent || ''
-              ),
-              recorderStatus: status.status,
               narrationBridge: Boolean(narrationStatus.model),
               voiceBridge: Boolean(voiceStatus.state),
               gatewayUrl: window.openrappterDesktop.gatewayUrl,
@@ -1187,6 +1188,9 @@ function createWindow(): BrowserWindow {
               protocol: location.protocol,
             };
           }
+          const status = await window.openrappterDesktop.showAndTell({
+            action: 'status'
+          });
           const controlSnapshot = await window.openrappterDesktop.desktopControl({
             action: 'snapshot'
           });
@@ -1288,17 +1292,20 @@ function createWindow(): BrowserWindow {
         const required = [
           'bridge',
           'component',
-          'recorderSurface',
           'narrationBridge',
           'voiceBridge',
         ] as const;
         const fullRequired = [
+          'recorderSurface',
           'desktopControl',
           'hotLoadedAgents',
           'recorderLifecycle',
         ] as const;
         if (
-          result.recorderStatus !== 'success' ||
+          (
+            result.smokeScope !== 'boot' &&
+            result.recorderStatus !== 'success'
+          ) ||
           result.protocol !== 'file:' ||
           !required.every((key) => result[key] === true) ||
           (
@@ -1435,7 +1442,10 @@ if (!ownsInstanceLock) {
         app.exit(0);
         return;
       }
-      await publishDesktopEndpoint();
+      const bootSmoke =
+        process.env.OPENRAPPTER_DESKTOP_SMOKE === '1' &&
+        process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE === 'boot';
+      if (!bootSmoke) await publishDesktopEndpoint();
       session.defaultSession.webRequest.onBeforeSendHeaders(
         { urls: [`ws://127.0.0.1:${gatewayPort}/*`] },
         (details, callback) => {
@@ -1529,7 +1539,7 @@ if (!ownsInstanceLock) {
         console.log('OPENRAPPTER_DESKTOP_SMOKE gateway-ready');
       }
       mainWindow = createWindow();
-      createTray();
+      if (!bootSmoke) createTray();
     } catch (error) {
       if (
         process.env.OPENRAPPTER_DESKTOP_SMOKE === '1' ||

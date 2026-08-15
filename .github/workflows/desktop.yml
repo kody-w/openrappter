@@ -45,7 +45,7 @@ jobs:
 
       - name: Audit desktop production dependencies
         working-directory: typescript/desktop
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=high
 
       - name: Run real Electron smoke on Linux
         if: runner.os == 'Linux'
@@ -67,7 +67,6 @@ jobs:
         shell: pwsh
         run: |
           $env:OPENRAPPTER_DESKTOP_SMOKE = "1"
-          $env:OPENRAPPTER_DESKTOP_SMOKE_SCOPE = "boot"
           .\node_modules\.bin\electron.cmd .
 
       - name: Build unpacked macOS application

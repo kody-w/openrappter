@@ -222,13 +222,139 @@ func runAppViewModelTests() async {
     }
 
     await suite("App ViewModel — lifecycle races") {
+        await test("desktop authority owns its gateway lifecycle") {
+            let mock = MockWebSocket()
+            let conn = GatewayConnection(transportFactory: { _ in mock })
+            let endpoint = DesktopGatewayEndpoint(
+                schema: "openrappter-desktop-endpoint/1.0",
+                host: "127.0.0.9",
+                port: 18888,
+                token: String(repeating: "a", count: 64),
+                pid: 42,
+                ownerPid: 43,
+                updatedAt: "2026-08-15T00:00:00Z"
+            )
+            var requestedEndpoint = ""
+            var requestedDesktopEndpoint: DesktopGatewayEndpoint?
+            var connectionFactoryCalls = 0
+            var discoveryCount = 0
+            let vm = AppViewModel(
+                processManager: ProcessManager(),
+                eventBus: EventBus(),
+                connectionFactory: { host, port, desktopEndpoint in
+                    connectionFactoryCalls += 1
+                    requestedEndpoint = "\(host):\(port)"
+                    requestedDesktopEndpoint = desktopEndpoint
+                    return conn
+                },
+                desktopEndpointProvider: {
+                    discoveryCount += 1
+                    return endpoint
+                }
+            )
+
+            mock.enqueueReceive(try makeHelloOk(requestId: "rpc-1"))
+            let connectTask = vm.connectUsingPreferredGateway(
+                fallbackHost: "standalone.local",
+                fallbackPort: 18790
+            )
+            _ = try await mock.waitForSentCount(2)
+            mock.enqueueReceive(try makeStatusResponse())
+            await connectTask.value
+
+            try expect(vm.usesDesktopGateway, "Desktop should remain the gateway authority")
+            try expectEqual(requestedEndpoint, "127.0.0.9:18888")
+            try expectEqual(requestedDesktopEndpoint, endpoint)
+            try expectEqual(discoveryCount, 1)
+            try expectEqual(vm.processState, .stopped)
+
+            await vm.stopGateway().value
+            try expectEqual(vm.connectionState, .disconnected)
+            try expect(vm.usesDesktopGateway, "Disconnecting must not claim desktop ownership")
+            try expectEqual(vm.processState, .stopped)
+
+            let explicitTask = vm.connectToGateway(
+                host: "standalone.local",
+                port: 18790
+            )
+            for _ in 0..<100 {
+                if connectionFactoryCalls >= 2 { break }
+                await Task.yield()
+            }
+            try expect(
+                !vm.usesDesktopGateway,
+                "An explicit standalone endpoint must clear Desktop authority"
+            )
+            try expectEqual(connectionFactoryCalls, 2)
+            try expectNil(
+                requestedDesktopEndpoint,
+                "Explicit standalone connects must not inherit a Desktop token"
+            )
+            await vm.disconnectFromGateway()
+            await explicitTask.value
+        }
+
+        await test("desktop takeover supersedes an in-flight standalone start") {
+            let detectorGate = TestGate()
+            var nodeResolverCalls = 0
+            let pm = ProcessManager(
+                nodePathResolver: {
+                    nodeResolverCalls += 1
+                    return "/bin/sh"
+                },
+                gatewayDetector: {
+                    await detectorGate.wait()
+                    return false
+                }
+            )
+            let endpoint = DesktopGatewayEndpoint(
+                schema: "openrappter-desktop-endpoint/1.0",
+                host: "127.0.0.1",
+                port: 18889,
+                token: String(repeating: "c", count: 64),
+                pid: 44,
+                ownerPid: 45,
+                updatedAt: "2026-08-15T00:00:00Z"
+            )
+            var discoveredEndpoint: DesktopGatewayEndpoint?
+            let mock = MockWebSocket()
+            let conn = GatewayConnection(transportFactory: { _ in mock })
+            let vm = AppViewModel(
+                processManager: pm,
+                eventBus: EventBus(),
+                connectionFactory: { _, _, _ in conn },
+                desktopEndpointProvider: { discoveredEndpoint }
+            )
+
+            let startTask = vm.startGateway()
+            await detectorGate.waitUntilEntered()
+            discoveredEndpoint = endpoint
+            let takeoverTask = vm.connectUsingPreferredGateway()
+            await detectorGate.open()
+
+            _ = try await mock.waitForSentCount(1)
+            mock.enqueueReceive(try makeHelloOk(requestId: "rpc-1"))
+            _ = try await mock.waitForSentCount(2)
+            mock.enqueueReceive(try makeStatusResponse())
+            await startTask.value
+            await takeoverTask.value
+
+            try expectEqual(nodeResolverCalls, 0)
+            try expectEqual(pm.state, .stopped)
+            try expect(vm.usesDesktopGateway, "Desktop should retain authority")
+            try expectEqual(vm.connectionState, .connected)
+            try expect(!vm.activities.contains { $0.text == "Gateway started" })
+
+            await vm.stopGateway().value
+        }
+
         await test("disconnect during handshake cancels and awaits the connect task") {
             let mock = MockWebSocket()
             let conn = GatewayConnection(transportFactory: { _ in mock })
             let vm = AppViewModel(
                 processManager: ProcessManager(),
                 eventBus: EventBus(),
-                connectionFactory: { _, _ in conn }
+                connectionFactory: { _, _, _ in conn }
             )
             var readyCount = 0
             vm.onRpcClientReady = { _ in readyCount += 1 }
@@ -257,7 +383,7 @@ func runAppViewModelTests() async {
             let vm = AppViewModel(
                 processManager: ProcessManager(),
                 eventBus: EventBus(),
-                connectionFactory: { _, _ in
+                connectionFactory: { _, _, _ in
                     factoryCalls += 1
                     return conn
                 }
@@ -291,7 +417,7 @@ func runAppViewModelTests() async {
             let vm = AppViewModel(
                 processManager: ProcessManager(),
                 eventBus: EventBus(),
-                connectionFactory: { host, port in
+                connectionFactory: { host, port, _ in
                     requestedEndpoints.append("\(host):\(port)")
                     defer { nextConnection += 1 }
                     return connections[nextConnection]
@@ -325,7 +451,7 @@ func runAppViewModelTests() async {
             let vm = AppViewModel(
                 processManager: ProcessManager(),
                 eventBus: EventBus(),
-                connectionFactory: { _, _ in conn }
+                connectionFactory: { _, _, _ in conn }
             )
             var disconnectTask: Task<Void, Never>?
             var invalidationCount = 0

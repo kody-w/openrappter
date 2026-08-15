@@ -49,7 +49,8 @@ NAMED_KEYS = {
 }
 PRIVATE_CONTEXT = re.compile(
     r"\b(?:1password|bitwarden|keychain|password|passkey|credential|secret|"
-    r"token|private key|security code|sign[ -]?in|log[ -]?in)\b",
+    r"token|private key|security code|sign[ -]?in|log[ -]?in|incognito|"
+    r"inprivate|private browsing)\b",
     re.I,
 )
 _INITIALIZE_LOCK = threading.RLock()
@@ -619,6 +620,9 @@ class ShowAndTellStore:
             SET collector_runtime = ?, collector_pid = ?, collector_nonce = ?,
                 collector_started_at = ?, collector_heartbeat_at = ?, updated_at = ?
             WHERE id = ? AND state = 'recording'
+              AND collector_runtime IS NULL
+              AND collector_pid IS NULL
+              AND collector_nonce IS NULL
             """,
             (runtime, pid, nonce, now, now, now, session_id),
         )
@@ -1382,6 +1386,35 @@ def _title_from_intent(intent: str) -> str:
     return " ".join(words[:5]) or "Recorded workflow"
 
 
+def _event_narration(event: dict[str, Any]) -> str:
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    if event.get("type") == "session.note":
+        return _safe_text(data.get("note"), 1200)
+    if event.get("type") != "narration.transcribed":
+        return ""
+    direct = _safe_text(data.get("text"), 1200)
+    if direct:
+        return direct
+    segments = data.get("segments")
+    if not isinstance(segments, list):
+        return ""
+    return _safe_text(
+        " ".join(
+            str(segment.get("text", ""))
+            for segment in segments
+            if isinstance(segment, dict)
+        ),
+        1200,
+    )
+
+
+def _privacy_step(step: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **step,
+        "url": privacy_reduced_url(step.get("url")),
+    }
+
+
 def build_deterministic_analysis(
     session: dict[str, Any],
     events: list[dict[str, Any]],
@@ -1389,10 +1422,9 @@ def build_deterministic_analysis(
 ) -> dict[str, Any]:
     note = next(
         (
-            _safe_text(event.get("data", {}).get("note"), 1000)
+            _event_narration(event)
             for event in events
-            if event.get("type") == "session.note"
-            and _safe_text(event.get("data", {}).get("note"), 1000)
+            if _event_narration(event)
         ),
         "",
     )
@@ -1479,8 +1511,8 @@ def build_deterministic_analysis(
                     "url": "",
                     "confidence": "medium",
                 }
-        elif event.get("type") == "session.note":
-            narration = _safe_text(data.get("note"), 1200)
+        elif event.get("type") in {"session.note", "narration.transcribed"}:
+            narration = _event_narration(event)
             if narration:
                 if steps:
                     steps[-1]["detail"] = _safe_text(
@@ -1577,7 +1609,7 @@ def revise_analysis(
     feedback: Any = None,
     approve: bool = False,
 ) -> dict[str, Any]:
-    steps = current["steps"]
+    steps = [_privacy_step(step) for step in current["steps"]]
     if isinstance(steps_json, str) and steps_json.strip():
         parsed = json.loads(steps_json)
         if not isinstance(parsed, list) or not parsed or len(parsed) > 60:
@@ -1585,7 +1617,7 @@ def revise_analysis(
         required = {"id", "title", "detail"}
         if any(not isinstance(step, dict) or not required.issubset(step) for step in parsed):
             raise ValueError("Every edited step requires id, title, and detail.")
-        steps = parsed
+        steps = [_privacy_step(step) for step in parsed]
     note = _safe_text(feedback, 2000)
     now = int(time.time() * 1000)
     revised = {
@@ -1615,15 +1647,18 @@ def _destination(root: Path, base_name: str, session_id: str, kind: str) -> Path
     _private_directory(root)
     candidate = root / base_name
     same_session = False
-    manifest = candidate / "manifest.json"
+    metadata_file = candidate / (
+        "manifest.json" if kind == "skill" else "automation.json"
+    )
     safe_candidate = (
         not candidate.exists()
         or (not candidate.is_symlink() and candidate.is_dir())
     )
-    if safe_candidate and kind == "skill" and manifest.exists():
+    if safe_candidate and metadata_file.exists():
         try:
             same_session = (
-                json.loads(manifest.read_text()).get("sourceSessionId") == session_id
+                json.loads(metadata_file.read_text()).get("sourceSessionId")
+                == session_id
             )
         except (OSError, json.JSONDecodeError):
             pass
@@ -1668,8 +1703,9 @@ def _render_skill(analysis: dict[str, Any], name: str) -> str:
         line = f"{index}. **{step['title']}** — {step['detail']}"
         if step.get("tool"):
             line += f" Prefer `{step['tool']}`."
-        if step.get("url"):
-            line += f" Destination: {step['url']}"
+        reduced_url = privacy_reduced_url(step.get("url"))
+        if reduced_url:
+            line += f" Destination: {reduced_url}"
         lines.append(line)
     lines.extend(
         [
@@ -1716,6 +1752,7 @@ def build_artifacts(
                 "description": analysis["intent"],
                 "tags": ["show-and-tell", "recorded-workflow"],
                 "sourceSessionId": analysis["sessionId"],
+                "sourceAnalysisRevision": analysis["revision"],
                 "generatedBy": "OpenRappter Show-and-Tell",
             },
             indent=2,
@@ -1756,6 +1793,7 @@ def build_artifacts(
                 "enabled": False,
                 "trigger": {"type": "manual"},
                 "sourceSessionId": analysis["sessionId"],
+                "sourceAnalysisRevision": analysis["revision"],
                 "steps": [
                     {
                         "id": step.get("id", f"s{index}"),
@@ -1763,7 +1801,11 @@ def build_artifacts(
                         "prompt": (
                             step["detail"]
                             + (f" Prefer {step['tool']}." if step.get("tool") else "")
-                            + (f" Use {step['url']}." if step.get("url") else "")
+                            + (
+                                f" Use {privacy_reduced_url(step.get('url'))}."
+                                if privacy_reduced_url(step.get("url"))
+                                else ""
+                            )
                         ),
                     }
                     for index, step in enumerate(analysis["steps"], 1)
@@ -1831,6 +1873,7 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
         privacy_safe = not artifact_contains_sensitive_text(content)
         if artifact["kind"] == "skill":
             manifest_path = path.parent / "manifest.json"
+            revision_ok = False
             try:
                 manifest = manifest_path.read_text(encoding="utf-8")
                 parsed_manifest = json.loads(manifest)
@@ -1838,6 +1881,10 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
                     parsed_manifest.get("sourceSessionId") == session_id
                     and parsed_manifest.get("name") == artifact["name"]
                     and not artifact_contains_sensitive_text(manifest)
+                )
+                revision_ok = (
+                    parsed_manifest.get("sourceAnalysisRevision")
+                    == (analysis or {}).get("revision")
                 )
                 checks.append(
                     {
@@ -1865,6 +1912,17 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
                         "detail": f"Missing or invalid {manifest_path}",
                     }
                 )
+            checks.append(
+                {
+                    "name": "skill-analysis-revision",
+                    "ok": revision_ok,
+                    "detail": (
+                        "Skill matches the current analysis revision."
+                        if revision_ok
+                        else "Skill was built from an older analysis revision."
+                    ),
+                }
+            )
         checks.append(
             {
                 "name": f"{artifact['kind']}-integrity",
@@ -1890,13 +1948,29 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
                     parsed.get("schema") == SHOW_AND_TELL_AUTOMATION_SCHEMA
                     and parsed.get("enabled") is False
                 )
+                revision_ok = (
+                    parsed.get("sourceAnalysisRevision")
+                    == (analysis or {}).get("revision")
+                )
             except json.JSONDecodeError:
                 shape_ok = False
+                revision_ok = False
             checks.append(
                 {
                     "name": "automation-shape",
                     "ok": shape_ok,
                     "detail": "Automation is versioned and disabled by default.",
+                }
+            )
+            checks.append(
+                {
+                    "name": "automation-analysis-revision",
+                    "ok": revision_ok,
+                    "detail": (
+                        "Automation matches the current analysis revision."
+                        if revision_ok
+                        else "Automation was built from an older analysis revision."
+                    ),
                 }
             )
     return {"ok": all(check["ok"] for check in checks), "checks": checks}

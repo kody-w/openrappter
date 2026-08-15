@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -19,6 +20,11 @@ import {
   validateReleaseState,
   waitForRegistryArtifacts,
 } from './release-preflight.mjs';
+
+const requireFromTypescript = createRequire(
+  new URL('../typescript/package.json', import.meta.url),
+);
+const { parse: parseYaml } = requireFromTypescript('yaml');
 
 const VERSION = '1.10.0';
 const PACKAGE_NAME = 'openrappter';
@@ -439,14 +445,19 @@ test('release workflows retain per-tag builds and globally serialize publication
   );
 });
 
-test('macOS workflow validates the tag before checkout and never injects output into shell', () => {
+test('macOS workflow validates tag provenance and never injects output into shell', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),
     'utf8',
   );
   const validation = workflow.indexOf('- name: Validate exact macOS release tag');
-  const checkout = workflow.indexOf('- uses: actions/checkout@v4');
-  assert.ok(validation >= 0 && validation < checkout);
+  const checkout = workflow.search(/- uses: actions\/checkout@[0-9a-f]{40}/);
+  const provenance = workflow.indexOf('- name: Require release commit on main');
+  assert.ok(checkout >= 0 && validation > checkout && provenance > validation);
+  assert.match(
+    workflow,
+    /git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
+  );
   assert.ok(workflow.includes(
     '^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)-bar$',
   ));
@@ -491,7 +502,11 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   assert.match(workflow, /"build==1\.5\.1"[\s\S]*"hatchling==1\.31\.0"/);
   assert.match(workflow, /python -m build --no-isolation/);
   assert.match(workflow, /overwrite: true/);
-  assert.match(workflow, /overwrite_files: true/);
+  assert.match(workflow, /overwrite_files: false/);
+  assert.match(
+    workflow,
+    /preflight:[\s\S]*?Require release commit on main[\s\S]*?git merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
+  );
   assert.match(
     workflow,
     /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts\]/,
@@ -516,6 +531,89 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   assert.match(workflow, /desktop-dist\/\*\.dmg/);
   assert.match(workflow, /desktop-dist\/\*\.exe/);
   assert.match(workflow, /desktop-dist\/\*\.AppImage/);
+  assert.match(desktopJob, /WINDOWS_CERTIFICATE_P12_BASE64/);
+  assert.match(desktopJob, /Get-AuthenticodeSignature/);
+  assert.match(workflow, /npm audit --audit-level=high/);
+});
+
+test('parsed release workflow preserves the privileged dependency graph', () => {
+  const workflow = parseYaml(readFileSync(
+    new URL('../.github/workflows/release.yml', import.meta.url),
+    'utf8',
+  ));
+  assert.deepEqual(
+    workflow.jobs['publish-registries'].needs,
+    ['preflight', 'smoke-artifacts', 'build-electron-artifacts'],
+  );
+  assert.deepEqual(
+    workflow.jobs['github-release'].needs,
+    ['preflight', 'publish-registries', 'build-electron-artifacts'],
+  );
+  assert.equal(
+    workflow.jobs.preflight.steps.some(
+      (step) =>
+        step.name === 'Require release commit on main' &&
+        String(step.run).includes(
+          'git merge-base --is-ancestor "$GITHUB_SHA" origin/main',
+        ),
+    ),
+    true,
+  );
+  const desktopStepNames = workflow.jobs['build-electron-artifacts'].steps
+    .map((step) => step.name)
+    .filter(Boolean);
+  for (const stepName of [
+    'Smoke packaged macOS application',
+    'Smoke packaged Linux application',
+    'Smoke packaged Windows application',
+    'Require signed Windows release',
+  ]) {
+    assert.ok(desktopStepNames.includes(stepName), `missing ${stepName}`);
+  }
+});
+
+test('macOS Bar release assets are immutable on rerun', () => {
+  const workflow = parseYaml(readFileSync(
+    new URL('../.github/workflows/release-bar.yml', import.meta.url),
+    'utf8',
+  ));
+  const releaseStep = workflow.jobs['build-and-release'].steps.find(
+    (step) => step.name === 'Upload DMG as release asset',
+  );
+  assert.equal(releaseStep.with.overwrite_files, false);
+});
+
+test('Windows Electron CI runs the complete smoke scope', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/desktop.yml', import.meta.url),
+    'utf8',
+  );
+  const windowsSmoke = workflow.slice(
+    workflow.indexOf('- name: Run real Electron smoke on Windows'),
+    workflow.indexOf('- name: Build unpacked macOS application'),
+  );
+  assert.match(windowsSmoke, /OPENRAPPTER_DESKTOP_SMOKE = "1"/);
+  assert.doesNotMatch(windowsSmoke, /OPENRAPPTER_DESKTOP_SMOKE_SCOPE/);
+});
+
+test('privileged release actions are pinned to immutable commits', () => {
+  for (const workflowName of ['release.yml', 'release-bar.yml']) {
+    const workflow = readFileSync(
+      new URL(`../.github/workflows/${workflowName}`, import.meta.url),
+      'utf8',
+    );
+    const externalUses = [...workflow.matchAll(
+      /^\s*-?\s*uses:\s*([^./\s][^@\s]*)@([^\s#]+)\s*$/gm,
+    )];
+    assert.ok(externalUses.length > 0);
+    for (const [, action, ref] of externalUses) {
+      assert.match(
+        ref,
+        /^[0-9a-f]{40}$/,
+        `${action} in ${workflowName} is not pinned`,
+      );
+    }
+  }
 });
 
 test('generated macOS release notes use the live Homebrew tap', () => {

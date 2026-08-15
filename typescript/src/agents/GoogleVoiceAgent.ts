@@ -114,7 +114,17 @@ export async function defaultResponder(message: InboxMessage): Promise<string | 
  */
 async function defaultProvider(): Promise<LLMProvider | null> {
   const { selectBackend } = await import('../providers/backend-select.js');
-  const choice = await selectBackend({});
+  const {
+    hasAuthProfileAuthority,
+    resolveGithubToken,
+  } = await import('../copilot-check.js');
+  const profileAuthority = hasAuthProfileAuthority();
+  const githubToken = await resolveGithubToken();
+  const choice = await selectBackend({
+    githubToken: githubToken ?? undefined,
+    allowIndependentCli: !profileAuthority,
+    allowAmbientCredentials: !profileAuthority,
+  });
   return choice.provider;
 }
 

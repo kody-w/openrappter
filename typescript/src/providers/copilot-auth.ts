@@ -86,6 +86,7 @@ export async function pollForAccessToken(params: {
   expiresAt: number;
   fetchImpl?: typeof fetch;
   onPoll?: () => void;
+  signal?: AbortSignal;
 }): Promise<string> {
   const fetchImpl = params.fetchImpl ?? fetch;
 
@@ -98,6 +99,9 @@ export async function pollForAccessToken(params: {
   let consecutiveNetworkErrors = 0;
 
   while (Date.now() < params.expiresAt) {
+    if (params.signal?.aborted) {
+      throw new DOMException('GitHub device flow cancelled', 'AbortError');
+    }
     params.onPoll?.();
 
     let res: Response;
@@ -109,9 +113,11 @@ export async function pollForAccessToken(params: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body,
+        signal: params.signal,
       });
       consecutiveNetworkErrors = 0;
     } catch (error) {
+      if (params.signal?.aborted) throw error;
       consecutiveNetworkErrors++;
       if (consecutiveNetworkErrors >= 5) throw error;
       await new Promise((r) => setTimeout(r, params.intervalMs));

@@ -7,6 +7,7 @@
 
 import { createInterface } from 'readline';
 import { BasicAgent } from '../agents/BasicAgent.js';
+import { agentResultIsError } from '../agents/result-status.js';
 import { VERSION } from '../version.js';
 import { recordInvocation } from '../agents/invocation-journal.js';
 
@@ -171,7 +172,8 @@ export class McpServer {
       // never sees these calls and `agent_logs` came back empty even when an
       // agent had demonstrably run. Journal it here — this is the only place
       // that observes the invocation.
-      recordInvocation(toolName, resultStr);
+      const contractError = agentResultIsError(resultStr);
+      recordInvocation(toolName, resultStr, contractError);
       let content: unknown;
       try {
         content = JSON.parse(resultStr);
@@ -183,6 +185,7 @@ export class McpServer {
         id: request.id,
         result: {
           content: [{ type: 'text', text: typeof content === 'string' ? content : JSON.stringify(content, null, 2) }],
+          ...(contractError ? { isError: true } : {}),
         },
       };
     } catch (e) {

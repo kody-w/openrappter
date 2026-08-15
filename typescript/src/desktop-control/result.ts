@@ -74,5 +74,10 @@ export async function dispatchAgentUiCommands(result: string): Promise<string> {
     }
   }
   parsed.ui_results = outcomes;
+  const failures = outcomes.filter((outcome) => outcome.status === 'error');
+  if (failures.length > 0) {
+    parsed.status = 'error';
+    parsed.error = 'One or more requested desktop UI commands failed.';
+  }
   return JSON.stringify(parsed);
 }

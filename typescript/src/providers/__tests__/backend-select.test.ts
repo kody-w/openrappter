@@ -64,6 +64,37 @@ describe('backend selection', () => {
     expect(choice.reason).toMatch(/own sign-in/i);
   });
 
+  it('can forbid a separately authenticated CLI account', async () => {
+    let probed = false;
+    const choice = await selectBackend({
+      env: {},
+      probeSdk: no,
+      probeCli: async () => {
+        probed = true;
+        return true;
+      },
+      allowIndependentCli: false,
+    });
+    expect(choice.kind).toBe('none');
+    expect(probed).toBe(false);
+  });
+
+  it('can forbid ambient SDK credentials', async () => {
+    let probed = false;
+    const choice = await selectBackend({
+      env: { GITHUB_TOKEN: 'ambient-account' },
+      probeSdk: async () => {
+        probed = true;
+        return true;
+      },
+      probeCli: no,
+      allowAmbientCredentials: false,
+      allowIndependentCli: false,
+    });
+    expect(choice.kind).toBe('none');
+    expect(probed).toBe(false);
+  });
+
   it('reports a remedy — not a failure — when nothing can answer', async () => {
     const choice = await selectBackend({
       githubToken: 'gho_unentitled', env: {}, probeSdk: no, probeCli: no,

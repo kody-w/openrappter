@@ -162,6 +162,42 @@ func runGatewayConnectionTests() async throws {
             await conn.disconnect()
         }
 
+        await test("desktop endpoint snapshot carries its token into the handshake") {
+            let mock = MockWebSocket()
+            let endpoint = DesktopGatewayEndpoint(
+                schema: "openrappter-desktop-endpoint/1.0",
+                host: "127.0.0.1",
+                port: 18888,
+                token: String(repeating: "b", count: 64),
+                pid: 42,
+                ownerPid: 43,
+                updatedAt: "2026-08-15T00:00:00Z"
+            )
+            let connectedURLs = AsyncCollector<URL>()
+            let conn = GatewayConnection(
+                host: "stale.local",
+                port: 18790,
+                desktopEndpoint: endpoint,
+                transportFactory: { url in
+                    Task { await connectedURLs.append(url) }
+                    return mock
+                }
+            )
+            mock.enqueueReceive(try makeHelloOk())
+
+            try await conn.connect()
+
+            _ = try await mock.waitForSentCount(1)
+            let sent = mock.lastSentJSON()
+            let params = sent?["params"] as? [String: Any]
+            let auth = params?["auth"] as? [String: Any]
+            let urls = try await connectedURLs.waitForCount(1)
+            try expectEqual(urls.first?.absoluteString, "ws://127.0.0.1:18888")
+            try expectEqual(auth?["token"] as? String, endpoint.token)
+
+            await conn.disconnect()
+        }
+
         await test("events dispatch to handler") {
             let mock = MockWebSocket()
             let conn = GatewayConnection(transportFactory: { _ in mock })

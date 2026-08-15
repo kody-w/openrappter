@@ -53,6 +53,9 @@ Electron Builder targets:
 - Linux: AppImage
 
 Production signing/notarization credentials remain external to the repository.
+macOS releases require the documented Apple certificate and notarization
+secrets. Windows releases require `WINDOWS_CERTIFICATE_P12_BASE64` and
+`WINDOWS_CERTIFICATE_PASSWORD`; unsigned `.exe` assets are rejected.
 
 ## Security boundary
 

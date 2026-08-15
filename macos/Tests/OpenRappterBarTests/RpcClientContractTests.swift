@@ -22,6 +22,16 @@ private func makeOkArrayResponse(id: String, payload: [[String: Any]]) throws ->
     return try JSONSerialization.data(withJSONObject: frame)
 }
 
+private func makeOkNullResponse(id: String) throws -> Data {
+    let frame: [String: Any] = [
+        "type": "res",
+        "id": id,
+        "ok": true,
+        "payload": NSNull(),
+    ]
+    return try JSONSerialization.data(withJSONObject: frame)
+}
+
 /// Connects a fresh mock-backed GatewayConnection (consumes request id
 /// "rpc-1" for the handshake) and returns it plus an RpcClient wrapping it,
 /// ready for a first RPC call at id "rpc-2".
@@ -70,6 +80,134 @@ private func withDeferredResponse<T: Sendable>(
 }
 
 func runRpcClientContractTests() async {
+    await suite("RpcClient Gateway Auth Contract") {
+        await test("auth login uses the gateway device-flow method") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let login = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: [
+                    "userCode": "ABCD-EFGH",
+                    "verificationUri": "https://github.com/login/device",
+                    "deviceCode": "device-1",
+                ])
+            ) {
+                try await rpc.beginGatewayAuthentication()
+            }
+
+            try expectEqual(login.userCode, "ABCD-EFGH")
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "auth.login")
+            await conn.disconnect()
+        }
+
+        await test("auth polling sends the gateway device code") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let poll = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: [
+                    "status": "pending",
+                ])
+            ) {
+                try await rpc.pollGatewayAuthentication(deviceCode: "device-2")
+            }
+
+            try expectEqual(poll.status, "pending")
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "auth.poll")
+            let params = sent?["params"] as? [String: Any]
+            try expectEqual(params?["deviceCode"] as? String, "device-2")
+            await conn.disconnect()
+        }
+
+        await test("auth cancellation targets the pending gateway flow") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let cancelled = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: [
+                    "ok": true,
+                    "status": "cancelled",
+                ])
+            ) {
+                try await rpc.cancelGatewayAuthentication(deviceCode: "device-3")
+            }
+
+            try expect(cancelled.ok, "Gateway should acknowledge cancellation")
+            try expectEqual(cancelled.status, "cancelled")
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "auth.cancel")
+            let params = sent?["params"] as? [String: Any]
+            try expectEqual(params?["deviceCode"] as? String, "device-3")
+            await conn.disconnect()
+        }
+
+        await test("active auth profile decodes the gateway authority") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let profile = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: [
+                    "id": "octocat",
+                    "username": "octocat",
+                    "provider": "copilot",
+                    "type": "device-code",
+                    "default": true,
+                    "createdAt": "2026-08-15T00:00:00Z",
+                ])
+            ) {
+                try await rpc.activeGatewayAuthProfile()
+            }
+
+            try expectEqual(profile?.id, "octocat")
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "auth.active")
+            await conn.disconnect()
+        }
+
+        await test("active auth profile accepts the gateway's null signed-out state") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let profile = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkNullResponse(id: "rpc-2")
+            ) {
+                try await rpc.activeGatewayAuthProfile()
+            }
+
+            try expectNil(profile)
+            await conn.disconnect()
+        }
+
+        await test("auth removal and switching use gateway profile methods") {
+            let (removeConn, removeMock, removeRpc) = try await makeConnectedClient()
+            try await withDeferredResponse(
+                mock: removeMock,
+                response: try makeOkResponse(id: "rpc-2", payload: ["ok": true])
+            ) {
+                try await removeRpc.removeGatewayAuthProfile(id: "octocat")
+            }
+            var sent = try await lastSentJSON(removeMock)
+            try expectEqual(sent?["method"] as? String, "auth.remove")
+            try expectEqual(
+                (sent?["params"] as? [String: Any])?["id"] as? String,
+                "octocat"
+            )
+            await removeConn.disconnect()
+
+            let (switchConn, switchMock, switchRpc) = try await makeConnectedClient()
+            try await withDeferredResponse(
+                mock: switchMock,
+                response: try makeOkResponse(id: "rpc-2", payload: ["ok": true])
+            ) {
+                try await switchRpc.switchGatewayAuthProfile(id: "hubot")
+            }
+            sent = try await lastSentJSON(switchMock)
+            try expectEqual(sent?["method"] as? String, "auth.switch")
+            try expectEqual(
+                (sent?["params"] as? [String: Any])?["id"] as? String,
+                "hubot"
+            )
+            await switchConn.disconnect()
+        }
+    }
+
     await suite("RpcClient Channel Contract") {
         await test("listChannels maps canonical status DTOs into UI channels") {
             let (conn, mock, rpc) = try await makeConnectedClient()

@@ -236,19 +236,17 @@ public enum AgentInstaller {
     public static func install(
         filename: String,
         contents: String,
-        port: Int = AppConstants.defaultPort
+        port: Int = AppConstants.defaultPort,
+        token: String? = AppConstants.defaultGatewayToken
     ) async -> AgentDropResult {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/agents/import") else {
+        guard let request = makeRequest(
+            filename: filename,
+            contents: contents,
+            port: port,
+            token: token
+        ) else {
             return .refused(reason: "Could not reach the daemon.")
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "filename": filename,
-            "contents": contents,
-        ])
-        request.timeoutInterval = 45
 
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
@@ -266,6 +264,29 @@ public enum AgentInstaller {
         } catch {
             return .refused(reason: "openrappter is not running, so there is nothing to teach. Start it and drop again.")
         }
+    }
+
+    static func makeRequest(
+        filename: String,
+        contents: String,
+        port: Int,
+        token: String?
+    ) -> URLRequest? {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/agents/import") else {
+            return nil
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token, !token.isEmpty {
+            request.setValue(token, forHTTPHeaderField: "X-Gateway-Token")
+        }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "filename": filename,
+            "contents": contents,
+        ])
+        request.timeoutInterval = 45
+        return request
     }
 }
 

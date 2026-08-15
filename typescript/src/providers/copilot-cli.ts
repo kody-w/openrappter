@@ -452,11 +452,11 @@ export class CopilotCliProvider implements LLMProvider {
       options.promptAttachmentPreparer ?? defaultPromptAttachmentPreparer;
   }
 
-  updateToken(token: string): void {
+  updateToken(token: string | null): void {
     for (const key of TOKEN_ENV_KEYS) {
       delete this.sourceEnv[key];
     }
-    const normalized = token.trim();
+    const normalized = token?.trim() ?? '';
     if (normalized) {
       this.sourceEnv.COPILOT_GITHUB_TOKEN = normalized;
     }

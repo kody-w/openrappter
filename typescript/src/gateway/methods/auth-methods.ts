@@ -6,6 +6,7 @@
  *   auth.active    — Get the current active profile
  *   auth.login     — Start device code flow (returns user_code + URL)
  *   auth.pollLogin — Poll for device code completion, save on success
+ *   auth.cancel    — Cancel a pending device code flow
  *   auth.switch    — Set a different profile as default
  *   auth.remove    — Remove a saved profile
  */
@@ -41,7 +42,9 @@ const pendingFlows = new Map<
     expiresAt: number;
     intervalMs: number;
     resolved: boolean;
+    controller: AbortController;
     token?: string;
+    username?: string;
     error?: string;
   }
 >();
@@ -70,12 +73,25 @@ export function registerAuthMethods(
   _deps?: Record<string, unknown>
 ): void {
   const store = new AuthProfileStore(_deps?.dataDir as string | undefined);
+  const requestDeviceCodeImpl = (
+    _deps?.requestDeviceCode ?? requestDeviceCode
+  ) as typeof requestDeviceCode;
+  const pollForAccessTokenImpl = (
+    _deps?.pollForAccessToken ?? pollForAccessToken
+  ) as typeof pollForAccessToken;
+  const fetchGitHubUsernameImpl = (
+    _deps?.fetchGitHubUsername ?? fetchGitHubUsername
+  ) as typeof fetchGitHubUsername;
 
   // If a profile already exists, notify the caller so the provider can use it
-  const onTokenUpdate = _deps?.onAuthTokenUpdate as ((token: string) => void) | undefined;
+  const onTokenUpdate = _deps?.onAuthTokenUpdate as (
+    (token: string | null) => void
+  ) | undefined;
   const existingProfile = store.get('copilot');
   if (existingProfile?.token && onTokenUpdate) {
     onTokenUpdate(existingProfile.token);
+  } else if (store.hasPersistedState() && onTokenUpdate) {
+    onTokenUpdate(null);
   }
 
   // ── auth.profiles — list all saved profiles ────────────────────────────────
@@ -109,9 +125,10 @@ export function registerAuthMethods(
   server.registerMethod<void, { userCode: string; verificationUri: string; deviceCode: string }>(
     'auth.login',
     async () => {
-      const device = await requestDeviceCode();
+      const device = await requestDeviceCodeImpl();
       const expiresAt = Date.now() + device.expires_in * 1000;
       const intervalMs = Math.max(1000, device.interval * 1000);
+      const controller = new AbortController();
 
       // Store the pending flow
       pendingFlows.set(device.device_code, {
@@ -119,35 +136,40 @@ export function registerAuthMethods(
         expiresAt,
         intervalMs,
         resolved: false,
+        controller,
       });
 
       // Start polling in the background
-      pollForAccessToken({
+      pollForAccessTokenImpl({
         deviceCode: device.device_code,
         intervalMs,
         expiresAt,
+        signal: controller.signal,
       })
         .then(async (token) => {
           const flow = pendingFlows.get(device.device_code);
-          if (flow) {
-            flow.token = token;
-            flow.resolved = true;
+          if (!flow) return;
 
-            // Fetch username and save profile
-            const username = (await fetchGitHubUsername(token)) ?? `account-${Date.now()}`;
-            // Remove existing profile with same username to avoid duplicates
-            store.remove('copilot', username);
-            store.add({
-              id: username,
-              provider: 'copilot',
-              type: 'device-code',
-              token,
-              default: true,
-            });
+          // Fetch username and save profile before publishing success. A
+          // cancellation can remove the flow while this request is in flight.
+          const username = (
+            await fetchGitHubUsernameImpl(token)
+          ) ?? `account-${Date.now()}`;
+          if (pendingFlows.get(device.device_code) !== flow) return;
+          store.remove('copilot', username);
+          store.add({
+            id: username,
+            provider: 'copilot',
+            type: 'device-code',
+            token,
+            default: true,
+          });
+          flow.token = token;
+          flow.username = username;
+          flow.resolved = true;
 
-            // Notify the running provider so it picks up the new token
-            if (onTokenUpdate) onTokenUpdate(token);
-          }
+          // Notify the running provider so it picks up the new token
+          if (onTokenUpdate) onTokenUpdate(token);
         })
         .catch((err) => {
           const flow = pendingFlows.get(device.device_code);
@@ -190,11 +212,25 @@ export function registerAuthMethods(
       }
 
       // Determine the username that was saved
-      const username = flow.token
-        ? (await fetchGitHubUsername(flow.token)) ?? 'unknown'
-        : 'unknown';
+      return { status: 'success', username: flow.username ?? 'unknown' };
+    }
+  );
 
-      return { status: 'success', username };
+  // ── auth.cancel — stop a pending login flow ────────────────────────────────
+  server.registerMethod<
+    { deviceCode: string },
+    { ok: boolean; status: 'cancelled' | 'completed' | 'missing' }
+  >(
+    'auth.cancel',
+    async (params) => {
+      const flow = pendingFlows.get(params.deviceCode);
+      if (!flow) return { ok: false, status: 'missing' };
+      pendingFlows.delete(params.deviceCode);
+      if (flow.resolved && flow.token) {
+        return { ok: false, status: 'completed' };
+      }
+      flow.controller.abort();
+      return { ok: true, status: 'cancelled' };
     }
   );
 
@@ -215,7 +251,11 @@ export function registerAuthMethods(
   server.registerMethod<{ id: string }, { ok: boolean }>(
     'auth.remove',
     async (params) => {
+      const activeProfileId = store.get('copilot')?.id;
       const ok = store.remove('copilot', params.id);
+      if (ok && activeProfileId === params.id && onTokenUpdate) {
+        onTokenUpdate(store.get('copilot')?.token ?? null);
+      }
       return { ok };
     }
   );

@@ -194,7 +194,7 @@ export class OpenRappterShowAndTell extends LitElement {
     button.primary {
       border-color: var(--accent);
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
     }
 
     button.danger {
@@ -331,6 +331,10 @@ export class OpenRappterShowAndTell extends LitElement {
   private narrationStartedAt = 0;
   private narrationTimer?: ReturnType<typeof setTimeout>;
   private narrationStopping = false;
+  private narrationGeneration = 0;
+  private narrationSessionId?: string;
+  private statusGeneration = 0;
+  @state() private sessionLoading = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -351,7 +355,11 @@ export class OpenRappterShowAndTell extends LitElement {
       }).catch(() => {});
     }
     this.poll = setInterval(() => {
-      if (this.session?.state === 'recording' || this.session?.state === 'stopping') {
+      if (
+        !this.sessionLoading &&
+        (this.session?.state === 'recording' ||
+          this.session?.state === 'stopping')
+      ) {
         void this.refreshStatus();
       }
     }, 1_500);
@@ -364,6 +372,7 @@ export class OpenRappterShowAndTell extends LitElement {
     this.mediaRecorder?.stop();
     if (this.narrationTimer) clearTimeout(this.narrationTimer);
     this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.narrationGeneration += 1;
     super.disconnectedCallback();
   }
 
@@ -380,7 +389,18 @@ export class OpenRappterShowAndTell extends LitElement {
     if (!this.session || this.session.state !== 'recording') {
       throw new Error('Start a Show-and-Tell recording before narration.');
     }
+    const sessionId = this.session.id;
+    const generation = ++this.narrationGeneration;
+    this.narrationSessionId = sessionId;
     await this.ensureNarrationModel();
+    if (
+      generation !== this.narrationGeneration ||
+      this.session?.id !== sessionId ||
+      this.session.state !== 'recording'
+    ) {
+      this.narrationSessionId = undefined;
+      throw new Error('Narration start was cancelled because recording stopped.');
+    }
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -388,6 +408,15 @@ export class OpenRappterShowAndTell extends LitElement {
         noiseSuppression: true,
       },
     });
+    if (
+      generation !== this.narrationGeneration ||
+      this.session?.id !== sessionId ||
+      this.session.state !== 'recording'
+    ) {
+      stream.getTracks().forEach((track) => track.stop());
+      this.narrationSessionId = undefined;
+      throw new Error('Narration start was cancelled because recording stopped.');
+    }
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
@@ -419,9 +448,17 @@ export class OpenRappterShowAndTell extends LitElement {
   }
 
   private async stopNarration(): Promise<void> {
+    this.narrationGeneration += 1;
     if (this.narrationStopping) return;
     const recorder = this.mediaRecorder;
-    if (!recorder || recorder.state === 'inactive') return;
+    if (!recorder || recorder.state === 'inactive') {
+      this.narrationSessionId = undefined;
+      return;
+    }
+    const sessionId = this.narrationSessionId;
+    if (!sessionId) {
+      throw new Error('Narration is not bound to a recording session.');
+    }
     this.narrationStopping = true;
     if (this.narrationTimer) {
       clearTimeout(this.narrationTimer);
@@ -458,7 +495,7 @@ export class OpenRappterShowAndTell extends LitElement {
       const desktop = desktopBridge()!;
       const transcript = await desktop.narration({
         action: 'transcribe',
-        session_id: this.session?.id,
+        session_id: sessionId,
         language: 'en',
         duration_ms: Date.now() - this.narrationStartedAt,
         audio: audioBytes,
@@ -473,6 +510,7 @@ export class OpenRappterShowAndTell extends LitElement {
       }
     } finally {
       this.narrationStopping = false;
+      this.narrationSessionId = undefined;
     }
   }
 
@@ -509,6 +547,9 @@ export class OpenRappterShowAndTell extends LitElement {
   ): Promise<Record<string, unknown>> {
     const bridge = desktopBridge();
     if (!bridge) throw new Error('Show-and-Tell desktop controls require the Electron app.');
+    if (interactive && this.sessionLoading) {
+      throw new Error('Wait for the selected Show-and-Tell session to finish loading.');
+    }
     if (interactive) {
       this.busy = true;
       this.error = '';
@@ -556,16 +597,27 @@ export class OpenRappterShowAndTell extends LitElement {
     }
   }
 
-  private async refreshStatus(sessionId = this.session?.id): Promise<void> {
+  private async refreshStatus(
+    sessionId = this.session?.id,
+    generation = ++this.statusGeneration,
+  ): Promise<void> {
     if (!desktopBridge()) return;
-    const result = await this.call({
-      action: 'status',
-      ...(sessionId ? { session_id: sessionId } : {}),
-    }, false);
+    let result: Record<string, unknown>;
+    try {
+      result = await this.call({
+        action: 'status',
+        ...(sessionId ? { session_id: sessionId } : {}),
+      }, false);
+    } catch (error) {
+      if (generation === this.statusGeneration) {
+        this.error = (error as Error).message;
+      }
+      return;
+    }
+    if (generation !== this.statusGeneration) return;
     const previousState = this.session?.state;
     this.session = (result.session as SessionSummary | null | undefined) ?? null;
     if (
-      this.narrationRecording &&
       previousState === 'recording' &&
       this.session?.state !== 'recording'
     ) {
@@ -573,23 +625,30 @@ export class OpenRappterShowAndTell extends LitElement {
         this.error = (error as Error).message;
       });
     }
-    const summary = result.analysis as
-      | { approved?: boolean; step_count?: number }
-      | null
-      | undefined;
     const detail = result.analysis_detail as Analysis | null | undefined;
-    if (detail) {
-      this.analysis = detail;
-      this.intent = detail.intent;
-    }
-    if (!summary && this.session && this.session.state !== 'recording') {
-      this.analysis = null;
-    }
+    this.analysis = detail ?? null;
+    this.intent = detail?.intent ?? this.session?.intentHint ?? '';
   }
 
   private async selectSession(id: string): Promise<void> {
+    if (
+      this.narrationRecording ||
+      this.narrationStopping ||
+      this.narrationSessionId
+    ) {
+      this.error = 'Stop narration before switching demonstrations.';
+      return;
+    }
+    const generation = ++this.statusGeneration;
     this.session = this.sessions.find((candidate) => candidate.id === id) ?? null;
-    await this.refreshStatus(id);
+    this.analysis = null;
+    this.intent = '';
+    this.sessionLoading = true;
+    try {
+      await this.refreshStatus(id, generation);
+    } finally {
+      if (generation === this.statusGeneration) this.sessionLoading = false;
+    }
   }
 
   private renderUnavailable() {
@@ -795,7 +854,7 @@ export class OpenRappterShowAndTell extends LitElement {
                         class="danger"
                         ?disabled=${this.busy}
                         @click=${() => void (async () => {
-                          if (this.narrationRecording) await this.stopNarration();
+                          await this.stopNarration();
                           await this.act(
                             { action: 'stop', session_id: this.session?.id },
                             'Recording stopped.',
@@ -960,6 +1019,7 @@ export class OpenRappterShowAndTell extends LitElement {
                 ? this.sessions.map((candidate) => html`
                     <button
                       class="session"
+                      ?disabled=${this.narrationRecording || this.narrationStopping}
                       @click=${() => void this.selectSession(candidate.id)}
                     >
                       <strong>${candidate.title || candidate.intentHint || candidate.id}</strong>

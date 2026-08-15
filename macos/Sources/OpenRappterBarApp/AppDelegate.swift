@@ -94,27 +94,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         observeViewModel()
         registerAsLoginItem()
 
-        // Electron publishes a private endpoint. Prefer it over starting a
-        // competing gateway so the window and menu bar share one organism.
-        if let desktop = DesktopGatewayDiscovery.current() {
-            viewModel.connectToGateway(host: desktop.host, port: desktop.port)
-        } else if settingsViewModel.settingsStore.autoStartGateway {
-            viewModel.startGateway()
-        } else if settingsViewModel.settingsStore.autoConnect {
-            // Only auto-connect standalone when not auto-starting
-            // (startGateway already calls connectToGateway on success)
-            viewModel.connectToGateway(
-                host: settingsViewModel.settingsStore.host,
-                port: settingsViewModel.settingsStore.port
-            )
-        }
-
         // Configure settings ViewModel when RPC becomes available
         viewModel.onRpcClientReady = { [weak self] rpc in
-            self?.settingsViewModel.configure(rpcClient: rpc)
+            guard let self else { return }
+            self.settingsViewModel.configure(
+                rpcClient: rpc,
+                useGatewayAuthentication: self.viewModel.usesDesktopGateway
+            )
         }
         viewModel.onRpcClientInvalidated = { [weak self] in
-            self?.settingsViewModel.clearConfiguration()
+            guard let self else { return }
+            self.settingsViewModel.clearConfiguration(
+                clearAccountAuthentication: !self.viewModel.usesDesktopGateway
+            )
         }
 
         // Configure account auth with gateway restart capability
@@ -127,6 +119,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         )
+
+        // Electron publishes a private endpoint. Prefer it over starting a
+        // competing gateway so the window and menu bar share one organism.
+        if DesktopGatewayDiscovery.current() != nil {
+            viewModel.connectUsingPreferredGateway(
+                fallbackHost: settingsViewModel.settingsStore.host,
+                fallbackPort: settingsViewModel.settingsStore.port
+            )
+        } else if settingsViewModel.settingsStore.autoStartGateway {
+            viewModel.startGateway()
+        } else if settingsViewModel.settingsStore.autoConnect {
+            viewModel.connectUsingPreferredGateway(
+                fallbackHost: settingsViewModel.settingsStore.host,
+                fallbackPort: settingsViewModel.settingsStore.port
+            )
+        }
     }
 
     // MARK: - Termination
@@ -207,11 +215,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(NSMenuItem(title: "Disconnect", action: #selector(menuDisconnect), keyEquivalent: ""))
         }
 
-        // Gateway
-        if viewModel.processState == .stopped {
-            menu.addItem(NSMenuItem(title: "Start Gateway", action: #selector(menuStartGateway), keyEquivalent: ""))
-        } else if viewModel.processState == .running {
-            menu.addItem(NSMenuItem(title: "Stop Gateway", action: #selector(menuStopGateway), keyEquivalent: ""))
+        // Electron owns its gateway lifecycle; the Bar may only connect to it.
+        if !viewModel.usesDesktopGateway {
+            if viewModel.processState == .stopped {
+                menu.addItem(NSMenuItem(title: "Start Gateway", action: #selector(menuStartGateway), keyEquivalent: ""))
+            } else if viewModel.processState == .running {
+                menu.addItem(NSMenuItem(title: "Stop Gateway", action: #selector(menuStopGateway), keyEquivalent: ""))
+            }
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -254,14 +264,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Menu Actions
 
     @objc private func menuConnect() {
-        viewModel.connectToGateway(
-            host: settingsViewModel.settingsStore.host,
-            port: settingsViewModel.settingsStore.port
+        viewModel.connectUsingPreferredGateway(
+            fallbackHost: settingsViewModel.settingsStore.host,
+            fallbackPort: settingsViewModel.settingsStore.port
         )
     }
 
     @objc private func menuDisconnect() {
-        Task { await viewModel.disconnectFromGateway() }
+        if viewModel.usesDesktopGateway {
+            viewModel.stopGateway()
+        } else {
+            Task { await viewModel.disconnectFromGateway() }
+        }
     }
 
     @objc private func menuStartGateway() {
@@ -315,7 +329,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .seconds(1))
             }
             if auth.authState == .authenticated {
-                viewModel.chatViewModel.addSystemMessage("✅ Authenticated! Restarting gateway…")
+                let message = auth.usingGatewayAuthentication
+                    ? "✅ Authenticated through OpenRappter Desktop."
+                    : "✅ Authenticated! Restarting gateway…"
+                viewModel.chatViewModel.addSystemMessage(message)
                 await settingsViewModel.accountViewModel.restartGatewayAfterAuth().value
             }
             viewModel.chatViewModel.authFlowFinished(succeeded: auth.authState == .authenticated)
@@ -348,7 +365,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         case .settings:
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         case .connect(let host, let port):
-            viewModel.connectToGateway(host: host, port: port)
+            if let desktop = DesktopGatewayDiscovery.current(),
+               desktop.host == host,
+               desktop.port == port {
+                viewModel.connectUsingPreferredGateway(
+                    fallbackHost: host,
+                    fallbackPort: port
+                )
+            } else {
+                viewModel.connectToGateway(host: host, port: port)
+            }
         case .unknown:
             break
         }

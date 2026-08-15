@@ -19,6 +19,7 @@ func runDesktopGatewayDiscoveryTests() throws {
                 port: 18841,
                 token: String(repeating: "a", count: 64),
                 pid: ProcessInfo.processInfo.processIdentifier,
+                ownerPid: ProcessInfo.processInfo.processIdentifier,
                 updatedAt: ISO8601DateFormatter().string(from: Date())
             )
             let data = try JSONEncoder().encode(endpoint)

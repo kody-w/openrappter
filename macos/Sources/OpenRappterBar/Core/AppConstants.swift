@@ -37,6 +37,9 @@ public enum AppConstants {
     public static var defaultPort: Int {
         DesktopGatewayDiscovery.current()?.port ?? 18790
     }
+    public static var defaultGatewayToken: String? {
+        DesktopGatewayDiscovery.current()?.token
+    }
     public static var defaultWebSocketURL: String {
         "ws://\(defaultHost):\(defaultPort)"
     }

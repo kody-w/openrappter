@@ -70,7 +70,12 @@ export class AuthProfileStore {
     if (provider) {
       return this.profiles.filter((p) => p.provider === provider);
     }
+
     return [...this.profiles];
+  }
+
+  hasPersistedState(): boolean {
+    return fs.existsSync(this.profilesPath);
   }
 
   setDefault(provider: string, id: string): boolean {

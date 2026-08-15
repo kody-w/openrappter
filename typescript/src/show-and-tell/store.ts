@@ -554,6 +554,9 @@ export class ShowAndTellStore {
         SET collector_runtime = ?, collector_pid = ?, collector_nonce = ?,
             collector_started_at = ?, collector_heartbeat_at = ?, updated_at = ?
         WHERE id = ? AND state = 'recording'
+          AND collector_runtime IS NULL
+          AND collector_pid IS NULL
+          AND collector_nonce IS NULL
       `)
       .run(runtime, pid, nonce, now, now, now, sessionId);
     return result.changes === 1;

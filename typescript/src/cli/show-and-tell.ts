@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 
 import { ShowAndTellAgent } from '../agents/ShowAndTellAgent.js';
 import {
+  hasAuthProfileAuthority,
   resolveCopilotAuth,
   resolveGithubToken,
 } from '../copilot-check.js';
@@ -30,6 +31,8 @@ async function connectAnalysisProvider(agent: ShowAndTellAgent): Promise<void> {
   let backend = await selectBackend({
     githubToken: token ?? undefined,
     model: process.env.OPENRAPPTER_MODEL,
+    allowIndependentCli: !hasAuthProfileAuthority(),
+    allowAmbientCredentials: !hasAuthProfileAuthority(),
   });
   if (!backend.provider) {
     const auth = await resolveCopilotAuth();
@@ -37,6 +40,8 @@ async function connectAnalysisProvider(agent: ShowAndTellAgent): Promise<void> {
     backend = await selectBackend({
       githubToken: token ?? undefined,
       model: process.env.OPENRAPPTER_MODEL,
+      allowIndependentCli: !hasAuthProfileAuthority(),
+      allowAmbientCredentials: !hasAuthProfileAuthority(),
     });
   }
   if (!backend.provider) {

@@ -2,7 +2,7 @@
  * Main App Component
  */
 
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
@@ -21,6 +21,10 @@ export class OpenRappterApp extends LitElement {
       display: flex;
       flex-direction: column;
       margin-left: 240px;
+    }
+
+    .main-content.focused {
+      margin-left: 0;
     }
 
     .header {
@@ -152,10 +156,13 @@ export class OpenRappterApp extends LitElement {
   @state()
   private status: { uptime: number; connections: number } | null = null;
 
+  @state()
+  private focusMode = false;
+
   connectedCallback() {
     super.connectedCallback();
     if (window.openrappterDesktop) {
-      this.currentView = 'chat';
+      this.navigate('chat');
     }
     this.connectToGateway();
 
@@ -197,7 +204,16 @@ export class OpenRappterApp extends LitElement {
   }
 
   private handleNavigation(e: CustomEvent<{ view: View }>) {
-    this.currentView = e.detail.view;
+    this.navigate(e.detail.view);
+  }
+
+  private handleToggleFocus(e: CustomEvent<{ focused: boolean }>) {
+    this.focusMode = e.detail.focused;
+  }
+
+  navigate(view: View): void {
+    this.currentView = view;
+    if (view !== 'chat') this.focusMode = false;
   }
 
   private renderView() {
@@ -205,7 +221,11 @@ export class OpenRappterApp extends LitElement {
       case 'surgeon':
         return html`<openrappter-surgeon></openrappter-surgeon>`;
       case 'chat':
-        return html`<openrappter-chat></openrappter-chat>`;
+        return html`
+          <openrappter-chat
+            @toggle-focus=${this.handleToggleFocus}
+          ></openrappter-chat>
+        `;
       case 'show-and-tell':
         return html`<openrappter-show-and-tell></openrappter-show-and-tell>`;
       case 'channels':
@@ -274,15 +294,21 @@ export class OpenRappterApp extends LitElement {
     }
 
     return html`
-      <openrappter-sidebar
-        .currentView=${this.currentView}
-        @navigate=${this.handleNavigation}
-      ></openrappter-sidebar>
+      ${this.focusMode
+        ? nothing
+        : html`
+            <openrappter-sidebar
+              .currentView=${this.currentView}
+              @navigate=${this.handleNavigation}
+            ></openrappter-sidebar>
+          `}
 
-      <div class="main-content">
-        <header class="header">
+      <div class="main-content ${this.focusMode ? 'focused' : ''}">
+        ${this.focusMode
+          ? nothing
+          : html`<header class="header">
           <div class="header-title">
-            <button class="back" @click=${() => { this.currentView = 'surgeon'; }}>
+            <button class="back" @click=${() => this.navigate('surgeon')}>
               ← Operating room
             </button>
             <h1>${this.getViewTitle()}</h1>
@@ -292,7 +318,7 @@ export class OpenRappterApp extends LitElement {
             ${this.connected ? 'Connected' : 'Disconnected'}
             ${this.status ? html` • Uptime: ${this.formatUptime(this.status.uptime)}` : ''}
           </div>
-        </header>
+        </header>`}
 
         <div class="view-container">
           ${this.renderView()}

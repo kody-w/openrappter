@@ -94,6 +94,43 @@ describe('AssistantConfig options survive the constructor', () => {
     expect(promptFor({})).not.toContain(marker);
   });
 
+  it('retains a disabled ambient-credential policy across token updates', async () => {
+    const priorToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'ambient-policy-test';
+    try {
+      const assistant = new Assistant(new Map(), {
+        allowAmbientCredentials: false,
+      });
+
+      assistant.setGithubToken(null);
+      const provider = (assistant as unknown as {
+        provider: { isAvailable(): Promise<boolean> };
+      }).provider;
+      expect(await provider.isAvailable()).toBe(false);
+    } finally {
+      if (priorToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = priorToken;
+    }
+  });
+
+  it('does not let a global CLI preference bypass Desktop sign-out', async () => {
+    const priorBackend = process.env.OPENRAPPTER_AI_BACKEND;
+    process.env.OPENRAPPTER_AI_BACKEND = 'copilot-cli';
+    try {
+      const assistant = new Assistant(new Map(), {
+        allowAmbientCredentials: false,
+      });
+      const provider = (assistant as unknown as {
+        provider: { id: string; isAvailable(): Promise<boolean> };
+      }).provider;
+      expect(provider.id).toBe('copilot');
+      expect(await provider.isAvailable()).toBe(false);
+    } finally {
+      if (priorBackend === undefined) delete process.env.OPENRAPPTER_AI_BACKEND;
+      else process.env.OPENRAPPTER_AI_BACKEND = priorBackend;
+    }
+  });
+
   it('drops no declared option silently — pins the whitelist itself', () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const source = readFileSync(join(here, '..', '..', 'agents', 'Assistant.ts'), 'utf8');

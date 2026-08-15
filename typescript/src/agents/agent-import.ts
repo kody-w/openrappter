@@ -131,14 +131,29 @@ export async function importAgentFile(
     // ── Make it live ─────────────────────────────────────────────────────────
     // Forget first: a replaced file may define a different set of names, and a
     // stale entry would keep answering from the old code.
-    const replaced = found.agents.some(a => live.has(a.name));
-    for (const a of found.agents) registry.forget(a.name);
+    const ownedBefore = [...live.entries()]
+      .filter(([, agent]) =>
+        (agent as { sourceFile?: string }).sourceFile === target)
+      .map(([agentName]) => agentName);
+    const replaced = ownedBefore.length > 0;
+    for (const agentName of new Set([
+      ...ownedBefore,
+      ...found.agents.map((agent) => agent.name),
+    ])) {
+      registry.forget(agentName);
+    }
     await registry.reloadUserAgents();
 
     const after = await registry.getAllAgents();
     const missing = found.agents.filter(a => !after.has(a.name)).map(a => a.name);
     if (missing.length > 0) {
       await restore();
+      const failed = await registry.getAllAgents();
+      for (const [agentName, agent] of failed) {
+        if ((agent as { sourceFile?: string }).sourceFile === target) {
+          registry.forget(agentName);
+        }
+      }
       await registry.reloadUserAgents();
       return { status: 'error', error: `${name} loaded but did not register: ${missing.join(', ')}.` };
     }

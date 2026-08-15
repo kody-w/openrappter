@@ -69,6 +69,19 @@ func runBonesWindowTests() async {
                        "the refusal must say why, got: \(refusal!)")
         }
 
+        await test("a drop authenticates to the discovered Desktop gateway") {
+            let request = AgentInstaller.makeRequest(
+                filename: "probe_agent.py",
+                contents: "print('safe')",
+                port: 18791,
+                token: String(repeating: "a", count: 64)
+            )
+            try expectEqual(
+                request?.value(forHTTPHeaderField: "X-Gateway-Token"),
+                String(repeating: "a", count: 64)
+            )
+        }
+
         await test("only .py and .js are treated as agents") {
             // The drop filter is what stands between a stray screenshot and an
             // attempt to execute it.

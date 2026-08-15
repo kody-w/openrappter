@@ -40,6 +40,7 @@ import {
   VIBEVOICE_MODEL_LABEL,
   VibeVoiceService,
 } from './vibevoice.js';
+import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -170,6 +171,10 @@ async function publishDesktopEndpoint(): Promise<void> {
     hardenPrivatePath(target: string, directory?: boolean): void;
   };
   const directory = path.join(os.homedir(), '.openrappter');
+  const gatewayPid = gatewayProcess?.pid;
+  if (!gatewayPid) {
+    throw new Error('Cannot publish a desktop endpoint before gateway readiness.');
+  }
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   hardenPrivatePath(directory, true);
   endpointFile = path.join(directory, 'desktop-gateway.json');
@@ -181,7 +186,8 @@ async function publishDesktopEndpoint(): Promise<void> {
       host: '127.0.0.1',
       port: gatewayPort,
       token: gatewayToken,
-      pid: process.pid,
+      pid: gatewayPid,
+      ownerPid: process.pid,
       updatedAt: new Date().toISOString(),
     })}\n`,
     { mode: 0o600 },
@@ -251,8 +257,7 @@ async function focusWindow(view?: string): Promise<void> {
       (async () => {
         const app = document.querySelector('openrappter-app');
         if (!app) throw new Error('OpenRappter app surface is not mounted.');
-        app.currentView = ${JSON.stringify(view)};
-        app.requestUpdate();
+        app.navigate(${JSON.stringify(view)});
         await app.updateComplete;
       })()
     `);
@@ -361,6 +366,7 @@ async function ensureGateway(): Promise<void> {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
         OPENRAPPTER_DESKTOP: '1',
+        OPENRAPPTER_DESKTOP_OWNER_PID: String(process.pid),
         OPENRAPPTER_PORT: String(gatewayPort),
         OPENRAPPTER_TOKEN: gatewayToken,
         ...(smokeRoot
@@ -636,17 +642,12 @@ async function handleNarration(
   runtime.store.hardenFile(audioFile);
   await runtime.store.appendEvent(
     sessionId,
-    'session.note',
-    'local-whisper-narration',
-    { note: transcript.text },
-  );
-  await runtime.store.appendEvent(
-    sessionId,
     'narration.transcribed',
     'local-whisper',
     {
       model: transcript.model,
       language,
+      text: transcript.text,
       audioFile: path.posix.join('audio', filename),
       segments: transcript.segments,
     },
@@ -883,7 +884,8 @@ async function installAgentFromCommand(
     if (Buffer.byteLength(source, 'utf8') > 500_000) {
       throw new Error('Agent source exceeds the 500 KB desktop approval limit.');
     }
-    const capabilities = scanAgentCapabilities(filename, source);
+    const compiled = await compileAgentForImport(filename, source);
+    const capabilities = scanAgentCapabilities(compiled.filename, source);
     if (Date.now() > expiresAt) {
       throw new Error('Agent installation request expired before approval.');
     }
@@ -892,7 +894,7 @@ async function installAgentFromCommand(
       const approval = await dialog.showMessageBox(mainWindow!, {
         type: 'warning',
         title: 'Install a hot-loaded agent?',
-        message: `Install ${path.basename(filename)}?`,
+        message: `Install ${compiled.filename}?`,
         detail:
           `This code will run with your full user authority after verification. ` +
           `The capability list is a heuristic, not a sandbox.\n\n` +
@@ -910,7 +912,6 @@ async function installAgentFromCommand(
     if (Date.now() > expiresAt) {
       throw new Error('Agent installation request expired before import.');
     }
-    const compiled = await compileAgentForImport(filename, source);
     const response = await fetch(`${gatewayOrigin}/agents/import`, {
       method: 'POST',
       headers: {
@@ -1114,14 +1115,11 @@ function createWindow(): BrowserWindow {
     backgroundColor: '#050711',
     webPreferences: {
       preload: path.join(import.meta.dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
+      ...SECURE_RENDERER_PREFERENCES,
     },
   });
   window.removeMenu();
-  window.webContents.once('did-finish-load', () => {
+  window.webContents.on('did-finish-load', () => {
     rendererReady = true;
     startDesktopCommandPump();
   });
@@ -1134,6 +1132,19 @@ function createWindow(): BrowserWindow {
       event.preventDefault();
       if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     }
+  });
+  window.webContents.on('render-process-gone', (_event, details) => {
+    rendererReady = false;
+    if (
+      quitting ||
+      details.reason === 'clean-exit' ||
+      window.isDestroyed()
+    ) {
+      return;
+    }
+    setTimeout(() => {
+      if (!quitting && !window.isDestroyed()) window.webContents.reload();
+    }, 250);
   });
   window.once('ready-to-show', () => window.show());
   if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
@@ -1161,8 +1172,7 @@ function createWindow(): BrowserWindow {
           )};
           let recorder = null;
           if (smokeScope !== 'boot') {
-            appElement.currentView = 'show-and-tell';
-            appElement.requestUpdate();
+            appElement.navigate('show-and-tell');
             await appElement.updateComplete;
             recorder = appElement.shadowRoot.querySelector(
               'openrappter-show-and-tell'
@@ -1365,7 +1375,28 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
     stopOwnedGateway(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
-  app.exit(exitCode);
+  if (commandTimer) clearInterval(commandTimer);
+  removeOwnedDesktopEndpoint();
+  if (smokeRoot && process.platform !== 'win32') {
+    rmSync(smokeRoot, { recursive: true, force: true });
+  }
+  const hardProcess = process as NodeJS.Process & {
+    reallyExit?: (code?: number) => never;
+  };
+  if (hardProcess.reallyExit) hardProcess.reallyExit(exitCode);
+  process.exit(exitCode);
+}
+
+function removeOwnedDesktopEndpoint(): void {
+  if (!endpointFile) return;
+  try {
+    const endpoint = JSON.parse(
+      readFileSync(endpointFile, 'utf8'),
+    ) as { pid?: unknown };
+    if (endpoint.pid === process.pid) rmSync(endpointFile, { force: true });
+  } catch {
+    // A newer desktop process may own the endpoint.
+  }
 }
 
 if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
@@ -1376,7 +1407,12 @@ if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
   console.log(`OPENRAPPTER_DESKTOP_SMOKE lock=${ownsInstanceLock}`);
 }
 if (!ownsInstanceLock) {
-  app.quit();
+  if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
+    console.error('OPENRAPPTER_DESKTOP_SMOKE_ERROR instance lock unavailable');
+    app.exit(1);
+  } else {
+    app.quit();
+  }
 } else {
   if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
     for (const eventName of ['ready', 'window-all-closed', 'before-quit', 'will-quit', 'quit']) {
@@ -1386,10 +1422,7 @@ if (!ownsInstanceLock) {
     }
   }
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    void focusWindow().catch(showTrayError);
   });
 
   app.on('before-quit', (event) => {
@@ -1445,7 +1478,6 @@ if (!ownsInstanceLock) {
       const bootSmoke =
         process.env.OPENRAPPTER_DESKTOP_SMOKE === '1' &&
         process.env.OPENRAPPTER_DESKTOP_SMOKE_SCOPE === 'boot';
-      if (!bootSmoke) await publishDesktopEndpoint();
       session.defaultSession.webRequest.onBeforeSendHeaders(
         { urls: [`ws://127.0.0.1:${gatewayPort}/*`] },
         (details, callback) => {
@@ -1538,6 +1570,7 @@ if (!ownsInstanceLock) {
       if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
         console.log('OPENRAPPTER_DESKTOP_SMOKE gateway-ready');
       }
+      if (!bootSmoke) await publishDesktopEndpoint();
       mainWindow = createWindow();
       if (!bootSmoke) createTray();
     } catch (error) {
@@ -1571,15 +1604,6 @@ if (!ownsInstanceLock) {
     if (smokeRoot) {
       rmSync(smokeRoot, { recursive: true, force: true });
     }
-    if (endpointFile) {
-      try {
-        const endpoint = JSON.parse(
-          readFileSync(endpointFile, 'utf8'),
-        ) as { pid?: unknown };
-        if (endpoint.pid === process.pid) rmSync(endpointFile, { force: true });
-      } catch {
-        // A newer desktop process may own the endpoint.
-      }
-    }
+    removeOwnedDesktopEndpoint();
   });
 }

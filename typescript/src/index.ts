@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { AgentRegistry } from './agents/index.js';
 import type { AgentInfo } from './agents/types.js';
 import { ensureHomeDir, loadEnv, saveEnv, hydrateManagedEnv, loadConfig, saveConfig, resolvedConfigSources, HOME_DIR, CONFIG_FILE, ENV_FILE } from './env.js';
-import { hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
+import { hasAuthProfileAuthority, hasCopilotAvailable, autoAuthIfNeeded, resolveCopilotAuth, resolveGithubToken, saveGitHubToken } from './copilot-check.js';
 import type { CopilotAuthOutcome } from './copilot-check.js';
 import { chat, displayResult } from './chat.js';
 import { VERSION } from './version.js';
@@ -21,6 +21,7 @@ import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
 import { portTypedOnCommandLine } from './infra/cli-port.js';
+import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
@@ -152,6 +153,7 @@ async function startGatewayInProcess(opts?: {
   // token is not a *missing* one.
   const auth = await resolveCopilotAuth({ silent: opts?.silent });
   const githubToken = auth.status === 'authenticated' ? auth.token : null;
+  const desktopProfileAuthority = hasAuthProfileAuthority();
   for (const line of describeCopilotAuth(auth)) {
     if (auth.status === 'authenticated') log(line); else console.warn(line);
   }
@@ -167,19 +169,26 @@ async function startGatewayInProcess(opts?: {
   const backend = await selectBackend({
     githubToken: githubToken ?? undefined,
     model: process.env.OPENRAPPTER_MODEL,
+    allowIndependentCli: !desktopProfileAuthority,
+    allowAmbientCredentials: !desktopProfileAuthority,
   });
   log(`${EMOJI} AI backend: ${backend.kind} — ${backend.reason}`);
   // Give the agent-writer a model. Without one it silently falls back to a
   // scaffold that echoes its input, so the surgeon reported "installed X" for
   // an agent that does not implement anything. The registry constructs agents
   // with no provider, so it has to be handed over after selection.
+  const providerAwareAgents = [
+    agents.get('LearnNew') ?? agents.get('LearnNewAgent'),
+    agents.get('ShowAndTell'),
+  ];
+  const updateAgentProviders = (provider: unknown): void => {
+    for (const agent of providerAwareAgents) {
+      (agent as { setProvider?: (value: unknown) => void } | undefined)
+        ?.setProvider?.(provider);
+    }
+  };
   if (backend.provider) {
-    const learner = agents.get('LearnNew') ?? agents.get('LearnNewAgent');
-    (learner as unknown as { setProvider?: (p: unknown) => void } | undefined)
-      ?.setProvider?.(backend.provider);
-    const showAndTell = agents.get('ShowAndTell');
-    (showAndTell as unknown as { setProvider?: (p: unknown) => void } | undefined)
-      ?.setProvider?.(backend.provider);
+    updateAgentProviders(backend.provider);
   }
   if (backend.kind === 'none' && backend.remedy) {
     // Actionable, not a stack trace: this is what the operator has to do.
@@ -201,6 +210,7 @@ async function startGatewayInProcess(opts?: {
       + 'You have shell, memory, and skill agents.',
     model: backend.model ?? process.env.OPENRAPPTER_MODEL,
     githubToken: githubToken ?? undefined,
+    allowAmbientCredentials: !desktopProfileAuthority,
     workspaceDir: process.env.OPENRAPPTER_WORKSPACE_DIR,
     // Which rappter this is. Reached the lock, the port and the channels
     // already; without this it never reached the thing that answers. #102
@@ -311,11 +321,18 @@ async function startGatewayInProcess(opts?: {
   let imessageModelProbeStopped = false;
   let imessageModelProbeController: AbortController | undefined;
   let imessageModelProbePromise: Promise<void> | undefined;
-  let updateIMessageToken: ((token: string) => void) | undefined;
+  let updateIMessageToken: ((token: string | null) => void) | undefined;
   if (imessageEnabled) {
     const { CopilotCliProvider } = await import('./providers/copilot-cli.js');
     const imessageModel =
       process.env.OPENRAPPTER_IMESSAGE_MODEL || 'gpt-5.6-sol';
+    const imessageEnv = { ...process.env };
+    if (desktopProfileAuthority) {
+      for (const key of ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) {
+        delete imessageEnv[key];
+      }
+    }
+    if (githubToken) imessageEnv.COPILOT_GITHUB_TOKEN = githubToken;
     const imessageProvider = new CopilotCliProvider({
       executable: process.env.COPILOT_CLI_PATH,
       copilotHome: path.join(HOME_DIR, 'copilot-imessage-home'),
@@ -325,12 +342,7 @@ async function startGatewayInProcess(opts?: {
         ?? ['']
       ),
       promptTransport: 'attachment',
-      env: githubToken
-        ? {
-            ...process.env,
-            COPILOT_GITHUB_TOKEN: githubToken,
-          }
-        : process.env,
+      env: imessageEnv,
     });
     imessageAssistant = new Assistant(new Map(), {
       name: `${NAME} iMessage`,
@@ -380,7 +392,7 @@ async function startGatewayInProcess(opts?: {
         }
       }
     };
-    updateIMessageToken = (token: string) => {
+    updateIMessageToken = (token: string | null) => {
       imessageProvider.updateToken(token);
       imessageRuntime?.setModelReadiness('pending', 'model_preflight_pending');
       imessageModelProbeController?.abort();
@@ -508,21 +520,20 @@ async function startGatewayInProcess(opts?: {
   const [
     { SurgeonService },
     { buildPatientSnapshot },
-    { CopilotCliDirectProvider },
-    { CopilotProvider },
+    {
+      CopilotProvider,
+      COPILOT_DEFAULT_MODEL: PROFILE_COPILOT_DEFAULT_MODEL,
+    },
   ] = await Promise.all([
     import('./surgeon/service.js'),
     import('./surgeon/patient.js'),
-    import('./providers/copilot-cli-direct.js'),
     import('./providers/copilot.js'),
   ]);
   const surgeonService = new SurgeonService({
     dataDir: HOME_DIR,
-    provider: githubToken
-      ? new CopilotProvider({ githubToken })
-      : new CopilotCliDirectProvider({
-          model: process.env.OPENRAPPTER_SURGEON_MODEL ?? 'auto',
-        }),
+    provider: backend.provider ?? new CopilotProvider({
+      allowAmbientCredentials: !desktopProfileAuthority,
+    }),
     inspectPatient: async () => {
       const status = server.getStatus();
       const channels = channelRegistry.getStatusList();
@@ -620,43 +631,83 @@ async function startGatewayInProcess(opts?: {
   server.setSurgeonService(surgeonService);
 
   // Wire auth profile token updates → live provider refresh (no restart needed)
+  let authTokenUpdateGeneration = 0;
+  let authTokenUpdateController: AbortController | undefined;
   server.setAuthTokenCallback((token) => {
-    assistant.setGithubToken(token);
-    void import('./providers/copilot-token.js')
-      .then(({ resolveCopilotApiToken }) =>
-        resolveCopilotApiToken({ githubToken: token })
-      )
-      .then(() => {
-        surgeonService.setProvider(new CopilotProvider({ githubToken: token }));
-      })
-      .catch(async () => {
-        // A credential we have just observed to be bad is a decision point, not
-        // a warning to print and walk past. Re-select a backend that works.
-        const { selectBackend: reselect } = await import('./providers/backend-select.js');
-        const next = await reselect({ githubToken: token, model: process.env.OPENRAPPTER_MODEL });
-        if (next.provider) {
-          surgeonService.setProvider(next.provider);
-          assistant.setProvider?.(
-            next.provider,
-            next.model ?? (next.kind === 'copilot-cli' ? 'auto' : assistant.getModel()),
-          );
-          log(`${EMOJI} Stored Copilot profile is stale — switched to ${next.kind}`);
-        } else {
-          log(`${EMOJI} Stored Copilot profile is stale and no backend can answer`);
-        }
-        server.setBackendStatus?.({
-          kind: next.kind,
-          reason: next.reason,
-          remedy: next.remedy,
-          // Re-selection has to carry these too. Dropping them here is what put
-          // `"model":"unknown"` on every reply: the startup path set them
-          // correctly, then this fallback replaced the whole record with one
-          // that had no model in it at all.
-          model: next.model ?? process.env.OPENRAPPTER_MODEL,
-          requestedModel: process.env.OPENRAPPTER_MODEL ?? next.model,
-        });
-      });
+    const generation = ++authTokenUpdateGeneration;
+    authTokenUpdateController?.abort();
+    const controller = new AbortController();
+    authTokenUpdateController = controller;
+    const profileModel =
+      process.env.OPENRAPPTER_MODEL
+      ?? (assistant.getModel() === 'auto'
+        ? PROFILE_COPILOT_DEFAULT_MODEL
+        : assistant.getModel());
+    const profileProvider = new CopilotProvider({
+      githubToken: token ?? undefined,
+      allowAmbientCredentials: false,
+    });
+    assistant.setGithubToken(token, false);
+    assistant.setProvider(profileProvider, profileModel);
+    surgeonService.setProvider(profileProvider);
+    updateAgentProviders(profileProvider);
     updateIMessageToken?.(token);
+    if (!token) {
+      server.setBackendStatus?.({
+        kind: 'unauthenticated',
+        reason: 'No active Copilot profile',
+        remedy: {
+          title: 'Sign in to GitHub',
+          detail: 'Open Accounts and authenticate a Copilot-enabled GitHub account.',
+          action: 'auth.login',
+        },
+        model: profileModel,
+        requestedModel: process.env.OPENRAPPTER_MODEL ?? profileModel,
+      });
+      void import('./providers/copilot-token.js').then(
+        ({ clearCachedCopilotToken }) => clearCachedCopilotToken(),
+      ).catch((error) => {
+        log(
+          `${EMOJI} Copilot profile removed; cached token cleanup failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+      log(`${EMOJI} Copilot profile removed — live credential cleared`);
+      return;
+    }
+    void import('./providers/copilot-token.js')
+      .then(({ clearCachedCopilotToken, resolveCopilotApiToken }) => {
+        clearCachedCopilotToken();
+        return resolveCopilotApiToken({
+          githubToken: token,
+          signal: controller.signal,
+        });
+      })
+      .then(() => {
+        if (generation !== authTokenUpdateGeneration) return;
+        server.setBackendStatus?.({
+          kind: 'copilot-direct',
+          reason: 'Authenticated with the active Copilot profile',
+          model: profileModel,
+          requestedModel: process.env.OPENRAPPTER_MODEL ?? profileModel,
+        });
+      })
+      .catch((error) => {
+        if (generation !== authTokenUpdateGeneration) return;
+        server.setBackendStatus?.({
+          kind: 'unavailable',
+          reason: error instanceof Error ? error.message : String(error),
+          remedy: {
+            title: 'Re-authenticate GitHub',
+            detail: 'The selected account could not obtain a Copilot API token.',
+            action: 'auth.login',
+          },
+          model: profileModel,
+          requestedModel: process.env.OPENRAPPTER_MODEL ?? profileModel,
+        });
+        log(`${EMOJI} Active Copilot profile could not be validated`);
+      });
     log(`${EMOJI} Copilot token updated from profile store`);
   });
 
@@ -1305,6 +1356,12 @@ program
           releaseProcessLock: () => releaseLock({ filePath: lockFile }),
         });
         lockHandedToGateway = true;
+        const desktopOwnerPid = Number.parseInt(
+          process.env.OPENRAPPTER_DESKTOP_OWNER_PID ?? '',
+          10,
+        );
+        watchOwnerProcess(desktopOwnerPid, () =>
+          cleanup().finally(() => process.exit(0)));
         if (
           process.env.OPENRAPPTER_NODE_ID
           && process.env.OPENRAPPTER_LAUNCHD !== '1'

@@ -118,7 +118,16 @@ public struct AccountSettingsView: View {
                 }
             }
 
-            Button("Sign Out", role: .destructive) {
+            if authService.usingGatewayAuthentication {
+                Label("Managed securely by OpenRappter Desktop", systemImage: "macwindow")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button(
+                authService.usingGatewayAuthentication ? "Remove Account" : "Sign Out",
+                role: .destructive
+            ) {
                 authService.logout()
             }
             .controlSize(.small)

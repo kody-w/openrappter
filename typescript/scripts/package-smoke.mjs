@@ -230,10 +230,15 @@ try {
       action: "stop",
       session_id: started.session.id,
     }));
+    const events = await store.events(started.session.id);
+    const activation = events.find((event) => event.type === "app.activate");
+    const browser = events.find((event) => event.type === "browser.url");
     process.stdout.write(JSON.stringify({
       started: started.status,
       healthy: live.collector_healthy,
       stopped: stopped.session.state,
+      activation,
+      browser,
     }));
     store.close();
   `;
@@ -255,7 +260,13 @@ try {
   if (
     showStatus.started !== "success" ||
     showStatus.healthy !== true ||
-    showStatus.stopped !== "stopped"
+    showStatus.stopped !== "stopped" ||
+    showStatus.activation?.source !== "context-collector" ||
+    showStatus.activation?.data?.app !== "ShowAndTellTestApp" ||
+    showStatus.activation?.data?.window !== "Synthetic collector window" ||
+    !Number.isInteger(showStatus.activation?.sequence) ||
+    showStatus.browser?.data?.url !== "https://example.test/workflow" ||
+    showStatus.browser?.sequence !== showStatus.activation.sequence + 1
   ) {
     throw new Error(
       `Installed Show-and-Tell worker failed:\n${showSmoke.stdout}`,
@@ -549,6 +560,47 @@ try {
       throw new Error(`Packaged reset left Flight Recorder state: ${resetPath}`);
     }
   }
+  } else {
+    const windowsFlightDir = path.join(scratch, "windows-flight-recorder");
+    mkdirSync(windowsFlightDir, { recursive: true });
+    const recorderModule = pathToFileURL(
+      path.join(installedRoot, "dist", "flight-recorder", "recorder.js"),
+    ).href;
+    const permissionsModule = pathToFileURL(
+      path.join(installedRoot, "dist", "flight-recorder", "permissions.js"),
+    ).href;
+    const windowsFlightScript = `
+      import path from "node:path";
+      import { FlightRecorder } from ${JSON.stringify(recorderModule)};
+      import { hardenPrivatePath } from ${JSON.stringify(permissionsModule)};
+      const directory = ${JSON.stringify(windowsFlightDir)};
+      hardenPrivatePath(directory, true);
+      const recorder = new FlightRecorder({
+        enabled: true,
+        databasePath: path.join(directory, "flight.db"),
+        retentionEvents: -1,
+      });
+      try {
+        await recorder.initialize();
+        await recorder.runTrace(
+          { traceId: "windows-package-smoke" },
+          async () => {},
+        );
+        const health = await recorder.health();
+        if (!health.initialized || health.eventCount < 2) {
+          throw new Error(
+            \`Packaged Windows Flight Recorder did not persist a trace: \${JSON.stringify(health)}\`,
+          );
+        }
+      } finally {
+        await recorder.close();
+      }
+    `;
+    run(
+      process.execPath,
+      ["--input-type=module", "--eval", windowsFlightScript],
+      { cwd: installRoot },
+    );
   }
 
   console.log(

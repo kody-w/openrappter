@@ -9,6 +9,7 @@ public struct DesktopGatewayEndpoint: Codable, Equatable {
     public let port: Int
     public let token: String
     public let pid: Int32
+    public let ownerPid: Int32?
     public let updatedAt: String
 }
 
@@ -35,7 +36,8 @@ public enum DesktopGatewayDiscovery {
                 of: #"^[0-9a-f]{64}$"#,
                 options: .regularExpression
             ) != nil,
-            processIsAlive(endpoint.pid)
+            processIsAlive(endpoint.pid),
+            endpoint.ownerPid.map(processIsAlive) ?? true
         else {
             return nil
         }

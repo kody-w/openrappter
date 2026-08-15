@@ -125,13 +125,13 @@ export class OpenRappterChat extends LitElement {
 
     .icon-btn.active {
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
     }
 
     .header-btn {
       padding: 0.375rem 0.75rem;
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
       border: none;
       border-radius: 0.375rem;
       font-size: 0.8125rem;
@@ -215,7 +215,7 @@ export class OpenRappterChat extends LitElement {
 
     .group-avatar.user {
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
     }
 
     .group-avatar.assistant {
@@ -245,7 +245,7 @@ export class OpenRappterChat extends LitElement {
 
     .message.user {
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -676,7 +676,7 @@ export class OpenRappterChat extends LitElement {
     button.send-btn {
       padding: 0.75rem 1.25rem;
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
       border: none;
       border-radius: 0.5rem;
       font-size: 0.9375rem;
@@ -806,7 +806,7 @@ export class OpenRappterChat extends LitElement {
       transform: translateX(-50%);
       z-index: 10;
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
       border: none;
       border-radius: 1rem;
       padding: 0.375rem 1rem;
@@ -869,15 +869,23 @@ export class OpenRappterChat extends LitElement {
   @state() private error: string | null = null;
   @state() private sessions: ChatSessionSummary[] = [];
   @state() private sessionsLoading = false;
+  @state() private sessionTransitioning = false;
   @state() private focusMode = false;
   @state() private toolCalls: ToolCall[] = [];
   @state() private toolSidebarOpen = false;
   @state() private toolExpandedIds = new Set<string>();
   @state() private attachments: AttachmentPreview[] = [];
   @state() private draggingOver = false;
-  @state() private messageQueue: Array<{ id: string; text: string; createdAt: number }> = [];
+  @state() private messageQueue: Array<{
+    id: string;
+    text: string;
+    createdAt: number;
+    sessionKey: string | null;
+  }> = [];
   @state() private showNewMessages = false;
   @state() private userAtBottom = true;
+  private sessionLoadGeneration = 0;
+  private sendGeneration = 0;
 
   private toolSidebarWidth = 320;
   private resizing = false;
@@ -1106,17 +1114,28 @@ export class OpenRappterChat extends LitElement {
 
   private async switchSession(sessionId: string) {
     if (sessionId === this.sessionKey) return;
-    this.sessionKey = sessionId;
-    this.toolCalls = [];
-    this.error = null;
-
+    const generation = ++this.sessionLoadGeneration;
+    this.sessionTransitioning = true;
+    this.sendGeneration += 1;
+    this.messageQueue = [];
     try {
+      await this.closeActiveRun();
+      if (generation !== this.sessionLoadGeneration) return;
+      this.sessionKey = sessionId;
+      this.toolCalls = [];
+      this.error = null;
       const loaded = await gateway.call<Array<{
         id: string;
         role: 'user' | 'assistant' | 'system';
         content: string;
         timestamp: string;
       }>>('chat.messages', { sessionId, limit: 100 });
+      if (
+        generation !== this.sessionLoadGeneration ||
+        this.sessionKey !== sessionId
+      ) {
+        return;
+      }
 
       this.messages = loaded.map((m) => ({
         id: m.id,
@@ -1126,28 +1145,46 @@ export class OpenRappterChat extends LitElement {
       }));
       this.scrollToBottom();
     } catch (err) {
+      if (generation !== this.sessionLoadGeneration) return;
       this.error = `Failed to load session: ${(err as Error).message}`;
       this.messages = [];
+    } finally {
+      if (generation === this.sessionLoadGeneration) {
+        this.sessionTransitioning = false;
+        this.sending = false;
+      }
     }
   }
 
-  private startNewChat() {
-    this.sessionKey = null;
-    this.messages = [];
-    this.toolCalls = [];
-    this.activeRunId = null;
-    this.sending = false;
-    this.error = null;
-    this.attachments = [];
+  private async startNewChat() {
+    const generation = ++this.sessionLoadGeneration;
+    this.sessionTransitioning = true;
+    this.sendGeneration += 1;
+    this.messageQueue = [];
+    try {
+      await this.closeActiveRun();
+      if (generation !== this.sessionLoadGeneration) return;
+      this.sessionKey = null;
+      this.messages = [];
+      this.toolCalls = [];
+      this.activeRunId = null;
+      this.error = null;
+      this.attachments = [];
+    } finally {
+      if (generation === this.sessionLoadGeneration) {
+        this.sessionTransitioning = false;
+        this.sending = false;
+      }
+    }
   }
 
-  private handleSessionChange(e: Event) {
+  private async handleSessionChange(e: Event) {
     const select = e.target as HTMLSelectElement;
     const value = select.value;
     if (value === '__new__') {
-      this.startNewChat();
+      await this.startNewChat();
     } else if (value) {
-      this.switchSession(value);
+      await this.switchSession(value);
     }
   }
 
@@ -1181,6 +1218,13 @@ export class OpenRappterChat extends LitElement {
       errorMessage?: string;
     };
     if (!data.runId || this.closedRunIds.has(data.runId)) return;
+    if (
+      this.sessionKey &&
+      data.sessionKey &&
+      data.sessionKey !== this.sessionKey
+    ) {
+      return;
+    }
 
     if (data.state === 'delta' || data.state === 'final') {
       const text = data.message?.content
@@ -1267,12 +1311,33 @@ export class OpenRappterChat extends LitElement {
     } catch { /* best effort */ }
   }
 
+  private async closeActiveRun(): Promise<void> {
+    if (!this.activeRunId) return;
+    const runId = this.activeRunId;
+    this.rememberClosedRun(runId);
+    this.finishStreaming(runId, false);
+    this.speechGeneration += 1;
+    this.activeAudio?.pause();
+    try {
+      await gateway.request('chat.abort', { runId }, {
+        timeoutMs: RUN_ABORT_TIMEOUT_MS,
+      });
+    } catch {
+      // Switching sessions remains available if the stale run already ended.
+    }
+  }
+
   // ── Message Queue ──
 
   private enqueueMessage(text: string) {
     this.messageQueue = [
       ...this.messageQueue,
-      { id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() },
+      {
+        id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        text,
+        createdAt: Date.now(),
+        sessionKey: this.sessionKey,
+      },
     ];
   }
 
@@ -1284,6 +1349,10 @@ export class OpenRappterChat extends LitElement {
     if (this.sending || this.messageQueue.length === 0) return;
     const [next, ...rest] = this.messageQueue;
     this.messageQueue = rest;
+    if (next.sessionKey !== this.sessionKey) {
+      await this.flushQueue();
+      return;
+    }
     this.inputValue = next.text;
     await this.handleSend();
   }
@@ -1322,6 +1391,7 @@ export class OpenRappterChat extends LitElement {
   // ── Sending Messages ──
 
   private async handleSend() {
+    if (this.sessionTransitioning) return;
     const content = this.inputValue.trim();
     // Allow queueing if busy
     if (this.sending && content) {
@@ -1332,6 +1402,8 @@ export class OpenRappterChat extends LitElement {
     if (!content) return;
 
     this.sending = true;
+    const sendGeneration = ++this.sendGeneration;
+    const visibleSessionKey = this.sessionKey;
     this.inputValue = '';
     this.error = null;
 
@@ -1362,6 +1434,12 @@ export class OpenRappterChat extends LitElement {
           filename: a.filename,
         });
       }
+      if (
+        sendGeneration !== this.sendGeneration ||
+        this.sessionKey !== visibleSessionKey
+      ) {
+        return;
+      }
 
       const params: Record<string, unknown> = {
         message: content,
@@ -1376,6 +1454,16 @@ export class OpenRappterChat extends LitElement {
         sessionKey: string;
         status: string;
       }>('chat.send', params);
+      if (
+        sendGeneration !== this.sendGeneration ||
+        this.sessionKey !== visibleSessionKey
+      ) {
+        this.rememberClosedRun(result.runId);
+        void gateway.request('chat.abort', { runId: result.runId }, {
+          timeoutMs: RUN_ABORT_TIMEOUT_MS,
+        }).catch(() => {});
+        return;
+      }
 
       this.sessionKey = result.sessionKey;
       this.activeRunId = result.runId;
@@ -1397,6 +1485,7 @@ export class OpenRappterChat extends LitElement {
       this.messages = [...this.messages, assistantMessage];
       this.scrollToBottom();
     } catch (err) {
+      if (sendGeneration !== this.sendGeneration) return;
       this.error = (err as Error).message;
       this.sending = false;
     }
@@ -1412,7 +1501,7 @@ export class OpenRappterChat extends LitElement {
     this.scrollToBottom();
   }
 
-  private finishStreaming(runId: string) {
+  private finishStreaming(runId: string, flushQueued = true) {
     this.rememberClosedRun(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx >= 0) {
@@ -1426,7 +1515,7 @@ export class OpenRappterChat extends LitElement {
     this.sending = false;
     this.activeRunId = null;
     // Flush queued messages
-    if (this.messageQueue.length > 0) {
+    if (flushQueued && this.messageQueue.length > 0) {
       setTimeout(() => this.flushQueue(), 100);
     }
   }
@@ -1786,7 +1875,11 @@ export class OpenRappterChat extends LitElement {
         ${this.sessionsLoading
           ? html`<span class="loading-sessions">Loading…</span>`
           : html`
-              <select @change=${this.handleSessionChange} .value=${this.sessionKey ?? '__new__'}>
+              <select
+                @change=${this.handleSessionChange}
+                .value=${this.sessionKey ?? '__new__'}
+                ?disabled=${this.sessionTransitioning}
+              >
                 <option value="__new__">✨ New Chat</option>
                 ${this.sessions.map(
                   (s) => html`
@@ -1905,6 +1998,7 @@ export class OpenRappterChat extends LitElement {
                 @dragover=${this.handleDragOver}
                 @dragleave=${this.handleDragLeave}
                 @drop=${this.handleDrop}
+                ?disabled=${this.sessionTransitioning}
                 rows="1"
               ></textarea>
               ${this.sending && this.activeRunId
@@ -1913,7 +2007,7 @@ export class OpenRappterChat extends LitElement {
               <button
                 class="send-btn"
                 @click=${this.handleSend}
-                ?disabled=${!this.inputValue.trim() && !this.sending}
+                ?disabled=${this.sessionTransitioning || (!this.inputValue.trim() && !this.sending)}
               >
                 ${this.sending ? 'Queue' : 'Send'}<span class="btn-kbd">↵</span>
               </button>

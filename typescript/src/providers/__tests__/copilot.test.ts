@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createHash } from 'crypto';
 
 // ── copilot-token.ts tests ───────────────────────────────────────────────────
 
@@ -56,6 +57,7 @@ describe('copilot-token', () => {
         token: 'cached-token;proxy-ep=proxy.test.com',
         expiresAt: Date.now() + 3600 * 1000,
         updatedAt: Date.now(),
+        githubTokenFingerprint: createHash('sha256').update('gh-token').digest('hex'),
       };
       fs.writeFileSync(cachePath, JSON.stringify(cached));
 
@@ -68,6 +70,64 @@ describe('copilot-token', () => {
       expect(result.token).toBe(cached.token);
       expect(result.source).toContain('cache');
       expect(result.baseUrl).toBe('https://api.test.com');
+    });
+
+    it('should not reuse a cached token from another GitHub account', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'other-account-token.json');
+      fs.writeFileSync(cachePath, JSON.stringify({
+        token: 'previous-account-token',
+        expiresAt: Date.now() + 3600 * 1000,
+        updatedAt: Date.now(),
+        githubTokenFingerprint: createHash('sha256')
+          .update('previous-github-token')
+          .digest('hex'),
+      }));
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          token: 'replacement-account-token',
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        }),
+      });
+
+      const result = await resolveCopilotApiToken({
+        githubToken: 'replacement-github-token',
+        cachePath,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+      });
+
+      expect(result.token).toBe('replacement-account-token');
+      expect(mockFetch).toHaveBeenCalledOnce();
+    });
+
+    it('should not cache a token after its account update is cancelled', async () => {
+      const { resolveCopilotApiToken } = await import('../copilot-token.js');
+      const cachePath = path.join(tmpDir, 'cancelled-account-token.json');
+      const controller = new AbortController();
+      let resolveJson: ((value: unknown) => void) | undefined;
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => new Promise((resolve) => {
+          resolveJson = resolve;
+        }),
+      });
+
+      const pending = resolveCopilotApiToken({
+        githubToken: 'cancelled-github-token',
+        cachePath,
+        fetchImpl: mockFetch as unknown as typeof fetch,
+        signal: controller.signal,
+      });
+      await vi.waitFor(() => expect(resolveJson).toBeDefined());
+      controller.abort();
+      resolveJson?.({
+        token: 'must-not-be-cached',
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      expect(fs.existsSync(cachePath)).toBe(false);
     });
 
     it('should fetch new token when cache is expired', async () => {
@@ -479,6 +539,15 @@ describe('CopilotProvider', () => {
     const provider = new CopilotProvider();
     const available = await provider.isAvailable();
     expect(available).toBe(false);
+  });
+
+  it('should not restore ambient credentials after explicit profile removal', async () => {
+    const { CopilotProvider } = await import('../copilot.js');
+    process.env.GITHUB_TOKEN = 'ambient-account-token';
+
+    const provider = new CopilotProvider({ allowAmbientCredentials: false });
+
+    expect(await provider.isAvailable()).toBe(false);
   });
 
   it('should expose default models', async () => {

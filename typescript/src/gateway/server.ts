@@ -171,7 +171,7 @@ export class GatewayServer {
   private rappterManager?: RappterManager;
 
   // Callback to update the running Copilot provider token after auth.login
-  private onAuthTokenUpdate?: (token: string) => void;
+  private onAuthTokenUpdate?: (token: string | null) => void;
 
   // External handlers
   private agentHandler?: (
@@ -420,7 +420,7 @@ export class GatewayServer {
    * Register a callback invoked when auth.login or auth.switch provides a new token.
    * Use this to update the running Copilot provider without a restart.
    */
-  setAuthTokenCallback(cb: (token: string) => void): void {
+  setAuthTokenCallback(cb: (token: string | null) => void): void {
     this.onAuthTokenUpdate = cb;
   }
 
@@ -2297,7 +2297,7 @@ export class GatewayServer {
 
     // Auth profile methods (device-code login, switch, remove)
     registerAuthMethods(this, {
-      onAuthTokenUpdate: (token: string) => this.onAuthTokenUpdate?.(token),
+      onAuthTokenUpdate: (token: string | null) => this.onAuthTokenUpdate?.(token),
       dataDir: this.dataDir,
     });
 

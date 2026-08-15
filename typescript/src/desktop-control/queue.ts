@@ -95,7 +95,11 @@ export class DesktopCommandQueue {
   async execute(
     action: DesktopControlAction,
     args: Record<string, unknown> = {},
-    timeoutMs = action === 'install_agent' ? 20 * 60_000 : 30_000,
+    timeoutMs = action === 'install_agent'
+      ? process.env.OPENRAPPTER_DESKTOP_SMOKE === '1'
+        ? 60_000
+        : 20 * 60_000
+      : 30_000,
   ): Promise<DesktopCommandResult> {
     const now = Date.now();
     const command: DesktopCommand = {

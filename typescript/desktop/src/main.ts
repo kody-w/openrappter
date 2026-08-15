@@ -90,6 +90,7 @@ let narrationService: NarrationService | undefined;
 let vibeVoiceService: VibeVoiceService | undefined;
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
+let smokeWatchdog: NodeJS.Timeout | undefined;
 let microphonePermissionGrantedUntil = 0;
 const desktopOwnedSessions = new Set<string>();
 let desktopQueue:
@@ -942,6 +943,7 @@ async function installAgentFromCommand(
         Authorization: `Bearer ${gatewayToken}`,
       },
       body: JSON.stringify(compiled),
+      signal: AbortSignal.timeout(30_000),
     });
     const result = await response.json() as Record<string, unknown>;
     if (!response.ok || result.status !== 'ok') {
@@ -1399,6 +1401,10 @@ if (!ownsInstanceLock) {
         smokeRoot,
         'desktop-control',
       );
+      smokeWatchdog = setTimeout(() => {
+        console.error('OPENRAPPTER_DESKTOP_SMOKE_ERROR timed out after three minutes');
+        app.exit(1);
+      }, 180_000);
     }
     try {
       await chooseGatewayPort();
@@ -1533,6 +1539,7 @@ if (!ownsInstanceLock) {
   });
 
   app.on('quit', () => {
+    if (smokeWatchdog) clearTimeout(smokeWatchdog);
     if (commandTimer) clearInterval(commandTimer);
     if (smokeRoot) {
       rmSync(smokeRoot, { recursive: true, force: true });

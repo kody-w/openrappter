@@ -290,17 +290,19 @@ try {
   });
   const managedDirectory = path.join(managedHome, ".openrappter");
   const managedDatabase = path.join(managedDirectory, "flight-recorder.db");
-  if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
-    throw new Error("Packaged default Flight Recorder directory is not 0700");
-  }
-  if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
-    throw new Error("Packaged default Flight Recorder database is not 0600");
-  }
-  if (
-    (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
-    0o600
-  ) {
-    throw new Error("Packaged Flight Recorder identity key is not 0600");
+  if (process.platform !== "win32") {
+    if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
+      throw new Error("Packaged default Flight Recorder directory is not 0700");
+    }
+    if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
+      throw new Error("Packaged default Flight Recorder database is not 0600");
+    }
+    if (
+      (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
+      0o600
+    ) {
+      throw new Error("Packaged Flight Recorder identity key is not 0600");
+    }
   }
 
   // ShellAgent is deterministic and needs no provider credential.
@@ -493,7 +495,10 @@ try {
   if (exported.schema !== "openrappter-flight-export/1.0") {
     throw new Error("Packaged flight export has the wrong schema");
   }
-  if ((statSync(exportPath).mode & 0o777) !== 0o600) {
+  if (
+    process.platform !== "win32" &&
+    (statSync(exportPath).mode & 0o777) !== 0o600
+  ) {
     throw new Error("Packaged flight export overwrite is not mode 0600");
   }
 

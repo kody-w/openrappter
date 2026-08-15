@@ -284,17 +284,26 @@ export async function spawnShowAndTellCollector(
     ];
   }
 
-  const child = spawn(executable, args, {
-    detached: true,
-    stdio: 'ignore',
-    env: {
-      ...process.env,
-      ...(process.versions.electron && executable === process.execPath
-        ? { ELECTRON_RUN_AS_NODE: '1' }
-        : {}),
-      OPENRAPPTER_SHOW_AND_TELL_DIR: root,
-    },
-  });
+  let child;
+  try {
+    child = spawn(executable, args, {
+      detached: true,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        ...(process.versions.electron && executable === process.execPath
+          ? { ELECTRON_RUN_AS_NODE: '1' }
+          : {}),
+        OPENRAPPTER_SHOW_AND_TELL_DIR: root,
+      },
+    });
+  } catch (error) {
+    throw new Error(
+      `Show-and-Tell collector could not start: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   return new Promise<SpawnedCollector>((resolve, reject) => {
     let settled = false;
     child.on('error', (error) => {

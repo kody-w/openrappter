@@ -50,7 +50,10 @@ jobs:
       - name: Run real Electron smoke on Linux
         if: runner.os == 'Linux'
         working-directory: typescript/desktop
-        run: xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
 
       - name: Run real Electron smoke on macOS
         if: runner.os == 'macOS'

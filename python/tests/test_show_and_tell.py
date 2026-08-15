@@ -134,8 +134,10 @@ def test_agent_uses_thread_local_store_connections(tmp_path):
     stores = []
 
     def collect():
-        stores.append(agent.store)
+        store = agent.store
         json.loads(agent.perform(action="list"))
+        stores.append((store, store.connection))
+        store.close()
 
     first = threading.Thread(target=collect)
     second = threading.Thread(target=collect)
@@ -144,8 +146,8 @@ def test_agent_uses_thread_local_store_connections(tmp_path):
     first.join()
     second.join()
     assert len(stores) == 2
-    assert stores[0] is not stores[1]
-    assert stores[0].connection is not stores[1].connection
+    assert stores[0][0] is not stores[1][0]
+    assert stores[0][1] is not stores[1][1]
 
 
 def test_healthy_sixty_second_poll_is_not_recovered_as_stale(tmp_path):

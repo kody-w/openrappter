@@ -67,7 +67,7 @@ __manifest__ = {
     ),
     "author": "Kody Wildfeuer",
     "ring": "ga",
-    "capabilities": ["filesystem-write", "process-exec"],
+    "capabilities": [],
     "tags": ["openrappter", "show-and-tell", "automation", "skills"],
     "category": "meta",
     "quality_tier": "official",

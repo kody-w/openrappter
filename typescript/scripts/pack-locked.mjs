@@ -23,10 +23,17 @@ if (!existing) writeFileSync(shrinkwrap, locked);
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 try {
-  const result = spawnSync(npm, ['pack', ...process.argv.slice(2)], {
+  const npmCli = process.env.npm_execpath;
+  const command = npmCli ? process.execPath : npm;
+  const args = npmCli
+    ? [npmCli, 'pack', ...process.argv.slice(2)]
+    : ['pack', ...process.argv.slice(2)];
+  const result = spawnSync(command, args, {
     cwd: root,
     stdio: 'inherit',
+    shell: process.platform === 'win32' && !npmCli,
   });
+  if (result.error) throw result.error;
   process.exitCode = result.status ?? 1;
 } finally {
   if (!existing) rmSync(shrinkwrap, { force: true });

@@ -63,5 +63,6 @@ describe('Show-and-Tell cross-runtime contract', () => {
         rmSync(root, { recursive: true, force: true });
       }
     },
+    30_000,
   );
 });

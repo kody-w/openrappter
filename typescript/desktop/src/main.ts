@@ -1375,7 +1375,6 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
     stopOwnedGateway(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
-  app.exit(exitCode);
   process.exit(exitCode);
 }
 

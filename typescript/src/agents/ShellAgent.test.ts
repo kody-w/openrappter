@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ShellAgent } from './ShellAgent.js';
+import { agentResultIsError } from './result-status.js';
 
 describe('ShellAgent — safety wiring', () => {
   describe('safe commands', () => {
@@ -25,6 +26,15 @@ describe('ShellAgent — safety wiring', () => {
       const result = JSON.parse(await agent.execute({ query: 'run echo hello-from-query' }));
       expect(result.status).toBe('success');
       expect(result.output).toContain('hello-from-query');
+    });
+
+    it('reports a nonzero exit as an agent-contract error', async () => {
+      const agent = new ShellAgent();
+      const resultJson = await agent.execute({ action: 'bash', command: 'false' });
+      const result = JSON.parse(resultJson);
+
+      expect(result.status).toBe('error');
+      expect(agentResultIsError(resultJson)).toBe(true);
     });
   });
 

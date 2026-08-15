@@ -211,7 +211,7 @@ class ShellAgent(BasicAgent):
             
             output = result.stdout or result.stderr
             return json.dumps({
-                "status": "success",
+                "status": "success" if result.returncode == 0 else "error",
                 "command": command,
                 "output": output[:2000] if output else "(no output)",
                 "return_code": result.returncode

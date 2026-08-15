@@ -6,6 +6,7 @@ import pytest
 from pathlib import Path
 
 from openrappter.agents.shell_agent import ShellAgent
+from openrappter.result_status import agent_result_is_error
 
 
 @pytest.fixture
@@ -34,8 +35,11 @@ class TestBashAction:
         assert result["return_code"] == 0
 
     def test_failed_command(self, agent):
-        result = json.loads(agent.perform(action="bash", command="false"))
+        result_json = agent.perform(action="bash", command="false")
+        result = json.loads(result_json)
+        assert result["status"] == "error"
         assert result["return_code"] != 0
+        assert agent_result_is_error(result_json) is True
 
     def test_no_command_error(self, agent):
         result = json.loads(agent.perform(action="bash", command=""))

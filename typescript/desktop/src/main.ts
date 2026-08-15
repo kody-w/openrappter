@@ -1376,6 +1376,7 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
   app.exit(exitCode);
+  setImmediate(() => process.exit(exitCode));
 }
 
 if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {

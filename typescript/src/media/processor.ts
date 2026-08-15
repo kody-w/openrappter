@@ -36,6 +36,12 @@ const DEFAULT_CONFIG: MediaConfig = {
   maxDocumentSize: 10 * 1024 * 1024, // 10MB
 };
 
+function hostnameMatchesDomain(hostname: string, configuredDomain: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  const domain = configuredDomain.trim().toLowerCase().replace(/^\./, '').replace(/\.$/, '');
+  return domain.length > 0 && (host === domain || host.endsWith(`.${domain}`));
+}
+
 export class MediaProcessor {
   private config: MediaConfig;
   private transcriptionService?: TranscriptionService;
@@ -68,11 +74,11 @@ export class MediaProcessor {
 
     const { allowedDomains, blockedDomains } = this.config;
     if (allowedDomains && allowedDomains.length > 0) {
-      if (!allowedDomains.some(domain => hostname.endsWith(domain))) {
+      if (!allowedDomains.some(domain => hostnameMatchesDomain(hostname, domain))) {
         throw new Error(`Domain ${hostname} is not in allowed list`);
       }
     }
-    if (blockedDomains && blockedDomains.some(domain => hostname.endsWith(domain))) {
+    if (blockedDomains && blockedDomains.some(domain => hostnameMatchesDomain(hostname, domain))) {
       throw new Error(`Domain ${hostname} is blocked`);
     }
   }

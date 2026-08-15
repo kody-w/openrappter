@@ -226,10 +226,10 @@ describe('Cron Service Parity', () => {
     it('should support cron.remove', () => {
       const request = {
         method: 'cron.remove',
-        params: { id: 'job_1' },
+        params: { jobId: 'job_1' },
       };
 
-      expect(request.params.id).toBeDefined();
+      expect(request.params.jobId).toBeDefined();
     });
 
     it('should support cron.list', () => {
@@ -269,10 +269,10 @@ describe('Cron Service Parity', () => {
     it('should support cron.run (immediate execution)', () => {
       const request = {
         method: 'cron.run',
-        params: { id: 'job_1' },
+        params: { jobId: 'job_1' },
       };
 
-      expect(request.params.id).toBeDefined();
+      expect(request.params.jobId).toBeDefined();
     });
   });
 });

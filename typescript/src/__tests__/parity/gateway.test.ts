@@ -227,11 +227,11 @@ describe('Gateway Parity', () => {
         const request = {
           method: 'cron.run',
           params: {
-            id: 'job_1',
+            jobId: 'job_1',
           },
         };
 
-        expect(request.params.id).toBeDefined();
+        expect(request.params.jobId).toBeDefined();
       });
     });
 

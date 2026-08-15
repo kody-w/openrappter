@@ -55,7 +55,7 @@ export function registerCronCommand(program: Command): void {
     .description('Remove a cron job')
     .action(async (id: string) => {
       await withClient(async (client) => {
-        await client.call('cron.remove', { id });
+        await client.call('cron.remove', { jobId: id });
         console.log(`Removed cron job: ${id}`);
       });
     });
@@ -65,7 +65,7 @@ export function registerCronCommand(program: Command): void {
     .description('Run a cron job immediately')
     .action(async (id: string) => {
       await withClient(async (client) => {
-        const result = await client.call('cron.run', { id });
+        const result = await client.call('cron.run', { jobId: id });
         console.log('Job result:', result);
       });
     });
@@ -76,7 +76,7 @@ export function registerCronCommand(program: Command): void {
     .option('--disable', 'Disable instead of enable')
     .action(async (id: string, options: { disable?: boolean }) => {
       await withClient(async (client) => {
-        await client.call('cron.enable', { id, enabled: !options.disable });
+        await client.call('cron.enable', { jobId: id, enabled: !options.disable });
         console.log(`${options.disable ? 'Disabled' : 'Enabled'} cron job: ${id}`);
       });
     });

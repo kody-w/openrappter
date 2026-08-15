@@ -2152,9 +2152,25 @@ export class GatewayServer {
     });
     this.registerMethod('cron.add', this.addCronJob, { requiresAuth: true });
     this.registerMethod('cron.remove', async (params: { jobId: string }) => {
-      if (this.cronService?.remove) await this.cronService.remove(params.jobId);
-      this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== params.jobId);
-      this.saveCronStore();
+      const jobId = params.jobId;
+      let removed = false;
+
+      if (jobId && this.cronService?.remove) {
+        const known = this.cronService.list().some((j) => j.id === jobId);
+        if (known) {
+          await this.cronService.remove(jobId);
+          removed = true;
+        }
+      }
+
+      const previousLength = this.cronStore.length;
+      this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== jobId);
+      if (this.cronStore.length !== previousLength) {
+        this.saveCronStore();
+        removed = true;
+      }
+
+      if (!removed) throw new Error(`Cron job not found: ${jobId || '(empty id)'}`);
       return { removed: true };
     }, { requiresAuth: true });
     this.registerMethod('cron.run', async (params: { jobId: string }) => {

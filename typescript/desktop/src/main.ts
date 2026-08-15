@@ -1375,7 +1375,28 @@ async function finishDesktopSmoke(exitCode: number): Promise<void> {
     stopOwnedGateway(),
     vibeVoiceService?.stop() ?? Promise.resolve(),
   ]);
+  if (commandTimer) clearInterval(commandTimer);
+  removeOwnedDesktopEndpoint();
+  if (smokeRoot && process.platform !== 'win32') {
+    rmSync(smokeRoot, { recursive: true, force: true });
+  }
+  const hardProcess = process as NodeJS.Process & {
+    reallyExit?: (code?: number) => never;
+  };
+  if (hardProcess.reallyExit) hardProcess.reallyExit(exitCode);
   process.exit(exitCode);
+}
+
+function removeOwnedDesktopEndpoint(): void {
+  if (!endpointFile) return;
+  try {
+    const endpoint = JSON.parse(
+      readFileSync(endpointFile, 'utf8'),
+    ) as { pid?: unknown };
+    if (endpoint.pid === process.pid) rmSync(endpointFile, { force: true });
+  } catch {
+    // A newer desktop process may own the endpoint.
+  }
 }
 
 if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
@@ -1583,15 +1604,6 @@ if (!ownsInstanceLock) {
     if (smokeRoot) {
       rmSync(smokeRoot, { recursive: true, force: true });
     }
-    if (endpointFile) {
-      try {
-        const endpoint = JSON.parse(
-          readFileSync(endpointFile, 'utf8'),
-        ) as { pid?: unknown };
-        if (endpoint.pid === process.pid) rmSync(endpointFile, { force: true });
-      } catch {
-        // A newer desktop process may own the endpoint.
-      }
-    }
+    removeOwnedDesktopEndpoint();
   });
 }

@@ -127,7 +127,7 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /SMOKE_ERROR instance lock unavailable/);
   assert.match(main, /async function finishDesktopSmoke/);
   assert.match(main, /child\.kill\('SIGKILL'\)/);
-  assert.match(main, /await Promise\.allSettled[\s\S]*process\.exit\(exitCode\)/);
+  assert.match(main, /await Promise\.allSettled[\s\S]*hardProcess\.reallyExit\(exitCode\)/);
   assert.match(
     main,
     /OPENRAPPTER_DESKTOP_SMOKE === '1'[\s\S]*OPENRAPPTER_SMOKE_ERROR/,

@@ -29,7 +29,10 @@ const agents: Array<[string, () => Validator]> = [
 
 const REFUSED = [
   ['IPv6 loopback', 'http://[::1]/'],
-  ['IPv6 link-local', 'http://[fe80::1]/'],
+  ['IPv6 link-local lower boundary', 'http://[fe80::1]/'],
+  ['IPv6 link-local fe90 subnet', 'http://[fe90::1]/'],
+  ['IPv6 link-local fea0 subnet', 'http://[fea0::1]/'],
+  ['IPv6 link-local upper boundary', 'http://[febf::1]/'],
   ['IPv4-mapped loopback', 'http://[::ffff:127.0.0.1]/'],
   ['IPv4 loopback', 'http://127.0.0.1/'],
   ['RFC 1918', 'http://10.0.0.1/'],
@@ -67,7 +70,7 @@ describe('normaliseHost', () => {
 });
 
 describe('isBlockedHost', () => {
-  it.each(['::1', '::', 'fe80::1', 'fc00::1', 'fd12::1', '127.0.0.1', '169.254.169.254', 'localhost'])(
+  it.each(['::1', '::', 'fe80::1', 'fe90::1', 'fea0::1', 'febf::1', 'fc00::1', 'fd12::1', '127.0.0.1', '169.254.169.254', 'localhost'])(
     'blocks %s', (host) => expect(isBlockedHost(host)).toBe(true),
   );
 

@@ -114,6 +114,27 @@ describe('cron.add reaches the running scheduler', () => {
     expect(sched.jobs).toHaveLength(0);
   });
 
+  it('does not report success for a job that does not exist', async () => {
+    const server = await boot();
+    server.setCronService(fakeScheduler().service as never);
+
+    await expect(
+      methodsOf(server).get('cron.remove')!.handler(
+        { jobId: 'no-such-job' },
+        null,
+      ),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('does not report success when the client sends no job id', async () => {
+    const server = await boot();
+    server.setCronService(fakeScheduler().service as never);
+
+    await expect(
+      methodsOf(server).get('cron.remove')!.handler({ jobId: '' }, null),
+    ).rejects.toThrow(/not found/i);
+  });
+
   // Older hosts wire no scheduler. Saving to disk is still useful, but the
   // caller must not be told it was scheduled when it was not.
   it('says so plainly when it could only reach the file', async () => {

@@ -81,4 +81,23 @@ describe('cron add sends what the gateway actually reads', () => {
       agentId: 'GoogleVoice',
     });
   });
+
+  describe('cron job actions send the identifier the gateway actually reads', () => {
+    it.each(['remove', 'run'])('sends `jobId` for cron %s', async (action) => {
+      await runCron([action, 'job-7']);
+
+      expect(calls.find(c => c.method === `cron.${action}`)!.params).toEqual({
+        jobId: 'job-7',
+      });
+    });
+
+    it('sends `jobId` and the requested state for cron enable', async () => {
+      await runCron(['enable', 'job-7', '--disable']);
+
+      expect(calls.find(c => c.method === 'cron.enable')!.params).toEqual({
+        jobId: 'job-7',
+        enabled: false,
+      });
+    });
+  });
 });

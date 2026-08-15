@@ -147,6 +147,7 @@ func runGatewayConnectionTests() async throws {
             let connId = await conn.connectionId
             try expectEqual(connId, "conn_test123")
 
+            _ = try await mock.waitForSentCount(1)
             let sent = mock.lastSentJSON()
             try expectEqual(sent?["type"] as? String, "req")
             try expectEqual(sent?["method"] as? String, "connect")

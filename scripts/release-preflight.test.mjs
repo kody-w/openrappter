@@ -30,6 +30,9 @@ function validState(overrides = {}) {
     typescriptPackageVersion: VERSION,
     typescriptPackageLockVersion: VERSION,
     typescriptPackageLockRootVersion: VERSION,
+    desktopPackageVersion: VERSION,
+    desktopPackageLockVersion: VERSION,
+    desktopPackageLockRootVersion: VERSION,
     pythonProjectName: PACKAGE_NAME,
     pythonProjectVersion: VERSION,
     typescriptRuntimeVersion: VERSION,
@@ -114,7 +117,7 @@ test('rejects a tag that does not match package and runtime versions', () => {
     artifactNames: undefined,
   }));
 
-  assert.equal(errors.length, 6);
+  assert.equal(errors.length, 9);
   assert.ok(errors.every((error) =>
     error.includes('does not match tag version 1.10.1')));
 });
@@ -489,7 +492,30 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   assert.match(workflow, /python -m build --no-isolation/);
   assert.match(workflow, /overwrite: true/);
   assert.match(workflow, /overwrite_files: true/);
-  assert.match(workflow, /needs: \[preflight, publish-registries\]/);
+  assert.match(
+    workflow,
+    /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts\]/,
+  );
+  assert.match(
+    workflow,
+    /needs: \[preflight, publish-registries, build-electron-artifacts\]/,
+  );
+  assert.match(workflow, /node scripts\/pack-locked\.mjs/);
+  const desktopJob = workflow.slice(
+    workflow.indexOf('  build-electron-artifacts:'),
+    workflow.indexOf('  build-artifacts:'),
+  );
+  assert.ok(
+    desktopJob.indexOf('- name: Install desktop dependencies')
+      < desktopJob.indexOf('- name: Prepare macOS notarization key'),
+  );
+  assert.doesNotMatch(
+    desktopJob.slice(0, desktopJob.indexOf('    steps:')),
+    /MACOS_CERTIFICATE|APPLE_API_KEY/,
+  );
+  assert.match(workflow, /desktop-dist\/\*\.dmg/);
+  assert.match(workflow, /desktop-dist\/\*\.exe/);
+  assert.match(workflow, /desktop-dist\/\*\.AppImage/);
 });
 
 test('generated macOS release notes use the live Homebrew tap', () => {

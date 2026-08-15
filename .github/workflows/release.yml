@@ -154,9 +154,206 @@ jobs:
         working-directory: python
         run: python -m pytest tests/test_flight_recorder_windows.py -q
 
+  show-and-tell-gate:
+    name: Show-and-Tell ${{ matrix.os }} gate
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python/pyproject.toml
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: npm ci
+
+      - name: Install Python runtime and test dependencies
+        run: python -m pip install -e "python[dev]"
+
+      - name: Build TypeScript runtime
+        working-directory: typescript
+        run: npm run build:server
+
+      - name: Run Show-and-Tell TypeScript tests
+        working-directory: typescript
+        run: >-
+          npx vitest run
+          src/show-and-tell/show-and-tell.test.ts
+          src/show-and-tell/cross-runtime.test.ts
+          src/agents/ComputerUseAgent.test.ts
+
+      - name: Run Show-and-Tell Python tests
+        working-directory: python
+        run: python -m pytest -q tests/test_show_and_tell.py tests/test_computer_use_security.py
+
+      - name: Exercise detached workers
+        run: node tools/show-and-tell-smoke.mjs
+
+  electron-desktop-gate:
+    name: Electron desktop gate
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/ui/package-lock.json
+            typescript/desktop/package-lock.json
+
+      - name: Install and build OpenRappter core
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install, compile, and test Electron desktop
+        working-directory: typescript/desktop
+        run: |
+          npm ci
+          npm run build
+          npm test
+          npm audit --omit=dev --audit-level=high
+
+      - name: Run real Electron smoke
+        working-directory: typescript/desktop
+        run: xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
+
+  build-electron-artifacts:
+    name: Build Electron ${{ matrix.os }}
+    needs: [preflight, electron-desktop-gate]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: mac
+            runner: macos-14
+          - os: win
+            runner: windows-latest
+          - os: linux
+            runner: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/ui/package-lock.json
+            typescript/desktop/package-lock.json
+
+      - name: Build OpenRappter core and UI
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install desktop dependencies
+        working-directory: typescript/desktop
+        run: npm ci
+
+      - name: Build desktop source
+        working-directory: typescript/desktop
+        run: npm run build
+
+      - name: Prepare macOS notarization key
+        id: notarization
+        if: matrix.os == 'mac'
+        shell: bash
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_API_KEY_P8_BASE64"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 -D > "$key_path"
+          chmod 600 "$key_path"
+          printf 'path=%s\n' "$key_path" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed desktop distributions
+        working-directory: typescript/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.os == 'mac' && 'true' || 'false' }}
+          CSC_LINK: ${{ matrix.os == 'mac' && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'mac' && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY: ${{ matrix.os == 'mac' && steps.notarization.outputs.path || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.os == 'mac' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.os == 'mac' && secrets.APPLE_API_ISSUER_ID || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "mac" ]; then
+            test -n "$CSC_LINK"
+            test -n "$CSC_KEY_PASSWORD"
+            test -n "$APPLE_API_KEY"
+            test -n "$APPLE_API_KEY_ID"
+            test -n "$APPLE_API_ISSUER"
+          fi
+          npx --no-install electron-builder --publish never
+
+      - name: Require signed and notarized macOS release
+        if: matrix.os == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(
+            find typescript/desktop/dist \
+              -maxdepth 3 \
+              -type d \
+              -name 'OpenRappter.app' \
+              -print \
+              -quit
+          )"
+          test -n "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          spctl --assess --type execute --verbose=2 "$app_path"
+          xcrun stapler validate "$app_path"
+
+      - name: Remove temporary notarization key
+        if: always() && matrix.os == 'mac'
+        shell: bash
+        run: rm -f "${{ steps.notarization.outputs.path }}"
+
+      - name: Upload desktop distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ needs.preflight.outputs.version }}
+          path: |
+            typescript/desktop/dist/*.dmg
+            typescript/desktop/dist/*.zip
+            typescript/desktop/dist/*.exe
+            typescript/desktop/dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
   build-artifacts:
     name: Build release artifacts once
-    needs: [preflight, flight-recorder-gate, flight-recorder-windows]
+    needs: [preflight, flight-recorder-gate, flight-recorder-windows, show-and-tell-gate, electron-desktop-gate]
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
@@ -190,7 +387,9 @@ jobs:
           npm ci --ignore-scripts
           npm run build
           mkdir -p ../release-dist
-          npm pack --ignore-scripts --pack-destination ../release-dist
+          node scripts/pack-locked.mjs \
+            --ignore-scripts \
+            --pack-destination ../release-dist
 
       - name: Build Python wheel and sdist
         run: |
@@ -272,6 +471,8 @@ jobs:
             "$RUNNER_TEMP/openrappter-npm-smoke/bin/openrappter" --version
           )"
           test "$reported_version" = "$RELEASE_VERSION"
+          "$RUNNER_TEMP/openrappter-npm-smoke/bin/openrappter" show --help \
+            | grep -qi "show-and-tell"
 
       - uses: actions/setup-python@v5
         with:
@@ -290,6 +491,10 @@ jobs:
           )"
           test "$reported_version" = "$RELEASE_VERSION"
           "$RUNNER_TEMP/openrappter-wheel-smoke/bin/openrappter" --version
+          (
+            cd "$RUNNER_TEMP"
+            openrappter-wheel-smoke/bin/python -c 'import openrappter.show_and_tell, openrappter.show_and_tell_worker; from openrappter.cli import AgentRegistry; names = {item["name"] for item in AgentRegistry(load_skills=False).list_agents()}; assert "ShowAndTell" in names'
+          )
 
       - name: Smoke-install Python sdist in a second clean environment
         shell: bash
@@ -304,10 +509,14 @@ jobs:
           )"
           test "$reported_version" = "$RELEASE_VERSION"
           "$RUNNER_TEMP/openrappter-sdist-smoke/bin/openrappter" --version
+          (
+            cd "$RUNNER_TEMP"
+            openrappter-sdist-smoke/bin/python -c 'import openrappter.show_and_tell, openrappter.show_and_tell_worker; from openrappter.cli import AgentRegistry; names = {item["name"] for item in AgentRegistry(load_skills=False).list_agents()}; assert "ShowAndTell" in names'
+          )
 
   publish-registries:
     name: Reconcile and publish exact registry artifacts
-    needs: [preflight, smoke-artifacts]
+    needs: [preflight, smoke-artifacts, build-electron-artifacts]
     runs-on: ubuntu-latest
     concurrency:
       group: openrappter-registry-publication
@@ -451,7 +660,7 @@ jobs:
 
   github-release:
     name: Create checksummed GitHub Release
-    needs: [preflight, publish-registries]
+    needs: [preflight, publish-registries, build-electron-artifacts]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -467,6 +676,21 @@ jobs:
         working-directory: release-dist
         run: sha256sum --check SHA256SUMS
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*-${{ env.RELEASE_VERSION }}
+          path: desktop-dist
+          merge-multiple: true
+
+      - name: Generate desktop checksums
+        working-directory: desktop-dist
+        run: |
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS-DESKTOP' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > SHA256SUMS-DESKTOP
+          sha256sum --check SHA256SUMS-DESKTOP
+
       - name: Create GitHub Release with generated notes
         uses: softprops/action-gh-release@v2
         with:
@@ -479,3 +703,8 @@ jobs:
             release-dist/openrappter-${{ env.RELEASE_VERSION }}-py3-none-any.whl
             release-dist/openrappter-${{ env.RELEASE_VERSION }}.tar.gz
             release-dist/SHA256SUMS
+            desktop-dist/*.dmg
+            desktop-dist/*.zip
+            desktop-dist/*.exe
+            desktop-dist/*.AppImage
+            desktop-dist/SHA256SUMS-DESKTOP

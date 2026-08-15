@@ -1,0 +1,71 @@
+name: Electron Desktop
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/ui/package-lock.json
+            typescript/desktop/package-lock.json
+
+      - name: Install and build OpenRappter core
+        working-directory: typescript
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Electron desktop runtime
+        working-directory: typescript/desktop
+        run: npm ci
+
+      - name: Compile and test desktop security contract
+        working-directory: typescript/desktop
+        run: |
+          npm run build
+          npm test
+
+      - name: Audit desktop production dependencies
+        working-directory: typescript/desktop
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run real Electron smoke on Linux
+        if: runner.os == 'Linux'
+        working-directory: typescript/desktop
+        run: xvfb-run -a env OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
+
+      - name: Run real Electron smoke on macOS
+        if: runner.os == 'macOS'
+        working-directory: typescript/desktop
+        run: OPENRAPPTER_DESKTOP_SMOKE=1 ./node_modules/.bin/electron .
+
+      - name: Run real Electron smoke on Windows
+        if: runner.os == 'Windows'
+        working-directory: typescript/desktop
+        shell: pwsh
+        run: |
+          $env:OPENRAPPTER_DESKTOP_SMOKE = "1"
+          .\node_modules\.bin\electron.cmd .
+
+      - name: Build unpacked macOS application
+        if: runner.os == 'macOS'
+        working-directory: typescript/desktop
+        run: CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist -- --dir

@@ -19,6 +19,7 @@ import { registerTwinCommands } from './twin/index.js';
 import { registerCronCommand } from './cli/cron.js';
 import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
+import { registerShowAndTellCommand } from './cli/show-and-tell.js';
 import { portTypedOnCommandLine } from './infra/cli-port.js';
 import {
   ensureFlightRecorderFromEnv,
@@ -175,6 +176,9 @@ async function startGatewayInProcess(opts?: {
   if (backend.provider) {
     const learner = agents.get('LearnNew') ?? agents.get('LearnNewAgent');
     (learner as unknown as { setProvider?: (p: unknown) => void } | undefined)
+      ?.setProvider?.(backend.provider);
+    const showAndTell = agents.get('ShowAndTell');
+    (showAndTell as unknown as { setProvider?: (p: unknown) => void } | undefined)
       ?.setProvider?.(backend.provider);
   }
   if (backend.kind === 'none' && backend.remedy) {
@@ -1331,6 +1335,11 @@ program
           port,
           pid: process.pid,
           startedAt: new Date().toISOString(),
+        });
+        process.send?.({
+          schema: 'openrappter-gateway-ready/1.0',
+          pid: process.pid,
+          port,
         });
         // A hatched twin is only useful if someone can reach it, so it says
         // where it lives rather than leaving the owner to derive the port. #101
@@ -2521,6 +2530,7 @@ registerCronCommand(program);
 // Seeing and creating the rappters on this device. #107
 registerRappterCommand(program);
 registerFlightRecorderCommand(program);
+registerShowAndTellCommand(program);
 
 await hydrateManagedEnv();
 program.parse();

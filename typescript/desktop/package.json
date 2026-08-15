@@ -1,0 +1,76 @@
+{
+  "name": "openrappter-desktop",
+  "version": "1.13.0",
+  "description": "Electron desktop shell for OpenRappter",
+  "author": "Wildhaven Homes LLC",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "adm-zip": "0.6.0",
+    "sharp": "0.35.3"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron .",
+    "test": "node --test test/*.test.mjs",
+    "dist": "npm run build && electron-builder",
+    "postinstall": "node scripts/install-runtime.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "40.10.6",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.openrappter.desktop",
+    "productName": "OpenRappter",
+    "icon": "build/icon.png",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "npmRebuild": false,
+    "files": [
+      "dist/**/*",
+      "runtime/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "OpenRappter records optional Show-and-Tell narration for local Whisper transcription.",
+        "NSAppleEventsUsageDescription": "OpenRappter reads the active application and window title while Show-and-Tell is recording."
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "asarUnpack": [
+      "runtime/node_modules/**/*.node",
+      "runtime/node_modules/openrappter/dist/agents/python/**/*",
+      "node_modules/**/*.node",
+      "node_modules/onnxruntime-node/bin/**/*"
+    ]
+  }
+}

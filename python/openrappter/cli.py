@@ -930,6 +930,118 @@ class Orchestrator:
 # CLI ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _require_show_and_tell_consent(store, purpose, prompt):
+    from openrappter.show_and_tell import request_interactive_consent
+
+    return request_interactive_consent(store, purpose, prompt)
+
+
+def _print_show_and_tell_result(raw):
+    try:
+        parsed = json.loads(raw)
+        print(json.dumps(parsed, indent=2))
+        return parsed.get("status") != "error"
+    except (json.JSONDecodeError, TypeError):
+        print(raw)
+        return True
+
+
+def _handle_show_and_tell_command(args):
+    from openrappter.agents.show_and_tell_agent import ShowAndTellAgent
+    from openrappter.show_and_tell import ShowAndTellStore
+
+    agent = ShowAndTellAgent(local_surface=True)
+    store = ShowAndTellStore()
+    command = args.show_command
+    kwargs = {"action": command, "session_id": getattr(args, "session", None)}
+
+    if command == "start":
+        kwargs.update(
+            {
+                "title": args.title,
+                "intent": args.intent,
+                "poll_interval_ms": args.poll,
+                "max_duration_ms": args.max_minutes * 60_000,
+                "consent_token": _require_show_and_tell_consent(
+                    store,
+                    "start",
+                    "Start recording active app/window changes? Screenshots are "
+                    "explicit-only. Avoid passwords, tokens, and private material.",
+                ),
+            }
+        )
+    elif command == "note":
+        kwargs["note"] = args.text
+    elif command == "observe":
+        kwargs.update(
+            {
+                "detail": args.detail,
+                "title": args.title,
+                "app": args.app,
+                "url": args.url,
+            }
+        )
+    elif command == "capture":
+        kwargs["title"] = args.label
+        kwargs["consent_token"] = _require_show_and_tell_consent(
+            store,
+            "capture",
+            "Capture the currently active window as a local reference frame?",
+        )
+    elif command == "analyze" and args.enhance:
+        kwargs["enhance"] = True
+        kwargs["consent_token"] = _require_show_and_tell_consent(
+            store,
+            "analyze",
+            "Send the privacy-safe textual summary to a connected model? "
+            "Raw screenshots are never sent.",
+        )
+    elif command in {"review", "approve"}:
+        kwargs.update(
+            {
+                "action": "review",
+                "title": args.title,
+                "intent": args.intent,
+                "feedback": args.feedback,
+                "steps_json": (
+                    Path(args.steps).read_text(encoding="utf-8")
+                    if args.steps
+                    else None
+                ),
+            }
+        )
+        if command == "approve":
+            kwargs.update(
+                {
+                    "approve": True,
+                    "consent_token": _require_show_and_tell_consent(
+                        store,
+                        "approve",
+                        "Approve this analysis as the exact source for a reusable "
+                        "skill or automation?",
+                    ),
+                }
+            )
+    elif command == "build":
+        kwargs["target"] = args.target
+    elif command == "delete":
+        kwargs["consent_token"] = _require_show_and_tell_consent(
+            store,
+            "delete",
+            f"Permanently delete "
+            f"{f'session {args.session}' if args.session else 'the latest session'} "
+            "and its local frames?",
+        )
+    elif command is None:
+        raise RuntimeError(
+            "Usage: openrappter show-and-tell "
+            "[start|status|note|observe|capture|stop|analyze|review|approve|"
+            "build|replay|test|list|delete]"
+        )
+
+    return _print_show_and_tell_result(agent.execute(**kwargs))
+
+
 def main():
     import argparse
     
@@ -1013,6 +1125,75 @@ Environment:
 
     rh_uninstall_parser = rappterhub_sub.add_parser('uninstall', help='Uninstall an agent')
     rh_uninstall_parser.add_argument('agent', help='Agent name to uninstall')
+
+    # Show-and-Tell commands
+    show_parser = subparsers.add_parser(
+        'show-and-tell',
+        help='Learn a reusable workflow from a local demonstration',
+    )
+    show_sub = show_parser.add_subparsers(dest='show_command')
+
+    show_start = show_sub.add_parser('start', help='Start a local demonstration')
+    show_start.add_argument('--title', default='', help='Short session title')
+    show_start.add_argument('--intent', default='', help='Goal being demonstrated')
+    show_start.add_argument('--poll', type=int, default=2000, help='Poll interval in ms')
+    show_start.add_argument(
+        '--max-minutes', type=int, default=480, help='Maximum recording duration'
+    )
+
+    for name, help_text in [
+        ('status', 'Show active or latest recording'),
+        ('stop', 'Stop a recording'),
+        ('replay', 'Preview a safe dry-run replay plan'),
+        ('test', 'Validate built artifacts'),
+        ('delete', 'Delete a stopped recording'),
+    ]:
+        command_parser = show_sub.add_parser(name, help=help_text)
+        command_parser.add_argument('session', nargs='?', default=None)
+
+    show_analyze = show_sub.add_parser(
+        'analyze', help='Reconstruct intent and ordered steps'
+    )
+    show_analyze.add_argument('session', nargs='?', default=None)
+    show_analyze.add_argument(
+        '--enhance',
+        action='store_true',
+        help='Request optional model refinement after separate local consent',
+    )
+
+    show_note = show_sub.add_parser('note', help='Add narration')
+    show_note.add_argument('text')
+    show_note.add_argument('--session', default=None)
+
+    show_observe = show_sub.add_parser('observe', help='Add a semantic step')
+    show_observe.add_argument('detail')
+    show_observe.add_argument('--session', default=None)
+    show_observe.add_argument('--title', default='')
+    show_observe.add_argument('--app', default='')
+    show_observe.add_argument('--url', default='')
+
+    show_capture = show_sub.add_parser('capture', help='Capture an explicit frame')
+    show_capture.add_argument('--session', default=None)
+    show_capture.add_argument('--label', default='')
+
+    for name, help_text in [
+        ('review', 'Edit the draft analysis'),
+        ('approve', 'Approve the reviewed analysis'),
+    ]:
+        command_parser = show_sub.add_parser(name, help=help_text)
+        command_parser.add_argument('session', nargs='?', default=None)
+        command_parser.add_argument('--title', default=None)
+        command_parser.add_argument('--intent', default=None)
+        command_parser.add_argument('--feedback', default=None)
+        command_parser.add_argument('--steps', default=None)
+
+    show_build = show_sub.add_parser('build', help='Build an approved artifact')
+    show_build.add_argument('session', nargs='?', default=None)
+    show_build.add_argument(
+        '--target', choices=['skill', 'automation', 'all'], default='skill'
+    )
+
+    show_sub.add_parser('list', help='List recorded demonstrations')
     
     args = parser.parse_args()
 
@@ -1104,6 +1285,15 @@ Environment:
         else:
             print("Usage: openrappter rappterhub [search|install|list|uninstall]")
             return
+
+    if args.command == 'show-and-tell':
+        try:
+            if not _handle_show_and_tell_command(args):
+                raise SystemExit(1)
+        except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"status": "error", "message": str(exc)}, indent=2))
+            raise SystemExit(1)
+        return
 
     # Initialize
     orchestrator.initialize()

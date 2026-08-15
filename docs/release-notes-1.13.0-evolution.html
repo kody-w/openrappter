@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenRappter 1.13.0 — Show-and-Tell</title>
+  <meta name="description" content="OpenRappter 1.13.0 turns a privacy-aware local demonstration into a reviewed skill or disabled automation." />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 antialiased">
+  <nav class="border-b border-zinc-800 bg-zinc-950/95">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <a class="logo font-semibold" href="./">OpenRappter</a>
+      <div class="nav-links flex gap-5 text-sm text-zinc-300">
+        <a href="./docs.html">Docs</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./changelog.html">Changelog</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="border-b border-zinc-800 bg-gradient-to-b from-emerald-950/40 to-zinc-950">
+      <div class="mx-auto max-w-6xl px-6 py-24">
+        <p class="mb-5 font-mono text-sm text-emerald-400">v1.13.0 · 2026-08-14</p>
+        <h1 class="max-w-4xl text-5xl font-bold tracking-tight md:text-7xl">
+          Show it once.<br />
+          <span class="text-emerald-400">Keep the judgment.</span>
+        </h1>
+        <p class="mt-8 max-w-3xl text-xl leading-8 text-zinc-300">
+          OpenRappter can now learn a workflow from a real local demonstration,
+          reconstruct the intent and ordered steps, let you correct the result,
+          and package the approved procedure as a portable skill or a disabled
+          automation.
+        </p>
+      </div>
+    </section>
+
+    <section class="mx-auto grid max-w-6xl gap-6 px-6 py-16 md:grid-cols-3">
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Record</p>
+        <h2 class="mt-3 text-2xl font-semibold">Context, not surveillance</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          The detached collector records active app/window changes, privacy-reduced
+          browser destinations, notes, and OpenRappter actions. Screenshots are explicit-only;
+          typed text is never persisted.
+        </p>
+      </article>
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Review</p>
+        <h2 class="mt-3 text-2xl font-semibold">The human owns the procedure</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          Deterministic local analysis comes first. Optional Copilot refinement
+          receives only a separately approved textual summary—never raw frames.
+          Approval itself requires a one-use local token.
+        </p>
+      </article>
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Reuse</p>
+        <h2 class="mt-3 text-2xl font-semibold">Native tools over pixel replay</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          Build a cross-runtime SKILL.md and manifest, a disabled automation, or
+          both. Replay is a dry run and generated artifacts are hash- and
+          privacy-checked before they are trusted.
+        </p>
+      </article>
+    </section>
+
+    <section class="border-y border-zinc-800 bg-zinc-900/50">
+      <div class="mx-auto max-w-6xl px-6 py-16">
+        <h2 class="text-3xl font-bold">A consent boundary for every irreversible edge</h2>
+        <div class="mt-8 grid gap-6 md:grid-cols-2">
+          <ul class="space-y-3 text-zinc-300">
+            <li>✓ recording starts only from an interactive local terminal</li>
+            <li>✓ Copilot enhancement has separate disclosure and consent</li>
+            <li>✓ approval is local, short-lived, and single-use</li>
+            <li>✓ deletion requires a fresh local confirmation</li>
+          </ul>
+          <pre class="overflow-x-auto rounded-xl border border-zinc-700 bg-black p-5 text-sm text-emerald-300"><code>openrappter show-and-tell start --intent "Publish a release"
+openrappter show-and-tell note "Wait for every required check"
+openrappter show-and-tell stop
+openrappter show-and-tell analyze
+openrappter show-and-tell approve
+openrappter show-and-tell build --target all
+openrappter show-and-tell test</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Desktop</p>
+      <h2 class="mt-3 text-3xl font-bold">Skill Recorder ergonomics, one OpenRappter core</h2>
+      <p class="mt-5 max-w-3xl leading-7 text-zinc-400">
+        The new Electron shell launches or reuses the same local gateway and
+        loads its own packaged current UI. Its renderer is sandboxed and
+        context-isolated; native dialogs guard recording, scoped window capture,
+        approval, and deletion. Electron carries an isolated packed runtime and
+        SQLite binding, so the system Node installation is never rebuilt.
+      </p>
+      <p class="mt-5 max-w-3xl leading-7 text-zinc-400">
+        Chat can now drive that visible UI through semantic snapshots and refs,
+        and approved Python or TypeScript agents can return the same bounded UI
+        commands. Whisper handles local narration; VibeVoice Realtime 0.5B
+        handles optional local speech; Electron's tray and the Swift
+        OpenRappter Bar attach to one authenticated desktop gateway.
+      </p>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <h2 class="text-3xl font-bold">Evidence, not launch copy</h2>
+      <p class="mt-5 max-w-3xl leading-7 text-zinc-400">
+        The release gate runs TypeScript and Python unit suites, npm test, pytest,
+        builds, lint, package installation smoke, cold-start CLI smoke, native
+        detached-worker probes, and a cross-runtime SQLite handoff. Artifact
+        integrity is verified with SHA-256, while privacy mutation tests keep
+        consent and redaction behavior executable.
+      </p>
+      <p class="mt-8 text-zinc-300">
+        Read the <a class="text-emerald-400 underline" href="./show-and-tell.md">Show-and-Tell guide</a>
+        or inspect the <a class="text-emerald-400 underline" href="../contracts/show-and-tell-v1.json">versioned contract</a>.
+      </p>
+    </section>
+  </main>
+
+  <footer class="border-t border-zinc-800">
+    <div class="mx-auto max-w-6xl px-6 py-8 text-sm text-zinc-500">
+      OpenRappter v1.13.0 · Show-and-Tell · Local-first · Apache-2.0 ·
+      <a class="text-emerald-400" href="https://github.com/kody-w/openrappter">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>

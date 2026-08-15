@@ -10,6 +10,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import { gateway } from '../services/gateway.js';
 import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
+import { desktopBridge } from '../services/desktop.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
@@ -849,6 +850,12 @@ export class OpenRappterChat extends LitElement {
   @state() private speechEnabled = false;
   @state() private speechStatus = 'idle';
   @state() private speechDetail = '';
+  @state() private vibeState = 'missing';
+  @state() private vibePhase = 'idle';
+  @state() private vibeProgress: number | null = null;
+  private voiceStatusCleanup?: () => void;
+  private activeAudio?: HTMLAudioElement;
+  private speechGeneration = 0;
 
   /** One speech seam for every surface — see src/voice/local-speech.js. */
   private speech = createLocalSpeech({
@@ -901,6 +908,24 @@ export class OpenRappterChat extends LitElement {
       this.speechDetail = status.detail?.reason ?? '';
       this.speechEnabled = this.speech.enabled;
     });
+    const desktop = desktopBridge();
+    if (desktop) {
+      this.speechEnabled = false;
+      this.voiceStatusCleanup = desktop.onVoiceStatus((status) => {
+        this.vibeState = String(status.state ?? 'missing');
+        this.vibePhase = String(status.phase ?? 'idle');
+        this.vibeProgress =
+          typeof status.progress === 'number' ? status.progress : null;
+        this.speechStatus =
+          this.vibeState === 'ready' ? 'ready' : this.vibeState;
+      });
+      void desktop.voice({ action: 'status' }).then((status) => {
+        this.vibeState = String(status.state ?? 'missing');
+        this.vibePhase = String(status.phase ?? 'idle');
+        this.vibeProgress =
+          typeof status.progress === 'number' ? status.progress : null;
+      }).catch(() => {});
+    }
     // Browsers drop speech that was not started by a user gesture. Any click
     // in this surface counts, so record them rather than gating on one button.
     window.addEventListener('pointerdown', this.noteGesture, { capture: true });
@@ -921,12 +946,85 @@ export class OpenRappterChat extends LitElement {
   private async speakReply(data: { voiceText?: string }) {
     const line = spokenLineFrom(data);
     if (!line) return;
+    const desktop = desktopBridge();
+    if (desktop && this.speechEnabled) {
+      const generation = ++this.speechGeneration;
+      this.speechStatus = 'speaking';
+      try {
+        const response = await desktop.voice({
+          action: 'speak',
+          text: line,
+          voice: 'en-Carter_man',
+        });
+        if (
+          generation !== this.speechGeneration ||
+          !this.speechEnabled
+        ) {
+          return;
+        }
+        const raw = response.audio;
+        const audioBytes =
+          raw instanceof Uint8Array
+            ? raw
+            : raw instanceof ArrayBuffer
+              ? new Uint8Array(raw)
+              : null;
+        if (!audioBytes) throw new Error('VibeVoice returned invalid audio.');
+        const audioBuffer = audioBytes.buffer.slice(
+          audioBytes.byteOffset,
+          audioBytes.byteOffset + audioBytes.byteLength,
+        ) as ArrayBuffer;
+        const url = URL.createObjectURL(
+          new Blob([audioBuffer], { type: 'audio/wav' }),
+        );
+        this.activeAudio?.pause();
+        const audio = new Audio(url);
+        this.activeAudio = audio;
+        audio.addEventListener('ended', () => {
+          URL.revokeObjectURL(url);
+          if (this.activeAudio === audio) this.activeAudio = undefined;
+          this.speechStatus = 'ready';
+        }, { once: true });
+        await audio.play();
+        return;
+      } catch (error) {
+        this.speechStatus = 'error';
+        this.speechDetail = (error as Error).message;
+        return;
+      }
+    }
     const result = await this.speech.speak(line);
     this.speechStatus = result.state;
     this.speechDetail = result.detail?.reason ?? '';
   }
 
-  private toggleSpeech = () => {
+  private toggleSpeech = async () => {
+    const desktop = desktopBridge();
+    if (desktop) {
+      if (this.speechEnabled) {
+        this.speechGeneration += 1;
+        this.activeAudio?.pause();
+        this.speechEnabled = false;
+        this.speechStatus = 'ready';
+        return;
+      }
+      this.speechStatus = 'installing';
+      try {
+        const status = await desktop.voice({ action: 'enable' });
+        this.vibeState = String(status.state ?? 'ready');
+        this.vibePhase = String(status.phase ?? 'idle');
+        this.speechEnabled = this.vibeState === 'ready';
+        this.speechStatus = this.vibeState;
+        this.speechDetail = this.speechEnabled
+          ? 'Microsoft VibeVoice Realtime 0.5B · local'
+          : String(status.error ?? '');
+      } catch (error) {
+        this.speechEnabled = false;
+        this.speechStatus = 'error';
+        this.speechDetail = (error as Error).message;
+      }
+      return;
+    }
     this.speech.noteUserGesture();
     this.speechEnabled = this.speech.setEnabled(!this.speech.enabled);
   };
@@ -937,10 +1035,13 @@ export class OpenRappterChat extends LitElement {
    * without opening the console.
    */
   private renderSpeechToggle() {
-    const unavailable = this.speechStatus === 'not-available';
+    const desktop = desktopBridge();
+    const unavailable = !desktop && this.speechStatus === 'not-available';
     const blocked = this.speechStatus === 'blocked-or-unknown';
     const speaking = this.speechStatus === 'speaking';
-    const voice = this.speech.voice?.name;
+    const voice = desktop
+      ? 'Microsoft VibeVoice Realtime 0.5B'
+      : this.speech.voice?.name;
 
     let glyph = '🔇';
     if (unavailable) glyph = '🚫';
@@ -952,6 +1053,10 @@ export class OpenRappterChat extends LitElement {
       title = this.speechDetail || 'No local voice is available on this device.';
     } else if (blocked) {
       title = `Speech could not be confirmed — ${this.speechDetail}`;
+    } else if (desktop && ['installing', 'downloading', 'starting'].includes(this.vibeState)) {
+      title =
+        `${this.vibePhase}` +
+        `${this.vibeProgress === null ? '' : ` · ${Math.round(this.vibeProgress)}%`}`;
     } else if (this.speechEnabled) {
       title = `Speaking replies with ${voice ?? 'a local voice'} (click to mute)`;
     } else {
@@ -959,6 +1064,7 @@ export class OpenRappterChat extends LitElement {
     }
 
     return html`<button
+      data-desktop-sensitive=${desktop ? 'voice' : nothing}
       class="icon-btn ${this.speechEnabled && !unavailable ? 'active' : ''}"
       ?disabled=${unavailable}
       @click=${this.toggleSpeech}
@@ -976,6 +1082,10 @@ export class OpenRappterChat extends LitElement {
       }).catch(() => {});
     }
     this.clearRunDeadline();
+    this.voiceStatusCleanup?.();
+    this.voiceStatusCleanup = undefined;
+    this.activeAudio?.pause();
+    this.speechGeneration += 1;
     gateway.off('chat', this.handleChatEvent);
     gateway.off('agent.tool', this.handleToolEvent);
     document.removeEventListener('mousemove', this.handleResizeMove);

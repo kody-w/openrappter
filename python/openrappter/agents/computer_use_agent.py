@@ -7,6 +7,15 @@ from pathlib import Path
 
 from openrappter.agents.basic_agent import BasicAgent
 
+try:
+    from openrappter.show_and_tell import record_active_computer_action
+except ModuleNotFoundError:
+    # The brainstem validates single-file agents in isolation. ComputerUse must
+    # remain loadable there; recording simply stays off when the host capability
+    # module is not present.
+    def record_active_computer_action(_action, _kwargs, _result=None):
+        return None
+
 
 __manifest__ = {
     "schema": "rapp-agent/1.0",
@@ -110,8 +119,15 @@ class ComputerUseAgent(BasicAgent):
             if not handler:
                 return json.dumps({"status": "error", "message": f"Unknown action: {action}"})
 
-            return handler(**kwargs)
+            output = handler(**kwargs)
+            try:
+                parsed = json.loads(output)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            record_active_computer_action(action, kwargs, parsed)
+            return output
         except Exception as e:
+            record_active_computer_action(action, kwargs, {"status": "error"})
             return json.dumps({"status": "error", "action": action, "message": str(e)})
 
     def _infer_action(self, query):

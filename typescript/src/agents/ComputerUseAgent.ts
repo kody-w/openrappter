@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { recordActiveComputerAction } from '../show-and-tell/active.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -98,52 +99,77 @@ export class ComputerUseAgent extends BasicAgent {
     const action = (kwargs.action as string) || this.inferAction(kwargs.query as string);
 
     try {
+      let output: string;
       switch (action) {
         case 'screenshot':
-          return await this.takeScreenshot();
+          output = await this.takeScreenshot();
+          break;
         case 'click':
-          return await this.click(kwargs.x as number, kwargs.y as number);
+          output = await this.click(kwargs.x as number, kwargs.y as number);
+          break;
         case 'double_click':
-          return await this.doubleClick(kwargs.x as number, kwargs.y as number);
+          output = await this.doubleClick(kwargs.x as number, kwargs.y as number);
+          break;
         case 'right_click':
-          return await this.rightClick(kwargs.x as number, kwargs.y as number);
+          output = await this.rightClick(kwargs.x as number, kwargs.y as number);
+          break;
         case 'type':
-          return await this.typeText(kwargs.text as string);
+          output = await this.typeText(kwargs.text as string);
+          break;
         case 'key':
-          return await this.pressKey(kwargs.text as string);
+          output = await this.pressKey(kwargs.text as string);
+          break;
         case 'move':
-          return await this.moveMouse(kwargs.x as number, kwargs.y as number);
+          output = await this.moveMouse(kwargs.x as number, kwargs.y as number);
+          break;
         case 'scroll':
-          return await this.scroll(
+          output = await this.scroll(
             (kwargs.direction as string) || 'down',
             kwargs.amount == null ? 5 : (kwargs.amount as number)
           );
+          break;
         case 'drag':
-          return await this.drag(
+          output = await this.drag(
             kwargs.x as number,
             kwargs.y as number,
             kwargs.end_x as number,
             kwargs.end_y as number
           );
+          break;
         case 'open_app':
-          return await this.openApp(kwargs.text as string);
+          output = await this.openApp(kwargs.text as string);
+          break;
         case 'activate_app':
-          return await this.activateApp(kwargs.text as string);
+          output = await this.activateApp(kwargs.text as string);
+          break;
         case 'list_windows':
-          return await this.listWindows();
+          output = await this.listWindows();
+          break;
         case 'get_frontmost':
-          return await this.getFrontmostApp();
+          output = await this.getFrontmostApp();
+          break;
         case 'read_screen':
-          return await this.readScreen();
+          output = await this.readScreen();
+          break;
         case 'find_element':
-          return await this.findElement(kwargs.text as string);
+          output = await this.findElement(kwargs.text as string);
+          break;
         default:
-          return JSON.stringify({
+          output = JSON.stringify({
             status: 'error',
             message: `Unknown action: ${action}. Available: screenshot, click, double_click, right_click, type, key, move, scroll, drag, open_app, activate_app, list_windows, get_frontmost, read_screen, find_element`,
           });
       }
+      let parsed: Record<string, unknown> | undefined;
+      try {
+        parsed = JSON.parse(output) as Record<string, unknown>;
+      } catch {
+        // The computer action still completed; the recorder only needs best-effort metadata.
+      }
+      await recordActiveComputerAction(action, kwargs, parsed);
+      return output;
     } catch (e) {
+      await recordActiveComputerAction(action, kwargs, { status: 'error' });
       return JSON.stringify({
         status: 'error',
         action,

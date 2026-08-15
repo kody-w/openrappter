@@ -6,7 +6,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
-type View = 'surgeon' | 'chat' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'surgeon' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -154,6 +154,9 @@ export class OpenRappterApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    if (window.openrappterDesktop) {
+      this.currentView = 'chat';
+    }
     this.connectToGateway();
 
     // Update status when connection state changes
@@ -203,6 +206,8 @@ export class OpenRappterApp extends LitElement {
         return html`<openrappter-surgeon></openrappter-surgeon>`;
       case 'chat':
         return html`<openrappter-chat></openrappter-chat>`;
+      case 'show-and-tell':
+        return html`<openrappter-show-and-tell></openrappter-show-and-tell>`;
       case 'channels':
         return html`<openrappter-channels></openrappter-channels>`;
       case 'sessions':
@@ -300,6 +305,7 @@ export class OpenRappterApp extends LitElement {
     const titles: Record<View, string> = {
       surgeon: 'Copilot Surgeon',
       chat: 'Chat',
+      'show-and-tell': 'Show-and-Tell',
       channels: 'Channels',
       sessions: 'Sessions',
       cron: 'Cron Jobs',

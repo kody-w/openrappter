@@ -12,4 +12,5 @@ export { registerDoctorCommand } from './doctor.js';
 export { registerUpdateCommand } from './update.js';
 export { registerLoginCommand } from './login.js';
 export { registerMemoryCommand } from './memory.js';
+export { registerShowAndTellCommand } from './show-and-tell.js';
 export { launchBar } from './bar.js';

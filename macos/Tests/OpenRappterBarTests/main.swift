@@ -5,6 +5,7 @@ print("========================================\n")
 
 await runTestHarnessTests()
 try runAppConstantsTests()
+try runDesktopGatewayDiscoveryTests()
 try runRpcTypesTests()
 try await runGatewayConnectionTests()
 await runRpcClientContractTests()

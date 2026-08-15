@@ -34,8 +34,12 @@ public enum AppConstants {
     // MARK: - Connection
 
     public static let defaultHost = "127.0.0.1"
-    public static let defaultPort = 18790
-    public static let defaultWebSocketURL = "ws://\(defaultHost):\(defaultPort)"
+    public static var defaultPort: Int {
+        DesktopGatewayDiscovery.current()?.port ?? 18790
+    }
+    public static var defaultWebSocketURL: String {
+        "ws://\(defaultHost):\(defaultPort)"
+    }
     public static let healthEndpointPath = "/health"
 
     // MARK: - Timeouts (seconds)

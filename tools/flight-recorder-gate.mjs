@@ -186,16 +186,16 @@ run(
   ROOT,
 );
 run(
-  "1.12.0 release preflight identity",
+  "1.13.0 release preflight identity",
   process.execPath,
   [
     "scripts/release-preflight.mjs",
     "--tag",
-    "v1.12.0",
+    "v1.13.0",
     "--typescript-runtime-version",
-    "1.12.0",
+    "1.13.0",
     "--python-runtime-version",
-    "1.12.0",
+    "1.13.0",
   ],
   ROOT,
 );

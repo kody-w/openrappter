@@ -162,6 +162,11 @@ jobs:
       - name: Real token-auth HTTP/WebSocket gateway smoke (installed wheel)
         run: $RUNNER_TEMP/gateway-smoke-venv/bin/python scripts/gateway_token_smoke.py
 
+      - name: Show-and-Tell modules and agent discovery smoke (installed wheel)
+        run: |
+          cd "$RUNNER_TEMP"
+          gateway-smoke-venv/bin/python -c 'import openrappter.show_and_tell, openrappter.show_and_tell_worker; from openrappter.cli import AgentRegistry; names = {item["name"] for item in AgentRegistry(load_skills=False).list_agents()}; assert "ShowAndTell" in names'
+
       - name: Install dev deps for full test suite
         run: pip install -e ".[dev]"
 
@@ -186,6 +191,11 @@ jobs:
         working-directory: typescript/ui
         run: |
           npm ci
+          npm audit --omit=dev --audit-level=high
+      - name: Audit Electron desktop production dependencies
+        working-directory: typescript/desktop
+        run: |
+          npm ci --ignore-scripts
           npm audit --omit=dev --audit-level=high
 
   # Explicit, fail-hard production dependency audit gate (Python side).

@@ -36,6 +36,7 @@ import {
 import { summarizeFlightError } from "../flight-recorder/redaction.js";
 import { sanitizeFlightValue } from "../flight-recorder/redaction.js";
 import { agentResultIsError } from "./result-status.js";
+import { dispatchAgentUiCommands } from "../desktop-control/result.js";
 import type {
   AgentMetadata,
   AgentContext,
@@ -257,7 +258,8 @@ export abstract class BasicAgent {
 
     kwargs._context = this.context;
 
-    const result = await this.perform(kwargs);
+    let result = await this.perform(kwargs);
+    result = await dispatchAgentUiCommands(result);
 
     // Extract data_slush from result for downstream chaining
     let parsed: Record<string, unknown> | null = null;

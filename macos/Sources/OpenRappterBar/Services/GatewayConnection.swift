@@ -81,11 +81,13 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     public typealias ReconnectSleeper = @Sendable (TimeInterval) async throws -> Void
     public typealias PostHandshakeHook = @Sendable () async -> Void
 
-    private let url: URL
+    private var url: URL
     private let transportFactory: TransportFactory
     private let reconnectDelayProvider: ReconnectDelayProvider
     private let reconnectSleeper: ReconnectSleeper
     private let postHandshakeHook: PostHandshakeHook
+    private var authToken: String?
+    private let followsDesktopEndpoint: Bool
 
     // Actor-isolated mutable state — safe by construction
     private var _state: ConnectionState = .disconnected
@@ -113,6 +115,7 @@ public actor GatewayConnection: GatewayConnectionProtocol {
     public init(
         host: String = AppConstants.defaultHost,
         port: Int = AppConstants.defaultPort,
+        authToken: String? = nil,
         transportFactory: TransportFactory? = nil,
         reconnectDelayProvider: @escaping ReconnectDelayProvider = {
             GatewayConnection.backoffDelay(attempt: $0)
@@ -122,7 +125,17 @@ public actor GatewayConnection: GatewayConnectionProtocol {
         },
         postHandshakeHook: @escaping PostHandshakeHook = {}
     ) {
+        let desktop = DesktopGatewayDiscovery.current()
         self.url = URL(string: "ws://\(host):\(port)")!
+        self.authToken = authToken ?? (
+            desktop?.host == host && desktop?.port == port
+                ? desktop?.token
+                : nil
+        )
+        self.followsDesktopEndpoint =
+            authToken == nil
+            && desktop?.host == host
+            && desktop?.port == port
         self.transportFactory = transportFactory ?? { url in URLSessionWebSocket(url: url) }
         self.reconnectDelayProvider = reconnectDelayProvider
         self.reconnectSleeper = reconnectSleeper
@@ -185,6 +198,7 @@ public actor GatewayConnection: GatewayConnectionProtocol {
             throw CancellationError()
         }
 
+        refreshDesktopEndpoint()
         teardownTransport()
 
         setState(.connecting)
@@ -336,9 +350,17 @@ public actor GatewayConnection: GatewayConnectionProtocol {
 
     // MARK: - Private
 
+    private func refreshDesktopEndpoint() {
+        guard followsDesktopEndpoint, let endpoint = DesktopGatewayDiscovery.current() else {
+            return
+        }
+        url = URL(string: "ws://\(endpoint.host):\(endpoint.port)")!
+        authToken = endpoint.token
+    }
+
     private func performHandshake(transport: WebSocketTransport) async throws {
         let id = generateRequestId()
-        let params: [String: AnyCodable] = [
+        var params: [String: AnyCodable] = [
             "client": AnyCodable([
                 "id": AppConstants.clientId,
                 "version": AppConstants.version,
@@ -346,6 +368,9 @@ public actor GatewayConnection: GatewayConnectionProtocol {
                 "mode": AppConstants.mode,
             ] as [String: Any])
         ]
+        if let authToken {
+            params["auth"] = AnyCodable(["token": authToken] as [String: Any])
+        }
 
         let frame = RpcRequestFrame(id: id, method: "connect", params: params)
         let data = try frame.toData()

@@ -1,5 +1,6 @@
 # Dependency directories
 node_modules/
+typescript/desktop/runtime/
 # Editor config
 .vscode/
 .idea/
@@ -9,6 +10,11 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
+!typescript/desktop/build/
+!typescript/desktop/build/icon.png
+!typescript/desktop/build/icon.svg
+!typescript/desktop/build/entitlements.mac.plist
+!typescript/desktop/build/entitlements.mac.inherit.plist
 # Logs & temp
 *.log
 *.swp

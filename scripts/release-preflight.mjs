@@ -34,6 +34,8 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'python/scripts/gateway_token_smoke.py',
   'scripts/release-preflight.mjs',
   'typescript/bin/openrappter.mjs',
+  'typescript/desktop/package-lock.json',
+  'typescript/desktop/package.json',
   'typescript/package-lock.json',
   'typescript/package.json',
   'typescript/src/version.ts',
@@ -107,6 +109,9 @@ export function validateReleaseState(state) {
     ['typescript/package.json', state.typescriptPackageVersion],
     ['typescript/package-lock.json', state.typescriptPackageLockVersion],
     ['typescript/package-lock.json root package', state.typescriptPackageLockRootVersion],
+    ['typescript/desktop/package.json', state.desktopPackageVersion],
+    ['typescript/desktop/package-lock.json', state.desktopPackageLockVersion],
+    ['typescript/desktop/package-lock.json root package', state.desktopPackageLockRootVersion],
     ['python/pyproject.toml', state.pythonProjectVersion],
     ['TypeScript runtime', state.typescriptRuntimeVersion],
     ['Python runtime', state.pythonRuntimeVersion],
@@ -524,6 +529,12 @@ function readRepositoryState(options, includeArtifactNames) {
   const root = options.root;
   const packageJson = readJson(path.join(root, 'typescript/package.json'));
   const packageLock = readJson(path.join(root, 'typescript/package-lock.json'));
+  const desktopPackageJson = readJson(
+    path.join(root, 'typescript/desktop/package.json'),
+  );
+  const desktopPackageLock = readJson(
+    path.join(root, 'typescript/desktop/package-lock.json'),
+  );
   const pyproject = readPythonProject(
     readFileSync(path.join(root, 'python/pyproject.toml'), 'utf8'),
   );
@@ -549,6 +560,9 @@ function readRepositoryState(options, includeArtifactNames) {
     typescriptPackageVersion: packageJson.version,
     typescriptPackageLockVersion: packageLock.version,
     typescriptPackageLockRootVersion: packageLock.packages?.['']?.version,
+    desktopPackageVersion: desktopPackageJson.version,
+    desktopPackageLockVersion: desktopPackageLock.version,
+    desktopPackageLockRootVersion: desktopPackageLock.packages?.['']?.version,
     pythonProjectName: pyproject.name,
     pythonProjectVersion: pyproject.version,
     typescriptRuntimeVersion:

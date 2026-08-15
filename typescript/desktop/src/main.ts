@@ -5,7 +5,6 @@ import {
   type ChildProcess,
 } from 'node:child_process';
 import {
-  chmodSync,
   existsSync,
   lstatSync,
   mkdtempSync,
@@ -91,6 +90,7 @@ let vibeVoiceService: VibeVoiceService | undefined;
 let tray: Tray | undefined;
 let endpointFile: string | undefined;
 let smokeWatchdog: NodeJS.Timeout | undefined;
+let smokeFinishing = false;
 let microphonePermissionGrantedUntil = 0;
 const desktopOwnedSessions = new Set<string>();
 let desktopQueue:
@@ -158,10 +158,20 @@ async function chooseGatewayPort(): Promise<void> {
   throw new Error('No local port is available for OpenRappter Desktop.');
 }
 
-function publishDesktopEndpoint(): void {
+async function publishDesktopEndpoint(): Promise<void> {
+  const { hardenPrivatePath } = await import(pathToFileURL(
+    path.join(
+      packageRoot,
+      'dist',
+      'flight-recorder',
+      'permissions.js',
+    ),
+  ).href) as {
+    hardenPrivatePath(target: string, directory?: boolean): void;
+  };
   const directory = path.join(os.homedir(), '.openrappter');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') chmodSync(directory, 0o700);
+  hardenPrivatePath(directory, true);
   endpointFile = path.join(directory, 'desktop-gateway.json');
   const temporary = `${endpointFile}.${process.pid}.tmp`;
   writeFileSync(
@@ -176,7 +186,7 @@ function publishDesktopEndpoint(): void {
     })}\n`,
     { mode: 0o600 },
   );
-  if (process.platform !== 'win32') chmodSync(temporary, 0o600);
+  hardenPrivatePath(temporary);
   if (existsSync(endpointFile)) {
     const linked = lstatSync(endpointFile);
     if (linked.isSymbolicLink() || !linked.isFile()) {
@@ -185,47 +195,7 @@ function publishDesktopEndpoint(): void {
     if (process.platform === 'win32') unlinkSync(endpointFile);
   }
   renameSync(temporary, endpointFile);
-  if (process.platform !== 'win32') {
-    chmodSync(endpointFile, 0o600);
-  } else {
-    const result = spawnSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `
-$ErrorActionPreference = 'Stop'
-$user = New-Object System.Security.Principal.NTAccount($env:OR_USER)
-$sid = $user.Translate([System.Security.Principal.SecurityIdentifier])
-$acl = New-Object System.Security.AccessControl.FileSecurity
-$acl.SetOwner($sid)
-$acl.SetAccessRuleProtection($true, $false)
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-  $sid,
-  'FullControl',
-  [System.Security.AccessControl.AccessControlType]::Allow
-)
-$acl.AddAccessRule($rule)
-(New-Object System.IO.FileInfo($env:OR_ENDPOINT)).SetAccessControl($acl)
-`,
-      ],
-      {
-        encoding: 'utf8',
-        windowsHide: true,
-        env: {
-          ...process.env,
-          OR_ENDPOINT: endpointFile,
-          OR_USER: process.env.USERNAME ?? '',
-        },
-      },
-    );
-    if (result.status !== 0) {
-      throw new Error(
-        result.stderr || 'Failed to secure the desktop endpoint ACL.',
-      );
-    }
-  }
+  hardenPrivatePath(endpointFile);
 }
 
 async function waitForRenderer(window: BrowserWindow): Promise<void> {
@@ -1312,11 +1282,13 @@ function createWindow(): BrowserWindow {
         ) {
           process.exitCode = 1;
         }
-        app.exit(typeof process.exitCode === 'number' ? process.exitCode : 0);
+        void finishDesktopSmoke(
+          typeof process.exitCode === 'number' ? process.exitCode : 0,
+        );
       }).catch((error) => {
         console.error(`OPENRAPPTER_DESKTOP_SMOKE_ERROR ${String(error)}`);
         process.exitCode = 1;
-        app.exit(1);
+        void finishDesktopSmoke(1);
       });
     });
   }
@@ -1342,6 +1314,25 @@ async function stopOwnedGateway(): Promise<void> {
       resolve();
     });
   });
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGKILL');
+    await Promise.race([
+      new Promise<void>((resolve) => child.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+    ]);
+  }
+}
+
+async function finishDesktopSmoke(exitCode: number): Promise<void> {
+  if (smokeFinishing) return;
+  smokeFinishing = true;
+  if (smokeWatchdog) clearTimeout(smokeWatchdog);
+  await Promise.allSettled([
+    stopOwnedShowSessions(),
+    stopOwnedGateway(),
+    vibeVoiceService?.stop() ?? Promise.resolve(),
+  ]);
+  app.exit(exitCode);
 }
 
 if (process.env.OPENRAPPTER_DESKTOP_SMOKE === '1') {
@@ -1403,7 +1394,7 @@ if (!ownsInstanceLock) {
       );
       smokeWatchdog = setTimeout(() => {
         console.error('OPENRAPPTER_DESKTOP_SMOKE_ERROR timed out after three minutes');
-        app.exit(1);
+        void finishDesktopSmoke(1);
       }, 180_000);
     }
     try {
@@ -1418,7 +1409,7 @@ if (!ownsInstanceLock) {
         app.exit(0);
         return;
       }
-      publishDesktopEndpoint();
+      await publishDesktopEndpoint();
       session.defaultSession.webRequest.onBeforeSendHeaders(
         { urls: [`ws://127.0.0.1:${gatewayPort}/*`] },
         (details, callback) => {
@@ -1525,7 +1516,7 @@ if (!ownsInstanceLock) {
           }`,
         );
         process.exitCode = 1;
-        app.exit(1);
+        await finishDesktopSmoke(1);
         return;
       }
       await dialog.showMessageBox({

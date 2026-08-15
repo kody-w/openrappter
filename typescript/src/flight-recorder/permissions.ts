@@ -68,6 +68,7 @@ try {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      timeout: 15_000,
       env: { ...process.env, HF_TARGET: target, HF_USER: user },
     },
   );
@@ -142,6 +143,7 @@ try {
       {
         stdio: "ignore",
         windowsHide: true,
+        timeout: 15_000,
         env: { ...process.env, HF_TARGET: target, HF_USER: user },
       },
     );

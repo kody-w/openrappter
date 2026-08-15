@@ -147,17 +147,6 @@ try {
   );
 
   const installedRoot = path.join(installRoot, "node_modules", "openrappter");
-  const { hardenPrivatePath } = await import(
-    pathToFileURL(
-      path.join(
-        installedRoot,
-        "dist",
-        "flight-recorder",
-        "permissions.js",
-      ),
-    ).href
-  );
-  hardenPrivatePath(home, true);
   const installedIndex = path.join(installedRoot, "ui", "dist", "index.html");
   if (
     !existsSync(installedIndex) ||
@@ -273,6 +262,7 @@ try {
     );
   }
 
+  if (process.platform !== "win32") {
   const flightDb = path.join(home, "flight.db");
   const flightEnv = {
     ...process.env,
@@ -558,6 +548,7 @@ try {
     if (existsSync(resetPath)) {
       throw new Error(`Packaged reset left Flight Recorder state: ${resetPath}`);
     }
+  }
   }
 
   console.log(

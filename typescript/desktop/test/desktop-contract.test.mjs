@@ -114,6 +114,8 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /onBeforeSendHeaders/);
   assert.match(main, /Origin:\s*gatewayOrigin/);
   assert.match(main, /required\.every\(\(key\) => result\[key\] === true\)/);
+  assert.match(main, /async function finishDesktopSmoke/);
+  assert.match(main, /child\.kill\('SIGKILL'\)/);
   assert.match(
     main,
     /OPENRAPPTER_DESKTOP_SMOKE === '1'[\s\S]*OPENRAPPTER_SMOKE_ERROR/,

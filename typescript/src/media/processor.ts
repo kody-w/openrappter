@@ -105,8 +105,41 @@ export class MediaProcessor {
       throw new Error(`Media too large: ${contentLength} bytes (max: ${maxSize})`);
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = await this.readResponseBuffer(response, maxSize);
     return this.processBuffer(buffer, contentType);
+  }
+
+  /**
+   * Read a response without letting a missing or dishonest Content-Length
+   * bypass the media limit.
+   */
+  private async readResponseBuffer(response: Response, maxSize: number): Promise<Buffer> {
+    const reader = response.body?.getReader();
+    if (!reader) return Buffer.alloc(0);
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.byteLength === 0) continue;
+
+        if (value.byteLength > maxSize - total) {
+          const received = total + value.byteLength;
+          await reader.cancel(`Media too large: ${received} bytes (max: ${maxSize})`);
+          throw new Error(`Media too large: at least ${received} bytes (max: ${maxSize})`);
+        }
+
+        total += value.byteLength;
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    return Buffer.concat(chunks, total);
   }
 
   /**

@@ -132,12 +132,17 @@ def test_status_recovers_a_dead_collector_process(tmp_path):
 def test_agent_uses_thread_local_store_connections(tmp_path):
     agent = ShowAndTellAgent(root=tmp_path / "show", local_surface=True)
     stores = []
+    results = []
+    barrier = threading.Barrier(2)
 
     def collect():
-        store = agent.store
-        json.loads(agent.perform(action="list"))
-        stores.append((store, store.connection))
-        store.close()
+        barrier.wait()
+        result = json.loads(agent.perform(action="list"))
+        results.append(result)
+        if result.get("status") == "success":
+            store = agent.store
+            stores.append((store, store.connection))
+            store.close()
 
     first = threading.Thread(target=collect)
     second = threading.Thread(target=collect)
@@ -145,6 +150,7 @@ def test_agent_uses_thread_local_store_connections(tmp_path):
     second.start()
     first.join()
     second.join()
+    assert [result["status"] for result in results] == ["success", "success"]
     assert len(stores) == 2
     assert stores[0][0] is not stores[1][0]
     assert stores[0][1] is not stores[1][1]

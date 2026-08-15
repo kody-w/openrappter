@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -51,6 +52,7 @@ PRIVATE_CONTEXT = re.compile(
     r"token|private key|security code|sign[ -]?in|log[ -]?in)\b",
     re.I,
 )
+_INITIALIZE_LOCK = threading.RLock()
 
 
 def show_and_tell_root() -> Path:
@@ -218,27 +220,29 @@ class ShowAndTellStore:
         self._connection: Optional[sqlite3.Connection] = None
 
     def initialize(self) -> None:
-        if self._connection is not None:
-            return
-        _private_directory(self.root)
-        if self.database_path.exists() and (
-            self.database_path.is_symlink()
-            or not self.database_path.is_file()
-        ):
-            raise RuntimeError(
-                "Show-and-Tell database must be a regular file."
+        with _INITIALIZE_LOCK:
+            if self._connection is not None:
+                return
+            _private_directory(self.root)
+            if self.database_path.exists() and (
+                self.database_path.is_symlink()
+                or not self.database_path.is_file()
+            ):
+                raise RuntimeError(
+                    "Show-and-Tell database must be a regular file."
+                )
+            connection = sqlite3.connect(
+                self.database_path,
+                timeout=5.0,
+                isolation_level=None,
             )
-        connection = sqlite3.connect(
-            self.database_path,
-            timeout=5.0,
-            isolation_level=None,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
-        connection.executescript(
-            """
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA foreign_keys = ON")
+                connection.execute("PRAGMA busy_timeout = 5000")
+                connection.executescript(
+                    """
             CREATE TABLE IF NOT EXISTS show_sessions (
               id TEXT PRIMARY KEY,
               schema_version INTEGER NOT NULL DEFAULT 1,
@@ -299,9 +303,12 @@ class ShowAndTellStore:
               expires_at INTEGER NOT NULL
             );
             """
-        )
-        self._connection = connection
-        _private_file(self.database_path)
+                )
+                self._connection = connection
+                _private_file(self.database_path)
+            except Exception:
+                connection.close()
+                raise
 
     def close(self) -> None:
         if self._connection is not None:

@@ -18,6 +18,7 @@ const packageRoot = path.resolve(
   "..",
 );
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
 const scratch = mkdtempSync(path.join(packageRoot, ".package-smoke-"));
 
 function run(command, args, options = {}) {
@@ -27,6 +28,7 @@ function run(command, args, options = {}) {
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
       [
@@ -39,6 +41,16 @@ function run(command, args, options = {}) {
     );
   }
   return result;
+}
+
+function runNpm(args, options = {}) {
+  if (npmCli) {
+    return run(process.execPath, [npmCli, ...args], options);
+  }
+  return run(npm, args, {
+    shell: process.platform === "win32",
+    ...options,
+  });
 }
 
 function parsePackResult(output) {
@@ -129,8 +141,7 @@ try {
     JSON.stringify({ name: "openrappter-package-smoke", private: true }),
   );
 
-  run(
-    npm,
+  runNpm(
     ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
     { cwd: installRoot },
   );
@@ -167,7 +178,7 @@ try {
   // Flight Recorder uses better-sqlite3, whose native binding is prepared by
   // its install script. Rebuild only that reviewed dependency before testing
   // the runtime path an ordinary npm install provides.
-  run(npm, ["rebuild", "better-sqlite3"], { cwd: installRoot });
+  runNpm(["rebuild", "better-sqlite3"], { cwd: installRoot });
 
   const binary = path.join(installedRoot, "bin", "openrappter.mjs");
   const showHelp = run(process.execPath, [binary, "show", "--help"], {
@@ -202,7 +213,7 @@ try {
     store.database()
       .prepare("INSERT INTO show_consents(token_hash, purpose, issued_at, expires_at) VALUES (?, ?, ?, ?)")
       .run(createHash("sha256").update(token).digest("hex"), "start", now, now + 60000);
-    const agent = new ShowAndTellAgent({ root: ${JSON.stringify(showRoot)} });
+    const agent = new ShowAndTellAgent({ store, localSurface: true });
     const started = JSON.parse(await agent.perform({
       action: "start",
       intent: "Package smoke",
@@ -537,5 +548,10 @@ try {
     `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, and Show-and-Tell`,
   );
 } finally {
-  rmSync(scratch, { recursive: true, force: true });
+  rmSync(scratch, {
+    recursive: true,
+    force: true,
+    maxRetries: 20,
+    retryDelay: 250,
+  });
 }

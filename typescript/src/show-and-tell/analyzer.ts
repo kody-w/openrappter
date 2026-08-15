@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 import type { LLMProvider } from '../providers/types.js';
 import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
-import { sanitizeShowAndTellText } from './privacy.js';
+import {
+  privacyReducedUrl,
+  sanitizeShowAndTellText,
+} from './privacy.js';
 import type { ShowAndTellStore } from './store.js';
 import {
   SHOW_AND_TELL_ANALYSIS_SCHEMA,
@@ -32,6 +35,34 @@ const SubmissionSchema = z.object({
   intentConfidence: z.enum(['high', 'medium', 'low']),
   steps: z.array(StepSchema).min(1).max(60),
 });
+
+function normalizedStep(stepInput: unknown): ShowAndTellStep {
+  const parsed = StepSchema.parse(stepInput);
+  return {
+    ...parsed,
+    url: privacyReducedUrl(parsed.url),
+  };
+}
+
+function narrationText(event: ShowAndTellEvent): string {
+  if (event.type === 'session.note') {
+    return sanitizeShowAndTellText(event.data.note, 1200);
+  }
+  if (event.type !== 'narration.transcribed') return '';
+  const direct = sanitizeShowAndTellText(event.data.text, 1200);
+  if (direct) return direct;
+  if (!Array.isArray(event.data.segments)) return '';
+  return sanitizeShowAndTellText(
+    event.data.segments
+      .map((segment) =>
+        segment && typeof segment === 'object'
+          ? (segment as Record<string, unknown>).text
+          : '')
+      .filter((value): value is string => typeof value === 'string')
+      .join(' '),
+    1200,
+  );
+}
 
 function titleFromIntent(intent: string): string {
   return intent
@@ -141,8 +172,11 @@ function deterministicSteps(events: ShowAndTellEvent[]): ShowAndTellStep[] {
           },
         );
       }
-    } else if (event.type === 'session.note') {
-      const note = sanitizeShowAndTellText(data.note, 1200);
+    } else if (
+      event.type === 'session.note' ||
+      event.type === 'narration.transcribed'
+    ) {
+      const note = narrationText(event);
       if (note) {
         const previous = steps.at(-1);
         if (previous) {
@@ -212,8 +246,7 @@ export function buildDeterministicAnalysis(
   previous?: ShowAndTellAnalysis | null,
 ): ShowAndTellAnalysis {
   const note = events
-    .filter((event) => event.type === 'session.note')
-    .map((event) => sanitizeShowAndTellText(event.data.note, 1000))
+    .map((event) => narrationText(event))
     .find(Boolean);
   const intent =
     sanitizeShowAndTellText(session.intentHint, 1200) ||
@@ -315,7 +348,7 @@ export async function analyzeShowAndTellSession(
       intent: submission.intent,
       intentRationale: submission.intentRationale,
       intentConfidence: submission.intentConfidence,
-      steps: submission.steps,
+      steps: submission.steps.map(normalizedStep),
       updatedAt: Date.now(),
     };
     await store.saveAnalysis(analysis);
@@ -342,10 +375,11 @@ export function reviseAnalysis(
     approve?: boolean;
   },
 ): ShowAndTellAnalysis {
-  let steps = current.steps;
+  let steps = current.steps.map(normalizedStep);
   if (typeof input.stepsJson === 'string' && input.stepsJson.trim()) {
     const parsed = JSON.parse(input.stepsJson) as unknown;
-    steps = z.array(StepSchema).min(1).max(60).parse(parsed);
+    steps = z.array(StepSchema).min(1).max(60).parse(parsed)
+      .map(normalizedStep);
   }
   const feedback = sanitizeShowAndTellText(input.feedback, 2000);
   const now = Date.now();

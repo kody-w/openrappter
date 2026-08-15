@@ -135,6 +135,7 @@ export class Assistant {
   private provider: LLMProvider;
   /** Maps conversation keys to message history for multi-turn continuity */
   private conversations: Map<string, Message[]> = new Map();
+  private conversationTails: Map<string, Promise<void>> = new Map();
   private workspaceDir: string;
   private cachedIdentity: AgentIdentity | null = null;
 
@@ -237,9 +238,34 @@ export class Assistant {
     signal?: AbortSignal,
   ): Promise<AssistantResponse> {
     const key = conversationKey ?? "default";
-    return this.runTurnTrace(key, () =>
-      this.getResponseWithinTrace(message, onDelta, memoryContext, key, signal),
+    return this.withConversationTurn(key, () =>
+      this.runTurnTrace(key, () =>
+        this.getResponseWithinTrace(message, onDelta, memoryContext, key, signal),
+      ),
     );
+  }
+
+  private async withConversationTurn<T>(
+    conversationKey: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.conversationTails.get(conversationKey) ??
+      Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current, () => current);
+    this.conversationTails.set(conversationKey, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.conversationTails.get(conversationKey) === tail) {
+        this.conversationTails.delete(conversationKey);
+      }
+    }
   }
 
   private async getResponseWithinTrace(
@@ -425,8 +451,10 @@ export class Assistant {
     conversationKey?: string,
   ): Promise<AssistantResponse> {
     const key = conversationKey ?? "default";
-    return this.runTurnTrace(key, () =>
-      this.getResponseStreamingWithinTrace(message, onDelta, key),
+    return this.withConversationTurn(key, () =>
+      this.runTurnTrace(key, () =>
+        this.getResponseStreamingWithinTrace(message, onDelta, key),
+      ),
     );
   }
 
@@ -440,7 +468,12 @@ export class Assistant {
     const modelPolicy = this.config.model;
     const chatStream = provider.chatStream;
     if (!chatStream) {
-      return this.getResponse(message, onDelta, undefined, conversationKey);
+      return this.getResponseWithinTrace(
+        message,
+        onDelta,
+        undefined,
+        conversationKey,
+      );
     }
 
     const agentLogs: string[] = [];

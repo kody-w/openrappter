@@ -85,6 +85,20 @@ class FailAgent extends BasicAgent {
   }
 }
 
+class ContractFailAgent extends BasicAgent {
+  constructor() {
+    super('ContractFail', {
+      name: 'ContractFail',
+      description: 'Returns a structured contract error',
+      parameters: { type: 'object', properties: {}, required: [] },
+    });
+  }
+
+  async perform(): Promise<string> {
+    return JSON.stringify({ status: 'error', message: 'Contract failure' });
+  }
+}
+
 describe('McpServer', () => {
   let server: McpServer;
 
@@ -297,6 +311,24 @@ describe('McpServer', () => {
       const result = response.result as { content: { type: string; text: string }[]; isError: boolean };
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Intentional failure');
+    });
+
+    it('marks structured agent errors as MCP tool errors', async () => {
+      server.registerAgent(new ContractFailAgent());
+      const response = await server.handleRequest({
+        jsonrpc: '2.0',
+        id: 'contract-error',
+        method: 'tools/call',
+        params: { name: 'ContractFail', arguments: {} },
+      });
+
+      expect(response.error).toBeUndefined();
+      const result = response.result as {
+        content: { type: string; text: string }[];
+        isError?: boolean;
+      };
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Contract failure');
     });
 
     it('should call tool with complex arguments', async () => {

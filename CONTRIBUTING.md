@@ -106,6 +106,8 @@ Package releases use one canonical workflow: `.github/workflows/release.yml`.
 A strict `vX.Y.Z` tag is accepted only when it matches:
 
 - `typescript/package.json` and both root versions in `typescript/package-lock.json`
+- `typescript/desktop/package.json` and both root versions in
+  `typescript/desktop/package-lock.json`
 - `python/pyproject.toml`
 - the TypeScript and Python runtime-reported versions
 
@@ -114,6 +116,7 @@ Update the npm metadata, then update the Python project version and
 
 ```bash
 npm version X.Y.Z --no-git-tag-version --prefix typescript
+npm version X.Y.Z --no-git-tag-version --prefix typescript/desktop
 node scripts/release-preflight.mjs --tag vX.Y.Z
 node --test scripts/release-preflight.test.mjs
 ```

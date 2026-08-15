@@ -21,6 +21,7 @@ import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
 import { portTypedOnCommandLine } from './infra/cli-port.js';
+import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
@@ -1305,6 +1306,12 @@ program
           releaseProcessLock: () => releaseLock({ filePath: lockFile }),
         });
         lockHandedToGateway = true;
+        const desktopOwnerPid = Number.parseInt(
+          process.env.OPENRAPPTER_DESKTOP_OWNER_PID ?? '',
+          10,
+        );
+        watchOwnerProcess(desktopOwnerPid, () =>
+          cleanup().finally(() => process.exit(0)));
         if (
           process.env.OPENRAPPTER_NODE_ID
           && process.env.OPENRAPPTER_LAUNCHD !== '1'

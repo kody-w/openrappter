@@ -2,7 +2,7 @@
  * Sidebar Navigation Component
  */
 
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 
 type View = 'surgeon' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
@@ -48,6 +48,8 @@ export class OpenRappterSidebar extends LitElement {
     nav {
       flex: 1;
       padding: 1rem 0;
+      overflow-y: auto;
+      min-height: 0;
     }
 
     .nav-section {
@@ -74,6 +76,11 @@ export class OpenRappterSidebar extends LitElement {
       transition: background 0.15s ease;
       color: var(--text-secondary);
       text-decoration: none;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      font: inherit;
+      text-align: left;
     }
 
     .nav-item:hover {
@@ -83,7 +90,12 @@ export class OpenRappterSidebar extends LitElement {
 
     .nav-item.active {
       background: var(--accent);
-      color: white;
+      color: var(--accent-foreground);
+    }
+
+    .nav-item:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     .nav-icon {
@@ -158,13 +170,15 @@ export class OpenRappterSidebar extends LitElement {
           <div class="nav-section-title">Operating room</div>
           ${this.navItems.slice(0, 1).map(
             (item) => html`
-              <div
+              <button
+                type="button"
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"
+                aria-current=${this.currentView === item.id ? 'page' : nothing}
                 @click=${() => this.handleClick(item.id)}
               >
                 <span class="nav-icon">${item.icon}</span>
                 <span class="nav-label">${item.label}</span>
-              </div>
+              </button>
             `
           )}
         </div>
@@ -173,13 +187,15 @@ export class OpenRappterSidebar extends LitElement {
           <div class="nav-section-title">Anatomy</div>
           ${this.navItems.slice(1).map(
             (item) => html`
-              <div
+              <button
+                type="button"
                 class="nav-item ${this.currentView === item.id ? 'active' : ''}"
+                aria-current=${this.currentView === item.id ? 'page' : nothing}
                 @click=${() => this.handleClick(item.id)}
               >
                 <span class="nav-icon">${item.icon}</span>
                 <span class="nav-label">${item.label}</span>
-              </div>
+              </button>
             `
           )}
         </div>

@@ -238,6 +238,13 @@ export class VibeVoiceService {
       this.operation.catch(() => undefined),
       delay(10_000),
     ]);
+    await Promise.all(
+      [...this.activeChildren].map((child) => this.terminateChild(child)),
+    );
+    const lateServer = this.server;
+    this.server = null;
+    this.serverPort = null;
+    if (lateServer) await this.terminateChild(lateServer);
     this.update({
       state: this.isInstalled() ? 'starting' : 'missing',
       phase: 'idle',
@@ -395,6 +402,7 @@ export class VibeVoiceService {
     const port = await this.availablePort(
       39_000 + (randomBytes(2).readUInt16BE(0) % 10_000),
     );
+    this.assertGeneration(generation);
     const device = this.device();
     const child = spawn(
       this.venvPython(),
@@ -424,55 +432,55 @@ export class VibeVoiceService {
     );
     let spawnError: Error | null = null;
     let output = '';
-    const onData = (chunk: Buffer) => {
-      output = `${output}${chunk.toString()}`.slice(-8000);
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    child.once('error', (error) => {
-      spawnError = error;
-    });
-    this.server = child;
-    this.serverPort = port;
-    const deadline = Date.now() + 120_000;
-    while (Date.now() < deadline) {
-      this.assertGeneration(generation);
-      if (!this.childIsRunning(child)) {
-        this.server = null;
-        this.serverPort = null;
-        throw new Error(
-          `VibeVoice server exited (${
-            child.exitCode ?? child.signalCode ?? 'unknown'
-          }): ${output.slice(-1200)}`,
-        );
-      }
-      if (spawnError) {
-        this.server = null;
-        this.serverPort = null;
-        throw spawnError;
-      }
-      try {
-        if (await this.serverReady(port)) {
-          this.update({
-            state: 'ready',
-            phase: 'idle',
-            port,
-            device,
-            progress: 100,
-          });
-          return;
+    try {
+      const onData = (chunk: Buffer) => {
+        output = `${output}${chunk.toString()}`.slice(-8000);
+      };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.once('error', (error) => {
+        spawnError = error;
+      });
+      this.server = child;
+      this.serverPort = port;
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        this.assertGeneration(generation);
+        if (!this.childIsRunning(child)) {
+          throw new Error(
+            `VibeVoice server exited (${
+              child.exitCode ?? child.signalCode ?? 'unknown'
+            }): ${output.slice(-1200)}`,
+          );
         }
-      } catch {
-        // Model loading can take well over a minute on first start.
+        if (spawnError) throw spawnError;
+        try {
+          if (await this.serverReady(port)) {
+            this.update({
+              state: 'ready',
+              phase: 'idle',
+              port,
+              device,
+              progress: 100,
+            });
+            return;
+          }
+        } catch {
+          // Model loading can take well over a minute on first start.
+        }
+        await delay(500);
       }
-      await delay(500);
+      throw new Error(
+        `VibeVoice server did not become ready in two minutes: ${output.slice(-1200)}`,
+      );
+    } catch (error) {
+      if (this.server === child) {
+        this.server = null;
+        this.serverPort = null;
+      }
+      await this.terminateChild(child);
+      throw error;
     }
-    await this.terminateChild(child);
-    this.server = null;
-    this.serverPort = null;
-    throw new Error(
-      `VibeVoice server did not become ready in two minutes: ${output.slice(-1200)}`,
-    );
   }
 
   private async run(

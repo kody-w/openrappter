@@ -21,12 +21,18 @@ const runtimeInstaller = readFileSync(
   new URL('../scripts/install-runtime.mjs', import.meta.url),
   'utf8',
 );
+const { SECURE_RENDERER_PREFERENCES } = await import(
+  '../dist/window-security.js'
+);
 
 test('desktop renderer is isolated and sandboxed', () => {
-  assert.match(main, /contextIsolation:\s*true/);
-  assert.match(main, /nodeIntegration:\s*false/);
-  assert.match(main, /sandbox:\s*true/);
-  assert.match(main, /webSecurity:\s*true/);
+  assert.deepEqual(SECURE_RENDERER_PREFERENCES, {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    webSecurity: true,
+  });
+  assert.match(main, /SECURE_RENDERER_PREFERENCES/);
 });
 
 test('signed macOS builds retain microphone and Apple Events capabilities', () => {
@@ -59,6 +65,8 @@ test('local tell and voice models bootstrap privately', () => {
   assert.match(vibevoice, /--no-access-log/);
   assert.match(vibevoice, /activeChildren/);
   assert.match(vibevoice, /lifecycleGeneration/);
+  assert.match(vibevoice, /this\.assertGeneration\(generation\);[\s\S]*const device/);
+  assert.match(vibevoice, /const lateServer = this\.server/);
   assert.match(vibevoice, /process\.kill\(-child\.pid/);
   assert.match(vibevoice, /taskkill\.exe/);
   assert.match(vibevoice, /'\/T'/);
@@ -76,6 +84,8 @@ test('desktop publishes one authenticated endpoint for tray and Swift Bar', () =
   assert.match(main, /Launch OpenRappter Bar/);
   assert.match(main, /app\.setLoginItemSettings/);
   assert.match(main, /async function waitForRenderer/);
+  assert.match(main, /render-process-gone/);
+  assert.match(main, /webContents\.on\('did-finish-load'/);
   assert.match(main, /await focusWindow\('chat'\)/);
   assert.match(main, /\.catch\(showTrayError\)/);
 });
@@ -114,6 +124,7 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /onBeforeSendHeaders/);
   assert.match(main, /Origin:\s*gatewayOrigin/);
   assert.match(main, /required\.every\(\(key\) => result\[key\] === true\)/);
+  assert.match(main, /SMOKE_ERROR instance lock unavailable/);
   assert.match(main, /async function finishDesktopSmoke/);
   assert.match(main, /child\.kill\('SIGKILL'\)/);
   assert.match(

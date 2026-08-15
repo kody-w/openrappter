@@ -147,6 +147,29 @@ describe('the refusals', () => {
     expect(agent!.metadata?.description).toBe('Version two.');
   }, 40_000);
 
+  it('removes agents that disappeared from a replaced Python file', async () => {
+    const first = Buffer.concat([
+      grailAgent('A', 'Alpha', 'Alpha version one.'),
+      Buffer.from('\n'),
+      grailAgent('B', 'Beta', 'Beta version one.'),
+    ]);
+    await importAgentFile('multi_agent.py', first, registry, { dir });
+    expect(await registry.getAgent('Alpha')).toBeDefined();
+    expect(await registry.getAgent('Beta')).toBeDefined();
+
+    await importAgentFile(
+      'multi_agent.py',
+      grailAgent('A', 'Alpha', 'Alpha version two.'),
+      registry,
+      { dir },
+    );
+
+    expect((await registry.getAgent('Alpha'))?.metadata?.description).toBe(
+      'Alpha version two.',
+    );
+    expect(await registry.getAgent('Beta')).toBeUndefined();
+  }, 40_000);
+
   it('re-reads an edit that CPython\'s bytecode cache would call unchanged', async () => {
     // The .pyc validity check is (mtime_seconds, size). Two versions of the same
     // agent that differ only in a same-length string, written inside one

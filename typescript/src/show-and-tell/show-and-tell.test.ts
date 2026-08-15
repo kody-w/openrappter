@@ -22,6 +22,7 @@ import {
   ShowAndTellStore,
   SHOW_AND_TELL_ANALYSIS_SCHEMA,
   SHOW_AND_TELL_SCHEMA,
+  reviseAnalysis,
   runShowAndTellCollector,
   spawnShowAndTellCollector,
 } from './index.js';
@@ -108,6 +109,23 @@ describe('ShowAndTellStore', () => {
   });
 
   describe('Show-and-Tell collector ownership', () => {
+    it('does not let a second collector replace the attached owner', async () => {
+      const store = new ShowAndTellStore(tempRoot());
+      const session = await store.createSession();
+      expect(
+        await store.attachCollector(session.id, 'typescript', 101, 'first'),
+      ).toBe(true);
+      expect(
+        await store.attachCollector(session.id, 'python', 202, 'second'),
+      ).toBe(false);
+      expect(await store.getSession(session.id)).toMatchObject({
+        collectorRuntime: 'typescript',
+        collectorPid: 101,
+        collectorNonce: 'first',
+      });
+      store.close();
+    });
+
     it('reports an executable launch failure without crashing the host', async () => {
       const priorPath = process.env.PATH;
       process.env.PATH = '';
@@ -385,11 +403,34 @@ describe('ShowAndTellAgent', () => {
     );
     expect(tested.status).toBe('success');
     expect(tested.ok).toBe(true);
+    const secondApprovalToken = await seedConsent(store, 'approve');
+    const revised = JSON.parse(
+      await agent.perform({
+        action: 'review',
+        session_id: sessionId,
+        intent: 'Create a revised weekly project status report',
+        approve: true,
+        consent_token: secondApprovalToken,
+      }),
+    );
+    expect(revised.analysis.revision).toBeGreaterThan(
+      analyzed.analysis.revision,
+    );
+    const stale = JSON.parse(
+      await agent.perform({ action: 'test', session_id: sessionId }),
+    );
+    expect(stale.status).toBe('error');
+    expect(
+      stale.checks.some(
+        (check: { name: string; ok: boolean }) =>
+          check.name.endsWith('-analysis-revision') && check.ok === false,
+      ),
+    ).toBe(true);
     const rebuilt = JSON.parse(
       await agent.perform({
         action: 'build',
         session_id: sessionId,
-        target: 'skill',
+        target: 'all',
       }),
     );
     expect(rebuilt.status).toBe('success');
@@ -677,6 +718,9 @@ describe('show-and-tell privacy and analysis', () => {
     ).toBe('https://example.com/callback/:id');
     expect(artifactContainsSensitiveText(JSON.stringify({ url: jwt }))).toBe(true);
     expect(isPrivateContext('Safari', 'Google Accounts', '/signin/oauth')).toBe(true);
+    expect(isPrivateContext('Google Chrome', 'New Incognito Tab')).toBe(true);
+    expect(isPrivateContext('Microsoft Edge', 'InPrivate browsing')).toBe(true);
+    expect(isPrivateContext('Safari', 'Private Browsing')).toBe(true);
   });
 
   it('never persists text typed through ComputerUse', () => {
@@ -731,14 +775,61 @@ describe('show-and-tell privacy and analysis', () => {
         sessionId: 'narrated-session',
         sequence: 0,
         timestamp: now,
-        type: 'session.note',
-        source: 'local-whisper-narration',
-        data: { note: 'Summarize blockers before listing next steps.' },
+        type: 'narration.transcribed',
+        source: 'local-whisper',
+        data: { text: 'Summarize blockers before listing next steps.' },
       }],
     );
     expect(analysis.steps[0].title).toBe('Follow the narrated instruction');
     expect(analysis.steps[0].detail).toContain('Summarize blockers');
-    expect(analysis.steps[0].evidence).toContain('event:0:session.note');
+    expect(analysis.steps[0].evidence).toContain(
+      'event:0:narration.transcribed',
+    );
+  });
+
+  it('privacy-reduces reviewed step URLs before persistence', () => {
+    const now = Date.now();
+    const revised = reviseAnalysis(
+      {
+        schema: SHOW_AND_TELL_ANALYSIS_SCHEMA,
+        sessionId: 'session-1',
+        revision: 1,
+        title: 'Research',
+        intent: 'Research safely',
+        intentRationale: 'Test',
+        intentConfidence: 'high',
+        steps: [{
+          id: 's1',
+          title: 'Search',
+          detail: 'Search for the report.',
+          kind: 'action',
+          tool: 'Browser or Web',
+          app: 'Safari',
+          url: 'https://example.com/start',
+          evidence: [],
+          confidence: 'high',
+        }],
+        feedbackLog: [],
+        approved: false,
+        approvedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        stepsJson: JSON.stringify([{
+          id: 's1',
+          title: 'Search',
+          detail: 'Search for the report.',
+          kind: 'action',
+          tool: 'Browser or Web',
+          app: 'Safari',
+          url: 'https://example.com/search?q=confidential#private',
+          evidence: [],
+          confidence: 'high',
+        }]),
+      },
+    );
+    expect(revised.steps[0].url).toBe('https://example.com/search');
   });
 
   it('builds a useful deterministic baseline without sending frames to a model', () => {

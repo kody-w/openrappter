@@ -21,6 +21,7 @@ import {
 } from '../flight-recorder/permissions.js';
 import {
   artifactContainsSensitiveText,
+  privacyReducedUrl,
   sanitizeShowAndTellText,
 } from './privacy.js';
 import type { ShowAndTellStore } from './store.js';
@@ -117,7 +118,9 @@ export function renderShowAndTellSkill(
     lines.push(
       `${index + 1}. **${step.title}** — ${step.detail}` +
         `${step.tool ? ` Prefer \`${step.tool}\`.` : ''}` +
-        `${step.url ? ` Destination: ${step.url}` : ''}`,
+        `${privacyReducedUrl(step.url)
+          ? ` Destination: ${privacyReducedUrl(step.url)}`
+          : ''}`,
     );
   });
   lines.push(
@@ -144,6 +147,7 @@ function skillManifest(
     description: analysis.intent,
     tags: ['show-and-tell', 'recorded-workflow'],
     sourceSessionId: analysis.sessionId,
+    sourceAnalysisRevision: analysis.revision,
     generatedBy: 'OpenRappter Show-and-Tell',
   }, null, 2)}\n`;
 }
@@ -156,22 +160,31 @@ function renderAutomation(analysis: ShowAndTellAnalysis, name: string): string {
     enabled: false,
     trigger: { type: 'manual' },
     sourceSessionId: analysis.sessionId,
+    sourceAnalysisRevision: analysis.revision,
     steps: analysis.steps.map((step, index) => ({
       id: step.id || `s${index + 1}`,
       label: step.title,
       prompt:
         `${step.detail}` +
         `${step.tool ? ` Prefer ${step.tool}.` : ''}` +
-        `${step.url ? ` Use ${step.url}.` : ''}`,
+        `${privacyReducedUrl(step.url)
+          ? ` Use ${privacyReducedUrl(step.url)}.`
+          : ''}`,
     })),
   }, null, 2)}\n`;
 }
 
-function existingSourceSession(directory: string): string | null {
-  const manifest = path.join(directory, 'manifest.json');
-  if (!existsSync(manifest)) return null;
+function existingSourceSession(
+  directory: string,
+  kind: ShowAndTellArtifactKind,
+): string | null {
+  const metadataFile = path.join(
+    directory,
+    kind === 'skill' ? 'manifest.json' : 'automation.json',
+  );
+  if (!existsSync(metadataFile)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as {
+    const parsed = JSON.parse(readFileSync(metadataFile, 'utf8')) as {
       sourceSessionId?: unknown;
     };
     return typeof parsed.sourceSessionId === 'string'
@@ -196,8 +209,7 @@ function destination(
   if (
     existsSync(candidate) &&
     (!candidateIsSafeDirectory ||
-      kind !== 'skill' ||
-      existingSourceSession(candidate) !== sessionId)
+      existingSourceSession(candidate, kind) !== sessionId)
   ) {
     let index = 2;
     while (existsSync(path.join(root, `${baseName}-${index}`))) index += 1;
@@ -319,6 +331,7 @@ export async function testShowAndTellArtifacts(
         const manifest = readFileSync(manifestPath, 'utf8');
         const parsed = JSON.parse(manifest) as {
           sourceSessionId?: unknown;
+          sourceAnalysisRevision?: unknown;
           name?: unknown;
         };
         const manifestOk =
@@ -331,6 +344,15 @@ export async function testShowAndTellArtifacts(
           detail: manifestOk
             ? 'Manifest matches the recorded session and skill.'
             : 'Manifest is missing, changed, or belongs to another session.',
+        });
+        const revisionOk =
+          parsed.sourceAnalysisRevision === analysis?.revision;
+        checks.push({
+          name: 'skill-analysis-revision',
+          ok: revisionOk,
+          detail: revisionOk
+            ? 'Skill matches the current analysis revision.'
+            : 'Skill was built from an older analysis revision.',
         });
         privacySafe = privacySafe && !artifactContainsSensitiveText(manifest);
         digest = createHash('sha256')
@@ -358,13 +380,26 @@ export async function testShowAndTellArtifacts(
     });
     if (artifact.kind === 'automation') {
       try {
-        const parsed = JSON.parse(content) as { schema?: unknown; enabled?: unknown };
+        const parsed = JSON.parse(content) as {
+          schema?: unknown;
+          enabled?: unknown;
+          sourceAnalysisRevision?: unknown;
+        };
         checks.push({
           name: 'automation-shape',
           ok:
             parsed.schema === SHOW_AND_TELL_AUTOMATION_SCHEMA &&
             parsed.enabled === false,
           detail: 'Automation is versioned and disabled by default.',
+        });
+        const revisionOk =
+          parsed.sourceAnalysisRevision === analysis?.revision;
+        checks.push({
+          name: 'automation-analysis-revision',
+          ok: revisionOk,
+          detail: revisionOk
+            ? 'Automation matches the current analysis revision.'
+            : 'Automation was built from an older analysis revision.',
         });
       } catch {
         checks.push({

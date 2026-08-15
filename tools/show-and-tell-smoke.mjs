@@ -61,6 +61,21 @@ try {
     }),
   );
   assert(stopped.session?.state === 'stopped', 'TypeScript collector did not stop cleanly.');
+  const events = await store.events(started.session.id);
+  const activation = events.find((event) => event.type === 'app.activate');
+  const browser = events.find((event) => event.type === 'browser.url');
+  assert(
+    activation?.source === 'context-collector' &&
+      activation.data.app === 'ShowAndTellTestApp' &&
+      activation.data.window === 'Synthetic collector window' &&
+      Number.isInteger(activation.sequence),
+    `TypeScript collector activation payload is incomplete: ${JSON.stringify(activation)}`,
+  );
+  assert(
+    browser?.data.url === 'https://example.test/workflow' &&
+      browser.sequence === activation.sequence + 1,
+    `TypeScript collector browser payload is incomplete: ${JSON.stringify(browser)}`,
+  );
   store.close();
 
   const pythonScript = `
@@ -89,10 +104,15 @@ started = json.loads(agent.perform(
 time.sleep(1.2)
 live = json.loads(agent.perform(action="status", session_id=started["session"]["id"]))
 stopped = json.loads(agent.perform(action="stop", session_id=started["session"]["id"]))
+events = store.events(started["session"]["id"])
+activation = next(event for event in events if event["type"] == "app.activate")
+browser = next(event for event in events if event["type"] == "browser.url")
 print(json.dumps({
     "started": started["status"],
     "healthy": live["collector_healthy"],
     "stopped": stopped["session"]["state"],
+    "activation": activation,
+    "browser": browser,
 }))
 agent.store.close()
 store.close()
@@ -109,7 +129,13 @@ store.close()
   assert(
     pythonResult.started === 'success' &&
       pythonResult.healthy === true &&
-      pythonResult.stopped === 'stopped',
+      pythonResult.stopped === 'stopped' &&
+      pythonResult.activation.source === 'context-collector' &&
+      pythonResult.activation.data.app === 'ShowAndTellTestApp' &&
+      pythonResult.activation.data.window === 'Synthetic collector window' &&
+      Number.isInteger(pythonResult.activation.sequence) &&
+      pythonResult.browser.data.url === 'https://example.test/workflow' &&
+      pythonResult.browser.sequence === pythonResult.activation.sequence + 1,
     `Python collector lifecycle failed: ${JSON.stringify(pythonResult)}`,
   );
 

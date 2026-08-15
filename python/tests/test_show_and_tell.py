@@ -16,6 +16,7 @@ from openrappter.show_and_tell import (
     is_private_context,
     safe_computer_action_data,
     privacy_reduced_url,
+    revise_analysis,
     run_collector,
 )
 import pytest
@@ -77,6 +78,20 @@ def test_event_sequence_is_shared_across_store_instances(tmp_path):
     assert [event["sequence"] for event in first.events(session["id"])] == [0, 1]
     first.close()
     second.close()
+
+
+def test_second_collector_cannot_replace_attached_owner(tmp_path):
+    store = ShowAndTellStore(tmp_path / "show")
+    session = store.create_session()
+    assert store.attach_collector(session["id"], "python", 101, "first")
+    assert not store.attach_collector(
+        session["id"], "typescript", 202, "second"
+    )
+    attached = store.get_session(session["id"])
+    assert attached["collectorRuntime"] == "python"
+    assert attached["collectorPid"] == 101
+    assert attached["collectorNonce"] == "first"
+    store.close()
 
 
 def test_stale_session_is_failed_before_replacement(tmp_path):
@@ -297,8 +312,25 @@ def test_full_flow_builds_portable_skill_and_disabled_automation(tmp_path, monke
     tested = json.loads(agent.perform(action="test", session_id=session_id))
     assert tested["status"] == "success"
     assert tested["ok"] is True
+    second_approval = seed_consent(store, "approve")
+    revised = json.loads(
+        agent.perform(
+            action="review",
+            session_id=session_id,
+            intent="Create a revised weekly project status report",
+            approve=True,
+            consent_token=second_approval,
+        )
+    )
+    assert revised["analysis"]["revision"] > analyzed["analysis"]["revision"]
+    stale = json.loads(agent.perform(action="test", session_id=session_id))
+    assert stale["status"] == "error"
+    assert any(
+        check["name"].endswith("-analysis-revision") and not check["ok"]
+        for check in stale["checks"]
+    )
     rebuilt = json.loads(
-        agent.perform(action="build", session_id=session_id, target="skill")
+        agent.perform(action="build", session_id=session_id, target="all")
     )
     assert rebuilt["status"] == "success"
     assert len([
@@ -568,6 +600,9 @@ def test_privacy_reduced_url_rejects_local_schemes_and_opaque_tokens():
     ) == "https://example.com/callback/:id"
     assert artifact_contains_sensitive_text(json.dumps({"url": jwt}))
     assert is_private_context("Safari", "Google Accounts", "/signin/oauth")
+    assert is_private_context("Google Chrome", "New Incognito Tab")
+    assert is_private_context("Microsoft Edge", "InPrivate browsing")
+    assert is_private_context("Safari", "Private Browsing")
 
 
 def test_deterministic_analysis_uses_semantic_events_not_frame_pixels():
@@ -662,12 +697,61 @@ def test_deterministic_analysis_keeps_narration_as_a_step():
                 "sessionId": "narrated-session",
                 "sequence": 0,
                 "timestamp": now,
-                "type": "session.note",
-                "source": "local-whisper-narration",
-                "data": {"note": "Summarize blockers before listing next steps."},
+                "type": "narration.transcribed",
+                "source": "local-whisper",
+                "data": {"text": "Summarize blockers before listing next steps."},
             }
         ],
     )
     assert analysis["steps"][0]["title"] == "Follow the narrated instruction"
     assert "Summarize blockers" in analysis["steps"][0]["detail"]
-    assert "event:0:session.note" in analysis["steps"][0]["evidence"]
+    assert "event:0:narration.transcribed" in analysis["steps"][0]["evidence"]
+
+
+def test_revise_analysis_privacy_reduces_step_urls():
+    now = int(time.time() * 1000)
+    revised = revise_analysis(
+        {
+            "schema": SHOW_AND_TELL_ANALYSIS_SCHEMA,
+            "sessionId": "session-1",
+            "revision": 1,
+            "title": "Research",
+            "intent": "Research safely",
+            "intentRationale": "Test",
+            "intentConfidence": "high",
+            "steps": [
+                {
+                    "id": "s1",
+                    "title": "Search",
+                    "detail": "Search for the report.",
+                    "kind": "action",
+                    "tool": "Browser or Web",
+                    "app": "Safari",
+                    "url": "https://example.com/start",
+                    "evidence": [],
+                    "confidence": "high",
+                }
+            ],
+            "feedbackLog": [],
+            "approved": False,
+            "approvedAt": None,
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        steps_json=json.dumps(
+            [
+                {
+                    "id": "s1",
+                    "title": "Search",
+                    "detail": "Search for the report.",
+                    "kind": "action",
+                    "tool": "Browser or Web",
+                    "app": "Safari",
+                    "url": "https://example.com/search?q=confidential#private",
+                    "evidence": [],
+                    "confidence": "high",
+                }
+            ]
+        ),
+    )
+    assert revised["steps"][0]["url"] == "https://example.com/search"

@@ -7,7 +7,7 @@ const JWT_TOKEN =
   /(?:^|[^A-Za-z0-9_-])([A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,})(?:$|[^A-Za-z0-9_-])/;
 
 const PRIVATE_CONTEXT =
-  /\b(?:1password|bitwarden|keychain|password|passkey|credential|secret|token|private key|security code|sign[ -]?in|log[ -]?in)\b/i;
+  /\b(?:1password|bitwarden|keychain|password|passkey|credential|secret|token|private key|security code|sign[ -]?in|log[ -]?in|incognito|inprivate|private browsing)\b/i;
 
 const NAMED_KEYS = new Set([
   'return', 'enter', 'tab', 'space', 'delete', 'escape', 'esc',

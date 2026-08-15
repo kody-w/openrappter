@@ -191,14 +191,12 @@ async function navigate(view: unknown): Promise<Record<string, unknown>> {
   }
   const app = document.querySelector('openrappter-app') as
     | (HTMLElement & {
-        currentView: string;
-        requestUpdate(): void;
+        navigate(view: string): void;
         updateComplete?: Promise<unknown>;
       })
     | null;
   if (!app) throw new Error('OpenRappter app surface is not mounted.');
-  app.currentView = view;
-  app.requestUpdate();
+  app.navigate(view);
   await app.updateComplete;
   return { view };
 }

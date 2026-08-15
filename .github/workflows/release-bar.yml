@@ -21,6 +21,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
       - name: Validate exact macOS release tag
         id: version
         shell: bash
@@ -35,6 +39,13 @@ jobs:
           fi
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
+      - name: Require release commit on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
   build-and-release:
     name: Build & Release DMG
     needs: validate-tag
@@ -46,9 +57,9 @@ jobs:
       run:
         working-directory: macos
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a
         with:
           swift-version: '6.0'
 
@@ -194,7 +205,7 @@ jobs:
             "${NOTARY_KEY_PATH:-}"
 
       - name: Upload DMG as release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           name: "OpenRappter Bar ${{ env.RELEASE_VERSION }}"
           body: |
@@ -223,3 +234,4 @@ jobs:
             macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg
             macos/dist/OpenRappter-Bar-${{ env.RELEASE_VERSION }}.dmg.sha256
           fail_on_unmatched_files: true
+          overwrite_files: false

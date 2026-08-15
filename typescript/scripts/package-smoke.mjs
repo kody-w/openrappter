@@ -561,37 +561,46 @@ try {
     }
   }
   } else {
-    const [{ FlightRecorder }, { hardenPrivatePath }] = await Promise.all([
-      import(pathToFileURL(
-        path.join(installedRoot, "dist", "flight-recorder", "recorder.js"),
-      ).href),
-      import(pathToFileURL(
-        path.join(installedRoot, "dist", "flight-recorder", "permissions.js"),
-      ).href),
-    ]);
     const windowsFlightDir = path.join(scratch, "windows-flight-recorder");
     mkdirSync(windowsFlightDir, { recursive: true });
-    hardenPrivatePath(windowsFlightDir, true);
-    const recorder = new FlightRecorder({
-      enabled: true,
-      databasePath: path.join(windowsFlightDir, "flight.db"),
-      retentionEvents: -1,
-    });
-    try {
-      await recorder.initialize();
-      await recorder.runTrace(
-        { traceId: "windows-package-smoke" },
-        async () => {},
-      );
-      const health = await recorder.health();
-      if (!health.initialized || health.eventCount < 2) {
-        throw new Error(
-          `Packaged Windows Flight Recorder did not persist a trace: ${JSON.stringify(health)}`,
+    const recorderModule = pathToFileURL(
+      path.join(installedRoot, "dist", "flight-recorder", "recorder.js"),
+    ).href;
+    const permissionsModule = pathToFileURL(
+      path.join(installedRoot, "dist", "flight-recorder", "permissions.js"),
+    ).href;
+    const windowsFlightScript = `
+      import path from "node:path";
+      import { FlightRecorder } from ${JSON.stringify(recorderModule)};
+      import { hardenPrivatePath } from ${JSON.stringify(permissionsModule)};
+      const directory = ${JSON.stringify(windowsFlightDir)};
+      hardenPrivatePath(directory, true);
+      const recorder = new FlightRecorder({
+        enabled: true,
+        databasePath: path.join(directory, "flight.db"),
+        retentionEvents: -1,
+      });
+      try {
+        await recorder.initialize();
+        await recorder.runTrace(
+          { traceId: "windows-package-smoke" },
+          async () => {},
         );
+        const health = await recorder.health();
+        if (!health.initialized || health.eventCount < 2) {
+          throw new Error(
+            \`Packaged Windows Flight Recorder did not persist a trace: \${JSON.stringify(health)}\`,
+          );
+        }
+      } finally {
+        await recorder.close();
       }
-    } finally {
-      await recorder.close();
-    }
+    `;
+    run(
+      process.execPath,
+      ["--input-type=module", "--eval", windowsFlightScript],
+      { cwd: installRoot },
+    );
   }
 
   console.log(

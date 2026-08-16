@@ -11,21 +11,41 @@
  * the next fix reaches every caller.
  */
 import { lookup } from 'dns/promises';
+import { BlockList, isIP } from 'node:net';
 
-const BLOCKED_HOST_PATTERNS = [
-  /^10\./,
-  /^172\.(1[6-9]|2[0-9]|3[01])\./,
-  /^192\.168\./,
-  /^127\./,
-  /^0\./,
-  /^169\.254\./,
-  /^::1$/,
-  /^::$/,
-  /^fc[0-9a-f]{2}:/,
-  /^fd[0-9a-f]{2}:/,
-  // IPv6 link-local is fe80::/10, spanning fe80 through febf.
-  /^fe[89ab][0-9a-f]:/,
-];
+const BLOCKED_IPS = new BlockList();
+for (const [network, prefix] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10],
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.0.0.0', 24],
+  ['192.0.2.0', 24],
+  ['192.88.99.0', 24],
+  ['192.168.0.0', 16],
+  ['198.18.0.0', 15],
+  ['198.51.100.0', 24],
+  ['203.0.113.0', 24],
+  ['224.0.0.0', 4],
+  ['240.0.0.0', 4],
+] as const) {
+  BLOCKED_IPS.addSubnet(network, prefix, 'ipv4');
+}
+for (const [network, prefix] of [
+  ['::', 128],
+  ['::1', 128],
+  ['64:ff9b:1::', 48],
+  ['100::', 64],
+  ['2001:db8::', 32],
+  ['fc00::', 7],
+  ['fe80::', 10],
+  ['fec0::', 10],
+  ['ff00::', 8],
+] as const) {
+  BLOCKED_IPS.addSubnet(network, prefix, 'ipv6');
+}
 
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -55,7 +75,10 @@ export function normaliseHost(host: string): string {
 export function isBlockedHost(host: string): boolean {
   const normalised = normaliseHost(host);
   if (normalised === 'localhost' || normalised.endsWith('.local')) return true;
-  return BLOCKED_HOST_PATTERNS.some(pattern => pattern.test(normalised));
+  const family = isIP(normalised);
+  if (family === 4) return BLOCKED_IPS.check(normalised, 'ipv4');
+  if (family === 6) return BLOCKED_IPS.check(normalised, 'ipv6');
+  return false;
 }
 
 /** Reject by scheme and by literal address, without touching the network. */
@@ -93,12 +116,18 @@ const defaultLookup: HostLookup = hostname => lookup(hostname, { all: true });
 export async function assertHostResolvesPublicly(
   url: string,
   hostLookup: HostLookup = defaultLookup,
+  options?: { failClosed?: boolean },
 ): Promise<void> {
   const { hostname } = new URL(url);
   let resolved: Array<{ address: string }>;
   try {
     resolved = await hostLookup(hostname);
-  } catch {
+  } catch (error) {
+    if (options?.failClosed) {
+      throw new Error(
+        `Could not verify URL host ${hostname}: ${(error as Error).message}`,
+      );
+    }
     return;
   }
 

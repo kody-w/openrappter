@@ -61,7 +61,7 @@ export const channelConfigSchema = z.object({
 });
 
 export const gatewayConfigSchema = z.object({
-  port: z.number().default(18790),
+  port: z.number().int().min(1).max(65535).default(18790),
   bind: z.enum(['loopback', 'all']).default('loopback'),
   auth: z.object({
     mode: z.enum(['none', 'password']).default('none'),

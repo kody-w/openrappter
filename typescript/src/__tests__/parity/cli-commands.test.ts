@@ -262,7 +262,7 @@ describe('CLI Commands', () => {
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
-        expect(content).toMatch(/function register\w+Command\(program:\s*Command\)/);
+        expect(content).toMatch(/function register\w+Command\(\s*program:\s*Command/);
       }
     });
   });

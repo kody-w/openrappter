@@ -90,7 +90,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /** Recursive merge where `override` wins on conflict. */
-function mergeConfigObjects(
+export function mergeConfigObjects(
   base: Record<string, unknown>,
   override: Record<string, unknown>,
 ): Record<string, unknown> {

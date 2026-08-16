@@ -3,7 +3,7 @@
  * System diagnostics and health checks for openrappter.
  *
  * Checks:
- *   - Node.js version (>= 18)
+ *   - Node.js version (>= 20.9.0)
  *   - npm/pnpm availability
  *   - Git installation
  *   - Python availability (for Python agents)
@@ -19,8 +19,8 @@
  */
 
 import type { Command } from 'commander';
-import { execSync } from 'child_process';
-import { existsSync, statSync } from 'fs';
+import { execFileSync, execSync } from 'child_process';
+import { existsSync, statfsSync, statSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { createConnection } from 'net';
@@ -54,17 +54,31 @@ function colorStatus(status: CheckStatus): string {
 // Individual checks
 // ---------------------------------------------------------------------------
 
-function checkNode(): CheckResult {
-  const version = process.version;
-  const major = parseInt(version.slice(1).split('.')[0], 10);
-  if (major >= 18) {
-    return { name: 'Node.js Version', status: 'pass', message: `${version} (>= 18 required)` };
+export function checkNodeVersion(version = process.version): CheckResult {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  const current = match?.slice(1).map(Number);
+  const minimum = [20, 9, 0];
+  let supported = current !== undefined;
+  if (current) {
+    for (let index = 0; index < minimum.length; index++) {
+      if (current[index] === minimum[index]) continue;
+      supported = current[index] > minimum[index];
+      break;
+    }
+  }
+
+  if (supported) {
+    return {
+      name: 'Node.js Version',
+      status: 'pass',
+      message: `${version} (>= 20.9.0 required)`,
+    };
   }
   return {
     name: 'Node.js Version',
     status: 'fail',
     message: `${version} is too old`,
-    detail: 'Requires Node.js >= 18',
+    detail: 'Requires Node.js >= 20.9.0',
   };
 }
 
@@ -106,7 +120,20 @@ function checkPython(): CheckResult {
 }
 
 function checkFfmpeg(): CheckResult {
-  return checkTool('ffmpeg', 'ffmpeg -version 2>&1 | head -1', 'FFmpeg');
+  try {
+    const out = execFileSync('ffmpeg', ['-version'], {
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim().split(/\r?\n/, 1)[0];
+    return { name: 'FFmpeg', status: 'pass', message: out || 'available' };
+  } catch {
+    return {
+      name: 'FFmpeg',
+      status: 'warn',
+      message: 'ffmpeg not found',
+      detail: 'Install ffmpeg to enable related features',
+    };
+  }
 }
 
 function checkCopilot(): CheckResult {
@@ -202,22 +229,8 @@ function checkMemorySystem(): CheckResult {
 
 function checkDiskSpace(): CheckResult {
   try {
-    const tmp = tmpdir();
-    // On most systems we can estimate from the fs stats
-    // Use df command as a portable way to get disk space
-    const out = execSync(`df -k "${tmp}" 2>/dev/null | tail -1`, {
-      timeout: 3000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).toString().trim();
-
-    const parts = out.split(/\s+/);
-    // df output: Filesystem 1K-blocks Used Available Use% Mountpoint
-    const availableKB = parseInt(parts[3], 10);
-    if (isNaN(availableKB)) {
-      return { name: 'Disk Space', status: 'warn', message: 'Could not determine disk space' };
-    }
-
-    const availableGB = availableKB / (1024 * 1024);
+    const stats = statfsSync(tmpdir());
+    const availableGB = (stats.bavail * stats.bsize) / (1024 ** 3);
     if (availableGB < 0.5) {
       return {
         name: 'Disk Space',
@@ -280,7 +293,7 @@ async function checkGatewayPort(port = 18790): Promise<CheckResult> {
 
 export async function runDoctorChecks(): Promise<CheckResult[]> {
   const checks: CheckResult[] = [
-    checkNode(),
+    checkNodeVersion(),
     checkNpm(),
     checkGit(),
     checkPython(),
@@ -299,7 +312,10 @@ export async function runDoctorChecks(): Promise<CheckResult[]> {
 // Command registration
 // ---------------------------------------------------------------------------
 
-export function registerDoctorCommand(program: Command): void {
+export function registerDoctorCommand(
+  program: Command,
+  runChecks: () => Promise<CheckResult[]> = runDoctorChecks,
+): void {
   program
     .command('doctor')
     .description('Run system diagnostics and health checks')
@@ -309,10 +325,12 @@ export function registerDoctorCommand(program: Command): void {
         console.log('\nRunning OpenRappter diagnostics...\n');
       }
 
-      const results = await runDoctorChecks();
+      const results = await runChecks();
+      const failed = results.some((result) => result.status === 'fail');
 
       if (options.json) {
         console.log(JSON.stringify(results, null, 2));
+        if (failed) process.exitCode = 1;
         return;
       }
 
@@ -340,8 +358,6 @@ export function registerDoctorCommand(program: Command): void {
       console.log(`Results: ${green(String(passCount))} passed, ${yellow(String(warnCount))} warnings, ${red(String(failCount))} failed`);
       console.log('');
 
-      if (failCount > 0) {
-        process.exit(1);
-      }
+      if (failed) process.exitCode = 1;
     });
 }

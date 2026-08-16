@@ -25,7 +25,7 @@ describe('DoctorCommand', () => {
 
   it('should accept Command parameter', () => {
     const content = readFileSync(join(CLI_DIR, 'doctor.ts'), 'utf-8');
-    expect(content).toMatch(/function registerDoctorCommand\(program:\s*Command\)/);
+    expect(content).toMatch(/function registerDoctorCommand\(\s*program:\s*Command/);
   });
 
   it('should import Command from commander', () => {

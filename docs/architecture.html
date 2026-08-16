@@ -18,7 +18,7 @@
 <!-- ── Navbar ── -->
 <nav>
   <div class="nav-container">
-    <a href="./" class="logo">openrappter <span class="logo-badge">v1.9.1</span></a>
+    <a href="./" class="logo">openrappter <span class="logo-badge">v1.13.0</span></a>
     <button class="mobile-menu-btn">&#9776;</button>
     <div class="nav-links">
       <a href="./docs.html">Docs</a>
@@ -46,39 +46,55 @@
 <section class="doc-section" id="system-overview" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
   <div class="section-label">System Overview</div>
   <h2 class="section-title">Architecture at a glance</h2>
-  <p class="section-subtitle">openrappter is a layered, local-first AI agent framework. Channels funnel messages into a WebSocket gateway, which dispatches them through a registry of agents. Those agents talk to pluggable LLM providers, a hybrid memory system, and a persistent storage layer — all on your own machine.</p>
+  <p class="section-subtitle">openrappter is a layered, local-first AI agent framework. Channels funnel messages into a gateway, which dispatches them through a registry of agents. Those agents talk to pluggable LLM providers, a hybrid memory system, and a persistent storage layer — all on your own machine.</p>
 
-  <div class="arch-diagram">                     Channels
-    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9436;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-    &#9474;   CLI   &#9474;  Slack   &#9474;  Discord  &#9474; Telegram &#9474;  ...15+ more
-    &#9492;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
-         &#9474;         &#9474;           &#9474;          &#9474;
-         &#9660;         &#9660;           &#9660;          &#9660;
-    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-    &#9474;           WebSocket Gateway               &#9474;
-    &#9474;        (JSON-RPC 2.0 / Streaming)         &#9474;
-    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
-                       &#9474;
-                       &#9660;
-    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-    &#9474;           Agent Registry                  &#9474;
-    &#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9474;
-    &#9474;   &#9474;Shell &#9474; &#9474;Memory&#9474; &#9474; Web  &#9474; &#9474;Browser&#9474;  &#9474;
-    &#9474;   &#9474;Agent &#9474; &#9474;Agent &#9474; &#9474;Agent &#9474; &#9474; Agent &#9474;  &#9474;
-    &#9474;   &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496; &#9492;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9496;  &#9474;
-    &#9474;      &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;       &#9474;
-    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
-                       &#9474;
-         &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9532;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-         &#9660;             &#9660;             &#9660;
-    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;  &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-    &#9474;Providers&#9474;  &#9474;  Memory  &#9474;  &#9474; Storage  &#9474;
-    &#9474; Copilot &#9474;  &#9474; Chunker  &#9474;  &#9474;  SQLite  &#9474;
-    &#9474;Anthropic&#9474;  &#9474;Embeddings&#9474;  &#9474;In-Memory &#9474;
-    &#9474; OpenAI  &#9474;  &#9474;  Search  &#9474;  &#9474;          &#9474;
-    &#9474; Gemini  &#9474;  &#9474;          &#9474;  &#9474;          &#9474;
-    &#9474; Ollama  &#9474;  &#9474;          &#9474;  &#9474;          &#9474;
-    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;  &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+  <p class="section-subtitle">Since v1.10 a single device no longer runs a single rappter. One <strong>alpha</strong> holds the default port and the device's channels; any number of <strong>hatched twins</strong> run beside it, each with its own identity, port, and lock. Twins reach each other over <code>POST /twin</code> using the <code>rapp-twin-chat/1.0</code> envelope. A twin owns a mouth only if the registry says so — sharing a device never means sharing a channel.</p>
+
+  <div class="arch-diagram">                         Channels  (16 in TypeScript)
+    ┌──────────┬──────────┬───────────┬──────────┬──────────────┐
+    │   CLI    │  Slack   │  Discord  │ Telegram │  iMessage …  │
+    └────┬─────┴────┬─────┴─────┬─────┴────┬─────┴──────┬───────┘
+         │          │           │          │            │
+         ▼          ▼           ▼          ▼            ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │                        Gateway                           │
+    │   JSON-RPC 2.0 over WebSocket  +  HTTP                    │
+    │   /health  /livez  /readyz  /status                       │
+    │   /chat    /twin   /agents/import   /vui                  │
+    └───────────────────────────┬──────────────────────────────┘
+                                │
+                                ▼
+    ┌──────────────────────────────────────────────────────────┐
+    │                     Agent Registry                        │
+    │        37 agents (TypeScript) · 26 agents (Python)        │
+    │   ┌───────┐ ┌────────┐ ┌───────┐ ┌────────┐ ┌─────────┐  │
+    │   │ Shell │ │ Memory │ │  Web  │ │Browser │ │  Media  │  │
+    │   └───┬───┘ └───┬────┘ └───┬───┘ └───┬────┘ └────┬────┘  │
+    │       └─────────┴──────────┴─────────┴───────────┘       │
+    └───────────────────────────┬──────────────────────────────┘
+                                │
+        ┌───────────────┬───────┴───────┬───────────────┐
+        ▼               ▼               ▼               ▼
+   ┌─────────┐    ┌──────────┐    ┌──────────┐   ┌────────────┐
+   │Providers│    │  Memory  │    │ Storage  │   │  Security  │
+   │ Copilot │    │ Chunker  │    │  SQLite  │   │ url-guard  │
+   │Anthropic│    │Embeddings│    │In-Memory │   │  redact    │
+   │ OpenAI  │    │  Search  │    │   WAL    │   │secret-keys │
+   │ Gemini  │    │          │    │          │   │            │
+   │ Ollama  │    │          │    │          │   │            │
+   └─────────┘    └──────────┘    └──────────┘   └────────────┘
+
+
+                    One device, many rappters
+    ┌──────────────────────────────────────────────────────────┐
+    │  alpha  (default port, owns the device's channels)       │
+    │     │                                                     │
+    │     ├── twin "ada"    own identity · own port · own lock  │
+    │     └── twin "nicolas"  own identity · own port · own lock│
+    │                                                           │
+    │  peer chat:  POST /twin   envelope rapp-twin-chat/1.0     │
+    │  a twin owns a mouth only if the registry says so         │
+    └──────────────────────────────────────────────────────────┘</div>
 </section>
 
 <!-- ── 2. Agent Contract ── -->
@@ -404,32 +420,105 @@ result_b = agent_b.execute(
                              result propagates up</div>
 </section>
 
-<!-- ── 7. Directory Structure ── -->
+
+<!-- ── 7. Twins ── -->
+<section class="doc-section" id="twins" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Twins</div>
+  <h2 class="section-title">One device, many rappters</h2>
+  <p class="section-subtitle">Before v1.10 a device ran one rappter. Now an <strong>alpha</strong> holds the default port and the device's channels, and any number of <strong>hatched twins</strong> run beside it. Each twin gets its own identity, its own port, and its own lock — not just a label.</p>
+
+  <pre style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;font-family:'JetBrains Mono',monospace;font-size:0.85rem;line-height:1.8;overflow-x:auto;margin-top:1.5rem;">openrappter hatch ada        <span style="color:#525252;"># hatch a twin on this device</span>
+openrappter twins            <span style="color:#525252;"># which rappters are running</span>
+openrappter --instance ada   <span style="color:#525252;"># address one of them</span></pre>
+
+  <h3 style="margin-top:2.5rem;">What a twin does and does not inherit</h3>
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>Its own identity.</strong> A rappter knows which rappter it is, and a twin is judged by the same name the roster calls it.</li>
+    <li><strong>Its own port and lock.</strong> Status is read for the port being asked about, and a dead pid is not a serving process.</li>
+    <li><strong>Not the device's mouths.</strong> Sharing a device never means sharing a channel. A twin is told which mouths are not its own, and a channel alias cannot route around the registry.</li>
+    <li><strong>Not another rappter's history.</strong> A stale endpoint record is history, not an address.</li>
+  </ul>
+
+  <h3 style="margin-top:2.5rem;">Talking to a peer</h3>
+  <p class="section-subtitle">A rappter can speak to a peer, not only be spoken to. <code>POST /twin</code> carries the <code>rapp-twin-chat/1.0</code> envelope; a peer that speaks <code>/chat</code> but not <code>/twin</code> is still reachable. Both endpoints require the same credential — <code>/twin</code> is not a way around the auth <code>/chat</code> enforces.</p>
+</section>
+
+<!-- ── 8. Local capture ── -->
+<section class="doc-section" id="local-capture" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Local Capture</div>
+  <h2 class="section-title">Flight Recorder and Show-and-Tell</h2>
+  <p class="section-subtitle">Two subsystems watch what happens on the machine so a rappter can learn from it. Both are local-first and consent-bound, and both are shared by the TypeScript and Python runtimes through a private SQLite WAL database.</p>
+
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>Flight Recorder</strong> (<code>openrappter flight</code>) — a privacy-aware local record of what the agent did, so a failure can be reconstructed after the fact rather than guessed at.</li>
+    <li><strong>Show-and-Tell</strong> (<code>openrappter show-and-tell</code>) — record a real workflow, reconstruct its ordered semantic steps, review them, and emit a portable <code>SKILL.md</code>, a disabled automation, or both.</li>
+    <li><strong>Detached context collectors</strong> — macOS, Windows and Linux adapters capture active app and window context after the CLI exits. Browser URLs lose their query and fragment; screenshots are explicit-only.</li>
+  </ul>
+
+  <p class="section-subtitle" style="margin-top:1.5rem;">The contracts both runtimes are held to live in <code>contracts/</code>: <code>flight-recorder-vector.json</code>, <code>show-and-tell-v1.json</code> and <code>rapp-chat-v1.json</code>.</p>
+</section>
+
+<!-- ── 9. Security ── -->
+<section class="doc-section" id="security" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
+  <div class="section-label">Security</div>
+  <h2 class="section-title">The boundaries an agent runs inside</h2>
+  <p class="section-subtitle">An agent that can fetch URLs, run shell commands and drive a browser is a large attack surface. These are the guards, and where they live.</p>
+
+  <ul style="color:var(--text-secondary);margin:0 0 1.5rem 1.5rem;font-size:0.95rem;line-height:1.9;">
+    <li><strong>Outbound URLs</strong> (<code>src/net/url-guard.ts</code>) — every user-supplied URL goes through <code>fetchGuarded</code>, which checks the scheme, resolves the host, rejects private, loopback and link-local addresses, and re-checks <em>every redirect hop</em>. Allowlisted domains match on DNS-label boundaries, so <code>evil-example.com</code> does not pass as <code>example.com</code>.</li>
+    <li><strong>Private network access</strong> — reaching a private address from the browser agent requires an explicit operator opt-in.</li>
+    <li><strong>Logs</strong> (<code>src/security/</code>) — one shared answer to "is this field a secret?", and one recursive redactor used by both config display and the logger. Mirrored in Python and pinned by a cross-runtime test, so the two cannot drift.</li>
+    <li><strong>Gateway</strong> — <code>/chat</code>, <code>/twin</code> and <code>/agents/import</code> all require the configured credential; loopback is not treated as trusted. Request bodies are bounded and an over-cap body is answered with 413, not a reset.</li>
+    <li><strong>Downloads</strong> — chunked downloads are bounded while they stream, not merely checked by a declared length.</li>
+  </ul>
+</section>
+
+<!-- ── 10. Directory Structure ── -->
 <section class="doc-section" id="directory-structure" style="max-width:1100px;margin:0 auto;padding:3rem 2rem;">
   <div class="section-label">Directory Structure</div>
   <h2 class="section-title">Monorepo layout</h2>
-  <p class="section-subtitle">TypeScript and Python share the same repo. The agent contract is identical across both runtimes. Drop a new agent file in the appropriate <code>agents/</code> directory and the registry discovers it automatically.</p>
+  <p class="section-subtitle">TypeScript and Python share the same repo. The agent contract is identical across both runtimes, and <code>parity_vectors/</code> holds golden vectors that both must reproduce. Drop a new agent file in the appropriate <code>agents/</code> directory and the registry discovers it automatically.</p>
 
   <pre style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:2rem;font-family:'JetBrains Mono',monospace;font-size:0.82rem;line-height:1.9;overflow-x:auto;margin-top:2rem;"><span style="color:var(--blue);">openrappter/</span>
-<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">typescript/</span>
-<span style="color:var(--border-light);">&#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">src/</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">agents/</span>         <span style="color:#525252;"># All agent implementations</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">channels/</span>       <span style="color:#525252;"># 15+ messaging channels</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">providers/</span>      <span style="color:#525252;"># LLM provider integrations</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">gateway/</span>        <span style="color:#525252;"># WebSocket server</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">memory/</span>         <span style="color:#525252;"># Chunking, embeddings, search</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">storage/</span>        <span style="color:#525252;"># SQLite + in-memory adapters</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">config/</span>         <span style="color:#525252;"># YAML/JSON config + Zod</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--text-muted);">clawhub.ts</span>      <span style="color:#525252;"># ClawHub client</span>
-<span style="color:var(--border-light);">&#9474;   &#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--blue);">skills/</span>         <span style="color:#525252;"># Skill registry</span>
-<span style="color:var(--border-light);">&#9474;   &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">dist/</span>               <span style="color:#525252;"># Compiled output</span>
-<span style="color:var(--border-light);">&#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">package.json</span>
-<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">python/</span>
-<span style="color:var(--border-light);">&#9474;   &#9492;&#9472;&#9472;</span> <span style="color:var(--blue);">openrappter/</span>
-<span style="color:var(--border-light);">&#9474;       &#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">agents/</span>         <span style="color:#525252;"># Python agent mirror</span>
-<span style="color:var(--border-light);">&#9474;       &#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">clawhub.py</span>      <span style="color:#525252;"># ClawHub client</span>
-<span style="color:var(--border-light);">&#9500;&#9472;&#9472;</span> <span style="color:var(--blue);">docs/</span>                   <span style="color:#525252;"># GitHub Pages site</span>
-<span style="color:var(--border-light);">&#9492;&#9472;&#9472;</span> <span style="color:var(--text-muted);">CLAUDE.md</span>               <span style="color:#525252;"># Agent architecture guide</span></pre>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">typescript/src/</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">agents/</span>               <span style="color:#525252;"># 37 agents + router, broadcast, subagent</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">channels/</span>             <span style="color:#525252;"># 16 messaging channels</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">gateway/</span>              <span style="color:#525252;"># JSON-RPC over WS + HTTP, /chat, /twin</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">twin/</span>                 <span style="color:#525252;"># hatching, soul, vault, peer send</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">identity/</span>             <span style="color:#525252;"># a rappter knows which rappter it is</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">nodes/</span>                <span style="color:#525252;"># roster and neighbourhood</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">providers/</span>            <span style="color:#525252;"># Copilot, Anthropic, OpenAI, Gemini, Ollama</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">memory/</span>               <span style="color:#525252;"># chunking, embeddings, search</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">storage/</span>              <span style="color:#525252;"># SQLite (WAL) + in-memory adapters</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">security/</span>             <span style="color:#525252;"># secret-keys, redact</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">net/</span>                  <span style="color:#525252;"># url-guard, fetchGuarded (SSRF)</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">flight-recorder/</span>      <span style="color:#525252;"># privacy-aware local recorder</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">show-and-tell/</span>        <span style="color:#525252;"># learn a skill from a demonstration</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">surgeon/</span>              <span style="color:#525252;"># Copilot-shaped operating room UI</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">browser/</span>              <span style="color:#525252;"># headless browser control</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">desktop-control/</span>      <span style="color:#525252;"># OS-level automation</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">telephony/</span>            <span style="color:#525252;"># placing and taking calls</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">voice/</span>                <span style="color:#525252;"># TTS and transcription</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">cron/</span>                 <span style="color:#525252;"># scheduled jobs</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">mcp/</span>                  <span style="color:#525252;"># Model Context Protocol</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">media/</span>                <span style="color:#525252;"># guarded download and processing</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">cli/</span>                  <span style="color:#525252;"># config, doctor, twins, hatch, flight …</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">tui/</span>                  <span style="color:#525252;"># terminal UI</span>
+<span style="color:var(--border-light);">│   └──</span> <span style="color:var(--blue);">skills/</span>               <span style="color:#525252;"># skill registry</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">python/openrappter/</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">agents/</span>               <span style="color:#525252;"># 26 agent modules, same contract</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">gateway/</span>              <span style="color:#525252;"># parity gateway + observability</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">channels/</span>             <span style="color:#525252;"># messaging channels</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">imessage/</span>             <span style="color:#525252;"># macOS iMessage service</span>
+<span style="color:var(--border-light);">│   ├──</span> <span style="color:var(--blue);">security/</span>             <span style="color:#525252;"># secret_keys, redact (mirrors TS)</span>
+<span style="color:var(--border-light);">│   └──</span> <span style="color:var(--blue);">memory/ storage/ providers/ config/ mcp/</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">macos/</span>                <span style="color:#525252;"># OpenRappter Bar, the menu bar app</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">vui/</span>                  <span style="color:#525252;"># voice UI served at /vui</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">contracts/</span>            <span style="color:#525252;"># cross-runtime JSON contracts</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">parity_vectors/</span>       <span style="color:#525252;"># golden vectors both runtimes must match</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">agents/</span>               <span style="color:#525252;"># drop-in agent files, discovered at runtime</span>
+<span style="color:var(--border-light);">├──</span> <span style="color:var(--blue);">docs/</span>                 <span style="color:#525252;"># this GitHub Pages site</span>
+<span style="color:var(--border-light);">└──</span> <span style="color:var(--blue);">CLAUDE.md</span>             <span style="color:#525252;"># agent architecture guide</span></pre>
 </section>
 
 <!-- ── Footer ── -->

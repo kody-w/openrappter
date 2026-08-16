@@ -21,7 +21,7 @@
 <!-- ── Navigation ── -->
 <nav>
   <div class="nav-container">
-    <a href="./" class="logo">openrappter <span class="logo-badge">v1.9.1</span></a>
+    <a href="./" class="logo">openrappter <span class="logo-badge">v1.13.0</span></a>
     <button class="mobile-menu-btn">&#9776;</button>
     <div class="nav-links">
       <a href="./docs.html">Docs</a>
@@ -55,9 +55,11 @@
       <li><a href="#providers">LLM Providers</a></li>
       <li><a href="#channels">Messaging Channels</a></li>
       <li><a href="#gateway">WebSocket Gateway</a></li>
+      <li><a href="#twins">Twins &amp; Neighbourhood</a></li>
     </ul>
     <div class="sidebar-title">Systems</div>
     <ul class="sidebar-nav">
+      <li><a href="#local-capture">Flight Recorder &amp; Show-and-Tell</a></li>
       <li><a href="#skills">Skills System</a></li>
       <li><a href="#memory">Memory System</a></li>
       <li><a href="#plugins">Plugin System</a></li>
@@ -67,6 +69,24 @@
     <div class="sidebar-title">Reference</div>
     <ul class="sidebar-nav">
       <li><a href="#api">API Reference</a></li>
+    </ul>
+    <div class="sidebar-title">Guides</div>
+    <ul class="sidebar-nav">
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/flight-recorder.md">Flight Recorder</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/show-and-tell.md">Show-and-Tell</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/electron-desktop.md">Electron Desktop</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/AUTONOMOUS.md">Autonomous Mode</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/typescript-imessage.md">iMessage Setup</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/imessage-reliability.md">iMessage Reliability</a></li>
+      <li><a href="https://github.com/kody-w/openrappter/blob/main/docs/RAPP.md">RAPP Protocol</a></li>
+    </ul>
+    <div class="sidebar-title">Releases</div>
+    <ul class="sidebar-nav">
+      <li><a href="./changelog.html">Changelog</a></li>
+      <li><a href="./release-notes-1.14.0-evolution.html">v1.14.0 Notes</a></li>
+      <li><a href="./release-notes-1.13.0-evolution.html">v1.13.0 Notes</a></li>
+      <li><a href="./release-notes-1.12.0-evolution.html">v1.12.0 Notes</a></li>
+      <li><a href="./release-notes-1.11.0-evolution.html">v1.11.0 Notes</a></li>
     </ul>
   </aside>
 
@@ -632,6 +652,56 @@ registerChannel(<span class="str">'my-channel'</span>, MyChannel);</pre>
 
       <h3>Rate Limiting</h3>
       <p>The gateway enforces a per-connection rate limit (default: 100 requests/minute). Exceeding the limit results in a JSON-RPC error response with code <code>-32029</code> (rate limit exceeded) and a <code>retry_after</code> field in milliseconds. Configure the limit in <code>config.yaml</code> under <code>gateway.rate_limit</code>.</p>
+    </div>
+
+    <!-- ── Twins ── -->
+    <div id="twins" class="doc-section">
+      <h2>Twins &amp; Neighbourhood</h2>
+      <p>Since v1.11 a device no longer runs a single rappter. One <strong>alpha</strong> holds the default port and the device's channels; any number of <strong>hatched twins</strong> run beside it, each with its own identity, its own port, and its own lock.</p>
+
+      <pre><span class="cm"># hatch a twin on this device</span>
+openrappter hatch ada
+
+<span class="cm"># which rappters are running here</span>
+openrappter twins
+
+<span class="cm"># address a specific one</span>
+openrappter --instance ada --status</pre>
+
+      <h3>What a twin does not inherit</h3>
+      <p>Sharing a device never means sharing a channel. A twin is told which mouths are not its own, and a channel alias cannot route around the registry — so a hatched twin cannot speak out of the alpha's iMessage or Slack connection unless the registry says it owns it.</p>
+
+      <h3>Talking to a peer</h3>
+      <p>A rappter can speak to a peer, not only be spoken to. <code>POST /twin</code> carries the <code>rapp-twin-chat/1.0</code> envelope; a peer that speaks <code>/chat</code> but not <code>/twin</code> is still reachable. Both endpoints require the same credential — <code>/twin</code> is not a way around the authentication <code>/chat</code> enforces.</p>
+
+      <table>
+        <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>openrappter hatch &lt;name&gt;</code></td><td>Hatch a twin rappter on this device</td></tr>
+          <tr><td><code>openrappter twins</code></td><td>List the rappters running on this device</td></tr>
+          <tr><td><code>openrappter twin</code></td><td>Your digital twin — local-first, never leaves this machine</td></tr>
+          <tr><td><code>--instance &lt;id&gt;</code></td><td>Name this rappter; omit for the alpha</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ── Local capture ── -->
+    <div id="local-capture" class="doc-section">
+      <h2>Flight Recorder &amp; Show-and-Tell</h2>
+      <p>Two local-first subsystems let a rappter learn from what actually happened on the machine. Both are consent-bound and share a private SQLite WAL database across the TypeScript and Python runtimes.</p>
+
+      <h3>Flight Recorder</h3>
+      <p>A provider-neutral ledger of correlated trace, context, provider, tool and agent lifecycle events. Raw prompts, responses, tool arguments and file contents are omitted unless explicitly enabled — and when enabled, are recursively scrubbed for secrets and bounded by a post-redaction byte cap.</p>
+      <pre>openrappter flight status
+openrappter flight events
+openrappter flight export <span class="cm"># integrity-checked bundle</span>
+openrappter flight clear  <span class="cm"># confirmation-gated</span></pre>
+      <p>Full guide: <a href="https://github.com/kody-w/openrappter/blob/main/docs/flight-recorder.md">flight-recorder.md</a></p>
+
+      <h3>Show-and-Tell</h3>
+      <p>Record a real workflow, reconstruct its intent and ordered semantic steps, review them, then emit a portable <code>SKILL.md</code>, a disabled automation, or both. Automations are disabled by default and replay is a dry run rather than coordinate playback.</p>
+      <pre>openrappter show-and-tell</pre>
+      <p>Full guide: <a href="https://github.com/kody-w/openrappter/blob/main/docs/show-and-tell.md">show-and-tell.md</a></p>
     </div>
 
     <!-- ── 8. Skills System ── -->

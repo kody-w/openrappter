@@ -412,6 +412,13 @@ state, recordings, and the viewer data stay under
 | `Watchmaker` | Agent ecosystem manager — evaluates quality, A/B tests, promotes winners |
 | `Web` | Fetch web pages and search the web with SSRF protection |
 
+`Browser` blocks loopback, private, link-local, CGNAT, benchmark, reserved, and
+multicast targets by default—including redirects, subresources, and WebSocket
+connections. For trusted local development only, the operator can set
+`OPENRAPPTER_BROWSER_ALLOW_PRIVATE_NETWORK=1` before starting OpenRappter. This
+is deliberately not an agent action parameter, so page content or a prompt
+cannot opt itself into the local network.
+
 ## Creating Custom Agents — The Single File Agent Pattern
 
 Every agent is a **single file** with metadata defined in native code constructors:

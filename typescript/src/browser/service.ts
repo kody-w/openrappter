@@ -4,6 +4,12 @@
  */
 
 import { EventEmitter } from 'events';
+import {
+  assertFetchableUrl,
+  assertHostResolvesPublicly,
+  isBlockedHost,
+  type HostLookup,
+} from '../net/url-guard.js';
 
 // Ambient declaration for browser-context code executed via page.evaluate()
 declare const document: {
@@ -23,6 +29,26 @@ interface BrowserContext {
   newPage(): Promise<Page>;
   close(): Promise<void>;
   pages(): Page[];
+  route(
+    pattern: string,
+    handler: (route: Route) => Promise<void>,
+  ): Promise<void>;
+  routeWebSocket?(
+    pattern: string,
+    handler: (route: WebSocketRoute) => Promise<void>,
+  ): Promise<void>;
+}
+
+interface Route {
+  request(): { url(): string };
+  continue(): Promise<void>;
+  abort(errorCode?: string): Promise<void>;
+}
+
+interface WebSocketRoute {
+  url(): string;
+  connectToServer(): unknown;
+  close(options?: { code?: number; reason?: string }): void;
 }
 
 interface Page {
@@ -69,6 +95,7 @@ interface BrowserContextOptions {
   userAgent?: string;
   locale?: string;
   timezoneId?: string;
+  serviceWorkers?: 'allow' | 'block';
 }
 
 interface ScreenshotOptions {
@@ -105,7 +132,17 @@ export interface BrowserConfig {
   userAgent?: string;
   timeout?: number;
   slowMo?: number;
+  /** Trusted operator opt-in for local/private browser automation. */
+  allowPrivateNetwork?: boolean;
+  /** Test/embedding seam; production uses dns/promises lookup. */
+  hostLookup?: HostLookup;
 }
+
+export type BrowserRuntimeLoader = () => Promise<{
+  chromium: {
+    launch(options: { headless?: boolean; slowMo?: number }): Promise<unknown>;
+  };
+}>;
 
 export interface BrowseResult {
   url: string;
@@ -126,6 +163,7 @@ const DEFAULT_CONFIG: BrowserConfig = {
   headless: true,
   viewport: { width: 1280, height: 720 },
   timeout: 30000,
+  allowPrivateNetwork: false,
 };
 
 export class BrowserService extends EventEmitter {
@@ -134,10 +172,15 @@ export class BrowserService extends EventEmitter {
   private context: BrowserContext | null = null;
   private pages = new Map<string, Page>();
   private pageCounter = 0;
+  private loadRuntime: BrowserRuntimeLoader;
 
-  constructor(config?: Partial<BrowserConfig>) {
+  constructor(
+    config?: Partial<BrowserConfig>,
+    loadRuntime: BrowserRuntimeLoader = async () => import('playwright-core'),
+  ) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.loadRuntime = loadRuntime;
   }
 
   /**
@@ -146,22 +189,70 @@ export class BrowserService extends EventEmitter {
   async initialize(): Promise<void> {
     if (this.browser) return;
 
+    let browser: Browser | null = null;
+    let context: BrowserContext | null = null;
     try {
-      const playwright = await import('playwright-core');
+      const playwright = await this.loadRuntime();
 
       // Try to connect to existing browser or launch new one
-      this.browser = await playwright.chromium.launch({
+      browser = await playwright.chromium.launch({
         headless: this.config.headless,
         slowMo: this.config.slowMo,
       }) as unknown as Browser;
 
-      this.context = await this.browser!.newContext({
+      context = await browser.newContext({
         viewport: this.config.viewport,
         userAgent: this.config.userAgent,
+        serviceWorkers: this.config.allowPrivateNetwork ? 'allow' : 'block',
       });
 
+      if (!this.config.allowPrivateNetwork) {
+        await context.route('**/*', async (route) => {
+          const url = route.request().url();
+          try {
+            await this.assertUrlAllowed(url);
+            await route.continue();
+          } catch (error) {
+            this.emit('requestBlocked', {
+              url,
+              reason: (error as Error).message,
+            });
+            await route.abort('blockedbyclient');
+          }
+        });
+
+        if (!context.routeWebSocket) {
+          throw new Error(
+            'Secure browser mode requires a Playwright runtime with routeWebSocket support',
+          );
+        }
+        await context.routeWebSocket('**/*', async (route) => {
+          const url = route.url();
+          try {
+            await this.assertUrlAllowed(url);
+            route.connectToServer();
+          } catch (error) {
+            this.emit('requestBlocked', {
+              url,
+              reason: (error as Error).message,
+            });
+            route.close({ code: 1008, reason: 'Private network blocked' });
+          }
+        });
+      }
+
+      this.browser = browser;
+      this.context = context;
       console.log('Browser service initialized');
     } catch (error) {
+      try {
+        await context?.close();
+      } catch { /* preserve the secure-setup error */ }
+      try {
+        await browser?.close();
+      } catch { /* preserve the secure-setup error */ }
+      this.context = null;
+      this.browser = null;
       throw new Error(
         `Failed to initialize browser: ${(error as Error).message}. ` +
           `Make sure playwright-core is installed: npm install playwright-core`
@@ -216,6 +307,12 @@ export class BrowserService extends EventEmitter {
    * Navigate to URL
    */
   async navigate(url: string, pageId?: string): Promise<BrowseResult> {
+    try {
+      await this.assertUrlAllowed(url);
+    } catch (error) {
+      return { url, title: '', content: '', error: (error as Error).message };
+    }
+
     const page = pageId ? this.pages.get(pageId) : await this.getDefaultPage();
     if (!page) {
       return { url, title: '', content: '', error: 'Page not found' };
@@ -233,10 +330,31 @@ export class BrowserService extends EventEmitter {
     }
   }
 
+  private async assertUrlAllowed(url: string): Promise<void> {
+    if (this.config.allowPrivateNetwork) return;
+    const parsed = new URL(url);
+    if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') {
+      if (isBlockedHost(parsed.hostname)) {
+        throw new Error(`Access to private IP range blocked: ${parsed.hostname}`);
+      }
+    } else {
+      assertFetchableUrl(url);
+    }
+    await assertHostResolvesPublicly(
+      url,
+      this.config.hostLookup,
+      { failClosed: true },
+    );
+  }
+
   /**
    * Take a screenshot
    */
-  async screenshot(options?: { fullPage?: boolean; pageId?: string }): Promise<string | null> {
+  async screenshot(options?: {
+    path?: string;
+    fullPage?: boolean;
+    pageId?: string;
+  }): Promise<string | null> {
     const page = options?.pageId
       ? this.pages.get(options.pageId)
       : await this.getDefaultPage();
@@ -245,6 +363,7 @@ export class BrowserService extends EventEmitter {
 
     try {
       const buffer = await page.screenshot({
+        path: options?.path,
         type: 'png',
         fullPage: options?.fullPage,
       });
@@ -406,6 +525,22 @@ export class BrowserService extends EventEmitter {
    */
   getPageIds(): string[] {
     return Array.from(this.pages.keys());
+  }
+
+  /** Get the pages BrowserAgent exposes, without leaking Playwright handles. */
+  listPages(): Array<{ id: string; url: string }> {
+    return Array.from(this.pages, ([id, page]) => ({ id, url: page.url() }));
+  }
+
+  /** Extract one element's text, or the cleaned readable page content. */
+  async extract(selector?: string, pageId?: string): Promise<string | null> {
+    const page = pageId ? this.pages.get(pageId) : await this.getDefaultPage();
+    if (!page) return null;
+    if (selector) {
+      const element = await page.$(selector);
+      return element ? element.innerText() : null;
+    }
+    return this.extractContent(page);
   }
 
   /**

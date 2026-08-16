@@ -3,6 +3,7 @@
  * Uses better-sqlite3 for synchronous operations wrapped in async interface
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   StorageAdapter,
   Session,
@@ -39,53 +40,103 @@ interface RunResult {
 
 type BetterSqlite3 = (filename: string, options?: { readonly?: boolean }) => Database;
 
+interface TransactionContext {
+  active: boolean;
+}
+
 export class SQLiteAdapter implements StorageAdapter {
   private db: Database | null = null;
   private config: StorageConfig;
   private betterSqlite3: BetterSqlite3 | null = null;
+  private activeTransaction: TransactionContext | null = null;
+  private transactionContext = new AsyncLocalStorage<TransactionContext>();
+  private lifecycleTail: Promise<void> = Promise.resolve();
 
   constructor(config: StorageConfig) {
     this.config = config;
   }
 
   async initialize(): Promise<void> {
-    // Dynamic import of better-sqlite3
-    try {
-      const module = await import('better-sqlite3');
-      this.betterSqlite3 = module.default as BetterSqlite3;
-    } catch {
-      throw new Error(
-        'better-sqlite3 is required for SQLite storage. Install it with: npm install better-sqlite3'
-      );
-    }
+    this.assertLifecycleAllowed('initialize');
+    await this.enqueueLifecycle(async () => {
+      this.assertLifecycleAllowed('initialize');
+      if (this.db) return;
 
-    const dbPath = this.config.inMemory ? ':memory:' : (this.config.path ?? 'openrappter.db');
-    this.db = this.betterSqlite3(dbPath);
+      let factory: BetterSqlite3;
+      try {
+        const module = await import('better-sqlite3');
+        factory = module.default as BetterSqlite3;
+      } catch {
+        throw new Error(
+          'better-sqlite3 is required for SQLite storage. Install it with: npm install better-sqlite3'
+        );
+      }
 
-    // Enable foreign keys and WAL mode for better performance
-    this.db.pragma('foreign_keys = ON');
-    this.db.pragma('journal_mode = WAL');
+      const dbPath = this.config.inMemory ? ':memory:' : (this.config.path ?? 'openrappter.db');
+      const db = factory(dbPath);
+      try {
+        // Enable foreign keys and WAL mode for better performance
+        db.pragma('foreign_keys = ON');
+        db.pragma('journal_mode = WAL');
+        await this.runMigrations(db);
+      } catch (error) {
+        try {
+          db.close();
+        } catch { /* preserve the initialization error */ }
+        throw error;
+      }
 
-    // Run migrations
-    await this.runMigrations();
+      this.betterSqlite3 = factory;
+      this.db = db;
+    });
   }
 
   async close(): Promise<void> {
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
+    this.assertLifecycleAllowed('close');
+    await this.enqueueLifecycle(async () => {
+      this.assertLifecycleAllowed('close');
+      if (this.db) {
+        this.db.close();
+        this.db = null;
+      }
+    });
   }
 
   private ensureDb(): Database {
+    this.assertTransactionAccess();
     if (!this.db) {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     return this.db;
   }
 
-  private async runMigrations(): Promise<void> {
-    const db = this.ensureDb();
+  private assertTransactionAccess(): void {
+    const current = this.transactionContext.getStore();
+    if (current && !current.active) {
+      throw new Error('Storage operation continued after its transaction completed');
+    }
+    if (this.activeTransaction && current !== this.activeTransaction) {
+      throw new Error('Storage operation attempted outside the active transaction');
+    }
+  }
+
+  private assertLifecycleAllowed(operation: 'initialize' | 'close'): void {
+    this.assertTransactionAccess();
+    if (this.activeTransaction) {
+      throw new Error(`Cannot ${operation} storage during an active transaction`);
+    }
+  }
+
+  private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lifecycleTail.then(operation, operation);
+    this.lifecycleTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private async runMigrations(db: Database): Promise<void> {
 
     // Create migrations table if not exists
     db.exec(`
@@ -453,9 +504,48 @@ export class SQLiteAdapter implements StorageAdapter {
   // Transactions
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    const db = this.ensureDb();
-    const txn = db.transaction(() => fn());
-    return txn() as T;
+    this.assertTransactionAccess();
+    if (this.activeTransaction) {
+      throw new Error('Nested storage transactions are not supported');
+    }
+
+    return this.enqueueLifecycle(async () => {
+      const db = this.ensureDb();
+      if (this.activeTransaction) {
+        throw new Error('Nested storage transactions are not supported');
+      }
+
+      const context: TransactionContext = { active: true };
+      this.activeTransaction = context;
+      let began = false;
+      try {
+        db.exec('BEGIN IMMEDIATE');
+        began = true;
+        const result = await this.transactionContext.run(context, fn);
+        db.exec('COMMIT');
+        began = false;
+        return result;
+      } catch (error) {
+        if (began) {
+          try {
+            db.exec('ROLLBACK');
+          } catch (rollbackError) {
+            try {
+              db.close();
+            } catch { /* the connection is unusable either way */ }
+            if (this.db === db) this.db = null;
+            throw new AggregateError(
+              [error, rollbackError],
+              'Storage transaction failed and rollback could not restore the connection',
+            );
+          }
+        }
+        throw error;
+      } finally {
+        context.active = false;
+        this.activeTransaction = null;
+      }
+    });
   }
 
   // Row mappers

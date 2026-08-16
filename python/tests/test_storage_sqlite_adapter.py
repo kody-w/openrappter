@@ -8,6 +8,7 @@ import json
 import sqlite3
 import stat
 import sys
+import threading
 
 import pytest
 
@@ -173,6 +174,55 @@ def test_memory_adapter_never_touches_disk(tmp_path, monkeypatch):
     assert not (tmp_path / 'unused').exists()
 
 
+def test_memory_cron_log_cannot_race_parent_deletion():
+    adapter = InMemoryStorageAdapter()
+    adapter.initialize()
+    adapter.save_cron_job({'id': 'job-1'})
+
+    parent_checked = threading.Event()
+    release_writer = threading.Event()
+    parent_deleted = threading.Event()
+
+    class PausingJobs(dict):
+        def __contains__(self, key):
+            present = super().__contains__(key)
+            parent_checked.set()
+            release_writer.wait(timeout=2)
+            return present
+
+        def pop(self, key, default=None):
+            result = super().pop(key, default)
+            parent_deleted.set()
+            return result
+
+    adapter._cron_jobs = PausingJobs(adapter._cron_jobs)
+    errors = []
+
+    def write_log():
+        try:
+            adapter.save_cron_log({'job_id': 'job-1', 'status': 'ok'})
+        except Exception as error:
+            errors.append(error)
+
+    writer = threading.Thread(target=write_log)
+    writer.start()
+    assert parent_checked.wait(timeout=2)
+
+    deleter = threading.Thread(target=lambda: adapter.delete_cron_job('job-1'))
+    deleter.start()
+    # Without a shared lock deletion completes here, before the writer appends.
+    parent_deleted.wait(timeout=0.2)
+    release_writer.set()
+
+    writer.join(timeout=2)
+    deleter.join(timeout=2)
+    assert not writer.is_alive()
+    assert not deleter.is_alive()
+    assert errors == []
+    assert adapter.get_cron_job('job-1') is None
+    assert adapter.get_cron_logs('job-1') == []
+
+
 # --- Filtering / CRUD parity with the in-memory adapter ---
 
 @pytest.fixture(params=['memory', 'sqlite'])
@@ -226,6 +276,230 @@ def test_cron_job_and_log_crud_parity(any_adapter):
     assert any_adapter.get_cron_logs('unknown-job') == []
     assert any_adapter.delete_cron_job('j1') is True
     assert any_adapter.list_cron_jobs() == []
+    assert any_adapter.get_cron_logs('j1') == []
+
+
+def test_updating_a_cron_job_preserves_its_logs(any_adapter):
+    any_adapter.save_cron_job({'id': 'j1', 'name': 'before'})
+    any_adapter.save_cron_log({'job_id': 'j1', 'status': 'ok'})
+
+    any_adapter.save_cron_job({'id': 'j1', 'name': 'after'})
+
+    assert any_adapter.get_cron_job('j1')['name'] == 'after'
+    assert [log['status'] for log in any_adapter.get_cron_logs('j1')] == ['ok']
+
+
+@pytest.mark.parametrize(
+    "log",
+    [
+        {'status': 'missing id'},
+        {'job_id': '', 'status': 'empty id'},
+        {'job_id': 'does-not-exist', 'status': 'orphan'},
+    ],
+)
+def test_cron_log_requires_an_existing_parent_job(any_adapter, log):
+    with pytest.raises(ValueError, match="cron job"):
+        any_adapter.save_cron_log(log)
+
+
+def test_sqlite_cron_log_schema_cascades_to_the_parent(tmp_path):
+    db_path = tmp_path / "cron-parent.sqlite3"
+    adapter = create_storage_adapter({'type': 'sqlite', 'path': str(db_path)})
+    adapter.close()
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        foreign_keys = conn.execute("PRAGMA foreign_key_list(cron_logs)").fetchall()
+    finally:
+        conn.close()
+
+    assert any(
+        row[2] == 'cron_jobs'
+        and row[3] == 'job_id'
+        and row[6].upper() == 'CASCADE'
+        for row in foreign_keys
+    )
+
+
+def test_concurrent_sqlite_initializers_apply_each_migration_once(tmp_path):
+    db_path = tmp_path / "concurrent-initialize.sqlite3"
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def initialize():
+        adapter = SqliteStorageAdapter(db_path, timeout=10)
+        try:
+            barrier.wait(timeout=2)
+            adapter.initialize()
+        except Exception as error:
+            errors.append(error)
+        finally:
+            adapter.close()
+
+    threads = [threading.Thread(target=initialize) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=12)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        versions = conn.execute(
+            "SELECT version, COUNT(*) FROM schema_migrations GROUP BY version"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert versions == [(1, 1), (2, 1)]
+
+
+def test_sqlite_v1_upgrade_keeps_parented_logs_and_removes_orphans(tmp_path):
+    db_path = tmp_path / "cron-v1-upgrade.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at REAL NOT NULL
+            );
+            INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0);
+            CREATE TABLE cron_jobs (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE cron_logs (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO cron_jobs VALUES (?, ?, ?, ?)",
+            ('job-1', json.dumps({'id': 'job-1'}), 1, 1),
+        )
+        conn.execute(
+            "INSERT INTO cron_logs (job_id, data, created_at) VALUES (?, ?, ?)",
+            ('job-1', json.dumps({'job_id': 'job-1', 'status': 'ok'}), 1),
+        )
+        conn.execute(
+            "INSERT INTO cron_logs (job_id, data, created_at) VALUES (?, ?, ?)",
+            ('missing', json.dumps({'job_id': 'missing', 'status': 'orphan'}), 1),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    adapter = create_storage_adapter({'type': 'sqlite', 'path': str(db_path)})
+    try:
+        assert [log['status'] for log in adapter.get_cron_logs('job-1')] == ['ok']
+        assert adapter.get_cron_logs('missing') == []
+        adapter.save_cron_log({'job_id': 'job-1', 'status': 'after'})
+    finally:
+        adapter.close()
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        versions = {
+            row[0] for row in conn.execute("SELECT version FROM schema_migrations")
+        }
+        foreign_keys = conn.execute("PRAGMA foreign_key_list(cron_logs)").fetchall()
+        sequences = [
+            row[0] for row in conn.execute("SELECT seq FROM cron_logs ORDER BY seq")
+        ]
+    finally:
+        conn.close()
+
+    assert versions == {1, 2}
+    assert any(row[2] == 'cron_jobs' and row[6].upper() == 'CASCADE' for row in foreign_keys)
+    assert sequences == [1, 3]
+
+
+def test_sqlite_v1_upgrade_preserves_sequence_when_every_old_log_is_orphaned(tmp_path):
+    db_path = tmp_path / "cron-v1-all-orphans.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE schema_migrations (
+                version INTEGER PRIMARY KEY,
+                applied_at REAL NOT NULL
+            );
+            INSERT INTO schema_migrations (version, applied_at) VALUES (1, 0);
+            CREATE TABLE cron_jobs (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE cron_logs (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
+            INSERT INTO cron_logs (job_id, data, created_at)
+            VALUES ('missing-1', '{}', 1), ('missing-2', '{}', 1);
+            """
+        )
+        conn.execute(
+            "INSERT INTO cron_jobs VALUES (?, ?, ?, ?)",
+            ('job-1', json.dumps({'id': 'job-1'}), 1, 1),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    adapter = create_storage_adapter({'type': 'sqlite', 'path': str(db_path)})
+    try:
+        assert adapter.get_cron_logs('missing-1') == []
+        adapter.save_cron_log({'job_id': 'job-1', 'status': 'first-valid'})
+    finally:
+        adapter.close()
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        sequences = conn.execute("SELECT seq FROM cron_logs").fetchall()
+    finally:
+        conn.close()
+    assert sequences == [(3,)]
+
+
+def test_sqlite_failed_parent_delete_keeps_the_job_and_logs(tmp_path):
+    db_path = tmp_path / "cron-delete-atomic.sqlite3"
+    adapter = create_storage_adapter({'type': 'sqlite', 'path': str(db_path)})
+    try:
+        adapter.save_cron_job({'id': 'job-1', 'name': 'protected'})
+        adapter.save_cron_log({'job_id': 'job-1', 'status': 'ok'})
+
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute(
+                """
+                CREATE TRIGGER refuse_cron_delete
+                BEFORE DELETE ON cron_jobs
+                BEGIN
+                    SELECT RAISE(ABORT, 'delete refused');
+                END
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(sqlite3.IntegrityError, match="delete refused"):
+            adapter.delete_cron_job('job-1')
+
+        assert adapter.get_cron_job('job-1') is not None
+        assert [log['status'] for log in adapter.get_cron_logs('job-1')] == ['ok']
+    finally:
+        adapter.close()
 
 
 def test_config_kv_crud_parity(any_adapter):

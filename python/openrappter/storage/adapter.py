@@ -74,7 +74,66 @@ _MIGRATIONS = [
             """,
         ),
     ),
+    (
+        2,
+        (
+            "CREATE TEMP TABLE cron_logs_old_sequence (seq INTEGER NOT NULL)",
+            """
+            INSERT INTO cron_logs_old_sequence (seq)
+            SELECT COALESCE(
+                (SELECT seq FROM sqlite_sequence WHERE name = 'cron_logs'),
+                0
+            )
+            """,
+            """
+            CREATE TABLE cron_logs_with_parent (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                FOREIGN KEY (job_id) REFERENCES cron_jobs(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            INSERT INTO cron_logs_with_parent (seq, job_id, data, created_at)
+            SELECT seq, job_id, data, created_at
+            FROM cron_logs
+            WHERE job_id IN (SELECT id FROM cron_jobs)
+            """,
+            "DROP TABLE cron_logs",
+            "ALTER TABLE cron_logs_with_parent RENAME TO cron_logs",
+            "DELETE FROM sqlite_sequence WHERE name = 'cron_logs'",
+            """
+            INSERT INTO sqlite_sequence (name, seq)
+            SELECT 'cron_logs', seq FROM cron_logs_old_sequence
+            """,
+            "DROP TABLE cron_logs_old_sequence",
+            "CREATE INDEX idx_cron_logs_job_id ON cron_logs(job_id, seq)",
+        ),
+    ),
 ]
+
+
+def _require_cron_log_job_id(log: dict) -> str:
+    job_id = log.get('job_id')
+    if not isinstance(job_id, str) or not job_id.strip():
+        raise ValueError("cron log requires an existing cron job id")
+    return job_id
+
+
+def _execute_with_busy_retry(
+    conn: sqlite3.Connection,
+    statement: str,
+    timeout: float,
+) -> sqlite3.Cursor:
+    deadline = time.monotonic() + max(timeout, 0)
+    while True:
+        try:
+            return conn.execute(statement)
+        except sqlite3.OperationalError as error:
+            if "locked" not in str(error).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(min(0.05, max(deadline - time.monotonic(), 0)))
 
 
 class StorageAdapter(abc.ABC):
@@ -166,6 +225,7 @@ class InMemoryStorageAdapter(StorageAdapter):
         self._cron_jobs = {}      # id -> dict
         self._cron_logs = {}      # job_id -> [log_dicts]
         self._config = {}         # key -> value
+        self._lock = threading.RLock()
         self._initialized = False
 
     def initialize(self):
@@ -223,32 +283,43 @@ class InMemoryStorageAdapter(StorageAdapter):
         job = dict(job)
         job.setdefault('created_at', time.time())
         job['updated_at'] = time.time()
-        self._cron_jobs[job['id']] = job
+        with self._lock:
+            self._cron_jobs[job['id']] = job
 
     def get_cron_job(self, job_id: str) -> Optional[dict]:
-        return self._cron_jobs.get(job_id)
+        with self._lock:
+            return self._cron_jobs.get(job_id)
 
     def delete_cron_job(self, job_id: str) -> bool:
-        return self._cron_jobs.pop(job_id, None) is not None
+        with self._lock:
+            deleted = self._cron_jobs.pop(job_id, None) is not None
+            if deleted:
+                self._cron_logs.pop(job_id, None)
+            return deleted
 
     def list_cron_jobs(self) -> list:
-        return list(self._cron_jobs.values())
+        with self._lock:
+            return list(self._cron_jobs.values())
 
     # --- Cron Logs ---
 
     def save_cron_log(self, log: dict) -> None:
         log = dict(log)
         log.setdefault('created_at', time.time())
-        job_id = log.get('job_id', 'unknown')
-        if job_id not in self._cron_logs:
-            self._cron_logs[job_id] = []
-        self._cron_logs[job_id].append(log)
+        job_id = _require_cron_log_job_id(log)
+        with self._lock:
+            if job_id not in self._cron_jobs:
+                raise ValueError(f"cron job does not exist: {job_id}")
+            if job_id not in self._cron_logs:
+                self._cron_logs[job_id] = []
+            self._cron_logs[job_id].append(log)
 
     def get_cron_logs(self, job_id: str, limit: Optional[int] = None) -> list:
-        logs = self._cron_logs.get(job_id, [])
-        if limit is not None:
-            return list(logs[-limit:])
-        return list(logs)
+        with self._lock:
+            logs = self._cron_logs.get(job_id, [])
+            if limit is not None:
+                return list(logs[-limit:])
+            return list(logs)
 
     # --- Config KV ---
 
@@ -303,7 +374,8 @@ class SqliteStorageAdapter(StorageAdapter):
                     pass
 
             conn = sqlite3.connect(self._path, timeout=self._timeout, isolation_level=None)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(f"PRAGMA busy_timeout={max(int(self._timeout * 1000), 0)}")
+            _execute_with_busy_retry(conn, "PRAGMA journal_mode=WAL", self._timeout)
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=NORMAL")
             self._conn = conn
@@ -342,12 +414,16 @@ class SqliteStorageAdapter(StorageAdapter):
             )
             """
         )
-        applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
         for version, statements in _MIGRATIONS:
-            if version in applied:
-                continue
             conn.execute("BEGIN IMMEDIATE")
             try:
+                applied = conn.execute(
+                    "SELECT 1 FROM schema_migrations WHERE version = ?",
+                    (version,),
+                ).fetchone()
+                if applied:
+                    conn.commit()
+                    continue
                 for statement in statements:
                     conn.execute(statement)
                 conn.execute(
@@ -448,8 +524,12 @@ class SqliteStorageAdapter(StorageAdapter):
         with self._lock, conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO cron_jobs (id, data, created_at, updated_at)
+                INSERT INTO cron_jobs (id, data, created_at, updated_at)
                 VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    data = excluded.data,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
                 """,
                 (job['id'], json.dumps(job), job['created_at'], job['updated_at']),
             )
@@ -479,13 +559,18 @@ class SqliteStorageAdapter(StorageAdapter):
     def save_cron_log(self, log: dict) -> None:
         log = dict(log)
         log.setdefault('created_at', time.time())
-        job_id = log.get('job_id', 'unknown')
+        job_id = _require_cron_log_job_id(log)
         conn = self._ensure_open()
         with self._lock, conn:
-            conn.execute(
-                "INSERT INTO cron_logs (job_id, data, created_at) VALUES (?, ?, ?)",
-                (job_id, json.dumps(log), log['created_at']),
-            )
+            try:
+                conn.execute(
+                    "INSERT INTO cron_logs (job_id, data, created_at) VALUES (?, ?, ?)",
+                    (job_id, json.dumps(log), log['created_at']),
+                )
+            except sqlite3.IntegrityError as error:
+                if "FOREIGN KEY" in str(error).upper():
+                    raise ValueError(f"cron job does not exist: {job_id}") from error
+                raise
 
     def get_cron_logs(self, job_id: str, limit: Optional[int] = None) -> list:
         conn = self._ensure_open()

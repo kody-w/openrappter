@@ -1,321 +1,119 @@
 /**
  * Config System Parity Tests
- * Tests that openrappter config system matches openclaw:
- * - Zod schema validation
- * - JSON5/YAML loading
- * - File watcher for hot reload
- * - All config domains (agent, channels, gateway, models, etc.)
+ *
+ * Exercises the real config loader and schema (src/config/loader.ts,
+ * src/config/schema.ts). The previous version of this file built literal config
+ * objects and asserted on their own shape — e.g. "should reject invalid config
+ * values" built an array of `{ port, error }` literals and only checked that the
+ * `error` strings it had just written were defined, never calling the validator.
+ * It also encoded claims that are wrong for the real schema (gateway.auth.mode
+ * has no 'token' option; chunkTokens has no positivity constraint). These tests
+ * call the real validateConfig / mergeConfigs / substituteEnvVars /
+ * parseConfigContent.
+ *
+ * config-system.test.ts covers mergePatch / expandEnvVars / migrateConfig; this
+ * file covers the loader.ts helpers and the Zod range/enum constraints.
  */
 
 import { describe, it, expect } from 'vitest';
+import { validateConfig } from '../../config/schema.js';
+import { mergeConfigs, substituteEnvVars, parseConfigContent } from '../../config/loader.js';
+import type { OpenRappterConfig, GatewayConfig } from '../../config/types.js';
 
 describe('Config System Parity', () => {
-  describe('Config Schema Validation', () => {
-    it('should validate agent config', () => {
-      const agentConfig = {
-        id: 'main',
-        name: 'Main Agent',
-        model: 'claude-3-sonnet',
-        workspace: '~/.openrappter/workspace',
-        skills: ['shell', 'memory'],
-        temperature: 0.7,
-        maxTokens: 4096,
-      };
-
-      expect(agentConfig.id).toBeDefined();
-      expect(agentConfig.model).toBeDefined();
-      expect(agentConfig.temperature).toBeGreaterThanOrEqual(0);
-      expect(agentConfig.temperature).toBeLessThanOrEqual(2);
+  describe('Schema validation (validateConfig)', () => {
+    it('accepts an empty config', () => {
+      expect(validateConfig({}).success).toBe(true);
     });
 
-    it('should validate channel config', () => {
-      const channelConfig = {
-        telegram: {
-          enabled: true,
-          token: 'bot_token',
-          allowFrom: ['user_123'],
-          mentionGating: true,
-        },
-        discord: {
-          enabled: false,
-          token: 'discord_token',
-          guildId: 'guild_123',
-        },
-      };
-
-      expect(channelConfig.telegram.enabled).toBe(true);
-      expect(typeof channelConfig.telegram.mentionGating).toBe('boolean');
+    it('accepts a valid gateway config', () => {
+      const result = validateConfig({ gateway: { port: 18790, bind: 'loopback' } });
+      expect(result.success).toBe(true);
+      expect(result.data?.gateway?.port).toBe(18790);
     });
 
-    it('should validate gateway config', () => {
-      const gatewayConfig = {
-        port: 18790,
-        bind: 'loopback' as const,
-        auth: {
-          mode: 'token' as const,
-          token: 'secret_token',
-        },
-        tls: {
-          enabled: false,
-          cert: '',
-          key: '',
-        },
-      };
-
-      expect(gatewayConfig.port).toBe(18790);
-      expect(['loopback', 'all', 'lan', 'tailscale']).toContain(gatewayConfig.bind);
-      expect(['none', 'password', 'token']).toContain(gatewayConfig.auth.mode);
+    it('rejects a gateway port below the valid range', () => {
+      expect(validateConfig({ gateway: { port: -1 } }).success).toBe(false);
     });
 
-    it('should validate model config', () => {
-      const modelConfig = {
-        id: 'claude-3',
-        provider: 'anthropic' as const,
-        model: 'claude-3-sonnet-20240229',
-        auth: {
-          type: 'api-key' as const,
-          tokenEnv: 'ANTHROPIC_API_KEY',
-        },
-        fallbacks: ['openai:gpt-4'],
-      };
-
-      expect(modelConfig.provider).toBe('anthropic');
-      expect(['anthropic', 'openai', 'gemini', 'ollama', 'copilot']).toContain(modelConfig.provider);
+    it('rejects a gateway port above 65535', () => {
+      expect(validateConfig({ gateway: { port: 99999 } }).success).toBe(false);
     });
 
-    it('should validate memory config', () => {
-      const memoryConfig = {
-        provider: 'openai' as const,
-        chunkTokens: 512,
-        chunkOverlap: 64,
-        searchThreshold: 0.7,
-      };
-
-      expect(memoryConfig.chunkTokens).toBeGreaterThan(0);
-      expect(memoryConfig.chunkOverlap).toBeLessThan(memoryConfig.chunkTokens);
+    it('rejects a non-integer gateway port', () => {
+      expect(validateConfig({ gateway: { port: 18790.5 } }).success).toBe(false);
     });
 
-    it('should validate cron config', () => {
-      const cronConfig = {
-        enabled: true,
-        jobs: [
-          {
-            name: 'health-check',
-            schedule: '*/5 * * * *',
-            agent: 'main',
-            message: 'Run health check',
-          },
-        ],
-      };
-
-      expect(cronConfig.enabled).toBe(true);
-      expect(cronConfig.jobs.length).toBeGreaterThan(0);
+    it('rejects an unknown gateway bind value', () => {
+      expect(validateConfig({ gateway: { bind: 'everywhere' } }).success).toBe(false);
     });
 
-    it('should validate approval config', () => {
-      const approvalConfig = {
-        policy: 'allowlist' as const,
-        rules: [
-          { tool: 'bash', action: 'allow', patterns: ['ls *', 'cat *'] },
-          { tool: 'bash', action: 'deny', patterns: ['rm -rf *'] },
-        ],
-      };
-
-      expect(['deny', 'allowlist', 'full']).toContain(approvalConfig.policy);
-    });
-
-    it('should validate TTS config', () => {
-      const ttsConfig = {
-        enabled: false,
-        provider: 'openai' as const,
-        voice: 'alloy',
-        speed: 1.0,
-      };
-
-      expect(typeof ttsConfig.enabled).toBe('boolean');
-      expect(ttsConfig.speed).toBeGreaterThan(0);
-    });
-
-    it('should reject invalid config values', () => {
-      const invalidConfigs = [
-        { port: -1, error: 'Port must be positive' },
-        { port: 99999, error: 'Port must be less than 65536' },
-        { temperature: 3, error: 'Temperature must be between 0 and 2' },
-        { chunkTokens: 0, error: 'Chunk tokens must be positive' },
-      ];
-
-      invalidConfigs.forEach((invalid) => {
-        expect(invalid.error).toBeDefined();
+    it('rejects an unknown model provider', () => {
+      const result = validateConfig({
+        models: [{ id: 'm', provider: 'not-a-provider', model: 'x', auth: { type: 'api-key' } }],
       });
+      expect(result.success).toBe(false);
+    });
+
+    it('accepts a valid model provider', () => {
+      const result = validateConfig({
+        models: [{ id: 'm', provider: 'anthropic', model: 'claude', auth: { type: 'api-key' } }],
+      });
+      expect(result.success).toBe(true);
     });
   });
 
-  describe('Config File Loading', () => {
-    it('should load JSON5 config', () => {
-      const json5Content = `{
-        // Comments are allowed in JSON5
-        agent: {
-          model: "claude-3-sonnet",
-          temperature: 0.7,
-        },
+  describe('Config merging (mergeConfigs)', () => {
+    it('lets a later config override earlier gateway fields while preserving the rest', () => {
+      const defaults: Partial<OpenRappterConfig> = { gateway: { port: 18790, bind: 'loopback' } };
+      const user: Partial<OpenRappterConfig> = { gateway: { port: 9999 } as GatewayConfig };
+
+      const merged = mergeConfigs(defaults, user);
+      expect(merged.gateway?.port).toBe(9999);
+      expect(merged.gateway?.bind).toBe('loopback');
+    });
+
+    it('concatenates model lists across configs', () => {
+      const merged = mergeConfigs(
+        { models: [{ id: 'a', provider: 'anthropic', model: 'claude', auth: { type: 'api-key' } }] },
+        { models: [{ id: 'b', provider: 'openai', model: 'gpt', auth: { type: 'api-key' } }] }
+      );
+      expect(merged.models?.map((m) => m.id)).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('Environment variable substitution (substituteEnvVars)', () => {
+    it('substitutes a defined ${VAR}', () => {
+      const key = 'OPENRAPPTER_PARITY_TEST_VAR';
+      process.env[key] = 'super-secret';
+      try {
+        expect(substituteEnvVars(`token-\${${key}}`)).toBe('token-super-secret');
+      } finally {
+        delete process.env[key];
+      }
+    });
+
+    it('substitutes an undefined ${VAR} with an empty string', () => {
+      const key = 'OPENRAPPTER_PARITY_UNSET_VAR';
+      delete process.env[key];
+      expect(substituteEnvVars(`x-\${${key}}-y`)).toBe('x--y');
+    });
+  });
+
+  describe('JSON5 parsing (parseConfigContent)', () => {
+    it('parses JSON5 with comments and trailing commas', () => {
+      const parsed = parseConfigContent(`{
+        // gateway settings
         gateway: {
           port: 18790,
         },
-      }`;
+      }`) as { gateway: { port: number } };
 
-      expect(json5Content).toContain('//');
-      expect(json5Content).toContain('agent');
+      expect(parsed.gateway.port).toBe(18790);
     });
 
-    it('should load YAML config', () => {
-      const yamlContent = `
-agent:
-  model: claude-3-sonnet
-  temperature: 0.7
-
-gateway:
-  port: 18790
-  bind: loopback
-`;
-
-      expect(yamlContent).toContain('agent:');
-      expect(yamlContent).toContain('gateway:');
-    });
-
-    it('should support environment variable substitution', () => {
-      const configWithEnvVars = {
-        agent: {
-          model: '${MODEL_NAME:-claude-3-sonnet}',
-        },
-        channels: {
-          telegram: {
-            token: '${TELEGRAM_BOT_TOKEN}',
-          },
-        },
-      };
-
-      expect(configWithEnvVars.channels.telegram.token).toContain('$');
-    });
-
-    it('should merge default config with user config', () => {
-      const defaults = {
-        gateway: { port: 18790, bind: 'loopback' },
-        agent: { temperature: 0.7 },
-      };
-
-      const userConfig = {
-        gateway: { port: 9999 },
-        agent: { model: 'gpt-4' },
-      };
-
-      const merged = {
-        gateway: { ...defaults.gateway, ...userConfig.gateway },
-        agent: { ...defaults.agent, ...userConfig.agent },
-      };
-
-      expect(merged.gateway.port).toBe(9999);
-      expect(merged.gateway.bind).toBe('loopback');
-      expect(merged.agent.temperature).toBe(0.7);
-      expect(merged.agent.model).toBe('gpt-4');
-    });
-
-    it('should resolve config file from standard paths', () => {
-      const searchPaths = [
-        './openrappter.config.json5',
-        './openrappter.config.yaml',
-        '~/.openrappter/config.json5',
-        '~/.openrappter/config.yaml',
-      ];
-
-      expect(searchPaths.length).toBeGreaterThanOrEqual(4);
-    });
-  });
-
-  describe('Config Hot Reload', () => {
-    it('should watch config file for changes', () => {
-      const watcher = {
-        path: '~/.openrappter/config.json5',
-        watching: true,
-        debounceMs: 500,
-      };
-
-      expect(watcher.watching).toBe(true);
-      expect(watcher.debounceMs).toBeGreaterThan(0);
-    });
-
-    it('should emit change events', () => {
-      const changeEvent = {
-        type: 'config:changed',
-        path: '~/.openrappter/config.json5',
-        changedKeys: ['agent.model', 'gateway.port'],
-        timestamp: new Date().toISOString(),
-      };
-
-      expect(changeEvent.changedKeys.length).toBeGreaterThan(0);
-    });
-
-    it('should validate before applying changes', () => {
-      const reloadResult = {
-        success: true,
-        validationErrors: [] as string[],
-        appliedAt: new Date().toISOString(),
-      };
-
-      expect(reloadResult.success).toBe(true);
-      expect(reloadResult.validationErrors).toHaveLength(0);
-    });
-
-    it('should rollback on invalid config', () => {
-      const reloadResult = {
-        success: false,
-        validationErrors: ['Invalid port: -1'],
-        rolledBack: true,
-      };
-
-      expect(reloadResult.success).toBe(false);
-      expect(reloadResult.rolledBack).toBe(true);
-    });
-  });
-
-  describe('Config RPC Methods', () => {
-    it('should support config.get', () => {
-      const request = { method: 'config.get', params: { key: 'agent.model' } };
-      const response = { result: 'claude-3-sonnet' };
-
-      expect(request.params.key).toBeDefined();
-      expect(response.result).toBeDefined();
-    });
-
-    it('should support config.set', () => {
-      const request = { method: 'config.set', params: { key: 'agent.model', value: 'gpt-4' } };
-      const response = { result: { success: true } };
-
-      expect(request.params.value).toBeDefined();
-      expect(response.result.success).toBe(true);
-    });
-
-    it('should support config.patch', () => {
-      const request = {
-        method: 'config.patch',
-        params: { patch: { agent: { temperature: 0.5 } } },
-      };
-
-      expect(request.params.patch).toBeDefined();
-    });
-
-    it('should support config.schema', () => {
-      const response = {
-        result: {
-          type: 'object',
-          properties: {
-            agent: { type: 'object' },
-            gateway: { type: 'object' },
-            channels: { type: 'object' },
-          },
-        },
-      };
-
-      expect(response.result.properties.agent).toBeDefined();
+    it('throws on malformed content instead of returning a partial object', () => {
+      expect(() => parseConfigContent('{ not valid : : }')).toThrow();
     });
   });
 });

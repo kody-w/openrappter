@@ -1,275 +1,161 @@
 /**
  * Skills Ecosystem Parity Tests
- * Tests that openrappter skills system matches openclaw:
- * - Skill registry with search/install/load
- * - Skill binaries
- * - Built-in skill categories
- * - Skill creator
+ *
+ * Exercises the real SkillsRegistry (src/skills/registry.ts) — discovery,
+ * install/enable lifecycle, and the on-disk lock file. The previous version of
+ * this file built literal objects and asserted on their own shape, so it passed
+ * no matter what the product did. Its most misleading test claimed skills store
+ * their lock file at `~/.openrappter/skills/.clawhub/lock.json` and "verified"
+ * it with `expect(lockPath).toContain('.clawhub/lock.json')` — a string
+ * compared against a substring of itself. That path is a Python-runtime concept
+ * (python/openrappter/clawhub.py); the TypeScript SkillsRegistry actually writes
+ * `openrappter-skills.lock`. These tests use the real registry against a scratch
+ * directory and assert the real behaviour.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { createSkillsRegistry } from '../../skills/registry.js';
+import type { SkillManifest } from '../../skills/registry.js';
+
+/** Scratch roots live under the repo's gitignored temp dir, never /tmp. */
+const SCRATCH_ROOT = join(process.cwd(), '.vitest-tmp');
+const scratchDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function scratch(): string {
+  mkdirSync(SCRATCH_ROOT, { recursive: true });
+  const dir = mkdtempSync(join(SCRATCH_ROOT, 'skills-'));
+  scratchDirs.push(dir);
+  return dir;
+}
+
+function seedSkill(skillsDir: string, manifest: SkillManifest, skillMd?: string): void {
+  const dir = join(skillsDir, manifest.id.replace('/', '--'));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  if (skillMd !== undefined) writeFileSync(join(dir, 'SKILL.md'), skillMd);
+}
+
+const weather: SkillManifest = {
+  id: 'weather',
+  name: 'Weather',
+  version: '1.0.0',
+  description: 'Get weather forecasts',
+  author: 'openrappter',
+  tags: ['weather', 'utility'],
+};
 
 describe('Skills Ecosystem Parity', () => {
-  describe('Skill Registry', () => {
-    it('should search for skills', () => {
-      const response = {
-        results: [
-          { name: 'apple-notes', description: 'Access Apple Notes', version: '1.0.0' },
-          { name: 'obsidian', description: 'Obsidian vault integration', version: '1.4.0' },
-        ],
-      };
-
-      expect(response.results.length).toBeGreaterThan(0);
+  describe('Installed skills discovery', () => {
+    it('reports no installed skills for a fresh registry', async () => {
+      const registry = createSkillsRegistry(scratch());
+      await registry.initialize();
+      expect(registry.getInstalled()).toHaveLength(0);
     });
 
-    it('should install skill from ClawHub', () => {
-      const response = {
-        success: true,
-        skill: 'apple-notes',
-        version: '1.0.0',
-        installedAt: new Date().toISOString(),
-      };
+    it('discovers a skill seeded on disk via its manifest', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
 
-      expect(response.success).toBe(true);
-    });
+      const registry = createSkillsRegistry(dir);
+      await registry.initialize();
 
-    it('should list installed skills', () => {
-      const response = {
-        skills: [
-          { name: 'shell', enabled: true, builtin: true },
-          { name: 'memory', enabled: true, builtin: true },
-          { name: 'apple-notes', enabled: true, builtin: false },
-        ],
-      };
-
-      expect(response.skills.length).toBeGreaterThan(0);
-    });
-
-    it('should get skill status', () => {
-      const response = {
-        method: 'skills.status',
-        result: {
-          totalInstalled: 10,
-          enabled: 8,
-          disabled: 2,
-          lastUpdated: '2024-01-01T00:00:00Z',
-        },
-      };
-
-      expect(response.result.totalInstalled).toBeGreaterThan(0);
-    });
-
-    it('should update installed skill', () => {
-      const response = {
-        updated: true,
-        from: '1.0.0',
-        to: '1.1.0',
-      };
-
-      expect(response.updated).toBe(true);
+      const installed = registry.getInstalled();
+      expect(installed).toHaveLength(1);
+      expect(installed[0].manifest.id).toBe('weather');
+      expect(installed[0].manifest.description).toBe('Get weather forecasts');
     });
   });
 
-  describe('Skill Format', () => {
-    it('should parse SKILL.md with YAML frontmatter', () => {
-      const skillMd = `---
-name: weather
-description: Get weather forecasts
-version: 1.0.0
-author: openrappter
-tags: [weather, utility]
----
+  describe('Lock file', () => {
+    it('writes the lock file as openrappter-skills.lock (not .clawhub/lock.json)', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
 
-# Weather Skill
+      const registry = createSkillsRegistry(dir);
+      await registry.initialize(); // scanning an unseen dir persists the lock file
 
-Get current weather and forecasts for any location.
-
-## Usage
-
-Ask about weather in any city.
-`;
-
-      expect(skillMd).toContain('---');
-      expect(skillMd).toContain('name: weather');
+      expect(existsSync(join(dir, 'openrappter-skills.lock'))).toBe(true);
+      // The `.clawhub/lock.json` path claimed by the old test belongs to the
+      // Python runtime only; the TypeScript registry never creates it.
+      expect(existsSync(join(dir, '.clawhub', 'lock.json'))).toBe(false);
     });
 
-    it('should parse inline metadata', () => {
-      const skillMd = `name: Calculator
-description: Perform calculations
+    it('records installed skills inside the lock file', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
 
-# Calculator Skill
+      await createSkillsRegistry(dir).initialize();
 
-Perform mathematical calculations.
-`;
-
-      const lines = skillMd.split('\n');
-      const nameMatch = lines[0].match(/^name:\s*(.+)$/);
-      expect(nameMatch?.[1]).toBe('Calculator');
-    });
-
-    it('should support skill scripts directory', () => {
-      const skillStructure = {
-        'SKILL.md': 'Skill documentation',
-        'scripts/': {
-          'main.py': 'Python implementation',
-          'run.sh': 'Shell implementation',
-        },
-      };
-
-      expect(skillStructure['scripts/']).toBeDefined();
+      const lock = JSON.parse(
+        readFileSync(join(dir, 'openrappter-skills.lock'), 'utf8')
+      ) as { skills: Array<{ manifest: SkillManifest }> };
+      expect(lock.skills.map((s) => s.manifest.id)).toContain('weather');
     });
   });
 
-  describe('Skill Execution', () => {
-    it('should wrap skill as agent', () => {
-      const skillAgent = {
-        name: 'weather',
-        type: 'skill',
-        metadata: {
-          name: 'weather',
-          description: 'Get weather forecasts',
-        },
-        execute: async (query: string) => `Weather for: ${query}`,
-      };
+  describe('Enable / disable lifecycle', () => {
+    it('excludes a disabled skill from getEnabled but keeps it installed', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
+      const registry = createSkillsRegistry(dir);
+      await registry.initialize();
 
-      expect(skillAgent.type).toBe('skill');
-      expect(typeof skillAgent.execute).toBe('function');
+      expect(registry.getEnabled().map((s) => s.manifest.id)).toContain('weather');
+
+      expect(await registry.disableSkill('weather')).toBe(true);
+      expect(registry.getEnabled()).toHaveLength(0);
+      expect(registry.getInstalled()).toHaveLength(1); // still installed, just off
+
+      expect(await registry.enableSkill('weather')).toBe(true);
+      expect(registry.getEnabled().map((s) => s.manifest.id)).toContain('weather');
     });
 
-    it('should execute Python scripts', () => {
-      const execution = {
-        skill: 'weather',
-        script: 'scripts/main.py',
-        args: ['San Francisco'],
-        timeout: 30000,
-      };
-
-      expect(execution.script.endsWith('.py')).toBe(true);
-    });
-
-    it('should execute shell scripts', () => {
-      const execution = {
-        skill: 'system-info',
-        script: 'scripts/run.sh',
-        args: [],
-        timeout: 10000,
-      };
-
-      expect(execution.script.endsWith('.sh')).toBe(true);
+    it('returns false when enabling a skill that is not installed', async () => {
+      const registry = createSkillsRegistry(scratch());
+      await registry.initialize();
+      expect(await registry.enableSkill('does-not-exist')).toBe(false);
     });
   });
 
-  describe('Built-in Skill Categories', () => {
-    it('should have productivity skills', () => {
-      const productivitySkills = [
-        'apple-notes',
-        'apple-reminders',
-        'notion',
-        'obsidian',
-        'things',
-        'trello',
-      ];
+  describe('Uninstall', () => {
+    it('removes the skill from the registry and deletes its directory', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
+      const registry = createSkillsRegistry(dir);
+      await registry.initialize();
 
-      expect(productivitySkills.length).toBeGreaterThanOrEqual(5);
-    });
+      const skillDir = join(dir, 'weather');
+      expect(existsSync(skillDir)).toBe(true);
 
-    it('should have media skills', () => {
-      const mediaSkills = [
-        'canvas',
-        'camsnap',
-        'video-frames',
-        'openai-image-gen',
-      ];
-
-      expect(mediaSkills.length).toBeGreaterThanOrEqual(3);
-    });
-
-    it('should have AI/ML skills', () => {
-      const aiSkills = [
-        'openai-whisper',
-        'summarize',
-        'coding-agent',
-      ];
-
-      expect(aiSkills.length).toBeGreaterThanOrEqual(3);
-    });
-
-    it('should have smart home skills', () => {
-      const homeSkills = [
-        'openhue',
-        'sonos-cli',
-        'spotify-player',
-      ];
-
-      expect(homeSkills.length).toBeGreaterThanOrEqual(3);
-    });
-
-    it('should have utility skills', () => {
-      const utilitySkills = [
-        'weather',
-        'local-places',
-        'health-check',
-        'model-usage',
-      ];
-
-      expect(utilitySkills.length).toBeGreaterThanOrEqual(3);
+      expect(await registry.uninstall('weather')).toBe(true);
+      expect(registry.getInstalled()).toHaveLength(0);
+      expect(existsSync(skillDir)).toBe(false);
     });
   });
 
-  describe('Skill Creator', () => {
-    it('should generate skill template', () => {
-      const template = {
-        name: 'my-custom-skill',
-        description: 'A custom skill',
-        files: [
-          'SKILL.md',
-          'scripts/main.py',
-        ],
-      };
+  describe('Loading a skill', () => {
+    it('loads manifest-derived fields for an installed skill', async () => {
+      const dir = scratch();
+      seedSkill(dir, weather);
+      const registry = createSkillsRegistry(dir);
+      await registry.initialize();
 
-      expect(template.files).toContain('SKILL.md');
+      const skill = await registry.loadSkill('weather');
+      expect(skill).not.toBeNull();
+      expect(skill?.name).toBe('Weather');
+      expect(skill?.version).toBe('1.0.0');
     });
 
-    it('should validate skill structure', () => {
-      const validate = (skill: { name?: string; description?: string }): string[] => {
-        const errors: string[] = [];
-        if (!skill.name) errors.push('name is required');
-        if (!skill.description) errors.push('description is required');
-        return errors;
-      };
-
-      expect(validate({ name: 'test', description: 'desc' })).toHaveLength(0);
-      expect(validate({ name: 'test' })).toHaveLength(1);
-    });
-  });
-
-  describe('Skill Binaries', () => {
-    it('should support skill binary download', () => {
-      const response = {
-        available: true,
-        url: 'https://clawhub.dev/bins/whisper/darwin-arm64',
-        size: 50000000,
-      };
-
-      expect(response.available).toBe(true);
-    });
-  });
-
-  describe('Lock File', () => {
-    it('should track installed skills in lock file', () => {
-      const lockFile = {
-        installed: {
-          'apple-notes': { version: '1.0.0', installedAt: '2024-01-01T00:00:00Z' },
-          'weather': { version: '2.0.0', installedAt: '2024-01-02T00:00:00Z' },
-        },
-      };
-
-      expect(Object.keys(lockFile.installed).length).toBe(2);
-    });
-
-    it('should store lock file at ~/.openrappter/skills/.clawhub/lock.json', () => {
-      const lockPath = '~/.openrappter/skills/.clawhub/lock.json';
-      expect(lockPath).toContain('.clawhub/lock.json');
+    it('returns null when loading a skill that is not installed', async () => {
+      const registry = createSkillsRegistry(scratch());
+      await registry.initialize();
+      expect(await registry.loadSkill('nope')).toBeNull();
     });
   });
 });

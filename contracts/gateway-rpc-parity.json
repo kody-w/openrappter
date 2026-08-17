@@ -2,7 +2,7 @@
   "schema": "rapp-gateway-rpc-parity/1.0",
   "why": [
     "The two gateways drifted without anything noticing. TypeScript registers 54 RPC",
-    "methods and Python 10, which is expected — they have different scopes — but the",
+    "methods and Python 10, which is expected \u2014 they have different scopes \u2014 but the",
     "overlap must agree, and a method must not quietly appear in one runtime only.",
     "",
     "This file is the pin. Each runtime has a test asserting it registers everything",
@@ -35,9 +35,29 @@
   },
   "typescript_only_note": [
     "TypeScript registers many methods Python does not (cron.*, chat.*, twin.*,",
-    "surgeon.*, backup.*, auth.*, and others). That is by design — the TypeScript",
+    "surgeon.*, backup.*, auth.*, and others). That is by design \u2014 the TypeScript",
     "gateway is the full daemon. They are not enumerated here because the list moves",
     "with feature work; what matters is that the `shared` set stays in agreement and",
     "that `python_only` does not grow silently."
+  ],
+  "what_this_does_not_pin": [
+    "Response shapes. This file pins which method NAMES both runtimes answer to,",
+    "and nothing about what they answer with. That distinction matters more than",
+    "it sounds: `agents.list` is listed as shared and the two runtimes return",
+    "payloads with almost nothing in common.",
+    "",
+    "  TypeScript  [{ id, type, description }]           (index.ts setAgentList)",
+    "  Python      [{ name, description, parameters,     (cli.py list_agents)",
+    "               module, file, source }]",
+    "",
+    "A client written against one cannot read the other. Only `description`",
+    "overlaps; TypeScript's `id` is Python's `name`.",
+    "",
+    "`health` does agree \u2014 status, version, uptime, timestamp, checks \u2014 except",
+    "that Python never sends the optional `instance`, which TypeScript documents",
+    "as meaning 'unknown' when absent, so that is compatible by design.",
+    "",
+    "Tracked as an issue rather than fixed here: choosing a canonical shape",
+    "breaks whichever side's clients are not chosen, which is an owner decision."
   ]
 }

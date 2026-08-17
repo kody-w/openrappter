@@ -22,7 +22,11 @@ import { reserveTestPort } from '../support/test-port.js';
 
 const CONTRACT = JSON.parse(
   readFileSync(resolve(__dirname, '../../../../contracts/gateway-rpc-parity.json'), 'utf-8'),
-) as { shared: string[]; python_only: Record<string, string[]> };
+) as {
+  shared: string[];
+  python_only: Record<string, string[]>;
+  what_this_does_not_pin?: string[];
+};
 
 let server: GatewayServer | undefined;
 
@@ -42,6 +46,17 @@ describe('gateway RPC parity with the Python runtime', () => {
   it('the contract lists something', () => {
     // Guards the rest: an empty contract would make every assertion vacuous.
     expect(CONTRACT.shared.length).toBeGreaterThan(4);
+  });
+
+  it('says plainly that it does not pin response shapes', () => {
+    // `agents.list` is shared, and the two runtimes return payloads with
+    // almost nothing in common — TypeScript `{ id, type, description }`,
+    // Python `{ name, description, parameters, module, file, source }`.
+    // Without this note, "shared" reads as though a client could consume
+    // either, which it cannot.
+    const note = (CONTRACT.what_this_does_not_pin ?? []).join(' ');
+    expect(note).toContain('Response shapes');
+    expect(note).toContain('agents.list');
   });
 
   it('registers every shared method', async () => {

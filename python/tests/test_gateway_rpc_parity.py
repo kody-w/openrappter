@@ -26,6 +26,21 @@ def registered() -> set[str]:
     return set(getattr(GatewayServer(), "_methods", {}))
 
 
+class TestContractHonesty:
+    def test_it_says_what_it_does_not_pin(self):
+        """The contract pins names, not response shapes.
+
+        `agents.list` is shared and the two runtimes return payloads with
+        almost nothing in common, so a reader must not take "shared" to mean
+        a client can consume either. Losing that note would make this file
+        quietly overstate what it guarantees.
+        """
+        assert "what_this_does_not_pin" in CONTRACT
+        note = " ".join(CONTRACT["what_this_does_not_pin"])
+        assert "agents.list" in note
+        assert "Response shapes" in note
+
+
 class TestSharedSurface:
     def test_the_contract_lists_something(self):
         # Guards the rest: an empty contract would make every assertion vacuous.

@@ -112,7 +112,9 @@ jobs:
           swift-version: '6.0'
       - run: swift build -c release --product OpenRappterBar
       # Fails hard on either a Swift build error or any failing test in the
-      # custom RunTests harness (86+ tests; exits non-zero on any failure).
+      # custom RunTests harness, which exits non-zero on any failure. The
+      # harness has no discovery: main.swift calls each suite by hand, and
+      # SuiteRegistrationTests fails the build if one is ever left out.
       - run: swift build --product RunTests && .build/debug/RunTests
 
   python:

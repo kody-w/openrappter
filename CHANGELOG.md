@@ -7,7 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One chat, both brains** — the brainstem runs as its own process speaking
+  `POST /chat` while the OpenRappter runtime answers `chat.send`, so holding a
+  conversation across both used to mean two chat windows. `chat.send` now takes
+  an optional `target` (`openrappter` by default, or `brainstem`), and the web
+  dashboard and the macOS Bar each carry a selector that remembers the choice.
+  This works because both runtimes already return the same
+  `rapp-runtime-parity/1.0` §2.4 envelope, so a reply from either renders
+  identically. An unrecognised target is refused rather than defaulted: the two
+  brains know different things and their replies are the same shape, so a typo
+  that quietly answered from the wrong one would be indistinguishable.
+  `OPENRAPPTER_BRAINSTEM_URL` overrides the address; otherwise both the
+  documented port and the RAPP drop-in slot are probed.
+
+- **A `Brainstem` agent in both runtimes** — the selector lets a person switch
+  brains, which still leaves them relaying answers by hand. The agent gives the
+  assistant the same reach, dispatched like any other tool through the ordinary
+  chat endpoint, so "ask the brainstem what it knows about this and compare it
+  to your own view" works in one turn. Declares exactly the `network`
+  capability its syntax tree can reach, per the RAPP agent contract.
+
 ### Fixed
+
+- **Stop did not stop the brainstem** — `chat.abort` marked the run aborted and
+  the interface went quiet, while the request carried on, produced a full reply,
+  and had it discarded. Stop looked like it worked from every angle a person can
+  see, and a hosted model kept generating billed output nobody would read. A run
+  now carries an `AbortController` whose signal reaches the request itself.
+
+- **GoogleVoiceAgent never loaded in the Python runtime** — every
+  `--list-agents` printed `Failed to load … No module named 'agents'` and listed
+  18 agents where TypeScript listed 19. The agent was not at fault: it is
+  written to the portability contract, which permits `agents.basic_agent` and
+  little else so the same file runs in the grail brainstem. The loader built
+  that synthetic namespace and skipped the one module a portable agent is
+  allowed to import.
+
+- **PythonAgent failed to load on every single run** — built-in discovery calls
+  `new` on every exported `BasicAgent` subclass, and `PythonAgent` is a wrapper
+  built per descriptor that needs constructor arguments. It threw, was recorded
+  as a broken agent file, and printed a warning above every `--list-agents`.
+
+- **The Bones window told a fresh install it had no agents** — the agents
+  section reads only the user's own directory, and the built-ins live inside the
+  installed package. On a fresh machine it said "No agents installed yet" while
+  37 agents were working; measured here, it counted 5 against a runtime that
+  reported 37.
+
+- **A slow PowerShell start aborted Windows ACL hardening** —
+  `hardenPrivatePath` spawns a fresh `powershell.exe` for every private path and
+  capped it at 15 seconds, which a cold start on a loaded machine can exceed.
+  Every caller that asks for a private path takes the throw, so Show-and-Tell
+  simply failed to start. Raised to 60s and retried once, but only for a process
+  that never got off the ground — a refused or unverifiable ACL still fails
+  closed on the first attempt.
+
+- **`config validate` called a mostly-inert config file valid** — Zod strips
+  unknown keys rather than rejecting them, so a file could parse cleanly while
+  almost nothing in it was read. Validation still passes, since these are not
+  errors, but it now lists the keys that will be ignored. This is why the
+  published config documentation drifted so far: the tool whose job is to check
+  the file agreed with it.
 
 - **A published install had none of the 52 bundled skills** — `files` in
   `package.json` never listed `skills/`, so every tarball carried
@@ -189,6 +251,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and desktop smoke tests were hardened for concurrent and Windows runs.
 
 ### Security
+
+- **The published container ran everything as root** — the root `Dockerfile`
+  declared no `USER`, and `docker-compose.yml` mounted the config volume at
+  `/root/.openrappter` to match. Anything that gets code execution inside that
+  container — and this process runs a shell agent by design — was root in it,
+  with the credential directory mounted in. Now runs as the unprivileged `node`
+  account, with `HOME` and the compose mount moved to match.
 
 - **`openrappter login` printed both tokens** — it echoed the first 20
   characters of the access token, and of the refresh token when one was

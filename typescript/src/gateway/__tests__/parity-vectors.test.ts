@@ -1,18 +1,24 @@
 /**
  * The golden conformance vectors, run against this runtime.
  *
- * PARITY §5 says the corpus **SHOULD** ship at `rapp_brainstem/parity_vectors/`
- * and be mirrored into `rapp-map`. It does not: both locations 404 today, and
- * §5 itself marks the corpus **PLANNED — not yet committed**.
+ * PARITY §5 said the corpus **SHOULD** ship at `rapp_brainstem/parity_vectors/`
+ * and be mirrored into `rapp-map`. When this file was written both locations
+ * 404'd and §5 marked the corpus **PLANNED — not yet committed**, so there was
+ * nothing to fetch and these cases were implemented from §5.2, which names the
+ * fourteen required cases and specifies each one's observable behaviour.
  *
- * So there is nothing to fetch. What *is* normative is §5.2, which names the
- * fourteen required cases and specifies each one's observable behaviour. This
- * file implements those cases against our own runtime, so the tier we declare is
- * measured rather than asserted.
+ * The corpus has since been committed to this repo at `parity_vectors/`. This
+ * file still implements the cases rather than executing the vectors, because
+ * the multi-round loop shapes need a scripted model harness that lives in the
+ * Python suite and not here. What it must not do is drift from the corpus while
+ * claiming to conform to it, so `parity-corpus-contract.test.ts` ties the two
+ * together: it checks the names below against the shipped files in both
+ * directions, checks `ENVELOPE_REQUIRED_KEYS` against what every vector
+ * declares, and recomputes the manifest digests.
  *
- * Where a case cannot be decided without a live model (the multi-round loop
- * shapes), it is reported as `needs-model` rather than quietly passed. A vector
- * that cannot fail is not evidence.
+ * Where a case cannot be decided without a live model, it is reported as
+ * `needs-model` rather than quietly passed. A vector that cannot fail is not
+ * evidence.
  */
 
 import { describe, expect, it } from 'vitest';

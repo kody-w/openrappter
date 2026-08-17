@@ -891,23 +891,18 @@ results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(a
       <p>OpenRappter operates with the same OS-level permissions as the user who runs it. Because agents can execute shell commands and read/write files, the framework includes several layers of protection. Security is opt-in by default for ease of development — enable stricter controls before deploying in shared or production environments.</p>
 
       <h3>ShellAgent Sandboxing</h3>
-      <p>ShellAgent is the primary attack surface for prompt injection via shell execution. Two mechanisms limit its blast radius:</p>
+      <p>ShellAgent is the primary attack surface for prompt injection via shell execution. Its limits are enforced in code by <code>ExecSafety</code>, not read from <code>config.yaml</code>:</p>
       <ul>
-        <li><strong>Allowlist mode</strong> — Set <code>shell.allowlist</code> to an array of permitted command prefixes. Any command not matching an entry is rejected before execution. Recommended for production deployments.</li>
-        <li><strong>Blocklist mode</strong> — The default. A configurable list of dangerous patterns (e.g. <code>rm -rf /</code>, <code>sudo rm</code>) is checked against the command string before execution. Overlapping glob patterns are supported.</li>
+        <li><strong>Injection detection</strong> — every command is normalised and checked before execution; substitutions and chaining that would escape the intended command are rejected.</li>
+        <li><strong>Safe-binary classification</strong> — binaries are classed as safe or dual-use. A dual-use binary (one that is ordinary in isolation and dangerous in combination) requires approval rather than being silently allowed.</li>
+        <li><strong>Approval</strong> — a command needing review raises an <code>approval</code> event to subscribed clients and waits for a decision, or accepts a single-use token bound to one exact normalised command.</li>
       </ul>
-      <pre><span class="cm"># config.yaml — production lockdown example</span>
-shell:
-  allowlist:
-    - <span class="str">"git status"</span>
-    - <span class="str">"git log"</span>
-    - <span class="str">"npm test"</span>
-    - <span class="str">"ls"</span>
-    - <span class="str">"cat"</span>
-  require_approval: false</pre>
+      <div class="info-box">
+        <strong>There is no <code>shell:</code> section in config.yaml.</strong> Earlier revisions of this page showed a "production lockdown" example built on <code>shell.allowlist</code> and <code>shell.require_approval</code>. Neither key exists, and the schema discards unknown keys silently, so that configuration validated cleanly and changed nothing. The safe-binary set is adjusted programmatically through <code>addSafeBin</code> / <code>removeSafeBin</code>.
+      </div>
 
       <h3>Approval Workflows</h3>
-      <p>Enable <code>shell.require_approval: true</code> to pause before executing any shell command and prompt the operator for confirmation. In gateway mode this sends an <code>approval.required</code> event to subscribed clients before proceeding. Useful for high-stakes operations like database migrations or deployments.</p>
+      <p>A command that <code>ExecSafety</code> classifies as needing review pauses before execution. In gateway mode this sends an <code>approval</code> event to subscribed clients and waits for a decision. Useful for high-stakes operations like database migrations or deployments.</p>
 
       <h3>Rate Limiting</h3>
       <p>The WebSocket gateway enforces per-connection rate limits. For channel adapters, each channel can set its own rate limit in addition to the global gateway limit. Rate limits apply to both inbound message handling and outbound LLM API calls, protecting against runaway loops.</p>

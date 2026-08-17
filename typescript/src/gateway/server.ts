@@ -913,6 +913,28 @@ export class GatewayServer {
     };
   }
 
+  /**
+   * Tell subscribers a channel's connection state changed.
+   *
+   * The channels screen keeps a map of statuses and listens for
+   * `channel.status` to update it. Nothing ever emitted that event, so the map
+   * was populated once by `channels.list` and then went stale: connecting or
+   * disconnecting a channel left the screen showing the old state until reload.
+   *
+   * The payload is deliberately one entry of exactly what `channels.list`
+   * returns, because the screen renders both through the same `ChannelStatus`
+   * type. An event shaped differently from the list that seeds it would be a
+   * second contract for the same thing.
+   */
+  private broadcastChannelStatus(type: string): void {
+    if (!this.channelRegistry) return;
+    const status = this.channelRegistry
+      .getStatusList()
+      .find((entry) => entry.type === type);
+    if (!status) return;
+    this.broadcastEvent(GatewayEvents.CHANNEL_STATUS, status);
+  }
+
   /** Broadcast an event to all authenticated connections (type: "event" frame) */
   broadcastEvent(event: string, payload: unknown, filter?: (conn: ConnectionInfo) => boolean): void {
     if (this.stopping || !this.wss) return;
@@ -2528,11 +2550,13 @@ export class GatewayServer {
     this.registerMethod('channels.connect', async (params: { type: string }) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       await this.channelRegistry.connectChannel(params.type);
+      this.broadcastChannelStatus(params.type);
       return { connected: true };
     }, { requiresAuth: true });
     this.registerMethod('channels.disconnect', async (params: { type: string }) => {
       if (!this.channelRegistry) throw new Error('Channel registry not configured');
       await this.channelRegistry.disconnectChannel(params.type);
+      this.broadcastChannelStatus(params.type);
       return { disconnected: true };
     }, { requiresAuth: true });
     this.registerMethod('channels.probe', async (params: { type: string }) => {

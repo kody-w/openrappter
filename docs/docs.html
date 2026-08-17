@@ -128,13 +128,18 @@ pip install -e .</pre>
 
       <h3>Verify</h3>
       <pre>openrappter --version
-# openrappter v1.9.1
+# 1.13.0
 
-openrappter status
-# Runtime: TypeScript/Node 20.x
-# Provider: copilot (authenticated)
-# Memory: ~/.openrappter/memory.json
-# Skills: 0 installed</pre>
+openrappter doctor
+# Check                 Status  Message
+# ------------------------------------------------------------
+# Node.js Version       PASS  v20.20.1 (>= 20.9.0 required)
+# GitHub Copilot CLI    PASS  Copilot extension available
+# API Keys              PASS  1 provider(s) configured
+# SQLite Database       PASS  Database exists
+# Gateway Port          WARN  Port 18790 is in use
+#
+# Results: 10 passed, 1 warnings, 0 failed</pre>
 
       <div class="info-box">
         <strong>First run:</strong> On first launch openrappter will attempt to authenticate with GitHub Copilot using your existing CLI credentials. If you are not signed in, it will open <code>gh auth login</code> inline without requiring you to run any commands manually.
@@ -587,7 +592,7 @@ registerChannel(<span class="str">'my-channel'</span>, MyChannel);</pre>
       <p>The WebSocket gateway provides a real-time bidirectional interface to the agent runtime using the JSON-RPC 2.0 protocol. It enables web frontends, external services, and other processes to invoke agents, subscribe to events, and stream responses without polling.</p>
 
       <h3>Starting the Gateway</h3>
-      <pre>openrappter gateway start --port 8765</pre>
+      <pre>openrappter gateway --port 8765</pre>
       <p>Or enable it in <code>config.yaml</code> under <code>gateway.enabled: true</code> to start it automatically with the main process.</p>
 
       <h3>Connection Lifecycle</h3>
@@ -721,7 +726,7 @@ openrappter skills install gh-pr-reviewer
 openrappter skills list
 
 <span class="cm"># Remove a skill</span>
-openrappter skills remove gh-pr-reviewer</pre>
+openrappter skills uninstall gh-pr-reviewer</pre>
 
       <h3>SKILL.md Format</h3>
       <p>A skill is defined by a <code>SKILL.md</code> file with a structured frontmatter block followed by documentation:</p>
@@ -764,7 +769,7 @@ grouped by file with line-level comments.</span></pre>
 });</pre>
 
       <h3>Lock File</h3>
-      <p>Installed skills are tracked in a lock file at <code>~/.openrappter/skills/.clawhub/lock.json</code>. The lock file records the installed version, install date, and a content hash. Running <code>openrappter skills verify</code> checks all installed skills against their hashes and reports any that have been modified locally.</p>
+      <p>Installed skills are tracked in a lock file at <code>~/.openrappter/skills/.clawhub/lock.json</code>. The lock file records the installed version, install date, and a content hash.</p>
 
       <h3>Writing a Skill</h3>
       <p>To publish a skill to ClawHub, create a directory with a <code>SKILL.md</code> file and optional scripts, then run:</p>
@@ -980,16 +985,14 @@ console.<span class="fn">log</span>(config.gateway.port);        <span class="cm
         <tbody>
           <tr><td><code>openrappter</code></td><td>Start the interactive CLI agent</td></tr>
           <tr><td><code>openrappter --version</code></td><td>Print version and exit</td></tr>
-          <tr><td><code>openrappter status</code></td><td>Show runtime, provider, and memory status</td></tr>
-          <tr><td><code>openrappter gateway start</code></td><td>Start the WebSocket gateway</td></tr>
-          <tr><td><code>openrappter gateway stop</code></td><td>Stop a running gateway instance</td></tr>
+          <tr><td><code>openrappter doctor</code></td><td>Run diagnostics: runtime, providers, database, gateway port</td></tr>
+          <tr><td><code>openrappter gateway</code></td><td>Start the WebSocket gateway in the foreground</td></tr>
+          <tr><td><code>openrappter service install</code></td><td>Install the gateway as a supervised background service</td></tr>
+          <tr><td><code>openrappter service uninstall</code></td><td>Stop and remove the gateway service</td></tr>
           <tr><td><code>openrappter skills search &lt;query&gt;</code></td><td>Search ClawHub for skills</td></tr>
           <tr><td><code>openrappter skills install &lt;name&gt;</code></td><td>Install a skill from ClawHub</td></tr>
           <tr><td><code>openrappter skills list</code></td><td>List installed skills</td></tr>
-          <tr><td><code>openrappter skills remove &lt;name&gt;</code></td><td>Uninstall a skill</td></tr>
-          <tr><td><code>openrappter skills verify</code></td><td>Verify integrity of installed skills</td></tr>
-          <tr><td><code>openrappter memory recall &lt;query&gt;</code></td><td>Search memory from the CLI</td></tr>
-          <tr><td><code>openrappter memory clear</code></td><td>Delete all memory entries</td></tr>
+          <tr><td><code>openrappter skills uninstall &lt;repo&gt;</code></td><td>Uninstall a skill</td></tr>
           <tr><td><code>openrappter config validate</code></td><td>Validate the current config file</td></tr>
         </tbody>
       </table>

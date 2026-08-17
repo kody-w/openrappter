@@ -1,7 +1,28 @@
 /**
- * Parity test: Gateway RPC Methods
+ * Structure of the standalone RPC method modules in `gateway/methods/`.
  *
- * Tests the registration and structure of all RPC methods exposed by the gateway.
+ * This does NOT test the gateway's exposed methods, despite what it used to
+ * claim. It calls `registerAllMethods` against a mock, and `registerAllMethods`
+ * is deliberately never invoked by `GatewayServer` — see the doc comment on
+ * `registerBuiltInMethods`. Only 5 of the 25 modules are wired in production.
+ *
+ * So the names asserted below include several that no running gateway answers:
+ * `exec.approval.request`, `usage.status`, `usage.cost`, `logs.tail`,
+ * `skills.toggle`. Three separate agents rejected exactly those modules on
+ * inspection in #182, #183 and #184, because their names, dependencies or
+ * return shapes did not match anything real.
+ *
+ * That mismatch is a large part of why ten broken client features went
+ * unnoticed for so long: this file is green, lives under `parity/`, and read as
+ * though it covered the live surface.
+ *
+ * What actually covers production:
+ *   - client-rpc-coverage.test.ts  — every method a client calls is registered
+ *   - gateway-rpc-parity.test.ts   — the TS and Python gateways agree
+ *   - the *-contract.test.ts files — real HTTP against a real GatewayServer
+ *
+ * Keep this file for the module structure it does check, and do not read a
+ * passing run here as evidence that any of these methods work.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

@@ -1,0 +1,43 @@
+{
+  "schema": "rapp-gateway-rpc-parity/1.0",
+  "why": [
+    "The two gateways drifted without anything noticing. TypeScript registers 54 RPC",
+    "methods and Python 10, which is expected — they have different scopes — but the",
+    "overlap must agree, and a method must not quietly appear in one runtime only.",
+    "",
+    "This file is the pin. Each runtime has a test asserting it registers everything",
+    "listed under `shared`, and that nothing in `typescript_only` or `python_only` has",
+    "silently crossed over. Adding a method to one runtime now requires saying which",
+    "list it belongs in."
+  ],
+  "shared": [
+    "agents.list",
+    "channels.connect",
+    "channels.disconnect",
+    "channels.list",
+    "channels.probe",
+    "channels.send",
+    "health",
+    "ping",
+    "status"
+  ],
+  "python_only": {
+    "agents.execute": [
+      "Runs a named agent from the registry with kwargs, auth-required.",
+      "TypeScript has no equivalent: its `agent` method is the legacy chat handler,",
+      "which dispatches an AgentRequest rather than executing a named agent.",
+      "The macOS Bar carries an `executeAgent()` wrapper for this name that nothing",
+      "calls, so a Bar pointed at a Python gateway could execute agents and the same",
+      "Bar pointed at a TypeScript gateway could not.",
+      "Whether TypeScript should gain this is an owner decision: it is a remote",
+      "code-execution surface. Tracked as an issue rather than added unilaterally."
+    ]
+  },
+  "typescript_only_note": [
+    "TypeScript registers many methods Python does not (cron.*, chat.*, twin.*,",
+    "surgeon.*, backup.*, auth.*, and others). That is by design — the TypeScript",
+    "gateway is the full daemon. They are not enumerated here because the list moves",
+    "with feature work; what matters is that the `shared` set stays in agreement and",
+    "that `python_only` does not grow silently."
+  ]
+}

@@ -14,6 +14,7 @@
  */
 
 import { BasicAgent } from './BasicAgent.js';
+import { agentResultIsError } from './result-status.js';
 import type { AgentMetadata } from './types.js';
 
 
@@ -271,10 +272,11 @@ export class PipelineAgent extends BasicAgent {
       // non-JSON result
     }
 
+    // A resolved `{status: 'error'}` envelope is a failure, exactly like a throw.
     return {
       stepId: step.id,
       agentName: step.agent,
-      status: 'success',
+      status: agentResultIsError(result) ? 'error' : 'success',
       result,
       dataSlush,
       latencyMs,
@@ -321,7 +323,7 @@ export class PipelineAgent extends BasicAgent {
       return {
         stepId: step.id,
         agentName,
-        status: 'success' as const,
+        status: agentResultIsError(result) ? ('error' as const) : ('success' as const),
         result,
         dataSlush,
         latencyMs,
@@ -379,6 +381,11 @@ export class PipelineAgent extends BasicAgent {
 
       if (result.dataSlush) {
         currentSlush = result.dataSlush;
+      }
+
+      // An errored iteration ends the loop, exactly as a throwing one would.
+      if (result.status === 'error') {
+        break;
       }
 
       // Check exit condition if defined

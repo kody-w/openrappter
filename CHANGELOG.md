@@ -45,6 +45,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through to the next agent in `fallback` mode (forwarding the failed agent's
   `data_slush`), and never lets an error envelope win a `race`. Cross-runtime
   agreement is pinned by `contracts/agent-result-status-vectors.json`.
+- **The rest of the composition layers had the same blind spot** — `AgentChain`,
+  `PipelineAgent`, and `SubAgentManager` (both runtimes) also equated failure
+  with a throw. A chain with `stopOnError` ran every remaining step past a step
+  that returned `{"status": "error"}` and reported `partial` instead of `error`;
+  `PipelineAgent` hard-coded every completed step to `status: 'success'`, so
+  `onError` never fired at all and the pipeline reported `completed`; and
+  `SubAgentManager` recorded a failed call as a success in its call history.
+  All three now classify through the same shared helper. The failed payload is
+  never discarded: the chain keeps the envelope as `finalResult`, the pipeline
+  keeps each branch's result, and a sub-agent's error envelope is still returned
+  to its caller (only the bookkeeping changes). The chain rollup also folds
+  `{"status": "ERROR"}`, which its old case-sensitive comparison called success.
+  A new `agentResultErrorMessage` / `agent_result_error_message` reports a failed
+  step's reason identically whether the agent threw or returned an envelope, and
+  is pinned by the same contract file.
+- **The shared classifier is reachable from a brainstem drop** — the Python
+  module moved from `openrappter/result_status.py` to
+  `openrappter/agents/result_status.py` (mirroring the TypeScript layout) because
+  `pipeline_agent.py` must load in a rapp brainstem, where only co-dropped
+  modules inside the agents directory resolve. `openrappter.result_status`
+  remains as a re-export.
 - **`config` and `doctor` were never registered** — both were implemented and
   exported, but their words fell through to chat and global help while shipped
   health guidance told you to run them. Registering them exposed dormant bugs:

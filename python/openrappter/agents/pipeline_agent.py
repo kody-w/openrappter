@@ -19,6 +19,7 @@ import time
 from datetime import datetime
 
 from openrappter.agents.basic_agent import BasicAgent
+from openrappter.agents.result_status import agent_result_is_error
 
 
 
@@ -211,10 +212,11 @@ class PipelineAgent(BasicAgent):
         except (json.JSONDecodeError, TypeError):
             pass
 
+        # A returned {"status": "error"} envelope is a failure, exactly like a raise.
         return {
             'stepId': step.get('id', ''),
             'agentName': agent_name,
-            'status': 'success',
+            'status': 'error' if agent_result_is_error(result) else 'success',
             'result': result if isinstance(result, str) else json.dumps(result),
             'dataSlush': data_slush,
             'latencyMs': latency_ms,
@@ -271,6 +273,10 @@ class PipelineAgent(BasicAgent):
 
             if result.get('dataSlush'):
                 current_slush = result['dataSlush']
+
+            # An errored iteration ends the loop, exactly as a raising one would.
+            if result.get('status') == 'error':
+                break
 
             # Check exit condition if defined
             if step.get('condition') and self._evaluate_condition(step['condition'], current_slush):

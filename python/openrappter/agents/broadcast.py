@@ -14,7 +14,7 @@ Mirrors TypeScript agents/broadcast.ts
 
 import asyncio
 
-from openrappter.result_status import agent_result_is_error
+from openrappter.agents.result_status import agent_result_is_error
 
 
 def _branch_succeeded(outcome):

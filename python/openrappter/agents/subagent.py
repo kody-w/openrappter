@@ -17,6 +17,8 @@ import time
 import random
 from datetime import datetime
 
+from openrappter.agents.result_status import agent_result_error_message, agent_result_is_error
+
 
 class SubAgentManager:
     """Manages sub-agent invocations with depth/loop guards."""
@@ -123,10 +125,15 @@ class SubAgentManager:
             else:
                 result = await coro
 
-            # Update call record
-            call['status'] = 'success'
+            # Update call record. A returned {"status": "error"} envelope is a
+            # failure, exactly like a raise — the payload is still returned to
+            # the caller, but the call is not recorded as a success.
+            failed = agent_result_is_error(result)
+            call['status'] = 'error' if failed else 'success'
             call['completedAt'] = datetime.now().isoformat()
             call['result'] = result
+            if failed:
+                call['error'] = agent_result_error_message(result)
 
             # Extract data_slush from result for downstream chaining
             if isinstance(result, dict) and 'data_slush' in result:

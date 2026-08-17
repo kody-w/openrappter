@@ -119,8 +119,8 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 **Multi-agent patterns** (TypeScript `src/agents/`):
 - `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first success wins), `fallback` (try until success). A branch that *resolves* with a `{status: 'error'}` envelope counts as a failure, not a success — the envelope is kept per-branch in `results` while `allSucceeded`/`anySucceeded` and `firstResponse` ignore it
 - `AgentRouter` (`router.ts`) — Rule-based message routing by sender/channel/group/pattern with priority; session key isolation
-- `SubAgent` (`subagent.ts`) — Nested agent invocation with depth limits and loop detection
-- `AgentChain` (`chain.ts`) — Sequential pipeline with automatic `data_slush` forwarding between steps; supports transforms, timeouts, stopOnError/continue modes
+- `SubAgent` (`subagent.ts`) — Nested agent invocation with depth limits and loop detection. A call that *resolves* with a `{status: 'error'}` envelope is recorded as an errored call (the envelope is still returned to the caller)
+- `AgentChain` (`chain.ts`) — Sequential pipeline with automatic `data_slush` forwarding between steps; supports transforms, timeouts, stopOnError/continue modes. A step that throws **or** returns a `{status: 'error'}` envelope fails the step: `stopOnError` halts the chain, otherwise the run rolls up as `partial`
 - `AgentGraph` (`graph.ts`) — DAG executor with parallel execution, topological sort, cycle detection, and multi-upstream `data_slush` merging
 
 ## Architecture: AgentGraph (DAG Executor)

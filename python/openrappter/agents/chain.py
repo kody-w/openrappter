@@ -14,6 +14,8 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from openrappter.agents.result_status import agent_result_error_message, agent_result_is_error
+
 
 @dataclass
 class ChainStep:
@@ -121,6 +123,18 @@ class AgentChain:
                     duration_ms=duration_ms,
                 ))
 
+                # A returned {"status": "error"} envelope is a failure, exactly like a raise.
+                if agent_result_is_error(result) and self._stop_on_error:
+                    return ChainResult(
+                        status='error',
+                        steps=step_results,
+                        total_duration_ms=int((time.time() - chain_start) * 1000),
+                        final_result=result,
+                        final_slush=current_slush,
+                        failed_step=step.name,
+                        error=agent_result_error_message(result),
+                    )
+
             except Exception as e:
                 duration_ms = int((time.time() - step_start) * 1000)
                 error_result = {'status': 'error', 'message': str(e)}
@@ -144,7 +158,7 @@ class AgentChain:
                         error=str(e),
                     )
 
-        has_errors = any(s.result.get('status') == 'error' for s in step_results)
+        has_errors = any(agent_result_is_error(s.result) for s in step_results)
 
         return ChainResult(
             status='partial' if has_errors else 'success',

@@ -2,7 +2,8 @@
 
 A sub-agent that *returns* a structured ``{"status": "error"}`` envelope has
 failed just as surely as one that raises. These tests pin that contract for the
-composition layers (AgentGraph, BroadcastManager) and pin the shared classifier
+composition layers (AgentGraph, BroadcastManager, AgentChain, PipelineAgent,
+SubAgentManager) and pin the shared classifier and failure-reason extractor
 against the cross-runtime vector file in ``contracts/``.
 
 Mirrors typescript/src/__tests__/parity/composite-error-status.test.ts
@@ -16,8 +17,11 @@ import pytest
 
 from openrappter.agents.basic_agent import BasicAgent
 from openrappter.agents.broadcast import BroadcastManager
+from openrappter.agents.chain import AgentChain
 from openrappter.agents.graph import AgentGraph
-from openrappter.result_status import agent_result_is_error
+from openrappter.agents.pipeline_agent import PipelineAgent
+from openrappter.agents.subagent import SubAgentManager
+from openrappter.result_status import agent_result_error_message, agent_result_is_error
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +83,32 @@ class SlowOkAgent(BasicAgent):
         return json.dumps({"status": "success", "slow": True})
 
 
+class TrackingAgent(BasicAgent):
+    """Records that it ran, so "never reached" can be asserted directly."""
+
+    def __init__(self, name, log):
+        self.name = name
+        self.metadata = _meta(name, "records that it ran")
+        self._log = log
+        super().__init__(name=self.name, metadata=self.metadata)
+
+    def perform(self, **kwargs):
+        self._log.append(self.name)
+        return json.dumps({"status": "success"})
+
+
+class ShoutFailAgent(BasicAgent):
+    """Reports failure with an uppercase status, which the classifier folds."""
+
+    def __init__(self, name="ShoutFail"):
+        self.name = name
+        self.metadata = _meta(name, "returns an uppercase error envelope")
+        super().__init__(name=self.name, metadata=self.metadata)
+
+    def perform(self, **kwargs):
+        return json.dumps({"status": "ERROR", "message": "loud failure"})
+
+
 def as_executor(agents, delays=None):
     delays = delays or {}
 
@@ -99,7 +129,10 @@ def make_group(group_id, agent_ids, mode):
 # ---------------------------------------------------------------------------
 
 VECTOR_PATH = Path(__file__).parents[2] / "contracts" / "agent-result-status-vectors.json"
-VECTORS = json.loads(VECTOR_PATH.read_text())["vectors"]
+_CONTRACT = json.loads(VECTOR_PATH.read_text())
+VECTORS = _CONTRACT["vectors"]
+MESSAGE_VECTORS = _CONTRACT["messageVectors"]
+FALLBACK_MESSAGE = "agent returned an error envelope"
 
 
 def test_vector_file_is_loaded():
@@ -109,6 +142,16 @@ def test_vector_file_is_loaded():
 @pytest.mark.parametrize("vector", VECTORS, ids=[v["name"] for v in VECTORS])
 def test_classifier_matches_cross_runtime_vectors(vector):
     assert agent_result_is_error(vector["value"]) is vector["isError"]
+
+
+def test_message_vector_file_is_loaded():
+    assert len(MESSAGE_VECTORS) > 5
+
+
+@pytest.mark.parametrize("vector", MESSAGE_VECTORS, ids=[v["name"] for v in MESSAGE_VECTORS])
+def test_error_message_matches_cross_runtime_vectors(vector):
+    expected = vector["message"] if vector["message"] is not None else FALLBACK_MESSAGE
+    assert agent_result_error_message(vector["value"]) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -308,3 +351,288 @@ class TestBroadcastErrorEnvelope:
 
         assert result["allSucceeded"] is True
         assert result["anySucceeded"] is True
+
+
+# ---------------------------------------------------------------------------
+# AgentChain
+# ---------------------------------------------------------------------------
+
+class TestChainErrorEnvelope:
+    def test_stop_on_error_halts_on_error_envelope(self):
+        ran = []
+        chain = AgentChain()
+        chain.add_step("good", OkAgent())
+        chain.add_step("bad", SoftFailAgent())
+        chain.add_step("after", TrackingAgent("After", ran))
+
+        result = chain.run()
+
+        assert result.status == "error"
+        assert result.failed_step == "bad"
+        assert result.error == "exit code 1"
+        assert [s.name for s in result.steps] == ["good", "bad"]
+        assert ran == []
+
+    def test_failed_step_envelope_is_preserved(self):
+        chain = AgentChain()
+        chain.add_step("bad", SoftFailAgent())
+
+        result = chain.run()
+
+        assert result.final_result["status"] == "error"
+        assert result.final_result["message"] == "exit code 1"
+        assert result.steps[0].result["message"] == "exit code 1"
+
+    def test_raise_and_error_envelope_are_identical(self):
+        soft_ran, hard_ran = [], []
+        soft = AgentChain()
+        soft.add_step("bad", SoftFailAgent())
+        soft.add_step("after", TrackingAgent("SoftAfter", soft_ran))
+        hard = AgentChain()
+        hard.add_step("bad", RaiseAgent())
+        hard.add_step("after", TrackingAgent("HardAfter", hard_ran))
+
+        soft_result, hard_result = soft.run(), hard.run()
+
+        assert soft_result.status == hard_result.status
+        assert soft_result.failed_step == hard_result.failed_step
+        assert len(soft_result.steps) == len(hard_result.steps)
+        assert soft_ran == hard_ran == []
+
+    def test_continues_when_stop_on_error_is_false(self):
+        ran = []
+        chain = AgentChain({"stop_on_error": False})
+        chain.add_step("bad", SoftFailAgent())
+        chain.add_step("after", TrackingAgent("After", ran))
+
+        result = chain.run()
+
+        assert result.status == "partial"
+        assert ran == ["After"]
+        assert result.failed_step is None
+
+    def test_uppercase_error_envelope_rolls_up_as_failure(self):
+        stopping = AgentChain()
+        stopping.add_step("bad", ShoutFailAgent())
+        continuing = AgentChain({"stop_on_error": False})
+        continuing.add_step("bad", ShoutFailAgent())
+
+        stopped, continued = stopping.run(), continuing.run()
+
+        assert stopped.status == "error"
+        assert stopped.error == "loud failure"
+        assert continued.status == "partial"
+
+    def test_failed_step_slush_reaches_the_rollup(self):
+        chain = AgentChain()
+        chain.add_step("bad", SoftFailAgent())
+
+        assert chain.run().final_slush == {"failed_by": "SoftFail"}
+
+    def test_all_success_chain_still_succeeds(self):
+        chain = AgentChain()
+        chain.add_step("a", OkAgent("A"))
+        chain.add_step("b", OkAgent("B"))
+
+        result = chain.run()
+
+        assert result.status == "success"
+        assert len(result.steps) == 2
+
+
+# ---------------------------------------------------------------------------
+# PipelineAgent
+# ---------------------------------------------------------------------------
+
+def run_pipeline(agents, steps):
+    pipeline = PipelineAgent(lambda name: agents.get(name))
+    return json.loads(
+        pipeline.execute(action="run", spec={"name": "p", "input": {}, "steps": steps})
+    )
+
+
+class TestPipelineErrorEnvelope:
+    def test_agent_step_returning_error_envelope_is_errored(self):
+        out = run_pipeline(
+            {"Bad": SoftFailAgent("Bad")},
+            [{"id": "s1", "type": "agent", "agent": "Bad"}],
+        )
+
+        assert out["pipeline"]["steps"][0]["status"] == "error"
+        assert out["pipeline"]["status"] == "failed"
+        assert out["status"] == "error"
+
+    def test_on_error_stop_halts_the_pipeline(self):
+        ran = []
+        out = run_pipeline(
+            {"Bad": SoftFailAgent("Bad"), "After": TrackingAgent("After", ran)},
+            [
+                {"id": "s1", "type": "agent", "agent": "Bad", "onError": "stop"},
+                {"id": "s2", "type": "agent", "agent": "After"},
+            ],
+        )
+
+        assert [s["stepId"] for s in out["pipeline"]["steps"]] == ["s1"]
+        assert ran == []
+
+    def test_on_error_continue_keeps_going_but_reports_partial(self):
+        ran = []
+        out = run_pipeline(
+            {"Bad": SoftFailAgent("Bad"), "After": TrackingAgent("After", ran)},
+            [
+                {"id": "s1", "type": "agent", "agent": "Bad", "onError": "continue"},
+                {"id": "s2", "type": "agent", "agent": "After"},
+            ],
+        )
+
+        assert out["pipeline"]["status"] == "partial"
+        assert ran == ["After"]
+
+    def test_raise_and_error_envelope_are_identical(self):
+        soft_ran, hard_ran = [], []
+        soft = run_pipeline(
+            {"Bad": SoftFailAgent("Bad"), "After": TrackingAgent("SoftAfter", soft_ran)},
+            [
+                {"id": "s1", "type": "agent", "agent": "Bad", "onError": "stop"},
+                {"id": "s2", "type": "agent", "agent": "After"},
+            ],
+        )
+        hard = run_pipeline(
+            {"Bad": RaiseAgent("Bad"), "After": TrackingAgent("HardAfter", hard_ran)},
+            [
+                {"id": "s1", "type": "agent", "agent": "Bad", "onError": "stop"},
+                {"id": "s2", "type": "agent", "agent": "After"},
+            ],
+        )
+
+        assert soft["pipeline"]["status"] == hard["pipeline"]["status"]
+        assert soft["status"] == hard["status"]
+        assert len(soft["pipeline"]["steps"]) == len(hard["pipeline"]["steps"])
+        assert soft_ran == hard_ran == []
+
+    def test_parallel_branch_error_fails_the_step_and_keeps_payloads(self):
+        out = run_pipeline(
+            {"A": OkAgent("A"), "B": SoftFailAgent("B")},
+            [{"id": "fan", "type": "parallel", "agents": ["A", "B"], "onError": "continue"}],
+        )
+
+        by_agent = {s["agentName"]: s["status"] for s in out["pipeline"]["steps"]}
+        assert by_agent == {"A": "success", "B": "error"}
+        assert out["pipeline"]["status"] == "partial"
+
+    def test_conditional_body_error_is_reported(self):
+        out = run_pipeline(
+            {"Ok": OkAgent("Ok"), "Bad": SoftFailAgent("Bad")},
+            [
+                {"id": "s1", "type": "agent", "agent": "Ok"},
+                {
+                    "id": "s2",
+                    "type": "conditional",
+                    "agent": "Bad",
+                    "condition": {"field": "from", "equals": "Ok"},
+                    "onError": "continue",
+                },
+            ],
+        )
+
+        assert out["pipeline"]["steps"][1]["status"] == "error"
+        assert out["pipeline"]["status"] == "partial"
+
+    def test_loop_iteration_error_ends_the_loop(self):
+        out = run_pipeline(
+            {"Bad": SoftFailAgent("Bad")},
+            [
+                {
+                    "id": "loop",
+                    "type": "loop",
+                    "agent": "Bad",
+                    "maxIterations": 4,
+                    "onError": "continue",
+                }
+            ],
+        )
+
+        assert len(out["pipeline"]["steps"]) == 1
+        assert out["pipeline"]["steps"][0]["status"] == "error"
+
+    def test_all_success_pipeline_still_completes(self):
+        out = run_pipeline(
+            {"A": OkAgent("A"), "B": OkAgent("B")},
+            [
+                {"id": "s1", "type": "agent", "agent": "A"},
+                {"id": "s2", "type": "agent", "agent": "B"},
+            ],
+        )
+
+        assert out["pipeline"]["status"] == "completed"
+        assert out["status"] == "success"
+        assert all(s["status"] == "success" for s in out["pipeline"]["steps"])
+
+
+# ---------------------------------------------------------------------------
+# SubAgentManager
+# ---------------------------------------------------------------------------
+
+def manager_for(agents):
+    mgr = SubAgentManager()
+
+    async def executor(agent_id, message, context=None, upstream_slush=None):
+        return json.loads(agents[agent_id].execute(query=message))
+
+    mgr.set_executor(executor)
+    return mgr
+
+
+class TestSubAgentErrorEnvelope:
+    def test_call_returning_error_envelope_is_recorded_as_errored(self):
+        mgr = manager_for({"bad": SoftFailAgent()})
+        asyncio.run(mgr.invoke("bad", "go", mgr.create_context("root")))
+
+        call = mgr.get_call_history()[-1]
+        assert call["status"] == "error"
+        assert call["error"] == "exit code 1"
+
+    def test_envelope_is_still_returned_to_the_caller(self):
+        mgr = manager_for({"bad": SoftFailAgent()})
+        result = asyncio.run(mgr.invoke("bad", "go", mgr.create_context("root")))
+
+        assert result["status"] == "error"
+        assert result["message"] == "exit code 1"
+        assert mgr.get_call_history()[-1]["result"] == result
+
+    def test_raise_and_error_envelope_record_the_same_status(self):
+        soft = manager_for({"bad": SoftFailAgent()})
+        asyncio.run(soft.invoke("bad", "go", soft.create_context("root")))
+
+        hard = SubAgentManager()
+
+        async def raising(agent_id, message, context=None, upstream_slush=None):
+            raise RuntimeError("hard failure")
+
+        hard.set_executor(raising)
+        with pytest.raises(RuntimeError, match="hard failure"):
+            asyncio.run(hard.invoke("bad", "go", hard.create_context("root")))
+
+        assert soft.get_call_history()[-1]["status"] == hard.get_call_history()[-1]["status"]
+
+    def test_call_is_cleared_from_active_calls(self):
+        mgr = manager_for({"bad": SoftFailAgent()})
+        asyncio.run(mgr.invoke("bad", "go", mgr.create_context("root")))
+
+        assert mgr.get_active_calls() == []
+        assert len(mgr.get_call_history()) == 1
+
+    def test_failed_subagent_slush_is_still_forwarded(self):
+        mgr = manager_for({"bad": SoftFailAgent()})
+        ctx = mgr.create_context("root")
+        asyncio.run(mgr.invoke("bad", "go", ctx))
+
+        assert ctx["lastSlush"] == {"failed_by": "SoftFail"}
+
+    def test_successful_call_is_recorded_as_success(self):
+        mgr = manager_for({"ok": OkAgent()})
+        asyncio.run(mgr.invoke("ok", "go", mgr.create_context("root")))
+
+        call = mgr.get_call_history()[-1]
+        assert call["status"] == "success"
+        assert "error" not in call

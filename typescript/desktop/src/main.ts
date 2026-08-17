@@ -41,6 +41,7 @@ import {
   VibeVoiceService,
 } from './vibevoice.js';
 import { SECURE_RENDERER_PREFERENCES } from './window-security.js';
+import { waitForGatewayReady } from './gateway-ready.js';
 
 const packageRoot = path.join(
   import.meta.dirname,
@@ -380,46 +381,7 @@ async function ensureGateway(): Promise<void> {
     },
   );
   gatewayProcess = child;
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      child.off('message', onMessage);
-      child.off('exit', onExit);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onMessage = (message: unknown) => {
-      const ready = message as {
-        schema?: unknown;
-        pid?: unknown;
-        port?: unknown;
-      };
-      if (
-        ready?.schema === 'openrappter-gateway-ready/1.0' &&
-        ready.pid === child.pid &&
-        ready.port === gatewayPort
-      ) {
-        finish();
-      }
-    };
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      finish(new Error(
-        `OpenRappter gateway exited during desktop startup (${
-          code ?? signal ?? 'unknown'
-        }).`,
-      ));
-    };
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish(new Error('OpenRappter gateway did not become ready in 30 seconds.'));
-    }, 30_000);
-    child.on('error', (error) => finish(error));
-    child.on('message', onMessage);
-    child.on('exit', onExit);
-  });
+  await waitForGatewayReady(child, { port: gatewayPort });
 }
 
 async function loadShowRuntime() {

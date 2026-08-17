@@ -11,11 +11,12 @@
  * It is a module now so a contract test can drive the real thing.
  */
 import type { CronService } from './service.js';
+import type { CronJob } from './types.js';
 
 /** The subset of CronService this adapter needs, so tests can supply a real one. */
 type SchedulerLike = Pick<
   CronService,
-  'listJobs' | 'executeJob' | 'updateJob' | 'getRunLogs' | 'addJob' | 'removeJob'
+  'listJobs' | 'executeJob' | 'updateJob' | 'getRunLogs' | 'addJob' | 'removeJob' | 'getJob'
 >;
 
 export interface CronGatewayAdapterOptions {
@@ -24,23 +25,40 @@ export interface CronGatewayAdapterOptions {
   persist: () => void;
 }
 
+/** One shape for a job on the wire, so `list` and `get` cannot disagree. */
+function onTheWire(j: CronJob) {
+  return {
+    id: j.id,
+    name: j.name,
+    schedule: j.schedule,
+    enabled: j.enabled,
+    // `message` is the canonical name on the wire. `command` is emitted
+    // alongside it because the macOS Bar reads that spelling; answering only
+    // in `command` was the read half of the same disagreement that made
+    // `cron.create` drop the Bar's prompt on the floor.
+    message: j.message || '',
+    command: j.message || '',
+    agentId: j.agentId || '',
+    lastRun: j.lastRun || null,
+    nextRun: j.nextRun || null,
+  };
+}
+
 export function createCronGatewayAdapter({ service, persist }: CronGatewayAdapterOptions) {
   return {
-    list: () => service.listJobs().map((j) => ({
-      id: j.id,
-      name: j.name,
-      schedule: j.schedule,
-      enabled: j.enabled,
-      // `message` is the canonical name on the wire. `command` is emitted
-      // alongside it because the macOS Bar reads that spelling; answering only
-      // in `command` was the read half of the same disagreement that made
-      // `cron.create` drop the Bar's prompt on the floor.
-      message: j.message || '',
-      command: j.message || '',
-      agentId: j.agentId || '',
-      lastRun: j.lastRun || null,
-      nextRun: j.nextRun || null,
-    })),
+    list: () => service.listJobs().map(onTheWire),
+    // Without this the gateway read only its file fallback, so a job the
+    // scheduler had just created and confirmed was reported as not found.
+    get: (id: string) => {
+      const job = service.getJob(id);
+      return job ? onTheWire(job) : undefined;
+    },
+    update: async (id: string, patch: Record<string, unknown>) => {
+      const updated = await service.updateJob(id, patch);
+      if (!updated) return undefined;
+      persist();
+      return onTheWire(updated);
+    },
     run: async (id: string) => { await service.executeJob(id, 'force'); },
     enable: async (id: string) => { await service.updateJob(id, { enabled: true }); persist(); },
     disable: async (id: string) => { await service.updateJob(id, { enabled: false }); persist(); },

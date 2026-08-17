@@ -2312,10 +2312,48 @@ export class GatewayServer {
       return { enabled: true };
     }, { requiresAuth: true });
     this.registerMethod('cron.get', async (params: { jobId: string }) => {
+      // The live scheduler first: it holds jobs created this process, which the
+      // file fallback does not see until a persist. Reading only the fallback
+      // made the gateway deny a job it had just created and confirmed.
+      const service = this.cronService as unknown as {
+        get?: (id: string) => Record<string, unknown> | undefined;
+      } | undefined;
+      const live = service?.get?.(params.jobId);
+      if (live) return live;
+
       const job = this.cronStore.find((j) => (j as { id: string }).id === params.jobId);
       if (!job) throw new Error(`Job not found: ${params.jobId}`);
       return job;
     });
+    this.registerMethod('cron.update', async (params: Record<string, unknown>) => {
+      const jobId = String(params.jobId ?? '');
+      if (!jobId) throw new Error('cron.update requires a jobId');
+
+      const { jobId: _ignored, ...patch } = params;
+      // The Bar spells the prompt `command`; `message` is canonical everywhere
+      // on this side. Normalised here so no record stores both spellings.
+      if (patch.command !== undefined && patch.message === undefined) {
+        patch.message = patch.command;
+      }
+      delete patch.command;
+
+      const service = this.cronService as unknown as {
+        update?: (id: string, patch: Record<string, unknown>) => Promise<Record<string, unknown> | undefined>;
+      } | undefined;
+      if (service?.update) {
+        const updated = await service.update(jobId, patch);
+        if (!updated) throw new Error(`Cron job not found: ${jobId}`);
+        return updated;
+      }
+
+      const job = this.cronStore.find((j) => (j as { id: string }).id === jobId) as
+        | Record<string, unknown>
+        | undefined;
+      if (!job) throw new Error(`Cron job not found: ${jobId}`);
+      Object.assign(job, patch);
+      this.saveCronStore();
+      return job;
+    }, { requiresAuth: true });
     this.registerMethod('cron.logs', async (params: Record<string, unknown>) => {
       if (this.cronService) {
         const svc = this.cronService as unknown as { getRunLogs?: (jobId?: string) => unknown[] };

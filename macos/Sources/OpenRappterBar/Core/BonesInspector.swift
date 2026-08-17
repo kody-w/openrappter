@@ -56,16 +56,21 @@ public enum BonesInspector {
     ) -> Bones {
         var sections: [Bones.Section] = []
 
-        // ── Agents: what it can DO ──────────────────────────────────────────
+        // ── Agents: what YOU have added ─────────────────────────────────────
+        // Only the user's own directory. The built-in agents — 37 in the
+        // TypeScript runtime, 19 in Python — live inside the installed package
+        // and never appear here, so this section must not claim to show
+        // everything the AI can do. It said "No agents installed yet" on a
+        // fresh machine that ships 37 working agents.
         let agentsDir = home + "/agents"
         sections.append(
             Bones.Section(
                 id: "agents",
-                title: "Agents",
-                blurb: "Single-file capabilities. Each one is a thing this AI can do.",
+                title: "Your Agents",
+                blurb: "Single-file capabilities you have added. The built-in agents ship with the runtime and are not listed here.",
                 root: agentsDir,
                 items: files(in: agentsDir, matching: [".js", ".py", ".ts"], fileManager: fileManager),
-                emptyNote: "No agents installed yet. Build one with the Brain Surgeon."
+                emptyNote: "You haven't added any agents of your own yet. The built-in ones are already working; build another with the Brain Surgeon."
             ))
 
         // ── Skills ──────────────────────────────────────────────────────────

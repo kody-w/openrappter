@@ -104,5 +104,29 @@ func runBonesInspectorTests() async {
                            "\(section.title) should say what that part of the organism does")
             }
         }
+
+        await test("an empty agents directory does not claim the AI has no agents") {
+            // This section reads only the user's own directory. The built-in
+            // agents — 37 in the TypeScript runtime, 19 in Python — live inside
+            // the installed package and never appear here.
+            //
+            // It used to be titled "Agents", blurbed "Each one is a thing this
+            // AI can do", and said "No agents installed yet" when empty. On a
+            // fresh machine that is three false statements at once: the user
+            // sees nothing while 37 agents are working.
+            let bones = BonesInspector.inspect(home: try makeHome())
+            let section = bones.sections.first { $0.id == "agents" }
+            try expectNotNil(section)
+            try expect(section!.items.isEmpty, "a fresh home has no user agents")
+
+            let claim = (section!.title + " " + section!.blurb + " " + (section!.emptyNote ?? ""))
+                .lowercased()
+            try expect(!claim.contains("no agents installed"),
+                       "the empty note must not deny agents that are installed and working")
+            try expect(claim.contains("your") || claim.contains("you"),
+                       "the section must say these are the user's own agents")
+            try expect(claim.contains("built-in"),
+                       "the section must account for the agents that ship with the runtime")
+        }
     }
 }

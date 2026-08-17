@@ -87,6 +87,26 @@ public struct ChatInputView: View {
                     .help("Send (Return)")
                 }
             }
+
+            // Which brain answers. Below the input rather than beside it, so it
+            // is visible while typing without competing with Send for the eye.
+            HStack(spacing: 6) {
+                Picker("Brain", selection: Binding(
+                    get: { viewModel.chatViewModel.chatTarget },
+                    set: { viewModel.chatViewModel.chatTarget = $0 }
+                )) {
+                    ForEach(ChatTarget.allCases, id: \.self) { target in
+                        Text(target.label).tag(target)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                .help("Which brain answers: the local runtime, or the brainstem")
+
+                Spacer()
+            }
         }
     }
 }

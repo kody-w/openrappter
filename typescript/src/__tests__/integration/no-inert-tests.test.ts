@@ -48,7 +48,6 @@ const KNOWN_INERT = new Set([
   'typescript/src/__tests__/parity/advanced.test.ts',
   'typescript/src/__tests__/parity/browser.test.ts',
   'typescript/src/__tests__/parity/media.test.ts',
-  'typescript/src/__tests__/parity/multiagent.test.ts',
   'typescript/src/__tests__/parity/network.test.ts',
   'typescript/src/__tests__/parity/onboarding.test.ts',
   'typescript/src/__tests__/parity/power-prompts-2.test.ts',

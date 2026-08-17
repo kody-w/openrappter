@@ -723,6 +723,7 @@ async function startGatewayInProcess(opts?: {
     log(`${EMOJI} Twin "${opts?.instance}" — cron and outbound channels stay with the alpha.`);
   } else try {
     const { CronService } = await import('./cron/service.js');
+    const { createCronGatewayAdapter } = await import('./cron/gateway-adapter.js');
     const cronService = new CronService();
     const cronFile = path.join(HOME_DIR, 'cron.json');
     try {
@@ -777,29 +778,7 @@ async function startGatewayInProcess(opts?: {
       if (event.type === 'job:executed' || event.type === 'job:error') persistCronJobs();
     });
 
-    server.setCronService({
-      list: () => cronService.listJobs().map(j => ({
-        id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled,
-        command: j.message || '', agentId: j.agentId || '',
-        lastRun: j.lastRun || null, nextRun: j.nextRun || null,
-      })),
-      run: async (id: string) => { await cronService.executeJob(id, 'force'); },
-      enable: async (id: string) => { await cronService.updateJob(id, { enabled: true }); persistCronJobs(); },
-      disable: async (id: string) => { await cronService.updateJob(id, { enabled: false }); persistCronJobs(); },
-      getRunLogs: (jobId?: string) => cronService.getRunLogs(jobId),
-      add: async (job: Record<string, unknown>) => {
-        const created = await cronService.addJob({
-          name: String(job.name ?? 'job'),
-          schedule: String(job.schedule ?? '*/5 * * * *'),
-          agentId: job.agentId ? String(job.agentId) : undefined,
-          message: String(job.message ?? ''),
-          enabled: job.enabled !== false,
-        });
-        persistCronJobs();
-        return { id: created.id };
-      },
-      remove: async (id: string) => { await cronService.removeJob(id); persistCronJobs(); },
-    });
+    server.setCronService(createCronGatewayAdapter({ service: cronService, persist: persistCronJobs }));
     // Send cron job results to Telegram when connected
     const CRON_TELEGRAM_CHAT_ID = process.env.CRON_TELEGRAM_CHAT_ID || '8055092758';
     cronService.onEvent(async (event) => {

@@ -229,6 +229,9 @@ export function getMigration(id: number): Migration | undefined {
   return migrations.find((m) => m.id === id);
 }
 
-export function getPendingMigrations(appliedIds: number[]): Migration[] {
-  return migrations.filter((m) => !appliedIds.includes(m.id));
+export function getPendingMigrations(
+  appliedIds: number[],
+  all: Migration[] = migrations
+): Migration[] {
+  return all.filter((m) => !appliedIds.includes(m.id));
 }

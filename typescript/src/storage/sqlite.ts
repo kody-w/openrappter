@@ -13,8 +13,27 @@ import type {
   CronLogRecord,
   Device,
   StorageConfig,
+  SyncTransactionCallback,
 } from './types.js';
-import { getPendingMigrations } from './migrations.js';
+import { getPendingMigrations, migrations, type Migration } from './migrations.js';
+
+const ASYNC_TRANSACTION_ERROR =
+  'transaction() requires a synchronous callback. better-sqlite3 cannot hold a SQLite ' +
+  'transaction open across an await — the transaction is rolled back the moment the callback ' +
+  'returns a promise, while the promise keeps running and writes outside it. Do async work ' +
+  'before or after the transaction and keep only storage calls inside it.';
+
+function isAsyncFunction(fn: unknown): boolean {
+  return typeof fn === 'function' && fn.constructor?.name === 'AsyncFunction';
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as PromiseLike<unknown>).then === 'function'
+  );
+}
 
 // Type definitions for better-sqlite3 (dynamically imported)
 interface Database {
@@ -100,16 +119,35 @@ export class SQLiteAdapter implements StorageAdapter {
     const applied = db.prepare('SELECT id FROM migrations').all() as { id: number }[];
     const appliedIds = applied.map((m) => m.id);
 
-    // Apply pending migrations
-    const pending = getPendingMigrations(appliedIds);
+    // Apply pending migrations. The DDL and the version marker must commit or roll
+    // back together: a half-applied migration with no version row is replayed on the
+    // next startup, and non-idempotent statements (ALTER TABLE ADD COLUMN) then fail
+    // forever, bricking the database.
+    const pending = getPendingMigrations(appliedIds, this.getMigrations());
     for (const migration of pending) {
-      db.exec(migration.up);
-      db.prepare('INSERT INTO migrations (id, name, applied_at) VALUES (?, ?, ?)').run(
-        migration.id,
-        migration.name,
-        new Date().toISOString()
-      );
+      const apply = db.transaction(() => {
+        db.exec(migration.up);
+        db.prepare('INSERT INTO migrations (id, name, applied_at) VALUES (?, ?, ?)').run(
+          migration.id,
+          migration.name,
+          new Date().toISOString()
+        );
+      });
+
+      try {
+        apply();
+      } catch (error) {
+        throw new Error(
+          `Migration ${migration.id} (${migration.name}) failed and was rolled back: ` +
+            (error instanceof Error ? error.message : String(error))
+        );
+      }
     }
+  }
+
+  /** The migration set to apply. Overridable so tests can inject failing migrations. */
+  protected getMigrations(): Migration[] {
+    return migrations;
   }
 
   // Sessions
@@ -122,11 +160,27 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async saveSession(session: Session): Promise<void> {
     const db = this.ensureDb();
+    // Real UPSERT, not INSERT OR REPLACE: REPLACE is a DELETE + INSERT, which fires
+    // ON DELETE SET NULL on approval_requests.session_id and silently destroys the
+    // approval's association with this session.
     db.prepare(
-      `INSERT OR REPLACE INTO sessions
+      `INSERT INTO sessions
        (id, channel_id, conversation_id, agent_id, user_id, metadata, messages,
         created_at, updated_at, expires_at, total_tokens, prompt_tokens, completion_tokens)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         channel_id = excluded.channel_id,
+         conversation_id = excluded.conversation_id,
+         agent_id = excluded.agent_id,
+         user_id = excluded.user_id,
+         metadata = excluded.metadata,
+         messages = excluded.messages,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at,
+         expires_at = excluded.expires_at,
+         total_tokens = excluded.total_tokens,
+         prompt_tokens = excluded.prompt_tokens,
+         completion_tokens = excluded.completion_tokens`
     ).run(
       session.id,
       session.channelId,
@@ -330,10 +384,23 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async saveCronJob(job: CronJobRecord): Promise<void> {
     const db = this.ensureDb();
+    // Real UPSERT — same class of bug as saveSession/saveDevice. REPLACE here is a
+    // DELETE + INSERT, which fires ON DELETE CASCADE on cron_logs.job_id and wipes
+    // the job's entire run history.
     db.prepare(
-      `INSERT OR REPLACE INTO cron_jobs
+      `INSERT INTO cron_jobs
        (id, name, schedule, agent_id, message, enabled, last_run, next_run, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         schedule = excluded.schedule,
+         agent_id = excluded.agent_id,
+         message = excluded.message,
+         enabled = excluded.enabled,
+         last_run = excluded.last_run,
+         next_run = excluded.next_run,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`
     ).run(
       job.id,
       job.name,
@@ -394,10 +461,21 @@ export class SQLiteAdapter implements StorageAdapter {
 
   async saveDevice(device: Device): Promise<void> {
     const db = this.ensureDb();
+    // Real UPSERT — see saveSession. REPLACE here would null out
+    // approval_requests.device_id via ON DELETE SET NULL.
     db.prepare(
-      `INSERT OR REPLACE INTO devices
+      `INSERT INTO devices
        (id, name, type, public_key, last_seen, trusted, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         type = excluded.type,
+         public_key = excluded.public_key,
+         last_seen = excluded.last_seen,
+         trusted = excluded.trusted,
+         metadata = excluded.metadata,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`
     ).run(
       device.id,
       device.name,
@@ -452,10 +530,38 @@ export class SQLiteAdapter implements StorageAdapter {
 
   // Transactions
 
-  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` inside a SQLite transaction and return its value.
+   *
+   * `fn` must be synchronous — see {@link SyncTransactionCallback}. Async callbacks
+   * are rejected both at the type level and at runtime. Storage methods return
+   * promises but perform their SQLite work synchronously before resolving, so they
+   * can be called (un-awaited) from inside the callback and still take part in the
+   * transaction.
+   */
+  async transaction<T>(fn: SyncTransactionCallback<T>): Promise<T> {
     const db = this.ensureDb();
-    const txn = db.transaction(() => fn());
-    return txn() as T;
+    const callback = fn as unknown as () => T;
+
+    // Reject before opening the transaction so no part of the callback body runs.
+    if (isAsyncFunction(callback)) {
+      throw new Error(ASYNC_TRANSACTION_ERROR);
+    }
+
+    let result!: T;
+    db.transaction(() => {
+      const value = callback() as unknown;
+      if (isThenable(value)) {
+        // The callback already started async work we cannot undo; at least keep its
+        // eventual rejection from crashing the process. Throwing here rolls back
+        // everything the callback wrote synchronously.
+        void Promise.resolve(value).catch(() => undefined);
+        throw new Error(ASYNC_TRANSACTION_ERROR);
+      }
+      result = value as T;
+    })();
+
+    return result;
   }
 
   // Row mappers

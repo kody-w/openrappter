@@ -94,49 +94,86 @@ export function getBundledSkillsDir(): string {
 }
 
 /**
+ * A read of the bundled skills directory, including whether it was there.
+ *
+ * #165 shipped 52 skills that the published tarball had never carried, and
+ * recorded why nobody noticed: `loadBundledSkills` catches a missing directory
+ * and returns an empty list, so "this install shipped no skills" and "this
+ * install legitimately has none" are the same answer. That silent swallow is
+ * deliberate and stays — a caller with no skills directory is a legitimate
+ * case. But a caller that needs to tell the two apart had no way to ask.
+ *
+ * `directoryPresent` is the missing bit. It is false only when the directory
+ * could not be read at all; a readable but empty directory is present with
+ * zero skills, which is the honest distinction.
+ */
+export interface BundledSkillsRead<T> {
+  /** The directory that was read. */
+  directory: string;
+  /** The directory existed and could be listed. */
+  directoryPresent: boolean;
+  skills: T[];
+}
+
+/**
+ * Discover all bundled SKILL.md files, reporting whether the directory existed.
+ */
+export async function readBundledSkills(
+  skillsDir?: string
+): Promise<BundledSkillsRead<ClawHubSkill>> {
+  const dir = skillsDir ?? getBundledSkillsDir();
+  const skills: ClawHubSkill[] = [];
+
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    // Skills directory doesn't exist
+    return { directory: dir, directoryPresent: false, skills };
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const skillMdPath = join(dir, entry.name, 'SKILL.md');
+    try {
+      const skill = await parseSkillFile(skillMdPath);
+      if (skill) {
+        skills.push(skill);
+      }
+    } catch {
+      // Skip directories without valid SKILL.md
+    }
+  }
+
+  return { directory: dir, directoryPresent: true, skills };
+}
+
+/**
  * Discover all bundled SKILL.md files from the skills directory.
+ *
+ * Returns an empty list when the directory is absent. Callers that must not
+ * mistake a missing install for an empty one want `readBundledSkills`.
  */
 export async function loadBundledSkills(
   skillsDir?: string
 ): Promise<ClawHubSkill[]> {
-  const dir = skillsDir ?? getBundledSkillsDir();
-  const skills: ClawHubSkill[] = [];
-
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-
-      const skillMdPath = join(dir, entry.name, 'SKILL.md');
-      try {
-        const skill = await parseSkillFile(skillMdPath);
-        if (skill) {
-          skills.push(skill);
-        }
-      } catch {
-        // Skip directories without valid SKILL.md
-      }
-    }
-  } catch {
-    // Skills directory doesn't exist
-  }
-
-  return skills;
+  return (await readBundledSkills(skillsDir)).skills;
 }
 
 /**
- * List all bundled skills with their eligibility status.
+ * List all bundled skills with their eligibility, reporting whether the
+ * bundled skills directory existed at all.
  */
-export async function listBundledSkills(
+export async function readBundledSkillInfo(
   skillsDir?: string,
   config?: Record<string, unknown>
-): Promise<BundledSkillInfo[]> {
+): Promise<BundledSkillsRead<BundledSkillInfo>> {
   const dir = skillsDir ?? getBundledSkillsDir();
-  const skills = await loadBundledSkills(dir);
+  const read = await readBundledSkills(dir);
   const results: BundledSkillInfo[] = [];
 
-  for (const skill of skills) {
+  for (const skill of read.skills) {
     const metadata = resolveSkillMetadata({
       metadata: skill.metadata,
     });
@@ -154,7 +191,17 @@ export async function listBundledSkills(
     });
   }
 
-  return results;
+  return { directory: read.directory, directoryPresent: read.directoryPresent, skills: results };
+}
+
+/**
+ * List all bundled skills with their eligibility status.
+ */
+export async function listBundledSkills(
+  skillsDir?: string,
+  config?: Record<string, unknown>
+): Promise<BundledSkillInfo[]> {
+  return (await readBundledSkillInfo(skillsDir, config)).skills;
 }
 
 /**

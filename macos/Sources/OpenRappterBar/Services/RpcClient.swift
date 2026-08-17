@@ -620,14 +620,27 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
     // MARK: - Skills Methods
 
+    /// List skills the gateway knows about — bundled and installed.
+    ///
+    /// A decode failure is surfaced, not swallowed. It used to return `[]`,
+    /// which the Skills pane renders as "No skills installed" — so a payload
+    /// the Bar could not read was indistinguishable from a machine with no
+    /// skills. The gateway ships 52 bundled skills, and the pane showed none
+    /// of them for exactly that reason.
     public func listSkills() async throws -> [Skill] {
         let response = try await connection.sendRequest(method: "skills.list")
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to list skills") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let skills = try? JSONDecoder().decode([Skill].self, from: data) {
-            return skills
+        guard response.ok else {
+            throw GatewayConnectionError.serverError(
+                code: response.error?.code ?? -1,
+                message: response.error?.message ?? "Failed to list skills"
+            )
         }
-        return []
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
+        do {
+            return try JSONDecoder().decode([Skill].self, from: data)
+        } catch {
+            throw RpcClientError.decodingFailed("skills.list returned a payload this build cannot read: \(error)")
+        }
     }
 
     public func installSkill(name: String) async throws {
@@ -640,14 +653,56 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
     // MARK: - Nodes Methods
 
+    /// List the connections attached to the gateway.
+    ///
+    /// A decode failure is surfaced rather than becoming an empty list. The
+    /// empty list is not harmless here: `disconnectNode` takes its
+    /// `connectionId` from a row of this list, so a payload the Bar could not
+    /// read left the Nodes pane empty AND made disconnect unreachable.
     public func listNodes() async throws -> [Node] {
         let response = try await connection.sendRequest(method: "connections.list")
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to list nodes") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let nodes = try? JSONDecoder().decode([Node].self, from: data) {
-            return nodes
+        guard response.ok else {
+            throw GatewayConnectionError.serverError(
+                code: response.error?.code ?? -1,
+                message: response.error?.message ?? "Failed to list nodes"
+            )
         }
-        return []
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
+        do {
+            return try Self.gatewayDecoder().decode([Node].self, from: data)
+        } catch {
+            throw RpcClientError.decodingFailed("connections.list returned a payload this build cannot read: \(error)")
+        }
+    }
+
+    /// A decoder for gateway payloads whose dates are ISO-8601 strings.
+    ///
+    /// `JSONDecoder`'s default `.deferredToDate` expects a number of seconds
+    /// since 2001, so an ISO-8601 string fails outright, and `.iso8601`
+    /// rejects the fractional seconds that JavaScript's `toISOString()`
+    /// always emits. Either failure fails the whole array.
+    static func gatewayDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            guard let str = try? container.decode(String.self) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "expected an ISO-8601 date string"
+                )
+            }
+            let withFraction = ISO8601DateFormatter()
+            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFraction.date(from: str) { return date }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            if let date = plain.date(from: str) { return date }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "not an ISO-8601 date: \(str)"
+            )
+        }
+        return decoder
     }
 
     public func disconnectNode(connectionId: String) async throws {

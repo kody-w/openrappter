@@ -1,250 +1,203 @@
 /**
  * Security & Approvals Parity Tests
- * Tests that openrappter security system matches openclaw:
- * - Execution approvals (request, resolve, policies)
- * - Scope-based authorization
- * - Audit logging
- * - Device auth scopes
+ *
+ * Exercises the real ApprovalManager (src/security/approvals.ts) — the product
+ * code that actually enforces tool-execution policy. An earlier version of this
+ * file built literal objects and asserted on their own shape, so it passed no
+ * matter what the product did (proven: mutating checkApproval's deny branch to
+ * `allowed: true` left every test green). These tests call the real manager and
+ * assert on its decisions, and they deliberately cover ground that
+ * showcase-auth-fortress.test.ts does not: per-sender scoping, allowlist by
+ * command prefix, blocked tools/commands, and the request expiration path.
  */
 
 import { describe, it, expect } from 'vitest';
+import { createApprovalManager } from '../../security/approvals.js';
+import type { ApprovalContext, ApprovalRule } from '../../security/approvals.js';
 
-describe('Security Parity', () => {
-  describe('Execution Approvals', () => {
-    it('should request approval for tool execution', () => {
-      const request = {
-        id: 'approval_123',
-        tool: 'bash',
-        args: { command: 'rm -rf /tmp/old-data' },
-        agentId: 'main',
-        sessionId: 'session_456',
-        requestedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 300000).toISOString(),
-      };
+function rule(overrides: Partial<ApprovalRule> & Pick<ApprovalRule, 'id' | 'policy'>): ApprovalRule {
+  return {
+    name: overrides.id,
+    priority: 10,
+    enabled: true,
+    ...overrides,
+  };
+}
 
-      expect(request.id).toBeDefined();
-      expect(request.tool).toBe('bash');
+describe('Security & Approvals Parity', () => {
+  describe('Base policies (checkApproval)', () => {
+    it('deny policy blocks every tool call', () => {
+      const manager = createApprovalManager();
+      manager.setDefaultPolicy('deny');
+
+      const result = manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'ls' } });
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.reason).toContain('denied');
     });
 
-    it('should resolve approval (approve)', () => {
-      const resolution = {
-        method: 'exec.approval.resolve',
-        params: {
-          requestId: 'approval_123',
-          decision: 'approved' as const,
-          resolvedBy: 'user_admin',
-        },
-      };
+    it('full policy allows every tool call', () => {
+      const manager = createApprovalManager();
+      manager.setDefaultPolicy('full');
 
-      expect(resolution.params.decision).toBe('approved');
+      const result = manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'rm -rf /' } });
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
     });
 
-    it('should resolve approval (deny)', () => {
-      const resolution = {
-        method: 'exec.approval.resolve',
-        params: {
-          requestId: 'approval_123',
-          decision: 'denied' as const,
-          reason: 'Too dangerous',
-        },
-      };
+    it('allowlist allows listed tools and requires approval for the rest', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'safe', policy: 'allowlist', allowedTools: ['read', 'list'] }));
 
-      expect(resolution.params.decision).toBe('denied');
+      expect(manager.checkApproval({ toolName: 'read', toolArgs: {} }).allowed).toBe(true);
+
+      const denied = manager.checkApproval({ toolName: 'bash', toolArgs: {} });
+      expect(denied.allowed).toBe(false);
+      expect(denied.requiresApproval).toBe(true);
+      expect(denied.reason).toContain('allowlist');
     });
 
-    it('should expire pending approvals', () => {
-      const expiredRequest = {
-        id: 'approval_old',
-        status: 'expired' as const,
-        expiresAt: '2024-01-01T00:00:00Z',
-      };
+    it('allowlist matches a command by prefix via allowedCommands', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'ls-only', policy: 'allowlist', allowedCommands: ['ls', 'cat'] }));
 
-      expect(expiredRequest.status).toBe('expired');
-    });
-
-    it('should list pending approvals', () => {
-      const response = {
-        method: 'exec.approvals.get',
-        result: {
-          pending: [
-            { id: 'approval_1', tool: 'bash', args: { command: 'npm install' } },
-            { id: 'approval_2', tool: 'write', args: { path: '/etc/config' } },
-          ],
-        },
-      };
-
-      expect(response.result.pending.length).toBeGreaterThan(0);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'ls -la /' } }).allowed).toBe(true);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'cat file' } }).allowed).toBe(true);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'rm file' } }).allowed).toBe(false);
     });
   });
 
-  describe('Approval Policies', () => {
-    it('should support deny-all policy', () => {
-      const policy = { mode: 'deny' as const };
-      expect(policy.mode).toBe('deny');
+  describe('Blocklists override the policy', () => {
+    it('blockedTools are refused even under a full policy', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'no-rm-tool', policy: 'full', blockedTools: ['dangerous'] }));
+
+      expect(manager.checkApproval({ toolName: 'read', toolArgs: {} }).allowed).toBe(true);
+
+      const blocked = manager.checkApproval({ toolName: 'dangerous', toolArgs: {} });
+      expect(blocked.allowed).toBe(false);
+      expect(blocked.reason).toContain('blocked');
     });
 
-    it('should support allowlist policy', () => {
-      const policy = {
-        mode: 'allowlist' as const,
-        rules: [
-          { tool: 'bash', allow: ['ls *', 'cat *', 'echo *'] },
-          { tool: 'read', allow: ['*'] },
-          { tool: 'write', deny: ['/etc/*', '/sys/*'] },
-        ],
-      };
+    it('blockedCommands match on substring inside the command args', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'no-rmrf', policy: 'full', blockedCommands: ['rm -rf'] }));
 
-      expect(policy.mode).toBe('allowlist');
-      expect(policy.rules.length).toBeGreaterThan(0);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'ls -la' } }).allowed).toBe(true);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'sudo rm -rf /' } }).allowed).toBe(false);
     });
 
-    it('should support full-access policy', () => {
-      const policy = { mode: 'full' as const };
-      expect(policy.mode).toBe('full');
-    });
+    it('blockedPatterns match via regex over the serialized args', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'regex-block', policy: 'full', blockedPatterns: ['rm\\s+-rf'] }));
 
-    it('should support per-channel policies', () => {
-      const channelPolicies = {
-        telegram: { mode: 'allowlist' as const },
-        discord: { mode: 'deny' as const },
-        cli: { mode: 'full' as const },
-      };
-
-      expect(channelPolicies.cli.mode).toBe('full');
-      expect(channelPolicies.discord.mode).toBe('deny');
-    });
-
-    it('should support per-sender policies', () => {
-      const senderPolicies = {
-        'user_admin': { mode: 'full' as const },
-        'user_guest': { mode: 'deny' as const },
-      };
-
-      expect(senderPolicies['user_admin'].mode).toBe('full');
-    });
-
-    it('should support per-agent policies', () => {
-      const agentPolicies = {
-        main: { mode: 'allowlist' as const },
-        readonly: { mode: 'deny' as const },
-      };
-
-      expect(agentPolicies.readonly.mode).toBe('deny');
-    });
-
-    it('should match patterns with wildcards', () => {
-      const matchPattern = (command: string, pattern: string): boolean => {
-        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
-        return regex.test(command);
-      };
-
-      expect(matchPattern('ls -la', 'ls *')).toBe(true);
-      expect(matchPattern('rm -rf /', 'ls *')).toBe(false);
-      expect(matchPattern('cat file.txt', 'cat *')).toBe(true);
-    });
-
-    it('should prioritize rules correctly', () => {
-      const rules = [
-        { priority: 10, tool: 'bash', pattern: 'rm *', action: 'deny' },
-        { priority: 5, tool: 'bash', pattern: '*', action: 'allow' },
-        { priority: 1, tool: '*', pattern: '*', action: 'deny' },
-      ];
-
-      const sorted = [...rules].sort((a, b) => b.priority - a.priority);
-      expect(sorted[0].action).toBe('deny');
-      expect(sorted[0].pattern).toBe('rm *');
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'echo hi' } }).allowed).toBe(true);
+      expect(manager.checkApproval({ toolName: 'bash', toolArgs: { command: 'rm   -rf /' } }).allowed).toBe(false);
     });
   });
 
-  describe('Scope-Based Authorization', () => {
-    it('should define authorization scopes', () => {
-      const scopes = [
-        'operator.admin',
-        'operator.read',
-        'operator.write',
-        'operator.approvals',
-        'operator.pairing',
-      ];
+  describe('Rule scoping', () => {
+    it('scopes a rule by channel', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'discord-deny', policy: 'deny', channels: ['discord'] }));
 
-      expect(scopes.length).toBeGreaterThanOrEqual(5);
+      const onDiscord: ApprovalContext = { toolName: 'bash', toolArgs: {}, channelId: 'discord' };
+      const onCli: ApprovalContext = { toolName: 'bash', toolArgs: {}, channelId: 'cli' };
+
+      expect(manager.checkApproval(onDiscord).allowed).toBe(false);
+      // cli doesn't match the discord-only rule and falls through to the default policy
+      expect(manager.checkApproval(onCli).rule?.id).toBeUndefined();
     });
 
-    it('should check scope authorization', () => {
-      const checkScope = (userScopes: string[], requiredScope: string): boolean => {
-        if (userScopes.includes('operator.admin')) return true;
-        return userScopes.includes(requiredScope);
-      };
+    it('scopes a rule by sender', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'guest-deny', policy: 'deny', senders: ['user_guest'] }));
 
-      expect(checkScope(['operator.admin'], 'operator.write')).toBe(true);
-      expect(checkScope(['operator.read'], 'operator.write')).toBe(false);
-      expect(checkScope(['operator.read', 'operator.write'], 'operator.write')).toBe(true);
+      const asGuest: ApprovalContext = { toolName: 'bash', toolArgs: {}, senderId: 'user_guest' };
+      const asAdmin: ApprovalContext = { toolName: 'bash', toolArgs: {}, senderId: 'user_admin' };
+
+      expect(manager.checkApproval(asGuest).allowed).toBe(false);
+      expect(manager.checkApproval(asGuest).rule?.id).toBe('guest-deny');
+      expect(manager.checkApproval(asAdmin).rule?.id).toBeUndefined();
     });
 
-    it('should assign scopes to device tokens', () => {
-      const deviceToken = {
-        deviceId: 'device_123',
-        token: 'token_abc',
-        scopes: ['operator.read', 'operator.write'],
-        expiresAt: new Date(Date.now() + 86400000 * 30).toISOString(),
-      };
+    it('scopes a rule by agent', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'shell-full', policy: 'full', agents: ['ShellAgent'] }));
 
-      expect(deviceToken.scopes).toContain('operator.read');
+      const shell: ApprovalContext = { toolName: 'bash', toolArgs: {}, agentId: 'ShellAgent' };
+      const other: ApprovalContext = { toolName: 'bash', toolArgs: {}, agentId: 'OtherAgent' };
+
+      expect(manager.checkApproval(shell).allowed).toBe(true);
+      expect(manager.checkApproval(other).rule?.id).toBeUndefined();
+    });
+
+    it('applies the highest-priority matching rule first', () => {
+      const manager = createApprovalManager();
+      manager.addRule(rule({ id: 'allow-bash', policy: 'full', tools: ['bash'], priority: 1 }));
+      manager.addRule(rule({ id: 'block-bash', policy: 'deny', tools: ['bash'], priority: 100 }));
+
+      const result = manager.checkApproval({ toolName: 'bash', toolArgs: {} });
+      expect(result.allowed).toBe(false);
+      expect(result.rule?.id).toBe('block-bash');
     });
   });
 
-  describe('Node-Level Approvals', () => {
-    it('should get node approval status', () => {
-      const response = {
-        nodeId: 'node_123',
-        policy: 'allowlist',
-        rules: [
-          { method: 'screenshot', allowed: true },
-          { method: 'database', allowed: false },
-        ],
-      };
+  describe('Request / approve / reject flow', () => {
+    it('creates a pending request and resolves it on approval', async () => {
+      const manager = createApprovalManager();
+      manager.setDefaultPolicy('allowlist'); // nothing allowlisted -> approval required
 
-      expect(response.rules.length).toBeGreaterThan(0);
+      const pending = manager.requestApproval({ toolName: 'bash', toolArgs: { command: 'npm i' } });
+
+      const requests = manager.getPendingRequests();
+      expect(requests).toHaveLength(1);
+      expect(requests[0].status).toBe('pending');
+
+      expect(manager.approveRequest(requests[0].id, 'admin')).toBe(true);
+
+      const result = await pending;
+      expect(result.allowed).toBe(true);
+      expect(result.reason).toContain('Approved');
+      // once resolved it is no longer pending
+      expect(manager.getPendingRequests()).toHaveLength(0);
     });
 
-    it('should set node approval policy', () => {
-      const request = {
-        method: 'exec.approvals.node.set',
-        params: {
-          nodeId: 'node_123',
+    it('creates a pending request and resolves it on rejection', async () => {
+      const manager = createApprovalManager();
+      manager.setDefaultPolicy('allowlist');
+
+      const pending = manager.requestApproval({ toolName: 'bash', toolArgs: {} });
+      const [req] = manager.getPendingRequests();
+
+      expect(manager.rejectRequest(req.id, 'Too dangerous', 'admin')).toBe(true);
+
+      const result = await pending;
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Rejected');
+
+      const stored = manager.getRequest(req.id);
+      expect(stored?.status).toBe('rejected');
+      expect(stored?.reason).toBe('Too dangerous');
+    });
+
+    it('expires a request that is never resolved within its timeout', async () => {
+      const manager = createApprovalManager();
+      manager.addRule(
+        rule({
+          id: 'needs-approval',
           policy: 'allowlist',
-          allowedMethods: ['screenshot', 'notification'],
-        },
-      };
+          allowedTools: ['bash'],
+          requireApproval: true,
+          approvalTimeout: 30,
+        })
+      );
 
-      expect(request.params.allowedMethods).toContain('screenshot');
-    });
-  });
-
-  describe('Audit Logging', () => {
-    it('should log approval decisions', () => {
-      const auditEntry = {
-        timestamp: new Date().toISOString(),
-        type: 'approval_decision',
-        requestId: 'approval_123',
-        tool: 'bash',
-        args: { command: 'npm install' },
-        decision: 'approved',
-        resolvedBy: 'user_admin',
-      };
-
-      expect(auditEntry.type).toBe('approval_decision');
-      expect(auditEntry.decision).toBeDefined();
-    });
-
-    it('should log security events', () => {
-      const securityEvent = {
-        timestamp: new Date().toISOString(),
-        type: 'auth_failure',
-        deviceId: 'unknown',
-        reason: 'Invalid token',
-        ip: '192.168.1.100',
-      };
-
-      expect(securityEvent.type).toBe('auth_failure');
+      const result = await manager.requestApproval({ toolName: 'bash', toolArgs: {} });
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('timed out');
+      expect(result.requestId).toBeDefined();
+      expect(manager.getRequest(result.requestId!)?.status).toBe('expired');
     });
   });
 });

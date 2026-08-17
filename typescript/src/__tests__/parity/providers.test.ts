@@ -1,251 +1,126 @@
 /**
  * Provider Parity Tests
- * Tests that openrappter model providers match openclaw:
- * - OpenAI, Anthropic, Gemini, Ollama
- * - Failover chains
- * - Embedding support
- * - Auth flows per provider
+ *
+ * Exercises the real ProviderRegistry (src/providers/registry.ts) — registration,
+ * lookup, availability filtering, and chat failover. The previous version of this
+ * file built literal arrays/objects and asserted on their own shape (e.g.
+ * `const chain = ['anthropic','openai','ollama']; expect(chain[0]).toBe('anthropic')`),
+ * so it passed no matter what the registry did. These tests register real and
+ * mock providers and assert on the registry's behaviour.
  */
 
 import { describe, it, expect } from 'vitest';
+import { ProviderRegistry, createDefaultRegistry } from '../../providers/registry.js';
+import type { LLMProvider, ProviderResponse, Message } from '../../providers/types.js';
+
+function mockProvider(
+  id: string,
+  behaviour: { response?: Partial<ProviderResponse>; throws?: boolean; available?: boolean }
+): LLMProvider {
+  return {
+    id,
+    name: id,
+    async chat(): Promise<ProviderResponse> {
+      if (behaviour.throws) throw new Error(`${id} failed`);
+      return { content: `from-${id}`, tool_calls: null, ...behaviour.response };
+    },
+    async isAvailable(): Promise<boolean> {
+      return behaviour.available ?? true;
+    },
+  };
+}
+
+const messages: Message[] = [{ role: 'user', content: 'hi' }];
 
 describe('Provider Parity', () => {
-  describe('Provider Registry', () => {
-    it('should support all required providers', () => {
-      const requiredProviders = ['anthropic', 'openai', 'gemini', 'ollama'];
-      expect(requiredProviders.length).toBeGreaterThanOrEqual(4);
+  describe('Default registry', () => {
+    it('registers the built-in providers', () => {
+      const registry = createDefaultRegistry();
+      expect(registry.list().sort()).toEqual(['anthropic', 'ollama', 'openai']);
+      expect(registry.has('anthropic')).toBe(true);
+      expect(registry.get('openai')?.id).toBe('openai');
     });
 
-    it('should register and retrieve providers', () => {
-      const registry = new Map<string, { id: string; name: string }>();
-      registry.set('anthropic', { id: 'anthropic', name: 'Anthropic' });
-      registry.set('openai', { id: 'openai', name: 'OpenAI' });
-      registry.set('ollama', { id: 'ollama', name: 'Ollama' });
-      registry.set('gemini', { id: 'gemini', name: 'Google Gemini' });
-
-      expect(registry.size).toBe(4);
-      expect(registry.get('anthropic')?.name).toBe('Anthropic');
+    it('does not report a provider that was never registered', () => {
+      const registry = createDefaultRegistry();
+      expect(registry.has('gemini')).toBe(false);
+      expect(registry.get('gemini')).toBeUndefined();
     });
   });
 
-  describe('Chat Interface', () => {
-    it('should send chat messages', () => {
-      const messages = [
-        { role: 'system' as const, content: 'You are a helpful assistant.' },
-        { role: 'user' as const, content: 'Hello' },
-      ];
+  describe('Registration and lookup', () => {
+    it('registers and retrieves a provider by id', () => {
+      const registry = new ProviderRegistry();
+      const provider = mockProvider('custom', {});
+      registry.register(provider);
 
-      expect(messages.length).toBe(2);
-      expect(messages[0].role).toBe('system');
+      expect(registry.get('custom')).toBe(provider);
+      expect(registry.has('custom')).toBe(true);
+      expect(registry.list()).toContain('custom');
     });
 
-    it('should return chat response', () => {
-      const response = {
-        content: 'Hello! How can I help you today?',
-        model: 'claude-3-sonnet',
-        usage: {
-          inputTokens: 20,
-          outputTokens: 15,
-        },
-        toolCalls: null,
-      };
-
-      expect(response.content).toBeDefined();
-      expect(response.usage.inputTokens).toBeGreaterThan(0);
-    });
-
-    it('should support tool calls', () => {
-      const response = {
-        content: null,
-        toolCalls: [
-          {
-            id: 'tc_1',
-            type: 'function' as const,
-            function: {
-              name: 'bash',
-              arguments: '{"command":"ls -la"}',
-            },
-          },
-        ],
-      };
-
-      expect(response.toolCalls).toHaveLength(1);
-      expect(response.toolCalls![0].function.name).toBe('bash');
-    });
-
-    it('should support streaming', () => {
-      const chunks = [
-        { content: 'Hello', done: false },
-        { content: ' world', done: false },
-        { content: '!', done: true, usage: { inputTokens: 5, outputTokens: 3 } },
-      ];
-
-      expect(chunks[chunks.length - 1].done).toBe(true);
-    });
-
-    it('should support chat options', () => {
-      const options = {
-        model: 'claude-3-sonnet',
-        temperature: 0.7,
-        maxTokens: 4096,
-        stream: true,
-        tools: [
-          {
-            type: 'function' as const,
-            function: {
-              name: 'bash',
-              description: 'Execute a bash command',
-              parameters: {
-                type: 'object',
-                properties: {
-                  command: { type: 'string' },
-                },
-                required: ['command'],
-              },
-            },
-          },
-        ],
-      };
-
-      expect(options.temperature).toBeGreaterThanOrEqual(0);
-      expect(options.tools!.length).toBeGreaterThan(0);
+    it('replaces a provider registered under the same id', () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('dup', { response: { content: 'first' } }));
+      registry.register(mockProvider('dup', { response: { content: 'second' } }));
+      expect(registry.list()).toEqual(['dup']);
     });
   });
 
-  describe('Failover', () => {
-    it('should try providers in chain order', () => {
-      const chain = ['anthropic', 'openai', 'ollama'];
-      expect(chain[0]).toBe('anthropic');
-      expect(chain.length).toBeGreaterThan(1);
-    });
+  describe('Availability filtering', () => {
+    it('returns only providers that report themselves available', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('up', { available: true }));
+      registry.register(mockProvider('down', { available: false }));
 
-    it('should fall back on provider error', () => {
-      const results = [
-        { provider: 'anthropic', success: false, error: 'Rate limited' },
-        { provider: 'openai', success: true, response: 'Hello!' },
-      ];
-
-      const firstSuccess = results.find((r) => r.success);
-      expect(firstSuccess?.provider).toBe('openai');
-    });
-
-    it('should retry with delay', () => {
-      const retryConfig = {
-        maxRetries: 2,
-        delayMs: 1000,
-        backoffMultiplier: 2,
-      };
-
-      expect(retryConfig.maxRetries).toBeGreaterThan(0);
-      expect(retryConfig.delayMs).toBeGreaterThan(0);
-    });
-
-    it('should fail if all providers fail', () => {
-      const allFailed = [
-        { provider: 'anthropic', error: 'Rate limited' },
-        { provider: 'openai', error: 'API key invalid' },
-        { provider: 'ollama', error: 'Connection refused' },
-      ];
-
-      expect(allFailed.every((r) => 'error' in r)).toBe(true);
+      const available = await registry.getAvailable();
+      expect(available.map((p) => p.id)).toEqual(['up']);
     });
   });
 
-  describe('Embedding Support', () => {
-    it('should generate embeddings', () => {
-      const request = {
-        texts: ['Hello world', 'How are you'],
-        model: 'text-embedding-3-small',
-      };
+  describe('Chat failover', () => {
+    it('falls over to the next provider when the first throws', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('primary', { throws: true }));
+      registry.register(mockProvider('secondary', { response: { content: 'rescued' } }));
 
-      expect(request.texts.length).toBe(2);
+      const response = await registry.chatWithFailover(
+        ['primary', 'secondary'],
+        messages,
+        undefined,
+        { maxRetries: 0, retryDelayMs: 0 }
+      );
+      expect(response.content).toBe('rescued');
     });
 
-    it('should return embedding vectors', () => {
-      const response = {
-        embeddings: [
-          new Float32Array([0.1, 0.2, 0.3]),
-          new Float32Array([0.4, 0.5, 0.6]),
-        ],
-        model: 'text-embedding-3-small',
-        dimensions: 3,
-      };
+    it('returns the first provider that succeeds without trying the rest', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('first', { response: { content: 'first-wins' } }));
+      registry.register(mockProvider('second', { response: { content: 'unused' } }));
 
-      expect(response.embeddings.length).toBe(2);
-      expect(response.dimensions).toBe(3);
+      const response = await registry.chatWithFailover(
+        ['first', 'second'],
+        messages,
+        undefined,
+        { maxRetries: 0, retryDelayMs: 0 }
+      );
+      expect(response.content).toBe('first-wins');
     });
 
-    it('should support batch embedding', () => {
-      const batchSize = 100;
-      const texts = Array.from({ length: 150 }, (_, i) => `Text ${i}`);
+    it('throws when every provider in the chain fails', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('only', { throws: true }));
 
-      const batches = [];
-      for (let i = 0; i < texts.length; i += batchSize) {
-        batches.push(texts.slice(i, i + batchSize));
-      }
-
-      expect(batches.length).toBe(2);
-    });
-  });
-
-  describe('Availability Check', () => {
-    it('should check provider availability', () => {
-      const availabilityChecks = [
-        { provider: 'anthropic', available: true, latencyMs: 150 },
-        { provider: 'openai', available: true, latencyMs: 200 },
-        { provider: 'ollama', available: false, error: 'Connection refused' },
-        { provider: 'gemini', available: true, latencyMs: 180 },
-      ];
-
-      const available = availabilityChecks.filter((c) => c.available);
-      expect(available.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Provider Auth', () => {
-    it('should support API key auth', () => {
-      const auth = {
-        type: 'api-key' as const,
-        tokenEnv: 'ANTHROPIC_API_KEY',
-      };
-
-      expect(auth.type).toBe('api-key');
+      await expect(
+        registry.chatWithFailover(['only'], messages, undefined, { maxRetries: 0, retryDelayMs: 0 })
+      ).rejects.toThrow(/All providers failed/);
     });
 
-    it('should support OAuth auth', () => {
-      const auth = {
-        type: 'oauth' as const,
-        clientId: 'client_123',
-        scopes: ['chat', 'embeddings'],
-      };
-
-      expect(auth.type).toBe('oauth');
-    });
-
-    it('should support device flow auth', () => {
-      const auth = {
-        type: 'device' as const,
-        deviceCode: 'device_abc',
-        userCode: 'USER-1234',
-        verificationUrl: 'https://provider.com/device',
-      };
-
-      expect(auth.type).toBe('device');
-    });
-  });
-
-  describe('Models RPC Method', () => {
-    it('should support models.list', () => {
-      const response = {
-        models: [
-          { id: 'claude-3-sonnet', provider: 'anthropic', available: true },
-          { id: 'gpt-4', provider: 'openai', available: true },
-          { id: 'llama3', provider: 'ollama', available: false },
-          { id: 'gemini-pro', provider: 'gemini', available: true },
-        ],
-      };
-
-      expect(response.models.length).toBeGreaterThanOrEqual(4);
+    it('reports a chain entry that is not registered as a failure', async () => {
+      const registry = new ProviderRegistry();
+      await expect(
+        registry.chatWithFailover(['ghost'], messages, undefined, { maxRetries: 0, retryDelayMs: 0 })
+      ).rejects.toThrow(/All providers failed/);
     });
   });
 });

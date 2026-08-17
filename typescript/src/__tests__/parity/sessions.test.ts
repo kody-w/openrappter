@@ -1,189 +1,162 @@
 /**
  * Session Management Parity Tests
- * Tests that openrappter session system matches openclaw:
- * - Session isolation
- * - Session CRUD (list, preview, patch, reset, delete, compact)
- * - Context persistence
- * - JSONL transcript storage
+ *
+ * Exercises the real StorageAdapter (src/storage/sqlite.ts, in-memory mode) —
+ * the code that actually persists sessions. The previous version of this file
+ * built literal session/response objects and asserted on their own shape, so it
+ * passed no matter what the product did (e.g. it "verified" transcript storage
+ * with `expect('~/.openrappter/sessions/x.jsonl').toContain('.jsonl')`, a string
+ * compared against a substring of itself). These tests save real sessions and
+ * assert on what comes back out.
+ *
+ * showcase-persistence-vault.test.ts covers the save/get/delete happy path and
+ * channelId filtering; this file deliberately covers the rest of the isolation
+ * surface — userId / conversationId / agentId filtering, message + tool-call
+ * round-tripping, and metadata updates via upsert.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createStorageAdapter } from '../../storage/index.js';
+import type { StorageAdapter, Session } from '../../storage/types.js';
+
+let storage: StorageAdapter;
+
+beforeEach(async () => {
+  storage = createStorageAdapter({ type: 'memory', inMemory: true });
+  await storage.initialize();
+});
+
+afterEach(async () => {
+  await storage.close();
+});
+
+function makeSession(overrides: Partial<Session> & Pick<Session, 'id'>): Session {
+  const now = new Date().toISOString();
+  return {
+    channelId: 'cli',
+    conversationId: 'conv',
+    agentId: 'main',
+    metadata: {},
+    messages: [],
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
 
 describe('Session Management Parity', () => {
   describe('Session CRUD', () => {
-    it('should create session with unique ID', () => {
-      const session = {
-        id: 'session_abc123',
-        channelType: 'telegram',
-        channelId: 'chat_456',
-        userId: 'user_789',
-        agentId: 'main',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        metadata: {},
-      };
-
-      expect(session.id).toBeDefined();
-      expect(session.messages).toHaveLength(0);
-    });
-
-    it('should list sessions with filters', () => {
-      const response = {
-        sessions: [
-          { id: 'session_1', channelType: 'telegram', userId: 'user_1', messageCount: 10 },
-          { id: 'session_2', channelType: 'telegram', userId: 'user_2', messageCount: 5 },
-        ],
-        total: 2,
-      };
-
-      expect(response.sessions.length).toBeGreaterThan(0);
-      expect(response.total).toBe(2);
-    });
-
-    it('should preview session (summary without full messages)', () => {
-      const response = {
-        id: 'session_1',
-        channelType: 'telegram',
-        userId: 'user_1',
-        messageCount: 50,
-        lastMessage: 'Thanks for the help!',
-        lastActivity: '2024-01-01T12:00:00Z',
-        tokenUsage: { total: 5000, prompt: 3000, completion: 2000 },
-      };
-
-      expect(response.messageCount).toBeGreaterThan(0);
-      expect(response.tokenUsage.total).toBeGreaterThan(0);
-    });
-
-    it('should patch session metadata', () => {
-      const request = {
-        method: 'sessions.patch',
-        params: {
-          sessionId: 'session_1',
-          metadata: { topic: 'code-review', priority: 'high' },
-        },
-      };
-
-      expect(request.params.metadata).toBeDefined();
-    });
-
-    it('should reset session (clear messages but keep session)', () => {
-      const response = {
-        success: true,
-        sessionId: 'session_1',
-        messagesCleared: 50,
-      };
-
-      expect(response.success).toBe(true);
-      expect(response.messagesCleared).toBeGreaterThan(0);
-    });
-
-    it('should delete session entirely', () => {
-      const response = { deleted: true };
-      expect(response.deleted).toBe(true);
-    });
-
-    it('should compact sessions (remove old data)', () => {
-      const response = {
-        compacted: 15,
-        freedBytes: 1024000,
-      };
-
-      expect(response.compacted).toBeGreaterThan(0);
-    });
-
-    it('should resolve session by channel + user', () => {
-      const response = {
-        sessionId: 'session_abc123',
-        isNew: false,
-      };
-
-      expect(response.sessionId).toBeDefined();
-    });
-  });
-
-  describe('Session Isolation', () => {
-    it('should isolate sessions per user', () => {
-      const sessions = new Map<string, { userId: string; messages: unknown[] }>();
-      sessions.set('session_1', { userId: 'user_A', messages: [{ content: 'secret A' }] });
-      sessions.set('session_2', { userId: 'user_B', messages: [{ content: 'secret B' }] });
-
-      expect(sessions.get('session_1')?.userId).toBe('user_A');
-      expect(sessions.get('session_2')?.userId).toBe('user_B');
-    });
-
-    it('should isolate sessions per channel', () => {
-      const sessionKey = (channelType: string, channelId: string, userId: string) =>
-        `${channelType}:${channelId}:${userId}`;
-
-      const key1 = sessionKey('telegram', 'chat_1', 'user_1');
-      const key2 = sessionKey('discord', 'ch_1', 'user_1');
-
-      expect(key1).not.toBe(key2);
-    });
-
-    it('should isolate agent state per session', () => {
-      const session1 = { agentId: 'main', systemPrompt: 'You are a code helper' };
-      const session2 = { agentId: 'main', systemPrompt: 'You are a writing assistant' };
-
-      expect(session1.systemPrompt).not.toBe(session2.systemPrompt);
-    });
-  });
-
-  describe('Context Persistence', () => {
-    it('should persist message history', () => {
-      const messages = [
-        { role: 'user', content: 'Hello' },
-        { role: 'assistant', content: 'Hi! How can I help?' },
-        { role: 'user', content: 'Write a function' },
-        { role: 'assistant', content: 'function hello() { ... }' },
-      ];
-
-      expect(messages.length).toBe(4);
-    });
-
-    it('should track token usage per session', () => {
-      const tokenUsage = {
-        totalTokens: 5000,
-        promptTokens: 3000,
-        completionTokens: 2000,
-        messages: 20,
-      };
-
-      expect(tokenUsage.totalTokens).toBe(
-        tokenUsage.promptTokens + tokenUsage.completionTokens
+    it('round-trips a session by id, including messages and metadata', async () => {
+      await storage.saveSession(
+        makeSession({
+          id: 'session_abc123',
+          userId: 'user_789',
+          metadata: { topic: 'code-review' },
+          messages: [
+            { id: 'm1', role: 'user', content: 'Hello', timestamp: new Date().toISOString() },
+            { id: 'm2', role: 'assistant', content: 'Hi!', timestamp: new Date().toISOString() },
+          ],
+        })
       );
+
+      const got = await storage.getSession('session_abc123');
+      expect(got).not.toBeNull();
+      expect(got!.userId).toBe('user_789');
+      expect(got!.metadata.topic).toBe('code-review');
+      expect(got!.messages).toHaveLength(2);
+      expect(got!.messages[1].content).toBe('Hi!');
     });
 
-    it('should track tool call history', () => {
-      const toolCalls = [
-        { id: 'tc_1', name: 'bash', args: { command: 'ls' }, result: 'file1.ts\nfile2.ts' },
-        { id: 'tc_2', name: 'read', args: { path: 'file1.ts' }, result: '// code...' },
-      ];
+    it('returns null for a session that was never saved', async () => {
+      expect(await storage.getSession('missing')).toBeNull();
+    });
 
-      expect(toolCalls.length).toBe(2);
+    it('deletes only the target session', async () => {
+      await storage.saveSession(makeSession({ id: 's1' }));
+      await storage.saveSession(makeSession({ id: 's2' }));
+
+      await storage.deleteSession('s1');
+
+      expect(await storage.getSession('s1')).toBeNull();
+      expect(await storage.getSession('s2')).not.toBeNull();
+    });
+
+    it('updates session metadata via upsert without creating a duplicate', async () => {
+      await storage.saveSession(makeSession({ id: 's1', metadata: { priority: 'low' } }));
+      await storage.saveSession(makeSession({ id: 's1', metadata: { priority: 'high' } }));
+
+      const all = await storage.listSessions();
+      expect(all).toHaveLength(1);
+      expect((await storage.getSession('s1'))!.metadata.priority).toBe('high');
     });
   });
 
-  describe('JSONL Transcript Storage', () => {
-    it('should store messages as JSONL', () => {
-      const jsonlLines = [
-        '{"role":"user","content":"Hello","timestamp":"2024-01-01T00:00:00Z"}',
-        '{"role":"assistant","content":"Hi!","timestamp":"2024-01-01T00:00:01Z"}',
-      ];
-
-      jsonlLines.forEach((line) => {
-        const parsed = JSON.parse(line);
-        expect(parsed.role).toBeDefined();
-        expect(parsed.content).toBeDefined();
-        expect(parsed.timestamp).toBeDefined();
-      });
+  describe('Session isolation via filters', () => {
+    beforeEach(async () => {
+      await storage.saveSession(makeSession({ id: 's_alice', userId: 'alice', channelId: 'telegram', conversationId: 'c1', agentId: 'main' }));
+      await storage.saveSession(makeSession({ id: 's_bob', userId: 'bob', channelId: 'telegram', conversationId: 'c2', agentId: 'writer' }));
+      await storage.saveSession(makeSession({ id: 's_bob2', userId: 'bob', channelId: 'discord', conversationId: 'c2', agentId: 'main' }));
     });
 
-    it('should append to transcript file', () => {
-      const transcriptPath = '~/.openrappter/sessions/session_abc123.jsonl';
-      expect(transcriptPath).toContain('.jsonl');
+    it('isolates sessions per user', async () => {
+      const alice = await storage.listSessions({ userId: 'alice' });
+      expect(alice.map((s) => s.id)).toEqual(['s_alice']);
+
+      const bob = await storage.listSessions({ userId: 'bob' });
+      expect(bob.map((s) => s.id).sort()).toEqual(['s_bob', 's_bob2']);
+    });
+
+    it('isolates sessions per channel', async () => {
+      const discord = await storage.listSessions({ channelId: 'discord' });
+      expect(discord.map((s) => s.id)).toEqual(['s_bob2']);
+    });
+
+    it('filters sessions by conversationId', async () => {
+      const c2 = await storage.listSessions({ conversationId: 'c2' });
+      expect(c2.map((s) => s.id).sort()).toEqual(['s_bob', 's_bob2']);
+    });
+
+    it('filters sessions by agentId', async () => {
+      const main = await storage.listSessions({ agentId: 'main' });
+      expect(main.map((s) => s.id).sort()).toEqual(['s_alice', 's_bob2']);
+    });
+
+    it('respects the limit on listSessions', async () => {
+      const limited = await storage.listSessions({ limit: 2 });
+      expect(limited).toHaveLength(2);
+    });
+  });
+
+  describe('Context persistence', () => {
+    it('persists tool-call records on messages', async () => {
+      await storage.saveSession(
+        makeSession({
+          id: 'with_tools',
+          messages: [
+            {
+              id: 'm1',
+              role: 'assistant',
+              content: '',
+              timestamp: new Date().toISOString(),
+              toolCalls: [
+                { id: 'tc_1', type: 'function', function: { name: 'bash', arguments: '{"command":"ls"}' } },
+              ],
+            },
+            {
+              id: 'm2',
+              role: 'tool',
+              content: 'file1.ts\nfile2.ts',
+              toolCallId: 'tc_1',
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        })
+      );
+
+      const got = await storage.getSession('with_tools');
+      expect(got!.messages[0].toolCalls).toHaveLength(1);
+      expect(got!.messages[0].toolCalls![0].function.name).toBe('bash');
+      expect(got!.messages[1].toolCallId).toBe('tc_1');
     });
   });
 });

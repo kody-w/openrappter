@@ -630,4 +630,79 @@ func runRpcClientContractTests() async {
             await conn.disconnect()
         }
     }
+
+    await suite("RpcClient Cron Contract") {
+        // The gateway calls a cron job's prompt `message` — CronJobCreate,
+        // the scheduler, and `execute(agentId, message)` all say so. This
+        // client sent `command`, so every job the Bar created was scheduled
+        // successfully and then fired forever with an empty prompt.
+        await test("createCronJob sends cron.create with the gateway's `message` field") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: ["id": "job_1", "scheduled": true])
+            ) {
+                try await rpc.createCronJob(
+                    name: "morning brief",
+                    schedule: "0 8 * * *",
+                    command: "summarise my inbox"
+                )
+            }
+
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "cron.create")
+            let params = sent?["params"] as? [String: Any]
+            try expectEqual(params?["message"] as? String, "summarise my inbox")
+            try expectEqual(params?["name"] as? String, "morning brief")
+            try expectEqual(params?["schedule"] as? String, "0 8 * * *")
+            await conn.disconnect()
+        }
+
+        // `nextRun` is the tell. `listCronJobs` has a hand-rolled fallback
+        // parser for listings the decoder rejects, and that fallback only
+        // recovers id/name/schedule/command/enabled — every schedule time is
+        // silently dropped. Decoding both spellings properly is what keeps a
+        // job's next run visible.
+        await test("a listing that names the prompt `message` decodes without losing run times") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let jobs = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkArrayResponse(id: "rpc-2", payload: [[
+                    "id": "job_1",
+                    "name": "morning brief",
+                    "schedule": "0 8 * * *",
+                    "message": "summarise my inbox",
+                    "enabled": true,
+                    "nextRun": "2026-08-17T08:00:00.000Z",
+                ]])
+            ) {
+                try await rpc.listCronJobs()
+            }
+
+            try expectEqual(jobs.count, 1)
+            try expectEqual(jobs.first?.command, "summarise my inbox")
+            try expectNotNil(jobs.first?.nextRun)
+            await conn.disconnect()
+        }
+
+        await test("a listing that names the prompt `command` still decodes") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let jobs = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkArrayResponse(id: "rpc-2", payload: [[
+                    "id": "job_1",
+                    "name": "morning brief",
+                    "schedule": "0 8 * * *",
+                    "command": "summarise my inbox",
+                    "enabled": true,
+                ]])
+            ) {
+                try await rpc.listCronJobs()
+            }
+
+            try expectEqual(jobs.count, 1)
+            try expectEqual(jobs.first?.command, "summarise my inbox")
+            await conn.disconnect()
+        }
+    }
 }

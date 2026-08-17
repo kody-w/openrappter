@@ -251,9 +251,24 @@ export class GatewayServer {
    * happened rather than reporting a uniform success.
    */
   private addCronJob = async (params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    // The macOS Bar called the prompt `command`; everything on this side of the
+    // wire calls it `message` — the CronJob type, the scheduler, the executor
+    // signature `execute(agentId, message)`, and the CLI. A job created from
+    // the Bar therefore reached the scheduler with `message: ''` and fired on
+    // schedule forever with nothing to say. `message` is canonical here because
+    // it is what gets persisted and re-read; `command` is accepted so a Bar
+    // binary built before this change keeps working.
+    const { command, ...rest } = params;
+    const message = rest.message ?? command;
+    if (typeof message !== 'string' || message.trim() === '') {
+      throw new Error(
+        'Cron job requires a non-empty `message` (the macOS Bar\'s legacy `command` is also accepted). '
+        + 'A job with no message runs on schedule and does nothing.',
+      );
+    }
     // `enabled` defaults to true when adding, so persisting without the field
     // would round-trip an enabled job back as a disabled one.
-    const job = { enabled: true, ...params };
+    const job = { enabled: true, ...rest, message };
     if (this.cronService?.add) {
       const created = await this.cronService.add(job);
       return { ...job, ...created, scheduled: true };

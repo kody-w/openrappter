@@ -410,10 +410,14 @@ public struct RpcClient: RpcClientProtocol, Sendable {
     }
 
     public func createCronJob(name: String, schedule: String, command: String) async throws {
+        // `message` is the gateway's field name — the cron store, the scheduler
+        // and the CLI all use it. This client sent `command`, so every job it
+        // created ran on schedule with an empty prompt. The gateway still
+        // accepts `command` for older builds; new builds send the real name.
         let params: [String: AnyCodable] = [
             "name": AnyCodable(name),
             "schedule": AnyCodable(schedule),
-            "command": AnyCodable(command),
+            "message": AnyCodable(command),
         ]
         let response = try await connection.sendRequest(method: "cron.create", params: params)
         guard response.ok else {

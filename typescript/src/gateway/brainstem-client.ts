@@ -27,7 +27,22 @@ export const BRAINSTEM_ENVELOPE_KEYS = [
 /** Where the brainstem listens when nothing says otherwise. */
 export const DEFAULT_BRAINSTEM_URL = 'http://127.0.0.1:7072';
 
+/**
+ * The addresses a brainstem is actually found at, in preference order.
+ *
+ * 7072 is this package's own default. 7071 is the slot a RAPP brainstem sits in
+ * — `brainstem.py` documents it as the full drop-in port — and an installation
+ * that followed the grail path has one there and nothing on 7072. Probing both
+ * is the difference between the selector working on a stock machine and
+ * appearing broken until someone finds an environment variable.
+ */
+export const BRAINSTEM_CANDIDATE_URLS = [
+  'http://127.0.0.1:7072',
+  'http://127.0.0.1:7071',
+] as const;
+
 const DEFAULT_TIMEOUT_MS = 120_000;
+const HEALTH_PROBE_TIMEOUT_MS = 1_500;
 
 export interface BrainstemEnvelope {
   response: string;
@@ -63,6 +78,57 @@ export function brainstemBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
+ * Find the brainstem, preferring an explicit setting over a guess.
+ *
+ * An explicit `OPENRAPPTER_BRAINSTEM_URL` is returned without probing: if
+ * someone has said where it is, silently using a different one would be worse
+ * than failing. Otherwise each candidate is asked `/health`, and the first that
+ * answers wins.
+ *
+ * The result is remembered, because this runs on every brainstem turn and the
+ * answer does not change while the gateway is up. `resetBrainstemDiscovery`
+ * exists so tests are not order-dependent on that cache.
+ */
+let discovered: string | null = null;
+
+export function resetBrainstemDiscovery(): void {
+  discovered = null;
+}
+
+export async function resolveBrainstemUrl(options: {
+  env?: NodeJS.ProcessEnv;
+  fetchImpl?: typeof fetch;
+  candidates?: readonly string[];
+} = {}): Promise<string> {
+  const env = options.env ?? process.env;
+  const configured = env.OPENRAPPTER_BRAINSTEM_URL?.trim();
+  if (configured && configured.length > 0) return configured.replace(/\/+$/, '');
+
+  if (discovered) return discovered;
+
+  const doFetch = options.fetchImpl ?? fetch;
+  const candidates = options.candidates ?? BRAINSTEM_CANDIDATE_URLS;
+
+  for (const candidate of candidates) {
+    try {
+      const response = await doFetch(`${candidate}/health`, {
+        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        discovered = candidate;
+        return candidate;
+      }
+    } catch {
+      // Nothing there; try the next.
+    }
+  }
+
+  // Nothing answered. Return the documented default so the failure names a
+  // concrete address rather than reporting that no address was tried.
+  return DEFAULT_BRAINSTEM_URL;
+}
+
+/**
  * A refusal a person can act on.
  *
  * "fetch failed" tells a user nothing. The common case by far is that the
@@ -95,11 +161,21 @@ function isEnvelope(value: unknown): value is BrainstemEnvelope {
  * place for the two runtimes to drift apart.
  */
 export async function askBrainstem(options: BrainstemAskOptions): Promise<BrainstemEnvelope> {
-  const baseUrl = (options.baseUrl ?? brainstemBaseUrl()).replace(/\/+$/, '');
   const doFetch = options.fetchImpl ?? fetch;
+  const baseUrl = (
+    options.baseUrl ?? (await resolveBrainstemUrl({ fetchImpl: doFetch }))
+  ).replace(/\/+$/, '');
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const body: Record<string, unknown> = { message: options.message };
+  const body: Record<string, unknown> = {
+    // Both spellings, deliberately. `brainstem.py` documents `message` with
+    // `user_input` as a legacy alias, but the RAPP kernel this mirrors is
+    // older and rejects a body without `user_input` — a live one answered
+    // `400 {"error":"user_input is required"}` to a `message`-only request.
+    // Sending both is what makes one client work against both kernels.
+    message: options.message,
+    user_input: options.message,
+  };
   if (options.sessionId) body.session_id = options.sessionId;
   if (options.conversationHistory) body.conversation_history = options.conversationHistory;
 

@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   askBrainstem,
   brainstemBaseUrl,
   BrainstemUnavailableError,
   DEFAULT_BRAINSTEM_URL,
+  resolveBrainstemUrl,
+  resetBrainstemDiscovery,
 } from '../brainstem-client.js';
 import { normalizeChatTarget, CHAT_TARGETS } from '../server.js';
 
@@ -96,7 +98,15 @@ describe('askBrainstem', () => {
     });
 
     expect(seen!.url).toBe('http://127.0.0.1:7072/chat');
-    expect(seen!.body).toEqual({ message: 'hello', session_id: 'session-1' });
+    // Both spellings. A live RAPP kernel answered
+    // `400 {"error":"user_input is required"}` to a message-only body, and
+    // every unit test here passed against a fake that accepted `message`, so
+    // only the end-to-end run caught it.
+    expect(seen!.body).toEqual({
+      message: 'hello',
+      user_input: 'hello',
+      session_id: 'session-1',
+    });
     // Passed through, not reshaped: rewriting it here would be a second place
     // for the two runtimes to drift.
     expect(result).toEqual(envelope);
@@ -167,5 +177,59 @@ describe('askBrainstem', () => {
     ) as unknown as typeof fetch;
 
     await expect(askBrainstem({ message: 'hi', fetchImpl })).rejects.toThrow(/not a chat envelope/);
+  });
+});
+
+describe('resolveBrainstemUrl', () => {
+  beforeEach(() => resetBrainstemDiscovery());
+
+  it('uses an explicit setting without probing anything', async () => {
+    let probes = 0;
+    const fetchImpl = (async () => { probes++; return new Response('{}'); }) as unknown as typeof fetch;
+
+    const url = await resolveBrainstemUrl({
+      env: { OPENRAPPTER_BRAINSTEM_URL: 'http://127.0.0.1:9999/' } as NodeJS.ProcessEnv,
+      fetchImpl,
+    });
+
+    expect(url).toBe('http://127.0.0.1:9999');
+    // If someone has said where it is, quietly using a different one would be
+    // worse than failing.
+    expect(probes).toBe(0);
+  });
+
+  it('finds a brainstem sitting in the RAPP drop-in slot', async () => {
+    // The installation this was written against has nothing on 7072 and a real
+    // brainstem on 7071. A single hardcoded default would look broken there.
+    const fetchImpl = (async (url: string | URL) =>
+      String(url).includes('7071')
+        ? new Response('{"status":"ok"}', { status: 200 })
+        : Promise.reject(new Error('ECONNREFUSED'))
+    ) as unknown as typeof fetch;
+
+    expect(await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl }))
+      .toBe('http://127.0.0.1:7071');
+  });
+
+  it('prefers this package own port when both answer', async () => {
+    const fetchImpl = (async () => new Response('{"status":"ok"}', { status: 200 })) as unknown as typeof fetch;
+    expect(await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl }))
+      .toBe('http://127.0.0.1:7072');
+  });
+
+  it('names a concrete address when nothing answers', async () => {
+    const fetchImpl = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
+    expect(await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl }))
+      .toBe(DEFAULT_BRAINSTEM_URL);
+  });
+
+  it('does not re-probe once it has found one', async () => {
+    let probes = 0;
+    const fetchImpl = (async () => { probes++; return new Response('{"status":"ok"}', { status: 200 }); }) as unknown as typeof fetch;
+
+    await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl });
+    await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl });
+
+    expect(probes).toBe(1);
   });
 });

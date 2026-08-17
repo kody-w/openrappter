@@ -61,6 +61,14 @@ export interface BrainstemAskOptions {
   conversationHistory?: unknown[];
   baseUrl?: string;
   timeoutMs?: number;
+  /**
+   * Cancels the request when the caller stops caring about the answer.
+   *
+   * Without this, pressing Stop only stops the *client* listening: the
+   * brainstem carries on generating a reply nobody will read, which on a hosted
+   * model is billed work.
+   */
+  signal?: AbortSignal;
   /** Injected for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -135,6 +143,14 @@ export async function resolveBrainstemUrl(options: {
  * brainstem simply is not running, and the fix is one command, so the error
  * says which address was tried and what to do about it.
  */
+/** The caller cancelled; not a failure of the brainstem. */
+export class BrainstemAbortedError extends Error {
+  constructor() {
+    super('The brainstem request was cancelled.');
+    this.name = 'BrainstemAbortedError';
+  }
+}
+
 export class BrainstemUnavailableError extends Error {
   constructor(baseUrl: string, cause: unknown) {
     const reason = cause instanceof Error ? cause.message : String(cause);
@@ -181,13 +197,25 @@ export async function askBrainstem(options: BrainstemAskOptions): Promise<Brains
 
   let response: Response;
   try {
+    // The caller's cancellation and the timeout are both reasons to stop
+    // waiting, so the request answers to either.
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, timeoutSignal])
+      : timeoutSignal;
+
     response = await doFetch(`${baseUrl}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
     });
   } catch (error) {
+    // A caller who cancelled already knows why, and does not need to be told
+    // the brainstem is unreachable — it was reachable, they changed their mind.
+    if (options.signal?.aborted) {
+      throw new BrainstemAbortedError();
+    }
     // Not running, refused, DNS, or timed out — all of them mean "no brainstem
     // answered", and all of them are actionable in the same way.
     throw new BrainstemUnavailableError(baseUrl, error);

@@ -190,6 +190,12 @@ interface ActiveRun {
   sessionId: string;
   aborted: boolean;
   generation: number;
+  /**
+   * Cancels work that is genuinely cancellable, such as an in-flight brainstem
+   * request. Marking a run aborted stops the gateway listening; it does not
+   * stop a remote model generating a reply nobody will read.
+   */
+  controller?: AbortController;
 }
 
 interface ActiveOperation {
@@ -2333,6 +2339,7 @@ export class GatewayServer {
           sessionId: sessionKey,
           aborted: false,
           generation: this.generation,
+          controller: new AbortController(),
         };
 
         // Store user message in session
@@ -3149,6 +3156,7 @@ export class GatewayServer {
   private abortActiveRun(run: ActiveRun, broadcast = true): void {
     if (run.aborted) return;
     run.aborted = true;
+    run.controller?.abort();
     this.cleanupActiveRun(run);
     if (broadcast && this.isGenerationActive(run.generation)) {
       this.broadcastEvent(GatewayEvents.CHAT, {
@@ -3171,7 +3179,11 @@ export class GatewayServer {
     try {
       const envelope = await this.runAgentOperation(
         run.generation,
-        () => askBrainstem({ message, sessionId: run.sessionId }),
+        () => askBrainstem({
+          message,
+          sessionId: run.sessionId,
+          signal: run.controller?.signal,
+        }),
       );
 
       if (run.aborted || !this.isGenerationActive(run.generation)) return;

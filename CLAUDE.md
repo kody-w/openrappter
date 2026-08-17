@@ -117,7 +117,7 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 - `LearnNewAgent` — Meta-agent that generates new single file agents at runtime with hot-loading (both TypeScript and Python)
 
 **Multi-agent patterns** (TypeScript `src/agents/`):
-- `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first wins), `fallback` (try until success)
+- `BroadcastManager` (`broadcast.ts`) — Send to multiple agents; modes: `all` (wait all), `race` (first success wins), `fallback` (try until success). A branch that *resolves* with a `{status: 'error'}` envelope counts as a failure, not a success — the envelope is kept per-branch in `results` while `allSucceeded`/`anySucceeded` and `firstResponse` ignore it
 - `AgentRouter` (`router.ts`) — Rule-based message routing by sender/channel/group/pattern with priority; session key isolation
 - `SubAgent` (`subagent.ts`) — Nested agent invocation with depth limits and loop detection
 - `AgentChain` (`chain.ts`) — Sequential pipeline with automatic `data_slush` forwarding between steps; supports transforms, timeouts, stopOnError/continue modes
@@ -140,7 +140,7 @@ No YAML. No config files. No magic parsing. The code IS the contract.
 2. `run()` computes topological levels via Kahn's algorithm
 3. Each level's nodes execute concurrently via `Promise.all`
 4. Multi-dependency slush merging: `upstream_slush = { nodeA: { ...slushA }, nodeB: { ...slushB } }`
-5. Failed nodes: dependents are marked `skipped` (default) or execution stops immediately (`stopOnError: true`)
+5. Failed nodes: dependents are marked `skipped` (default) or execution stops immediately (`stopOnError: true`). A node fails when its agent throws **or** returns a `{status: 'error'}` envelope — both are classified by the shared `agentResultIsError` / `agent_result_is_error` helper
 
 ```typescript
 const graph = new AgentGraph()

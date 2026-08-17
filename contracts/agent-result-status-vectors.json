@@ -1,0 +1,28 @@
+{
+  "description": "Cross-runtime agreement vectors for the shared agent-result classifier (agentResultIsError / agent_result_is_error). kind='string' passes the value as the raw string an agent returned; kind='value' passes the already-parsed value.",
+  "vectors": [
+    { "name": "success-envelope-string", "kind": "string", "value": "{\"status\":\"success\",\"result\":1}", "isError": false },
+    { "name": "error-envelope-string", "kind": "string", "value": "{\"status\":\"error\",\"message\":\"exit code 1\"}", "isError": true },
+    { "name": "error-envelope-string-uppercase", "kind": "string", "value": "{\"status\":\"ERROR\"}", "isError": true },
+    { "name": "error-envelope-string-mixedcase", "kind": "string", "value": "{\"status\":\"Error\"}", "isError": true },
+    { "name": "info-envelope-string", "kind": "string", "value": "{\"status\":\"info\",\"message\":\"skipped\"}", "isError": false },
+    { "name": "status-with-trailing-space-not-trimmed", "kind": "string", "value": "{\"status\":\"error \"}", "isError": false },
+    { "name": "non-json-string", "kind": "string", "value": "boom", "isError": false },
+    { "name": "bare-error-word", "kind": "string", "value": "error", "isError": false },
+    { "name": "empty-string", "kind": "string", "value": "", "isError": false },
+    { "name": "json-null-string", "kind": "string", "value": "null", "isError": false },
+    { "name": "json-number-string", "kind": "string", "value": "5", "isError": false },
+    { "name": "json-array-string", "kind": "string", "value": "[{\"status\":\"error\"}]", "isError": false },
+    { "name": "double-encoded-error-envelope", "kind": "string", "value": "\"{\\\"status\\\":\\\"error\\\"}\"", "isError": false },
+    { "name": "error-envelope-object", "kind": "value", "value": { "status": "error", "message": "exit code 1" }, "isError": true },
+    { "name": "error-envelope-object-uppercase", "kind": "value", "value": { "status": "ERROR" }, "isError": true },
+    { "name": "success-envelope-object", "kind": "value", "value": { "status": "success" }, "isError": false },
+    { "name": "object-without-status", "kind": "value", "value": { "message": "no status here" }, "isError": false },
+    { "name": "object-with-null-status", "kind": "value", "value": { "status": null }, "isError": false },
+    { "name": "object-with-nested-error-status", "kind": "value", "value": { "status": "success", "result": { "status": "error" } }, "isError": false },
+    { "name": "array-value", "kind": "value", "value": [{ "status": "error" }], "isError": false },
+    { "name": "null-value", "kind": "value", "value": null, "isError": false },
+    { "name": "number-value", "kind": "value", "value": 5, "isError": false },
+    { "name": "boolean-value", "kind": "value", "value": true, "isError": false }
+  ]
+}

@@ -19,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from openrappter.result_status import agent_result_is_error
+
 
 @dataclass
 class GraphNode:
@@ -284,7 +286,8 @@ class AgentGraph:
                 result=result,
                 data_slush=data_slush,
                 duration_ms=duration_ms,
-                status='success',
+                # A returned {"status": "error"} envelope is a failure, exactly like a raise.
+                status='error' if agent_result_is_error(result) else 'success',
             )
 
         except Exception as e:

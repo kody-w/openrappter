@@ -16,6 +16,10 @@ export function registerAgentsCommand(program: Command): void {
       const registry = new AgentRegistry(AGENTS_DIR);
       const allAgents = await registry.listAgents();
       console.log(`\nRegistered Agents (${allAgents.length}):\n`);
+      if (allAgents.length === 0) {
+        console.log('  (none)\n');
+        return;
+      }
       for (const agent of allAgents) {
         console.log(`  ${agent.name}`);
         if (agent.description) {

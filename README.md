@@ -665,6 +665,22 @@ openrappter clawhub install author/skill-name
 openrappter clawhub list
 ```
 
+Both registries are implemented in the Python runtime. The launcher runs
+TypeScript by default, so these two commands hand their arguments to the Python
+runtime installed beside it (`~/.openrappter/python`, or `$OPENRAPPTER_HOME`)
+and return its exit code. On an npm-only install, where no Python runtime is
+present, they say so and exit nonzero.
+
+Skills that live in a GitHub repo with a `skill.json` are installed by the
+TypeScript runtime directly:
+
+```bash
+openrappter skills list                 # bundled + installed
+openrappter skills search "productivity"
+openrappter skills install owner/repo
+openrappter skills uninstall owner/repo
+```
+
 ## Why "openrappter"?
 
 It's a **rapp**id prototyping **agent** that's open source. Plus, who doesn't want a velociraptor in their terminal?

@@ -234,7 +234,7 @@ describe('CLI Index Exports', () => {
   it('should have all expected command files including memory.ts', () => {
     const files = readdirSync(CLI_DIR);
     const expectedFiles = [
-      'gateway.ts',
+      'hubs.ts',
       'config.ts',
       'cron.ts',
       'skills.ts',

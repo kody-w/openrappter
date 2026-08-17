@@ -1085,12 +1085,17 @@ export class GatewayServer {
              * a token answered 200 with the agent having run.
              *
              * This comment originally cited `openrappter gateway --bind all
-             * --token SECRET` as the configuration at risk. That command does
-             * not ship: `registerGatewayCommand` is exported from
-             * `cli/index.ts` and never called, and `gateway --bind all` answers
-             * `unknown option '--bind'`. The credential that DOES exist is
-             * `OPENRAPPTER_TOKEN` on the loopback daemon, which is the boundary
-             * this actually protects. #119
+             * --token SECRET` as the configuration at risk. That command did
+             * not ship: `registerGatewayCommand` was exported from
+             * `cli/index.ts` and never called, and `gateway --bind all`
+             * answered `unknown option '--bind'`. #119
+             *
+             * `openrappter gateway` now exists, but it delegates to the same
+             * daemon path as `openrappter --daemon`, which hardcodes
+             * `bind: 'loopback'` — so `--bind all` still cannot be reached from
+             * the CLI. The credential that DOES exist is `OPENRAPPTER_TOKEN` on
+             * the loopback daemon, which is the boundary this actually
+             * protects.
              *
              * `validateRequestSource` does not cover this: its loopback check
              * is gated on `bind === 'loopback'` and is skipped under

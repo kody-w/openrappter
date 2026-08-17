@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync, spawnSync } from 'child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,6 +20,11 @@ import { createRequire } from 'module';
  * is why twelve fully implemented command modules under src/cli could sit
  * unregistered without a single test going red: the files were present and
  * exported, and nothing ever asked the program what it had registered.
+ *
+ * #159 registered config and doctor. This pass registers skills, agents,
+ * models, update, gateway and the delegating rappterhub/clawhub. Four modules
+ * remain deliberately unregistered — see the header of src/cli/index.ts for
+ * why each of them would ship a command that lies.
  */
 
 const ENTRY = join(__dirname, '../../index.ts');
@@ -49,7 +55,23 @@ const REGISTERED = [
   'cron',
   'config',
   'doctor',
+  'skills',
+  'agents',
+  'models',
+  'update',
+  'gateway',
+  'rappterhub',
+  'clawhub',
 ];
+
+/**
+ * Modules that stay unregistered on purpose.
+ *
+ * Without this list the next person to notice an exported-but-unreachable
+ * module has no way to tell a decision from an oversight, and "make it
+ * reachable" is the obvious wrong move for all four.
+ */
+const DELIBERATELY_UNREGISTERED = ['memory', 'sessions', 'channels', 'send', 'login'];
 
 let commands: string[];
 
@@ -76,6 +98,10 @@ beforeAll(() => {
 describe('CLI command registration, observed from outside', () => {
   it.each(REGISTERED)('registers %s', (name) => {
     expect(commands).toContain(name);
+  });
+
+  it.each(DELIBERATELY_UNREGISTERED)('does not register %s', (name) => {
+    expect(commands).not.toContain(name);
   });
 
   it('parses a plausible command list at all', () => {
@@ -318,6 +344,252 @@ describe('CLI command registration, observed from outside', () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toMatch(/Usage: .*doctor/);
       expect(result.stdout).toContain('--json');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('skills list reads the registry lock file the runtime installs into', () => {
+    // The old implementation asked ClawHubClient, whose listInstalled() is
+    // `return []`. It printed "(none)" over any number of installed skills.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-skills-list-'));
+    try {
+      const skillsDir = join(home, '.openrappter', 'skills');
+      mkdirSync(skillsDir, { recursive: true });
+      writeFileSync(
+        join(skillsDir, 'openrappter-skills.lock'),
+        JSON.stringify({
+          skills: [
+            {
+              manifest: {
+                id: 'kody-w/rappterverse',
+                name: 'rappterverse',
+                version: '2.1.0',
+                description: 'Installed on disk, invisible to the old command',
+              },
+              path: join(skillsDir, 'kody-w--rappterverse'),
+              installedAt: '2026-01-01T00:00:00.000Z',
+              enabled: true,
+            },
+          ],
+        }),
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('skills', 'list', '--user'),
+        { encoding: 'utf-8', env: isolatedHomeEnv(home), timeout: 120_000 },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('kody-w/rappterverse');
+      expect(result.stdout).toContain('2.1.0');
+      expect(result.stdout).not.toContain('(none)');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('skills install refuses a reference it cannot install instead of reporting success', () => {
+    // ClawHubClient.install() wrote nothing and returned status 'success', and
+    // the command printed "Successfully installed" and exited 0 over it.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-skills-install-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('skills', 'install', 'not-a-repo-reference'),
+        { encoding: 'utf-8', env: isolatedHomeEnv(home), timeout: 120_000 },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('owner/repo');
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/Successfully installed/);
+      // Nothing was written for a reference that was never installable.
+      expect(existsSync(join(home, '.openrappter', 'skills', 'openrappter-skills.lock')))
+        .toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('skills install exits nonzero when the registry could not install it', () => {
+    // Well-formed reference, unresolvable repo: `SkillsRegistry.install` logs
+    // and returns null both offline and against a 404, and the command has to
+    // treat that as a failure rather than fall off the end at exit 0.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-skills-missing-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('skills', 'install', 'openrappter-tests/definitely-missing-skill-xyz'),
+        { encoding: 'utf-8', env: isolatedHomeEnv(home), timeout: 120_000 },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Failed to install skill');
+      expect(`${result.stdout}${result.stderr}`).not.toMatch(/Successfully installed/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('models get reports the model the runtime resolves, not the shadowed file', () => {
+    // hydrateManagedEnv copies .env into process.env only for keys that are
+    // not already set, so an exported OPENRAPPTER_MODEL is what every model
+    // read in the runtime sees. The command resolved the file first.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-models-get-'));
+    try {
+      mkdirSync(join(home, '.openrappter'), { recursive: true });
+      writeFileSync(
+        join(home, '.openrappter', '.env'),
+        'OPENRAPPTER_MODEL="model-from-file"\n',
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('models', 'get'),
+        {
+          encoding: 'utf-8',
+          env: { ...isolatedHomeEnv(home), OPENRAPPTER_MODEL: 'model-from-environment' },
+          timeout: 120_000,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe('model-from-environment');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('models set warns that an exported model still overrides what it just saved', () => {
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-models-set-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('models', 'set', 'claude-sonnet-4'),
+        {
+          encoding: 'utf-8',
+          env: { ...isolatedHomeEnv(home), OPENRAPPTER_MODEL: 'model-from-environment' },
+          timeout: 120_000,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      // The file really was written…
+      expect(readFileSync(join(home, '.openrappter', '.env'), 'utf-8'))
+        .toContain('claude-sonnet-4');
+      // …and is still ignored, which is the part the user has to be told.
+      expect(result.stdout).toContain('OPENRAPPTER_MODEL is exported');
+      expect(result.stdout).not.toContain('Restart the gateway');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('models set does not mistake its own hydrated .env for an exported override', () => {
+    // index.ts calls hydrateManagedEnv() before parsing, so the file's value is
+    // already in process.env when the action runs. A naive "process.env wins"
+    // check warns about a shadow that does not exist, on every single set.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-models-hydrated-'));
+    try {
+      mkdirSync(join(home, '.openrappter'), { recursive: true });
+      writeFileSync(
+        join(home, '.openrappter', '.env'),
+        'OPENRAPPTER_MODEL="model-from-file"\nGITHUB_TOKEN="ghp_not_a_real_token"\n',
+      );
+
+      const env = { ...isolatedHomeEnv(home) };
+      delete env.OPENRAPPTER_MODEL;
+
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('models', 'set', 'claude-sonnet-4'),
+        { encoding: 'utf-8', env, timeout: 120_000 },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain('OPENRAPPTER_MODEL is exported');
+      expect(result.stdout).toContain('Restart the gateway');
+
+      // Rewriting the file must not drop the other keys that live in it.
+      const written = readFileSync(join(home, '.openrappter', '.env'), 'utf-8');
+      expect(written).toContain('claude-sonnet-4');
+      expect(written).toContain('GITHUB_TOKEN');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('rappterhub hands its arguments to the Python runtime and returns its exit code', () => {
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-hub-delegate-'));
+    try {
+      const pyHome = join(home, 'runtime');
+      mkdirSync(join(pyHome, 'python', 'openrappter'), { recursive: true });
+      writeFileSync(join(pyHome, 'python', 'openrappter', 'cli.py'), '');
+      mkdirSync(join(pyHome, '.venv', 'bin'), { recursive: true });
+      const stub = join(pyHome, '.venv', 'bin', 'python');
+      writeFileSync(stub, '#!/bin/sh\necho "ARGV: $*"\nexit 7\n');
+      chmodSync(stub, 0o755);
+
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('rappterhub', 'install', 'kody-w/git-helper', '--force'),
+        {
+          encoding: 'utf-8',
+          env: { ...isolatedHomeEnv(home), OPENRAPPTER_HOME: pyHome },
+          timeout: 120_000,
+        },
+      );
+
+      expect(result.stdout).toContain(
+        'ARGV: -m openrappter.cli rappterhub install kody-w/git-helper --force',
+      );
+      // Not 0: a failed install must not read as a successful one just because
+      // the delegation itself worked.
+      expect(result.status).toBe(7);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('clawhub says the runtime is missing instead of answering as the chat model', () => {
+    // Before registration these words were a chat prompt: `openrappter
+    // rappterhub list` reached the agent and exited 0.
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-hub-missing-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('clawhub', 'list'),
+        {
+          encoding: 'utf-8',
+          env: { ...isolatedHomeEnv(home), OPENRAPPTER_HOME: join(home, 'nowhere') },
+          timeout: 120_000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Python runtime');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('gateway is the daemon runtime, not a second one', () => {
+    const home = mkdtempSync(join(tmpdir(), 'openrappter-gateway-help-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        tsxArgs('gateway', '--help'),
+        { encoding: 'utf-8', env: isolatedHomeEnv(home), timeout: 120_000 },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toMatch(/Usage: .*gateway/);
+      expect(result.stdout).toContain('--daemon');
+      // The abandoned cli/gateway.ts advertised these; the bare GatewayServer
+      // it started had no Assistant and no agent handler behind them.
+      expect(result.stdout).not.toContain('--bind');
+      expect(result.stdout).not.toContain('--token');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

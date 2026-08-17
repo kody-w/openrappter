@@ -169,28 +169,22 @@ provider:
     model: llama3.2
 
 memory:
-  backend: sqlite           # sqlite | json
-  path: ~/.openrappter/memory.db
-  embedding_model: all-MiniLM-L6-v2
-  chunk_size: 512
-  chunk_overlap: 64
+  provider: openai          # openai | gemini | local
+  chunkTokens: 512
+  chunkOverlap: 64
 
 gateway:
-  enabled: true
-  port: 8765
-  host: 127.0.0.1
-  rate_limit: 100           # requests per minute per connection
+  port: 18790
+  bind: loopback            # loopback | all
+  auth:
+    mode: none              # none | password
 
-shell:
-  allowlist: []             # if non-empty, only these commands are permitted
-  blocklist:
-    - "rm -rf /"
-    - "sudo rm"
-  require_approval: false   # set true to approve every shell command
-
-skills:
-  auto_load: true
-  directory: ~/.openrappter/skills
+security:
+  approvalPolicy: allowlist # deny | allowlist | full
+  allowlists:
+    commands: []            # if non-empty, only these commands are permitted
+    tools: []
+    domains: []
 
 logging:
   level: info               # debug | info | warn | error
@@ -216,7 +210,7 @@ logging:
           <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
           <tr><td><code>OPENRAPPTER_CONFIG</code></td><td>Override config file path</td><td><code>~/.openrappter/config.yaml</code></td></tr>
           <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td>Override log level</td><td><code>info</code></td></tr>
-          <tr><td><code>OPENRAPPTER_PORT</code></td><td>Override gateway port</td><td><code>8765</code></td></tr>
+          <tr><td><code>OPENRAPPTER_PORT</code></td><td>Override gateway port</td><td><code>18790</code></td></tr>
           <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td>Override default provider</td><td><code>copilot</code></td></tr>
         </tbody>
       </table>
@@ -595,7 +589,7 @@ channels:
       <p>The WebSocket gateway provides a real-time bidirectional interface to the agent runtime using the JSON-RPC 2.0 protocol. It enables web frontends, external services, and other processes to invoke agents, subscribe to events, and stream responses without polling.</p>
 
       <h3>Starting the Gateway</h3>
-      <pre>openrappter gateway --port 8765</pre>
+      <pre>openrappter gateway --port 18790</pre>
       <p>Configure it in <code>config.yaml</code> under <code>gateway.port</code>, <code>gateway.bind</code> (<code>loopback</code> or <code>all</code>) and <code>gateway.auth.mode</code>. The default port is <code>18790</code>.</p>
 
       <h3>Connection Lifecycle</h3>
@@ -1063,7 +1057,7 @@ console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port
           <tr><td><code>GATEWAY_SECRET</code></td><td>—</td><td>Bearer secret for gateway authentication</td></tr>
           <tr><td><code>OPENRAPPTER_CONFIG</code></td><td><code>~/.openrappter/config.yaml</code></td><td>Override config file location</td></tr>
           <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td><code>info</code></td><td>debug / info / warn / error</td></tr>
-          <tr><td><code>OPENRAPPTER_PORT</code></td><td><code>8765</code></td><td>Gateway WebSocket port</td></tr>
+          <tr><td><code>OPENRAPPTER_PORT</code></td><td><code>18790</code></td><td>Gateway WebSocket port</td></tr>
           <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td><code>copilot</code></td><td>Override default LLM provider</td></tr>
           <tr><td><code>OPENRAPPTER_NO_TELEMETRY</code></td><td>—</td><td>Set to any value to disable anonymous usage stats</td></tr>
         </tbody>

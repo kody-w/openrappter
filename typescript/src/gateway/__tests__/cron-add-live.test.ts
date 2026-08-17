@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GatewayServer } from '../server.js';
+import { CronService } from '../../cron/service.js';
 
 type Handler = (params: unknown, connection: unknown) => Promise<unknown>;
 
@@ -162,6 +163,109 @@ describe('cron.create is an alias, not a second implementation', () => {
     expect(res.scheduled).toBe(true);
     expect(sched.jobs).toHaveLength(1);
     expect(sched.jobs[0]).toMatchObject({ name: 'from-menu-bar', agentId: 'GoogleVoice' });
+  });
+});
+
+describe('cron.delete is an alias, not a second implementation', () => {
+  // The menu bar deletes through `cron.delete`. That alias filtered the JSON
+  // file store and returned { removed: true } without ever telling the running
+  // scheduler — the user was told the job was gone and it kept firing.
+  it('removes the job from the live scheduler, not just the file', async () => {
+    const server = await boot();
+    const sched = fakeScheduler();
+    server.setCronService(sched.service as never);
+    const methods = methodsOf(server);
+
+    const created = await methods.get('cron.add')!.handler(
+      { name: 'from-menu-bar', schedule: '* * * * *', agentId: 'GoogleVoice', message: 'check' },
+      {} as never,
+    ) as { id: string };
+    expect(sched.jobs).toHaveLength(1);
+
+    // Exactly the payload RpcClient.deleteCronJob sends.
+    const res = await methods.get('cron.delete')!.handler({ jobId: created.id }, {} as never);
+
+    expect(res).toMatchObject({ removed: true });
+    expect(sched.jobs, 'the scheduler itself must no longer hold it').toHaveLength(0);
+    expect(sched.service.list().map(j => j.id)).not.toContain(created.id);
+  });
+
+  it('refuses an unknown job id instead of reporting a successful delete', async () => {
+    const server = await boot();
+    server.setCronService(fakeScheduler().service as never);
+    await expect(
+      methodsOf(server).get('cron.delete')!.handler({ jobId: 'no-such-job' }, {} as never),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('refuses an empty job id', async () => {
+    const server = await boot();
+    server.setCronService(fakeScheduler().service as never);
+    await expect(
+      methodsOf(server).get('cron.delete')!.handler({ jobId: '' }, {} as never),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it('is literally the same handler as cron.remove, so it cannot drift again', async () => {
+    const server = await boot();
+    const methods = methodsOf(server);
+    expect(methods.get('cron.delete')!.handler).toBe(methods.get('cron.remove')!.handler);
+  });
+
+  // The symptom the user reports: not "it is still listed" but "it still ran".
+  it('stops the real CronService job from firing again', async () => {
+    const server = await boot();
+    const cron = new CronService();
+    const fired: string[] = [];
+    await cron.start({ execute: async (agentId, message) => { fired.push(`${agentId}:${message}`); return 'ok'; } });
+    // Wired exactly as the daemon wires it (src/index.ts).
+    server.setCronService({
+      list: () => cron.listJobs().map(j => ({ id: j.id, name: j.name, schedule: j.schedule, enabled: j.enabled })),
+      run: async (id: string) => { await cron.executeJob(id, 'force'); },
+      enable: async (id: string) => { await cron.updateJob(id, { enabled: true }); },
+      disable: async (id: string) => { await cron.updateJob(id, { enabled: false }); },
+      add: async (job: Record<string, unknown>) => {
+        const created = await cron.addJob({
+          name: String(job.name ?? 'job'), schedule: String(job.schedule ?? '* * * * *'),
+          agentId: job.agentId ? String(job.agentId) : undefined, message: String(job.message ?? ''),
+          enabled: job.enabled !== false,
+        });
+        return { id: created.id };
+      },
+      remove: async (id: string) => { await cron.removeJob(id); },
+    });
+    const methods = methodsOf(server);
+
+    const created = await methods.get('cron.add')!.handler(
+      { name: 'every minute', schedule: '* * * * *', agentId: 'ReproAgent', message: 'ping' },
+      {} as never,
+    ) as { id: string };
+    // Sanity: before the delete it does fire when its minute comes up. This is
+    // the same call the scheduler's timer makes on a matching minute.
+    expect(await cron.executeJob(created.id, 'force')).toBe('ok');
+    expect(fired).toHaveLength(1);
+
+    await methods.get('cron.delete')!.handler({ jobId: created.id }, {} as never);
+
+    // Now the scheduler tick has nothing left to run.
+    expect(await cron.executeJob(created.id, 'force')).toBeNull();
+    expect(fired, 'a deleted job must not fire again').toHaveLength(1);
+    expect(cron.listJobs()).toHaveLength(0);
+    cron.stop();
+  });
+
+  // Hosts with no live scheduler still delete from the file store.
+  it('still removes a file-only job when no scheduler is wired', async () => {
+    const server = await boot();
+    const methods = methodsOf(server);
+    const created = await methods.get('cron.add')!.handler(
+      { name: 'orphan', schedule: '* * * * *', message: 'x' }, {} as never,
+    ) as { id: string };
+
+    await methods.get('cron.delete')!.handler({ jobId: created.id }, {} as never);
+
+    const listed = await methods.get('cron.list')!.handler({}, {} as never) as Array<{ id: string }>;
+    expect(listed.map(j => j.id)).not.toContain(created.id);
   });
 });
 

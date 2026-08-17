@@ -157,6 +157,7 @@ export class ExecSafety {
   private strictDefaults: boolean;
   private auditLog: AuditEntry[] = [];
   private pendingApprovals = new Map<string, PendingApproval>();
+  private approvalListeners = new Set<(approval: PendingApproval) => void>();
   private approvalTokens = new Map<string, ApprovalToken>();
 
   constructor(safeBins?: Iterable<string>, options?: ExecSafetyOptions) {
@@ -272,6 +273,19 @@ export class ExecSafety {
   }
 
   /**
+   * Watch for commands entering the approval queue.
+   *
+   * Deliberately an observer rather than a direct call into the gateway: this
+   * module must stay importable without dragging the server behind it.
+   *
+   * Returns an unsubscribe.
+   */
+  onApprovalRequested(listener: (approval: PendingApproval) => void): () => void {
+    this.approvalListeners.add(listener);
+    return () => { this.approvalListeners.delete(listener); };
+  }
+
+  /**
    * Queue an unsafe command for user approval.
    * Returns a promise that resolves true if approved, false if rejected/timed-out.
    */
@@ -301,6 +315,14 @@ export class ExecSafety {
       };
 
       this.pendingApprovals.set(id, approval);
+
+      // Tell anyone watching. The Bar has an approval screen that listens for
+      // this; without it the list only refreshed when the screen was opened,
+      // so a command could sit waiting with nothing on screen to say so.
+      // A listener that throws must not take down the command it is announcing.
+      for (const listener of this.approvalListeners) {
+        try { listener(approval); } catch { /* a watcher cannot break the queue */ }
+      }
 
       // Record in audit log with pending status
       this.auditLog.push({

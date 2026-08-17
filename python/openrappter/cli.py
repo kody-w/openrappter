@@ -104,7 +104,21 @@ class AgentRegistry:
             from openrappter.agents.basic_agent import BasicAgent
         except ImportError:
             BasicAgent = None
-        
+
+        # Agents written to the portability contract import `agents.basic_agent`
+        # and nothing else from the tree, so the same file runs in the grail
+        # brainstem unchanged. This loader already gives discovered modules a
+        # synthetic `agents.` namespace, but it skips basic_agent.py, so that
+        # import resolved to nothing and the agent failed to load here while
+        # loading fine in the grail. Alias it, without clobbering a real
+        # top-level `agents` package if one is present.
+        if BasicAgent is not None:
+            import openrappter.agents as _agents_pkg
+            import openrappter.agents.basic_agent as _basic_agent_mod
+
+            sys.modules.setdefault("agents", _agents_pkg)
+            sys.modules.setdefault("agents.basic_agent", _basic_agent_mod)
+
         # Scan for agent files
         for file_path in self.agents_dir.glob("*_agent.py"):
             if file_path.name.startswith("_") or file_path.name == "basic_agent.py":

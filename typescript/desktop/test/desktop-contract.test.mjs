@@ -3,6 +3,13 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+// The readiness handshake was lifted out of main.ts so it could be driven by a
+// test — main.ts imports electron and cannot be loaded here. These text
+// assertions follow it to the module that now owns it.
+const gatewayReady = readFileSync(
+  new URL('../src/gateway-ready.ts', import.meta.url),
+  'utf8',
+);
 const runtimeEntry = readFileSync(
   new URL('../../src/index.ts', import.meta.url),
   'utf8',
@@ -92,7 +99,7 @@ test('desktop publishes one authenticated endpoint for tray and Swift Bar', () =
 
 test('desktop accepts gateway readiness only from its owned child IPC channel', () => {
   assert.match(main, /stdio: \['ignore', 'ignore', 'ignore', 'ipc'\]/);
-  assert.match(main, /openrappter-gateway-ready\/1\.0/);
+  assert.match(gatewayReady, /openrappter-gateway-ready\/1\.0/);
   assert.doesNotMatch(main, /desktop_probe_/);
   assert.match(runtimeEntry, /process\.send\?\.\(\{/);
   assert.match(runtimeEntry, /openrappter-gateway-ready\/1\.0/);
@@ -118,7 +125,7 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /runtime[\s\S]*node_modules[\s\S]*openrappter/);
   assert.match(main, /ShowAndTellAgent\.js/);
   assert.match(main, /--daemon/);
-  assert.match(main, /openrappter-gateway-ready\/1\.0/);
+  assert.match(gatewayReady, /openrappter-gateway-ready\/1\.0/);
   assert.match(main, /window\.loadFile\(uiIndex\)/);
   assert.match(preload, /gatewayUrl:/);
   assert.match(main, /onBeforeSendHeaders/);

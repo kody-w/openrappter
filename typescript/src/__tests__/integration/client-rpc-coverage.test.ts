@@ -47,16 +47,16 @@ const KNOWN_MISSING = new Set<string>([
   'zen.sessions',
   'zen.subscribe',
   'zen.unsubscribe',
-  // Live macOS Bar screens that cannot work: usage, logs, node pairing and
-  // skills. Being fixed now; each entry is removed as its method lands, and the
-  // last test in this file fails if one is left here after it starts existing.
+  // Live macOS Bar screens that cannot work: usage, node pairing and skills.
+  // Being fixed now; each entry is removed as its method lands, and the last
+  // test in this file fails if one is left here after it starts existing.
   // Approvals left this list in the exec.pending/exec.respond fix: they are
   // served by the ExecSafety engine ShellAgent actually blocks on, not by the
-  // unwired gateway/methods/exec-methods.ts module.
+  // unwired gateway/methods/exec-methods.ts module. Logs and session reset
+  // left in #183, wired to the daemon's launchd log files and the live
+  // sessionStore.
   'connections.disconnect',
   'connections.pair',
-  'logs.get',
-  'sessions.reset',
   'skills.install',
   'skills.list',
   'usage.history',

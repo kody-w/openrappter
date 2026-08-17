@@ -30,6 +30,48 @@ export const GATEWAY_READY_SCHEMA = 'openrappter-gateway-ready/1.0';
  */
 export const GATEWAY_READY_TIMEOUT_MS = 30_000;
 
+/**
+ * The environment variable an operator can use to widen that budget.
+ *
+ * The 30s default stays where it is, because a single Windows CI flake is not
+ * evidence for a different universal number and #223 leaves that question open.
+ * But the person who actually hits it — a cold first run, an antivirus scan, a
+ * loaded machine — could not do anything about it: `waitForGatewayReady` has
+ * always accepted a `timeoutMs`, and no caller passed one and nothing read an
+ * environment variable, so the documented escape hatch could only be reached by
+ * editing source.
+ *
+ * This does not decide what the budget should be. It lets someone who knows
+ * their machine raise it without waiting for that decision.
+ */
+export const GATEWAY_READY_TIMEOUT_ENV = 'OPENRAPPTER_GATEWAY_READY_TIMEOUT_MS';
+
+/** Upper bound, so a typo cannot hang desktop startup indefinitely. */
+const MAX_GATEWAY_READY_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Resolve the readiness budget from the environment, falling back to the
+ * default for anything that is not a plain positive integer within bounds.
+ *
+ * A bad value is ignored rather than fatal: refusing to launch the app because
+ * someone exported a malformed number would be a worse failure than the one
+ * this setting exists to relieve.
+ */
+export function resolveGatewayReadyTimeout(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env[GATEWAY_READY_TIMEOUT_ENV];
+  if (raw === undefined) return GATEWAY_READY_TIMEOUT_MS;
+
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return GATEWAY_READY_TIMEOUT_MS;
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return GATEWAY_READY_TIMEOUT_MS;
+  if (parsed > MAX_GATEWAY_READY_TIMEOUT_MS) return MAX_GATEWAY_READY_TIMEOUT_MS;
+  return parsed;
+}
+
 /** The part of a child process this handshake uses. */
 export interface ReadyChildProcess {
   readonly pid?: number;
@@ -58,7 +100,7 @@ export function waitForGatewayReady(
   child: ReadyChildProcess,
   options: WaitForGatewayReadyOptions,
 ): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? GATEWAY_READY_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? resolveGatewayReadyTimeout();
 
   return new Promise<void>((resolve, reject) => {
     let settled = false;

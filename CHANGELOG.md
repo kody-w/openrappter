@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The published agent counts described a developer's laptop, not the product**
+  — `architecture.html`, the README and two other pages advertised 37 TypeScript
+  agents. That number came from running `--list-agents` on a machine that also
+  loads the operator's own agents from `~/.openrappter/agents`, so it counted
+  three that no one else has. A fresh install ships **34 TypeScript and 20
+  Python agents**; the pages now say so, and a guard per runtime re-derives the
+  figure with `HOME` isolated so the published number cannot drift back to
+  whatever the author happens to have installed.
+
 - **Stop did not stop the brainstem** — `chat.abort` marked the run aborted and
   the interface went quiet, while the request carried on, produced a full reply,
   and had it discarded. Stop looked like it worked from every angle a person can

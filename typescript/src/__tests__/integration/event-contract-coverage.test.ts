@@ -80,7 +80,8 @@ function invokedMethodModules(): Set<string> {
  * emitted while still listed.
  */
 const LISTENED_BUT_NEVER_EMITTED = new Set([
-  'channel.status',
+  // `channel.status` came off this list when the gateway started emitting it
+  // on channels.connect/disconnect — see channel-status-event.test.ts.
   'agent.tool',
 ]);
 
@@ -89,7 +90,6 @@ const DECLARED_BUT_NEVER_EMITTED = new Set([
   'agent.tool',
   'channel',
   'channel.message',
-  'channel.status',
   'chat.message',
   'cron',
   'cron.complete',

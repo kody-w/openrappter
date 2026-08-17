@@ -7,13 +7,13 @@
  *
  *   - "should use pnpm for package management" — the real Dockerfile uses
  *     `npm ci` / `npm run build`; pnpm appears nowhere.
- *   - "should run as non-root user" (user = 'node') — the real Dockerfile
- *     defines NO `USER` directive, so the container runs as root. The compose
- *     file even mounts config at `/root/.openrappter`, confirming root. This
- *     vacuous test claimed a security property the image does not have. It is
- *     reported as a hardening gap rather than re-asserted (see PR notes); the
- *     suite must not codify the insecure state as "expected", nor go red for a
- *     pre-existing infra gap.
+ *   - "should run as non-root user" (user = 'node') — at the time of that
+ *     audit the real Dockerfile defined NO `USER` directive, so the container
+ *     ran as root, and the compose file mounted config at `/root/.openrappter`
+ *     to match. The vacuous test claimed a security property the image did not
+ *     have. Rather than codify the insecure state, it was reported as a
+ *     hardening gap; the image has since been fixed and the property is now
+ *     asserted against the real file below.
  *   - "should define gateway service" / optional `ollama` service / a
  *     `networks: { openrappter: { driver: bridge } }` block — the real
  *     docker-compose.yml defines services `openrappter` and `openrappter-dev`,
@@ -76,6 +76,25 @@ describe('Docker Parity', () => {
     it('runs the compiled entrypoint and sets production env', () => {
       expect(dockerfile).toMatch(/CMD\s+\[.*dist\/index\.js.*\]/);
       expect(dockerfile).toMatch(/NODE_ENV=production/);
+    });
+
+    it('drops root before running the app', () => {
+      // The image previously had no USER directive at all and ran as root.
+      const user = /^USER\s+(\S+)/m.exec(dockerfile);
+      expect(user, 'the Dockerfile must declare a USER').not.toBeNull();
+      expect(user![1]).not.toBe('root');
+
+      // A USER that comes before the privileged steps would be undone by them,
+      // so position matters as much as presence.
+      expect(dockerfile.indexOf('USER ')).toBeGreaterThan(dockerfile.indexOf('pip3 install'));
+    });
+
+    it('points HOME at a directory the unprivileged user owns', () => {
+      // The app resolves its config directory from os.homedir(). Left at
+      // Docker's default HOME=/root, an unprivileged process would be sent at a
+      // directory it cannot write.
+      expect(dockerfile).toMatch(/ENV\s+HOME=\/home\/node/);
+      expect(dockerfile).toMatch(/chown -R node:node/);
     });
   });
 

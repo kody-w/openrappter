@@ -6,7 +6,7 @@ services:
       - "18790:18790"
     volumes:
       - openrappter-data:/app/data
-      - openrappter-config:/root/.openrappter
+      - openrappter-config:/home/node/.openrappter
     environment:
       - NODE_ENV=production
       - OPENRAPPTER_HOST=0.0.0.0

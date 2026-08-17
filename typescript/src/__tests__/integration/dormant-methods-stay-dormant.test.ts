@@ -30,6 +30,43 @@ import { reserveTestPort } from '../support/test-port.js';
  */
 
 const METHODS_DIR = resolve(__dirname, '../../gateway/methods');
+const SERVER = resolve(__dirname, '../../gateway/server.ts');
+
+/**
+ * The five modules `GatewayServer` is meant to invoke.
+ *
+ * Anything else being called is the bug this file exists to catch. Listed
+ * explicitly so wiring a sixth is a deliberate edit here, not a silent one.
+ */
+const INTENTIONALLY_INVOKED = new Set([
+  'registerAuthMethods',
+  'registerBackupMethods',
+  'registerRappterMethods',
+  'registerShowcaseMethods',
+  'registerSurgeonMethods',
+]);
+
+/** Every `registerXMethods` export under gateway/methods, with its file. */
+function registerFunctions(): Array<{ file: string; fn: string }> {
+  const found: Array<{ file: string; fn: string }> = [];
+  for (const file of readdirSync(METHODS_DIR)) {
+    if (!file.endsWith('.ts') || file.includes('.test.')) continue;
+    const source = readFileSync(join(METHODS_DIR, file), 'utf-8');
+    for (const match of source.matchAll(/export function (register[A-Za-z]+)/g)) {
+      found.push({ file, fn: match[1] });
+    }
+  }
+  return found;
+}
+
+/** Is this function actually called in server.ts (ignoring comments)? */
+function invokedByServer(fn: string): boolean {
+  const source = readFileSync(SERVER, 'utf-8')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('*') && !line.trimStart().startsWith('//'))
+    .join('\n');
+  return new RegExp(`\\b${fn}\\s*\\(`).test(source);
+}
 
 /** Names that appear only in the dormant modules and in no real handler. */
 const DEMO_ONLY = [
@@ -68,6 +105,34 @@ describe('the dormant RPC method modules stay out of the gateway', () => {
       .filter((line) => /registerAllMethods\s*\(/.test(line))
       .filter((line) => !line.trimStart().startsWith('*'));
     expect(invocations).toEqual([]);
+  });
+
+  it('invokes no dormant module, one at a time either', () => {
+    // The registerAllMethods check above only covers the one-line shortcut.
+    // Wiring a single module directly — `registerChannelsMethods(this)` —
+    // passed every assertion in this file, while that module declares
+    // channels.connect and channels.list, which the real server already
+    // registers. It would have overridden real handlers with disconnected
+    // demos, which is exactly what the doc comment on registerBuiltInMethods
+    // warns about.
+    const unexpected = registerFunctions()
+      .filter(({ fn }) => !INTENTIONALLY_INVOKED.has(fn) && invokedByServer(fn))
+      .map(({ file, fn }) => `${fn} (${file})`)
+      .sort();
+    expect(unexpected).toEqual([]);
+  });
+
+  it('the intentionally-invoked five really are invoked', () => {
+    // Guards the list above. If one is renamed or dropped, this fails rather
+    // than silently shrinking the set of things anyone is checking.
+    const missing = [...INTENTIONALLY_INVOKED].filter((fn) => !invokedByServer(fn)).sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('finds register functions to check', () => {
+    // A rename that makes the scan match nothing would leave both assertions
+    // above passing over an empty list.
+    expect(registerFunctions().length).toBeGreaterThan(15);
   });
 
   it('answers none of the demo-only method names', async () => {

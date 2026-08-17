@@ -511,9 +511,11 @@ provider:
 
       <h3>Provider Registry Pattern</h3>
       <p>Providers are registered at <code>typescript/src/providers/registry.ts</code>. To add a custom provider, implement the <code>LLMProvider</code> interface and register it before starting the agent runtime:</p>
-      <pre><span class="kw">import</span> { registerProvider } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+      <pre><span class="kw">import</span> { ProviderRegistry } <span class="kw">from</span> <span class="str">'openrappter/dist/providers/registry.js'</span>;
 
-registerProvider(<span class="str">'my-provider'</span>, {
+<span class="kw">const</span> registry <span class="op">=</span> <span class="kw">new</span> <span class="typ">ProviderRegistry</span>();
+registry.<span class="fn">register</span>({
+  id<span class="op">:</span> <span class="str">'my-provider'</span>,
   <span class="kw">async</span> <span class="fn">chat</span>(messages, options) {
     <span class="cm">// call your API here</span>
     <span class="kw">return</span> { content<span class="op">:</span> response.text };
@@ -575,7 +577,7 @@ channels:
 
       <h3>Channel Registry Pattern</h3>
       <p>Channels are loaded from <code>typescript/src/channels/</code>. To implement a custom channel, extend the <code>BaseChannel</code> class and register it by name. The channel will then be available in the router and reachable via <code>MessageAgent</code>.</p>
-      <pre><span class="kw">import</span> { BaseChannel, registerChannel } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+      <pre><span class="kw">import</span> { BaseChannel } <span class="kw">from</span> <span class="str">'openrappter/dist/channels/base.js'</span>;
 
 <span class="kw">class</span> <span class="typ">MyChannel</span> <span class="kw">extends</span> <span class="typ">BaseChannel</span> {
   <span class="kw">async</span> <span class="fn">connect</span>() { <span class="cm">/* establish connection */</span> }
@@ -583,7 +585,8 @@ channels:
   <span class="kw">async</span> <span class="fn">receive</span>(handler) { <span class="cm">/* subscribe to incoming messages */</span> }
 }
 
-registerChannel(<span class="str">'my-channel'</span>, MyChannel);</pre>
+<span class="cm">// Registration is a plugin-context call, not a root import:</span>
+<span class="cm">// ctx.registerChannel('my-channel', MyChannel)</span></pre>
     </div>
 
     <!-- ── 7. WebSocket Gateway ── -->
@@ -593,70 +596,84 @@ registerChannel(<span class="str">'my-channel'</span>, MyChannel);</pre>
 
       <h3>Starting the Gateway</h3>
       <pre>openrappter gateway --port 8765</pre>
-      <p>Or enable it in <code>config.yaml</code> under <code>gateway.enabled: true</code> to start it automatically with the main process.</p>
+      <p>Configure it in <code>config.yaml</code> under <code>gateway.port</code>, <code>gateway.bind</code> (<code>loopback</code> or <code>all</code>) and <code>gateway.auth.mode</code>. The default port is <code>18790</code>.</p>
 
       <h3>Connection Lifecycle</h3>
       <ol>
-        <li>Client connects to <code>ws://localhost:8765</code></li>
-        <li>Server sends a <code>connected</code> event with session ID and server version</li>
-        <li>Client sends JSON-RPC requests; server responds with results or streaming chunks</li>
-        <li>Client subscribes to event channels using <code>subscribe</code> method</li>
-        <li>Server pushes events to subscribed clients as JSON-RPC notifications</li>
+        <li>Client opens a WebSocket to <code>ws://localhost:18790</code></li>
+        <li>Client sends a <code>connect</code> request identifying itself; a connection that never completes this handshake is refused</li>
+        <li>Server replies with a <code>hello-ok</code> payload carrying the server version</li>
+        <li>The connection is subscribed to all events (<code>*</code>) on success; use <code>unsubscribe</code> to narrow it</li>
+        <li>Server pushes events as <code>type: "event"</code> frames</li>
       </ol>
 
-      <h3>JSON-RPC Request / Response</h3>
-      <pre><span class="cm">// Request: invoke an agent</span>
+      <h3>Request / Response</h3>
+      <p>A request is any frame carrying an <code>id</code> and a <code>method</code>. A <code>jsonrpc</code> field is accepted and ignored, so JSON-RPC 2.0 clients interoperate — but <strong>responses are not JSON-RPC</strong>: they are <code>type: "res"</code> frames with an <code>ok</code> flag and a <code>payload</code>.</p>
+      <pre><span class="cm">// Handshake</span>
 {
-  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
-  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>,
-  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.execute"</span>,
+  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-000"</span>,
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"connect"</span>,
   <span class="str">"params"</span><span class="op">:</span> {
-    <span class="str">"agent"</span><span class="op">:</span> <span class="str">"ShellAgent"</span>,
-    <span class="str">"kwargs"</span><span class="op">:</span> { <span class="str">"action"</span><span class="op">:</span> <span class="str">"bash"</span>, <span class="str">"command"</span><span class="op">:</span> <span class="str">"uptime"</span> },
-    <span class="str">"stream"</span><span class="op">:</span> <span class="kw">false</span>
+    <span class="str">"client"</span><span class="op">:</span> { <span class="str">"id"</span><span class="op">:</span> <span class="str">"my-app"</span>, <span class="str">"version"</span><span class="op">:</span> <span class="str">"1.0.0"</span>, <span class="str">"platform"</span><span class="op">:</span> <span class="str">"node"</span>, <span class="str">"mode"</span><span class="op">:</span> <span class="str">"control"</span> },
+    <span class="str">"token"</span><span class="op">:</span> <span class="str">"&lt;gateway token&gt;"</span>
   }
 }
 
-<span class="cm">// Response</span>
+<span class="cm">// Send a message to the agent</span>
 {
-  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
   <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>,
-  <span class="str">"result"</span><span class="op">:</span> {
-    <span class="str">"output"</span><span class="op">:</span> <span class="str">"12:34  up 3 days, 4:21, 2 users, load averages: 1.23 0.98 0.84"</span>,
-    <span class="str">"exit_code"</span><span class="op">:</span> <span class="num">0</span>
-  }
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"chat.send"</span>,
+  <span class="str">"params"</span><span class="op">:</span> { <span class="str">"sessionKey"</span><span class="op">:</span> <span class="str">"my-session"</span>, <span class="str">"message"</span><span class="op">:</span> <span class="str">"what is my uptime?"</span> }
+}
+
+<span class="cm">// Response — acknowledgement only; the reply arrives later as an event</span>
+{
+  <span class="str">"type"</span><span class="op">:</span> <span class="str">"res"</span>,
+  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>,
+  <span class="str">"ok"</span><span class="op">:</span> <span class="kw">true</span>,
+  <span class="str">"payload"</span><span class="op">:</span> { <span class="str">"runId"</span><span class="op">:</span> <span class="str">"run_1a2b3c4d"</span>, <span class="str">"sessionKey"</span><span class="op">:</span> <span class="str">"my-session"</span>, <span class="str">"status"</span><span class="op">:</span> <span class="str">"accepted"</span> }
 }</pre>
 
-      <h3>Streaming Responses</h3>
-      <p>Set <code>"stream": true</code> in the request params to receive incremental token delivery. The server sends multiple <code>agent.chunk</code> notifications followed by a final <code>agent.done</code> notification with the complete result.</p>
-      <pre><span class="cm">// Streaming chunk notification</span>
+      <h3>Receiving the Reply</h3>
+      <p><code>chat.send</code> returns as soon as the run is accepted. The answer arrives as a <code>chat</code> event on the same connection, matched by <code>runId</code>.</p>
+      <div class="info-box">
+        <strong>There is no token-level streaming.</strong> The gateway sends the completed reply in a single <code>chat</code> event with <code>state: "final"</code>, deliberately — incremental deltas duplicate output across multi-turn tool-call loops. Failures arrive the same way with <code>state: "error"</code> and an <code>errorMessage</code>.
+      </div>
+      <pre><span class="cm">// Final reply</span>
 {
-  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
-  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.chunk"</span>,
-  <span class="str">"params"</span><span class="op">:</span> { <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>, <span class="str">"delta"</span><span class="op">:</span> <span class="str">"Here is the "</span> }
-}
-{
-  <span class="str">"jsonrpc"</span><span class="op">:</span> <span class="str">"2.0"</span>,
-  <span class="str">"method"</span><span class="op">:</span> <span class="str">"agent.done"</span>,
-  <span class="str">"params"</span><span class="op">:</span> { <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-001"</span>, <span class="str">"result"</span><span class="op">:</span> { <span class="str">"output"</span><span class="op">:</span> <span class="str">"Here is the analysis..."</span> } }
+  <span class="str">"type"</span><span class="op">:</span> <span class="str">"event"</span>,
+  <span class="str">"event"</span><span class="op">:</span> <span class="str">"chat"</span>,
+  <span class="str">"payload"</span><span class="op">:</span> {
+    <span class="str">"runId"</span><span class="op">:</span> <span class="str">"run_1a2b3c4d"</span>,
+    <span class="str">"sessionKey"</span><span class="op">:</span> <span class="str">"my-session"</span>,
+    <span class="str">"state"</span><span class="op">:</span> <span class="str">"final"</span>,
+    <span class="str">"message"</span><span class="op">:</span> { <span class="str">"role"</span><span class="op">:</span> <span class="str">"assistant"</span>, <span class="str">"content"</span><span class="op">:</span> [{ <span class="str">"type"</span><span class="op">:</span> <span class="str">"text"</span>, <span class="str">"text"</span><span class="op">:</span> <span class="str">"up 3 days, 4:21"</span> }] }
+  }
 }</pre>
 
       <h3>Event Types</h3>
+      <p>Subscription is one method — <code>subscribe</code> with <code>{"events": ["chat", "cron.run"]}</code> — not a method per event. An authenticated connection already receives everything, so <code>unsubscribe</code> is what narrows the stream.</p>
       <table class="doc-table">
         <thead>
-          <tr><th>Event</th><th>Description</th><th>Subscribe Method</th></tr>
+          <tr><th>Event</th><th>Description</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>agent.*</code></td><td>Agent execution lifecycle (start, chunk, done, error)</td><td><code>subscribe.agent</code></td></tr>
-          <tr><td><code>chat.*</code></td><td>Incoming and outgoing chat messages</td><td><code>subscribe.chat</code></td></tr>
-          <tr><td><code>channel.*</code></td><td>Channel connect/disconnect/error events</td><td><code>subscribe.channel</code></td></tr>
-          <tr><td><code>cron.*</code></td><td>Scheduled job fire and completion events</td><td><code>subscribe.cron</code></td></tr>
-          <tr><td><code>presence.*</code></td><td>Connected client join/leave events</td><td><code>subscribe.presence</code></td></tr>
+          <tr><td><code>chat</code>, <code>chat.message</code></td><td>Agent replies and chat traffic</td></tr>
+          <tr><td><code>agent</code>, <code>agent.stream</code>, <code>agent.tool</code></td><td>Agent execution lifecycle</td></tr>
+          <tr><td><code>channel</code>, <code>channel.message</code>, <code>channel.status</code></td><td>Channel traffic and connect/disconnect state</td></tr>
+          <tr><td><code>cron</code>, <code>cron.run</code>, <code>cron.complete</code></td><td>Scheduled job fire and completion</td></tr>
+          <tr><td><code>approval</code></td><td>A command is waiting for your approval</td></tr>
+          <tr><td><code>presence</code>, <code>heartbeat</code></td><td>Connected client join/leave, and liveness</td></tr>
+          <tr><td><code>rappter</code>, <code>rappter.summon</code></td><td>Twin lifecycle</td></tr>
+          <tr><td><code>shutdown</code>, <code>error</code></td><td>Server stopping, and error notifications</td></tr>
         </tbody>
       </table>
 
       <h3>Rate Limiting</h3>
-      <p>The gateway enforces a per-connection rate limit (default: 100 requests/minute). Exceeding the limit results in a JSON-RPC error response with code <code>-32029</code> (rate limit exceeded) and a <code>retry_after</code> field in milliseconds. Configure the limit in <code>config.yaml</code> under <code>gateway.rate_limit</code>.</p>
+      <p>The gateway allows 100 requests per minute per connection. Exceeding it returns an error frame with code <code>-32001</code> and the message <code>Rate limit exceeded</code>. Frame-carrying methods (currently <code>zen.publish</code>) draw on a separate budget of 120 frames per 2 seconds, so neither can exhaust the other's allowance.</p>
+      <div class="info-box">
+        <strong>Not configurable.</strong> These limits are compile-time constants; there is no <code>config.yaml</code> key for them, and no <code>retry_after</code> is sent.
+      </div>
     </div>
 
     <!-- ── Twins ── -->
@@ -758,15 +775,13 @@ grouped by file with line-level comments.</span></pre>
 
       <h3>Skill Execution</h3>
       <p>When a skill is installed, OpenRappter wraps it as a <code>ClawHubSkillAgent</code> instance that extends <code>BasicAgent</code>. The skill's parameters become the agent's metadata parameters. Scripts in the <code>scripts/</code> directory are executed via <code>ShellAgent</code> with the skill's directory as the working directory.</p>
-      <pre><span class="kw">import</span> { loadSkill } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+      <pre><span class="kw">import</span> { clawhubInstall, parseSkillFile, ClawHubSkillAgent }
+  <span class="kw">from</span> <span class="str">'openrappter/dist/clawhub.js'</span>;
 
-<span class="cm">// Skills auto-load at startup if config.skills.auto_load is true</span>
-<span class="cm">// Or load manually:</span>
-<span class="kw">const</span> prReviewer <span class="op">=</span> <span class="kw">await</span> <span class="fn">loadSkill</span>(<span class="str">'gh-pr-reviewer'</span>);
-<span class="kw">const</span> review <span class="op">=</span> <span class="kw">await</span> prReviewer.<span class="fn">execute</span>({
-  pr_url<span class="op">:</span> <span class="str">'https://github.com/org/repo/pull/42'</span>,
-  focus<span class="op">:</span> <span class="str">'security'</span>
-});</pre>
+<span class="cm">// Install, then wrap the SKILL.md as an agent</span>
+<span class="kw">await</span> <span class="fn">clawhubInstall</span>(<span class="str">'gh-pr-reviewer'</span>);
+<span class="kw">const</span> skill <span class="op">=</span> <span class="fn">parseSkillFile</span>(skillMarkdownPath);
+<span class="kw">const</span> prReviewer <span class="op">=</span> <span class="kw">new</span> <span class="typ">ClawHubSkillAgent</span>(skill);</pre>
 
       <h3>Lock File</h3>
       <p>Installed skills are tracked in a lock file at <code>~/.openrappter/skills/.clawhub/lock.json</code>. The lock file records the installed version, install date, and a content hash.</p>
@@ -859,19 +874,21 @@ results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(a
   README.md</pre>
 
       <pre><span class="cm">// index.js — minimal plugin implementing onLoad hook</span>
-<span class="kw">import</span> { registerStorageAdapter } <span class="kw">from</span> <span class="str">'openrappter/plugins'</span>;
-<span class="kw">import</span> { NotionStorageAdapter } <span class="kw">from</span> <span class="str">'./notion-adapter.js'</span>;
+<span class="kw">import</span> { NotionMemoryBackend } <span class="kw">from</span> <span class="str">'./notion-backend.js'</span>;
 
 <span class="kw">export async function</span> <span class="fn">onLoad</span>(ctx) {
-  <span class="fn">registerStorageAdapter</span>(<span class="str">'notion'</span>, <span class="kw">new</span> <span class="typ">NotionStorageAdapter</span>({
-    token<span class="op">:</span> ctx.config.<span class="fn">get</span>(<span class="str">'notion.token'</span>),
-    databaseId<span class="op">:</span> ctx.config.<span class="fn">get</span>(<span class="str">'notion.database_id'</span>)
-  }));
+  <span class="cm">// Registration comes from the context, not from an import.</span>
+  ctx.<span class="fn">registerMemoryBackend</span>({
+    id<span class="op">:</span> <span class="str">'notion'</span>,
+    store<span class="op">:</span> (entry) <span class="op">=&gt;</span> backend.<span class="fn">store</span>(entry),
+    search<span class="op">:</span> (query) <span class="op">=&gt;</span> backend.<span class="fn">search</span>(query),
+    <span class="str">'delete'</span><span class="op">:</span> (id) <span class="op">=&gt;</span> backend.<span class="fn">remove</span>(id),
+  });
   ctx.logger.<span class="fn">info</span>(<span class="str">'Notion memory backend registered'</span>);
 }</pre>
 
       <h3>SDK Hooks API</h3>
-      <p>The plugin SDK (<code>openrappter/plugins</code>) exports registration functions for each extensible subsystem: <code>registerStorageAdapter</code>, <code>registerChannel</code>, <code>registerProvider</code>, <code>registerMiddleware</code>, and <code>registerEventHandler</code>. The <code>ctx</code> object passed to each hook provides access to config, logger, memory, and the agent registry.</p>
+      <p>The plugin SDK (<code>openrappter/plugins</code>) builds a context via <code>createPluginContext()</code> carrying <code>registerTool</code>, <code>registerChannel</code>, <code>registerHook</code>, <code>registerRoute</code>, and <code>registerMemoryBackend</code>. The <code>ctx</code> object passed to each hook provides access to config, logger, memory, and the agent registry.</p>
     </div>
 
     <!-- ── 11. Security ── -->
@@ -948,12 +965,13 @@ gateway:
 
       <h3>File Watcher and Live Reload</h3>
       <p>The config loader registers a file system watcher on the config file. When a change is detected, the new file is read, validated, and diffed against the current config. Fields that support hot-reload are updated in place; fields that require a restart (e.g. <code>memory.backend</code>) emit a <code>config.restart_required</code> warning without crashing the process.</p>
-      <pre><span class="kw">import</span> { getConfig, onConfigChange } <span class="kw">from</span> <span class="str">'openrappter/config'</span>;
+      <pre><span class="kw">import</span> { ConfigWatcher } <span class="kw">from</span> <span class="str">'openrappter/dist/config/index.js'</span>;
 
-<span class="fn">onConfigChange</span>((newConfig, diff) <span class="op">=&gt;</span> {
-  console.<span class="fn">log</span>(<span class="str">'Config updated:'</span>, diff);
-  <span class="cm">// diff contains only the fields that changed</span>
-});</pre>
+<span class="kw">const</span> watcher <span class="op">=</span> <span class="kw">new</span> <span class="typ">ConfigWatcher</span>({
+  path<span class="op">:</span> configPath,
+  <span class="fn">onReload</span>(config) { console.<span class="fn">log</span>(<span class="str">'config reloaded'</span>, config.gateway<span class="op">?.</span>port); },
+});
+<span class="kw">await</span> watcher.<span class="fn">start</span>();</pre>
 
       <h3>Migration System</h3>
       <p>As OpenRappter evolves, config schemas change. The migration system tracks the config format version in a <code>_version</code> field and automatically upgrades older config files to the current schema. Migrations are defined as transform functions in <code>typescript/src/config/migrations/</code>. The original file is backed up to <code>config.yaml.bak</code> before any migration is applied.</p>
@@ -966,11 +984,14 @@ provider:
     api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}</pre>
 
       <h3>Programmatic Config Access</h3>
-      <pre><span class="kw">import</span> { getConfig } <span class="kw">from</span> <span class="str">'openrappter/config'</span>;
+      <p>The loader is <code>loadConfig</code>. There is no <code>openrappter/config</code> entry point — the package publishes no <code>exports</code> map, so a subpath import has to name the built file.</p>
+      <pre><span class="kw">import</span> { loadConfig } <span class="kw">from</span> <span class="str">'openrappter/dist/config/index.js'</span>;
 
-<span class="kw">const</span> config <span class="op">=</span> <span class="fn">getConfig</span>();
-console.<span class="fn">log</span>(config.provider.default);   <span class="cm">// "copilot"</span>
-console.<span class="fn">log</span>(config.gateway.port);        <span class="cm">// 8765</span></pre>
+<span class="kw">const</span> config <span class="op">=</span> <span class="fn">loadConfig</span>();
+console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port);      <span class="cm">// 18790</span></pre>
+      <div class="info-box">
+        <strong>That is an internal path, not a stable API.</strong> It works because nothing stops it, and it can move in any release. Config keys are validated by the Zod schema above; <code>provider</code> is not one of them.
+      </div>
     </div>
 
     <!-- ── 13. API Reference ── -->
@@ -998,30 +1019,10 @@ console.<span class="fn">log</span>(config.gateway.port);        <span class="cm
       </table>
 
       <h3>Programmatic API</h3>
-      <p>Import OpenRappter as a library in your TypeScript or JavaScript project:</p>
-      <pre><span class="kw">import</span> {
-  BasicAgent,
-  ShellAgent,
-  MemoryAgent,
-  BroadcastManager,
-  AgentRouter,
-  SubAgentManager,
-  loadSkill,
-  getConfig,
-  onConfigChange,
-  registerProvider,
-  registerChannel,
-  startGateway
-} <span class="kw">from</span> <span class="str">'openrappter'</span>;
-
-<span class="cm">// Instantiate and run an agent</span>
-<span class="kw">const</span> shell <span class="op">=</span> <span class="kw">new</span> <span class="typ">ShellAgent</span>();
-<span class="kw">const</span> result <span class="op">=</span> <span class="kw">await</span> shell.<span class="fn">execute</span>({ action<span class="op">:</span> <span class="str">'bash'</span>, command<span class="op">:</span> <span class="str">'date'</span> });
-console.<span class="fn">log</span>(result.output);
-
-<span class="cm">// Start the gateway programmatically</span>
-<span class="kw">const</span> gw <span class="op">=</span> <span class="kw">await</span> <span class="fn">startGateway</span>({ port<span class="op">:</span> <span class="num">8765</span> });
-gw.<span class="fn">on</span>(<span class="str">'agent.done'</span>, (event) <span class="op">=&gt;</span> console.<span class="fn">log</span>(event));</pre>
+      <div class="info-box">
+        <strong>OpenRappter does not ship a library API.</strong> The package's <code>main</code> is the CLI: importing <code>openrappter</code> runs <code>program.parse()</code> and drops you into the interactive agent. The only symbol it exports is <code>describeCopilotAuth</code>.
+      </div>
+      <p>The supported way to drive OpenRappter from another program is the <a href="#gateway">WebSocket gateway</a> — it is the same interface the macOS Bar and the web dashboard use, it is versioned, and it is authenticated.</p>
 
       <h3>Data Sloshing Signals</h3>
       <p>The slosh pipeline populates a context object before each <code>perform()</code> call. Access these signals with <code>getSignal(key)</code> using dot notation.</p>
@@ -1069,31 +1070,20 @@ gw.<span class="fn">on</span>(<span class="str">'agent.done'</span>, (event) <sp
       </table>
 
       <h3>TypeScript Exports</h3>
-      <pre><span class="cm">// Core agents</span>
-<span class="kw">export</span> { BasicAgent, AgentMetadata, AgentResult } <span class="kw">from</span> <span class="str">'./agents/BasicAgent'</span>;
-<span class="kw">export</span> { ShellAgent } <span class="kw">from</span> <span class="str">'./agents/ShellAgent'</span>;
-<span class="kw">export</span> { MemoryAgent } <span class="kw">from</span> <span class="str">'./agents/MemoryAgent'</span>;
-<span class="kw">export</span> { OuroborosAgent } <span class="kw">from</span> <span class="str">'./agents/OuroborosAgent'</span>;
+      <p>The classes below exist and are exported from their own modules, but no barrel re-exports them and the package root does not expose them. Reaching one means importing its built file directly, which is an internal path that can move in any release.</p>
+      <pre><span class="cm">// Agents</span>
+<span class="str">'openrappter/dist/agents/BasicAgent.js'</span>    <span class="cm">// BasicAgent</span>
+<span class="str">'openrappter/dist/agents/ShellAgent.js'</span>    <span class="cm">// ShellAgent</span>
+<span class="str">'openrappter/dist/agents/MemoryAgent.js'</span>   <span class="cm">// MemoryAgent</span>
 
 <span class="cm">// Multi-agent</span>
-<span class="kw">export</span> { BroadcastManager } <span class="kw">from</span> <span class="str">'./agents/broadcast'</span>;
-<span class="kw">export</span> { AgentRouter } <span class="kw">from</span> <span class="str">'./agents/router'</span>;
-<span class="kw">export</span> { SubAgentManager } <span class="kw">from</span> <span class="str">'./agents/subagent'</span>;
+<span class="str">'openrappter/dist/agents/broadcast.js'</span>     <span class="cm">// BroadcastManager</span>
+<span class="str">'openrappter/dist/agents/router.js'</span>        <span class="cm">// AgentRouter</span>
+<span class="str">'openrappter/dist/agents/subagent.js'</span>      <span class="cm">// SubAgentManager</span>
 
-<span class="cm">// Skills</span>
-<span class="kw">export</span> { ClawHubClient, loadSkill, ClawHubSkillAgent } <span class="kw">from</span> <span class="str">'./clawhub'</span>;
-
-<span class="cm">// Gateway</span>
-<span class="kw">export</span> { startGateway, GatewayServer } <span class="kw">from</span> <span class="str">'./gateway'</span>;
-
-<span class="cm">// Config</span>
-<span class="kw">export</span> { getConfig, onConfigChange, configSchema } <span class="kw">from</span> <span class="str">'./config'</span>;
-
-<span class="cm">// Providers</span>
-<span class="kw">export</span> { registerProvider, LLMProvider } <span class="kw">from</span> <span class="str">'./providers'</span>;
-
-<span class="cm">// Channels</span>
-<span class="kw">export</span> { BaseChannel, registerChannel } <span class="kw">from</span> <span class="str">'./channels'</span>;</pre>
+<span class="cm">// Gateway and config</span>
+<span class="str">'openrappter/dist/gateway/server.js'</span>       <span class="cm">// GatewayServer</span>
+<span class="str">'openrappter/dist/config/index.js'</span>         <span class="cm">// loadConfig, saveConfig, ConfigWatcher</span></pre>
     </div>
 
   </main>

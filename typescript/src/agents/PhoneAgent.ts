@@ -38,7 +38,7 @@ export const __manifest__ = {
     'Place real phone calls on the owner\'s behalf with a goal and hard limits, negotiate, and stop for approval rather than committing outside them.',
   author: 'Kody Wildfeuer',
   ring: 'ga',
-  capabilities: ['network-access', 'credential-access', 'process-exec'],
+  capabilities: ['network', 'credential-access', 'process-exec'],
   tags: ['openrappter', 'phone', 'telephony', 'second-brain'],
   category: 'communication',
   quality_tier: 'official',

@@ -18,6 +18,34 @@ function generateId(): string {
   return `job_${Date.now()}_${++idCounter}`;
 }
 
+/**
+ * The agent a job gets when its creator names none.
+ *
+ * This is not a free-form label. Whatever it is, the daemon executor has to be
+ * able to resolve it, or every job created without an explicit agent is
+ * scheduled, persisted, fired on time and then fails to find an agent —
+ * the third way a cron job could look healthy and do nothing, after #166 (a
+ * deleted job kept running) and #174 (a job fired with an empty prompt).
+ */
+export const DEFAULT_CRON_AGENT_ID = 'main';
+
+/**
+ * Whether a job's agent id means "the built-in assistant" rather than a named
+ * agent from the registry.
+ *
+ * Exported because the invariant that matters spans two files that had no
+ * reason to agree: `addJob` picks the default here, and the executor in
+ * `index.ts` decides what it accepts. They disagreed, and nothing could see it
+ * because neither file is wrong on its own.
+ */
+export function isAssistantCronAgent(agentId: string, assistantName: string): boolean {
+  return (
+    agentId === 'Assistant' ||
+    agentId === assistantName ||
+    agentId === DEFAULT_CRON_AGENT_ID
+  );
+}
+
 function generateLogId(): string {
   return `log_${Date.now()}_${++idCounter}`;
 }
@@ -189,7 +217,7 @@ export class CronService {
       id: generateId(),
       name: input.name,
       schedule: input.schedule,
-      agentId: input.agentId ?? 'main',
+      agentId: input.agentId ?? DEFAULT_CRON_AGENT_ID,
       message: input.message,
       enabled: input.enabled ?? true,
       createdAt: now,

@@ -726,7 +726,7 @@ async function startGatewayInProcess(opts?: {
   if (isTwin) {
     log(`${EMOJI} Twin "${opts?.instance}" — cron and outbound channels stay with the alpha.`);
   } else try {
-    const { CronService } = await import('./cron/service.js');
+    const { CronService, isAssistantCronAgent } = await import('./cron/service.js');
     const { createCronGatewayAdapter } = await import('./cron/gateway-adapter.js');
     const cronService = new CronService();
     const cronFile = path.join(HOME_DIR, 'cron.json');
@@ -741,7 +741,7 @@ async function startGatewayInProcess(opts?: {
         console.log(`${EMOJI} Cron executing: agent=${agentId} message="${message.slice(0, 60)}"`);
         try {
           // Use the main assistant for 'Assistant' agentId
-          if (agentId === 'Assistant' || agentId === NAME) {
+          if (isAssistantCronAgent(agentId, NAME)) {
             // Each cron job gets its own conversation key to prevent
             // poisoned history from one job breaking others
             const cronKey = `cron_${agentId}_${Date.now()}`;

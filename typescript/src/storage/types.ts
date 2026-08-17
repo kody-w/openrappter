@@ -39,8 +39,23 @@ export interface StorageAdapter {
   getAllConfig(): Promise<Record<string, string>>;
 
   // Transactions
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
+  transaction<T>(fn: SyncTransactionCallback<T>): Promise<T>;
 }
+
+/**
+ * A transaction callback must be synchronous.
+ *
+ * SQLite transactions are held open on a single connection and are executed
+ * synchronously by better-sqlite3. A callback that returns a promise cannot be
+ * run inside one: better-sqlite3 aborts (and rolls back) as soon as it sees a
+ * promise, while the promise keeps running and writing *outside* the
+ * transaction it believes it is in.
+ *
+ * This type makes an async callback a compile-time error: when `T` is a
+ * promise, the required parameter type collapses to `never`.
+ */
+export type SyncTransactionCallback<T> = () => T &
+  (T extends PromiseLike<unknown> ? never : unknown);
 
 export interface Session {
   id: string;

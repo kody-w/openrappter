@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A slow machine can start the desktop app** — the app waits for the gateway
+  it spawned to report ready and then kills it. That budget only ever runs out
+  when the gateway is alive and merely slow (a genuine startup failure is
+  reported immediately by its exit), which is a cold first run, an antivirus
+  scan or a loaded machine. `OPENRAPPTER_GATEWAY_READY_TIMEOUT_MS` now sets it;
+  the 30-second default is unchanged. A malformed value is ignored rather than
+  fatal, and the accepted maximum is ten minutes.
+
 - **One chat, both brains** — the brainstem runs as its own process speaking
   `POST /chat` while the OpenRappter runtime answers `chat.send`, so holding a
   conversation across both used to mean two chat windows. `chat.send` now takes
@@ -30,6 +38,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+
+- **A cron job created without an agent fired on time and then found no agent**
+  — `addJob` defaulted the agent to `main` while the daemon executor resolved
+  only `Assistant` and the runtime's own name, so every job created without an
+  explicit agent was accepted, persisted, scheduled and fired exactly on time
+  before failing with `Agent not found: main`. Both sides now share one
+  constant and one resolver.
+
+- **The channels screen went stale after the first load** — it listened for
+  `channel.status` and nothing ever emitted it, so connecting or disconnecting
+  a channel left the previous state on screen until reload. Connecting and
+  disconnecting now notify subscribers with the changed channel, in the same
+  shape `channels.list` returns.
+
+- **`config validate` called a security policy valid while nothing enforced it**
+  — a config setting `approvalPolicy: deny` was told `Configuration is valid.`,
+  and the ignored-key report stayed silent too because the section really is in
+  the schema. Validation now names sections that are valid but enforced by
+  nothing, and says what does the enforcing instead.
+
+- **The agent that places phone calls declared a capability that does not exist**
+  — `PhoneAgent` declared `network-access`, which is not in the vocabulary; the
+  word is `network`, used by every other networked agent. Any filter selecting
+  on `network` skipped the one agent that dials real people. Declared
+  capabilities are now checked against the list `conformance.py` defines.
 
 - **The published agent counts described a developer's laptop, not the product**
   — `architecture.html`, the README and two other pages advertised 37 TypeScript
@@ -260,6 +293,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and desktop smoke tests were hardened for concurrent and Windows runs.
 
 ### Security
+
+- **Turning authentication on no longer severs the neighborhood** — a rappter
+  contacting a peer sent no credential at all, while `/twin` and `/chat` both
+  authenticate before parsing. Those were compatible only because
+  authentication was off by default; a peer with a token refused every sender,
+  including one whose environment held the credential. Both wires now present
+  `Authorization: Bearer` when `OPENRAPPTER_TOKEN` is set, and send no
+  authorization header at all when there is none rather than a malformed one.
 
 - **The published container ran everything as root** — the root `Dockerfile`
   declared no `USER`, and `docker-compose.yml` mounted the config volume at

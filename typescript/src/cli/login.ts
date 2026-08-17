@@ -30,9 +30,13 @@ export function registerLoginCommand(program: Command): void {
       try {
         const result = await initiateOAuthFlow(provider, { port });
         console.log('\n\x1b[32mAuthentication successful!\x1b[0m');
-        console.log(`\nAccess token: ${result.accessToken.substring(0, 20)}...`);
+        // Deliberately prints nothing derived from the tokens. A prefix is
+        // still credential material: it goes to terminal scrollback and to CI
+        // logs, and it narrows a brute force. The user does not need to see a
+        // token to know the flow worked.
+        console.log(`Signed in to ${provider}.`);
         if (result.refreshToken) {
-          console.log(`Refresh token: ${result.refreshToken.substring(0, 20)}...`);
+          console.log('A refresh token was issued.');
         }
         console.log('\nCredentials have been saved to your config.');
       } catch (err) {

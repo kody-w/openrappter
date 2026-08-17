@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSecrets, TOO_DEEP } from './redact.js';
+import { redactSecrets, redactSecretsInText, TOO_DEEP } from './redact.js';
 
 const secret = (tag: string): string => ['S3CR3T', tag, 'v1'].join('-');
 
@@ -55,5 +55,34 @@ describe('the depth limit', () => {
     const blob = JSON.stringify(redactSecrets(node));
     expect(blob).not.toContain(value);
     expect(blob).not.toContain(TOO_DEEP);
+  });
+});
+
+describe('redactSecretsInText — the same judgement applied to a log line', () => {
+  it('blanks a secret assigned inside free text', () => {
+    const value = secret('line');
+    const out = redactSecretsInText(`auth failed apiKey=${value} status=401`);
+    expect(out).not.toContain(value);
+    expect(out).toContain('status=401');
+  });
+
+  it('blanks the token after an auth scheme, not just the scheme word', () => {
+    const value = secret('bearer');
+    expect(redactSecretsInText(`Authorization: Bearer ${value}`)).not.toContain(value);
+  });
+
+  it('blanks a secret in a quoted pair a JSON parse never reached', () => {
+    const value = secret('quoted');
+    expect(redactSecretsInText(`{"token":"${value}"}`)).not.toContain(value);
+  });
+
+  it('leaves fields that merely look secret alone', () => {
+    expect(redactSecretsInText('keyCount=3 monkey=curious keyword=key'))
+      .toBe('keyCount=3 monkey=curious keyword=key');
+  });
+
+  it('leaves text with no assignment in it untouched', () => {
+    expect(redactSecretsInText('Gateway server started on 127.0.0.1:1234'))
+      .toBe('Gateway server started on 127.0.0.1:1234');
   });
 });

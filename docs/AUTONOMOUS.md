@@ -113,7 +113,8 @@ curl -sS -X POST http://127.0.0.1:18790 \
 ```
 
 Useful methods: `agents.list`, `chat.send`, `chat.session`, `chat.list`,
-`chat.messages`, `chat.delete`, `config.get`, `config.set`.
+`chat.messages`, `chat.delete`, `sessions.reset`, `logs.get`, `config.get`,
+`config.set`.
 
 To enumerate everything this build actually registers rather than trusting this
 list, ask for a method that cannot exist and read the registry from the source:

@@ -40,3 +40,32 @@ export function redactSecrets(obj: unknown, depth = 0): unknown {
   }
   return result;
 }
+
+/**
+ * Redact `key=value` / `key: value` pairs inside a line of free text.
+ *
+ * `redactSecrets` judges object keys, which is everything the config printer
+ * and the logger's `data` field need. A log *line* is different: by the time it
+ * reaches disk the secret is inside a string — `Authorization: Bearer ghp_…`,
+ * `apiKey=…` — where there is no object key left to judge, so `redactSecrets`
+ * passes it through untouched.
+ *
+ * This is deliberately not a second answer to "is this a secret?": the decision
+ * still belongs to `isSecretKey`, and the marker is still `REDACTED`. Only the
+ * shape being scanned differs, which is why it lives in this file rather than
+ * beside the one caller that needs it.
+ *
+ * Conservative by construction — an unrecognized shape is left alone, so this
+ * is a second line of defense behind "do not log the secret", never a licence
+ * to log one.
+ */
+const TEXT_PAIR =
+  /(["']?)([A-Za-z_][A-Za-z0-9_.\- ]*)\1(\s*[:=]\s*)("[^"]*"|'[^']*'|(?:Bearer|Basic|Token)\s+[^\s,;)\]}]+|[^\s,;)\]}]+)/gi;
+
+export function redactSecretsInText(text: string): string {
+  if (!text) return text;
+  return text.replace(TEXT_PAIR, (whole, quote: string, key: string, separator: string) => {
+    if (!isSecretKey(key.trim())) return whole;
+    return `${quote}${key}${quote}${separator}${REDACTED}`;
+  });
+}

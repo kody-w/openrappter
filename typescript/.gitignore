@@ -7,3 +7,6 @@ src/**/*.js
 # instead of a TypeScript original and a hand-copied twin that drifts.
 !src/voice/local-speech.js
 .env
+
+# Temp data dirs for tests that start a real gateway (see gateway/__tests__).
+.vitest-tmp/

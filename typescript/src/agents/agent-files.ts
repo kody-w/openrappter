@@ -29,7 +29,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import { isReservedAgentPath, RESERVED_AGENT_DIRS } from './AgentRegistry.js';
+import { isReservedAgentPath, RESERVED_AGENT_DIRS } from './reserved-paths.js';
 
 /** One browsable file, as the dashboard's file tab renders it. */
 export interface AgentFileEntry {

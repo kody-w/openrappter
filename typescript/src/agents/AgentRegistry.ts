@@ -13,21 +13,15 @@ import { BasicAgent } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
 import type { AgentInfo } from './types.js';
 import { logger } from '../logging/logger.js';
+import { RESERVED_AGENT_DIRS, isReservedAgentPath } from './reserved-paths.js';
 
 /**
- * Subdirectories a conforming kernel never auto-loads.
- *
- * KERNEL §2.3 freezes both names. Honouring them is not a spec nicety: without
- * it, moving an agent into `disabled_agents/` does not disable it, and "how do I
- * turn one off" is the very next question after drag-and-drop loading.
+ * The reserved-directory rules live in `./reserved-paths.js` so callers that
+ * must stay free of this module's dependencies can share one definition. They
+ * are re-exported here because this is where they have always been imported
+ * from.
  */
-export const RESERVED_AGENT_DIRS = ['experimental_agents', 'disabled_agents'] as const;
-
-/** True when `file` sits inside a reserved subdirectory of the agents tree. */
-export function isReservedAgentPath(relativePath: string): boolean {
-  const parts = relativePath.split(/[\\/]/);
-  return parts.some(seg => (RESERVED_AGENT_DIRS as readonly string[]).includes(seg));
-}
+export { RESERVED_AGENT_DIRS, isReservedAgentPath } from './reserved-paths.js';
 
 /**
  * Every agent file under `dir`, relative to it, excluding reserved directories.

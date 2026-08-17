@@ -18,6 +18,7 @@ await runOnboardingSpawnTests()
 await runBonesInspectorTests()
 await runBonesWindowTests()
 await runChatTargetTests()
+try runSuiteRegistrationTests()
 
 printResults()
 exitWithCode()

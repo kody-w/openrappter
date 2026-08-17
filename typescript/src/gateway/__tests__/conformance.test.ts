@@ -19,6 +19,7 @@ import path from 'path';
 import { startBurrowBeacon, BURROW_PROBE_PORTS, type BeaconHandle } from '../burrow-beacon.js';
 import { isReservedAgentPath, RESERVED_AGENT_DIRS, AgentRegistry } from '../../agents/AgentRegistry.js';
 import { readAnatomy } from '../anatomy.js';
+import { reserveTestPort } from '../../__tests__/support/test-port.js';
 
 const open: Array<{ close: () => Promise<void> }> = [];
 afterEach(async () => {
@@ -43,8 +44,11 @@ describe('the burrow beacon makes openrappter detectable', () => {
   });
 
   it('binds a free probed port and answers /health', async () => {
-    // Use a private range for the test so a real grail on 7071 is never touched.
-    const beacon = await startBurrowBeacon([49_181, 49_182], {
+    // Kernel-assigned so a real grail on 7071 is never touched and nothing on
+    // the runner can already hold them. These used to be hardcoded 49_18x,
+    // which is the guessing PR #51 removed everywhere else.
+    const probes = [await reserveTestPort(), await reserveTestPort()];
+    const beacon = await startBurrowBeacon(probes, {
       name: 'Mero', designation: 'openrappter-MR-3565', gatewayPort: 18790,
     });
     expect(beacon).not.toBeNull();
@@ -64,26 +68,30 @@ describe('the burrow beacon makes openrappter detectable', () => {
   it('NEVER displaces something already listening', async () => {
     // 7071 is the grail parent and 7081+ are its twins. Squatting one would
     // break a real brainstem in order to advertise ourselves.
-    const squatter = await occupy(49_183);
+    const taken = await reserveTestPort();
+    const free = await reserveTestPort();
+    const squatter = await occupy(taken);
     open.push(squatter);
 
-    const beacon = await startBurrowBeacon([49_183, 49_184], {
+    const beacon = await startBurrowBeacon([taken, free], {
       name: 'Mero', gatewayPort: 18790,
     });
     open.push(beacon as BeaconHandle);
-    expect(beacon!.port).toBe(49_184);
+    expect(beacon!.port).toBe(free);
   }, 20_000);
 
   it('stays quiet when every probed port is taken, rather than fighting', async () => {
-    const a = await occupy(49_185); open.push(a);
-    const b = await occupy(49_186); open.push(b);
+    const first = await reserveTestPort();
+    const second = await reserveTestPort();
+    const a = await occupy(first); open.push(a);
+    const b = await occupy(second); open.push(b);
     // Not a failure: if something else answers there, the detector already
     // reports a brainstem on this device.
-    expect(await startBurrowBeacon([49_185, 49_186], { name: 'Mero', gatewayPort: 18790 })).toBeNull();
+    expect(await startBurrowBeacon([first, second], { name: 'Mero', gatewayPort: 18790 })).toBeNull();
   }, 20_000);
 
   it('refuses a cross-origin read but still answers, so an opaque probe resolves', async () => {
-    const beacon = await startBurrowBeacon([49_187], { name: 'Mero', gatewayPort: 18790 });
+    const beacon = await startBurrowBeacon([await reserveTestPort()], { name: 'Mero', gatewayPort: 18790 });
     open.push(beacon as BeaconHandle);
 
     const status = await new Promise<number>((resolve) => {

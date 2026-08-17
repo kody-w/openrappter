@@ -15,6 +15,8 @@ import type { ChatSessionSummary, Attachment } from '../types.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
+/** Remembers which brain the operator last chose to talk to. */
+const CHAT_TARGET_STORAGE_KEY = 'openrappter.chat.target';
 
 interface Message {
   id: string;
@@ -622,6 +624,30 @@ export class OpenRappterChat extends LitElement {
       align-items: flex-end;
     }
 
+    .brain-select {
+      height: 44px;
+      padding: 0 0.5rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      flex-shrink: 0;
+    }
+
+    .brain-select:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--text-primary);
+    }
+
+    .brain-select:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .attach-btn {
       display: flex;
       align-items: center;
@@ -846,6 +872,14 @@ export class OpenRappterChat extends LitElement {
 
   @state() private messages: Message[] = [];
   @state() private inputValue = '';
+  /**
+   * Which brain answers the next turn.
+   *
+   * The brainstem is a separate process, but it returns the same §2.4 envelope,
+   * so both replies render through this one component instead of needing a
+   * second chat window open beside it.
+   */
+  @state() private chatTarget: 'openrappter' | 'brainstem' = 'openrappter';
   @state() private sending = false;
   @state() private speechEnabled = false;
   @state() private speechStatus = 'idle';
@@ -900,6 +934,7 @@ export class OpenRappterChat extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    this.restoreChatTarget();
     this.loadSessions();
 
     // Listen for chat events (streaming deltas + finals)
@@ -1444,6 +1479,7 @@ export class OpenRappterChat extends LitElement {
       const params: Record<string, unknown> = {
         message: content,
         sessionKey,
+        target: this.chatTarget,
       };
       if (attachmentPayload.length > 0) {
         params.attachments = attachmentPayload;
@@ -1718,6 +1754,34 @@ export class OpenRappterChat extends LitElement {
     target.style.height = `${Math.min(target.scrollHeight, 200)}px`;
   }
 
+  /**
+   * Switch which brain answers, and remember it.
+   *
+   * The choice persists because the two brains know different things — an
+   * answer from the wrong one is not obviously wrong, it is just wrong — and
+   * silently reverting to the default on reload is how someone ends up
+   * believing the brainstem said something it never said.
+   */
+  private handleTargetChange(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    if (value !== 'openrappter' && value !== 'brainstem') return;
+    this.chatTarget = value;
+    try {
+      localStorage.setItem(CHAT_TARGET_STORAGE_KEY, value);
+    } catch {
+      // A blocked or full localStorage must not stop the switch itself.
+    }
+  }
+
+  private restoreChatTarget() {
+    try {
+      const stored = localStorage.getItem(CHAT_TARGET_STORAGE_KEY);
+      if (stored === 'openrappter' || stored === 'brainstem') this.chatTarget = stored;
+    } catch {
+      // Unreadable storage just means the default.
+    }
+  }
+
   private formatTime(ts: number): string {
     return new Date(ts).toLocaleTimeString([], {
       hour: '2-digit',
@@ -1977,6 +2041,16 @@ export class OpenRappterChat extends LitElement {
           <div class="input-area">
             ${this.renderAttachmentStrip()}
             <div class="input-container">
+              <select
+                class="brain-select"
+                title="Which brain answers"
+                .value=${this.chatTarget}
+                @change=${this.handleTargetChange}
+                ?disabled=${this.sessionTransitioning}
+              >
+                <option value="openrappter">🦖 OpenRappter</option>
+                <option value="brainstem">🧠 Brainstem</option>
+              </select>
               <button
                 class="attach-btn"
                 @click=${this.handleAttachClick}

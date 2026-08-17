@@ -25,6 +25,7 @@ import type {
   SendMessageRequest,
 } from './types.js';
 import { RPC_ERROR, GatewayEvents } from './types.js';
+import { askBrainstem } from './brainstem-client.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
@@ -96,6 +97,27 @@ import {
 } from './observability.js';
 
 const DEFAULT_PORT = 18790;
+
+/** The brains a chat turn can be addressed to. */
+export const CHAT_TARGETS = ['openrappter', 'brainstem'] as const;
+export type ChatTarget = (typeof CHAT_TARGETS)[number];
+
+/**
+ * Resolve the requested brain, refusing anything unrecognised.
+ *
+ * Defaulting an unknown target to the local runtime would be the wrong kind of
+ * forgiving: a typo would silently answer from a different brain than the one
+ * the caller asked for, and the reply looks identical either way.
+ */
+export function normalizeChatTarget(value: unknown): ChatTarget {
+  if (value === undefined || value === null || value === '') return 'openrappter';
+  if (typeof value !== 'string' || !CHAT_TARGETS.includes(value as ChatTarget)) {
+    throw new Error(
+      `Unknown chat target ${JSON.stringify(value)}. Expected one of: ${CHAT_TARGETS.join(', ')}.`,
+    );
+  }
+  return value as ChatTarget;
+}
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const DEFAULT_SHUTDOWN_TIMEOUT = 250;
@@ -2292,10 +2314,17 @@ export class GatewayServer {
     // chat.send — primary chat entry point (openclaw-compatible)
     this.registerMethod(
       'chat.send',
-      async (params: { sessionKey?: string; sessionId?: string; message?: string; idempotencyKey?: string }, conn) => {
+      async (params: { sessionKey?: string; sessionId?: string; message?: string; idempotencyKey?: string; target?: string }, conn) => {
         const message = params.message?.trim();
         if (!message) throw new Error('message required');
-        if (!this.agentHandler) throw new Error('Agent handler not configured');
+
+        // Which brain answers. The brainstem is a separate process speaking
+        // HTTP, but it returns the same §2.4 envelope, so a caller can switch
+        // between them on one connection instead of keeping two chats open.
+        const target = normalizeChatTarget(params.target);
+        if (target === 'openrappter' && !this.agentHandler) {
+          throw new Error('Agent handler not configured');
+        }
 
         const sessionKey = resolveSessionId(params) || `session_${randomUUID().slice(0, 8)}`;
         const runId = `run_${randomUUID().slice(0, 8)}`;
@@ -2327,12 +2356,16 @@ export class GatewayServer {
         this.activeRunsById.set(runId, run);
         this.activeRunBySession.set(sessionKey, runId);
 
-        const accepted = { runId, sessionKey, sessionId: sessionKey, status: 'accepted' as const, acceptedAt: Date.now() };
+        const accepted = { runId, sessionKey, sessionId: sessionKey, status: 'accepted' as const, acceptedAt: Date.now(), target };
 
-        // Execute agent asynchronously — defer to ensure response is sent first
+        // Execute asynchronously — defer to ensure response is sent first
         setTimeout(() => {
           if (run.aborted || !this.isGenerationActive(run.generation)) {
             this.cleanupActiveRun(run);
+            return;
+          }
+          if (target === 'brainstem') {
+            void this.askBrainstemWithEvents(run, message);
             return;
           }
           void this.executeAgentWithEvents(run, message, conn.id);
@@ -3124,6 +3157,69 @@ export class GatewayServer {
         sessionId: run.sessionId,
         state: 'aborted',
       });
+    }
+  }
+
+  /**
+   * Run a turn against the brainstem instead of the local agent runtime.
+   *
+   * Emits exactly the events the agent path emits, because the point of the
+   * selector is that a client does not have to care which brain answered — the
+   * §2.4 envelope is shared, so the rendering is too.
+   */
+  private async askBrainstemWithEvents(run: ActiveRun, message: string): Promise<void> {
+    try {
+      const envelope = await this.runAgentOperation(
+        run.generation,
+        () => askBrainstem({ message, sessionId: run.sessionId }),
+      );
+
+      if (run.aborted || !this.isGenerationActive(run.generation)) return;
+
+      const text = envelope.response ?? '';
+      this.broadcastEvent(GatewayEvents.CHAT, {
+        runId: run.runId,
+        sessionKey: run.sessionId,
+        sessionId: run.sessionId,
+        state: 'final',
+        target: 'brainstem',
+        message: text
+          ? { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() }
+          : undefined,
+        voiceText: envelope.voice_response || undefined,
+        agentLogs: envelope.agent_logs || undefined,
+        model: envelope.model,
+      });
+
+      const session = this.sessionStore.get(run.sessionId);
+      if (session) {
+        session.messages.push({
+          id: `msg_${randomUUID().slice(0, 8)}`,
+          role: 'assistant',
+          content: text,
+          timestamp: new Date().toISOString(),
+        });
+        session.updatedAt = new Date().toISOString();
+        this.saveSessions();
+      }
+    } catch (error) {
+      if (
+        run.aborted
+        || error instanceof GatewayStoppedError
+        || !this.isGenerationActive(run.generation)
+      ) {
+        return;
+      }
+      this.broadcastEvent(GatewayEvents.CHAT, {
+        runId: run.runId,
+        sessionKey: run.sessionId,
+        sessionId: run.sessionId,
+        state: 'error',
+        target: 'brainstem',
+        errorMessage: (error as Error).message,
+      });
+    } finally {
+      this.cleanupActiveRun(run);
     }
   }
 

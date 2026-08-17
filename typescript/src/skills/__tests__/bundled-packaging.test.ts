@@ -69,8 +69,14 @@ describe('bundled skills are actually published', () => {
   });
 
   it('ships the assets the loader reads, not only the loader', () => {
-    const packed = packedFiles();
-    expect(packed).toContain('dist/skills/bundled.js');
-    expect(packed.some((path) => path.startsWith('skills/'))).toBe(true);
+    const pkg = JSON.parse(readFileSync(join(PKG_DIR, 'package.json'), 'utf-8')) as {
+      files: string[];
+    };
+    // The loader lives in dist/, which the prepack build produces and
+    // packedFiles() deliberately skips. Assert dist/ is *declared* for
+    // publication rather than that it happens to be built right now, or this
+    // passes or fails depending on whether anyone has run a build.
+    expect(pkg.files).toContain('dist/');
+    expect(packedFiles().some((path) => path.startsWith('skills/'))).toBe(true);
   });
 });

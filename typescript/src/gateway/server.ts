@@ -254,6 +254,35 @@ export class GatewayServer {
   };
 
   /**
+   * The one way a cron job gets removed. The live scheduler comes FIRST: a
+   * delete that only filtered the file store left the running job firing while
+   * telling the caller it was gone. An id nobody knows is refused rather than
+   * answered with `{ removed: true }`.
+   */
+  private removeCronJob = async (params: { jobId: string }): Promise<{ removed: true }> => {
+    const jobId = params?.jobId;
+    let removed = false;
+
+    if (jobId && this.cronService?.remove) {
+      const known = this.cronService.list().some((j) => j.id === jobId);
+      if (known) {
+        await this.cronService.remove(jobId);
+        removed = true;
+      }
+    }
+
+    const previousLength = this.cronStore.length;
+    this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== jobId);
+    if (this.cronStore.length !== previousLength) {
+      this.saveCronStore();
+      removed = true;
+    }
+
+    if (!removed) throw new Error(`Cron job not found: ${jobId || '(empty id)'}`);
+    return { removed: true };
+  };
+
+  /**
    * Installs a dropped agent into the running organism.
    *
    * Injected rather than constructed here because only the daemon owns the live
@@ -2151,28 +2180,7 @@ export class GatewayServer {
       return this.cronStore;
     });
     this.registerMethod('cron.add', this.addCronJob, { requiresAuth: true });
-    this.registerMethod('cron.remove', async (params: { jobId: string }) => {
-      const jobId = params.jobId;
-      let removed = false;
-
-      if (jobId && this.cronService?.remove) {
-        const known = this.cronService.list().some((j) => j.id === jobId);
-        if (known) {
-          await this.cronService.remove(jobId);
-          removed = true;
-        }
-      }
-
-      const previousLength = this.cronStore.length;
-      this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== jobId);
-      if (this.cronStore.length !== previousLength) {
-        this.saveCronStore();
-        removed = true;
-      }
-
-      if (!removed) throw new Error(`Cron job not found: ${jobId || '(empty id)'}`);
-      return { removed: true };
-    }, { requiresAuth: true });
+    this.registerMethod('cron.remove', this.removeCronJob, { requiresAuth: true });
     this.registerMethod('cron.run', async (params: { jobId: string }) => {
       if (this.cronService) {
         await this.runCronServiceJob(params.jobId);
@@ -2237,11 +2245,10 @@ export class GatewayServer {
     // the original file-only bug after cron.add was fixed, so the menu bar could
     // create a job that silently never ran.
     this.registerMethod('cron.create', this.addCronJob, { requiresAuth: true });
-    this.registerMethod('cron.delete', async (params: { jobId: string }) => {
-      this.cronStore = this.cronStore.filter((j) => (j as { id: string }).id !== params.jobId);
-      this.saveCronStore();
-      return { removed: true };
-    }, { requiresAuth: true });
+    // Same story for delete: this alias filtered the file store and reported
+    // success, so the menu bar could "delete" a job that kept firing — and got
+    // the same cheerful answer for ids that never existed.
+    this.registerMethod('cron.delete', this.removeCronJob, { requiresAuth: true });
     this.registerMethod('cron.trigger', async (params: { jobId: string }) => {
       if (this.cronService) {
         await this.runCronServiceJob(params.jobId);

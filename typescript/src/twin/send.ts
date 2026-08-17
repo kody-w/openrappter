@@ -106,6 +106,34 @@ export function buildTwinSay(options: {
 }
 
 /**
+ * Headers for a peer request, carrying a credential when this rappter has one.
+ *
+ * Both wires used to send only a content type. `/twin` and `/chat` each call
+ * `resolveHttpAuthenticated` before parsing (#113, #119), so those two facts
+ * were compatible only because authentication was off — `isAuthCredentialValid`
+ * returns true immediately when `authMode` is `none`. Turning the control on
+ * anywhere severed the neighborhood: a peer with a token refused both senders,
+ * including one whose own environment held the credential.
+ *
+ * `OPENRAPPTER_TOKEN` is the credential that actually exists on this
+ * deployment — the CLI and the daemon both read it. Presenting it when set is
+ * what "a rappter presents a credential when it has one" means today.
+ *
+ * This deliberately does not answer where a credential should come from in
+ * general. A device-wide token, a per-instance token exchanged at hatch, and
+ * the sealed identity in `rapp-sealed/1.0` are all still open (#133), and all
+ * three are compatible with sending what we hold now. Sending nothing is not.
+ */
+export function peerHeaders(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = env.OPENRAPPTER_TOKEN?.trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+/**
  * The other wire. Plain `/chat`, the one every participant already answers.
  *
  * Deliberately carries no rappid and no envelope: `/chat` has no place to put
@@ -123,7 +151,7 @@ async function sendChat(
   try {
     const res = await doFetch(`${options.to.replace(/\/$/, '')}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: peerHeaders(),
       body: JSON.stringify({
         user_input: options.text,
         conversation_history: [],
@@ -170,7 +198,7 @@ export async function sendTwin(options: TwinSendOptions): Promise<TwinSendResult
   try {
     const res = await doFetch(`${options.to.replace(/\/$/, '')}/twin`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: peerHeaders(),
       body: JSON.stringify(envelope),
       signal: controller.signal,
     });

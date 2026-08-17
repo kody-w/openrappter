@@ -33,3 +33,38 @@ export function agentResultIsError(result: unknown): boolean {
   const status = (envelope as { status?: unknown }).status;
   return typeof status === "string" && status.toLowerCase() === "error";
 }
+
+/**
+ * Human-readable reason for a failed agent result.
+ *
+ * Composition layers report a failed step's reason the same way whether the
+ * agent threw (Error.message) or resolved with an error envelope. Reads
+ * `message`, then `error`, then falls back.
+ *
+ * Mirrors python/openrappter/result_status.py
+ */
+export function agentResultErrorMessage(
+  result: unknown,
+  fallback = "agent returned an error envelope",
+): string {
+  let envelope: unknown = result;
+
+  if (typeof envelope === "string") {
+    try {
+      envelope = JSON.parse(envelope);
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) {
+    return fallback;
+  }
+
+  for (const key of ["message", "error"] as const) {
+    const value = (envelope as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+
+  return fallback;
+}

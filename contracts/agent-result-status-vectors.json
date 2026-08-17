@@ -24,5 +24,18 @@
     { "name": "null-value", "kind": "value", "value": null, "isError": false },
     { "name": "number-value", "kind": "value", "value": 5, "isError": false },
     { "name": "boolean-value", "kind": "value", "value": true, "isError": false }
+  ],
+  "messageDescription": "Cross-runtime agreement vectors for the shared failure-reason extractor (agentResultErrorMessage / agent_result_error_message). Composition layers report a failed step's reason identically whether the agent threw or resolved with an error envelope. 'fallback' means the runtime's default fallback string is returned.",
+  "messageVectors": [
+    { "name": "message-field", "kind": "value", "value": { "status": "error", "message": "exit code 1" }, "message": "exit code 1" },
+    { "name": "error-field", "kind": "value", "value": { "status": "error", "error": "boom" }, "message": "boom" },
+    { "name": "message-wins-over-error", "kind": "value", "value": { "status": "error", "message": "first", "error": "second" }, "message": "first" },
+    { "name": "empty-message-falls-through-to-error", "kind": "value", "value": { "status": "error", "message": "", "error": "second" }, "message": "second" },
+    { "name": "non-string-message-falls-through-to-error", "kind": "value", "value": { "status": "error", "message": 5, "error": "second" }, "message": "second" },
+    { "name": "no-reason-fields", "kind": "value", "value": { "status": "error" }, "message": null },
+    { "name": "message-from-string-envelope", "kind": "string", "value": "{\"status\":\"error\",\"message\":\"exit code 1\"}", "message": "exit code 1" },
+    { "name": "non-json-string", "kind": "string", "value": "boom", "message": null },
+    { "name": "array-value", "kind": "value", "value": [{ "message": "nope" }], "message": null },
+    { "name": "null-value", "kind": "value", "value": null, "message": null }
   ]
 }

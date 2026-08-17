@@ -33,3 +33,31 @@ def agent_result_is_error(result: Any) -> bool:
 
     status = envelope.get("status")
     return isinstance(status, str) and status.lower() == "error"
+
+
+def agent_result_error_message(result: Any, fallback: str = "agent returned an error envelope") -> str:
+    """Human-readable reason for a failed agent result.
+
+    Composition layers report a failed step's reason the same way whether the
+    agent raised (str(exc)) or returned an error envelope. Reads ``message``,
+    then ``error``, then falls back.
+
+    Mirrors typescript/src/agents/result-status.ts
+    """
+    envelope = result
+
+    if isinstance(envelope, str):
+        try:
+            envelope = json.loads(envelope)
+        except (TypeError, ValueError):
+            return fallback
+
+    if not isinstance(envelope, dict):
+        return fallback
+
+    for key in ("message", "error"):
+        value = envelope.get(key)
+        if isinstance(value, str) and value:
+            return value
+
+    return fallback

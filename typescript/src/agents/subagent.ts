@@ -3,6 +3,7 @@
  * Allows agents to invoke other agents as tools
  */
 
+import { agentResultIsError, agentResultErrorMessage } from './result-status.js';
 import type { AgentResult } from './types.js';
 
 export interface SubAgentConfig {
@@ -145,10 +146,16 @@ export class SubAgentManager {
         context.lastSlush
       );
 
-      // Update call record
-      call.status = 'success';
+      // Update call record. A resolved `{status: 'error'}` envelope is a
+      // failure, exactly like a throw — the payload is still returned to the
+      // caller, but the call is not recorded as a success.
+      const failed = agentResultIsError(result);
+      call.status = failed ? 'error' : 'success';
       call.completedAt = new Date().toISOString();
       call.result = result;
+      if (failed) {
+        call.error = agentResultErrorMessage(result);
+      }
 
       // Extract data_slush from result for downstream chaining
       if (result && typeof result === 'object' && 'data_slush' in result) {

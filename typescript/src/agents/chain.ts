@@ -17,6 +17,7 @@
  */
 
 import { BasicAgent } from './BasicAgent.js';
+import { agentResultIsError, agentResultErrorMessage } from './result-status.js';
 import type { AgentResult } from './types.js';
 
 export interface ChainStep {
@@ -144,6 +145,19 @@ export class AgentChain {
           dataSlush: currentSlush,
           durationMs,
         });
+
+        // A resolved `{status: 'error'}` envelope is a failure, exactly like a throw.
+        if (agentResultIsError(result) && this.options.stopOnError) {
+          return {
+            status: 'error',
+            steps: stepResults,
+            totalDurationMs: Date.now() - chainStart,
+            finalResult: result,
+            finalSlush: currentSlush,
+            failedStep: step.name,
+            error: agentResultErrorMessage(result),
+          };
+        }
       } catch (e) {
         const durationMs = Date.now() - stepStart;
         const error = e as Error;
@@ -174,7 +188,7 @@ export class AgentChain {
       }
     }
 
-    const hasErrors = stepResults.some(s => s.result.status === 'error');
+    const hasErrors = stepResults.some(s => agentResultIsError(s.result));
 
     return {
       status: hasErrors ? 'partial' : 'success',

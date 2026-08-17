@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenRappter 1.14.0 — The doors an agent can open</title>
+  <meta name="description" content="OpenRappter 1.14.0 is a hardening release: every outward door an agent can open is now checked at the moment it opens, not at the moment it is described." />
+  <meta property="og:title" content="OpenRappter 1.14.0 — The doors an agent can open" />
+  <meta property="og:description" content="A hardening release. Private networks need an opt-in, allowlists match on label boundaries, downloads are bounded while they stream, and two stub commands became real." />
+  <meta property="og:type" content="website" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 antialiased">
+  <nav class="border-b border-zinc-800 bg-zinc-950/95">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <a class="logo font-semibold" href="./">OpenRappter</a>
+      <div class="nav-links flex gap-5 text-sm text-zinc-300">
+        <a href="./docs.html">Docs</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./tutorial.html">Tutorial</a>
+        <a href="./changelog.html">Changelog</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="border-b border-zinc-800 bg-gradient-to-b from-emerald-950/40 to-zinc-950">
+      <div class="mx-auto max-w-6xl px-6 py-24">
+        <p class="mb-5 font-mono text-sm text-emerald-400">v1.14.0 · unreleased</p>
+        <h1 class="max-w-4xl text-5xl font-bold tracking-tight md:text-7xl">
+          A rule that is never<br />
+          <span class="text-emerald-400">checked is not a rule.</span>
+        </h1>
+        <p class="mt-8 max-w-3xl text-xl leading-8 text-zinc-300">
+          This is a hardening release. Nothing here adds a capability; everything
+          here closes the distance between what a guard <em>says</em> and the
+          moment it actually runs. Several of these were rules the code already
+          believed it enforced.
+        </p>
+      </div>
+    </section>
+
+    <section class="mx-auto grid max-w-6xl gap-6 px-6 py-16 md:grid-cols-3">
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Network</p>
+        <h2 class="mt-3 text-2xl font-semibold">Private is not reachable by default</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          Reaching a private or loopback address from the browser agent now
+          requires an explicit operator opt-in. <code class="text-zinc-300">allowPrivateNetwork</code>
+          defaults to <code class="text-zinc-300">false</code>, and a blocked route is
+          closed rather than quietly followed.
+        </p>
+      </article>
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Address space</p>
+        <h2 class="mt-3 text-2xl font-semibold">The whole link-local range</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          The SSRF guard covered part of <code class="text-zinc-300">fe80::/10</code>.
+          A range that is partly blocked is a range that is open — the rest of it is
+          now rejected too.
+        </p>
+      </article>
+      <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Allowlists</p>
+        <h2 class="mt-3 text-2xl font-semibold">Boundaries, not substrings</h2>
+        <p class="mt-4 leading-7 text-zinc-400">
+          Allowlisted domains match on DNS-label boundaries, so
+          <code class="text-zinc-300">evil-example.com</code> no longer satisfies an
+          allowlist entry of <code class="text-zinc-300">example.com</code>.
+        </p>
+      </article>
+    </section>
+
+    <section class="border-y border-zinc-800 bg-zinc-900/50">
+      <div class="mx-auto max-w-6xl px-6 py-16">
+        <h2 class="text-3xl font-bold">A declared length is not a promise</h2>
+        <p class="mt-6 max-w-3xl leading-8 text-zinc-300">
+          A download cap that is checked against the <em>advertised</em> size trusts
+          the thing it is defending against. Chunked downloads are now bounded
+          <strong>while they stream</strong> — the limit is enforced as bytes arrive,
+          so a server that lies about its length runs into the cap anyway.
+        </p>
+        <p class="mt-6 max-w-3xl leading-8 text-zinc-300">
+          The same correction runs through the rest of this release: check the thing
+          itself, at the moment it happens, rather than the description of it.
+        </p>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Correctness</p>
+      <h2 class="mt-3 text-3xl font-bold">Things that only looked like they worked</h2>
+      <div class="mt-8 grid gap-6 md:grid-cols-2">
+        <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 class="text-xl font-semibold">Cron sent an id nobody read</h3>
+          <p class="mt-3 leading-7 text-zinc-400">
+            The scheduler now sends the job id the gateway actually reads. Cron logs
+            can also no longer outlive, or precede, the job they belong to.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 class="text-xl font-semibold">Two runtimes disagreed about failure</h3>
+          <p class="mt-3 leading-7 text-zinc-400">
+            Python returned <code>status=success</code> for every completed
+            subprocess, even on a nonzero exit — so <code>false</code> reported
+            <code>return_code=1</code> while the shared classifier recorded the
+            invocation as successful. TypeScript already called that an error.
+            Python now derives its status from the return code, and the contract is
+            pinned at both front doors.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 class="text-xl font-semibold"><code>config</code> and <code>doctor</code> are real</h3>
+          <p class="mt-3 leading-7 text-zinc-400">
+            Both were fully implemented and exported — and never registered, so their
+            words fell through to chat and global help while shipped health guidance
+            told you to run them. Registering them exposed dormant bugs, so this went
+            further than two function calls: <code>get</code>/<code>set</code> no
+            longer echo credential values, validation strictly parses both config
+            files against the real schema, and Doctor returns nonzero for failed
+            checks in JSON mode too.
+          </p>
+        </article>
+        <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <h3 class="text-xl font-semibold">The <code>voice-call</code> skill described a CLI that did not ship</h3>
+          <p class="mt-3 leading-7 text-zinc-400">
+            It prescribed <code>call start</code>, <code>call end</code> and
+            <code>call conference</code> — none of which exist. It also required a
+            legacy plugin switch no OpenRappter code reads, so eligibility could hide
+            a working command. It now documents the real flow, and a test rejects any
+            documented subcommand absent from the command tree.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="border-t border-zinc-800 bg-zinc-900/50">
+      <div class="mx-auto max-w-6xl px-6 py-16">
+        <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Desktop</p>
+        <h2 class="mt-3 text-3xl font-bold">One authority for authentication</h2>
+        <p class="mt-6 max-w-3xl leading-8 text-zinc-300">
+          The Electron desktop is now the authority for OpenRappter Bar
+          authentication, rather than the two racing to own the same credential.
+          Desktop smoke tests were hardened for concurrent and Windows runs, where
+          completed runs could previously hang instead of exiting.
+        </p>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <p class="font-mono text-xs uppercase tracking-widest text-emerald-400">Evidence</p>
+      <h2 class="mt-3 text-3xl font-bold">What had to pass before this shipped</h2>
+      <p class="mt-6 max-w-3xl leading-8 text-zinc-300">
+        A release note is a claim. These are the gates that make it checkable —
+        every one of them runs in CI and blocks the release artifact, not a
+        summary written afterwards.
+      </p>
+      <div class="mt-8 grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">npm test</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">TypeScript suite, including the docs-site tests that check this page.</p>
+        </div>
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">pytest</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">Python suite, plus the cross-runtime agreement tests that stop the two drifting.</p>
+        </div>
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">mutation tests</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">Each guard in this release was re-broken to prove its test can actually fail. A green suite proves nothing until it has been seen red.</p>
+        </div>
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">lint · builds</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">Both runtimes build clean, and packaging builds the Electron desktop artifacts.</p>
+        </div>
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">cold-start CLI smoke</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">The CLI is exercised from a clean machine state, so a command that only works on a warm developer box does not pass.</p>
+        </div>
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+          <p class="font-mono text-sm text-emerald-400">SHA-256</p>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">Installer and Copilot CLI digests are computed from the commit's git blob and re-verified before reuse.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <h2 class="text-3xl font-bold">Upgrading</h2>
+      <p class="mt-6 max-w-3xl leading-8 text-zinc-300">
+        Nothing here changes a public contract, so no migration is required. One
+        behavioural note: if you relied on the browser agent reaching a private or
+        loopback address, that now needs an explicit opt-in via
+        <code class="text-zinc-300">allowPrivateNetwork</code>. That is the intended
+        breaking edge of this release.
+      </p>
+      <p class="mt-6 max-w-3xl leading-8 text-zinc-400">
+        Full detail in the <a class="text-emerald-400 underline" href="./changelog.html">changelog</a>.
+      </p>
+    </section>
+  </main>
+
+  <footer class="border-t border-zinc-800">
+    <div class="mx-auto max-w-6xl px-6 py-10 text-sm text-zinc-500">
+      OpenRappter · <a class="underline" href="https://github.com/kody-w/openrappter">github.com/kody-w/openrappter</a>
+    </div>
+  </footer>
+</body>
+</html>

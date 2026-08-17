@@ -7,22 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- **Copilot Surgeon primary interface** — replaces the static dashboard landing
-  page with an adaptive operating room where OpenRappter is the patient and
-  GitHub Copilot shapes each next interaction from live, sanitized patient
-  anatomy. Existing operational pages remain available as secondary anatomy.
-- **Consent-bound procedures** — Copilot proposals are persisted with an
-  immutable SHA-256 digest, require explicit owner approval (plus
-  `OPERATE OPENRAPPTER` for high-risk work), and cannot report recovery without
-  real agent-tool evidence and post-operative verification.
-
 ### Fixed
 
-- **HTTP RPC authentication** — token/password mode no longer trusts every
-  loopback request implicitly; protected JSON-RPC and `/chat` calls now enforce
-  configured credentials consistently with WebSocket authentication.
+- **Browser private network access** — reaching a private or loopback address
+  from the browser agent now requires an explicit operator opt-in
+  (`allowPrivateNetwork`, off by default) rather than being reachable by
+  default.
+- **Full IPv6 link-local range blocked** — the SSRF guard covered only part of
+  `fe80::/10`; the whole range is now rejected.
+- **Allowlisted domains match on DNS-label boundaries** — `evil-example.com`
+  no longer satisfies an allowlist entry of `example.com`.
+- **Chunked downloads are bounded while they stream** — a declared length is
+  not a promise, so the cap is enforced as bytes arrive rather than checked up
+  front.
+- **Cron job ids** — the scheduler sends the job id the gateway actually
+  reads, and cron logs can no longer outlive or precede the job they belong
+  to.
+- **Shell exit codes** — Python returned `status=success` for every completed
+  subprocess even on a nonzero exit, so `false` reported `return_code=1` while
+  the shared classifier recorded success. Python now derives status from the
+  return code; TypeScript already did.
+- **`config` and `doctor` were never registered** — both were implemented and
+  exported, but their words fell through to chat and global help while shipped
+  health guidance told you to run them. Registering them exposed dormant bugs:
+  `get`/`set` no longer echo credential values, validation strictly parses both
+  config files against the real schema, and `doctor` returns nonzero for failed
+  checks in JSON mode too.
+- **`voice-call` skill** prescribed `call start`, `call end` and
+  `call conference`, none of which exist, and required a legacy plugin switch
+  no OpenRappter code reads. It now documents the flow that ships.
+
+### Changed
+
+- The Electron desktop is the authority for OpenRappter Bar authentication,
+  and desktop smoke tests were hardened for concurrent and Windows runs.
 
 ## [1.13.0] - 2026-08-14
 
@@ -147,6 +165,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a tool-to-agent causal subtree rather than a disconnected child trace.
 - Standalone records evict sequence caches, and explicit recorder installation
   remains synchronized with environment bootstrap.
+
+## [1.11.0] - 2026-08-10
+
+### Added
+
+- **One device, many rappters** — an *alpha* holds the default port and the
+  device's channels, and any number of *hatched twins* run beside it, each with
+  its own identity, port, and lock. `openrappter hatch <name>`,
+  `openrappter twins`, and `--instance <id>` address them.
+- **Twin-to-twin chat** — a rappter can speak to a peer, not only be spoken to.
+  `POST /twin` carries the `rapp-twin-chat/1.0` envelope, and a peer that
+  speaks `/chat` but not `/twin` is still reachable.
+- **Neighbourhood and roster** — a running rappter can reach a neighbour, tells
+  its neighbours which twin it is, and is judged by the same name the roster
+  calls it.
+- **Copilot Surgeon primary interface** — replaces the static dashboard landing
+  page with an adaptive operating room where OpenRappter is the patient and
+  GitHub Copilot shapes each next interaction from live, sanitized patient
+  anatomy. Existing operational pages remain available as secondary anatomy.
+- **Consent-bound procedures** — Copilot proposals are persisted with an
+  immutable SHA-256 digest, require explicit owner approval (plus
+  `OPERATE OPENRAPPTER` for high-risk work), and cannot report recovery without
+  real agent-tool evidence and post-operative verification.
+- **Release channels** — `openrappter channel` manages stable and experimental
+  rings, with isolated canary, nightly, alpha, and beta promotion.
+
+### Changed
+
+- **The Copilot CLI ships with the commit.** `@github/copilot` is a
+  lockfile-pinned dependency resolved from this package's own `node_modules`
+  rather than found on `PATH`, so its version is no longer decided by whoever
+  last ran `copilot update`. Resolution order — explicit operator override,
+  then the pinned copy, then ambient globals — is covered by tests.
+- **The digest is re-checked before reuse.** The installer stamps the CLI's
+  SHA-256 at build time and verifies it again before reusing an installation,
+  so a binary substituted after install forces a rebuild instead of running.
+- **`--status` names the binary that will actually answer**, instead of
+  judging Copilot solely by `GITHUB_TOKEN` and reporting it unavailable while
+  the gateway answered happily through the CLI backend.
+- Installer digests are computed from the commit's git blob rather than the
+  working tree, so a stale checkout or a local line-ending conversion cannot
+  publish a hash for bytes that were never released.
+
+### Fixed
+
+- **HTTP RPC authentication** — token/password mode no longer trusts every
+  loopback request implicitly; protected JSON-RPC and `/chat` calls now enforce
+  configured credentials consistently with WebSocket authentication.
+- `/twin` requires the same credential `/chat` requires, and `/agents/import`
+  — which executes code — requires it too.
+- A hatched twin shares the device, never a mouth: a channel alias cannot route
+  around the registry, and a twin is told which mouths are not its own.
+- A stale endpoint record is history, not an address; a name that never started
+  is not answered for by someone else; a dead pid is not a serving process.
+- An unknown `POST` path returns 404 rather than `200 "Received: …"`, and an
+  over-cap request body is answered with 413 rather than a connection reset.
+- A `--port` typed after a subcommand reaches that subcommand.
 
 ## [1.10.0] - 2026-07-11
 

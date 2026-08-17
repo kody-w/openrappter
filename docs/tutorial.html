@@ -18,7 +18,7 @@
   <!-- Nav -->
   <nav>
     <div class="nav-container">
-      <a href="./" class="logo">openrappter <span class="logo-badge">v1.9.1</span></a>
+      <a href="./" class="logo">openrappter <span class="logo-badge">v1.13.0</span></a>
       <button class="mobile-menu-btn">&#9776;</button>
       <div class="nav-links">
         <a href="./docs.html">Docs</a>
@@ -154,8 +154,8 @@
         <pre><code><span class="cmd">openrappter --task "list files in current directory"</span></code></pre>
 
         <p><strong>Specify an agent directly</strong> — bypass the router and run a named agent:</p>
-        <pre><code><span class="cmd">openrappter --agent shell "what's in my home directory?"</span>
-<span class="cmd">openrappter --exec ShellAgent "read package.json"</span></code></pre>
+        <pre><code><span class="cmd">openrappter --exec Shell "what's in my home directory?"</span>
+<span class="cmd">openrappter --exec Shell "read package.json"</span></code></pre>
 
         <div class="terminal">
           <div class="terminal-header">
@@ -321,7 +321,7 @@
 <span class="comment"># Should now include GreeterAgent in the list</span>
 
 <span class="comment"># Invoke it directly</span>
-<span class="cmd">openrappter --agent greeter "greet Alice"</span></code></pre>
+<span class="cmd">openrappter --exec GreeterAgent "greet Alice"</span></code></pre>
 
         <div class="terminal">
           <div class="terminal-header">
@@ -333,7 +333,7 @@
           <div class="terminal-body">
             <div class="terminal-line">
               <span class="terminal-prompt">$</span>
-              <span class="terminal-command">openrappter --agent greeter "greet Alice"</span>
+              <span class="terminal-command">openrappter --exec GreeterAgent "greet Alice"</span>
             </div>
             <div class="terminal-output">Executing GreeterAgent...</div>
             <div class="terminal-output">Data sloshing: injecting temporal + memory context</div>

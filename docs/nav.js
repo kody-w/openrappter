@@ -1,4 +1,4 @@
-/* OpenRappter v1.9.1 — Shared Navigation JS */
+/* OpenRappter — Shared Navigation JS */
 
 (function () {
   'use strict';

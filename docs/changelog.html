@@ -16,7 +16,7 @@
 
   <nav>
     <div class="nav-container">
-      <a href="./" class="logo">openrappter <span class="logo-badge">v1.9.1</span></a>
+      <a href="./" class="logo">openrappter <span class="logo-badge">v1.13.0</span></a>
       <button class="mobile-menu-btn">&#9776;</button>
       <div class="nav-links">
         <a href="./docs.html">Docs</a>
@@ -42,11 +42,127 @@
   <section class="timeline-section">
     <div class="timeline">
 
-      <!-- v1.9.1 — newest, highlighted -->
+      <!-- v1.13.0 -->
       <div class="timeline-item">
         <div class="timeline-dot" style="background:var(--green);"></div>
         <div class="timeline-card" style="border:1px solid rgba(16,185,129,0.3);">
-          <div class="version-badge" style="background:rgba(16,185,129,0.15);color:var(--green);">v1.9.1</div>
+          <div class="version-badge" style="background:rgba(16,185,129,0.15);color:var(--green);">v1.13.0</div>
+          <div class="version-date">2026-08-14</div>
+
+          <div class="change-group">
+            <div class="change-group-title added">
+              <span class="change-icon">+</span> Added
+            </div>
+            <ul class="change-list added">
+              <li>Show-and-Tell — record a real workflow, reconstruct its ordered semantic steps, and build a portable <code>SKILL.md</code>, a disabled automation, or both</li>
+              <li>Cross-runtime recording store — a private SQLite WAL database gives TypeScript and Python the same session, event, analysis, consent and artifact contract</li>
+              <li>Detached context collectors for macOS, Windows and Linux; browser URLs lose query and fragment, screenshots are explicit-only</li>
+              <li>Electron desktop shell with a sandboxed, context-isolated renderer and a visual Show-and-Tell workspace</li>
+              <li>Chat-driven desktop control through semantic refs while you watch</li>
+              <li>On-device narration (Whisper Small q8) and an opt-in on-device voice preview</li>
+            </ul>
+          </div>
+          <div class="change-group">
+            <div class="change-group-title technical">
+              <span class="change-icon">*</span> Technical
+            </div>
+            <ul class="change-list technical">
+              <li>Typed text is represented only by length, never content; credential- and sign-in-looking windows refuse capture</li>
+              <li>Raw frames never reach Copilot — only a separately approved, privacy-safe textual summary can leave the machine</li>
+              <li>The desktop gateway uses a random per-process bearer token on a dedicated loopback port</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.12.0 -->
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-card">
+          <div class="version-badge">v1.12.0</div>
+          <div class="version-date">2026-08-11</div>
+
+          <div class="change-group">
+            <div class="change-group-title added">
+              <span class="change-icon">+</span> Added
+            </div>
+            <ul class="change-list added">
+              <li>Provider-neutral Flight Recorder in both runtimes — a local SQLite WAL ledger of correlated trace, context, provider, tool and agent lifecycle events</li>
+              <li>Privacy-safe defaults — prompts, responses, tool arguments and file contents are omitted unless explicitly enabled, then recursively scrubbed and byte-capped</li>
+              <li>Integrity-checked replay bundles with SHA-256 event hashes and atomic tamper rejection</li>
+              <li><code>flight status</code>, <code>events</code>, <code>export</code>, <code>import</code> and a confirmation-gated <code>clear</code></li>
+            </ul>
+          </div>
+          <div class="change-group">
+            <div class="change-group-title technical">
+              <span class="change-icon">*</span> Technical
+            </div>
+            <ul class="change-list technical">
+              <li>Absolute workspace paths and session identifiers persist as stable SHA-256 scope identifiers, so channel keys cannot leak phone numbers, emails or chat GUIDs</li>
+              <li>Retention prunes whole completed traces and preserves active ones, rather than leaving replay fragments</li>
+              <li>A release-enforced cross-runtime gate blocks artifact publication on behaviour, mutation, privacy, causality and retention checks</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.11.0 -->
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-card">
+          <div class="version-badge">v1.11.0</div>
+          <div class="version-date">2026-08-10</div>
+
+          <div class="change-group">
+            <div class="change-group-title added">
+              <span class="change-icon">+</span> Added
+            </div>
+            <ul class="change-list added">
+              <li>One device, many rappters — an <strong>alpha</strong> holds the default port and the device&#39;s channels, and hatched <strong>twins</strong> run beside it with their own identity, port and lock</li>
+              <li>Twin-to-twin chat over <code>POST /twin</code> using the <code>rapp-twin-chat/1.0</code> envelope</li>
+              <li>Neighbourhood and roster — a running rappter can reach a neighbour and is judged by the name the roster calls it</li>
+              <li>Copilot Surgeon as the primary interface, with consent-bound procedures carrying an immutable SHA-256 digest</li>
+              <li>Release channels — <code>openrappter channel</code> manages stable and experimental rings</li>
+            </ul>
+          </div>
+          <div class="change-group">
+            <div class="change-group-title technical">
+              <span class="change-icon">*</span> Technical
+            </div>
+            <ul class="change-list technical">
+              <li>The Copilot CLI ships with the commit — <code>@github/copilot</code> is lockfile-pinned and resolved from this package&#39;s own <code>node_modules</code>, not <code>PATH</code></li>
+              <li>Its SHA-256 is stamped at build time and re-checked before reuse, so a substituted binary forces a rebuild instead of running</li>
+              <li><code>/twin</code> and <code>/agents/import</code> require the same credential <code>/chat</code> requires; loopback is not implicitly trusted</li>
+              <li>A hatched twin shares the device, never a mouth — a channel alias cannot route around the registry</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.10.0 -->
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-card">
+          <div class="version-badge">v1.10.0</div>
+          <div class="version-date">2026-07-11</div>
+
+          <div class="change-group">
+            <div class="change-group-title added">
+              <span class="change-icon">+</span> Added
+            </div>
+            <ul class="change-list added">
+              <li>Dual-use binary classification — network-fetch, install, arbitrary-exec and permission binaries are tagged so an approval layer can gate them</li>
+              <li>Brainstem device-code auth — <code>POST /login</code> starts the GitHub device flow and persists the token in the kernel&#39;s format</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- v1.9.1 -->
+      <div class="timeline-item">
+        <div class="timeline-dot"></div>
+        <div class="timeline-card">
+          <div class="version-badge">v1.9.1</div>
           <div class="version-date">2026-02-20</div>
 
           <div class="change-group">

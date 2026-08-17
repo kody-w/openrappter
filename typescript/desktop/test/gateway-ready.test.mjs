@@ -4,7 +4,9 @@ import { test } from 'node:test';
 
 import {
   GATEWAY_READY_SCHEMA,
+  GATEWAY_READY_TIMEOUT_ENV,
   GATEWAY_READY_TIMEOUT_MS,
+  resolveGatewayReadyTimeout,
   waitForGatewayReady,
 } from '../dist/gateway-ready.js';
 
@@ -148,4 +150,60 @@ test('the default budget is the one the error message promises', () => {
   // The message states a number of seconds; if the constant and the text ever
   // disagree the error would misreport how long the app actually waited.
   assert.equal(GATEWAY_READY_TIMEOUT_MS, 30_000);
+});
+
+/**
+ * The readiness budget is reachable without editing source.
+ *
+ * `waitForGatewayReady` has always accepted a `timeoutMs`, and until now no
+ * caller passed one and nothing read an environment variable — so the escape
+ * hatch the module documents existed only for its own tests. The person who
+ * actually hits a 30s cold start had no remedy at all.
+ *
+ * These drive `resolveGatewayReadyTimeout` against an injected environment
+ * rather than mutating `process.env`, so they cannot leak into another test.
+ */
+test('readiness budget falls back to the default when unset', () => {
+  assert.equal(resolveGatewayReadyTimeout({}), GATEWAY_READY_TIMEOUT_MS);
+});
+
+test('readiness budget honours a valid override', () => {
+  assert.equal(
+    resolveGatewayReadyTimeout({ [GATEWAY_READY_TIMEOUT_ENV]: '90000' }),
+    90_000,
+  );
+  assert.equal(
+    resolveGatewayReadyTimeout({ [GATEWAY_READY_TIMEOUT_ENV]: '  45000  ' }),
+    45_000,
+  );
+});
+
+test('readiness budget ignores anything that is not a positive integer', () => {
+  // Refusing to launch because someone exported a malformed number would be a
+  // worse failure than the slow start this setting exists to relieve.
+  for (const bad of ['', 'soon', '30s', '-1', '0', '1.5', '1e5', '0x30', 'NaN']) {
+    assert.equal(
+      resolveGatewayReadyTimeout({ [GATEWAY_READY_TIMEOUT_ENV]: bad }),
+      GATEWAY_READY_TIMEOUT_MS,
+      `expected ${JSON.stringify(bad)} to be ignored`,
+    );
+  }
+});
+
+test('readiness budget is capped so a typo cannot hang startup forever', () => {
+  assert.equal(
+    resolveGatewayReadyTimeout({ [GATEWAY_READY_TIMEOUT_ENV]: '999999999' }),
+    10 * 60_000,
+  );
+});
+
+test('an explicit caller option still wins over the environment', async () => {
+  // The option is the mechanism; the variable is only the default for it.
+  const child = new FakeChild();
+  const started = Date.now();
+  await assert.rejects(
+    waitForGatewayReady(child, { port: 18790, timeoutMs: 20 }),
+    /did not become ready in 0 seconds\./,
+  );
+  assert.ok(Date.now() - started < 5_000);
 });

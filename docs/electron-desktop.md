@@ -142,6 +142,35 @@ login, and optional OpenRappter Bar launch. It publishes
 validates the file, process, host, port, and token, then authenticates to that
 gateway instead of creating another daemon.
 
+## Slow gateway startup
+
+The desktop app will not open a window until the gateway it spawned reports
+itself ready. That budget is **30 seconds**, and when it runs out the gateway is
+killed and startup fails with:
+
+```
+OpenRappter gateway did not become ready in 30 seconds.
+```
+
+A gateway that genuinely fails to start is reported immediately by its exit,
+so this particular message only appears when the process is alive and merely
+slow — a cold first run resolving modules, an antivirus scan, or a heavily
+loaded machine.
+
+If that is your machine, raise the budget:
+
+```bash
+export OPENRAPPTER_GATEWAY_READY_TIMEOUT_MS=90000
+```
+
+Values must be a plain positive integer of milliseconds. Anything else is
+ignored in favour of the 30s default rather than being treated as fatal, and
+the accepted maximum is ten minutes so that a mistyped value cannot hang
+startup indefinitely.
+
+Whether 30 seconds is the right default is still open (issue #223); this
+variable exists so that nobody has to wait for that answer to start the app.
+
 ## Deterministic smoke
 
 `OPENRAPPTER_DESKTOP_SMOKE=1` launches the real Electron app, verifies the

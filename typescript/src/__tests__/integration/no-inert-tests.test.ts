@@ -43,11 +43,22 @@ const TEST_ROOTS = [
  * cannot currently fail, and should not be counted as coverage.
  */
 const KNOWN_INERT = new Set([
-  // Catalogued by the #213 audit as having no product unit to target, or
-  // wrapping external I/O that is mocked end to end.
+  // Two end-to-end scenario specifications: "auto-ETA reply from WhatsApp and
+  // Calendar", "Slack mention digest to Telegram", and so on. Each composes
+  // channels that genuinely exist (whatsapp.ts, slack.ts, discord.ts,
+  // signal.ts) into a user-facing recipe, and each is written as literals
+  // because there is no single unit that performs the composition — the
+  // scenario is the product, assembled by an operator across cron, channels
+  // and agents.
+  //
+  // They are kept rather than deleted because they document intended
+  // behaviour that nothing else records. They are listed here because that is
+  // documentation, and counting it as 145 passing tests overstates what is
+  // covered. If the composition ever gains a runtime — a recipe loader, a
+  // scenario runner — these become real tests against it, and come off this
+  // list.
   'typescript/src/__tests__/parity/power-prompts-2.test.ts',
   'typescript/src/__tests__/parity/power-prompts.test.ts',
-  'typescript/src/__tests__/parity/voice.test.ts',
   // Three former entries — src/config/schema.test.ts, src/providers/providers.test.ts
   // and src/__tests__/imessage-channel.test.ts — were deleted rather than
   // catalogued: each was already covered by a real suite (parity/config*.test.ts

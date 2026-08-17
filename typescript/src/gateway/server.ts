@@ -33,6 +33,7 @@ import { registerSurgeonMethods } from './methods/surgeon-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import { readAnatomy } from './anatomy.js';
+import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
 import type { SurgeonService } from '../surgeon/service.js';
@@ -2213,6 +2214,62 @@ export class GatewayServer {
       const result = { deleted: !!sessionId && this.sessionStore.delete(sessionId) };
       this.saveSessions();
       return result;
+    }, { requiresAuth: true });
+
+    /**
+     * sessions.reset — empty a session without discarding it.
+     *
+     * Wired against `sessionStore`, the same map `chat.*` reads, because the
+     * reply is not the evidence: `methods/session-methods.ts` declares this
+     * same name against a `Map` it allocates itself, so it answered "Session
+     * not found" for sessions the live gateway demonstrably held, and would
+     * have cleared nothing had it found one.
+     *
+     * Aborting the in-flight run is part of the reset, not politeness. A run
+     * that survives it pushes its assistant reply into the session on
+     * completion (see `executeAgentWithEvents`), so a reset issued mid-answer
+     * would report success and then be silently undone a few seconds later.
+     */
+    this.registerMethod('sessions.reset', async (params: { sessionId?: string; sessionKey?: string }) => {
+      const sessionId = resolveSessionId(params);
+      if (!sessionId) throw new Error('sessionKey required');
+      const session = this.sessionStore.get(sessionId);
+      if (!session) throw new Error('Session not found');
+
+      const runId = this.activeRunBySession.get(sessionId);
+      const run = runId ? this.activeRunsById.get(runId) : undefined;
+      if (run) this.abortActiveRun(run);
+
+      const clearedMessages = session.messages.length;
+      session.messages = [];
+      session.updatedAt = new Date().toISOString();
+      this.saveSessions();
+
+      return {
+        reset: true,
+        sessionId,
+        sessionKey: sessionId,
+        clearedMessages,
+        messageCount: 0,
+      };
+    }, { requiresAuth: true });
+
+    /**
+     * logs.get — the daemon's own log, redacted.
+     *
+     * Reads the launchd stdout/stderr files under this server's data dir; see
+     * `log-store.ts` for why those files and not the unfed in-memory buffer in
+     * `methods/logs-methods.ts` (which also answers to `logs.tail`, a name
+     * nothing calls). Returns a bare array because that is what the Bar's
+     * `RpcClient.getLogs` decodes.
+     */
+    this.registerMethod('logs.get', async (params: { limit?: number; since?: number; level?: string }) => {
+      return readGatewayLogs({
+        dataDir: this.dataDir,
+        limit: params?.limit,
+        since: params?.since,
+        level: params?.level,
+      });
     }, { requiresAuth: true });
 
     // Channel methods

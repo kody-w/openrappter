@@ -119,7 +119,14 @@ export class AgentRegistry {
             const ExportedClass = mod[exportName];
             if (
               typeof ExportedClass === 'function' &&
-              ExportedClass.prototype instanceof BasicAgent
+              ExportedClass.prototype instanceof BasicAgent &&
+              // A template is constructed per descriptor elsewhere and cannot be
+              // instantiated bare; calling `new` on it here throws and records a
+              // permanent, false load failure. Constructor arity cannot be used
+              // to detect this — an optional parameter still counts toward
+              // `Function.length`, so ShellAgent reports arity 1 while loading
+              // perfectly well.
+              !(ExportedClass as { isTemplate?: boolean }).isTemplate
             ) {
               const instance = new ExportedClass() as BasicAgent;
               this.agents.set(instance.name, instance);

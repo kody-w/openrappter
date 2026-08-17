@@ -85,6 +85,12 @@ $REPO_URL       = "https://github.com/kody-w/openrappter.git"
 $MIN_NODE       = 20
 $HOME_DIR       = Join-Path $env:USERPROFILE ".openrappter"
 $GATEWAY_PID    = Join-Path $HOME_DIR "gateway.pid"
+# The port the readiness probe knocks on. It must be the port the gateway
+# actually binds, so it follows the CLI's own precedence: OPENRAPPTER_PORT, then
+# the alpha's default. Probing a port the gateway never bound would report a
+# failure for a healthy daemon, which is the same lie as reporting success for a
+# dead one, only inverted.
+$GATEWAY_PORT   = if ($env:OPENRAPPTER_PORT) { [int]$env:OPENRAPPTER_PORT } else { 18790 }
 $CLIENT_ID      = "Iv1.b507a08c87ecfe98"
 $COPILOT_SCOPE  = "read:user"
 $INSTALL_STAGE  = 0
@@ -627,6 +633,103 @@ function Stop-GatewayIfRunning {
     }
 }
 
+function Resolve-GatewayEntry {
+    param([string]$LauncherPath)
+
+    # `Get-Command openrappter` finds a launcher, not the JavaScript entry point,
+    # and dist/index.js is not one level above that launcher under EITHER install
+    # method: `npm install -g` leaves the shim in %APPDATA%\npm with the package
+    # under node_modules\, and the git method writes .openrappter\bin\openrappter.cmd
+    # for a build that lives in .openrappter\typescript\dist. The old
+    # "<launcher>\..\dist\index.js" guess therefore named a file that exists in
+    # neither layout, so node exited immediately with MODULE_NOT_FOUND.
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    if ($LauncherPath) {
+        $launcherDir = Split-Path $LauncherPath
+        # npm -g on Windows: shim in <prefix>, package under <prefix>\node_modules
+        $candidates.Add([System.IO.Path]::Combine($launcherDir, "node_modules", "openrappter", "dist", "index.js"))
+        # npm -g with a Unix-style prefix: shim in <prefix>\bin, package under <prefix>\lib\node_modules
+        $candidates.Add([System.IO.Path]::Combine($launcherDir, "..", "lib", "node_modules", "openrappter", "dist", "index.js"))
+        # Launcher shipped inside the package itself (bin\ sits next to dist\)
+        $candidates.Add([System.IO.Path]::Combine($launcherDir, "..", "dist", "index.js"))
+    }
+
+    # git method: .openrappter\bin\openrappter.cmd runs .openrappter\typescript\dist\index.js
+    $candidates.Add([System.IO.Path]::Combine($InstallDir, "typescript", "dist", "index.js"))
+
+    try {
+        $npmRoot = (Invoke-Npm root -g | Where-Object { $_ } | Select-Object -Last 1)
+        if ($npmRoot) {
+            $candidates.Add([System.IO.Path]::Combine($npmRoot.ToString().Trim(), "openrappter", "dist", "index.js"))
+        }
+    } catch {
+        # `npm root -g` is one hint among several; its absence is not fatal.
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    return $null
+}
+
+function Test-GatewayAnswering {
+    param([int]$Port)
+
+    # /readyz is handled before the origin check in gateway/server.ts, so a
+    # loopback probe needs no token and no Origin header.
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/readyz" `
+            -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        return [pscustomobject]@{
+            Answering = ($response.StatusCode -eq 200)
+            Detail    = "answered HTTP $($response.StatusCode)"
+        }
+    } catch {
+        # Connection refused while it boots, or 503 while it is still degraded.
+        return [pscustomobject]@{ Answering = $false; Detail = $_.Exception.Message }
+    }
+}
+
+function Wait-GatewayReady {
+    param(
+        [System.Diagnostics.Process]$Process,
+        [int]$Port,
+        [int]$TimeoutSeconds = 60
+    )
+
+    # A PID is not readiness. Start-Process hands back an ID for a process that
+    # has already died, so the only honest evidence that a gateway is serving is
+    # a gateway answering.
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastReason = "no response on port $Port"
+
+    while ((Get-Date) -lt $deadline) {
+        if ($Process.HasExited) {
+            return [pscustomobject]@{
+                Ready  = $false
+                Reason = "the process exited with code $($Process.ExitCode) before answering on port $Port"
+            }
+        }
+
+        $probe = Test-GatewayAnswering -Port $Port
+        if ($probe.Answering) {
+            return [pscustomobject]@{ Ready = $true; Reason = $null }
+        }
+        $lastReason = "port $Port not ready yet ($($probe.Detail))"
+
+        Start-Sleep -Milliseconds 500
+    }
+
+    return [pscustomobject]@{
+        Ready  = $false
+        Reason = "timed out after $TimeoutSeconds seconds -- $lastReason"
+    }
+}
+
 function Start-GatewayBrainstem {
     Write-Info "Starting gateway brainstem daemon..."
     if ($DryRun) {
@@ -636,29 +739,63 @@ function Start-GatewayBrainstem {
 
     $openrappterBin = Get-Command openrappter -ErrorAction SilentlyContinue
     if (-not $openrappterBin) {
-        Write-Warn "openrappter not on PATH -- skipping gateway start. Restart your terminal and run: openrappter gateway"
+        Write-Warn "openrappter not on PATH -- skipping gateway start. Restart your terminal and run: openrappter --daemon"
+        return
+    }
+
+    $entry = Resolve-GatewayEntry -LauncherPath $openrappterBin.Source
+    if (-not $entry) {
+        Write-Warn "Could not locate the gateway entry point (dist\index.js) -- skipping gateway start."
+        Write-Info "Start manually with: openrappter --daemon"
+        return
+    }
+
+    # A gateway already answering on this port would satisfy the readiness probe
+    # below no matter what was launched, so "this PID is serving" is only a
+    # claim worth making when the port was silent first.
+    if ((Test-GatewayAnswering -Port $GATEWAY_PORT).Answering) {
+        Write-Success "Gateway already running on port $GATEWAY_PORT"
         return
     }
 
     try {
-        # Start gateway in background
+        # `openrappter gateway` is not a registered command. Commander read the
+        # word as the [message] positional, sent it to the model as a chat
+        # prompt, printed an answer about network gateways, and exited 0 -- while
+        # this installer recorded its PID and announced a running daemon. The
+        # daemon is `--daemon`, and no port is passed so the CLI keeps its own
+        # port precedence, which $GATEWAY_PORT mirrors.
         $proc = Start-Process -FilePath "node" `
-            -ArgumentList @((Join-Path (Join-Path (Join-Path (Split-Path $openrappterBin.Source) "..") "dist") "index.js"), "gateway") `
+            -ArgumentList @($entry, "--daemon") `
             -WindowStyle Hidden `
             -PassThru `
             -ErrorAction Stop
-
-        # Save PID
-        if (-not (Test-Path $HOME_DIR)) {
-            New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
-        }
-        $proc.Id | Set-Content -Path $GATEWAY_PID
-
-        Write-Success "Gateway brainstem started (PID $($proc.Id), port 18790)"
     } catch {
         Write-Warn "Could not start gateway: $_"
-        Write-Info "Start manually with: openrappter gateway"
+        Write-Info "Start manually with: openrappter --daemon"
+        return
     }
+
+    $readiness = Wait-GatewayReady -Process $proc -Port $GATEWAY_PORT
+    if (-not $readiness.Ready) {
+        Write-Warn "Gateway did not become ready: $($readiness.Reason)"
+        if (-not $proc.HasExited) {
+            # Leave nothing half-started behind to hold the port and confuse the
+            # next run's probe.
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+        Write-Info "Start manually with: openrappter --daemon"
+        return
+    }
+
+    # Recorded only now: the file says "a gateway answered on this port", not
+    # "a process was spawned".
+    if (-not (Test-Path $HOME_DIR)) {
+        New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
+    }
+    $proc.Id | Set-Content -Path $GATEWAY_PID
+
+    Write-Success "Gateway brainstem ready (PID $($proc.Id), port $GATEWAY_PORT)"
 }
 
 # ── Doctor ───────────────────────────────────────────────────────────────────
@@ -845,7 +982,7 @@ function Main {
     Write-Kv "Check status" "openrappter --status"
     Write-Kv "List agents"  "openrappter --list-agents"
     Write-Kv "Chat"         'openrappter "hello"'
-    Write-Kv "Start gateway" "openrappter gateway"
+    Write-Kv "Start gateway" "openrappter --daemon"
     if ($Method -eq "git") {
         Write-Kv "Install dir" $InstallDir
         Write-Kv "Update"      "cd $InstallDir && git pull && cd typescript && npm run build"

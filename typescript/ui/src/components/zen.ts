@@ -136,15 +136,29 @@ export class OpenRappterZen extends LitElement {
   @state() private loading = true;
 
   private frameHandler: ((payload: unknown) => void) | null = null;
+  private sessionListHandler: (() => void) | null = null;
 
   async connectedCallback() {
     super.connectedCallback();
+
+    // The gateway already announces sessions starting and ending; nothing
+    // listened, so the list was only ever as fresh as the moment this screen
+    // was opened. A session that appeared a second later stayed invisible.
+    this.sessionListHandler = () => { void this.loadSessions(); };
+    gateway.on('zen.session.start', this.sessionListHandler);
+    gateway.on('zen.session.end', this.sessionListHandler);
+
     await this.loadSessions();
     this.loading = false;
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    if (this.sessionListHandler) {
+      gateway.off('zen.session.start', this.sessionListHandler);
+      gateway.off('zen.session.end', this.sessionListHandler);
+      this.sessionListHandler = null;
+    }
     if (this.activeSessionId) {
       this.unsubscribe();
     }

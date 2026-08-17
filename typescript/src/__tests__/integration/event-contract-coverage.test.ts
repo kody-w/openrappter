@@ -64,6 +64,26 @@ function invokedMethodModules(): Set<string> {
  * Declared but never emitted. Anyone subscribing to one of these waits
  * forever. This list may only shrink: either start emitting it, or delete it.
  */
+/**
+ * A client listens for these and nothing emits them, so the feature is inert.
+ *
+ * Found by widening this test to parse `gateway.on(...)`; the first version
+ * read only `.subscribe([...])` and could not see them.
+ *
+ *   channel.status — components/channels.ts keeps a `channelStatuses` map
+ *                    that therefore never updates after first load.
+ *   agent.tool     — components/chat.ts registers `handleToolEvent`, which
+ *                    never fires, so tool use never appears in chat.
+ *
+ * Both need the gateway to start emitting, which is a feature change rather
+ * than a wiring fix. Shrink-only: the list below fails if one starts being
+ * emitted while still listed.
+ */
+const LISTENED_BUT_NEVER_EMITTED = new Set([
+  'channel.status',
+  'agent.tool',
+]);
+
 const DECLARED_BUT_NEVER_EMITTED = new Set([
   'agent.stream',
   'agent.tool',
@@ -132,8 +152,8 @@ function barListeners(): Map<string, string> {
   return listeners;
 }
 
-/** Event names the web UI subscribes to. */
-function uiListeners(): Map<string, string> {
+/** Event names the web UI passes to `gateway.subscribe([...])`. */
+function uiSubscribeListeners(): Map<string, string> {
   const listeners = new Map<string, string>();
   for (const file of sourceFiles(UI_SRC, ['.ts'])) {
     const source = readFileSync(file, 'utf-8');
@@ -146,9 +166,26 @@ function uiListeners(): Map<string, string> {
   return listeners;
 }
 
-/** Every client listener, from both clients. */
+/** Event names the web UI registers a handler for with `gateway.on(...)`. */
+function uiOnListeners(): Map<string, string> {
+  const listeners = new Map<string, string>();
+  for (const file of sourceFiles(UI_SRC, ['.ts'])) {
+    const source = readFileSync(file, 'utf-8');
+    // `gateway.on('zen.frame', ...)` is a listener too. Parsing only
+    // `.subscribe([...])` missed every component that registers a handler
+    // directly, which is most of them.
+    for (const call of source.matchAll(/\bgateway\.on\(\s*['"]([a-z][a-z.*]*)['"]/g)) {
+      // `gateway.on('*')` in the debug panel is a firehose, not a contract.
+      if (call[1] === '*') continue;
+      listeners.set(call[1], file.replace(`${REPO}/`, ''));
+    }
+  }
+  return listeners;
+}
+
+/** Every client listener, from every path that registers one. */
 function listenedEvents(): Map<string, string> {
-  return new Map([...barListeners(), ...uiListeners()]);
+  return new Map([...barListeners(), ...uiSubscribeListeners(), ...uiOnListeners()]);
 }
 
 describe('every event a client waits for is one the gateway sends', () => {
@@ -157,15 +194,20 @@ describe('every event a client waits for is one the gateway sends', () => {
     // hides one parser breaking, because the other keeps the total up. That
     // is exactly what happened to the first version of this test — breaking
     // the Bar regex changed nothing, since the UI parser still found four.
+    // Every parsing path asserted separately. A merged count hides one parser
+    // breaking, because the others keep the total up — which is exactly how
+    // the first two versions of this guard failed to notice their own blind
+    // spots. Three parsers, three assertions.
     expect(barListeners().size).toBeGreaterThan(0);
-    expect(uiListeners().size).toBeGreaterThan(0);
+    expect(uiSubscribeListeners().size).toBeGreaterThan(0);
+    expect(uiOnListeners().size).toBeGreaterThan(0);
     expect(emittedEvents().size).toBeGreaterThan(4);
   });
 
   it('no client waits for an event nothing emits', () => {
     const emitted = emittedEvents();
     const orphans = [...listenedEvents().entries()]
-      .filter(([name]) => !emitted.has(name))
+      .filter(([name]) => !emitted.has(name) && !LISTENED_BUT_NEVER_EMITTED.has(name))
       .map(([name, where]) => `${name} (listened for in ${where})`)
       .sort();
     expect(orphans).toEqual([]);
@@ -184,6 +226,13 @@ describe('every event a client waits for is one the gateway sends', () => {
     // removed, so the list cannot rot into a permanent excuse.
     const emitted = emittedEvents();
     const stale = [...DECLARED_BUT_NEVER_EMITTED].filter((name) => emitted.has(name)).sort();
+    expect(stale).toEqual([]);
+  });
+
+  it('the listened-but-never-emitted list contains nothing now emitted', () => {
+    // Same self-cleaning rule: wire one up and this fails until it is removed.
+    const emitted = emittedEvents();
+    const stale = [...LISTENED_BUT_NEVER_EMITTED].filter((n) => emitted.has(n)).sort();
     expect(stale).toEqual([]);
   });
 

@@ -37,7 +37,6 @@ const KNOWN_MISSING = new Set<string>([
   'agents.info',
   'config.patch',
   'connections.info',
-  'exec.history',
   'models.list',
   // Live UI call sites still unimplemented.
   'agents.files.list',
@@ -48,14 +47,14 @@ const KNOWN_MISSING = new Set<string>([
   'zen.sessions',
   'zen.subscribe',
   'zen.unsubscribe',
-  // Live macOS Bar screens that cannot work: approvals, usage, logs, node
-  // pairing and skills. Being fixed now; each entry is removed as its method
-  // lands, and the last test in this file fails if one is left here after it
-  // starts existing.
+  // Live macOS Bar screens that cannot work: usage, logs, node pairing and
+  // skills. Being fixed now; each entry is removed as its method lands, and the
+  // last test in this file fails if one is left here after it starts existing.
+  // Approvals left this list in the exec.pending/exec.respond fix: they are
+  // served by the ExecSafety engine ShellAgent actually blocks on, not by the
+  // unwired gateway/methods/exec-methods.ts module.
   'connections.disconnect',
   'connections.pair',
-  'exec.pending',
-  'exec.respond',
   'logs.get',
   'sessions.reset',
   'skills.install',

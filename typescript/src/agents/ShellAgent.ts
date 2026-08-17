@@ -14,7 +14,7 @@ import path from 'path';
 import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
-import { ExecSafety } from '../security/exec-safety.js';
+import { ExecSafety, getSharedExecSafety } from '../security/exec-safety.js';
 
 
 export const __manifest__ = {
@@ -80,7 +80,9 @@ export class ShellAgent extends BasicAgent {
       },
     };
     super('Shell', metadata);
-    this.execSafety = execSafety ?? new ExecSafety();
+    // Defaults to the process-wide engine so the approvals this agent blocks on
+    // are the ones the gateway serves to the reviewer (see getSharedExecSafety).
+    this.execSafety = execSafety ?? getSharedExecSafety();
   }
 
   /** Access to the underlying safety engine, e.g. for reviewing/resolving approval tokens. */

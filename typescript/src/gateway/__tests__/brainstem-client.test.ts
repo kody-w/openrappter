@@ -4,6 +4,7 @@ import {
   askBrainstem,
   brainstemBaseUrl,
   BrainstemUnavailableError,
+  BrainstemAbortedError,
   DEFAULT_BRAINSTEM_URL,
   resolveBrainstemUrl,
   resetBrainstemDiscovery,
@@ -231,5 +232,67 @@ describe('resolveBrainstemUrl', () => {
     await resolveBrainstemUrl({ env: {} as NodeJS.ProcessEnv, fetchImpl });
 
     expect(probes).toBe(1);
+  });
+});
+
+describe('cancelling a brainstem request', () => {
+  it('passes the caller signal to fetch, so the model stops generating', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      seenSignal = init?.signal ?? undefined;
+      return jsonResponse(envelope);
+    }) as unknown as typeof fetch;
+
+    const controller = new AbortController();
+    await askBrainstem({ message: 'hi', fetchImpl, signal: controller.signal, baseUrl: 'http://127.0.0.1:7072' });
+
+    // Marking a run aborted only stops the gateway listening. Without a signal
+    // on the request the brainstem keeps generating a reply nobody reads,
+    // which on a hosted model is billed work.
+    expect(seenSignal).toBeDefined();
+    expect(seenSignal!.aborted).toBe(false);
+
+    controller.abort();
+    expect(seenSignal!.aborted).toBe(true);
+  });
+
+  it('reports cancellation as cancellation, not as an unreachable brainstem', async () => {
+    const controller = new AbortController();
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      controller.abort();
+      const error = new Error('This operation was aborted');
+      error.name = 'AbortError';
+      void init;
+      throw error;
+    }) as unknown as typeof fetch;
+
+    // Telling someone who pressed Stop that the brainstem is down, and offering
+    // the command to start it, would be a confusing lie: it was reachable.
+    await expect(
+      askBrainstem({ message: 'hi', fetchImpl, signal: controller.signal }),
+    ).rejects.toThrow(BrainstemAbortedError);
+  });
+
+  it('still reports an unreachable brainstem when nobody cancelled', async () => {
+    const controller = new AbortController();
+    const fetchImpl = (async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:7072');
+    }) as unknown as typeof fetch;
+
+    await expect(
+      askBrainstem({ message: 'hi', fetchImpl, signal: controller.signal }),
+    ).rejects.toThrow(BrainstemUnavailableError);
+  });
+
+  it('still applies the timeout when no caller signal is given', async () => {
+    let seenSignal: AbortSignal | undefined;
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      seenSignal = init?.signal ?? undefined;
+      return jsonResponse(envelope);
+    }) as unknown as typeof fetch;
+
+    await askBrainstem({ message: 'hi', fetchImpl, timeoutMs: 5_000 });
+
+    expect(seenSignal).toBeDefined();
   });
 });

@@ -16,6 +16,7 @@ SQLite-backed adapter is returned.
 """
 
 import abc
+import contextlib
 import json
 import os
 import sqlite3
@@ -23,7 +24,7 @@ import stat
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 DEFAULT_DB_PATH = Path.home() / ".openrappter" / "storage.db"
 
@@ -344,6 +345,27 @@ class SqliteStorageAdapter(StorageAdapter):
     JSON-serializable Python values) alongside a handful of indexed columns
     used for filtering. Every mutation runs inside a transaction so writes
     are atomic; failures are never swallowed.
+
+    **Thread safety.** The adapter owns exactly one ``sqlite3.Connection``,
+    opened with ``check_same_thread=False`` so it may be used from any thread
+    (a ``ThreadPoolExecutor``, the gateway's executor, a cron worker, ...).
+    That flag on its own would only trade an exception for a data race, so it
+    is paired with a hard invariant: **the connection — and every cursor
+    derived from it — is only ever touched while ``self._lock`` is held.**
+    ``_connection()`` is the single door through which that happens; no method
+    reaches ``self._conn`` directly, and every result set is materialized
+    (``fetchone``/``fetchall``) before the lock is released, so no lazy cursor
+    can be stepped while another thread is mid-statement.
+
+    One shared, fully serialized connection is deliberate rather than a
+    connection-per-thread pool: ``:memory:`` databases are private to their
+    connection, so per-thread connections would silently give each thread its
+    own empty database — writes would appear to succeed and then vanish, which
+    is far worse than the ``ProgrammingError`` this replaces. It also keeps
+    ``close()`` meaningful from any thread. WAL mode (already enabled) still
+    provides concurrency across *processes*; within the process, correctness
+    is bought at the cost of read parallelism, which is the right trade for a
+    local-first runtime whose storage calls are sub-millisecond.
     """
 
     def __init__(self, path: Optional[Any] = None, timeout: float = 5.0):
@@ -362,6 +384,17 @@ class SqliteStorageAdapter(StorageAdapter):
             if self._initialized:
                 return
 
+            if sqlite3.threadsafety == 0:
+                # SQLITE_THREADSAFE=0: the library keeps unprotected global
+                # state, so no amount of Python-level locking can make a
+                # connection safe to share across threads. Fail loudly rather
+                # than hand back an adapter that silently corrupts data.
+                raise RuntimeError(
+                    "sqlite3 was built without thread safety "
+                    "(sqlite3.threadsafety == 0); SqliteStorageAdapter cannot "
+                    "guarantee its cross-thread contract on this interpreter."
+                )
+
             if self._path != ":memory:":
                 db_path = Path(self._path)
                 db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -373,7 +406,12 @@ class SqliteStorageAdapter(StorageAdapter):
                     # so proceed rather than failing initialization.
                     pass
 
-            conn = sqlite3.connect(self._path, timeout=self._timeout, isolation_level=None)
+            conn = sqlite3.connect(
+                self._path,
+                timeout=self._timeout,
+                isolation_level=None,
+                check_same_thread=False,
+            )
             conn.execute(f"PRAGMA busy_timeout={max(int(self._timeout * 1000), 0)}")
             _execute_with_busy_retry(conn, "PRAGMA journal_mode=WAL", self._timeout)
             conn.execute("PRAGMA foreign_keys=ON")
@@ -404,36 +442,56 @@ class SqliteStorageAdapter(StorageAdapter):
             )
         return self._conn
 
+    @contextlib.contextmanager
+    def _connection(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """
+        The only sanctioned way to reach the shared connection.
+
+        Holds ``self._lock`` for the whole body, so the openness check, the
+        statement, and the materialization of its results are one atomic unit
+        with respect to other threads (including a concurrent ``close()``).
+        With ``write=True`` the body additionally runs inside the connection's
+        transaction context manager, committing on success and rolling back on
+        error before the lock is released.
+        """
+        with self._lock:
+            conn = self._ensure_open()
+            if write:
+                with conn:
+                    yield conn
+            else:
+                yield conn
+
     def _run_migrations(self) -> None:
-        conn = self._ensure_open()
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version INTEGER PRIMARY KEY,
-                applied_at REAL NOT NULL
-            )
-            """
-        )
-        for version, statements in _MIGRATIONS:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                applied = conn.execute(
-                    "SELECT 1 FROM schema_migrations WHERE version = ?",
-                    (version,),
-                ).fetchone()
-                if applied:
-                    conn.commit()
-                    continue
-                for statement in statements:
-                    conn.execute(statement)
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    (version, time.time()),
+        with self._connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at REAL NOT NULL
                 )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                raise
+                """
+            )
+            for version, statements in _MIGRATIONS:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    applied = conn.execute(
+                        "SELECT 1 FROM schema_migrations WHERE version = ?",
+                        (version,),
+                    ).fetchone()
+                    if applied:
+                        conn.commit()
+                        continue
+                    for statement in statements:
+                        conn.execute(statement)
+                    conn.execute(
+                        "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                        (version, time.time()),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
 
     # --- Sessions ---
 
@@ -441,8 +499,7 @@ class SqliteStorageAdapter(StorageAdapter):
         session = dict(session)
         session.setdefault('created_at', time.time())
         session['updated_at'] = time.time()
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO sessions (id, channel_id, data, created_at, updated_at)
@@ -458,27 +515,24 @@ class SqliteStorageAdapter(StorageAdapter):
             )
 
     def get_session(self, session_id: str) -> Optional[dict]:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT data FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def delete_session(self, session_id: str) -> bool:
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             cur = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_sessions(self, filter_opts: Optional[dict] = None) -> list:
-        conn = self._ensure_open()
         sql = "SELECT data FROM sessions"
         params: list = []
         if filter_opts and 'channel_id' in filter_opts:
             sql += " WHERE channel_id = ?"
             params.append(filter_opts['channel_id'])
-        with self._lock:
+        with self._connection() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [json.loads(row[0]) for row in rows]
 
@@ -487,30 +541,26 @@ class SqliteStorageAdapter(StorageAdapter):
     def save_memory_chunk(self, chunk: dict) -> None:
         chunk = dict(chunk)
         chunk.setdefault('created_at', time.time())
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO memory_chunks (id, data, created_at) VALUES (?, ?, ?)",
                 (chunk['id'], json.dumps(chunk), chunk['created_at']),
             )
 
     def get_memory_chunk(self, chunk_id: str) -> Optional[dict]:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT data FROM memory_chunks WHERE id = ?", (chunk_id,)
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def delete_memory_chunk(self, chunk_id: str) -> bool:
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             cur = conn.execute("DELETE FROM memory_chunks WHERE id = ?", (chunk_id,))
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_memory_chunks(self) -> list:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             rows = conn.execute("SELECT data FROM memory_chunks").fetchall()
         return [json.loads(row[0]) for row in rows]
 
@@ -520,8 +570,7 @@ class SqliteStorageAdapter(StorageAdapter):
         job = dict(job)
         job.setdefault('created_at', time.time())
         job['updated_at'] = time.time()
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             conn.execute(
                 """
                 INSERT INTO cron_jobs (id, data, created_at, updated_at)
@@ -535,22 +584,19 @@ class SqliteStorageAdapter(StorageAdapter):
             )
 
     def get_cron_job(self, job_id: str) -> Optional[dict]:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT data FROM cron_jobs WHERE id = ?", (job_id,)
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def delete_cron_job(self, job_id: str) -> bool:
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             cur = conn.execute("DELETE FROM cron_jobs WHERE id = ?", (job_id,))
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
     def list_cron_jobs(self) -> list:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             rows = conn.execute("SELECT data FROM cron_jobs").fetchall()
         return [json.loads(row[0]) for row in rows]
 
@@ -560,8 +606,7 @@ class SqliteStorageAdapter(StorageAdapter):
         log = dict(log)
         log.setdefault('created_at', time.time())
         job_id = _require_cron_log_job_id(log)
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             try:
                 conn.execute(
                     "INSERT INTO cron_logs (job_id, data, created_at) VALUES (?, ?, ?)",
@@ -573,8 +618,7 @@ class SqliteStorageAdapter(StorageAdapter):
                 raise
 
     def get_cron_logs(self, job_id: str, limit: Optional[int] = None) -> list:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT data FROM cron_logs WHERE job_id = ? ORDER BY seq ASC",
                 (job_id,),
@@ -587,32 +631,28 @@ class SqliteStorageAdapter(StorageAdapter):
     # --- Config KV ---
 
     def set_config(self, key: str, value: Any) -> None:
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO config_kv (key, value) VALUES (?, ?)",
                 (key, json.dumps(value)),
             )
 
     def get_config(self, key: str) -> Any:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT value FROM config_kv WHERE key = ?", (key,)
             ).fetchone()
         return json.loads(row[0]) if row else None
 
     def get_all_config(self) -> dict:
-        conn = self._ensure_open()
-        with self._lock:
+        with self._connection() as conn:
             rows = conn.execute("SELECT key, value FROM config_kv").fetchall()
         return {key: json.loads(value) for key, value in rows}
 
     def delete_config(self, key: str) -> bool:
-        conn = self._ensure_open()
-        with self._lock, conn:
+        with self._connection(write=True) as conn:
             cur = conn.execute("DELETE FROM config_kv WHERE key = ?", (key,))
-        return cur.rowcount > 0
+            return cur.rowcount > 0
 
 
 def create_storage_adapter(config: Optional[dict] = None) -> StorageAdapter:

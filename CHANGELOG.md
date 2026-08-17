@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Python storage adapter is genuinely thread-safe** — `SqliteStorageAdapter`
+  held an `RLock` (implying multi-threaded use) but opened its connection with
+  sqlite3's default `check_same_thread=True`, so any call from a worker thread
+  — a `ThreadPoolExecutor`, the gateway's executor, a cron worker — raised
+  `sqlite3.ProgrammingError`. The connection is now opened with
+  `check_same_thread=False` and every use of it, including cursor results and
+  `rowcount`, is funnelled through a single lock-holding gate.
 - **Browser private network access** — reaching a private or loopback address
   from the browser agent now requires an explicit operator opt-in
   (`allowPrivateNetwork`, off by default) rather than being reachable by

@@ -13,6 +13,16 @@ public final class ChatViewModel {
     public var chatInput: String = ""
     public var currentSessionKey: String?
 
+    /// Which brain answers the next turn, restored from the last launch.
+    ///
+    /// Persisted because the two brains know different things and their replies
+    /// are the same shape: silently reverting to the local runtime on relaunch
+    /// is how someone ends up believing the brainstem said something it never
+    /// said.
+    public var chatTarget: ChatTarget = .restored() {
+        didSet { chatTarget.remember() }
+    }
+
     // Services
     private var rpcClient: RpcClient?
     private var sessionStore: SessionStore?
@@ -84,7 +94,11 @@ public final class ChatViewModel {
             await sessionStore?.addMessage(userMsg)
 
             do {
-                let accepted = try await rpc.sendChat(message: text, sessionKey: currentSessionKey)
+                let accepted = try await rpc.sendChat(
+                    message: text,
+                    sessionKey: currentSessionKey,
+                    target: chatTarget
+                )
                 currentSessionKey = accepted.sessionKey
 
                 // Update the user message with correct sessionKey if it changed

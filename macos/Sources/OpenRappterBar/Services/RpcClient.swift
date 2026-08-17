@@ -155,9 +155,17 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         }
     }
 
-    public func sendChat(message: String, sessionKey: String? = nil) async throws -> ChatAccepted {
+    public func sendChat(
+        message: String,
+        sessionKey: String? = nil,
+        target: ChatTarget = .openrappter
+    ) async throws -> ChatAccepted {
         var params: [String: AnyCodable] = [
-            "message": AnyCodable(message)
+            "message": AnyCodable(message),
+            // Which brain answers. Always sent, including the default, so a
+            // gateway that ever changes its own default cannot silently move
+            // the conversation to the other brain.
+            "target": AnyCodable(target.rawValue)
         ]
         if let sessionKey {
             params["sessionKey"] = AnyCodable(sessionKey)

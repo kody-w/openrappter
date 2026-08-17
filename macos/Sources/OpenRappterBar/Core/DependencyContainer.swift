@@ -16,7 +16,7 @@ public protocol RpcClientProtocol: Sendable {
     func getStatus() async throws -> GatewayStatusResponse
     func getHealth() async throws -> HealthResponse
     func ping() async throws -> PingResponse
-    func sendChat(message: String, sessionKey: String?) async throws -> ChatAccepted
+    func sendChat(message: String, sessionKey: String?, target: ChatTarget) async throws -> ChatAccepted
     func listMethods() async throws -> [String]
 }
 

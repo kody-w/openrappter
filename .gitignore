@@ -17,6 +17,9 @@ build/
 !typescript/desktop/build/entitlements.mac.inherit.plist
 # Logs & temp
 *.log
+# Integration tests that bind real sockets keep their scratch data dirs
+# inside the repo rather than the system temp dir.
+.test-scratch/
 *.swp
 # Python envs
 __pycache__/

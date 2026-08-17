@@ -122,7 +122,6 @@ async function startGatewayInProcess(opts?: {
     listGatewayChannelStatuses,
     readIMessageConfig,
   } = await import('./channels/imessage-gateway.js');
-  const { listBundledSkills } = await import('./skills/bundled.js');
 
   const port = opts?.port ?? parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
   const token = process.env.OPENRAPPTER_TOKEN || undefined;
@@ -883,17 +882,12 @@ async function startGatewayInProcess(opts?: {
     return imessageRuntime.getStatus();
   });
 
-  // Register skills.list RPC method
-  server.registerMethod('skills.list', async () => {
-    const skills = await listBundledSkills();
-    return skills.map(s => ({
-      name: s.name,
-      description: s.description,
-      category: s.category,
-      enabled: s.eligibility.eligible === 'eligible',
-      version: '1.0.0',
-    }));
-  });
+  // `skills.list` is registered by `GatewayServer.registerBuiltInMethods`.
+  // It used to be registered here as well, and this copy won — it ran after
+  // `start()` and overwrote whatever the server had. Its payload omitted
+  // `id`, `installed` and `source`, so the macOS Bar's `[Skill]` decode
+  // failed and the pane showed "No skills installed" no matter how many
+  // skills were on disk. One method, one place.
 
   // ── Model switching RPC methods ──
   const { COPILOT_DEFAULT_MODELS, COPILOT_DEFAULT_MODEL } = await import('./providers/copilot.js');

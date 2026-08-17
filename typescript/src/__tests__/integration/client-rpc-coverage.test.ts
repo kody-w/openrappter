@@ -57,11 +57,19 @@ const KNOWN_MISSING = new Set<string>([
   // sessionStore. Usage left the same way — usage.stats/usage.history read
   // the Flight Recorder's recorded provider token counts, not the unwired
   // usage-methods.ts module, whose tracker nothing constructs and which
-  // answers a hardcoded zero.
-  'connections.disconnect',
+  // answers a hardcoded zero. Skills left it in the skills.list/skills.install
+  // fix, and connections.disconnect with them.
+  //
+  // `connections.pair` stays, and not because nobody got to it. There is no
+  // registry of remote peers for a pairing to be recorded in: `infra/roster.ts`
+  // holds loopback instances that each publish their *own* endpoint, and
+  // writing someone else's entry there is the forgery #132 ruled out
+  // ("a record nothing can vouch for is not an address"). `connections.list`
+  // reports inbound sockets, so a paired peer could never appear in it — the
+  // Bar would get `{paired:true}` and then an empty list. Registering it would
+  // buy a green line here at the cost of a screen that lies. See the block
+  // comment beside the `connections.*` registrations in gateway/server.ts.
   'connections.pair',
-  'skills.install',
-  'skills.list',
 ]);
 
 let server: GatewayServer | undefined;

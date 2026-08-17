@@ -46,6 +46,41 @@ import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
+import type { InstalledSkill } from '../skills/registry.js';
+
+/**
+ * The part of `SkillsRegistry` the gateway needs.
+ *
+ * Structural rather than a class import so a test can substitute a registry
+ * rooted in a scratch directory, and so the gateway never grows a second
+ * install implementation. `install` returning `null` on failure is the
+ * registry's real signature — see `skills.install` for why that must not be
+ * allowed to reach a caller as success.
+ */
+export interface SkillsRegistryLike {
+  initialize(): Promise<void>;
+  install(skillId: string, version?: string): Promise<InstalledSkill | null>;
+  getInstalled(): InstalledSkill[];
+}
+
+/**
+ * One row of `skills.list`, in the shape the macOS Bar's `Skill` decodes.
+ *
+ * `source` is the Bar's `SkillSource` enum — `local | clawhub | builtin`. A
+ * value outside it fails the decode on the client, which is how this endpoint
+ * managed to return rows and still render "No skills installed".
+ */
+interface GatewaySkillRow {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author?: string;
+  installed: boolean;
+  enabled: boolean;
+  source: 'local' | 'clawhub' | 'builtin';
+  category: string;
+}
 import { currentInstanceDeclared, currentInstanceName } from '../infra/current-instance.js';
 import {
   GatewayMetrics,
@@ -259,6 +294,19 @@ export class GatewayServer {
    * screen that lists nothing and approves nothing while reporting success.
    */
   private execSafety?: ExecSafety;
+  /**
+   * Where third-party skills are installed to, and read back from.
+   *
+   * Injectable so a test can point it at a scratch directory instead of the
+   * owner's real `~/.openrappter/skills`. Left unset it is constructed lazily
+   * against `dataDir`, so production needs no wiring — `skills.install` that
+   * only works when someone remembered to call a setter is the failure mode
+   * this whole change exists to remove.
+   */
+  private skillsRegistry?: SkillsRegistryLike;
+  private skillsRegistryReady?: Promise<SkillsRegistryLike>;
+  /** Override for the bundled `skills/` directory. Tests only. */
+  private bundledSkillsDir?: string;
 
   constructor(config?: Partial<GatewayConfig>) {
     this.config = {
@@ -568,6 +616,48 @@ export class GatewayServer {
 
   getExecSafety(): ExecSafety {
     return (this.execSafety ??= getSharedExecSafety());
+  }
+
+  /**
+   * Point `skills.install`/`skills.list` at a specific skills registry.
+   *
+   * Production does not need to call this — see `skillsRegistry()`. It exists
+   * so a test can install into a scratch directory rather than the machine's
+   * real `~/.openrappter/skills`.
+   */
+  setSkillsRegistry(registry: SkillsRegistryLike): void {
+    this.skillsRegistry = registry;
+    this.skillsRegistryReady = undefined;
+  }
+
+  /** Point the bundled-skill reader at a specific directory. Tests only. */
+  setBundledSkillsDir(dir: string | undefined): void {
+    this.bundledSkillsDir = dir;
+  }
+
+  /**
+   * The installed-skills registry, created on first use.
+   *
+   * Lazy because constructing it mkdirs the skills directory, and a gateway
+   * that never touches skills should not create one. Rooted at `dataDir` so a
+   * test with a scratch `dataDir` is automatically contained.
+   */
+  private async skillsRegistryOrCreate(): Promise<SkillsRegistryLike> {
+    if (this.skillsRegistry) {
+      this.skillsRegistryReady ??= (async () => {
+        await this.skillsRegistry!.initialize();
+        return this.skillsRegistry!;
+      })();
+      return this.skillsRegistryReady;
+    }
+    this.skillsRegistryReady ??= (async () => {
+      const { SkillsRegistry } = await import('../skills/registry.js');
+      const registry = new SkillsRegistry(path.join(this.dataDir, 'skills'));
+      await registry.initialize();
+      this.skillsRegistry = registry;
+      return registry;
+    })();
+    return this.skillsRegistryReady;
   }
 
   setReadinessProvider(
@@ -1583,6 +1673,8 @@ export class GatewayServer {
       authenticated: false, // always start unauthenticated; connect handshake required
       subscriptions: new Set(['*']), // auto-subscribe to all events after auth
       lastActivity: Date.now(),
+      remoteAddress: req.socket?.remoteAddress ?? undefined,
+      remotePort: req.socket?.remotePort ?? undefined,
       metadata: {
         userAgent: req.headers['user-agent'],
         origin: req.headers['origin'],
@@ -2015,17 +2107,18 @@ export class GatewayServer {
    *
    * This is the *single* place production method names/handlers/auth
    * requirements are wired for the live GatewayServer — chat/channels/
-   * cron/connections/config here operate on this server's real state
-   * (`sessionStore`, `channelRegistry`, `cronStore`/`cronService`) and are
+   * cron/connections/config/skills here operate on this server's real state
+   * (`sessionStore`, `channelRegistry`, `cronStore`/`cronService`, the
+   * bundled `skills/` directory and the real `SkillsRegistry`) and are
    * the authoritative implementations for those names.
    *
    * `typescript/src/gateway/methods/*.ts` (aggregated by
    * `methods/index.ts#registerAllMethods`) are standalone, independently
    * unit-tested RPC method modules. Several of them declare the *same*
    * method names as the ones below (e.g. `chat.list`, `channels.connect`,
-   * `cron.*`, `connections.list`, `config.get`/`config.set`) against their
-   * own local/disconnected dependencies. `registerAllMethods` is
-   * intentionally **not** invoked here: doing so would silently duplicate
+   * `cron.*`, `connections.list`, `config.get`/`config.set`, `skills.*`)
+   * against their own local/disconnected dependencies. `registerAllMethods`
+   * is intentionally **not** invoked here: doing so would silently duplicate
    * or override the real, wired handlers below with divergent
    * implementations (the exact failure mode this method's doc-comment
    * exists to prevent). Do not call `registerAllMethods` from
@@ -2462,13 +2555,218 @@ export class GatewayServer {
       return { runs: [] };
     });
 
+    // ── Skills ────────────────────────────────────────────────────────
+    //
+    // `gateway/methods/skills-methods.ts` declares these names too, and is
+    // deliberately never registered (see this method's doc comment). It hangs
+    // every handler off an injected `skillRegistry` that nothing in this repo
+    // ever supplies, and its `skills.list` answers `[]` when that registry is
+    // absent — which is the shape of the two defects this replaces, not a fix
+    // for them. These handlers run on the real bundled skills directory and
+    // the real `SkillsRegistry`.
+    //
+    // The payload is the macOS Bar's `Skill` — `id`, `name`, `description`,
+    // `version`, `author`, `installed`, `enabled`, `source`. That is not
+    // cosmetic. `RpcClient.listSkills` decodes `[Skill]`, and the shape
+    // previously returned by `src/index.ts` (`{name, description, category,
+    // enabled, version}`) is missing `id`, `installed` and `source`, so the
+    // decode failed and the Bar rendered "No skills installed" — #176's
+    // `skills list` always printing `(none)`, one layer up.
+    this.registerMethod('skills.list', async () => {
+      // Imported lazily, and it matters. `skills/bundled.ts` reaches
+      // `clawhub.ts` -> `agents/index.js` -> `AgentRegistry` -> `logging/
+      // logger.ts` -> `chalk`. Statically this pulls chalk into every module
+      // graph that touches GatewayServer, including `typescript/ui`, whose CI
+      // job installs only its own dependencies and so cannot resolve it. The
+      // dashboard's gateway test went red on an import it never asked for.
+      const { readBundledSkillInfo } = await import('../skills/bundled.js');
+      const bundled = await readBundledSkillInfo(this.bundledSkillsDir);
+
+      // An install that shipped without `skills/` and an install with no
+      // skills are both "zero skills" to the loader, which is exactly how
+      // #165 went unnoticed for as long as it did. Refuse to answer rather
+      // than report the packaging fault as an empty, successful list.
+      if (!bundled.directoryPresent) {
+        throw new Error(
+          `Bundled skills directory not found at ${bundled.directory} — this install shipped without skills/. `
+          + 'Reporting an empty list here would be indistinguishable from having no skills.'
+        );
+      }
+
+      const skills: GatewaySkillRow[] = bundled.skills.map((skill) => ({
+        id: skill.name,
+        name: skill.name,
+        description: skill.description,
+        version: '1.0.0',
+        // It ships with the product; it is on disk whether or not its
+        // dependencies are met.
+        installed: true,
+        // Eligibility is the real enable/disable signal for a bundled skill:
+        // a skill whose required binary or credential is missing cannot run.
+        enabled: skill.eligibility.eligible === 'eligible',
+        source: 'builtin',
+        category: skill.category,
+      }));
+
+      const registry = await this.skillsRegistryOrCreate();
+      for (const entry of registry.getInstalled()) {
+        skills.push({
+          id: entry.manifest.id,
+          name: entry.manifest.name,
+          description: entry.manifest.description,
+          version: entry.manifest.version,
+          author: entry.manifest.author,
+          installed: true,
+          enabled: entry.enabled,
+          source: 'clawhub',
+          category: 'installed',
+        });
+      }
+
+      return skills;
+    });
+
+    /**
+     * Install a skill from a public GitHub repo.
+     *
+     * `requiresAuth: true`, for the same reason `/agents/import` does (#171):
+     * this fetches a third-party manifest and `SKILL.md` off the network and
+     * writes them where the agent will later load them. That is code entering
+     * the assistant's execution surface, and every other method here that
+     * changes what the machine will run — `config.set`, `cron.add`,
+     * `cron.create` — is gated the same way. An unauthenticated caller must
+     * not be able to plant a skill.
+     */
+    this.registerMethod('skills.install', async (params: { name?: string; source?: string; version?: string }) => {
+      const id = (params?.name ?? params?.source ?? '').trim();
+      if (!id) throw new Error('skills.install requires `name`');
+
+      // `SkillsRegistry.install` addresses skills as GitHub `owner/repo`.
+      // Checking here means a bare name gets a sentence that says what is
+      // wrong, instead of a 404 laundered into `null` and then into a
+      // generic failure.
+      if (!/^[\w.-]+\/[\w.-]+$/.test(id)) {
+        throw new Error(
+          `skills.install expects a GitHub "owner/repo" identifier; got "${id}". `
+          + 'Bundled skills ship with the product and are not installed.'
+        );
+      }
+
+      const registry = await this.skillsRegistryOrCreate();
+      const installed = await registry.install(id, params?.version);
+
+      // The registry logs and returns `null` on every failure — missing repo,
+      // no skill.json, unwritable directory. #176 found the ClawHub stub
+      // reporting `Successfully installed` over a no-op that wrote nothing;
+      // returning `{installed: true}` for a `null` here would be that defect
+      // rebuilt on a real registry.
+      if (!installed) {
+        throw new Error(
+          `skills.install failed for "${id}" — no skill.json was fetched and nothing was written. `
+          + 'Check the repo exists, is public, and has skill.json at its root.'
+        );
+      }
+
+      return {
+        id: installed.manifest.id,
+        name: installed.manifest.name,
+        description: installed.manifest.description,
+        version: installed.manifest.version,
+        author: installed.manifest.author,
+        installed: true,
+        enabled: installed.enabled,
+        source: 'clawhub',
+        path: installed.path,
+        installedAt: installed.installedAt,
+      };
+    }, { requiresAuth: true });
+
     // Connection methods
+    //
+    // The payload carries the macOS Bar's `Node` fields as well as the
+    // original ConnectionInfo ones. `RpcClient.listNodes` decodes `[Node]`,
+    // which requires `name`, `host`, `port` and `status`; without them the
+    // decode failed, `listNodes` swallowed it, and the Nodes pane was
+    // permanently empty — which also meant `connections.disconnect` could
+    // never be reached, because the Bar takes the connection id it
+    // disconnects from a row in that list.
     this.registerMethod('connections.list', async () => {
       return this.getConnections().map((c) => ({
         id: c.id, connectedAt: c.connectedAt, authenticated: c.authenticated,
         subscriptions: Array.from(c.subscriptions), deviceId: c.deviceId, deviceType: c.deviceType,
+        connectionId: c.id,
+        name: c.deviceId ?? c.deviceType ?? c.id,
+        // The peer's real socket address, recorded when the socket opened.
+        // Not a guess and not a placeholder: if the transport did not report
+        // one, this says so rather than inventing 127.0.0.1.
+        host: c.remoteAddress ?? 'unknown',
+        port: c.remotePort ?? 0,
+        // It is in `this.connections`, so it is attached right now.
+        status: 'online',
+        platform: c.deviceType,
+        lastSeen: new Date(c.lastActivity).toISOString(),
       }));
     });
+
+    /**
+     * Close a live connection to this gateway.
+     *
+     * Backed by `this.connections` — the same map `connections.list` reads
+     * and the same map `handleConnection` writes — so what it reports is what
+     * happened. An unknown id is an error, not a cheerful `{disconnected:
+     * true}`: the Bar's only reason to call this is to end a session it can
+     * see, and telling it the session ended when nothing was found is the
+     * kind of false success #176 was written about.
+     *
+     * `requiresAuth: true` — it terminates other clients' sessions.
+     */
+    this.registerMethod('connections.disconnect', async (params: { connectionId?: string; id?: string }) => {
+      const connectionId = (params?.connectionId ?? params?.id ?? '').trim();
+      if (!connectionId) throw new Error('connections.disconnect requires `connectionId`');
+
+      const target = this.connections.get(connectionId);
+      if (!target) {
+        throw new Error(`No connection '${connectionId}' is attached to this gateway`);
+      }
+
+      target.ws.close(1000, 'Disconnected by request');
+      this.connections.delete(connectionId);
+      this.rateLimits.delete(connectionId);
+
+      return { disconnected: true, connectionId };
+    }, { requiresAuth: true });
+
+    /**
+     * `connections.pair` is deliberately NOT registered.
+     *
+     * `RpcClient.pairNode(host:port:)` asks this gateway to pair with an
+     * arbitrary `host` and `port`. There is nothing here that can honestly
+     * accept it:
+     *
+     *  - There is no registry of remote peers to record a pairing in. The
+     *    real neighbourhood (`infra/roster.ts`) is loopback instances, and
+     *    each rappter writes its OWN `endpoint.json` after a successful
+     *    listen. Writing one on another process's behalf would forge exactly
+     *    the record #114/#118/#132 spent three passes learning not to trust.
+     *  - `connections.list` reports INBOUND websocket connections. A peer
+     *    paired outbound could never appear in it, so a `{paired: true}`
+     *    would be followed by the Bar's own `loadNodes()` showing nothing —
+     *    success, then an empty list. That is the lie, not the fix.
+     *  - Any loopback gateway worth pairing with is already in the roster,
+     *    by itself, because it recorded itself. Pairing would add a second
+     *    way to know a peer; `agents/NeighborAgent.ts` is explicit that "a
+     *    second way to contact a peer would be the next one" in this repo's
+     *    long run of two-derivations-of-one-thing defects.
+     *  - It takes a host. `NeighborAgent` refuses URLs on purpose — "an agent
+     *    taking a URL would hand a model a general HTTP POST primitive, which
+     *    is an SSRF vector" (#84 is open on DNS rebinding here).
+     *
+     * So the Bar gets `Method not found`, which is true, instead of a
+     * pairing that records an unverified peer as though it were reachable.
+     * Registering it needs a peer registry that probes on read, and that is
+     * a design decision, not a wiring fix.
+     */
+
     this.registerMethod('connection.identify', async (params: { deviceId?: string; deviceType?: string; metadata?: Record<string, unknown> }, conn) => {
       conn.deviceId = params.deviceId;
       conn.deviceType = params.deviceType;

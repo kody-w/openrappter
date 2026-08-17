@@ -23,6 +23,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `JSONDecoder`, whose `.deferredToDate` strategy threw on the gateway's
   ISO-8601 strings; the throw was swallowed by `try?`, so a populated response
   was silently rendered as an empty list.
+- **The Bar's Skills and Nodes panes call methods that exist** — `skills.list`,
+  `skills.install` and `connections.disconnect` were answered with
+  `Method not found` by the live gateway; they are now registered in
+  `registerBuiltInMethods` against the real bundled `skills/` directory, the
+  real `SkillsRegistry`, and the gateway's own live connection map.
+  `skills.install` requires the gateway credential, because it fetches a
+  third-party manifest off the network and writes it where the agent will load
+  it.
+- **`skills.list` cannot report a packaging fault as an empty list** — a
+  missing bundled `skills/` directory now raises instead of answering `[]`,
+  which was indistinguishable from a machine that legitimately has no skills.
+- **`skills.list` and `connections.list` answer in the shape the Bar decodes** —
+  both payloads omitted fields the macOS `Skill`/`Node` decoders require, so
+  the Bar showed "No skills installed" over 52 shipped skills and an empty
+  Nodes pane over live connections. `RpcClient` no longer turns a decode
+  failure into an empty array either.
+- **`connections.disconnect` does not claim to have closed a connection that
+  was not there** — an unknown connection id is an error.
+- **`connections.pair` stays unregistered, deliberately** — nothing in the
+  gateway can record a remote peer, and `connections.list` reports inbound
+  sockets, so a successful pairing would be followed by a list that still
+  showed nothing. The Bar gets a refusal it can display instead.
 - **Python storage adapter is genuinely thread-safe** — `SqliteStorageAdapter`
   held an `RLock` (implying multi-threaded use) but opened its connection with
   sqlite3's default `check_same_thread=True`, so any call from a worker thread

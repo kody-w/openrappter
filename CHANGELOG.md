@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subprocess even on a nonzero exit, so `false` reported `return_code=1` while
   the shared classifier recorded success. Python now derives status from the
   return code; TypeScript already did.
+- **Composite error status** — `AgentGraph` and `BroadcastManager` (both
+  runtimes) only noticed a sub-agent failure when the call *threw*, so an agent
+  that correctly reported `{"status": "error"}` was recorded as a success and
+  the composite reported success overall. Both layers now classify through the
+  shared `agentResultIsError` / `agent_result_is_error` helper, which also
+  accepts an already-parsed envelope. A failed graph node now skips its
+  dependents (or halts the graph under `stopOnError`); a broadcast keeps the
+  full error envelope per branch but no longer counts it as a success, falls
+  through to the next agent in `fallback` mode (forwarding the failed agent's
+  `data_slush`), and never lets an error envelope win a `race`. Cross-runtime
+  agreement is pinned by `contracts/agent-result-status-vectors.json`.
 - **`config` and `doctor` were never registered** — both were implemented and
   exported, but their words fell through to chat and global help while shipped
   health guidance told you to run them. Registering them exposed dormant bugs:

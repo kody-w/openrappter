@@ -22,6 +22,7 @@
  */
 
 import { BasicAgent } from './BasicAgent.js';
+import { agentResultIsError } from './result-status.js';
 import type { AgentResult } from './types.js';
 
 export interface GraphNode {
@@ -363,13 +364,14 @@ export class AgentGraph {
         signals: { node_name: name, node_result_status: result.status },
       });
 
+      // A resolved `{status: 'error'}` envelope is a failure, exactly like a throw.
       return {
         name,
         agentName: node.agent.name,
         result,
         dataSlush: effectiveSlush,
         durationMs,
-        status: 'success',
+        status: agentResultIsError(result) ? 'error' : 'success',
       };
     } catch (e) {
       const durationMs = Date.now() - nodeStart;

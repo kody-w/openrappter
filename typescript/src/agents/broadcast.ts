@@ -3,6 +3,7 @@
  * Send messages to multiple agents simultaneously
  */
 
+import { agentResultIsError } from './result-status.js';
 import type { AgentResult } from './types.js';
 
 export interface BroadcastGroup {
@@ -15,13 +16,31 @@ export interface BroadcastGroup {
 
 export interface BroadcastResult {
   groupId: string;
+  /**
+   * Per-branch outcome. A branch that *resolved* with a `{status: 'error'}`
+   * envelope keeps that envelope here (nothing is discarded) — it is still
+   * counted as a failure by `allSucceeded` / `anySucceeded`.
+   */
   results: Map<string, AgentResult | Error>;
+  /** First branch that actually succeeded (error envelopes do not qualify). */
   firstResponse?: { agentId: string; result: AgentResult };
   allSucceeded: boolean;
   anySucceeded: boolean;
 }
 
 type AgentExecutor = (agentId: string, message: string, upstreamSlush?: Record<string, unknown>) => Promise<AgentResult>;
+
+/**
+ * A branch succeeded only if it neither threw nor resolved with a
+ * `{status: 'error'}` envelope.
+ */
+function branchSucceeded(outcome: AgentResult | Error): boolean {
+  return !(outcome instanceof Error) && !agentResultIsError(outcome);
+}
+
+function countSuccesses(results: Map<string, AgentResult | Error>): number {
+  return Array.from(results.values()).filter(branchSucceeded).length;
+}
 
 export class BroadcastManager {
   private groups = new Map<string, BroadcastGroup>();
@@ -94,10 +113,10 @@ export class BroadcastManager {
       try {
         const result = await this.executeWithTimeout(executor, agentId, message, group.timeout);
         results.set(agentId, result);
-        if (!firstResponse) {
+        if (!firstResponse && !agentResultIsError(result)) {
           firstResponse = { agentId, result };
         }
-        return { agentId, result, success: true };
+        return { agentId, result, success: !agentResultIsError(result) };
       } catch (error) {
         results.set(agentId, error as Error);
         return { agentId, error, success: false };
@@ -106,9 +125,7 @@ export class BroadcastManager {
 
     await Promise.all(promises);
 
-    const successes = Array.from(results.values()).filter(
-      (r) => !(r instanceof Error)
-    ).length;
+    const successes = countSuccesses(results);
 
     return {
       groupId: group.id,
@@ -134,6 +151,13 @@ export class BroadcastManager {
       try {
         const result = await this.executeWithTimeout(executor, agentId, message, group.timeout);
         results.set(agentId, result);
+        if (agentResultIsError(result)) {
+          return {
+            agentId,
+            error: new Error(`Agent ${agentId} returned an error result`),
+            success: false,
+          };
+        }
         return { agentId, result, success: true };
       } catch (error) {
         results.set(agentId, error as Error);
@@ -141,30 +165,27 @@ export class BroadcastManager {
       }
     });
 
-    // Wait for first successful result
+    // Wait for the first genuinely successful result. `Promise.any` (not `race`)
+    // is required: a branch that fails fast must not preempt a slower success.
     try {
-      const first = await Promise.race(
+      const first = await Promise.any(
         promises.map((p) =>
           p.then((r) => {
-            if (r.success) return r;
-            throw r.error;
+            if (r.success && 'result' in r) return r;
+            throw 'error' in r ? r.error : new Error(`Agent ${r.agentId} failed`);
           })
         )
       );
 
-      if (first.success && 'result' in first) {
-        firstResponse = { agentId: first.agentId, result: first.result as AgentResult };
-      }
+      firstResponse = { agentId: first.agentId, result: first.result as AgentResult };
     } catch {
-      // All failed
+      // Every branch either threw or returned an error envelope
     }
 
     // Wait for all to complete (for result map)
     await Promise.allSettled(promises);
 
-    const successes = Array.from(results.values()).filter(
-      (r) => !(r instanceof Error)
-    ).length;
+    const successes = countSuccesses(results);
 
     return {
       groupId: group.id,
@@ -192,6 +213,15 @@ export class BroadcastManager {
       try {
         const result = await this.executeWithTimeout(executor, agentId, message, group.timeout, lastSlush);
         results.set(agentId, result);
+        if (agentResultIsError(result)) {
+          // A resolved error envelope is a failure: keep it in the result map,
+          // forward its data_slush, and fall through to the next agent in line.
+          const slush = result.data_slush;
+          if (slush && typeof slush === 'object') {
+            lastSlush = slush as Record<string, unknown>;
+          }
+          continue;
+        }
         firstResponse = { agentId, result };
         break; // Success, stop trying
       } catch (error) {
@@ -205,9 +235,7 @@ export class BroadcastManager {
       }
     }
 
-    const successes = Array.from(results.values()).filter(
-      (r) => !(r instanceof Error)
-    ).length;
+    const successes = countSuccesses(results);
 
     return {
       groupId: group.id,

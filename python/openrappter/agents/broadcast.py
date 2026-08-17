@@ -14,6 +14,18 @@ Mirrors TypeScript agents/broadcast.ts
 
 import asyncio
 
+from openrappter.result_status import agent_result_is_error
+
+
+def _branch_succeeded(outcome):
+    """A branch succeeded only if it neither raised nor returned a
+    ``{"status": "error"}`` envelope."""
+    return not isinstance(outcome, Exception) and not agent_result_is_error(outcome)
+
+
+def _count_successes(results):
+    return sum(1 for r in results.values() if _branch_succeeded(r))
+
 
 class BroadcastManager:
     """Manages broadcast groups for multi-agent messaging."""
@@ -84,14 +96,14 @@ class BroadcastManager:
                 else:
                     result = await coro
                 results[agent_id] = result
-                if first_response is None:
+                if first_response is None and not agent_result_is_error(result):
                     first_response = {'agentId': agent_id, 'result': result}
             except Exception as e:
                 results[agent_id] = e
 
         await asyncio.gather(*[run_agent(aid) for aid in group['agentIds']], return_exceptions=True)
 
-        successes = sum(1 for r in results.values() if not isinstance(r, Exception))
+        successes = _count_successes(results)
 
         return {
             'groupId': group['id'],
@@ -115,6 +127,9 @@ class BroadcastManager:
                 else:
                     result = await coro
                 results[agent_id] = result
+                if agent_result_is_error(result):
+                    # A returned error envelope loses the race like a raise does.
+                    return {'agentId': agent_id, 'result': result, 'success': False}
                 return {'agentId': agent_id, 'result': result, 'success': True}
             except Exception as e:
                 results[agent_id] = e
@@ -122,12 +137,17 @@ class BroadcastManager:
 
         tasks = [asyncio.create_task(run_agent(aid)) for aid in group['agentIds']]
 
-        # Wait for first successful result
+        # Wait for the first genuinely successful result. A branch that fails
+        # fast must not preempt a slower success, so keep waiting until either
+        # a success arrives or every branch has settled.
+        pending = set(tasks)
         try:
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            while pending and first_response is None:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
 
-            for task in done:
-                if not task.cancelled() and task.exception() is None:
+                for task in done:
+                    if task.cancelled() or task.exception() is not None:
+                        continue
                     r = task.result()
                     if r.get('success'):
                         first_response = {'agentId': r['agentId'], 'result': r['result']}
@@ -146,7 +166,7 @@ class BroadcastManager:
         # Wait for all tasks to be done
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        successes = sum(1 for r in results.values() if not isinstance(r, Exception))
+        successes = _count_successes(results)
 
         return {
             'groupId': group['id'],
@@ -175,6 +195,12 @@ class BroadcastManager:
                 else:
                     result = await coro
                 results[agent_id] = result
+                if agent_result_is_error(result):
+                    # A returned error envelope is a failure: keep it in the
+                    # result map, forward its data_slush, and try the next agent.
+                    if isinstance(result, dict) and isinstance(result.get('data_slush'), dict):
+                        last_slush = result['data_slush']
+                    continue
                 first_response = {'agentId': agent_id, 'result': result}
                 break  # Success, stop trying
             except Exception as e:
@@ -183,7 +209,7 @@ class BroadcastManager:
                 if hasattr(e, 'result') and isinstance(e.result, dict) and 'data_slush' in e.result:
                     last_slush = e.result['data_slush']
 
-        successes = sum(1 for r in results.values() if not isinstance(r, Exception))
+        successes = _count_successes(results)
 
         return {
             'groupId': group['id'],

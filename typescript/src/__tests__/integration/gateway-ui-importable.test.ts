@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { builtinModules } from 'module';
 
@@ -33,8 +33,8 @@ import { builtinModules } from 'module';
  */
 
 const TS_ROOT = resolve(__dirname, '../..');
-const ENTRY = resolve(TS_ROOT, 'gateway/server.ts');
 const UI_PACKAGE = resolve(TS_ROOT, '../ui/package.json');
+const UI_SRC = resolve(TS_ROOT, '../ui/src');
 
 function uiProvidedPackages(): Set<string> {
   const pkg = JSON.parse(readFileSync(UI_PACKAGE, 'utf-8')) as {
@@ -70,10 +70,42 @@ function staticSpecifiers(source: string): string[] {
 
 function resolveLocal(fromFile: string, specifier: string): string | undefined {
   const base = join(dirname(fromFile), specifier.replace(/\.js$/, ''));
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+  // `.js` last: `voice/local-speech.js` is hand-written JavaScript with a
+  // sibling .d.ts, so a .ts-only resolver walks straight past it.
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), `${base}.js`]) {
     if (existsSync(candidate)) return candidate;
   }
   return undefined;
+}
+
+/**
+ * Every module the UI package reaches into `typescript/src` for.
+ *
+ * Derived rather than hardcoded. This test used to name `gateway/server.ts`
+ * alone, which was the module I happened to be debugging — but the UI also
+ * imports `voice/local-speech.js`, and nothing would have noticed if that one
+ * started pulling in a Node-only package. Deriving the list means a new
+ * UI-to-src import is guarded the moment somebody writes it.
+ */
+function uiEntryPoints(): string[] {
+  const entries = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        if (entry !== 'node_modules') walk(full);
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry)) continue;
+      const source = readFileSync(full, 'utf-8');
+      for (const match of source.matchAll(/from\s*'((?:\.\.\/)+src\/[^']+)'/g)) {
+        const resolved = resolveLocal(full, match[1]);
+        if (resolved) entries.add(resolved);
+      }
+    }
+  };
+  walk(UI_SRC);
+  return [...entries].sort();
 }
 
 /** Bare package specifiers reachable from the entry, with the chain that reached each. */
@@ -101,11 +133,20 @@ function reachablePackages(): Map<string, string[]> {
     }
   };
 
-  walk(ENTRY, []);
+  for (const entry of uiEntryPoints()) walk(entry, []);
   return packages;
 }
 
 describe('the gateway stays importable by the UI package', () => {
+  it('finds every module the UI reaches into src for', () => {
+    // Derived, not hardcoded — and asserted so a broken scan cannot leave the
+    // real check walking an empty list. There are two today: the gateway and
+    // the speech seam.
+    const entries = uiEntryPoints().map((e) => e.replace(`${TS_ROOT}/`, ''));
+    expect(entries.length).toBeGreaterThan(1);
+    expect(entries).toContain('gateway/server.ts');
+  });
+
   it('finds a non-trivial import graph', () => {
     // Guards the walker. If resolution silently stops at the entry file, the
     // assertion below would pass over almost nothing.

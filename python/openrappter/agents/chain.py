@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from openrappter.agents.result_status import agent_result_error_message, agent_result_is_error
+from openrappter.result_status import agent_result_error_message, agent_result_is_error
 
 
 @dataclass

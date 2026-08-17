@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from openrappter.agents.result_status import agent_result_is_error
+from openrappter.result_status import agent_result_is_error
 
 
 @dataclass

@@ -636,3 +636,88 @@ class TestSubAgentErrorEnvelope:
         call = mgr.get_call_history()[-1]
         assert call["status"] == "success"
         assert "error" not in call
+
+
+# ---------------------------------------------------------------------------
+# The brainstem fallback classifier
+#
+# pipeline_agent.py is a single-file agent: RAPP conformance R7 requires it to
+# load with no kernel import, so its import of the shared classifier is guarded
+# and it carries a local fallback. A fallback that disagrees with the shared
+# classifier recreates the cross-runtime drift the classifier exists to prevent,
+# so it is pinned here against the real implementation, vector by vector.
+# ---------------------------------------------------------------------------
+
+FALLBACK_PROBE = r'''
+import importlib.util, json, os, sys, types
+
+agents_dir, fixture, vectors_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# Replicate a brainstem drop: only basic_agent is shimmed, and the openrappter
+# package points nowhere, so `openrappter.result_status` cannot be imported.
+spec = importlib.util.spec_from_file_location("basic_agent", fixture)
+ba = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ba)
+sys.modules["basic_agent"] = ba
+
+or_mod = types.ModuleType("openrappter")
+or_mod.__path__ = [os.path.join(agents_dir, "__brainstem_has_no_openrappter_package__")]
+sys.modules["openrappter"] = or_mod
+or_agents = types.ModuleType("openrappter.agents")
+or_agents.__path__ = [agents_dir]
+sys.modules["openrappter.agents"] = or_agents
+ba_mod = types.ModuleType("openrappter.agents.basic_agent")
+ba_mod.BasicAgent = ba.BasicAgent
+sys.modules["openrappter.agents.basic_agent"] = ba_mod
+or_agents.basic_agent = ba_mod
+or_mod.agents = or_agents
+
+spec = importlib.util.spec_from_file_location(
+    "pipeline_isolated", os.path.join(agents_dir, "pipeline_agent.py")
+)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+
+vectors = json.loads(open(vectors_path).read())["vectors"]
+print(json.dumps({
+    "kernel_importable": "openrappter.result_status" in sys.modules,
+    "defining_module": mod.agent_result_is_error.__module__,
+    "answers": {v["name"]: bool(mod.agent_result_is_error(v["value"])) for v in vectors},
+}))
+'''
+
+
+def _probe_fallback():
+    import subprocess
+    import sys as _sys
+
+    tests_dir = Path(__file__).parent
+    agents_dir = tests_dir.parent / "openrappter" / "agents"
+    fixture = tests_dir / "fixtures" / "brainstem_basic_agent.py"
+    proc = subprocess.run(
+        [_sys.executable, "-c", FALLBACK_PROBE, str(agents_dir), str(fixture), str(VECTOR_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(tests_dir),  # neutral cwd: the real openrappter package is not importable
+    )
+    assert proc.returncode == 0, f"fallback probe crashed:\n{proc.stderr}"
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+FALLBACK = _probe_fallback()
+
+
+class TestBrainstemFallbackClassifier:
+    def test_probe_really_ran_without_the_kernel(self):
+        assert FALLBACK["kernel_importable"] is False
+
+    def test_the_fallback_is_the_function_in_use(self):
+        # If the guarded import had somehow succeeded, this would name the
+        # shared module and the agreement assertions below would be vacuous.
+        assert FALLBACK["defining_module"] == "pipeline_isolated"
+
+    @pytest.mark.parametrize("vector", VECTORS, ids=[v["name"] for v in VECTORS])
+    def test_fallback_agrees_with_the_shared_classifier(self, vector):
+        assert FALLBACK["answers"][vector["name"]] is agent_result_is_error(vector["value"])
+        assert FALLBACK["answers"][vector["name"]] is vector["isError"]

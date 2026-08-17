@@ -77,12 +77,7 @@ class TestAgentDiscovery:
         """All agent files in agents/ should be *_agent.py or known exceptions."""
         # Some modules (broadcast, router, subagent) are multi-agent utility
         # files that don't follow the single-agent naming convention.
-        # result_status.py is the shared classifier those layers depend on; it
-        # lives here so a brainstem drop of the agents directory resolves it.
-        exceptions = {
-            "broadcast.py", "router.py", "subagent.py", "chain.py", "graph.py",
-            "tracer.py", "result_status.py",
-        }
+        exceptions = {"broadcast.py", "router.py", "subagent.py", "chain.py", "graph.py", "tracer.py"}
         agents_dir = Path(__file__).parent.parent / "openrappter" / "agents"
         py_files = [f.name for f in agents_dir.glob("*.py") if f.name != "__init__.py"]
         for name in py_files:

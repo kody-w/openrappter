@@ -17,7 +17,7 @@ import time
 import random
 from datetime import datetime
 
-from openrappter.agents.result_status import agent_result_error_message, agent_result_is_error
+from openrappter.result_status import agent_result_error_message, agent_result_is_error
 
 
 class SubAgentManager:

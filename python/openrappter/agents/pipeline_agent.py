@@ -19,7 +19,30 @@ import time
 from datetime import datetime
 
 from openrappter.agents.basic_agent import BasicAgent
-from openrappter.agents.result_status import agent_result_is_error
+
+try:
+    from openrappter.result_status import agent_result_is_error
+except ModuleNotFoundError:
+    # The brainstem loads single-file agents in isolation, with no openrappter
+    # package on the path — an agent must stay loadable there (R7). Falling back
+    # to "nothing ever failed" would make a dropped pipeline disagree with the
+    # kernel about which steps failed, so the fallback is the shared classifier
+    # verbatim. tests/test_composite_error_status.py pins the two together.
+    def agent_result_is_error(result):
+        """Fallback mirroring openrappter.result_status.agent_result_is_error."""
+        envelope = result
+
+        if isinstance(envelope, str):
+            try:
+                envelope = json.loads(envelope)
+            except (TypeError, ValueError):
+                return False
+
+        if not isinstance(envelope, dict):
+            return False
+
+        status = envelope.get("status")
+        return isinstance(status, str) and status.lower() == "error"
 
 
 

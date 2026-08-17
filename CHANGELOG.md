@@ -60,12 +60,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A new `agentResultErrorMessage` / `agent_result_error_message` reports a failed
   step's reason identically whether the agent threw or returned an envelope, and
   is pinned by the same contract file.
-- **The shared classifier is reachable from a brainstem drop** — the Python
-  module moved from `openrappter/result_status.py` to
-  `openrappter/agents/result_status.py` (mirroring the TypeScript layout) because
-  `pipeline_agent.py` must load in a rapp brainstem, where only co-dropped
-  modules inside the agents directory resolve. `openrappter.result_status`
-  remains as a re-export.
+- **The pipeline agent stays loadable without the kernel** — `pipeline_agent.py`
+  is a single-file agent, so RAPP conformance R7 requires it to load with no
+  kernel import at all. Its use of the shared classifier is a guarded import
+  (the pattern `shell_agent.py` already uses) with a local fallback that mirrors
+  the shared implementation verbatim; the two are pinned against each other over
+  every contract vector by a test that loads the agent with no `openrappter`
+  package present.
 - **`config` and `doctor` were never registered** — both were implemented and
   exported, but their words fell through to chat and global help while shipped
   health guidance told you to run them. Registering them exposed dormant bugs:

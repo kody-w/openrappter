@@ -2,27 +2,36 @@
  * Command registrations.
  *
  * Being exported here is not the same as being reachable. #159 registered
- * `config` and `doctor`; this pass registers `skills`, `agents`, `models`,
- * `update` and the delegating `rappterhub`/`clawhub`, and moves `gateway` onto
+ * `config` and `doctor`; a later pass registered `skills`, `agents`, `models`,
+ * `update` and the delegating `rappterhub`/`clawhub`, and moved `gateway` onto
  * the daemon path in `index.ts`.
  *
- * Four modules are still deliberately unregistered, because registering them
- * would ship a command that lies:
+ * Six of the exports below are still deliberately unregistered, because
+ * registering them would ship a command that lies or duplicates one that
+ * already works. Verified against the running gateway and the OAuth flow, not
+ * by reading — `dormant-cli-commands-stay-dormant.test.ts` pins them:
  *
- * - `memory.ts` — `MemoryManager` holds chunks in two `Map`s and never touches
- *   disk, so `memory add` prints an id for a chunk that dies with the process
- *   and `memory list` can only ever say "No memories stored."
- * - `sessions.ts` — calls `sessions.list/get/delete/reset`; the gateway
- *   registers no method with a `sessions.` prefix at all (`chat.list`,
- *   `chat.session`, `chat.messages`, `chat.delete` are the real ones).
- * - `channels.ts` — sends `{channel}` where `channels.connect/disconnect`
- *   read `params.type`.
- * - `send.ts` — sends `{channel, message, target}` where `channels.send` reads
- *   `{channelId, conversationId, content}`, and calls `channels.broadcast`,
- *   which does not exist.
- * - `login.ts` — `initiateOAuthFlow` persists nothing, yet the command prints
- *   "Credentials have been saved to your config" and echoes 20 characters of
- *   the access token.
+ * - `memory.ts` (`registerMemoryCommand`) — `MemoryManager` holds chunks in two
+ *   `Map`s and never touches disk, so `memory add` prints an id for a chunk
+ *   that dies with the process and `memory list` can only ever say "No memories
+ *   stored." Filed as #204.
+ * - `sessions.ts` (`registerSessionsCommand`) — calls `sessions.list/get/delete`,
+ *   none of which the gateway registers (the real listing methods are
+ *   `chat.list`, `chat.session`, `chat.messages`, `chat.delete`); `sessions.reset`
+ *   IS registered but reads `sessionKey`, not the `{id}` this sends, so even
+ *   that throws "sessionKey required".
+ * - `channels.ts` (`registerChannelsCommand`) — sends `{channel}` where
+ *   `channels.connect`/`channels.disconnect` read `params.type`, so both pass
+ *   `undefined` to the registry.
+ * - `send.ts` (`registerSendCommand`) — sends `{channel, message, target}` where
+ *   `channels.send` reads `{channelId, conversationId, content}`, and `--all`
+ *   calls `channels.broadcast`, which the gateway does not register.
+ * - `login.ts` (`registerLoginCommand`) — `initiateOAuthFlow` persists nothing,
+ *   yet the command prints "Credentials have been saved to your config." (The
+ *   token-prefix echo was removed in #178; the false "saved" claim remains.)
+ * - `channel.ts` (`registerChannelCommand`) — release-channel management that is
+ *   already live as an inline `channel` command in `index.ts`; this module is a
+ *   duplicate of it, so wiring it would double-register `channel`.
  */
 
 export { registerConfigCommand } from './config.js';

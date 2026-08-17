@@ -39,10 +39,19 @@ const KNOWN_MISSING = new Set<string>([
   'connections.info',
   'models.list',
   // Live UI call sites still unimplemented.
-  'agents.files.list',
-  'agents.files.read',
-  'agents.files.write',
-  'cron.runs',
+  //
+  // `skills.toggle` stays deliberately unimplemented, and this is the reason:
+  // nothing in this runtime consumes a skill's enabled state. Bundled skills
+  // never become agents (`ClawHubClient.loadAllSkills()` returns `[]`), no
+  // prompt path reads them, and the `enabled` flag `skills.list` reports is
+  // computed *eligibility* — whether the skill's required binaries and env vars
+  // are present — which is a fact about the machine, not a setting a switch can
+  // change. That listing does not even carry an `id`, so the UI sends
+  // `{ id: undefined }`. A handler that persisted a flag would return success,
+  // flip the toggle in the UI, change nothing about what the assistant can do,
+  // and revert on the next refresh: exactly the stub-reporting-success shape
+  // #176 found in `skills install`. Implementing it needs skills to mean
+  // something at runtime first.
   'skills.toggle',
   'zen.sessions',
   'zen.subscribe',

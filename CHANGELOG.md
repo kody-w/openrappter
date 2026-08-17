@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Zen viewer works** — `<openrappter-zen>` is live UI, but `zen.sessions`,
+  `zen.subscribe` and `zen.unsubscribe` were never registered on the gateway,
+  so the page answered `-32601 Method not found` on load and rendered an empty
+  screen forever. They are now registered against live streaming state owned by
+  the running server. `src/gateway/methods/zen-methods.ts` was deliberately not
+  reused: it reads `peer-stream.ts`'s process-local `globalPeerStream`, whose
+  only writer (`openrappter bar --tui`) runs in a different process from the
+  daemon, so it could only ever have reported an empty list. Producers now feed
+  the daemon over the wire (`zen.publish`/`zen.end`, WebSocket only), the Bar's
+  pong screen publishes through it, frames reach only the connections that
+  subscribed, and a dropped connection releases its viewer slots and ends the
+  sessions it was producing. The client-RPC coverage guard now also walks
+  `ui/src/components`, not just `ui/src/services`: `zen.ts` is a component, so
+  the guard never saw the three broken calls — their debt entries had been
+  listed by hand rather than found.
 - **The Bar's usage screen shows real numbers** — `UsageViewModel` calls
   `usage.stats` and `usage.history`, and the live `GatewayServer` registered
   neither, so both answered `Method not found` and the screen only ever

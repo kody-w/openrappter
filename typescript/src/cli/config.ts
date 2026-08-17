@@ -90,6 +90,43 @@ function formatValidationErrors(error: string): string[] {
 }
 
 /**
+ * Sections the schema accepts and no runtime enforces.
+ *
+ * `ignoredConfigKeys` above catches keys the schema will *discard*. These are
+ * the opposite problem and a worse one: they are in the schema, so they parse,
+ * they survive into the loaded config, and `config validate` has every reason
+ * to call them valid. Nothing then reads them.
+ *
+ * For `security` that is not a cosmetic difference. A user can write
+ * `approvalPolicy: deny` with an allowlist, be told the configuration is valid,
+ * and reasonably conclude the policy is in force. It is not — `ExecSafety` and
+ * `ApprovalManager` are configured programmatically and never consult this file
+ * (#219). Every signal the tool gives says the lockdown is on.
+ *
+ * Listing a section here is a statement about the runtime, not about the
+ * section's worth. When one of these is wired up its entry comes out, and the
+ * test alongside this fails until it does.
+ */
+export const UNENFORCED_CONFIG_SECTIONS: ReadonlyMap<string, string> = new Map([
+  [
+    'security',
+    'nothing reads it — ExecSafety and ApprovalManager are configured in code, not from this file (#219)',
+  ],
+  [
+    'network',
+    'nothing reads it — TailscaleClient is constructed by no production code (#235)',
+  ],
+]);
+
+/** Which unenforced sections a given config actually sets. */
+export function unenforcedConfigSections(value: unknown): string[] {
+  if (!isPlainObject(value)) return [];
+  return [...UNENFORCED_CONFIG_SECTIONS.keys()]
+    .filter((section) => section in value)
+    .sort();
+}
+
+/**
  * Config keys the schema will silently discard.
  *
  * Zod strips unknown keys rather than rejecting them, so a config file can be
@@ -295,6 +332,20 @@ export function registerConfigCommand(program: Command): void {
           console.log('');
           console.log(`${ignored.length} key(s) are not part of the schema and will be ignored:`);
           for (const key of ignored) console.log(`  - ${key}`);
+        }
+
+        // Worse than an ignored key: in the schema, parsed, kept, and read by
+        // nobody. A security policy that validates and does nothing looks
+        // exactly like one that works.
+        const unenforced = unenforcedConfigSections(cfg);
+        if (unenforced.length > 0) {
+          console.log('');
+          console.log(
+            `${unenforced.length} section(s) are valid but not enforced by any runtime:`,
+          );
+          for (const section of unenforced) {
+            console.log(`  - ${section}: ${UNENFORCED_CONFIG_SECTIONS.get(section)}`);
+          }
         }
       } catch (error) {
         console.log('Configuration validation failed:');

@@ -628,6 +628,21 @@ channels:
   <span class="str">"payload"</span><span class="op">:</span> { <span class="str">"runId"</span><span class="op">:</span> <span class="str">"run_1a2b3c4d"</span>, <span class="str">"sessionKey"</span><span class="op">:</span> <span class="str">"my-session"</span>, <span class="str">"status"</span><span class="op">:</span> <span class="str">"accepted"</span> }
 }</pre>
 
+      <h3>Choosing Which Brain Answers</h3>
+      <p>The brainstem is a separate process speaking <code>POST /chat</code>, and it returns the same envelope this gateway does. <code>chat.send</code> therefore takes an optional <code>target</code> so one connection can address either brain: <code>"openrappter"</code> (the default) or <code>"brainstem"</code>. The reply arrives as the same <code>chat</code> event, carrying <code>target</code> so a client can label it.</p>
+      <pre>{
+  <span class="str">"id"</span><span class="op">:</span> <span class="str">"req-002"</span>,
+  <span class="str">"method"</span><span class="op">:</span> <span class="str">"chat.send"</span>,
+  <span class="str">"params"</span><span class="op">:</span> {
+    <span class="str">"sessionKey"</span><span class="op">:</span> <span class="str">"my-session"</span>,
+    <span class="str">"message"</span><span class="op">:</span> <span class="str">"what do you know about this?"</span>,
+    <span class="str">"target"</span><span class="op">:</span> <span class="str">"brainstem"</span>
+  }
+}</pre>
+      <div class="info-box">
+        <strong>An unknown target is refused, not defaulted.</strong> The two brains know different things and their replies are the same shape, so a typo that quietly answered from the local runtime would be indistinguishable from the brainstem answering. The address is discovered on <code>127.0.0.1:7072</code> and <code>127.0.0.1:7071</code> — the RAPP drop-in slot — and <code>OPENRAPPTER_BRAINSTEM_URL</code> overrides it. There is also a <code>Brainstem</code> agent in both runtimes, so the assistant can consult the other brain mid-turn without the operator switching.
+      </div>
+
       <h3>Receiving the Reply</h3>
       <p><code>chat.send</code> returns as soon as the run is accepted. The answer arrives as a <code>chat</code> event on the same connection, matched by <code>runId</code>.</p>
       <div class="info-box">

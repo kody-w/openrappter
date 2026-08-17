@@ -5,7 +5,7 @@
  * capabilities, A/B tests competing versions, and promotes winners.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { WatchmakerAgent } from '../../agents/WatchmakerAgent.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 
@@ -417,6 +417,18 @@ describe('WatchmakerAgent', () => {
     });
 
     it('should tie when agents are equal', async () => {
+      // Both mocks return immediately, so each measured latency is 0-1ms of
+      // scheduler noise. The tiebreaker fires when |delta| >= 5ms and the
+      // relative difference exceeds 20%, and on a loaded runner one call can
+      // land 5ms after the other while the average stays tiny — which reads
+      // as a 100%+ difference and picks a winner. CI failed exactly that way:
+      //   expected 'A' to be 'tie'
+      // Freezing the clock makes both latencies genuinely equal, so this
+      // asserts what it means — equal agents tie — rather than measuring the
+      // machine it runs on.
+      const frozen = Date.now();
+      const now = vi.spyOn(Date, 'now').mockReturnValue(frozen);
+      try {
       registerStrong(watchmaker, '1.0');
       // Register a second strong agent as candidate
       await watchmaker.perform({
@@ -436,6 +448,9 @@ describe('WatchmakerAgent', () => {
       const parsed = JSON.parse(result);
 
       expect(parsed.comparison.winner).toBe('tie');
+      } finally {
+        now.mockRestore();
+      }
     });
 
     it('should use latency tiebreaker when quality is similar', async () => {

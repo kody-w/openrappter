@@ -2,6 +2,17 @@ export interface UpdateCheckResult {
   hasUpdate: boolean;
   latestVersion: string;
   currentVersion: string;
+  /**
+   * Whether the registry was actually reached.
+   *
+   * The catch below used to return `hasUpdate: false, latestVersion:
+   * currentVersion` for a DNS failure, a 500, and a genuinely current install
+   * alike. Every caller then said "you are using the latest version" — the one
+   * sentence a user offline on a version with a security fix must not be told.
+   */
+  checked: boolean;
+  /** Why the check could not be made, when `checked` is false. */
+  error?: string;
 }
 
 function compareVersions(v1: string, v2: string): number {
@@ -30,6 +41,9 @@ export async function checkForUpdate(
 
     const data = (await response.json()) as { version: string };
     const latestVersion = data.version;
+    if (typeof latestVersion !== 'string' || !latestVersion) {
+      throw new Error('Registry response contained no version');
+    }
 
     const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
 
@@ -37,13 +51,15 @@ export async function checkForUpdate(
       hasUpdate,
       latestVersion,
       currentVersion,
+      checked: true,
     };
-  } catch {
-    // On error, assume no update
+  } catch (error) {
     return {
       hasUpdate: false,
       latestVersion: currentVersion,
       currentVersion,
+      checked: false,
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

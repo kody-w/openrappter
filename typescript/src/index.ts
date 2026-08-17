@@ -22,6 +22,11 @@ import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
+import { registerSkillsCommand } from './cli/skills.js';
+import { registerAgentsCommand } from './cli/agents.js';
+import { registerModelsCommand } from './cli/models.js';
+import { registerUpdateCommand } from './cli/update.js';
+import { registerHubCommands } from './cli/hubs.js';
 import { portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
@@ -1025,6 +1030,19 @@ async function startGatewayInProcess(opts?: {
 // COMMANDS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** Options commander hands the default command. */
+interface RootCommandOptions {
+  task?: string;
+  evolve?: number;
+  daemon?: boolean;
+  instance?: string;
+  port?: number;
+  status?: boolean;
+  listAgents?: boolean;
+  exec?: string;
+  web?: boolean;
+}
+
 program
   .name('openrappter')
   .description(`${EMOJI} ${NAME} — Local-first AI agent powered by GitHub Copilot SDK`)
@@ -1052,7 +1070,22 @@ program
   .option('-l, --list-agents', 'List available agents')
   .option('--exec <agent>', 'Execute a specific agent')
   .option('--web', 'Open web UI in browser')
-  .action(async (message, options) => {
+  .action(runRootCommand);
+
+/**
+ * The default command, named so other commands can reuse it.
+ *
+ * `openrappter gateway` is the phrase the docs and the shipped health guidance
+ * use for "start the server", and it has to mean the same thing as
+ * `openrappter --daemon`. The abandoned `cli/gateway.ts` started a bare
+ * `GatewayServer` with no Assistant, no channels, no agent handler, and no
+ * port lock — it printed "Gateway running" over a server that could not answer
+ * a single chat. Delegating here is the only way `gateway` can be honest.
+ */
+async function runRootCommand(
+  message: string | undefined,
+  options: RootCommandOptions,
+): Promise<void> {
     await ensureHomeDir();
 
     // Load env vars from ~/.openrappter/.env (saved by onboard wizard)
@@ -1482,7 +1515,7 @@ program
 
     // Interactive mode — drop straight into streaming chat
     await interactiveMode();
-  });
+}
 
 // Onboard command
 program
@@ -2592,6 +2625,41 @@ registerDoctorCommand(program);
 registerRappterCommand(program);
 registerFlightRecorderCommand(program);
 registerShowAndTellCommand(program);
+// Same silence as cron, five more times. `skills`, `agents`, `models` and
+// `update` were implemented, exported from `cli/index.ts`, and never
+// registered, so `openrappter skills list` was not a command — it was a chat
+// prompt, and the agent answered it by trying to run a binary called `skills`.
+// #159 fixed config and doctor the same way.
+registerSkillsCommand(program);
+registerAgentsCommand(program);
+registerModelsCommand(program);
+registerUpdateCommand(program);
+// `rappterhub` and `clawhub` are promised in the README but only implemented in
+// the Python runtime, and the installed launcher always prefers TypeScript when
+// `dist/` exists — so both documented commands reached the chat model instead
+// of a registry. They delegate rather than pretend.
+registerHubCommands(program);
+
+// `openrappter gateway` — the documented phrase for "start the server", routed
+// through the one implementation that actually wires an Assistant, channels
+// and the port lock.
+program
+  .command('gateway')
+  .description('Start the gateway server (same runtime as `openrappter --daemon`)')
+  .option('--port <port>', 'Gateway port', (value: string) => {
+    const port = Number.parseInt(value, 10);
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid port: ${value}`);
+    }
+    return port;
+  })
+  .option(
+    '--instance <id>',
+    'Name this rappter, so an alpha and its hatched twins can run on one device.',
+  )
+  .action(async (options: { port?: number; instance?: string }) => {
+    await runRootCommand(undefined, { ...options, daemon: true });
+  });
 
 await hydrateManagedEnv();
 program.parse();

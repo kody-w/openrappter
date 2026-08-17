@@ -36,6 +36,46 @@ async function discoverModels(): Promise<string[]> {
   return models;
 }
 
+/**
+ * The model the runtime will actually use.
+ *
+ * `hydrateManagedEnv` copies `~/.openrappter/.env` into `process.env` only for
+ * keys that are not already set — "existing values always win". Every model
+ * read in the runtime is then `process.env.OPENRAPPTER_MODEL`. This command
+ * used to resolve the file first, so with `OPENRAPPTER_MODEL` exported in the
+ * shell, `models get` named one model while the agent ran another. #159 fixed
+ * the same inversion for `config`.
+ */
+async function resolveActiveModel(): Promise<ModelResolution> {
+  const env = await loadEnv();
+  const fileModel = env.OPENRAPPTER_MODEL;
+  const processModel = process.env.OPENRAPPTER_MODEL;
+
+  return {
+    model: processModel || fileModel || COPILOT_DEFAULT_MODEL,
+    fileModel,
+    // index.ts calls hydrateManagedEnv() before parsing, so the file's own
+    // value is in process.env by the time any action runs. Only a value that
+    // disagrees with the file can have come from the user's shell — treating
+    // every process value as exported would warn on every `models set`.
+    shadowedByEnvironment: Boolean(processModel) && processModel !== fileModel,
+  };
+}
+
+interface ModelResolution {
+  /** What the runtime will use. */
+  model: string;
+  /** What `~/.openrappter/.env` holds, if anything. */
+  fileModel?: string;
+  /** An exported OPENRAPPTER_MODEL is overriding the file. */
+  shadowedByEnvironment: boolean;
+}
+
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
+}
+
 export function registerModelsCommand(program: Command): void {
   const cmd = program
     .command('models')
@@ -44,8 +84,7 @@ export function registerModelsCommand(program: Command): void {
   // Default action: list models
   cmd
     .action(async () => {
-      const env = await loadEnv();
-      const current = env.OPENRAPPTER_MODEL || process.env.OPENRAPPTER_MODEL || COPILOT_DEFAULT_MODEL;
+      const { model: current } = await resolveActiveModel();
 
       console.log(`\n${EMOJI} Discovering available models…\n`);
       const models = await discoverModels();
@@ -67,9 +106,8 @@ export function registerModelsCommand(program: Command): void {
     .command('get')
     .description('Show the current active model')
     .action(async () => {
-      const env = await loadEnv();
-      const current = env.OPENRAPPTER_MODEL || process.env.OPENRAPPTER_MODEL || COPILOT_DEFAULT_MODEL;
-      console.log(current);
+      const { model } = await resolveActiveModel();
+      console.log(model);
     });
 
   // Subcommand: set
@@ -77,13 +115,34 @@ export function registerModelsCommand(program: Command): void {
     .command('set <model>')
     .description('Set the default model (persisted to ~/.openrappter/.env)')
     .action(async (model: string) => {
+      const requested = model.trim();
+      if (!requested) {
+        fail('Error: model id must not be empty');
+      }
+
+      const { model: previous, shadowedByEnvironment } = await resolveActiveModel();
+
       const env = await loadEnv();
-      const previous = env.OPENRAPPTER_MODEL || process.env.OPENRAPPTER_MODEL || COPILOT_DEFAULT_MODEL;
+      env.OPENRAPPTER_MODEL = requested;
+      try {
+        await saveEnv(env);
+      } catch (err) {
+        // saveEnv verifies its own read-back. A failure there means the file on
+        // disk is not what we just claimed to write.
+        fail(`Failed to save model: ${err instanceof Error ? err.message : String(err)}`);
+      }
 
-      env.OPENRAPPTER_MODEL = model;
-      await saveEnv(env);
-
-      console.log(`${EMOJI} Model set: ${previous} → ${model}`);
+      console.log(`${EMOJI} Model set: ${previous} → ${requested}`);
+      if (shadowedByEnvironment && previous !== requested) {
+        // The file is now correct and still ignored: the exported variable
+        // wins in every process that inherits it. Saying "restart the gateway"
+        // here would send the user to fix the wrong thing.
+        console.log(
+          `  Warning: OPENRAPPTER_MODEL is exported in this environment as "${previous}"`,
+        );
+        console.log('  and overrides the saved value. Unset it for the change to apply.');
+        return;
+      }
       console.log('  Restart the gateway for the change to take effect,');
       console.log('  or use the dashboard to hot-swap without restarting.');
     });

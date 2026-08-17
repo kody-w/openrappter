@@ -20,7 +20,6 @@ describe('CLI Commands', () => {
   describe('CLI Module Structure', () => {
     it('should have all expected command files', () => {
       const expectedFiles = [
-        'gateway.ts',
         'config.ts',
         'cron.ts',
         'skills.ts',
@@ -48,7 +47,6 @@ describe('CLI Commands', () => {
       const content = readFileSync(indexPath, 'utf-8');
 
       const expectedExports = [
-        'registerGatewayCommand',
         'registerConfigCommand',
         'registerCronCommand',
         'registerSkillsCommand',
@@ -69,10 +67,10 @@ describe('CLI Commands', () => {
   });
 
   describe('Command File Structure', () => {
-    it('gateway.ts should export registerGatewayCommand', () => {
-      const filePath = join(CLI_DIR, 'gateway.ts');
+    it('hubs.ts should export registerHubCommands', () => {
+      const filePath = join(CLI_DIR, 'hubs.ts');
       const content = readFileSync(filePath, 'utf-8');
-      expect(content).toContain('export function registerGatewayCommand');
+      expect(content).toContain('export function registerHubCommands');
     });
 
     it('config.ts should export registerConfigCommand', () => {
@@ -158,11 +156,10 @@ describe('CLI Commands', () => {
   });
 
   describe('Command Features', () => {
-    it('gateway command should have server start functionality', () => {
-      const filePath = join(CLI_DIR, 'gateway.ts');
+    it('hub commands should delegate to the Python runtime', () => {
+      const filePath = join(CLI_DIR, 'hubs.ts');
       const content = readFileSync(filePath, 'utf-8');
-      expect(content).toContain('command');
-      expect(content).toContain('description');
+      expect(content).toContain('openrappter.cli');
     });
 
     it('config command should have get/set operations', () => {
@@ -262,7 +259,8 @@ describe('CLI Commands', () => {
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
-        expect(content).toMatch(/function register\w+Command\(\s*program:\s*Command/);
+        // `registerHubCommands` registers two, like registerTelephonyCommands does.
+        expect(content).toMatch(/function register\w+Commands?\(\s*program:\s*Command/);
       }
     });
   });

@@ -80,6 +80,10 @@ const GITHUB_RAW = 'https://raw.githubusercontent.com';
 const GITHUB_API = 'https://api.github.com';
 const DEFAULT_SKILLS_DIR = join(homedir(), '.openrappter', 'skills');
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class SkillsRegistry {
   private skillsDir: string;
   private installed = new Map<string, InstalledSkill>();
@@ -134,7 +138,9 @@ export class SkillsRegistry {
         rating: repo.stargazers_count,
       }));
     } catch (error) {
-      console.error('Failed to search GitHub:', error);
+      // Reachable from `openrappter skills` since this pass, so what lands
+      // here is a user-facing message rather than a library log line.
+      console.error(`Failed to search GitHub: ${describeError(error)}`);
       return [];
     }
   }
@@ -218,7 +224,7 @@ export class SkillsRegistry {
       console.log(`Installed skill: ${manifest.name} v${manifest.version} from ${skillId}`);
       return installed;
     } catch (error) {
-      console.error(`Failed to install skill ${skillId}:`, error);
+      console.error(`Failed to install skill ${skillId}: ${describeError(error)}`);
       return null;
     }
   }
@@ -244,7 +250,7 @@ export class SkillsRegistry {
       console.log(`Uninstalled skill: ${skillId}`);
       return true;
     } catch (error) {
-      console.error(`Failed to uninstall skill ${skillId}:`, error);
+      console.error(`Failed to uninstall skill ${skillId}: ${describeError(error)}`);
       return false;
     }
   }

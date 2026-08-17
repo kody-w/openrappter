@@ -22,7 +22,16 @@ import { reserveTestPort } from '../support/test-port.js';
 
 const REPO = resolve(__dirname, '../../..');
 const SWIFT_RPC = join(REPO, '../macos/Sources/OpenRappterBar/Services/RpcClient.swift');
-const UI_SERVICES = join(REPO, 'ui/src/services');
+/**
+ * Both halves of the web UI call the gateway directly.
+ *
+ * This scan used to cover `ui/src/services` alone, which is how
+ * `ui/src/components/zen.ts` — a live `<openrappter-zen>` element rendered by
+ * the app shell — called three methods nobody had registered without this file
+ * noticing: its entries were listed below by hand, not found. Components make
+ * `gateway.call(...)` as freely as services do, so both are walked.
+ */
+const UI_SOURCES = [join(REPO, 'ui/src/services'), join(REPO, 'ui/src/components')];
 
 /**
  * Methods a client calls that the gateway still does not register.
@@ -53,9 +62,6 @@ const KNOWN_MISSING = new Set<string>([
   // #176 found in `skills install`. Implementing it needs skills to mean
   // something at runtime first.
   'skills.toggle',
-  'zen.sessions',
-  'zen.subscribe',
-  'zen.unsubscribe',
   // Live macOS Bar screens that cannot work: node pairing and skills.
   // Being fixed now; each entry is removed as its method lands, and the last
   // test in this file fails if one is left here after it starts existing.
@@ -124,7 +130,7 @@ function uiMethods(): string[] {
       }
     }
   };
-  walk(UI_SERVICES);
+  for (const dir of UI_SOURCES) walk(dir);
   return names;
 }
 

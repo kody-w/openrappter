@@ -19,7 +19,7 @@ import { LispyVM, STRATEGIES } from './lispy.js';
 import type { LispAction } from './lispy.js';
 import { LispyCoach } from './lispy-coach.js';
 import type { GameSituation } from './lispy-coach.js';
-import { globalPeerStream } from '../gateway/peer-stream.js';
+import { createZenPublisher, type ZenPublisher } from './zen-publisher.js';
 
 export interface TuiBarOptions {
   port?: number;
@@ -438,6 +438,10 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
 
   // Try to connect to gateway
   let client: any = null;
+  // Pong frames go to browser viewers through the gateway (zen.publish), which
+  // is the only path that reaches it: the Bar is a separate process from the
+  // daemon, so writing to an in-process frame buffer relayed nothing.
+  let zenPublisher: ZenPublisher | null = null;
   try {
     const { TuiGatewayClient } = await import('./gateway-client.js');
     client = new TuiGatewayClient();
@@ -492,9 +496,11 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       pongTick(state.pong);
       render(state);
       // Broadcast frame to web viewers
-      const { cols } = getTermSize();
-      const pongLines = renderPongView(state.pong, cols, cols - 4);
-      globalPeerStream.pushFrame('bar-pong', pongLines.join('\n'));
+      if (zenPublisher) {
+        const { cols } = getTermSize();
+        const pongLines = renderPongView(state.pong, cols, cols - 4);
+        zenPublisher.publish(pongLines.join('\n'));
+      }
     }
   }, 1000 / 30);
 
@@ -511,7 +517,7 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
       clearInterval(uptimeInterval);
       clearInterval(renderInterval);
       clearInterval(pongInterval);
-      globalPeerStream.endSession('bar-pong');
+      await zenPublisher?.end();
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       client?.disconnect();
       process.exit(0);
@@ -530,7 +536,13 @@ export async function startTuiBar(options: TuiBarOptions = {}): Promise<void> {
         const fh = 16;
         state.pong = createPongState(fw, fh);
         // Start streaming session for web viewers
-        globalPeerStream.createSession('bar-pong', 'Pong — You vs AI');
+        if (client && state.connected) {
+          zenPublisher = createZenPublisher({
+            call: (method, params) => client.call(method, params),
+            sessionId: 'bar-pong',
+            name: 'Pong — You vs AI',
+          });
+        }
         // Countdown timer
         let cd = 3;
         const cdTimer = setInterval(() => {

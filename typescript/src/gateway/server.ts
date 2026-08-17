@@ -42,6 +42,7 @@ import {
   readAgentFile,
   writeAgentFile,
 } from '../agents/agent-files.js';
+import { ZenStreamHub, registerZenStreamMethods } from './zen-stream.js';
 import { readAnatomy } from './anatomy.js';
 import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
@@ -100,6 +101,16 @@ const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const DEFAULT_SHUTDOWN_TIMEOUT = 250;
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
+/**
+ * `zen.publish` carries rendered terminal frames, not control-plane calls: a
+ * 30fps screen is 1800 requests a minute, which the 100/minute control budget
+ * exists to stop. Frames get their own, separately accounted budget so a
+ * stream cannot starve (or be starved by) everything else on the connection.
+ * 120 frames per 2s window sustains 60fps and still bounds a rogue publisher.
+ */
+const FRAME_RATE_LIMIT_WINDOW_MS = 2000;
+const FRAME_RATE_LIMIT_MAX_FRAMES = 120;
+const FRAME_RATE_LIMITED_METHODS = new Set(['zen.publish']);
 const PROTOCOL_VERSION = 3;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
@@ -220,6 +231,11 @@ export class GatewayServer {
   private methods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private publicHttpMethods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private rateLimits = new Map<string, RateLimitEntry>();
+  private frameRateLimits = new Map<string, RateLimitEntry>();
+  /** Live zen streaming state — see gateway/zen-stream.ts. */
+  private zenStreams = new ZenStreamHub((event, payload, filter) =>
+    this.broadcastEvent(event, payload, filter),
+  );
   /**
    * Largest HTTP POST body this gateway will read, in bytes.
    *
@@ -777,8 +793,12 @@ export class GatewayServer {
     for (const { ws } of this.connections.values()) {
       ws.close(1000, 'Server shutting down');
     }
+    for (const connId of [...this.connections.keys()]) {
+      this.zenStreams.releaseConnection(connId);
+    }
     this.connections.clear();
     this.rateLimits.clear();
+    this.frameRateLimits.clear();
 
     const wss = this.wss;
     const httpServer = this.httpServer;
@@ -1716,6 +1736,10 @@ export class GatewayServer {
     ws.on('close', () => {
       this.connections.delete(connId);
       this.rateLimits.delete(connId);
+      this.frameRateLimits.delete(connId);
+      // A browser that closes its tab never sends zen.unsubscribe, and a
+      // killed producer never sends zen.end. Both are released here.
+      this.zenStreams.releaseConnection(connId);
       if (info.authenticated) {
         this.broadcastEvent(GatewayEvents.PRESENCE, {
           type: 'disconnect',
@@ -1796,7 +1820,10 @@ export class GatewayServer {
     if (!this.isGenerationActive(dispatchGeneration)) return;
 
     // Rate limit
-    if (!this.checkRateLimit(connId)) {
+    const withinBudget = FRAME_RATE_LIMITED_METHODS.has(frame.method)
+      ? this.checkFrameRateLimit(connId)
+      : this.checkRateLimit(connId);
+    if (!withinBudget) {
       this.metrics.recordRequest('rate_limited');
       logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'ws', outcome: 'rate_limited', durationMs: Date.now() - startedAt });
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.RATE_LIMITED, message: 'Rate limit exceeded' } });
@@ -2121,6 +2148,20 @@ export class GatewayServer {
       return true;
     }
     if (entry.count >= RATE_LIMIT_MAX_REQUESTS) return false;
+    entry.count++;
+    return true;
+  }
+
+  /** Budget for frame-carrying methods, accounted separately from the
+   * control-plane limit above so neither can consume the other's allowance. */
+  private checkFrameRateLimit(connId: string): boolean {
+    const now = Date.now();
+    const entry = this.frameRateLimits.get(connId);
+    if (!entry || now - entry.windowStart > FRAME_RATE_LIMIT_WINDOW_MS) {
+      this.frameRateLimits.set(connId, { count: 1, windowStart: now });
+      return true;
+    }
+    if (entry.count >= FRAME_RATE_LIMIT_MAX_FRAMES) return false;
     entry.count++;
     return true;
   }
@@ -3026,6 +3067,18 @@ export class GatewayServer {
 
     // Backup & restore methods
     registerBackupMethods(this, { dataDir: this.dataDir });
+
+    // Zen streaming (live terminal screens relayed to browsers).
+    //
+    // `methods/zen-methods.ts` declares these same names against
+    // `peer-stream.ts`'s process-local `globalPeerStream`, which no gateway
+    // ever writes to — registering it would answer the dashboard's
+    // `zen.sessions` with a list that is empty by construction. These handlers
+    // are backed by this server's own hub, fed by connected producers.
+    registerZenStreamMethods(this, {
+      hub: this.zenStreams,
+      isLiveConnection: (connectionId: string) => this.connections.has(connectionId),
+    });
 
     // Rappter multi-soul methods
     if (this.rappterManager) {

@@ -10,6 +10,14 @@
  *   Browser connects via WS → subscribes to 'zen.frame' events → renders ANSI
  *
  * Sessions allow multiple zen screens (pong, future games) running in parallel.
+ *
+ * ⚠️  Not the live path. `globalPeerStream` below is a per-process singleton,
+ * and every zen producer (`openrappter bar --tui`, `node pong.js zen`) runs in
+ * its own process — never the daemon's — so nothing written here is visible to
+ * a `GatewayServer`. The wired implementation, fed by producers over the
+ * `zen.publish` RPC, is `gateway/zen-stream.ts`; this module and
+ * `gateway/methods/zen-methods.ts` remain only as the standalone,
+ * independently unit-tested pair described on `registerBuiltInMethods`.
  */
 
 export interface ZenStreamSession {

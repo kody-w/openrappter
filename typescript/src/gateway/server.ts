@@ -32,6 +32,11 @@ import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
+import {
+  collectUsageHistory,
+  collectUsageStats,
+} from './usage.js';
+import { getFlightRecorder } from '../flight-recorder/recorder.js';
 import { readAnatomy } from './anatomy.js';
 import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
@@ -2596,6 +2601,38 @@ export class GatewayServer {
         binary: entry.binary,
         auditStatus: entry.status,
       })),
+    );
+
+    /**
+     * Usage methods — what the Bar's usage screen calls.
+     *
+     * `UsageViewModel.loadUsage()` calls `usage.stats`; `loadRecentEntries()`
+     * calls `usage.history`. Neither name was registered here, so the screen
+     * showed "Method not found" for both. See `gateway/usage.ts` for why these
+     * read the Flight Recorder rather than reusing
+     * `methods/usage-methods.ts` (which declares different names —
+     * `usage.status`/`usage.cost` — against a `usageTracker` nothing in this
+     * repository constructs, and answers a hardcoded zero without one).
+     *
+     * Authenticated: token counts describe what the operator's account has
+     * spent. The Bar handshakes before any RPC, so `requiresAuth` costs it
+     * nothing.
+     */
+    const usageParams = (params: { since?: string | number; limit?: number } | undefined) => ({
+      ...(params?.since === undefined ? {} : { since: params.since }),
+      ...(params?.limit === undefined ? {} : { limit: params.limit }),
+    });
+    this.registerMethod(
+      'usage.stats',
+      async (params: { since?: string | number } | undefined) =>
+        collectUsageStats(getFlightRecorder(), usageParams(params)),
+      { requiresAuth: true },
+    );
+    this.registerMethod(
+      'usage.history',
+      async (params: { since?: string | number; limit?: number } | undefined) =>
+        collectUsageHistory(getFlightRecorder(), usageParams(params)),
+      { requiresAuth: true },
     );
 
     // Showcase methods

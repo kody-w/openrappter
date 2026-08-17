@@ -9,6 +9,15 @@ public struct UsageStats: Codable, Sendable {
     public let totalCost: Double
     public let requestCount: Int
     public let period: String?
+    /// Whether `totalCost` is a measurement at all.
+    ///
+    /// This runtime holds no per-token price table for any provider, and the
+    /// default backend is a Copilot subscription that has no per-token price.
+    /// The gateway therefore sends `costAvailable: false` and `totalCost: 0`.
+    /// Rendering that as "$0.0000" would present a number nobody measured, so
+    /// `formattedCost` says so instead. Absent (older gateway) is treated as
+    /// unknown for the same reason.
+    public let costAvailable: Bool?
 
     public init(
         totalTokens: Int = 0,
@@ -16,7 +25,8 @@ public struct UsageStats: Codable, Sendable {
         completionTokens: Int = 0,
         totalCost: Double = 0,
         requestCount: Int = 0,
-        period: String? = nil
+        period: String? = nil,
+        costAvailable: Bool? = nil
     ) {
         self.totalTokens = totalTokens
         self.promptTokens = promptTokens
@@ -24,11 +34,13 @@ public struct UsageStats: Codable, Sendable {
         self.totalCost = totalCost
         self.requestCount = requestCount
         self.period = period
+        self.costAvailable = costAvailable
     }
 
-    /// Formatted cost string (e.g., "$0.0042")
+    /// Formatted cost string (e.g., "$0.0042"), or "n/a" when nothing priced it.
     public var formattedCost: String {
-        String(format: "$%.4f", totalCost)
+        guard costAvailable == true else { return "n/a" }
+        return String(format: "$%.4f", totalCost)
     }
 
     /// Formatted token count (e.g., "12.3K")

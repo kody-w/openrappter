@@ -161,6 +161,18 @@ export async function introspectPythonAgents(
  * is what lets a dropped file be usable in the very next message.
  */
 export class PythonAgent extends BasicAgent {
+  /**
+   * Not a standalone agent.
+   *
+   * This class is a wrapper the registry constructs once per descriptor found
+   * in a user's `.py` file, so it needs `(file, descriptor)` and cannot be
+   * instantiated bare. Built-in discovery instantiates every exported subclass
+   * of `BasicAgent` with no arguments, which meant it reached this constructor,
+   * threw on `descriptor.name`, and recorded `PythonAgent.js` as a failed agent
+   * file on every single run. The marker is what tells discovery to skip it.
+   */
+  static readonly isTemplate = true;
+
   private readonly file: string;
   private readonly agentName: string;
   private readonly python: string;

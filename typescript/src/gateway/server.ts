@@ -46,7 +46,6 @@ import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
 import { parseChatRequest } from './chat-request.js';
 import { buildTwinResponse, parseTwinEnvelope, sayText } from './twin-chat.js';
-import { readBundledSkillInfo } from '../skills/bundled.js';
 import type { InstalledSkill } from '../skills/registry.js';
 
 /**
@@ -2574,6 +2573,13 @@ export class GatewayServer {
     // decode failed and the Bar rendered "No skills installed" — #176's
     // `skills list` always printing `(none)`, one layer up.
     this.registerMethod('skills.list', async () => {
+      // Imported lazily, and it matters. `skills/bundled.ts` reaches
+      // `clawhub.ts` -> `agents/index.js` -> `AgentRegistry` -> `logging/
+      // logger.ts` -> `chalk`. Statically this pulls chalk into every module
+      // graph that touches GatewayServer, including `typescript/ui`, whose CI
+      // job installs only its own dependencies and so cannot resolve it. The
+      // dashboard's gateway test went red on an import it never asked for.
+      const { readBundledSkillInfo } = await import('../skills/bundled.js');
       const bundled = await readBundledSkillInfo(this.bundledSkillsDir);
 
       // An install that shipped without `skills/` and an install with no

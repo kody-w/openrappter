@@ -9,6 +9,50 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+/**
+ * PowerShell is spawned fresh for every hardened path, and a cold start pays
+ * for the shell plus the .NET types the ACL script uses. 15s was enough on an
+ * idle machine and not on a loaded one: CI failed with
+ * `spawnSync powershell.exe ETIMEDOUT` while hardening a Show-and-Tell
+ * directory, which aborts the operation that asked for the private path.
+ */
+const ACL_TIMEOUT_MS = 60_000;
+const ACL_ATTEMPTS = 2;
+
+/**
+ * Whether a failure is the spawn never getting off the ground, rather than the
+ * ACL work itself failing.
+ *
+ * The distinction is the whole safety argument for retrying. A refused or
+ * unverifiable ACL exits 1 from the script, which surfaces as a non-zero
+ * `status` and no `code`, so it is never retried and never softened — the
+ * caller still fails closed. Only a transient inability to start or run the
+ * process is tried again.
+ */
+export function isTransientSpawnFailure(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ETIMEDOUT" || code === "EAGAIN" || code === "EBUSY";
+}
+
+/**
+ * Run an idempotent operation, retrying only transient spawn failures.
+ *
+ * Exported so the retry policy can be tested on any platform; the ACL script
+ * itself only runs on Windows.
+ */
+export function withTransientRetry<T>(
+  operation: () => T,
+  attempts = ACL_ATTEMPTS,
+): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return operation();
+    } catch (error) {
+      if (attempt >= attempts || !isTransientSpawnFailure(error)) throw error;
+    }
+  }
+}
+
 export function hardenPrivatePath(
   target: string,
   directory = false,
@@ -61,16 +105,18 @@ try {
   exit 1
 }
 `;
-  execFileSync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", command],
-    {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      timeout: 15_000,
-      env: { ...process.env, HF_TARGET: target, HF_USER: user },
-    },
+  withTransientRetry(() =>
+    execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", command],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        timeout: ACL_TIMEOUT_MS,
+        env: { ...process.env, HF_TARGET: target, HF_USER: user },
+      },
+    ),
   );
 }
 

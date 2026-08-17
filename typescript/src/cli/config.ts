@@ -23,7 +23,7 @@ import {
   mergeConfigObjects,
   saveConfig,
 } from '../env.js';
-import { validateConfig as validateConfigSchema } from '../config/schema.js';
+import { validateConfig as validateConfigSchema, openRappterConfigSchema } from '../config/schema.js';
 export { redactSecrets } from '../security/redact.js';
 import { redactSecrets } from '../security/redact.js';
 import { isSecretKey } from '../security/secret-keys.js';
@@ -87,6 +87,67 @@ function formatValidationErrors(error: string): string[] {
   } catch {
     return [error];
   }
+}
+
+/**
+ * Config keys the schema will silently discard.
+ *
+ * Zod strips unknown keys rather than rejecting them, so a config file can be
+ * mostly inert and still parse. `openrappter config validate` reported
+ * "Configuration is valid." for a file whose `memory`, `shell` and `skills`
+ * sections did nothing at all — which is how the published documentation came
+ * to describe a config format that has not existed for some time: the tool
+ * whose job is to check the file agreed with it.
+ *
+ * Derived from the schema rather than listed here, because a hand-maintained
+ * list is what `unsupportedConfigErrors` already is: it names exactly three
+ * keys and misses everything else.
+ */
+export function ignoredConfigKeys(
+  value: unknown,
+  schema: unknown = openRappterConfigSchema,
+  prefix = '',
+): string[] {
+  if (!isPlainObject(value)) return [];
+
+  const shape = zodObjectShape(schema);
+  // A record accepts arbitrary keys (channels), and anything we cannot read the
+  // shape of is not evidence of a problem — stay quiet rather than guess.
+  if (!shape) return [];
+
+  const ignored: string[] = [];
+  for (const [key, nested] of Object.entries(value)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!(key in shape)) {
+      ignored.push(path);
+      continue;
+    }
+    ignored.push(...ignoredConfigKeys(nested, shape[key], path));
+  }
+  return ignored;
+}
+
+/**
+ * The `shape` of a Zod object, looking through the wrappers a schema uses.
+ *
+ * `gateway` is `z.object({…}).optional()`, so the shape is one unwrap away;
+ * defaults add another. Zod 4 exposes `.shape` directly on object schemas and
+ * no longer carries `_def.typeName`, so the presence of `.shape` is the test.
+ * Returns null for anything that is not an object schema, including records,
+ * which legitimately accept any key.
+ */
+function zodObjectShape(schema: unknown): Record<string, unknown> | null {
+  let current = schema as { shape?: unknown; _def?: { innerType?: unknown } } | undefined;
+
+  for (let depth = 0; current && depth < 10; depth++) {
+    const shape = current.shape;
+    if (shape && typeof shape === 'object') return shape as Record<string, unknown>;
+
+    const inner = current._def?.innerType;
+    if (!inner) return null;
+    current = inner as typeof current;
+  }
+  return null;
 }
 
 function unsupportedConfigErrors(config: Record<string, unknown>): string[] {
@@ -226,6 +287,15 @@ export function registerConfigCommand(program: Command): void {
           return;
         }
         console.log('Configuration is valid.');
+
+        // Valid is not the same as effective: everything below parsed, and
+        // will then be dropped. Saying so is the whole point.
+        const ignored = ignoredConfigKeys(cfg);
+        if (ignored.length > 0) {
+          console.log('');
+          console.log(`${ignored.length} key(s) are not part of the schema and will be ignored:`);
+          for (const key of ignored) console.log(`  - ${key}`);
+        }
       } catch (error) {
         console.log('Configuration validation failed:');
         console.log(`  - ${(error as Error).message}`);

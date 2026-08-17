@@ -1,0 +1,62 @@
+{
+  "schema": "openrappter-usage/1.0",
+  "note": "Captured from a live GatewayServer over the macOS Bar's WebSocket wire. typescript/src/gateway/__tests__/usage-live.test.ts asserts the running gateway still reproduces this; macos/Tests/OpenRappterBarTests/UsageContractTests.swift decodes it through RpcClient. Regenerate only alongside both.",
+  "usage.stats": {
+    "totalTokens": 1632,
+    "promptTokens": 1280,
+    "completionTokens": 352,
+    "totalCost": 0,
+    "costAvailable": false,
+    "requestCount": 2,
+    "requestsWithTokenCounts": 2,
+    "period": "all recorded activity",
+    "source": "flight-recorder",
+    "truncated": false,
+    "byProvider": {
+      "copilot": {
+        "requests": 2,
+        "promptTokens": 1280,
+        "completionTokens": 352,
+        "totalTokens": 1632
+      }
+    },
+    "byModel": {
+      "gpt-4o": {
+        "requests": 1,
+        "promptTokens": 1200,
+        "completionTokens": 340,
+        "totalTokens": 1540
+      },
+      "gpt-4o-mini": {
+        "requests": 1,
+        "promptTokens": 80,
+        "completionTokens": 12,
+        "totalTokens": 92
+      }
+    }
+  },
+  "usage.history": [
+    {
+      "id": "1beab979-8ba5-4e72-8cd8-d8aaead3ec55",
+      "timestamp": "2026-08-17T02:21:40.192Z",
+      "model": "gpt-4o-mini",
+      "provider": "copilot",
+      "tokens": 92,
+      "promptTokens": 80,
+      "completionTokens": 12,
+      "cost": 0,
+      "costAvailable": false
+    },
+    {
+      "id": "ca87fc7e-0a00-4cac-9c46-8eba3c3930d4",
+      "timestamp": "2026-08-17T02:21:40.184Z",
+      "model": "gpt-4o",
+      "provider": "copilot",
+      "tokens": 1540,
+      "promptTokens": 1200,
+      "completionTokens": 340,
+      "cost": 0,
+      "costAvailable": false
+    }
+  ]
+}

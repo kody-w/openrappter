@@ -584,14 +584,38 @@ public struct RpcClient: RpcClientProtocol, Sendable {
         return try decodePayload(response)
     }
 
+    /// Recent per-request usage entries.
+    ///
+    /// The gateway timestamps these as ISO-8601 strings, like every other
+    /// timestamp on this wire. A bare `JSONDecoder()` uses
+    /// `.deferredToDate`, which demands a `Double` and fails on a string —
+    /// and because the failure was swallowed by `try?`, every entry the
+    /// gateway sent was silently discarded and this returned `[]`. Same
+    /// custom strategy as `listCronJobs()`, for the same reason.
     public func getUsageHistory() async throws -> [UsageEntry] {
         let response = try await connection.sendRequest(method: "usage.history")
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to get usage history") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let entries = try? JSONDecoder().decode([UsageEntry].self, from: data) {
-            return entries
+        guard response.ok else {
+            let detail = response.error ?? RpcErrorDetail(code: -1, message: "Failed to get usage history")
+            throw GatewayConnectionError.serverError(code: detail.code, message: detail.message)
         }
-        return []
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            guard let str = try? container.decode(String.self) else {
+                throw RpcClientError.decodingFailed("usage.history timestamp was not a string")
+            }
+            let withFraction = ISO8601DateFormatter()
+            withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = withFraction.date(from: str) { return date }
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            guard let date = plain.date(from: str) else {
+                throw RpcClientError.decodingFailed("usage.history timestamp was not ISO-8601: \(str)")
+            }
+            return date
+        }
+        return try decoder.decode([UsageEntry].self, from: data)
     }
 
     // MARK: - Skills Methods

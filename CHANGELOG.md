@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Bar's usage screen shows real numbers** — `UsageViewModel` calls
+  `usage.stats` and `usage.history`, and the live `GatewayServer` registered
+  neither, so both answered `Method not found` and the screen only ever
+  rendered an error. Both are now registered against the Flight Recorder's
+  `provider.attempt.completed` events, which is where provider-reported token
+  counts are actually recorded. `gateway/methods/usage-methods.ts` was
+  deliberately *not* wired: it declares different names (`usage.status`,
+  `usage.cost`) against a `usageTracker` nothing in this repository
+  constructs, and answers a hardcoded zero without one. Cost is reported as
+  `costAvailable: false` rather than `$0.0000` — no price table exists in this
+  runtime. `RpcClient.getUsageHistory()` also decoded timestamps with a bare
+  `JSONDecoder`, whose `.deferredToDate` strategy threw on the gateway's
+  ISO-8601 strings; the throw was swallowed by `try?`, so a populated response
+  was silently rendered as an empty list.
 - **Python storage adapter is genuinely thread-safe** — `SqliteStorageAdapter`
   held an `RLock` (implying multi-threaded use) but opened its connection with
   sqlite3's default `check_same_thread=True`, so any call from a worker thread

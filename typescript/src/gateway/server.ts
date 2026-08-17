@@ -37,6 +37,11 @@ import {
   collectUsageStats,
 } from './usage.js';
 import { getFlightRecorder } from '../flight-recorder/recorder.js';
+import {
+  listAgentFiles,
+  readAgentFile,
+  writeAgentFile,
+} from '../agents/agent-files.js';
 import { readAnatomy } from './anatomy.js';
 import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
@@ -418,6 +423,26 @@ export class GatewayServer {
 
   private get cronStorePath(): string {
     return path.join(this.dataDir, 'cron.json');
+  }
+
+  /**
+   * The directory the agent file browser is allowed to see.
+   *
+   * The same tree `AgentRegistry` hot-loads and `/agents/import` writes into:
+   * with the default data dir this is `~/.openrappter/agents`, so what the
+   * dashboard edits is what the organism runs. A gateway pointed at another
+   * data dir (every test does this) gets that dir's `agents/` and can never
+   * reach the real user's agents by accident.
+   */
+  private get agentFilesRoot(): string {
+    return this.agentFilesRootOverride ?? path.join(this.dataDir, 'agents');
+  }
+
+  private agentFilesRootOverride?: string;
+
+  /** Point the file browser somewhere else. For embedders and tests. */
+  setAgentFilesRoot(dir: string): void {
+    this.agentFilesRootOverride = dir;
   }
 
   private loadCronStore() {
@@ -2075,6 +2100,48 @@ export class GatewayServer {
     // Agents
     this.registerMethod('agents.list', async () => this.agentList ? this.agentList() : []);
 
+    /**
+     * Agent file browser — the dashboard's Files tab.
+     *
+     * These names existed in `methods/agents-methods.ts`, which is never
+     * registered (see the doc comment on this method): it forwarded to an
+     * `agentRegistry.readAgentFile`/`writeAgentFile` pair that no registry in
+     * this repo implements, with no path validation and no auth. So the tab
+     * answered `Method not found`, and the module that looked like the
+     * implementation would have been an unauthenticated arbitrary-path write
+     * into the directory the loader executes.
+     *
+     * The guards live in `agents/agent-files.ts`. The two decisions made here:
+     *
+     *  - `read` and `write` require the credential. `write` because these bytes
+     *    are executed by the next registry sweep — the same reason
+     *    `/agents/import` requires it (#171) — and `read` because agent source
+     *    is where a generated agent's keys end up.
+     *  - `list` does not: it returns names, sizes and mtimes for agents that
+     *    `agents.list` already names without a credential, and the file tab
+     *    has to be able to render before anything is opened.
+     */
+    this.registerMethod('agents.files.list', async (params: { agentId?: string }) => {
+      const files = await listAgentFiles(this.agentFilesRoot, params?.agentId);
+      return { files };
+    });
+    this.registerMethod('agents.files.read', async (params: { agentId?: string; path?: string }) => {
+      const content = await readAgentFile(this.agentFilesRoot, params?.agentId, params?.path);
+      return { content };
+    }, { requiresAuth: true });
+    this.registerMethod(
+      'agents.files.write',
+      async (params: { agentId?: string; path?: string; content?: string }) => {
+        return writeAgentFile(
+          this.agentFilesRoot,
+          params?.agentId,
+          params?.path,
+          params?.content,
+        );
+      },
+      { requiresAuth: true },
+    );
+
     // What the assistant is running on, and what to do when it cannot run.
     this.registerMethod('backend.status', async () => this.backendStatus);
 
@@ -2451,7 +2518,7 @@ export class GatewayServer {
       this.saveCronStore();
       return job;
     }, { requiresAuth: true });
-    this.registerMethod('cron.logs', async (params: Record<string, unknown>) => {
+    const cronRunLogs = async (params: Record<string, unknown>) => {
       if (this.cronService) {
         const svc = this.cronService as unknown as { getRunLogs?: (jobId?: string) => unknown[] };
         if (svc.getRunLogs) {
@@ -2460,7 +2527,19 @@ export class GatewayServer {
         }
       }
       return { runs: [] };
-    });
+    };
+    this.registerMethod('cron.logs', cronRunLogs);
+    /**
+     * `cron.runs` is the dashboard's spelling of `cron.logs`, not a second
+     * feature: both mean "the run history of this job", both take `{ jobId }`,
+     * and `CronService.getRunLogs(jobId)` already answers it. It shares the
+     * handler *object* rather than re-deriving the lookup, for the reason
+     * `cron.delete` had to (#166) — an alias with its own body kept the old bug
+     * after the original was fixed, and reported success over a store nothing
+     * was running from. A test asserts the two handlers are the same reference.
+     */
+    this.registerMethod('cron.runs', cronRunLogs);
+
 
     // Connection methods
     this.registerMethod('connections.list', async () => {

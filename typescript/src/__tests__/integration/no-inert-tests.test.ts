@@ -40,15 +40,12 @@ const KNOWN_INERT = new Set([
   'src/__tests__/parity/power-prompts-2.test.ts',
   'src/__tests__/parity/power-prompts.test.ts',
   'src/__tests__/parity/voice.test.ts',
-
-  // Not parity specs. These sit beside the module they are named after, which
-  // makes them likelier to be trusted than the parity suites ever were.
-  //   schema.test.ts     — 23 blocks beside config/schema.ts, all literals
-  //   providers.test.ts  — 8 blocks beside the provider registry
-  //   imessage-channel   — 21 blocks over a privacy-sensitive channel
-  'src/config/schema.test.ts',
-  'src/providers/providers.test.ts',
-  'src/__tests__/imessage-channel.test.ts',
+  // Three former entries — src/config/schema.test.ts, src/providers/providers.test.ts
+  // and src/__tests__/imessage-channel.test.ts — were deleted rather than
+  // catalogued: each was already covered by a real suite (parity/config*.test.ts
+  // + unit/config-ignored-keys.test.ts; parity/providers.test.ts;
+  // channels/imessage.test.ts respectively). Removing them keeps this list
+  // shrink-only.
 ]);
 
 /** Every test file in the TypeScript package. */

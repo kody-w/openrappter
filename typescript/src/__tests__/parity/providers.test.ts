@@ -15,9 +15,15 @@ import type { LLMProvider, ProviderResponse, Message } from '../../providers/typ
 
 function mockProvider(
   id: string,
-  behaviour: { response?: Partial<ProviderResponse>; throws?: boolean; available?: boolean }
+  behaviour: {
+    response?: Partial<ProviderResponse>;
+    throws?: boolean;
+    available?: boolean;
+    embeds?: number[][];
+    embedThrows?: boolean;
+  }
 ): LLMProvider {
-  return {
+  const provider: LLMProvider = {
     id,
     name: id,
     async chat(): Promise<ProviderResponse> {
@@ -28,6 +34,16 @@ function mockProvider(
       return behaviour.available ?? true;
     },
   };
+  // Only providers given embedding behaviour expose `embed`. A provider with no
+  // `embed` method is exactly how a chat-only provider looks to
+  // embedWithFailover, which must skip it rather than crash.
+  if (behaviour.embeds !== undefined || behaviour.embedThrows) {
+    provider.embed = async (): Promise<number[][]> => {
+      if (behaviour.embedThrows) throw new Error(`${id} embed failed`);
+      return behaviour.embeds ?? [];
+    };
+  }
+  return provider;
 }
 
 const messages: Message[] = [{ role: 'user', content: 'hi' }];
@@ -121,6 +137,72 @@ describe('Provider Parity', () => {
       await expect(
         registry.chatWithFailover(['ghost'], messages, undefined, { maxRetries: 0, retryDelayMs: 0 })
       ).rejects.toThrow(/All providers failed/);
+    });
+  });
+
+  describe('Embedding failover', () => {
+    const texts = ['hello'];
+
+    it('returns the first provider that can embed without trying the rest', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('first', { embeds: [[1, 2, 3]] }));
+      registry.register(mockProvider('second', { embeds: [[9, 9, 9]] }));
+
+      const vectors = await registry.embedWithFailover(
+        ['first', 'second'],
+        texts,
+        undefined,
+        { maxRetries: 0, retryDelayMs: 0 }
+      );
+      expect(vectors).toEqual([[1, 2, 3]]);
+    });
+
+    it('falls over to the next provider when the first throws while embedding', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('primary', { embedThrows: true }));
+      registry.register(mockProvider('secondary', { embeds: [[4, 5, 6]] }));
+
+      const vectors = await registry.embedWithFailover(
+        ['primary', 'secondary'],
+        texts,
+        undefined,
+        { maxRetries: 0, retryDelayMs: 0 }
+      );
+      expect(vectors).toEqual([[4, 5, 6]]);
+    });
+
+    it('skips a provider that does not support embeddings and uses the next', async () => {
+      const registry = new ProviderRegistry();
+      // 'chat-only' is registered with no embedding behaviour, so it has no
+      // `embed` method at all — the registry must move past it, not throw.
+      registry.register(mockProvider('chat-only', { response: { content: 'x' } }));
+      registry.register(mockProvider('embedder', { embeds: [[7, 8]] }));
+
+      const vectors = await registry.embedWithFailover(
+        ['chat-only', 'embedder'],
+        texts,
+        undefined,
+        { maxRetries: 0, retryDelayMs: 0 }
+      );
+      expect(vectors).toEqual([[7, 8]]);
+    });
+
+    it('names the unsupported-embeddings reason when the whole chain cannot embed', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('chat-only', { response: { content: 'x' } }));
+
+      await expect(
+        registry.embedWithFailover(['chat-only'], texts, undefined, { maxRetries: 0, retryDelayMs: 0 })
+      ).rejects.toThrow(/does not support embeddings/);
+    });
+
+    it('throws when every embedding provider in the chain fails', async () => {
+      const registry = new ProviderRegistry();
+      registry.register(mockProvider('bad', { embedThrows: true }));
+
+      await expect(
+        registry.embedWithFailover(['bad'], texts, undefined, { maxRetries: 0, retryDelayMs: 0 })
+      ).rejects.toThrow(/All embedding providers failed/);
     });
   });
 });

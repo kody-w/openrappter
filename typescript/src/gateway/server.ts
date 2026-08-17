@@ -2946,6 +2946,22 @@ export class GatewayServer {
     //
     // These handlers serve the engine that actually blocks commands: the
     // ExecSafety instance ShellAgent issues approval tokens from.
+    // The Bar's approval screen listens for this event (AppViewModel
+    // handleEvent -> "approval"). Nothing ever emitted it, so a command could
+    // sit in the queue with the screen showing nothing until it was reopened.
+    // Only authenticated, subscribed connections receive it — the same
+    // audience that can already call exec.pending — so the payload carries
+    // the fields that screen reads rather than forcing a second round trip.
+    this.getExecSafety().onApprovalRequested((approval) => {
+      this.broadcastEvent(GatewayEvents.APPROVAL, {
+        id: approval.id,
+        command: approval.cmd,
+        description: approval.reason,
+        binary: approval.binary,
+        createdAt: approval.createdAt,
+      });
+    });
+
     this.registerMethod('exec.pending', async () =>
       this.getExecSafety().listPendingApprovals().map((approval) => ({
         // Field names the Bar decodes into ExecutionApproval.

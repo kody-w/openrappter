@@ -245,7 +245,15 @@ public struct RpcClient: RpcClientProtocol, Sendable {
             return yaml
         }
         if let dict = response.payload?.value as? [String: Any] {
-            // Convert dict to YAML-like string representation
+            // The gateway answers with a snapshot, not a bare string. Read the
+            // config out of it; serialising the whole envelope showed the user
+            // `{"content": "..."}` instead of their YAML.
+            if let raw = dict["raw"] as? String {
+                return raw
+            }
+            if let content = dict["content"] as? String {
+                return content
+            }
             let data = try JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted)
             return String(data: data, encoding: .utf8) ?? "{}"
         }
@@ -253,7 +261,9 @@ public struct RpcClient: RpcClientProtocol, Sendable {
     }
 
     public func setConfig(yaml: String) async throws {
-        let params: [String: AnyCodable] = ["config": AnyCodable(yaml)]
+        // `raw` is the canonical field name; the gateway still accepts the
+        // older `config` and `content` spellings.
+        let params: [String: AnyCodable] = ["raw": AnyCodable(yaml)]
         let response = try await connection.sendRequest(method: "config.set", params: params)
         guard response.ok else {
             let msg = response.error?.message ?? "Unknown error"

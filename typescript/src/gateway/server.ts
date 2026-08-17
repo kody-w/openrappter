@@ -116,6 +116,17 @@ function safeCompare(a: string, b: string): boolean {
 
 type StreamCallback = (response: StreamingResponse) => void;
 
+/**
+ * The dashboard sends `raw`, the macOS Bar sends `config`, and this server
+ * historically read `content`. All three are accepted so an older client keeps
+ * working; `raw` is canonical.
+ */
+interface ConfigWriteParams {
+  raw?: string;
+  content?: string;
+  config?: string;
+  baseHash?: string;
+}
 export interface GatewayReadiness {
   ready: boolean;
   status: 'ready' | 'degraded';
@@ -348,6 +359,14 @@ export class GatewayServer {
 
   private saveConfig(content: string) {
     fs.writeFileSync(this.configPath, content, 'utf-8');
+  }
+
+  /**
+   * Identifies the config bytes a client last read, so a save can refuse to
+   * overwrite an edit it never saw.
+   */
+  private configHash(raw: string): string {
+    return createHash('sha256').update(raw, 'utf-8').digest('hex').slice(0, 16);
   }
 
   private get cronStorePath(): string {
@@ -2303,13 +2322,43 @@ export class GatewayServer {
     });
 
     // Config methods
+    //
+    // Three clients each spoke a different dialect here and none matched the
+    // server: the dashboard sends `raw`/`baseHash`, the macOS Bar sends
+    // `config`, and this handler read `content`. Every one of them therefore
+    // wrote `undefined` and threw ERR_INVALID_ARG_TYPE. `config.apply` was
+    // never registered at all.
+    //
+    // The canonical shape is the dashboard's (`raw` + a hash for optimistic
+    // concurrency). The older field names are accepted as aliases so a Bar
+    // built before this change keeps working, and `content` is echoed back on
+    // read for the same reason.
     this.registerMethod('config.get', async () => {
-      return { content: this.loadConfig() };
+      const raw = this.loadConfig();
+      return { raw, hash: this.configHash(raw), format: 'yaml', content: raw };
     });
-    this.registerMethod('config.set', async (params: { content: string }) => {
-      this.saveConfig(params.content);
-      return { saved: true };
-    }, { requiresAuth: true });
+
+    const writeConfig = async (params: ConfigWriteParams) => {
+      const raw = params.raw ?? params.content ?? params.config;
+      if (typeof raw !== 'string') {
+        throw new Error('config.set requires a string `raw` (or legacy `content`/`config`)');
+      }
+      // A baseHash that no longer matches means someone else wrote after this
+      // client read. Overwriting would silently discard their edit.
+      if (params.baseHash) {
+        const currentHash = this.configHash(this.loadConfig());
+        if (params.baseHash !== currentHash) {
+          throw new Error(
+            'Config changed since it was loaded; reload before saving to avoid discarding the other edit',
+          );
+        }
+      }
+      this.saveConfig(raw);
+      return { saved: true, applied: true, hash: this.configHash(raw) };
+    };
+
+    this.registerMethod('config.set', writeConfig, { requiresAuth: true });
+    this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
 
     // Showcase methods
     registerShowcaseMethods(this);

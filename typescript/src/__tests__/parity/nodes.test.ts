@@ -1,284 +1,228 @@
 /**
  * Node Protocol Parity Tests
- * Tests that openrappter node protocol matches openclaw:
- * - Node types (mobile, desktop, Raspberry Pi)
- * - Node pairing with verification
- * - Method invocation
- * - Event streaming
- * - Canvas rendering, screen capture, camera, location, notifications
+ *
+ * The previous version of this file imported only `vitest` and asserted on
+ * hand-built literals — e.g. it constructed a `{ params: { publicKey: '...' } }`
+ * object and then asserted `expect(request.params.publicKey).toBeDefined()`,
+ * or built a one-element array and asserted `length > 0`. Those assertions can
+ * never fail: they touch no product code, so the "Node Pairing", "Method
+ * Invocation", "Event Streaming" and "Node Capabilities" sections protected
+ * nothing. They were replaced with tests against the two real modules that
+ * actually implement this surface, both of which were entirely untested:
+ *
+ *   - DevicePairingManager (src/auth/pairing.ts) — device trust + token
+ *     issuance/validation/revocation. This is credential-bearing code, so it
+ *     is exercised first and most thoroughly.
+ *   - MobileNodeProtocol (src/nodes/protocol.ts) — node registration, request/
+ *     response correlation, capability gating, and event streaming.
+ *
+ * Per the "assert per path" rule, the success and failure branches of pairing
+ * approval, token validation, and request/response are each asserted
+ * separately rather than only through a combined happy-path total.
  */
 
 import { describe, it, expect } from 'vitest';
+import { DevicePairingManager } from '../../auth/pairing.js';
+import { MobileNodeProtocol, type NodeMessage, type NodeRequest } from '../../nodes/protocol.js';
+
+function msg(partial: Partial<NodeMessage> & Pick<NodeMessage, 'type' | 'nodeId' | 'payload'>): NodeMessage {
+  return {
+    id: partial.id ?? `msg_${Math.random().toString(36).slice(2)}`,
+    timestamp: partial.timestamp ?? new Date().toISOString(),
+    ...partial,
+  };
+}
 
 describe('Node Protocol Parity', () => {
-  describe('Node Types', () => {
-    it('should support all node types', () => {
-      const nodeTypes = ['mobile', 'desktop', 'raspberry-pi', 'server'];
-      expect(nodeTypes.length).toBeGreaterThanOrEqual(3);
+  describe('Device pairing (credentials)', () => {
+    it('approves a pairing request, trusts the device, and issues a token that validates', () => {
+      const mgr = new DevicePairingManager();
+      const req = mgr.createPairingRequest('device_1', 'My iPhone', 'mobile');
+
+      expect(req.status).toBe('pending');
+      expect(req.challenge).toHaveLength(64); // 32 random bytes, hex-encoded
+
+      const res = mgr.approvePairingRequest(req.id, 'admin');
+      expect(res.success).toBe(true);
+      expect(res.token).toBeTruthy();
+      expect(mgr.getDevice('device_1')?.trusted).toBe(true);
+
+      const check = mgr.validateToken(res.token!);
+      expect(check.valid).toBe(true);
+      expect(check.device?.id).toBe('device_1');
     });
 
-    it('should have node metadata', () => {
-      const node = {
-        id: 'node_123',
-        name: 'My iPhone',
-        type: 'mobile' as const,
-        platform: 'ios',
-        version: '1.0.0',
-        capabilities: ['camera', 'location', 'notifications', 'screen-capture'],
-        lastSeen: new Date().toISOString(),
-        status: 'online' as const,
-      };
+    it('refuses to mint a token for an untrusted device', () => {
+      const mgr = new DevicePairingManager();
+      mgr.registerDevice('device_2', 'Rogue Laptop', 'cli', false); // NOT trusted
 
-      expect(node.capabilities.length).toBeGreaterThan(0);
-      expect(node.status).toBe('online');
-    });
-  });
-
-  describe('Node Pairing', () => {
-    it('should initiate pairing request', () => {
-      const request = {
-        method: 'node.pair.request',
-        params: {
-          nodeId: 'node_123',
-          nodeName: 'My iPhone',
-          nodeType: 'mobile',
-          publicKey: 'ed25519:abc123',
-        },
-      };
-
-      expect(request.params.publicKey).toBeDefined();
+      expect(() => mgr.generateToken('device_2')).toThrow(/not trusted/);
     });
 
-    it('should list pending pair requests', () => {
-      const response = {
-        requests: [
-          {
-            id: 'pair_req_1',
-            nodeId: 'node_123',
-            nodeName: 'My iPhone',
-            nodeType: 'mobile',
-            requestedAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 300000).toISOString(),
-          },
-        ],
-      };
+    it('revokes a device\u2019s tokens when it is untrusted', () => {
+      const mgr = new DevicePairingManager();
+      mgr.registerDevice('device_3', 'Tablet', 'mobile', true);
+      const token = mgr.generateToken('device_3');
+      expect(mgr.validateToken(token.token).valid).toBe(true);
 
-      expect(response.requests.length).toBeGreaterThan(0);
+      expect(mgr.untrustDevice('device_3')).toBe(true);
+
+      const after = mgr.validateToken(token.token);
+      expect(after.valid).toBe(false);
+      // Must be gone from the token store, not merely rejected for being untrusted.
+      expect(after.error).toBe('Token not found');
     });
 
-    it('should approve pairing with verification', () => {
-      const approval = {
-        method: 'node.pair.approve',
-        params: {
-          requestId: 'pair_req_1',
-          verificationCode: '123456',
-        },
-      };
+    it('cannot approve a pairing request that was already rejected', () => {
+      const mgr = new DevicePairingManager();
+      const req = mgr.createPairingRequest('device_4', 'Unknown device', 'mobile');
 
-      expect(approval.params.verificationCode).toBeDefined();
+      expect(mgr.rejectPairingRequest(req.id)).toBe(true);
+
+      const res = mgr.approvePairingRequest(req.id, 'admin');
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/already rejected/);
+      expect(mgr.getDevice('device_4')).toBeUndefined(); // never registered/trusted
     });
 
-    it('should reject pairing', () => {
-      const rejection = {
-        method: 'node.pair.reject',
-        params: { requestId: 'pair_req_1', reason: 'Unknown device' },
-      };
+    it('cannot approve the same pairing request twice', () => {
+      const mgr = new DevicePairingManager();
+      const req = mgr.createPairingRequest('device_5', 'Phone', 'mobile');
 
-      expect(rejection.params.reason).toBeDefined();
+      const first = mgr.approvePairingRequest(req.id, 'admin');
+      expect(first.success).toBe(true);
+
+      const second = mgr.approvePairingRequest(req.id, 'admin');
+      expect(second.success).toBe(false);
+      expect(second.error).toMatch(/already approved/);
     });
 
-    it('should verify pairing with challenge', () => {
-      const verify = {
-        method: 'node.pair.verify',
-        params: {
-          nodeId: 'node_123',
-          challenge: 'random_nonce',
-          signature: 'signed_nonce',
-        },
-      };
+    it('lists only pending requests, excluding approved and rejected ones', () => {
+      const mgr = new DevicePairingManager();
+      const a = mgr.createPairingRequest('d_a', 'A', 'mobile');
+      const b = mgr.createPairingRequest('d_b', 'B', 'mobile');
+      const c = mgr.createPairingRequest('d_c', 'C', 'mobile');
 
-      expect(verify.params.challenge).toBeDefined();
-      expect(verify.params.signature).toBeDefined();
-    });
-  });
+      mgr.approvePairingRequest(a.id, 'admin');
+      mgr.rejectPairingRequest(b.id);
 
-  describe('Method Invocation', () => {
-    it('should invoke method on node', () => {
-      const request = {
-        method: 'node.invoke',
-        params: {
-          nodeId: 'node_123',
-          method: 'screenshot',
-          args: { fullScreen: true },
-          timeout: 10000,
-        },
-      };
-
-      expect(request.params.nodeId).toBeDefined();
-      expect(request.params.method).toBeDefined();
+      const pending = mgr.getPendingRequests().map((r) => r.id);
+      expect(pending).toEqual([c.id]);
     });
 
-    it('should return invocation result', () => {
-      const response = {
-        nodeId: 'node_123',
-        method: 'screenshot',
-        result: {
-          data: 'base64_image_data',
-          format: 'png',
-        },
-        durationMs: 500,
-      };
-
-      expect(response.result).toBeDefined();
-      expect(response.durationMs).toBeGreaterThan(0);
+    it('rejects an unknown token', () => {
+      const mgr = new DevicePairingManager();
+      expect(mgr.validateToken('not-a-real-token')).toEqual({
+        valid: false,
+        error: 'Token not found',
+      });
     });
 
-    it('should handle invocation timeout', () => {
-      const error = {
-        code: -32000,
-        message: 'Node invocation timeout after 10000ms',
-        data: { nodeId: 'node_123', method: 'screenshot' },
-      };
+    it('rotates a token: the old one stops working and the new one validates', () => {
+      const mgr = new DevicePairingManager();
+      mgr.registerDevice('device_6', 'Desktop', 'web', true);
+      const original = mgr.generateToken('device_6');
 
-      expect(error.code).toBeDefined();
+      const rotated = mgr.rotateToken(original.token);
+      expect(rotated).not.toBeNull();
+      expect(rotated!.token).not.toBe(original.token);
+
+      expect(mgr.validateToken(original.token).valid).toBe(false); // old revoked
+      expect(mgr.validateToken(rotated!.token).valid).toBe(true); // new works
     });
   });
 
-  describe('Event Streaming', () => {
-    it('should stream events from node', () => {
-      const event = {
-        type: 'node.event',
-        nodeId: 'node_123',
-        eventType: 'location_update',
-        data: {
-          latitude: 37.7749,
-          longitude: -122.4194,
-          accuracy: 10,
-        },
-        timestamp: new Date().toISOString(),
-      };
+  describe('Mobile node protocol', () => {
+    it('registers a node in pairing state and connects it on handshake', () => {
+      const proto = new MobileNodeProtocol();
+      const node = proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
+      expect(node.status).toBe('pairing');
+      expect(node.capabilities).toEqual([]);
 
-      expect(event.eventType).toBeDefined();
-      expect(event.data).toBeDefined();
+      const connected: string[] = [];
+      proto.on('node:connected', (n: { id: string }) => connected.push(n.id));
+
+      proto.handleMessage(msg({ type: 'handshake', nodeId: 'n1', payload: {} }));
+
+      expect(proto.getNode('n1')?.status).toBe('connected');
+      expect(connected).toEqual(['n1']);
     });
 
-    it('should support heartbeat monitoring', () => {
-      const heartbeat = {
-        nodeId: 'node_123',
-        timestamp: Date.now(),
-        battery: 85,
-        networkType: 'wifi',
-      };
+    it('applies a capabilities update and gates hasCapability accordingly', () => {
+      const proto = new MobileNodeProtocol();
+      proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
+      proto.handleMessage(msg({ type: 'handshake', nodeId: 'n1', payload: {} }));
 
-      expect(heartbeat.timestamp).toBeGreaterThan(0);
-    });
-  });
+      proto.handleMessage(msg({ type: 'capabilities', nodeId: 'n1', payload: ['camera', 'clipboard'] }));
 
-  describe('Node Capabilities', () => {
-    it('should support screen capture', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'screen-capture',
-        args: { format: 'png' },
-      };
-
-      expect(request.method).toBe('screen-capture');
+      expect(proto.hasCapability('n1', 'camera')).toBe(true);
+      expect(proto.hasCapability('n1', 'clipboard')).toBe(true);
+      expect(proto.hasCapability('n1', 'screen')).toBe(false); // not granted
     });
 
-    it('should support camera capture', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'camera',
-        args: { facing: 'back', format: 'jpeg' },
-      };
+    it('refuses to send a request to a node that is not connected', async () => {
+      const proto = new MobileNodeProtocol();
+      proto.registerNode('n2', 'Android', 'android', '2.0.0'); // still "pairing"
 
-      expect(request.method).toBe('camera');
+      await expect(proto.sendRequest('n2', 'camera.capture')).rejects.toThrow(/not connected/);
     });
 
-    it('should support location access', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'location',
-        args: { accuracy: 'high' },
-      };
+    it('correlates a successful response back to the pending request', async () => {
+      const proto = new MobileNodeProtocol();
+      proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
+      proto.handleMessage(msg({ type: 'handshake', nodeId: 'n1', payload: {} }));
 
-      expect(request.method).toBe('location');
+      let sent: NodeMessage | undefined;
+      proto.on('send', (m: NodeMessage) => { sent = m; });
+
+      const pending = proto.sendRequest('n1', 'clipboard.read');
+      const requestId = (sent!.payload as NodeRequest).id;
+
+      proto.handleMessage(
+        msg({ type: 'response', nodeId: 'n1', payload: { requestId, success: true, data: 'clip-contents' } })
+      );
+
+      await expect(pending).resolves.toBe('clip-contents');
     });
 
-    it('should support sending notifications', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'notification',
-        args: {
-          title: 'Reminder',
-          body: 'Check your tasks',
-          sound: true,
-        },
-      };
+    it('rejects a request when the node reports failure (error path)', async () => {
+      const proto = new MobileNodeProtocol();
+      proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
+      proto.handleMessage(msg({ type: 'handshake', nodeId: 'n1', payload: {} }));
 
-      expect(request.args.title).toBeDefined();
+      let sent: NodeMessage | undefined;
+      proto.on('send', (m: NodeMessage) => { sent = m; });
+
+      const pending = proto.sendRequest('n1', 'files.read');
+      const requestId = (sent!.payload as NodeRequest).id;
+
+      proto.handleMessage(
+        msg({ type: 'response', nodeId: 'n1', payload: { requestId, success: false, error: 'permission denied' } })
+      );
+
+      await expect(pending).rejects.toThrow('permission denied');
     });
 
-    it('should support canvas rendering', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'canvas',
-        args: {
-          html: '<div>Rich content</div>',
-          width: 400,
-          height: 300,
-        },
-      };
+    it('emits node:event when the node streams an event', () => {
+      const proto = new MobileNodeProtocol();
+      proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
 
-      expect(request.method).toBe('canvas');
+      const events: Array<{ nodeId: string; type: string; data: unknown }> = [];
+      proto.on('node:event', (e: { nodeId: string; type: string; data: unknown }) => events.push(e));
+
+      proto.handleMessage(
+        msg({ type: 'event', nodeId: 'n1', payload: { type: 'battery', data: { level: 50 } } })
+      );
+
+      expect(events).toEqual([{ nodeId: 'n1', type: 'battery', data: { level: 50 } }]);
     });
 
-    it('should support database query', () => {
-      const request = {
-        nodeId: 'node_123',
-        method: 'database',
-        args: {
-          query: 'SELECT * FROM contacts LIMIT 10',
-        },
-      };
+    it('times out a request that never receives a response', async () => {
+      const proto = new MobileNodeProtocol({ requestTimeout: 20 });
+      proto.registerNode('n1', 'iPhone', 'ios', '1.0.0');
+      proto.handleMessage(msg({ type: 'handshake', nodeId: 'n1', payload: {} }));
 
-      expect(request.method).toBe('database');
-    });
-  });
-
-  describe('Node Management', () => {
-    it('should list paired nodes', () => {
-      const response = {
-        nodes: [
-          { id: 'node_1', name: 'iPhone', type: 'mobile', status: 'online' },
-          { id: 'node_2', name: 'MacBook', type: 'desktop', status: 'offline' },
-        ],
-      };
-
-      expect(response.nodes.length).toBeGreaterThan(0);
-    });
-
-    it('should describe node capabilities', () => {
-      const description = {
-        nodeId: 'node_1',
-        capabilities: ['camera', 'location', 'notifications'],
-        methods: [
-          { name: 'screenshot', description: 'Capture screen' },
-          { name: 'camera', description: 'Take photo' },
-        ],
-      };
-
-      expect(description.capabilities.length).toBeGreaterThan(0);
-      expect(description.methods.length).toBeGreaterThan(0);
-    });
-
-    it('should rename node', () => {
-      const request = {
-        method: 'node.rename',
-        params: { nodeId: 'node_1', newName: 'My iPhone Pro' },
-      };
-
-      expect(request.params.newName).toBeDefined();
+      await expect(proto.sendRequest('n1', 'sensors.read')).rejects.toThrow(/timeout/);
     });
   });
 });

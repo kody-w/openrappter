@@ -502,14 +502,52 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
     // MARK: - Execution Approval Methods
 
+    /// The gateway timestamps approvals as ISO-8601 strings (`toISOString()`,
+    /// so always with milliseconds), while `JSONDecoder`'s default date
+    /// strategy expects a `Double`. Decoding `ExecutionApproval` with a stock
+    /// decoder therefore always failed — and the old `try?` turned that into an
+    /// empty array, i.e. an approval screen that silently shows nothing while
+    /// commands sit blocked. Accept both spellings, with and without fractional
+    /// seconds.
+    private static func approvalDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let basic = ISO8601DateFormatter()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let text = try? container.decode(String.self) {
+                if let date = withFraction.date(from: text) ?? basic.date(from: text) {
+                    return date
+                }
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unrecognised approval timestamp: \(text)"
+                )
+            }
+            // Numeric timestamps stay readable for any client that sends them.
+            let seconds = try container.decode(Double.self)
+            return Date(timeIntervalSince1970: seconds > 3_000_000_000 ? seconds / 1000 : seconds)
+        }
+        return decoder
+    }
+
     public func listPendingApprovals() async throws -> [ExecutionApproval] {
         let response = try await connection.sendRequest(method: "exec.pending")
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to list approvals") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let approvals = try? JSONDecoder().decode([ExecutionApproval].self, from: data) {
-            return approvals
+        guard response.ok else {
+            throw GatewayConnectionError.serverError(
+                code: response.error?.code ?? -1,
+                message: response.error?.message ?? "Failed to list approvals"
+            )
         }
-        return []
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
+        // Throw rather than return []: an approval the user cannot see is an
+        // approval they cannot deny, so a decode failure must be visible.
+        do {
+            return try Self.approvalDecoder().decode([ExecutionApproval].self, from: data)
+        } catch {
+            throw RpcClientError.decodingFailed("Pending approvals: \(error)")
+        }
     }
 
     public func respondToApproval(approvalId: String, approved: Bool) async throws {
@@ -525,12 +563,18 @@ public struct RpcClient: RpcClientProtocol, Sendable {
 
     public func getApprovalHistory() async throws -> [ExecutionApproval] {
         let response = try await connection.sendRequest(method: "exec.history")
-        guard response.ok else { throw RpcClientError.decodingFailed("Failed to get approval history") }
-        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
-        if let approvals = try? JSONDecoder().decode([ExecutionApproval].self, from: data) {
-            return approvals
+        guard response.ok else {
+            throw GatewayConnectionError.serverError(
+                code: response.error?.code ?? -1,
+                message: response.error?.message ?? "Failed to get approval history"
+            )
         }
-        return []
+        let data = try JSONEncoder().encode(response.payload ?? AnyCodable([]))
+        do {
+            return try Self.approvalDecoder().decode([ExecutionApproval].self, from: data)
+        } catch {
+            throw RpcClientError.decodingFailed("Approval history: \(error)")
+        }
     }
 
     // MARK: - Usage Methods

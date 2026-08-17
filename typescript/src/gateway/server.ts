@@ -30,6 +30,8 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { getSharedExecSafety } from '../security/exec-safety.js';
+import type { ExecSafety } from '../security/exec-safety.js';
 import { readAnatomy } from './anatomy.js';
 import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
@@ -54,6 +56,22 @@ const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 const PROTOCOL_VERSION = 3;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+/**
+ * ExecSafety's audit vocabulary → the macOS Bar's `ApprovalStatus` enum, which
+ * only knows pending/approved/denied/expired. An unmapped value would fail the
+ * Swift decode for the whole array, so every audit status is covered here and
+ * the raw one is echoed alongside as `auditStatus`.
+ */
+const EXEC_AUDIT_STATUS_TO_BAR: Record<string, 'pending' | 'approved' | 'denied' | 'expired'> = {
+  allowed: 'approved',
+  approved: 'approved',
+  used: 'approved',
+  blocked: 'denied',
+  rejected: 'denied',
+  pending: 'pending',
+  expired: 'expired',
+};
 
 /** Parse a response that may contain a |||VOICE||| delimiter into formatted + voice parts */
 function parseVoiceDelimiter(content: string): { text: string; voiceText: string } {
@@ -227,6 +245,14 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
+  /**
+   * The approval queue `exec.pending`/`exec.respond` serve.
+   *
+   * Defaults to the process-wide engine, which is the same object ShellAgent
+   * blocks on — see `getSharedExecSafety`. Anything else would give the Bar a
+   * screen that lists nothing and approves nothing while reporting success.
+   */
+  private execSafety?: ExecSafety;
 
   constructor(config?: Partial<GatewayConfig>) {
     this.config = {
@@ -527,6 +553,15 @@ export class GatewayServer {
 
   setSurgeonService(service: SurgeonService): void {
     this.surgeonService = service;
+  }
+
+  /** Override the approval engine served by `exec.*` (tests, embedders). */
+  setExecSafety(execSafety: ExecSafety): void {
+    this.execSafety = execSafety;
+  }
+
+  getExecSafety(): ExecSafety {
+    return (this.execSafety ??= getSharedExecSafety());
   }
 
   setReadinessProvider(
@@ -2418,9 +2453,96 @@ export class GatewayServer {
     this.registerMethod('config.set', writeConfig, { requiresAuth: true });
     this.registerMethod('config.apply', writeConfig, { requiresAuth: true });
 
+    // ── Execution approvals ────────────────────────────────────────────────
+    //
+    // The macOS Bar's Permissions screen (ApprovalViewModel.swift) calls
+    // `exec.pending` on appear and `exec.respond` on approve/deny. Neither was
+    // registered, so every button on the screen that gates agent commands
+    // returned "Method not found: exec.pending". `gateway/methods/exec-methods.ts`
+    // is not the fix: it declares different names (`exec.approval.request`,
+    // `exec.approvals.get`, …) against an injected `approvalManager` that no
+    // caller ever supplies, so registering it would have produced a screen that
+    // renders an empty list and reports success — strictly worse than an error.
+    //
+    // These handlers serve the engine that actually blocks commands: the
+    // ExecSafety instance ShellAgent issues approval tokens from.
+    this.registerMethod('exec.pending', async () =>
+      this.getExecSafety().listPendingApprovals().map((approval) => ({
+        // Field names the Bar decodes into ExecutionApproval.
+        id: approval.id,
+        command: approval.cmd,
+        description: approval.reason,
+        timestamp: approval.createdAt,
+        status: 'pending',
+        // Extra context; unknown keys are ignored by the Swift decoder.
+        binary: approval.binary,
+        kind: approval.kind,
+        expiresAt: approval.expiresAt,
+      })),
+    );
+
+    this.registerMethod(
+      'exec.respond',
+      async (params: {
+        approvalId?: string;
+        id?: string;
+        requestId?: string;
+        approved?: boolean;
+        decision?: string;
+      }) => {
+        const approvalId = params?.approvalId ?? params?.id ?? params?.requestId;
+        if (typeof approvalId !== 'string' || approvalId.trim() === '') {
+          throw new Error('exec.respond requires an `approvalId`');
+        }
+
+        // Never infer the decision. A missing/garbled field defaulting to
+        // "approved" is an unaudited execution, and defaulting to "denied"
+        // silently kills a command the user approved.
+        let approved: boolean;
+        if (typeof params.approved === 'boolean') {
+          approved = params.approved;
+        } else if (params.decision === 'approve' || params.decision === 'approved') {
+          approved = true;
+        } else if (
+          params.decision === 'deny' ||
+          params.decision === 'denied' ||
+          params.decision === 'reject' ||
+          params.decision === 'rejected'
+        ) {
+          approved = false;
+        } else {
+          throw new Error('exec.respond requires a boolean `approved` (or a `decision`)');
+        }
+
+        // Refuse rather than report success: an unknown, expired, or
+        // already-resolved id means this approval cannot be granted, and the
+        // reviewer has to see that instead of a row quietly disappearing.
+        if (!this.getExecSafety().respondToApproval(approvalId, approved)) {
+          throw new Error(
+            `Unknown, expired, or already-resolved approval id: ${approvalId}`,
+          );
+        }
+
+        return { ok: true, approvalId, approved, status: approved ? 'approved' : 'denied' };
+      },
+    );
+
+    // The Bar's approval history view reads the same shape. Backed by the real
+    // audit log, mapped onto the Bar's vocabulary (it has no 'rejected'/'used').
+    this.registerMethod('exec.history', async () =>
+      this.getExecSafety().getAuditLog().map((entry) => ({
+        id: entry.id,
+        command: entry.cmd,
+        description: entry.reason,
+        timestamp: entry.timestamp,
+        status: EXEC_AUDIT_STATUS_TO_BAR[entry.status] ?? 'pending',
+        binary: entry.binary,
+        auditStatus: entry.status,
+      })),
+    );
+
     // Showcase methods
     registerShowcaseMethods(this);
-
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }

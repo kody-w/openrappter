@@ -705,4 +705,129 @@ func runRpcClientContractTests() async {
             await conn.disconnect()
         }
     }
+
+    // The Bar's approval screen was dead: `exec.pending` and `exec.respond`
+    // were never registered on the production gateway. Now that they are, these
+    // pin the wire shape the gateway emits to what RpcClient actually decodes —
+    // including the ISO-8601 `timestamp`, which the stock JSONDecoder date
+    // strategy rejects (it wants a Double), and which the old `try?` swallowed
+    // into an empty list: an approval screen that shows nothing, forever.
+    await suite("RpcClient Execution Approval Contract") {
+        await test("pending approvals decode the gateway's real payload") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let approvals = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkArrayResponse(id: "rpc-2", payload: [[
+                    "id": "token_1786932956639_v2wdh9c9wgs",
+                    "command": "curl https://example.com",
+                    "description": "Approval token issued for: curl https://example.com",
+                    "timestamp": "2026-08-17T02:15:56.639Z",
+                    "status": "pending",
+                    "binary": "curl",
+                    "kind": "token",
+                    "expiresAt": "2026-08-17T02:20:56.639Z",
+                ]])
+            ) {
+                try await rpc.listPendingApprovals()
+            }
+
+            try expectEqual(approvals.count, 1)
+            try expectEqual(approvals.first?.id, "token_1786932956639_v2wdh9c9wgs")
+            try expectEqual(approvals.first?.command, "curl https://example.com")
+            try expectEqual(approvals.first?.status, .pending)
+            try expectNotNil(approvals.first?.timestamp)
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "exec.pending")
+            await conn.disconnect()
+        }
+
+        await test("a timestamp without fractional seconds still decodes") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let approvals = try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkArrayResponse(id: "rpc-2", payload: [[
+                    "id": "exec_1",
+                    "command": "npm install",
+                    "timestamp": "2026-08-17T02:15:56Z",
+                    "status": "pending",
+                ]])
+            ) {
+                try await rpc.listPendingApprovals()
+            }
+
+            try expectEqual(approvals.count, 1)
+            try expectEqual(approvals.first?.command, "npm install")
+            await conn.disconnect()
+        }
+
+        await test("a payload the Bar cannot read is reported, not silently empty") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            var threw = false
+            do {
+                _ = try await withDeferredResponse(
+                    mock: mock,
+                    response: try makeOkArrayResponse(id: "rpc-2", payload: [[
+                        "id": "exec_1",
+                        "timestamp": "2026-08-17T02:15:56.639Z",
+                        "status": "pending",
+                    ]])
+                ) {
+                    try await rpc.listPendingApprovals()
+                }
+            } catch {
+                threw = true
+            }
+
+            try expect(threw, "a malformed approval list must surface an error")
+            await conn.disconnect()
+        }
+
+        await test("responding sends the approvalId and the decision") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            try await withDeferredResponse(
+                mock: mock,
+                response: try makeOkResponse(id: "rpc-2", payload: [
+                    "ok": true,
+                    "approvalId": "token_1",
+                    "approved": false,
+                    "status": "denied",
+                ])
+            ) {
+                try await rpc.respondToApproval(approvalId: "token_1", approved: false)
+            }
+
+            let sent = try await lastSentJSON(mock)
+            try expectEqual(sent?["method"] as? String, "exec.respond")
+            let params = sent?["params"] as? [String: Any]
+            try expectEqual(params?["approvalId"] as? String, "token_1")
+            try expectEqual(params?["approved"] as? Bool, false)
+            await conn.disconnect()
+        }
+
+        // A refused id must not look like a granted approval: the gateway
+        // answers ok:false, and the Bar has to keep the row and say so.
+        await test("a refused approval id surfaces the gateway error") {
+            let (conn, mock, rpc) = try await makeConnectedClient()
+            let frame: [String: Any] = [
+                "type": "res",
+                "id": "rpc-2",
+                "ok": false,
+                "error": ["code": -32603, "message": "Unknown, expired, or already-resolved approval id: token_x"],
+            ]
+            var threw = false
+            do {
+                try await withDeferredResponse(
+                    mock: mock,
+                    response: try JSONSerialization.data(withJSONObject: frame)
+                ) {
+                    try await rpc.respondToApproval(approvalId: "token_x", approved: true)
+                }
+            } catch {
+                threw = true
+            }
+
+            try expect(threw, "a refused approval must throw")
+            await conn.disconnect()
+        }
+    }
 }

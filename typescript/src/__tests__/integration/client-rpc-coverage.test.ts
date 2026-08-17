@@ -32,6 +32,24 @@ const SWIFT_RPC = join(REPO, '../macos/Sources/OpenRappterBar/Services/RpcClient
  * `gateway.call(...)` as freely as services do, so both are walked.
  */
 const UI_SOURCES = [join(REPO, 'ui/src/services'), join(REPO, 'ui/src/components')];
+/**
+ * The CLI is a client too.
+ *
+ * It was missed for the same reason `ui/src/components` was: this file grew
+ * from the two clients I happened to be looking at. `src/cli/` talks to the
+ * gateway over the same JSON-RPC wire as the Bar and the dashboard.
+ */
+const CLI_SOURCE = join(REPO, 'src/cli');
+
+/**
+ * Not RPC methods.
+ *
+ * `connect` is the WebSocket handshake, handled before method dispatch — a
+ * connection that has not sent it is refused with "Handshake required" — so it
+ * never appears in the method registry. Listing it as missing would claim a
+ * break that does not exist.
+ */
+const PROTOCOL_PRIMITIVES = new Set(['connect', 'subscribe', 'unsubscribe']);
 
 /**
  * Methods a client calls that the gateway still does not register.
@@ -85,6 +103,13 @@ const KNOWN_MISSING = new Set<string>([
   // buy a green line here at the cost of a screen that lies. See the block
   // comment beside the `connections.*` registrations in gateway/server.ts.
   'connections.pair',
+  // Called from CLI modules that #176 deliberately left unregistered, having
+  // found them backed by nothing real. Unreachable today, so not a live break
+  // — but whoever registers `sessions` or `channels` inherits these.
+  'channels.broadcast',
+  'sessions.delete',
+  'sessions.get',
+  'sessions.list',
 ]);
 
 let server: GatewayServer | undefined;
@@ -134,18 +159,53 @@ function uiMethods(): string[] {
   return names;
 }
 
+/** Method names the CLI sends over the wire. */
+function cliMethods(): string[] {
+  const names: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        if (entry !== '__tests__') walk(full);
+        continue;
+      }
+      if (!entry.endsWith('.ts') || entry.includes('.test.')) continue;
+      const source = readFileSync(full, 'utf-8');
+      for (const m of source.matchAll(/\.(?:call|request)\(\s*'([a-z][a-zA-Z.]+)'/g)) {
+        names.push(m[1]);
+      }
+      for (const m of source.matchAll(/method:\s*'([a-z][a-zA-Z.]+)'/g)) {
+        names.push(m[1]);
+      }
+    }
+  };
+  walk(CLI_SOURCE);
+  return names;
+}
+
 describe('every RPC method a client calls exists on the gateway', () => {
   it('finds call sites in both clients', () => {
     // Guards the parsers. If a rename makes either match nothing, the
     // assertions below would pass over an empty list and prove nothing.
+    // Asserted per source. A combined count hides one parser breaking because
+    // the others keep the total up — the trap this file fell into twice.
     expect(swiftMethods().length).toBeGreaterThan(20);
     expect(uiMethods().length).toBeGreaterThan(10);
+    expect(cliMethods().length).toBeGreaterThan(5);
   });
 
   it('the macOS Bar calls nothing the gateway lacks', async () => {
     const registered = await registeredMethods();
     const missing = [...new Set(swiftMethods())]
       .filter((m) => !registered.has(m) && !KNOWN_MISSING.has(m))
+      .sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('the CLI calls nothing the gateway lacks', async () => {
+    const registered = await registeredMethods();
+    const missing = [...new Set(cliMethods())]
+      .filter((m) => !registered.has(m) && !KNOWN_MISSING.has(m) && !PROTOCOL_PRIMITIVES.has(m))
       .sort();
     expect(missing).toEqual([]);
   });

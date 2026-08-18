@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,5 +70,118 @@ describe('flight recorder redaction of credentials in URLs', () => {
       'utf8',
     );
     expect(provider).toMatch(/\?key=\$\{apiKey\}/);
+  });
+});
+
+/**
+ * Bare tokens, with no field name to give them away.
+ *
+ * The key-based rules only fire when the surrounding field is called something
+ * like `apiKey`. A token quoted inside a longer recorded string has no such
+ * field, so the value patterns are all that stand between it and the ledger.
+ * They covered GitHub, AWS and `Bearer …` — and nothing else, while this
+ * repository reads keys for OpenAI, Anthropic, Google, Slack, Telegram,
+ * Discord and Tailscale.
+ *
+ * Every value here is assembled at runtime. A credential-shaped *literal* in
+ * this file would be flagged by the R9 credential scan, correctly — which is
+ * how the first version of the previous test in this file failed CI.
+ */
+describe('flight recorder redaction of bare provider tokens', () => {
+  const shapes: Array<[string, string]> = [
+    ['OpenAI', 'sk-' + 'E'.repeat(32)],
+    ['OpenAI project', 'sk-proj-' + 'F'.repeat(32)],
+    ['Anthropic', 'sk-ant-api03-' + 'G'.repeat(32)],
+    ['Google', 'AIza' + 'H'.repeat(35)],
+    ['Slack bot', 'xox' + 'b-111111111111-' + 'I'.repeat(24)],
+    ['Slack app', 'xa' + 'pp-1-A11111111-' + 'J'.repeat(24)],
+    ['Telegram bot', '1234567890:AA' + 'K'.repeat(33)],
+    ['Tailscale', 'tskey-auth-' + 'N'.repeat(24)],
+    ['JWT', 'eyJ' + 'hbGciOiJIUzI1NiJ9.' + 'P'.repeat(20) + '.' + 'Q'.repeat(20)],
+    ['GitHub', 'ghp_' + 'A'.repeat(36)],
+    ['AWS access key id', 'AKIA' + 'C'.repeat(16)],
+  ];
+
+  for (const [name, value] of shapes) {
+    it(`redacts a ${name} token`, () => {
+      expect(sanitizeFlightValue(value)).toBe('[redacted]');
+    });
+  }
+
+  it('leaves ordinary text alone', () => {
+    // The cost of over-redaction is a ledger you cannot read. These are the
+    // near misses: right prefix, wrong length.
+    for (const text of [
+      'the build finished in 20 seconds',
+      'sk-short',
+      'AIzaShort',
+      'xoxb-1',
+      'commit 1234567890 was reverted',
+      'version 1.13.0 released',
+    ]) {
+      expect(sanitizeFlightValue(text), text).toBe(text);
+    }
+  });
+
+  it('knows about every credential env var this repository reads', () => {
+    // The shape list is only useful while it tracks what the product handles.
+    // Scanning the source means a new provider's key cannot be added without
+    // someone deciding whether the redactor knows what its token looks like.
+    const srcRoot = path.join(here, '..');
+    const found = new Set<string>();
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules') walk(full);
+        } else if (entry.name.endsWith('.ts') && !entry.name.includes('.test.')) {
+          const text = readFileSync(full, 'utf8');
+          for (const m of text.matchAll(/process\.env\.([A-Z_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)[A-Z_]*)/g)) {
+            found.add(m[1]);
+          }
+        }
+      }
+    };
+    walk(srcRoot);
+
+    // Every credential env var, and what the redactor does about it.
+    const reviewed = new Set([
+      // Shape is matched by SECRET_VALUE_PATTERNS.
+      'ANTHROPIC_API_KEY',        // sk-ant-…
+      'OPENAI_API_KEY',           // sk-… / sk-proj-…
+      'GEMINI_API_KEY',           // AIza…
+      'SLACK_BOT_TOKEN',          // xoxb-…
+      'SLACK_APP_TOKEN',          // xapp-…
+      'TELEGRAM_BOT_TOKEN',       // digits:AA…
+      'COPILOT_GITHUB_TOKEN',     // gh?_…
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+
+      // No safely matchable shape. Twilio auth tokens are 32 hex characters,
+      // which is also what an MD5 digest looks like, and Discord/ElevenLabs/
+      // Retell tokens are opaque strings with no distinctive prefix. Matching
+      // them would blank ordinary hashes and ids all over the ledger, so these
+      // rely on the key-based rules instead — which cover them whenever the
+      // value sits in a field named for what it is.
+      'TWILIO_AUTH_TOKEN',
+      'DISCORD_BOT_TOKEN',
+      'ELEVENLABS_API_KEY',
+      'RETELL_API_KEY',
+
+      // Not third-party credentials: the gateway's own bearer and the flight
+      // recorder's id-hashing salt.
+      'OPENRAPPTER_TOKEN',
+      'OPENRAPPTER_FLIGHT_ID_KEY',
+      'TEST_TOKEN',
+    ]);
+
+    // Anti-vacuity: a walk that found nothing would make this pass silently.
+    expect(found.size).toBeGreaterThanOrEqual(10);
+
+    const unreviewed = [...found].filter((name) => !reviewed.has(name)).sort();
+    expect(
+      unreviewed,
+      'a new credential env var appeared; does the redactor know its token shape?',
+    ).toEqual([]);
   });
 });

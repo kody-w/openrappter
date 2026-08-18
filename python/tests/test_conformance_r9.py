@@ -182,9 +182,9 @@ def test_pragma_suppressions_are_surfaced_rather_than_silently_dropped(tmp_path,
 
 # ── the contract we are relying on, checked against the real tool ────────────
 
-REAL_BROKER = os.path.expanduser("~/.local/bin/rapp-keyring")
+REAL_BROKER = conformance.keyring_broker()
 needs_broker = pytest.mark.skipif(
-    not (os.path.isfile(REAL_BROKER) and os.access(REAL_BROKER, os.X_OK)),
+    REAL_BROKER is None,
     reason="rapp-keyring not installed; CI installs it and runs these")
 
 

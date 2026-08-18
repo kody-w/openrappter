@@ -21,7 +21,24 @@ jobs:
       # credential scan could stop running entirely behind a green build. A
       # security check that can quietly disappear is not a security check.
       - name: Install RAPP Keyring
-        run: curl -fsSL https://kody-w.github.io/rapp-keyring/install.sh | bash
+        # Pinned and checksummed, matching release.yml and flight-recorder.yml.
+        # This step runs on every pull request, so an unpinned `curl | bash`
+        # would let whoever controls the Pages site run code in CI on every
+        # proposed change — including the run that decides whether the change
+        # is compliant. The two workflows that install the same broker already
+        # do it this way.
+        run: |
+          set -euo pipefail
+          KEYRING_SHA=89386724e9bf8b365ce3bd2847fbcc06365953d5
+          curl -fsSL \
+            "https://raw.githubusercontent.com/kody-w/rapp-keyring/$KEYRING_SHA/install.sh" \
+            -o "$RUNNER_TEMP/keyring-install.sh"
+          echo "a41a8e50f7a1a29212a402024bb65b8e9060e2b6f3bc4594b16d066ff666542c  $RUNNER_TEMP/keyring-install.sh" \
+            | sha256sum -c -
+          sed -i \
+            "s|https://raw.githubusercontent.com/\${REPO}/main|https://raw.githubusercontent.com/\${REPO}/$KEYRING_SHA|" \
+            "$RUNNER_TEMP/keyring-install.sh"
+          bash "$RUNNER_TEMP/keyring-install.sh"
 
       # Fail here, legibly, rather than as an unexplained SKIP three steps
       # later. R9 looks on PATH and then at ~/.local/bin, which is where the

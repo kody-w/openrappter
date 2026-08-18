@@ -439,11 +439,26 @@ def r8_attribution():
     return False, "no file attributes RAPP as the underlying substrate"
 
 
-@check("R9", "The repository contains no credential of its own.")
-def r9_no_secrets():
+def keyring_broker():
+    """The credential broker R9 will use, or None.
+
+    Both R9 and the tests that verify the broker's JSON contract must look in
+    the same place. When the tests looked only in ~/.local/bin while R9 also
+    honoured PATH, a machine with the broker on PATH alone ran R9 while
+    skipping every contract test — so the check executed against a contract
+    nothing had checked. CI installs to ~/.local/bin, which is why the two
+    agreed there and the drift went unnoticed."""
     broker = shutil.which("rapp-keyring") or \
         os.path.expanduser("~/.local/bin/rapp-keyring")
-    if not (os.path.isfile(broker) and os.access(broker, os.X_OK)):
+    if os.path.isfile(broker) and os.access(broker, os.X_OK):
+        return broker
+    return None
+
+
+@check("R9", "The repository contains no credential of its own.")
+def r9_no_secrets():
+    broker = keyring_broker()
+    if broker is None:
         return None, ("rapp-keyring not installed; cannot run the credential scan "
                       "(curl -fsSL https://kody-w.github.io/rapp-keyring/install.sh | bash)")
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT,

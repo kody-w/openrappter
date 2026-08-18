@@ -586,12 +586,26 @@ describe('ExecSafety — dual-use classification (RAI hardening)', () => {
   });
 
   it('does not flag ordinary read-only binaries as dual-use', () => {
-    for (const cmd of ['ls -la', 'cat f', 'grep x f', 'git status', 'echo hi']) {
+    // `git status` was in this list. git is not read-only in the sense that
+    // matters here: `git -c alias.x='!cmd' x` executes `cmd`, and there is no
+    // separator or substitution for the injection patterns to catch. Verified
+    // against a real repository — the alias form creates the marker file — so
+    // git is now classified dual-use alongside find, awk, sed and tar.
+    for (const cmd of ['ls -la', 'cat f', 'grep x f', 'echo hi']) {
       const result = safety.checkCommand(cmd);
       expect(result.safe).toBe(true);
       expect(result.dualUse).toBeUndefined();
       expect(result.requiresApproval).toBeUndefined();
     }
+  });
+
+  it('classifies git as dual-use because its configuration executes commands', () => {
+    // `git -c alias.x='!touch /tmp/marker' x` runs the command. Confirmed in a
+    // scratch repository rather than inferred from the manual.
+    expect(safety.isDualUse('git')).toBe(true);
+    const result = safety.checkCommand("git -c alias.x=!touch /tmp/x x");
+    expect(result.safe).toBe(true);          // still on the safe list
+    expect(result.requiresApproval).toBe(true);  // but a human has to look
   });
 
   it('isDualUse reports classification directly', () => {

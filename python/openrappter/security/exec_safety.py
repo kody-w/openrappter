@@ -33,6 +33,12 @@ DUAL_USE_BINS = {
     'node', 'python', 'python3', 'tsx', 'tsc', 'vitest',
     'chmod', 'chown',
     'find', 'awk', 'sed', 'tar', 'env',
+    # git runs whatever its configuration tells it to.
+    # `git -c alias.x='!cmd' x` executes `cmd`, and `-c core.pager=` does the
+    # same wherever a pager is used. Verified: the alias form creates the file.
+    # Nothing in the injection patterns can see this — there is no separator,
+    # no substitution, and the binary is on the safe list.
+    'git',
     'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
     'date', 'sort', 'uniq',
 }

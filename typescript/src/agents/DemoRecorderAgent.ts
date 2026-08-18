@@ -4,7 +4,7 @@ import { ComputerUseAgent } from './ComputerUseAgent.js';
 import { exec, execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync } from 'fs';
-import { copyFile } from 'fs/promises';
+import { copyFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -514,10 +514,17 @@ export class DemoRecorderAgent extends BasicAgent {
     // List existing demos
     let demos: string[] = [];
     try {
-      const { stdout } = await execAsync(`ls -1t "${this.outputDir}" 2>/dev/null`);
-      demos = stdout
-        .trim()
-        .split('\n')
+      // Newest first, matching the previous `ls -1t`, without a subprocess.
+      const entries = await readdir(this.outputDir);
+      const withTimes = await Promise.all(
+        entries.map(async (name) => ({
+          name,
+          mtime: (await stat(join(this.outputDir, name))).mtimeMs,
+        })),
+      );
+      demos = withTimes
+        .sort((a, b) => b.mtime - a.mtime)
+        .map((e) => e.name)
         .filter((f) => f.endsWith('.mov'));
     } catch {
       demos = [];

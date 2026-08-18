@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`read_screen` never worked, and Computer Use declared no capabilities** — a
+  generated manifest block had been inserted at a byte offset that fell inside
+  the Python source string `ComputerUseAgent` uses for OCR. The agent therefore
+  exported no `__manifest__` at all, leaving its `filesystem-write` and
+  `process-exec` declarations invisible to anything that reads manifests, and
+  the OCR script was a syntax error so screen reading could only ever fail. The
+  capability check did not notice because it matches source text rather than
+  the runtime export; it now verifies both, and that the two agree.
 - **A cron job created without an agent fired on time and then found no agent**
   — `addJob` defaulted the agent to `main` while the daemon executor resolved
   only `Assistant` and the runtime's own name, so every job created without an
@@ -294,6 +302,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Agents no longer build shell command lines by interpolation** — every
+  remaining site in `ComputerUseAgent`, `DailyTipAgent`, `DemoRecorderAgent`,
+  `HackerNewsAgent`, `OuroborosAgent` and `UpdateAgent` now passes an argument
+  vector. None was reachable with attacker-controlled input, so this is
+  hardening rather than a fix, but it removes the shape that produced three
+  real injections. Notification text is escaped for AppleScript, which is what
+  it was always for, and the demo listing uses the filesystem instead of `ls`.
 - **Learning a new agent could run arbitrary commands** — `learn_new_agent`
   asks a model to write agent code, scans that code for imports, and installs
   them, so an import specifier is model-authored untrusted input. It was

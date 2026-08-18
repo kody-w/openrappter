@@ -5,7 +5,7 @@
  * on kody-w/rappterbook, starting conversations around each link.
  */
 
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
@@ -32,6 +32,7 @@ export const __manifest__ = {
   requires_env: []
 } as const;
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 interface HNStory {
   id: number;
@@ -234,8 +235,9 @@ export class HackerNewsAgent extends BasicAgent {
       }
     }`;
 
-    const { stdout } = await execAsync(
-      `gh api graphql -f query='${mutation.replace(/'/g, "'\\''")}'`
+    const { stdout } = await execFileAsync(
+      'gh',
+      ['api', 'graphql', '-f', `query=${mutation}`],
     );
     const result = JSON.parse(stdout);
 

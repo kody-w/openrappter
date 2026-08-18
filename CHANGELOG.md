@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`openrappter update` could restore a stash it never made** — the updater
+  stashes local changes, pulls, rebuilds, then pops. But `git stash` on a clean
+  tree prints "No local changes to save" and exits 0 *without creating an
+  entry*, while the pop ran unconditionally. Updating a clean checkout that had
+  an older stash therefore restored that older work into the tree and dropped
+  the entry. The pop was also written `git stash pop 2>/dev/null || true`, so a
+  pop that conflicted with the pulled version left conflict markers in the
+  working tree and reported the update as a success; and any failure between
+  the stash and the pop said only "Update failed", sending you to look for
+  changes that were sitting in a stash entry you never made. The updater now
+  pops only what it saved, reports a failed restore as a failure, and names the
+  stash entry when it cannot finish.
 - **A non-numeric Pokemon setting crashed the agent instead of being refused** —
   `port`, `max_clips`, `max_states`, `max_storage_gb`, `min_free_gb` and
   `startup_timeout` are chosen by a model, so they arrive as whatever it

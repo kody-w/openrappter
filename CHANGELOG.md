@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`openrappter memory`** — search, record and forget what a rappter remembers.
+  The module was complete and had never been registered, so `openrappter memory`
+  fell through to the `[message]` positional and went to the model as a chat
+  prompt. It was left unregistered deliberately, because it built a
+  `MemoryManager` that holds everything in `Map`s and performs no file I/O: `add`
+  printed an id and discarded it on exit, and `list` reported nothing afterwards.
+  It now drives `MemoryAgent`, which is the memory the product actually keeps in
+  `~/.openrappter/memory.json` — the same file `anatomy` reads and `doctor`
+  inspects — so what one invocation records, the next one finds. There is no
+  `clear`: `MemoryAgent` forgets by query, and a command that said "delete all"
+  while doing nothing of the sort is the mistake this module already made once.
+
 - **`openrappter backup`** — create, list, restore and delete snapshots of
   `~/.openrappter/` from the terminal. The gateway has served all four
   operations since the feature landed and the code behind them does real work,

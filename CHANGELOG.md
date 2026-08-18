@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A config valid in one runtime was rejected by the other.** TypeScript's
+  schema declares 21 top-level sections; Python's validator required one of six
+  and refused anything else, so a file holding only `logging` or only `security`
+  was accepted by one runtime and rejected by the other with "Config must contain
+  at least one recognized section". Python now recognises the same 21, and
+  `contracts/config-sections.json` pins the vocabulary with a test on each side,
+  so adding a section to one runtime fails the other until it is added to both.
+  The validators still differ in kind — Zod strips unknown keys, Python returns
+  the data untouched — which is deliberate and unchanged.
+
 - **The config schema did not know settings the runtime reads.** `channels.*`
   accepted only `enabled`, `allowFrom` and `mentionGating`, while
   `readIMessageConfig` reads `mode`, `pollInterval` and `staleAfterMs` off the

@@ -29,9 +29,6 @@
  * - `login.ts` (`registerLoginCommand`) — `initiateOAuthFlow` persists nothing,
  *   yet the command prints "Credentials have been saved to your config." (The
  *   token-prefix echo was removed in #178; the false "saved" claim remains.)
- * - `channel.ts` (`registerChannelCommand`) — release-channel management that is
- *   already live as an inline `channel` command in `index.ts`; this module is a
- *   duplicate of it, so wiring it would double-register `channel`.
  */
 
 export { registerConfigCommand } from './config.js';
@@ -39,7 +36,6 @@ export { registerCronCommand } from './cron.js';
 export { registerSkillsCommand } from './skills.js';
 export { registerSessionsCommand } from './sessions.js';
 export { registerChannelsCommand } from './channels.js';
-export { registerChannelCommand } from './channel.js';
 export { registerAgentsCommand } from './agents.js';
 export { registerSendCommand } from './send.js';
 export { registerModelsCommand } from './models.js';

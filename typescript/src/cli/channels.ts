@@ -1,15 +1,5 @@
 import type { Command } from 'commander';
-import { RpcClient } from './rpc-client.js';
-
-async function withClient<T>(fn: (client: RpcClient) => Promise<T>): Promise<T> {
-  const client = new RpcClient();
-  try {
-    await client.connect(18790, process.env.OPENRAPPTER_TOKEN);
-    return await fn(client);
-  } finally {
-    client.disconnect();
-  }
-}
+import { withClient } from './with-client.js';
 
 export function registerChannelsCommand(program: Command): void {
   const channels = program.command('channels').description('Manage messaging channels');

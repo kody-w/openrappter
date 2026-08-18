@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Security page promised two protections that do not exist.** It
+  described a prompt-injection detector in the slosh pipeline, matching phrases
+  like "ignore previous instructions" and adding a `suspicious_input: true`
+  signal — no such detector, phrase list or signal exists in either runtime.
+  (ExecSafety's injection detection is *shell* injection in a command string, a
+  different problem.) It also promised per-channel rate limits and limits on
+  outbound LLM calls "protecting against runaway loops"; neither exists. The
+  gateway's real limit — 100 requests per minute per connection, error `-32001`
+  — was already documented accurately elsewhere and is unchanged. Both sections
+  now describe what is actually enforced, and the injection section points at
+  the mitigations that do the work: ExecSafety refusing commands, approval for
+  dual-use ones, and prompts that label third-party content as data.
+
 - **Five documented environment variables did nothing.** `OPENRAPPTER_CONFIG`,
   `OPENRAPPTER_LOG_LEVEL`, `OPENRAPPTER_PROVIDER` and `GATEWAY_SECRET` were
   listed in the reference tables and read by nothing anywhere in either runtime.

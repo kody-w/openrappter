@@ -11,18 +11,8 @@
 
 import type { Command } from 'commander';
 import path from 'path';
-import { RpcClient } from './rpc-client.js';
+import { withClient } from './with-client.js';
 import { promises as fs } from 'fs';
-
-async function withClient<T>(fn: (client: RpcClient) => Promise<T>): Promise<T> {
-  const client = new RpcClient();
-  try {
-    await client.connect(18790, process.env.OPENRAPPTER_TOKEN);
-    return await fn(client);
-  } finally {
-    client.disconnect();
-  }
-}
 
 export function registerSendCommand(program: Command): void {
   program

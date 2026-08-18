@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { RpcClient } from './rpc-client.js';
+import { withClient } from './with-client.js';
 
 /**
  * Snapshot and restore ~/.openrappter/ from the terminal.
@@ -22,16 +22,6 @@ interface BackupInfo {
   createdAt: string;
   sizeBytes: number;
   fileCount: number;
-}
-
-async function withClient<T>(fn: (client: RpcClient) => Promise<T>): Promise<T> {
-  const client = new RpcClient();
-  try {
-    await client.connect(18790, process.env.OPENRAPPTER_TOKEN);
-    return await fn(client);
-  } finally {
-    client.disconnect();
-  }
 }
 
 function formatSize(bytes: number): string {

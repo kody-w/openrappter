@@ -16,6 +16,20 @@ import { join } from 'path';
 
 const CLI_DIR = join(__dirname, '../../cli');
 
+/**
+ * Files in `src/cli/` that are shared helpers, not command modules.
+ *
+ * `with-client.ts` joined this list when six identical private copies of
+ * `withClient` were consolidated into it -- and with them, six copies of the
+ * same missing `catch`.
+ */
+const HELPER_FILES = new Set(['index.ts', 'rpc-client.ts', 'bar.ts', 'with-client.ts']);
+
+/** Every command module: the files that must export a `register*Command`. */
+function commandModules(): string[] {
+  return readdirSync(CLI_DIR).filter((f) => f.endsWith('.ts') && !HELPER_FILES.has(f));
+}
+
 describe('CLI Commands', () => {
   describe('CLI Module Structure', () => {
     it('should have all expected command files', () => {
@@ -191,24 +205,12 @@ describe('CLI Commands', () => {
 
   describe('Command Coverage', () => {
     it('should have at least 12 command files', () => {
-      const commandFiles = readdirSync(CLI_DIR).filter(
-        (file) =>
-          file.endsWith('.ts') &&
-          file !== 'index.ts' &&
-          file !== 'rpc-client.ts' &&
-          file !== 'bar.ts'
-      );
+      const commandFiles = commandModules();
       expect(commandFiles.length).toBeGreaterThanOrEqual(12);
     });
 
     it('all command files should use TypeScript Command type', () => {
-      const commandFiles = readdirSync(CLI_DIR).filter(
-        (file) =>
-          file.endsWith('.ts') &&
-          file !== 'index.ts' &&
-          file !== 'rpc-client.ts' &&
-          file !== 'bar.ts'
-      );
+      const commandFiles = commandModules();
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
@@ -217,13 +219,7 @@ describe('CLI Commands', () => {
     });
 
     it('all command files should export a register function', () => {
-      const commandFiles = readdirSync(CLI_DIR).filter(
-        (file) =>
-          file.endsWith('.ts') &&
-          file !== 'index.ts' &&
-          file !== 'rpc-client.ts' &&
-          file !== 'bar.ts'
-      );
+      const commandFiles = commandModules();
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
@@ -234,13 +230,7 @@ describe('CLI Commands', () => {
 
   describe('TypeScript Types', () => {
     it('all command files should import Command type from commander', () => {
-      const commandFiles = readdirSync(CLI_DIR).filter(
-        (file) =>
-          file.endsWith('.ts') &&
-          file !== 'index.ts' &&
-          file !== 'rpc-client.ts' &&
-          file !== 'bar.ts'
-      );
+      const commandFiles = commandModules();
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
@@ -249,13 +239,7 @@ describe('CLI Commands', () => {
     });
 
     it('all register functions should accept program parameter', () => {
-      const commandFiles = readdirSync(CLI_DIR).filter(
-        (file) =>
-          file.endsWith('.ts') &&
-          file !== 'index.ts' &&
-          file !== 'rpc-client.ts' &&
-          file !== 'bar.ts'
-      );
+      const commandFiles = commandModules();
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');

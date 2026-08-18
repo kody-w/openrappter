@@ -53,6 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Bar claimed auto-start was installed when it was not.** Writing the
+  launchd plist and loading it were both discarded failures, with
+  `autoStartInstalled = true` set immediately after regardless, so the completion
+  screen showed "Auto-start ✓" whether or not anything had been installed — and
+  the daemon simply did not come back after a reboot, with nothing to explain
+  why. `launchctl` reports refusal through its exit status, which the Bar's shell
+  helper discards along with stderr, so a status-aware helper was added. The CLI
+  path has always reported this honestly.
+
+- **The Bar showed a setup step it never performed.** "Scheduling daily tips" was
+  marked complete from `daemonStarted`, which is unrelated, and nothing in the
+  Bar schedules tips — that happens in `openrappter onboard`, in the CLI. The row
+  is gone rather than tied to a different unrelated signal.
+
 - **The Bar could wipe your other credentials while saving one.** Onboarding
   wrote `~/.openrappter/.env` by reading it, dropping the key being replaced, and
   writing the result — but the read was `(try? String(contentsOfFile:)) ?? ""`,

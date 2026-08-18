@@ -358,6 +358,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A single `&` chained commands past the safety policy** — the injection
+  patterns covered `&&` but not `&`, and `ls & touch /tmp/x` runs both: the
+  first goes to the background and the second executes immediately. Since `ls`
+  is a safe binary the policy judged the pair safe, so neither command was
+  reviewed and no approval was requested. This is the same shape as the newline
+  bypass below — a separator the policy did not know about, hidden behind a
+  harmless-looking binary.
 - **The shell agent checked one command and executed another** — it normalized
   the command, ran the safety policy against the normalized form, and then
   executed the *raw* input. `normalizeCommand` collapses all whitespace,

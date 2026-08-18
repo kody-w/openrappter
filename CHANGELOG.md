@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`openrappter approvals`** — list, approve and deny commands the safety
+  policy has gated, from the terminal. The gateway has served `exec.pending`
+  and `exec.respond` for some time and the only client calling them was the
+  macOS menu bar app, so on Linux and Windows a gated command could be
+  requested and never granted: the agent hands back an approval id and there
+  was nowhere to take it. `approvals list` shows the command *and why it needs
+  a person*, since `LD_PRELOAD=… ls` reads as an ordinary `ls` otherwise.
 - **A slow machine can start the desktop app** — the app waits for the gateway
   it spawned to report ready and then kills it. That budget only ever runs out
   when the gateway is alive and merely slow (a genuine startup failure is

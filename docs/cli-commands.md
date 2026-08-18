@@ -20,6 +20,7 @@ Run `openrappter <command> --help` for a command's own options.
 | `cron` |  | Manage cron jobs |
 | `approvals` |  | Review commands waiting on your approval |
 | `backup` |  | Snapshot and restore your OpenRappter data |
+| `memory` |  | Search and record what this rappter remembers |
 | `config` |  | Manage configuration |
 | `doctor` | `[options]` | Run system diagnostics and health checks |
 | `twins` | `[options]` | Which rappters are running on this device |

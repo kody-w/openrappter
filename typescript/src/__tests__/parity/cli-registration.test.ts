@@ -62,6 +62,7 @@ const REGISTERED = [
   'gateway',
   'rappterhub',
   'clawhub',
+  'memory',
 ];
 
 /**
@@ -69,9 +70,15 @@ const REGISTERED = [
  *
  * Without this list the next person to notice an exported-but-unreachable
  * module has no way to tell a decision from an oversight, and "make it
- * reachable" is the obvious wrong move for all four.
+ * reachable" is the obvious wrong move for all of them.
+ *
+ * `memory` left this list in #204. It was here because the module built a
+ * `MemoryManager`, which has no file I/O, so registering it would have shipped
+ * an `add` that discarded what it stored. It now drives `MemoryAgent`, which is
+ * the memory the product actually keeps, so reachable is no longer the wrong
+ * move — the objection was to the implementation, not to the command existing.
  */
-const DELIBERATELY_UNREGISTERED = ['memory', 'sessions', 'channels', 'send', 'login'];
+const DELIBERATELY_UNREGISTERED = ['sessions', 'channels', 'send', 'login'];
 
 let commands: string[];
 

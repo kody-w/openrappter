@@ -35,10 +35,9 @@ import { resolve } from 'path';
  *    delete`); `sessions.reset` is registered but reads `sessionKey`, not the
  *    `{id}` this sends, so even that throws "sessionKey required".
  *  - registerLoginCommand    — `initiateOAuthFlow` persists nothing, yet the
- *    command prints "Credentials have been saved to your config." Same lie the
- *    memory CLI would tell (#204).
- *  - registerMemoryCommand   — `MemoryManager` holds chunks in in-memory `Map`s
- *    with zero file I/O, so every CLI process starts empty. Filed as #204.
+ *    command prints "Credentials have been saved to your config." The shape the
+ *    memory CLI had before #204 rewired it onto `MemoryAgent`, which is the
+ *    store the product actually keeps; `memory` left this list then.
  *
  * This asserts the source of truth — which functions `index.ts` actually calls.
  * The neighbouring `cli-registration.test.ts` asks the built CLI which command
@@ -76,11 +75,7 @@ const INTENTIONALLY_DORMANT = new Map<string, string>([
   ],
   [
     'registerLoginCommand',
-    'initiateOAuthFlow persists nothing while the command prints "Credentials have been saved to your config" (identical to the memory case, #204)',
-  ],
-  [
-    'registerMemoryCommand',
-    'MemoryManager keeps chunks in in-memory Maps with zero file I/O, so every CLI process starts empty (#204)',
+    'initiateOAuthFlow persists nothing while the command prints "Credentials have been saved to your config" — the shape the memory CLI had before #204 rewired it onto MemoryAgent',
   ],
 ]);
 

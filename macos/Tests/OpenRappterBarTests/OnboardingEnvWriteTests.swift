@@ -87,5 +87,36 @@ func runOnboardingEnvWriteTests() async {
             try expectNotNil(model.errorMessage)
             try expect(!FileManager.default.fileExists(atPath: agents + "/com.openrappter.daemon.plist"))
         }
+
+        await test("onboarding installs the same launch agent Settings manages") {
+            // Onboarding used to write its own `com.openrappter.daemon.plist`
+            // while `LaunchAgentManager` — which the "Start at login" toggle
+            // reads and writes — manages `com.openrappter.gateway.plist`. Two
+            // agents: the toggle showed off right after onboarding installed
+            // one, turning it on added a second job for the same gateway on the
+            // same port, and turning it off could never remove onboarding's.
+            //
+            // Source-level, in the style of ApprovalBannerTests: loading a real
+            // agent to observe this would mean calling launchctl for real.
+            let path = #filePath.replacingOccurrences(
+                of: "Tests/OpenRappterBarTests/OnboardingEnvWriteTests.swift",
+                with: "Sources/OpenRappterBar/ViewModels/OnboardingViewModel.swift"
+            )
+            let source = try String(contentsOfFile: path, encoding: .utf8)
+
+            try expect(source.contains("LaunchAgentManager("),
+                       "onboarding must install through the shared manager")
+            // Counting code only: the comments above the removal path explain
+            // the old label and would otherwise inflate this.
+            let code = source
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+            let mentions = code.components(separatedBy: "com.openrappter.daemon").count - 1
+            try expect(mentions == 1,
+                       "expected one code reference to the legacy label, in the removal path, found \(mentions)")
+            try expect(source.contains("removeLegacyDaemonAgent"),
+                       "a stale daemon agent from an earlier onboarding must be removed")
+        }
     }
 }

@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Onboarding and Settings installed two different launch agents.** Onboarding
+  wrote its own `com.openrappter.daemon.plist` while `LaunchAgentManager` — which
+  the Settings "Start at login" toggle reads and writes — manages
+  `com.openrappter.gateway.plist`. So the toggle showed off immediately after
+  onboarding had installed auto-start, turning it on added a second launchd job
+  starting the same gateway on the same port, and turning it off could never
+  remove the one onboarding made. Onboarding now installs through the shared
+  manager, which also brings the better plist it always had — restart only on
+  crash rather than on every clean exit, a throttle interval, background process
+  type, `Umask 0o077` and separate stdout/stderr logs. A stale
+  `com.openrappter.daemon` agent from an earlier onboarding is unloaded and
+  removed.
+
 - **Pressing Stop in the Bar could do nothing, silently.** `abortChat` caught
   its failure and discarded it, and `chatState` is only set to `.idle` on the
   success path — so a refused or undelivered abort left the UI streaming, with

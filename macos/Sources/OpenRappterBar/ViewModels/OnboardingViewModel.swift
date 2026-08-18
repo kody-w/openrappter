@@ -328,7 +328,6 @@ public final class OnboardingViewModel {
     /// Internal rather than private so the failure path is reachable from a
     /// test without writing a real launch agent or invoking launchctl.
     func installLaunchAgent() {
-        let plistPath = launchAgentsDir + "/com.openrappter.daemon.plist"
         let nodePath = resolveNodePath()
         // Resolve the CODE directory, which is not the data directory.
         //
@@ -340,60 +339,33 @@ public final class OnboardingViewModel {
         // machine. `resolveProjectPath()` already ranks the released build above
         // that directory; it simply was not being asked.
         let projectPath = ProcessManager.resolveProjectPath()
-        let indexPath = projectPath + "/typescript/dist/index.js"
-        let fallbackIndexPath = projectPath + "/dist/index.js"
         // A deployed release has dist/ at its root; a source checkout has it
-        // under typescript/. Pick whichever actually exists rather than assuming.
-        let resolvedIndex = FileManager.default.fileExists(atPath: indexPath) ? indexPath : fallbackIndexPath
-        let logPath = homeDir + "/daemon.log"
+        // under typescript/. `LaunchAgentManager` appends `/dist/index.js`, so
+        // hand it whichever base makes that true rather than assuming one.
+        let base = FileManager.default.fileExists(atPath: projectPath + "/typescript/dist/index.js")
+            ? projectPath + "/typescript"
+            : projectPath
 
-        // PATH comes from `nodeSearchPath()`, not from this app's own
-        // environment. A Finder-launched menu-bar app inherits launchd's
-        // session PATH, so the previous version baked a four-entry PATH with
-        // no node and no copilot into the plist — which is exactly the
-        // configuration the daemon on this machine was running under.
-        let plist = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key><string>com.openrappter.daemon</string>
-            <key>ProgramArguments</key><array>
-                <string>\(nodePath)</string>
-                <string>\(resolvedIndex)</string>
-                <string>--daemon</string>
-            </array>
-            <key>RunAtLoad</key><true/>
-            <key>KeepAlive</key><true/>
-            <key>StandardOutPath</key><string>\(logPath)</string>
-            <key>StandardErrorPath</key><string>\(logPath)</string>
-            <key>EnvironmentVariables</key><dict>
-                <key>PATH</key><string>\(ProcessManager.nodeSearchPath())</string>
-                <key>HOME</key><string>\(NSHomeDirectory())</string>
-            </dict>
-        </dict>
-        </plist>
-        """
-
-        try? FileManager.default.createDirectory(atPath: (plistPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-
-        // Every step here used to be `try?` with `autoStartInstalled = true`
-        // after it, so a failed write or a failed `launchctl load` still showed
-        // "Auto-start ✓" on the completion screen — and the daemon simply did
-        // not come back on the next login, with nothing to explain why. The CLI
-        // path has always said "Auto-start not installed" when this fails.
+        // Onboarding used to write its own plist, at
+        // `com.openrappter.daemon.plist`, while `LaunchAgentManager` — which
+        // Settings' "Start at login" toggle reads and writes — manages
+        // `com.openrappter.gateway.plist`. Two different agents: the toggle
+        // showed off after onboarding had just installed one, turning it on
+        // added a second job starting the same gateway on the same port, and
+        // turning it off could never remove the one onboarding made. The
+        // duplicate plist builder is gone; there is one agent now.
+        let manager = LaunchAgentManager(launchAgentsDir: launchAgentsDir)
         do {
-            try plist.write(toFile: plistPath, atomically: true, encoding: .utf8)
+            try manager.install(nodePath: nodePath, projectPath: base, port: 18790)
         } catch {
             autoStartInstalled = false
             errorMessage = "Could not install auto-start: \(error.localizedDescription)"
             return
         }
 
-        // `launchctl load` reports refusal through its exit status, and
-        // `shellSync` throws away the status along with stderr, so it cannot be
-        // used to tell whether this worked.
-        let status = shellStatus("launchctl", args: ["load", "-w", plistPath])
+        // `launchctl` reports refusal through its exit status, which the Bar's
+        // `shellSync` discards along with stderr.
+        let status = shellStatus("launchctl", args: ["load", "-w", manager.plistPath])
         guard status == 0 else {
             autoStartInstalled = false
             errorMessage = "Auto-start was written but launchctl refused it (exit \(status)). "
@@ -401,7 +373,20 @@ public final class OnboardingViewModel {
             return
         }
 
+        removeLegacyDaemonAgent()
         autoStartInstalled = true
+    }
+
+    /// Remove the agent onboarding used to install under its own label.
+    ///
+    /// Anyone who onboarded before this was unified has a
+    /// `com.openrappter.daemon` job that Settings cannot see or remove, still
+    /// starting a second gateway on every login.
+    private func removeLegacyDaemonAgent() {
+        let legacyPath = launchAgentsDir + "/com.openrappter.daemon.plist"
+        guard FileManager.default.fileExists(atPath: legacyPath) else { return }
+        _ = shellStatus("launchctl", args: ["unload", "-w", legacyPath])
+        try? FileManager.default.removeItem(atPath: legacyPath)
     }
 
     /// Exit status of a command, for the cases where the status is the answer.

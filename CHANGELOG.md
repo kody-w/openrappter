@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- Every RPC-backed CLI command (`backup`, `approvals`, `cron`, `memory`, `flight`, ...) printed its output instantly and then hung for 30 seconds before exiting. `RpcClient.call()` armed a 30s timeout and never cleared it once the response arrived; a pending timer keeps Node's event loop alive. `openrappter backup list` went from 30.1s to 0.1s.
 - `openrappter channel status` threw `ReferenceError: __dirname is not defined` on every invocation. `infra/channel.ts` is ESM but used a bare `__dirname`, which type-checks (`@types/node` declares it) and only fails when the statement runs -- so `channel promote`, which never reaches that line, worked. Four other files already defined the `fileURLToPath(import.meta.url)` shim; this one was missed.
 - Removed `src/cli/channel.ts`, an unregistered duplicate of the live inline `channel` command. Two copies of the same logic means a fix can land in the unreachable one.
 

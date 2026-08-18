@@ -1,6 +1,9 @@
 import WebSocket from 'ws';
 import { VERSION } from '../version.js';
 
+/** How long a single RPC may take before the client gives up. */
+const RPC_TIMEOUT_MS = 30_000;
+
 export class RpcClient {
   private ws: WebSocket | null = null;
   private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
@@ -42,14 +45,29 @@ export class RpcClient {
     if (!this.ws) throw new Error('Not connected');
     const id = `cli_${++this.idCounter}`;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws!.send(JSON.stringify({ type: 'req', id, method, params }));
-      setTimeout(() => {
+      // The timeout must be cleared on every exit path. An un-cleared
+      // setTimeout keeps the Node event loop alive, so the CLI printed its
+      // result immediately and then sat for the full 30s before exiting --
+      // the response had already arrived, but the timer still held the
+      // process open. Clearing it in both settle paths is what lets the
+      // command exit as soon as its work is done.
+      const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
-          reject(new Error('RPC timeout'));
+          reject(new Error(`RPC timeout: ${method} did not respond within 30s`));
         }
-      }, 30000);
+      }, RPC_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      this.ws!.send(JSON.stringify({ type: 'req', id, method, params }));
     });
   }
 

@@ -1,6 +1,6 @@
 {
   "canonicalization": "sha256 over JSON with sorted keys and (',',':') separators, UTF-8",
-  "corpus_sha256": "f8f05099895e62966e354ba684e62c96291f674d9e21ce9b5d455c2af431ca4c",
+  "corpus_sha256": "4bd0157ff68ada48856de4d74605a55edc4c0355fc0ed396b03216b4dac7a6c0",
   "spec": "rapp-runtime-parity/1.0",
   "vector_count": 14,
   "vectors": {
@@ -9,7 +9,7 @@
     "bad-arguments-fallback": "ccc4de2395e5d6e775741073758931fcbb170419b5293f379781833e9e7396b2",
     "empty-input-400": "b70ce40465bcd2f8c362e35d96a5bb7edccb5b30ce0b34c2ff46f6837c4de3a0",
     "finish-reason-agnostic-trigger": "0c4713b71821456ae863534a69e611ea7ded0994f078cf6a19fc746e982e6ed4",
-    "history-role-filter": "0f5aacec9e351a6cc3591ddff686305b5c6bdee2d917f44a6b9eead85e96c063",
+    "history-role-filter": "c8062fd137bf8ce5cb8c7bb8e0ba59f42995dc6587aaa2000fe1272d96793ba7",
     "multi-round-tools": "2510ed9a6a409dce848a7488b1ec6b4e2cba625e0823d22cd869af44fd59fe02",
     "no-agents-passthrough": "deaefc9651fd958e6ad5b0980907bf3209fb7a48d3c3349e551dbe7401356564",
     "parallel-tool-calls": "8174c38586d0b1564d1f0ea62744d75fc6609c47491d3bfbcd4fe4e9ca5bb397",

@@ -18,6 +18,7 @@
  */
 import { Assistant } from './typescript/dist/agents/Assistant.js';
 import { buildChatEnvelope } from './typescript/dist/gateway/chat-envelope.js';
+import { parseChatRequest } from './typescript/dist/gateway/chat-request.js';
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -101,19 +102,31 @@ const fixture = vector.fixture ?? {};
 const request = vector.request ?? {};
 const provider = new ScriptedProvider(vector.model_script);
 
-// §2.1: `user_input` is required; missing or empty-after-trim is a 400. This
-// runtime's HTTP layer owns that check, so the driver applies the same rule
-// rather than pretending the loop rejected it.
-const userInput = String(request.user_input ?? '').trim();
-if (!userInput) {
+// §2.1 and the rest of the request contract are checked by calling the real
+// validator, not by restating it.
+//
+// This line used to read `String(request.user_input ?? '').trim()` with a
+// comment explaining that the HTTP layer owns the check and the driver applies
+// "the same rule". It was the same rule right up until the HTTP layer's rule
+// changed. `1b94040` transliterated the brainstem's validation into
+// `parseChatRequest` — array checking, role validation, and a flip making
+// `user_input` authoritative over `message` — and the corpus stayed green,
+// because the corpus was measuring this copy (#117).
+//
+// A driver that reimplements the thing under test can only ever confirm
+// itself. `parseChatRequest` is what `server.ts:1421` calls on the real /chat
+// path, so calling it here puts the request contract back on the measured path.
+const parsedRequest = parseChatRequest(request);
+if (!parsedRequest.ok) {
   process.stdout.write(JSON.stringify({
     __status: 400,
-    body: { error: 'user_input is required' },
+    body: { error: parsedRequest.error },
     __modelCalled: false,
     __rounds: 0,
   }));
   process.exit(0);
 }
+const userInput = parsedRequest.value.userInput;
 
 const agents = buildAgents(fixture);
 const assistant = new Assistant(agents, {

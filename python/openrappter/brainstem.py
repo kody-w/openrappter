@@ -71,6 +71,37 @@ _CHAT_IDEMPOTENCY_LOCKS = {}
 _CHAT_IDEMPOTENCY_GUARD = threading.Lock()
 
 
+
+_HISTORY_ROLES = {"user", "assistant", "tool"}
+
+
+def _validate_conversation_history(value):
+    """Return (history, error) for the public conversation-history contract.
+
+    A transliteration of the grail brainstem's `_validate_conversation_history`,
+    including the indexed error text: a caller repairing a forty-turn transcript
+    has to be told which turn is wrong.
+
+    This runtime used to accept anything — a non-list became `[]` and unknown
+    roles were dropped later when the prompt was assembled — so it answered 200
+    where the grail and openrappter's TypeScript both answer 400. PARITY §0: two
+    runtimes that answer a malformed request differently are distinguishable.
+    Measured against the live brainstem on :7071 before changing anything.
+    """
+    if value is None:
+        return [], None
+    if not isinstance(value, list):
+        return None, "conversation_history must be an array"
+    for index, message in enumerate(value):
+        if not isinstance(message, dict):
+            return None, f"conversation_history[{index}] must be an object"
+        if message.get("role") not in _HISTORY_ROLES:
+            return None, f"conversation_history[{index}].role is invalid"
+        if not isinstance(message.get("content"), str):
+            return None, f"conversation_history[{index}].content must be a string"
+    return value, None
+
+
 class IdempotencyConflict(ValueError):
     pass
 
@@ -1212,6 +1243,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 else data.get("user_input")
             )
             user_input = raw_message.strip() if isinstance(raw_message, str) else ""
+            # History is validated BEFORE the empty-input check, because the
+            # grail does: `{"user_input":"","conversation_history":"nope"}`
+            # reports the array problem, not the missing input. Measured on
+            # :7071 rather than assumed.
+            history_value = data.get("conversation_history", data.get("history"))
+            history, history_error = _validate_conversation_history(history_value)
+            if history_error:
+                return self._send(400, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": history_error,
+                })
             if not user_input:
                 return self._send(400, {
                     "schema": "rapp-chat/1.0",
@@ -1221,8 +1264,6 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                     # accepted, so the spec's wording stays accurate here.
                     "error": "user_input is required",
                 })
-            history_value = data.get("conversation_history", data.get("history"))
-            history = history_value if isinstance(history_value, list) else []
             provided_session_id = data.get("session_id") or data.get("sessionId")
             session_id = (
                 str(provided_session_id)

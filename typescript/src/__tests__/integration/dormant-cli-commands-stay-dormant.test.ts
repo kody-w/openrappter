@@ -27,10 +27,6 @@ import { resolve } from 'path';
  *  - registerSendCommand     — sends `{channel, message, target}`;
  *    `channels.send` reads `{channelId, conversationId, content}`, and `--all`
  *    calls `channels.broadcast`, which the gateway never registers.
- *  - registerSessionsCommand — calls `sessions.list/get/delete`, none of which
- *    the gateway registers (the real ones are `chat.list/session/messages/
- *    delete`); `sessions.reset` is registered but reads `sessionKey`, not the
- *    `{id}` this sends, so even that throws "sessionKey required".
  *  - registerLoginCommand    — `initiateOAuthFlow` persists nothing, yet the
  *    command prints "Credentials have been saved to your config." The shape the
  *    memory CLI had before #204 rewired it onto `MemoryAgent`, which is the
@@ -64,12 +60,8 @@ const INTENTIONALLY_DORMANT = new Map<string, string>([
     'sends {channel,message,target}; channels.send reads {channelId,conversationId,content}, and --all calls channels.broadcast which the gateway never registers',
   ],
   [
-    'registerSessionsCommand',
-    'calls sessions.list/get/delete (unregistered — real methods are chat.list/session/messages/delete); sessions.reset reads sessionKey, not the {id} this sends',
-  ],
-  [
     'registerLoginCommand',
-    'initiateOAuthFlow persists nothing while the command prints "Credentials have been saved to your config" — the shape the memory CLI had before #204 rewired it onto MemoryAgent',
+    'initiateOAuthFlow persists nothing and there is no credential store to wire it to (see the OAuth storage issue); the command now says so rather than claiming a save',
   ],
 ]);
 

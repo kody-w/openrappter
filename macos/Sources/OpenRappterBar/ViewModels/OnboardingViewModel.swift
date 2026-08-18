@@ -65,11 +65,15 @@ public final class OnboardingViewModel {
 
     // MARK: - Paths
 
-    private let homeDir = NSHomeDirectory() + "/.openrappter"
+    /// Injectable so the write path can be tested against a temp directory
+    /// rather than the real `~/.openrappter`. Defaults to the real one.
+    private let homeDir: String
     private var envFilePath: String { homeDir + "/.env" }
     private var configFilePath: String { homeDir + "/config.json" }
 
-    public init() {}
+    public init(homeDir: String = NSHomeDirectory() + "/.openrappter") {
+        self.homeDir = homeDir
+    }
 
     // MARK: - Step Navigation
 
@@ -154,7 +158,10 @@ public final class OnboardingViewModel {
 
     public func saveManualToken(_ token: String) {
         guard !token.isEmpty else { return }
-        saveEnvVar("GITHUB_TOKEN", value: token)
+        guard saveEnvVar("GITHUB_TOKEN", value: token) else {
+            authState = .failed("Could not write the token to \(envFilePath)")
+            return
+        }
         authState = .success
     }
 
@@ -162,7 +169,10 @@ public final class OnboardingViewModel {
 
     public func connectTelegram() {
         guard !telegramToken.isEmpty else { return }
-        saveEnvVar("TELEGRAM_BOT_TOKEN", value: telegramToken)
+        guard saveEnvVar("TELEGRAM_BOT_TOKEN", value: telegramToken) else {
+            errorMessage = "Could not write the Telegram token to \(envFilePath)"
+            return
+        }
         telegramSkipped = false
         // Validate token
         Task {
@@ -249,14 +259,52 @@ public final class OnboardingViewModel {
         return nil
     }
 
-    private func saveEnvVar(_ key: String, value: String) {
+    /// Write one variable into `~/.openrappter/.env`, preserving the rest.
+    ///
+    /// Returns `false` if the value did not reach disk, and the caller is
+    /// expected to say so rather than report success.
+    ///
+    /// Two failures were previously indistinguishable from success. The read was
+    /// `(try? String(contentsOfFile:)) ?? ""`, so a file that exists and cannot
+    /// be decoded produced an empty string, and the rewrite below then replaced
+    /// every other variable with just this one. `.env` is shared with the CLI —
+    /// `openrappter models set` keeps `OPENRAPPTER_MODEL` there — so that is not
+    /// confined to onboarding's own keys. And the write itself was `try?`, so a
+    /// failure to save a token looked exactly like saving it.
+    ///
+    /// The TypeScript `saveEnv` has verified its own read-back since #159. This
+    /// does the same thing, for the same reason.
+    @discardableResult
+    private func saveEnvVar(_ key: String, value: String) -> Bool {
         try? FileManager.default.createDirectory(atPath: homeDir, withIntermediateDirectories: true)
-        var content = (try? String(contentsOfFile: envFilePath, encoding: .utf8)) ?? ""
-        // Remove existing key
+
+        var content: String
+        if FileManager.default.fileExists(atPath: envFilePath) {
+            // Present but unreadable is the dangerous case: starting from "" here
+            // discards everything already in the file.
+            guard let existing = try? String(contentsOfFile: envFilePath, encoding: .utf8) else {
+                return false
+            }
+            content = existing
+        } else {
+            content = ""
+        }
+
         content = content.split(separator: "\n").filter { !$0.hasPrefix("\(key)=") }.joined(separator: "\n")
         if !content.isEmpty { content += "\n" }
         content += "\(key)=\(value)\n"
-        try? content.write(toFile: envFilePath, atomically: true, encoding: .utf8)
+
+        do {
+            try content.write(toFile: envFilePath, atomically: true, encoding: .utf8)
+        } catch {
+            return false
+        }
+
+        guard let readBack = try? String(contentsOfFile: envFilePath, encoding: .utf8),
+              readBack == content else {
+            return false
+        }
+        return true
     }
 
     private func saveConfig() {

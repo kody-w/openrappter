@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Bar could wipe your other credentials while saving one.** Onboarding
+  wrote `~/.openrappter/.env` by reading it, dropping the key being replaced, and
+  writing the result — but the read was `(try? String(contentsOfFile:)) ?? ""`,
+  so a file that exists and cannot be decoded became an empty string and the
+  rewrite replaced everything in it with the single variable being saved. That
+  file is shared with the CLI, which keeps `OPENRAPPTER_MODEL` there, so the
+  blast radius was not limited to onboarding's own keys. The write was `try?`
+  too, and `saveManualToken` reported success immediately after it, so a token
+  that never reached disk looked exactly like one that did. The read now
+  distinguishes absent from unreadable and refuses to overwrite what it could not
+  read, the write is verified by reading it back — as the TypeScript `saveEnv`
+  has done since #159 — and a failure is surfaced instead of reported as success.
+
 - **A config valid in one runtime was rejected by the other.** TypeScript's
   schema declares 21 top-level sections; Python's validator required one of six
   and refused anything else, so a file holding only `logging` or only `security`

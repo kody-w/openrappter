@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { resolve } from 'path';
 import { JSDOM } from 'jsdom';
 
@@ -219,6 +219,40 @@ describe('Current release identity', () => {
     for (const link of links) {
       expect(link.getAttribute('href')).toBe(CURRENT_RELEASE_FILE);
     }
+  });
+
+  it('no published page advertises a release that has not shipped', () => {
+    // The existing check above covers index.html only, which is where I was
+    // looking when it was written. docs.html carries a "Releases" archive, and
+    // it listed `v1.14.0 Notes` at the top alongside shipped versions while
+    // 1.14.0 had no tag, nothing on npm, and no released section in
+    // CHANGELOG.md. Anything merged into docs/ is served by Pages immediately,
+    // so it was live and reachable.
+    //
+    // Preparing the page ahead of a release is fine and this does not forbid
+    // it. Linking to it from a list of things that shipped is what misleads.
+    const [major, minor, patch] = CURRENT_VERSION.split('.').map(Number);
+    const offenders: string[] = [];
+
+    for (const file of readdirSync(DOCS_DIR).filter((f) => f.endsWith('.html'))) {
+      const doc = parseHTML(file);
+      for (const link of Array.from(doc.querySelectorAll('a[href*="release-notes-"]'))) {
+        const href = link.getAttribute('href') ?? '';
+        const version = /release-notes-(\d+)\.(\d+)\.(\d+)-/.exec(href);
+        if (!version) continue;
+        const [, hMajor, hMinor, hPatch] = version.map(Number);
+        const ahead =
+          hMajor > major
+          || (hMajor === major && hMinor > minor)
+          || (hMajor === major && hMinor === minor && hPatch > patch);
+        if (ahead) offenders.push(`${file} -> ${href}`);
+      }
+    }
+
+    expect(
+      offenders,
+      `these pages link release notes newer than package.json's ${CURRENT_VERSION}`,
+    ).toEqual([]);
   });
 
   it('current release page identifies the package version and has valid local links', () => {

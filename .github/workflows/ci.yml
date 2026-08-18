@@ -64,23 +64,15 @@ jobs:
       - run: npm run lint
       # vitest (esbuild) does not type-check — tsc is the only gate for type errors
       - run: npm run build
-      - run: npm test
-      # A skip here is indistinguishable from a pass in the summary line, and
-      # this suite has already shipped tests that never ran anywhere.
-      - name: Assert the telephony integration tests were not skipped
-        run: |
-          set -euo pipefail
-          npx vitest run src/telephony/integration.test.ts --reporter=json \
-            --outputFile="$RUNNER_TEMP/telephony.json" >/dev/null
-          node -e '
-            const r = require(process.env.RUNNER_TEMP + "/telephony.json");
-            const total = r.numTotalTests, passed = r.numPassedTests;
-            if (total === 0 || passed !== total) {
-              console.error(`::error::telephony integration tests did not all run: ${passed}/${total}`);
-              process.exit(1);
-            }
-            console.log(`telephony integration tests executed: ${passed}/${total}`);
-          '
+      # One run, two reporters: the readable one for a human scanning the log,
+      # and JSON so the skip budget below has something to check.
+      - name: Run the suite
+        run: npm test -- --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest.json"
+      # `284 passed | 3 skipped` reads like success. It was how eleven
+      # telephony integration tests went unexecuted in every environment
+      # (#280). Every skip must now be named, with where it does run.
+      - name: Skip budget
+        run: node ../tools/skip-budget.mjs "$RUNNER_TEMP/vitest.json"
 
   # Dedicated gate for the dashboard UI surface (typescript/ui) — a separate
   # npm project (own lockfile/deps) that the generic `typescript` job above

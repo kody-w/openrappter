@@ -217,19 +217,28 @@ export class GitAgent extends BasicAgent {
 
   private gitLog(kwargs: Record<string, unknown>): string {
     const count = (kwargs.count as number) ?? 10;
-    const format = '--pretty=format:{"hash":"%H","short":"%h","author":"%an","date":"%ai","subject":"%s"}';
-    const { stdout } = this.execFn('git', ['log', `-${count}`, ...format.split(' ').filter(Boolean)], this.cwd);
+    // Fields separated by US (0x1f) rather than built into JSON by git. A
+    // subject containing a double quote produced an unparseable line, and the
+    // parse error was swallowed, so those commits vanished from the result and
+    // from `count` with nothing to say they had. Commit subjects quote things
+    // all the time.
+    const fields = ['%H', '%h', '%an', '%ai', '%s'];
+    const format = `--pretty=format:${fields.join('%x1f')}`;
+    const { stdout } = this.execFn('git', ['log', `-${count}`, format], this.cwd);
 
     const commits: Array<Record<string, string>> = [];
     if (stdout) {
       for (const line of stdout.split('\n')) {
-        if (line.trim()) {
-          try {
-            commits.push(JSON.parse(line));
-          } catch {
-            // skip malformed lines
-          }
-        }
+        if (!line.trim()) continue;
+        const parts = line.split('\x1f');
+        if (parts.length !== fields.length) continue;
+        commits.push({
+          hash: parts[0],
+          short: parts[1],
+          author: parts[2],
+          date: parts[3],
+          subject: parts[4],
+        });
       }
     }
 

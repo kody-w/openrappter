@@ -347,6 +347,26 @@ describe('documentation only tells readers to run commands that exist', () => {
     expect(total).toBeGreaterThan(20);
   });
 
+  it('leaves no registered command undocumented', () => {
+    // The other direction, and it was the unguarded one. This file has always
+    // checked that documentation names only real commands; nothing checked
+    // that real commands are named anywhere. `hatch` and `doctor` had zero
+    // mentions in README.md or docs/ — a headline capability and the
+    // diagnostics entry point, both undiscoverable without --help.
+    //
+    // docs/cli-commands.md is the reference that satisfies this. Listing a
+    // command there is the minimum; describing it properly elsewhere is better
+    // and is not something a test can judge.
+    const reference = fs.readFileSync(
+      path.resolve(tsRoot, '..', 'docs/cli-commands.md'),
+      'utf8',
+    );
+    const undocumented = [...rootHelp.subcommands.keys()]
+      .filter((name) => !new RegExp(`\\\`${name}\\\``).test(reference))
+      .sort();
+    expect(undocumented).toEqual([]);
+  });
+
   it('documents no command the CLI does not register', async () => {
     const problems: Problem[] = [];
 

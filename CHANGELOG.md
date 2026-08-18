@@ -294,6 +294,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Learning a new agent could run arbitrary commands** — `learn_new_agent`
+  asks a model to write agent code, scans that code for imports, and installs
+  them, so an import specifier is model-authored untrusted input. It was
+  interpolated into a shell command line, and the import pattern permits both
+  spaces and semicolons, so generated code containing
+  `import x from 'lodash; touch pwned'` executed the second command. Installs
+  now use an argument vector, and package names are checked against npm's own
+  grammar before use.
 - **Turning authentication on no longer severs the neighborhood** — a rappter
   contacting a peer sent no credential at all, while `/twin` and `/chat` both
   authenticate before parsing. Those were compatible only because

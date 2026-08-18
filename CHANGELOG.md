@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A non-numeric Pokemon setting crashed the agent instead of being refused** —
+  `port`, `max_clips`, `max_states`, `max_storage_gb` and `min_free_gb` are
+  chosen by a model, so they arrive as whatever it produced, and each was
+  passed straight to `int()` or `float()` while building the supervisor command
+  line. `int("abc")` raises `ValueError`, nothing above it caught `ValueError`,
+  and one odd argument took the agent down rather than coming back as an error.
+  They are now coerced before the command is built, and a bad one names the
+  setting that was wrong.
 - **Two conformance checks could not fail** — R8 asserts the RAPP substrate is
   attributed, which its own docstring calls the licence condition, but it
   tested for `rapp` as a plain substring, and open**rapp**ter contains it; the

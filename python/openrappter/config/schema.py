@@ -1,4 +1,12 @@
-RECOGNIZED_SECTIONS = {'gateway', 'models', 'agents', 'channels', 'memory', 'cron'}
+RECOGNIZED_SECTIONS = {
+    # Pinned by contracts/config-sections.json, which both runtimes test against.
+    # This set held six names while the TypeScript schema declared twenty-one, so
+    # a config containing only `logging` or only `security` was valid there and
+    # rejected here — the vocabularies had drifted with nothing comparing them.
+    'agents', 'auth', 'browser', 'channels', 'configVersion', 'cron', 'env',
+    'experimental', 'gateway', 'hooks', 'logging', 'media', 'memory', 'models',
+    'network', 'plugins', 'security', 'session', 'tools', 'ui', 'voice',
+}
 
 
 def validate_config(data: dict) -> dict:

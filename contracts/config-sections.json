@@ -1,0 +1,41 @@
+{
+  "schema": "rapp-config-sections/1.0",
+  "why": [
+    "The two config validators disagreed about what a config file may contain.",
+    "TypeScript's Zod schema declares 21 top-level sections. Python's validator",
+    "required at least one of six, and rejected anything else outright, so a file",
+    "holding only `logging` or only `security` was valid in one runtime and refused",
+    "by the other with 'Config must contain at least one recognized section'.",
+    "",
+    "The two validators also differ in kind, which is fine and is not what this",
+    "file pins: Zod strips unknown keys, Python returns the data untouched. What",
+    "has to agree is the vocabulary — which sections are real.",
+    "",
+    "This file is the pin. Each runtime has a test asserting its own list matches",
+    "`sections` exactly. Adding a section to one runtime now fails the other's test",
+    "until it is added here too."
+  ],
+  "sections": [
+    "agents",
+    "auth",
+    "browser",
+    "channels",
+    "configVersion",
+    "cron",
+    "env",
+    "experimental",
+    "gateway",
+    "hooks",
+    "logging",
+    "media",
+    "memory",
+    "models",
+    "network",
+    "plugins",
+    "security",
+    "session",
+    "tools",
+    "ui",
+    "voice"
+  ]
+}

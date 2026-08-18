@@ -20,6 +20,7 @@ await runBonesInspectorTests()
 await runBonesWindowTests()
 await runChatTargetTests()
 await runOnboardingEnvWriteTests()
+await runChatAbortFailureTests()
 try runSuiteRegistrationTests()
 
 printResults()

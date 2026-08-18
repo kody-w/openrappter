@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`${VAR:-default}` in config did nothing.** The documented fallback form —
+  `api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}` on the docs site — was matched
+  by neither runtime's substitution pattern, since `\w` covers neither `:` nor
+  `-`. The value survived into the config as that literal string and surfaced
+  much later as a rejected credential rather than as a config error. Both
+  runtimes now support it, and agree that a set-but-empty variable stays empty
+  while only an unset one falls back. A second, fuller implementation existed in
+  `config/env-expand.ts` with tests proving the fallback worked; nothing outside
+  those tests ever called it, so the tests passed for years while the feature
+  did not exist.
+
 - **`openrappter update` now says how to be able to go back.** `backup.create`
   was documented as auto-running before updates. It never did: nothing in
   either runtime called it, and updating is a manual

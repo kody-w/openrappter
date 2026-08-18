@@ -927,17 +927,27 @@ openrappter approvals deny &lt;id&gt;</pre>
       <p>The WebSocket gateway enforces per-connection rate limits. For channel adapters, each channel can set its own rate limit in addition to the global gateway limit. Rate limits apply to both inbound message handling and outbound LLM API calls, protecting against runaway loops.</p>
 
       <h3>Audit Logging</h3>
-      <p>When <code>logging.level: debug</code> or when <code>logging.audit: true</code> is set, all agent invocations, shell commands executed, files written, and channel messages sent are written to the audit log at <code>~/.openrappter/logs/audit.jsonl</code>. Each entry is a newline-delimited JSON object with timestamp, agent name, action, arguments, result status, and duration.</p>
+      <p>There is no separate audit log. Earlier revisions of this page described one at <code>~/.openrappter/logs/audit.jsonl</code>, enabled with <code>logging.audit: true</code>. No such key exists in the schema and no such file is ever written, so a reader who set it got a config that validated cleanly and an audit trail that was never there.</p>
+      <p>The <a href="#local-capture">Flight Recorder</a> is the mechanism that does exist. It is a correlated ledger of trace, context, provider, tool and agent lifecycle events, shared by both runtimes, and it is what to reach for when you need to know what a rappter actually did:</p>
+      <pre>openrappter flight status
+openrappter flight events
+openrappter flight export <span class="cm"># integrity-checked bundle</span></pre>
+      <p><code>logging.level: debug</code> raises log verbosity. The real logging keys are <code>level</code>, <code>file</code>, <code>maxSize</code>, <code>rotation</code> and <code>redaction</code>.</p>
 
       <h3>Gateway Authentication</h3>
-      <p>By default the gateway binds to <code>127.0.0.1</code> and is not accessible from external networks. For remote access, set a shared secret in <code>config.yaml</code>:</p>
+      <p>By default the gateway binds to <code>127.0.0.1</code> and is not reachable from other machines. For remote access, set the bind and a password in <code>config.yaml</code>:</p>
       <pre><span class="cm"># config.yaml</span>
 gateway:
-  host: 0.0.0.0
-  secret: ${GATEWAY_SECRET}    <span class="cm"># required in Authorization: Bearer header</span></pre>
+  bind: all                      <span class="cm"># 'loopback' (default) or 'all'</span>
+  auth:
+    mode: password               <span class="cm"># 'none' (default) or 'password'</span>
+    password: ${GATEWAY_PASSWORD}</pre>
 
       <div class="warning-box">
-        <strong>Warning:</strong> Never expose the gateway on <code>0.0.0.0</code> without setting a <code>gateway.secret</code>. Without a secret, any process on the network can invoke agents and execute shell commands.
+        <strong>Warning:</strong> Never expose the gateway on all interfaces without a password. This one is enforced rather than advised: <code>bind: all</code> with <code>auth.mode: none</code> refuses to start, with <em>"Gateway auth is required when binding to all interfaces"</em>.
+      </div>
+      <div class="info-box">
+        <strong>The keys are <code>bind</code> and <code>auth</code>, not <code>host</code> and <code>secret</code>.</strong> Earlier revisions of this page showed <code>gateway.host</code> and <code>gateway.secret</code>. Neither exists in the schema, and unknown keys are discarded silently, so that example validated cleanly and configured nothing — leaving the gateway on loopback with no auth while the reader believed they had done the opposite. Parsed against the schema it yields exactly <code>{"port":18790,"bind":"loopback"}</code>.
       </div>
 
       <h3>Prompt Injection Mitigations</h3>

@@ -8,12 +8,26 @@ import { homedir } from 'node:os';
 import JSON5 from 'json5';
 import { validateConfig } from './schema.js';
 import type { OpenRappterConfig } from './types.js';
+import { expandEnvVars } from './env-expand.js';
 
 const DEFAULT_CONFIG_DIR = join(homedir(), '.openrappter');
 const DEFAULT_CONFIG_FILE = 'config.json5';
 
+/**
+ * Expand `${VAR}` and `${VAR:-default}` in a config value.
+ *
+ * This used to carry its own regex, `/\$\{(\w+)\}/g`, while `config/env-expand.ts`
+ * carried a second one that also understood `:-default`. Only this copy ran:
+ * nothing outside its own tests imported the other. So the documented
+ * `${ANTHROPIC_API_KEY:-sk-placeholder}` form matched nothing here — neither `:`
+ * nor `-` is `\w` — and survived into the config as that literal string, to fail
+ * later as a bad credential rather than at load. The tests covering the fallback
+ * passed the whole time, because they exercised the copy that was never wired in.
+ *
+ * One implementation now, the one with the behaviour the documentation promises.
+ */
 export function substituteEnvVars(value: string): string {
-  return value.replace(/\$\{(\w+)\}/g, (_, key) => process.env[key] ?? '');
+  return expandEnvVars(value);
 }
 
 function substituteDeep(obj: unknown): unknown {

@@ -27,9 +27,18 @@ def substitute_env_vars(config: dict) -> dict:
         if isinstance(value, list):
             return [_substitute(item) for item in value]
         if isinstance(value, str):
+            # `${VAR}` and `${VAR:-default}`. The fallback form is documented on
+            # the docs site with `api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}`,
+            # but the pattern here was `\$\{(\w+)\}` — neither `:` nor `-` is
+            # `\w` — so that example matched nothing and survived into the config
+            # as the literal string, to fail later as a rejected credential.
+            # A set-but-empty variable stays empty; only an unset one falls back,
+            # which is what the TypeScript loader does.
             return re.sub(
-                r'\$\{(\w+)\}',
-                lambda m: os.environ.get(m.group(1), ''),
+                r'\$\{(\w+)(?::-(.*?))?\}',
+                lambda m: os.environ.get(m.group(1))
+                if m.group(1) in os.environ
+                else (m.group(2) if m.group(2) is not None else ''),
                 value,
             )
         return value

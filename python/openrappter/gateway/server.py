@@ -848,12 +848,28 @@ class GatewayServer:
 
     # ── Built-in methods ─────────────────────────────────────────────────
     #
-    # Cross-runtime contract note: `ping`/`status`/`health`/`agents.list`
-    # are wire-compatible with the TypeScript gateway's canonical
-    # registration path (see `typescript/src/gateway/methods/index.ts` and
-    # `GatewayServer.registerBuiltInMethods` in
+    # Cross-runtime contract note: `ping`/`status`/`health` are
+    # wire-compatible with the TypeScript gateway's canonical registration
+    # path (`GatewayServer.registerBuiltInMethods` in
     # `typescript/src/gateway/server.ts`) — same names, same response
     # shapes, same fail-closed `requires_auth`/`requiresAuth` semantics.
+    #
+    # `agents.list` is the exception, and this note used to claim it was not.
+    # The two runtimes answer that name with payloads sharing exactly one key:
+    #
+    #     TypeScript  [{ id, type, description }]
+    #     Python      [{ name, description, parameters, module, file, source }]
+    #
+    # `description` overlaps; TypeScript's `id` is this runtime's `name`. A
+    # client written against either cannot read the other. Which shape should
+    # be canonical is an open product question (#198) — what is not open is
+    # that they differ, so the claim is corrected here rather than left to
+    # mislead the next reader. Both shapes are pinned by tests so neither can
+    # drift further while that is decided.
+    #
+    # The old note also cited `typescript/src/gateway/methods/index.ts` as a
+    # canonical path. It is not: nothing calls `registerAllMethods`, and those
+    # modules are reference implementations kept for parity testing.
     # This Python transport has no HTTP JSON-RPC POST surface (only
     # `/health`, `/status`, `/ws`), so the HTTP-auth-bypass class of bug
     # fixed on the TS side (forcing `authenticated: true` for HTTP RPC

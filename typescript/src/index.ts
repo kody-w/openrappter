@@ -17,6 +17,7 @@ import { VERSION } from './version.js';
 import { registerTelephonyCommands } from './telephony/cli.js';
 import { registerTwinCommands } from './twin/index.js';
 import { registerCronCommand } from './cli/cron.js';
+import { registerApprovalsCommand } from './cli/approvals.js';
 import { registerConfigCommand } from './cli/config.js';
 import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
@@ -2592,6 +2593,7 @@ registerTwinCommands(program);
 // message, which is why asking for `cron add --help` printed the top-level help
 // instead of an error.
 registerCronCommand(program);
+registerApprovalsCommand(program);
 registerConfigCommand(program);
 registerDoctorCommand(program);
 // Seeing and creating the rappters on this device. #107

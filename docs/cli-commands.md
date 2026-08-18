@@ -18,6 +18,7 @@ Run `openrappter <command> --help` for a command's own options.
 | `call` |  | Place and manage phone calls the agent makes on your behalf |
 | `twin` | `[options]` | Your digital twin — local-first, never leaves this machine |
 | `cron` |  | Manage cron jobs |
+| `approvals` |  | Review commands waiting on your approval |
 | `config` |  | Manage configuration |
 | `doctor` | `[options]` | Run system diagnostics and health checks |
 | `twins` | `[options]` | Which rappters are running on this device |

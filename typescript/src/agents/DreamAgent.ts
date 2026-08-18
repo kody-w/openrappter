@@ -65,6 +65,19 @@ function similarity(a: string, b: string): number {
   return intersection.size / union.size;
 }
 
+/**
+ * A finite number within bounds, or the documented default.
+ *
+ * Deliberately rejects rather than coerces: `Number("")` is 0, which is exactly
+ * the value that makes both of this agent's destructive actions apply to
+ * everything. Anything that is not already a usable number falls back.
+ */
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' ? value : Number.NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
+
 export class DreamAgent extends BasicAgent {
   private memoryDir: string;
   private memoryFile: string;
@@ -118,8 +131,18 @@ export class DreamAgent extends BasicAgent {
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
     let action = (kwargs.action as string) || 'dream';
-    const threshold = (kwargs.similarity_threshold as number) ?? 0.75;
-    const staleDays = (kwargs.stale_days as number) ?? 30;
+    // `??` only defaults on null and undefined, so an empty string passes
+    // straight through as a string -- and both of these end up in arithmetic or
+    // a comparison that silently coerces it to 0.
+    //
+    //   stale_days: ""  ->  "" * 86400000 === 0  ->  every memory is stale
+    //   similarity_threshold: ""  ->  sim >= "" is true  ->  every pair merges
+    //
+    // Measured: with stale_days: "" the prune deleted a memory created the same
+    // day. Both actions write the result back, so that is permanent. A blank
+    // form field or an unset argument forwarded as "" is enough to reach it.
+    const threshold = clampNumber(kwargs.similarity_threshold, 0.75, 0, 1);
+    const staleDays = clampNumber(kwargs.stale_days, 30, 0, Number.MAX_SAFE_INTEGER);
     let dryRun = (kwargs.dry_run as boolean) ?? false;
 
     // Parse action from query string (for --exec usage)

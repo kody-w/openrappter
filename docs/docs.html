@@ -151,7 +151,7 @@ openrappter doctor
       <p>OpenRappter reads its configuration from <code>~/.openrappter/config.json5</code>. The format is JSON5 — JSON with comments, unquoted keys and trailing commas. The file is optional; when it is absent the defaults below apply.</p>
 
       <div class="info-box">
-        <strong>It is <code>config.json5</code>, not <code>config.yaml</code>.</strong> Earlier revisions of this page showed YAML throughout. Neither runtime has ever parsed YAML — the loader is <code>JSON5.parse</code> in TypeScript and a comment-stripping <code>json.loads</code> in Python — and it only ever looks for <code>config.json5</code>. A <code>config.yaml</code> written from those examples was not read, and produced no error, because a missing config file is a supported state.
+        <strong>It is <code>config.json5</code>, not <code>config.yaml</code>.</strong> Earlier revisions of this page showed YAML throughout. Neither runtime has ever parsed YAML — the loaders are <code>JSON5.parse</code> in TypeScript and a comment-stripping <code>json.loads</code> in Python — so a <code>config.yaml</code> written from those examples was not read, and produced no error, because a missing config file is a supported state. (A previous revision of this box said the runtime looks only at <code>config.json5</code>. That was too strong: see <a href="#config-system">Loading Order</a>.)
       </div>
 
       <h3>Example config.json5</h3>
@@ -221,12 +221,16 @@ openrappter models get</pre>
           <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic Claude API key</td><td>—</td></tr>
           <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI API key</td><td>—</td></tr>
           <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
-          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td>Override config file path</td><td><code>~/.openrappter/config.json5</code></td></tr>
-          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td>Override log level</td><td><code>info</code></td></tr>
+          <tr><td><code>OLLAMA_URL</code></td><td>Ollama endpoint</td><td><code>http://localhost:11434</code></td></tr>
+          <tr><td><code>COPILOT_GITHUB_TOKEN</code></td><td>GitHub token for the Copilot provider</td><td>—</td></tr>
+          <tr><td><code>OPENRAPPTER_MODEL</code></td><td>Active model; written by <code>openrappter models set</code></td><td>—</td></tr>
           <tr><td><code>OPENRAPPTER_PORT</code></td><td>Override gateway port</td><td><code>18790</code></td></tr>
-          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td>Override default provider</td><td><code>copilot</code></td></tr>
         </tbody>
       </table>
+
+      <div class="info-box">
+        <!-- unimplemented --><strong>There is no telemetry, so there is nothing to opt out of.</strong> Earlier revisions of this page listed <code>OPENRAPPTER_NO_TELEMETRY</code> as disabling anonymous usage stats. Nothing anywhere in either runtime read that variable, and no usage stats are collected or sent — so the variable did nothing and the sentence described a product that does not exist. Local-first means this one.
+      </div>
     </div>
 
     <!-- ── 3. Agents Reference ── -->
@@ -953,11 +957,10 @@ openrappter flight export <span class="cm"># integrity-checked bundle</span></pr
       <h3>Loading Order</h3>
       <p>Configuration is resolved in this priority order (highest wins):</p>
       <ol>
-        <li>Environment variables (e.g. <code>OPENRAPPTER_LOG_LEVEL=debug</code>)</li>
-        <li>Config file specified by <code>OPENRAPPTER_CONFIG</code> env var</li>
-        <li><code>~/.openrappter/config.json5</code> (default location)</li>
-        <li><code>~/.openrappter/config.json</code> (JSON alternative)</li>
-        <li>Built-in defaults compiled into the binary</li>
+        <li>An explicit path passed by the caller — used by the config file watcher</li>
+        <li><code>~/.openrappter/config.json</code>, which wins any conflict</li>
+        <li><code>~/.openrappter/config.json5</code>, merged underneath it</li>
+        <li>Defaults declared in the Zod schema</li>
       </ol>
 
       <h3>Zod Schema Validation</h3>
@@ -1081,12 +1084,7 @@ openrappter backup delete &lt;id&gt; --yes</pre>
           <tr><td><code>SLACK_BOT_TOKEN</code></td><td>—</td><td>Slack bot token for channel integration</td></tr>
           <tr><td><code>DISCORD_BOT_TOKEN</code></td><td>—</td><td>Discord bot token</td></tr>
           <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>—</td><td>Telegram BotFather token</td></tr>
-          <tr><td><code>GATEWAY_SECRET</code></td><td>—</td><td>Bearer secret for gateway authentication</td></tr>
-          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td><code>~/.openrappter/config.json5</code></td><td>Override config file location</td></tr>
-          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td><code>info</code></td><td>debug / info / warn / error</td></tr>
           <tr><td><code>OPENRAPPTER_PORT</code></td><td><code>18790</code></td><td>Gateway WebSocket port</td></tr>
-          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td><code>copilot</code></td><td>Override default LLM provider</td></tr>
-          <tr><td><code>OPENRAPPTER_NO_TELEMETRY</code></td><td>—</td><td>Set to any value to disable anonymous usage stats</td></tr>
         </tbody>
       </table>
 

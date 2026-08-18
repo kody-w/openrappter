@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Five documented environment variables did nothing.** `OPENRAPPTER_CONFIG`,
+  `OPENRAPPTER_LOG_LEVEL`, `OPENRAPPTER_PROVIDER` and `GATEWAY_SECRET` were
+  listed in the reference tables and read by nothing anywhere in either runtime.
+  So was `OPENRAPPTER_NO_TELEMETRY`, described as disabling anonymous usage
+  stats — there are none, and none are collected or sent, so the sentence
+  described a product that does not exist while quietly contradicting the
+  local-first promise. The page now says so. A new guard requires every
+  documented variable in the project's own namespace to be read by the source,
+  or explicitly marked as unimplemented.
+
 - **The documented configuration file was one neither runtime reads.** The docs
   site showed `~/.openrappter/config.yaml` throughout, in YAML. The loader is
   `JSON5.parse` in TypeScript and a comment-stripping `json.loads` in Python,

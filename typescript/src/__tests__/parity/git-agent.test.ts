@@ -19,7 +19,11 @@ import { BasicAgent } from '../../agents/BasicAgent.js';
  * for unrecognised commands.
  */
 function createMockExec(responses: Record<string, { stdout: string; stderr: string }>): ExecFn {
-  return (cmd: string, _cwd?: string) => {
+  return (binary: string, args: string[], _cwd?: string) => {
+    // The agent now passes an argv rather than a command line (a shell was
+    // reachable through it). Joining restores the string these expectations
+    // were written against, without restoring the shell.
+    const cmd = [binary, ...args].join(' ');
     for (const [pattern, response] of Object.entries(responses)) {
       if (cmd.includes(pattern)) {
         return response;
@@ -212,8 +216,8 @@ describe('GitAgent', () => {
 
     it('should respect the count parameter in the git log command', async () => {
       const capturedCmds: string[] = [];
-      const capturingExec: ExecFn = (cmd) => {
-        capturedCmds.push(cmd);
+      const capturingExec: ExecFn = (binary, args) => {
+        capturedCmds.push([binary, ...args].join(' '));
         return { stdout: '', stderr: '' };
       };
       const agent = new GitAgent({ execFn: capturingExec });
@@ -270,7 +274,8 @@ describe('GitAgent', () => {
   describe('commit action', () => {
     it('should stage files and commit successfully with files and message', async () => {
       const capturedCmds: string[] = [];
-      const exec: ExecFn = (cmd) => {
+      const exec: ExecFn = (binary, args) => {
+        const cmd = [binary, ...args].join(' ');
         capturedCmds.push(cmd);
         if (cmd.includes('git commit')) {
           return { stdout: '[main abc1234] Add feature', stderr: '' };

@@ -375,7 +375,11 @@ def r6_kernel_parity():
     missing = [r for r in required if f'"{r}"' not in body and f"'{r}'" not in body]
     if missing:
         return False, "routes absent from the brainstem: %s" % ", ".join(missing)
-    if "response" not in body:
+    if '"response":' not in body and "'response':" not in body:
+        # The bare word is not evidence: `send_response` is a standard
+        # BaseHTTPRequestHandler method, so "response" appears in any server
+        # whatever its reply envelope looks like. Renaming every `"response":`
+        # key in the brainstem left this check passing.
         return False, "the /chat reply field `response` is not present"
     return True, "routes %s present; /chat replies in `response`" % ", ".join(required)
 

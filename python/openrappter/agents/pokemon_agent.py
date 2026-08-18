@@ -1083,6 +1083,20 @@ class PokemonAgent(BasicAgent):
             min_free_setting = numeric_setting(
                 kwargs, "min_free_gb", DEFAULT_MIN_FREE_GB, float
             )
+            # Validated here rather than where it is used, which is after the
+            # supervisor has been spawned: a bad value there left a live
+            # process behind with nothing tracking it.
+            minimum_startup_timeout = (
+                COPILOT_START_TIMEOUT_SECONDS
+                + COPILOT_STOP_TIMEOUT_SECONDS * 2
+                + 10
+            )
+            startup_timeout = max(
+                numeric_setting(
+                    kwargs, "startup_timeout", minimum_startup_timeout, float
+                ),
+                minimum_startup_timeout,
+            )
         except SettingError as error:
             log_handle.close()
             return json.dumps({"status": "error", "message": str(error)})
@@ -1122,15 +1136,6 @@ class PokemonAgent(BasicAgent):
             start_new_session=True,
         )
         log_handle.close()
-        minimum_startup_timeout = (
-            COPILOT_START_TIMEOUT_SECONDS
-            + COPILOT_STOP_TIMEOUT_SECONDS * 2
-            + 10
-        )
-        startup_timeout = max(
-            float(kwargs.get("startup_timeout", minimum_startup_timeout)),
-            minimum_startup_timeout,
-        )
         deadline = time.monotonic() + startup_timeout
         viewer_url = f"http://127.0.0.1:{port_setting}"
         while time.monotonic() < deadline:

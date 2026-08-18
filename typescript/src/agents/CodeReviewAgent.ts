@@ -49,6 +49,25 @@ export interface ReviewResult {
 
 // ── CodeReviewAgent ─────────────────────────────────────────────────
 
+/**
+ * A usable number, or the caller's default.
+ *
+ * `??` defaults only on null and undefined, so an empty string passed straight
+ * through and every comparison against it coerced to 0 -- making every line
+ * longer than the limit. Measured: `maxLineLength: ""` reported
+ * `const x = 1;` as exceeding the maximum and dropped a clean file from 100
+ * to 90.
+ *
+ * The Python agent has always been right here: `max_len or self._max_line_length`
+ * treats "" and 0 as unusable and falls back. This matches that, so a review
+ * does not depend on which runtime answered.
+ */
+function usableNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : fallback;
+}
+
 export class CodeReviewAgent extends BasicAgent {
   private maxLineLength: number;
 
@@ -127,7 +146,7 @@ export class CodeReviewAgent extends BasicAgent {
   private reviewCode(kwargs: Record<string, unknown>): string {
     const content = kwargs.content as string | undefined;
     const file = kwargs.file as string | undefined;
-    const maxLen = (kwargs.maxLineLength as number) ?? this.maxLineLength;
+    const maxLen = usableNumber(kwargs.maxLineLength, this.maxLineLength);
 
     if (!content) {
       return JSON.stringify({
@@ -160,7 +179,7 @@ export class CodeReviewAgent extends BasicAgent {
   private suggestFixes(kwargs: Record<string, unknown>): string {
     const content = kwargs.content as string | undefined;
     const file = kwargs.file as string | undefined;
-    const maxLen = (kwargs.maxLineLength as number) ?? this.maxLineLength;
+    const maxLen = usableNumber(kwargs.maxLineLength, this.maxLineLength);
 
     if (!content) {
       return JSON.stringify({
@@ -197,7 +216,7 @@ export class CodeReviewAgent extends BasicAgent {
 
   private diffReview(kwargs: Record<string, unknown>): string {
     const diff = kwargs.diff as string | undefined;
-    const maxLen = (kwargs.maxLineLength as number) ?? this.maxLineLength;
+    const maxLen = usableNumber(kwargs.maxLineLength, this.maxLineLength);
 
     if (!diff) {
       return JSON.stringify({

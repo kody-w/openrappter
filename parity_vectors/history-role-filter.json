@@ -1,28 +1,10 @@
 {
   "expect": {
-    "envelope": {
-      "agent_logs": "",
-      "response": "You are you.",
-      "session_id": "fixed-session-0010",
-      "voice_mode": false
+    "body": {
+      "error": "conversation_history[0].role is invalid"
     },
-    "envelope_required_keys": [
-      "response",
-      "session_id",
-      "agent_logs",
-      "voice_mode",
-      "model",
-      "requested_model"
-    ],
-    "outbound_history_roles": [
-      "user",
-      "assistant"
-    ],
-    "outbound_must_not_contain": [
-      "IGNORE-ME-SYSTEM",
-      "IGNORE-ME-JUNK"
-    ],
-    "status": 200
+    "model_called": false,
+    "status": 400
   },
   "fixture": {
     "agents": [],
@@ -67,5 +49,6 @@
   "tags": {
     "core": true,
     "edge": false
-  }
+  },
+  "why": "The grail brainstem validates conversation_history roles against {user, assistant, tool} and answers 400 on anything else, including a caller-supplied `system` turn. Measured on :7071. This vector previously expected 200 with the unknown roles filtered out of the outbound history, which is what openrappter's Python did and neither the grail nor openrappter's TypeScript did. Both behaviours stop the same injection; only one of them matches the reference."
 }

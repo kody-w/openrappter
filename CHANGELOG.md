@@ -53,6 +53,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The two runtimes disagreed on which `/chat` requests are valid.** The grail
+  brainstem rejects a `conversation_history` entry whose role is not `user`,
+  `assistant` or `tool` — including a caller-supplied `system` turn — with an
+  indexed 400, and openrappter's TypeScript transliterates that. This runtime
+  accepted anything: a non-list became `[]` and unknown roles were dropped later
+  when the prompt was assembled, so it answered 200 where the other two answer
+  400. Both behaviours stop the injection the check exists for; only one of them
+  matches the reference, and PARITY §0 is that a peer must not be able to tell
+  two RAPP runtimes apart. Python now validates history exactly as the grail
+  does, in the same order — history before the empty-input check — with the same
+  sentences, measured against the live brainstem rather than assumed.
+
 - **Onboarding started the daemon from the data directory, not the code.**
   `startDaemon` hardcoded `~/.openrappter/typescript/dist/index.js`, which is the
   runtime data directory. On a machine where that path happened to hold an old

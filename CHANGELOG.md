@@ -480,6 +480,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A client that stopped reading was buffered without limit.** The handshake
+  advertised `policy.maxBufferedBytes: 10000000` and `sendFrame` was
+  `ws.send(...)` with nothing consulting `bufferedAmount`, so the limit was
+  announced and never applied. `zen.publish` carries frames of up to 256 KB at
+  up to 30fps, so a stalled subscriber could accumulate megabytes a second in a
+  process meant to run for weeks. A connection past the limit is now closed with
+  1013 rather than fed, and the advertised number and the enforced one are one
+  constant.
+
 - **The gateway advertised a payload limit it did not enforce.** The handshake
   has always reported `policy.maxPayload: 5000000`, while `WebSocketServer` was
   constructed without a `maxPayload` option — so `ws` applied its own 100 MB

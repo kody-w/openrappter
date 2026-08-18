@@ -358,6 +358,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`git` is now treated as dual-use, because its configuration executes
+  commands** — `git -c alias.x='!cmd' x` runs `cmd`, and `-c core.pager=` does
+  the same wherever a pager is used. There is no separator and no substitution
+  for the injection patterns to catch, and `git` was on the safe list, so the
+  shell agent ran it without asking. It stays on the safe list but now requires
+  approval, alongside `find`, `awk`, `sed` and `tar` — which were already
+  listed for exactly this reason.
 - **A single `&` chained commands past the safety policy** — the injection
   patterns covered `&&` but not `&`, and `ls & touch /tmp/x` runs both: the
   first goes to the background and the second executes immediately. Since `ls`

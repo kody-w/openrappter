@@ -113,6 +113,12 @@ export const DUAL_USE_BINS = new Set([
   'chmod', 'chown',
   // Utilities with built-in command execution or shell escapes
   'find', 'awk', 'sed', 'tar', 'env',
+  // git runs whatever its configuration tells it to. `git -c alias.x='!cmd' x`
+  // executes `cmd`, and `-c core.pager=` does the same wherever a pager is
+  // used. Verified: `git -c alias.x='!touch /tmp/marker' x` creates the file.
+  // Nothing in the injection patterns can see this — there is no separator,
+  // no substitution, and the binary is on the safe list.
+  'git',
   // Filesystem-mutating utilities
   'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
   // Commands with output-file or system-mutation modes

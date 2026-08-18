@@ -281,3 +281,28 @@ class TestSingleAmpersandChain:
         safety = ExecSafety()
         for cmd in ("echo hello", "ls -la", "git status"):
             assert safety.check_command(cmd).safe is True, cmd
+
+
+class TestGitIsDualUse:
+    """git runs whatever its configuration tells it to.
+
+    `git -c alias.x='!cmd' x` executes `cmd`; there is no separator and no
+    substitution, so nothing in the injection patterns can see it, and git was
+    on the safe list. Verified against a real repository: the alias form
+    creates the marker file.
+    """
+
+    def test_git_is_classified_dual_use(self):
+        from openrappter.security.exec_safety import ExecSafety, DUAL_USE_BINS
+        assert "git" in DUAL_USE_BINS
+        result = ExecSafety().check_command("git -c alias.x=!touch /tmp/x x")
+        assert result.safe is True            # still on the safe list
+        assert result.requires_approval is True  # but a human has to look
+
+    def test_ordinary_read_only_binaries_are_still_not_dual_use(self):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        for cmd in ("ls -la", "cat f", "grep x f", "echo hi"):
+            result = safety.check_command(cmd)
+            assert result.safe is True, cmd
+            assert not result.requires_approval, cmd

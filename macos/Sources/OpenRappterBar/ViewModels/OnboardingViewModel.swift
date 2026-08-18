@@ -68,11 +68,18 @@ public final class OnboardingViewModel {
     /// Injectable so the write path can be tested against a temp directory
     /// rather than the real `~/.openrappter`. Defaults to the real one.
     private let homeDir: String
+    /// Injectable for the same reason as `homeDir`: the failure path can then
+    /// be exercised without writing a real launch agent or calling launchctl.
+    private let launchAgentsDir: String
     private var envFilePath: String { homeDir + "/.env" }
     private var configFilePath: String { homeDir + "/config.json" }
 
-    public init(homeDir: String = NSHomeDirectory() + "/.openrappter") {
+    public init(
+        homeDir: String = NSHomeDirectory() + "/.openrappter",
+        launchAgentsDir: String = NSHomeDirectory() + "/Library/LaunchAgents"
+    ) {
         self.homeDir = homeDir
+        self.launchAgentsDir = launchAgentsDir
     }
 
     // MARK: - Step Navigation
@@ -318,8 +325,10 @@ public final class OnboardingViewModel {
         }
     }
 
-    private func installLaunchAgent() {
-        let plistPath = NSHomeDirectory() + "/Library/LaunchAgents/com.openrappter.daemon.plist"
+    /// Internal rather than private so the failure path is reachable from a
+    /// test without writing a real launch agent or invoking launchctl.
+    func installLaunchAgent() {
+        let plistPath = launchAgentsDir + "/com.openrappter.daemon.plist"
         let nodePath = resolveNodePath()
         // Resolve the CODE directory, which is not the data directory.
         //
@@ -367,9 +376,52 @@ public final class OnboardingViewModel {
         """
 
         try? FileManager.default.createDirectory(atPath: (plistPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try? plist.write(toFile: plistPath, atomically: true, encoding: .utf8)
-        _ = try? shellSync("launchctl", args: ["load", "-w", plistPath])
+
+        // Every step here used to be `try?` with `autoStartInstalled = true`
+        // after it, so a failed write or a failed `launchctl load` still showed
+        // "Auto-start ✓" on the completion screen — and the daemon simply did
+        // not come back on the next login, with nothing to explain why. The CLI
+        // path has always said "Auto-start not installed" when this fails.
+        do {
+            try plist.write(toFile: plistPath, atomically: true, encoding: .utf8)
+        } catch {
+            autoStartInstalled = false
+            errorMessage = "Could not install auto-start: \(error.localizedDescription)"
+            return
+        }
+
+        // `launchctl load` reports refusal through its exit status, and
+        // `shellSync` throws away the status along with stderr, so it cannot be
+        // used to tell whether this worked.
+        let status = shellStatus("launchctl", args: ["load", "-w", plistPath])
+        guard status == 0 else {
+            autoStartInstalled = false
+            errorMessage = "Auto-start was written but launchctl refused it (exit \(status)). "
+                + "The daemon will not start automatically after a reboot."
+            return
+        }
+
         autoStartInstalled = true
+    }
+
+    /// Exit status of a command, for the cases where the status is the answer.
+    ///
+    /// `shellSync` returns stdout and drops the status, which is right for
+    /// reading `gh auth token` and wrong for asking whether `launchctl` accepted
+    /// something.
+    private func shellStatus(_ executable: String, args: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [executable] + args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return -1
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 
     private func isPortOpen(port: Int) -> Bool {

@@ -248,7 +248,6 @@ public struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 12) {
                 statusRow(label: "Starting daemon", done: viewModel.daemonStarted)
                 statusRow(label: "Installing auto-start", done: viewModel.autoStartInstalled)
-                statusRow(label: "Scheduling daily tips", done: viewModel.daemonStarted)
             }
             .padding()
             .background(Color.gray.opacity(0.05))

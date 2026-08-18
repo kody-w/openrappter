@@ -69,5 +69,23 @@ func runOnboardingEnvWriteTests() async {
             default: throw AssertionError(description: "expected .failed, got \(model.authState)")
             }
         }
+
+        await test("does not claim auto-start when the plist could not be written") {
+            let home = try scratchHome()
+            // A directory the write cannot succeed into. `installLaunchAgent`
+            // returns before reaching launchctl, so no real launch agent is
+            // touched and nothing is loaded.
+            let agents = try scratchHome()
+            try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: agents)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: agents) }
+
+            let model = OnboardingViewModel(homeDir: home, launchAgentsDir: agents)
+            model.installLaunchAgent()
+
+            try expect(model.autoStartInstalled == false,
+                       "a plist that was never written must not report auto-start installed")
+            try expectNotNil(model.errorMessage)
+            try expect(!FileManager.default.fileExists(atPath: agents + "/com.openrappter.daemon.plist"))
+        }
     }
 }

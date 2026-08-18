@@ -31,7 +31,6 @@ import {
   listRappters,
   plannedPortFor,
   portForInstance,
-  recordedPortFor,
   urlForInstance,
 } from '../../infra/roster.js';
 import {

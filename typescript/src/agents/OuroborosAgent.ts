@@ -19,7 +19,7 @@ import type { LLMProvider } from '../providers/types.js';
 import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { join } from 'path';
 import { HOME_DIR } from '../env.js';

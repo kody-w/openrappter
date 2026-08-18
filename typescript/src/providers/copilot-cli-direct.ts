@@ -294,7 +294,6 @@ export class CopilotCliDirectProvider implements LLMProvider {
   }
 
   private cleanOutput(raw: string): string {
-    // eslint-disable-next-line no-control-regex
     const noAnsi = raw.replace(/\x1b\[[0-9;]*m/g, '');
     const lines = noAnsi.split('\n');
     const footer = /^(Changes|AI Credits|Tokens|Resume|Total|Session|Model|Usage)\b/;

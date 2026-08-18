@@ -185,6 +185,8 @@ export function createLocalSpeech(options = {}) {
   let state = SPEECH_STATES.IDLE;
   let lastDetail = {};
   /** Chrome garbage-collects a live utterance mid-speech; holding it prevents that. */
+  // The assignment is the whole purpose, so this is written and never read.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   let held = null;
   let gestureSeen = false;
   let watchingLate = false;

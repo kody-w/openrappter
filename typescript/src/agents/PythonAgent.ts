@@ -42,7 +42,7 @@ export interface PythonAgentDescriptor {
   parameters: AgentMetadata['parameters'];
 }
 
-interface RunnerOk<T> { status: 'ok'; }
+interface RunnerOk { status: 'ok'; }
 interface RunnerErr { status: 'error'; error: string; }
 
 /** Default ceiling for one agent call. Long enough for real work, short enough to not wedge a chat turn. */
@@ -137,7 +137,7 @@ export async function introspectPythonAgents(
     python,
   );
 
-  let parsed: (RunnerOk<unknown> & { agents?: PythonAgentDescriptor[] }) | RunnerErr;
+  let parsed: (RunnerOk & { agents?: PythonAgentDescriptor[] }) | RunnerErr;
   try {
     parsed = JSON.parse(stdout.trim());
   } catch {

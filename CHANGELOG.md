@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The agent-authoring example could not work.** The page that teaches the
+  framework's main extension point opened with
+  `import { BasicAgent, AgentMetadata } from 'openrappter'`. The package entry
+  point is the CLI, not a library — it exports one unrelated function, and
+  importing it starts the interactive prompt. Both examples also returned a bare
+  object from `perform`, which is declared `Promise<string>` and is
+  `json.dumps(...)` in all 240 returns across the Python agents. The examples are
+  corrected, and the contract for an agent you add yourself — a
+  `createAgent(BasicAgent)` factory in `~/.openrappter/agents/`, which exists
+  precisely because that import cannot work — is documented for the first time.
+
 - **The Security page promised two protections that do not exist.** It
   described a prompt-injection detector in the slosh pipeline, matching phrases
   like "ignore previous instructions" and adding a `suspicious_input: true`

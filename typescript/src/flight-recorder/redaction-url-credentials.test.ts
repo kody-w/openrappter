@@ -185,3 +185,49 @@ describe('flight recorder redaction of bare provider tokens', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * What the key rules deliberately do *not* redact.
+ *
+ * `isSensitiveKey` splits a field name into words and fires on `token`,
+ * `secret`, `password…`, `credential…`, `cookie…`, `authorization`, plus a few
+ * compounds. It does not fire on `key`, `auth`, `salt`, `nonce` or `bearer`.
+ *
+ * That looks like a gap and is not one. `key` is one of the most common field
+ * names there is — map entries, config entries, cache entries, sort keys — and
+ * redacting it would blank most of a ledger whose whole purpose is to be read
+ * afterwards. `salt` and `nonce` are not secrets. `bearer` appears in this
+ * codebase only as a local variable holding a header value, never as a
+ * recorded field.
+ *
+ * This is written down because the instinct on seeing the list is to add those
+ * words, and the damage from doing so is invisible: nothing fails, the ledger
+ * just quietly stops saying anything. I had that instinct while auditing it.
+ */
+describe('flight recorder redaction is deliberately conservative', () => {
+  const value = 'zzzz0000zzzz0000zzzz';
+
+  it('does not redact generic field names that are usually not secrets', () => {
+    for (const name of ['key', 'auth', 'salt', 'nonce', 'id', 'name', 'path']) {
+      const out = sanitizeFlightValue({ [name]: value }) as Record<string, unknown>;
+      expect(out[name], `${name} should stay readable`).toBe(value);
+    }
+  });
+
+  it('still redacts the compound names those words appear in', () => {
+    // The conservatism is about the bare word, not the concept: a field that
+    // says what it holds is still redacted.
+    for (const name of ['apiKey', 'privateKey', 'identityKey', 'authToken', 'sessionToken']) {
+      const out = sanitizeFlightValue({ [name]: value }) as Record<string, unknown>;
+      expect(out[name], `${name} should be redacted`).toBe('[redacted]');
+    }
+  });
+
+  it('redacts a client secret through the excluded-path rules', () => {
+    // Not via [redacted] — `client_secret` matches DEFAULT_EXCLUDED_PATH_PATTERNS,
+    // so the whole entry is replaced. Worth pinning: a reader checking only for
+    // '[redacted]' would conclude this leaks, which is what I first concluded.
+    const out = sanitizeFlightValue({ clientSecret: value }) as Record<string, unknown>;
+    expect(Object.values(out)).not.toContain(value);
+  });
+});

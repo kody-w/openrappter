@@ -25,7 +25,7 @@ import {
   recordedPortFor,
   type RappterStatus,
 } from '../infra/roster.js';
-import { canonicalInstanceKey, gatewayPortFor } from '../infra/gateway-lock.js';
+import { canonicalInstanceKey } from '../infra/gateway-lock.js';
 import { portTypedOnCommandLine } from '../infra/cli-port.js';
 
 const EMOJI = '🦖';

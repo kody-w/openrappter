@@ -137,7 +137,7 @@ describe('an approval entering the queue reaches the screen watching for it', ()
   });
 
   it('a throwing listener does not break the command it announces', async () => {
-    const port = await startServer();
+    await startServer();
     const safety = server!.getExecSafety();
     safety.onApprovalRequested(() => {
       throw new Error('a watcher blew up');

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { GoogleVoiceBrowserDriver, GoogleVoiceSurfaceError } from './google-voice-browser.js';
+import { GoogleVoiceBrowserDriver } from './google-voice-browser.js';
 import type { PageSurface } from './chrome-cdp.js';
 
 /**

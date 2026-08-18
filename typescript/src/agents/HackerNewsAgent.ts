@@ -5,7 +5,7 @@
  * on kody-w/rappterbook, starting conversations around each link.
  */
 
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
@@ -31,7 +31,6 @@ export const __manifest__ = {
   quality_tier: 'official',
   requires_env: []
 } as const;
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 interface HNStory {

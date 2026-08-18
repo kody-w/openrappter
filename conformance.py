@@ -415,13 +415,22 @@ def r7_agents_are_portable():
 @check("R8", "The RAPP substrate is attributed.")
 def r8_attribution():
     """RAPP is open and MIT-licensed; this organism stands on it. Saying so is
-    both the licence condition and the point of the architecture."""
+    both the licence condition and the point of the architecture.
+
+    The token has to stand alone. `rapp` as a plain substring is satisfied by
+    the project's own name — openRAPPter contains it — so the check used to
+    pass on a README with every mention of the substrate deleted. A licence
+    condition that cannot fail is worse than none: it reports compliance
+    without ever having looked."""
+    substrate = re.compile(r"(?<![a-z0-9])rapp(?![a-z])")
+    licence = re.compile(r"(?<![a-z0-9])mit(?![a-z])")
     for name in ("README.md", "LICENSE", "NOTICE"):
         path = os.path.join(ROOT, name)
         if os.path.isfile(path):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 body = fh.read().lower()
-            if "rapp" in body and ("mit" in body or "rapp-1" in body):
+            if substrate.search(body) and (licence.search(body)
+                                           or "rapp-1" in body):
                 return True, f"{name} attributes the RAPP substrate"
     return False, "no file attributes RAPP as the underlying substrate"
 

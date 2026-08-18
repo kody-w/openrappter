@@ -352,3 +352,36 @@ class TestReachingASafeNameByAnotherRoute:
         result = self._safety().check_command("scripts/build.sh")
         assert result.safe is False
         assert "not in the safe list" in result.reason
+
+
+class TestTheApprovalQueueTellsTheReviewerWhy:
+    """check_command works out precisely why a command needs a person, and that
+    explanation went to the caller in the agent's error message. The approval
+    queue recorded 'Approval token issued for: <cmd>', so the human deciding
+    saw the command restated back at them.
+
+    Gating a command only helps if the person approving it can judge it.
+    """
+
+    def _pending_for(self, command):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        ShellAgent(exec_safety=safety).perform(command=command)
+        return safety.list_pending_approvals()[0]
+
+    def test_names_the_environment_assignment(self):
+        pending = self._pending_for("LD_PRELOAD=/tmp/evil.so ls")
+        assert "Environment assignment" in pending["reason"], pending
+        assert "LD_PRELOAD" in pending["cmd"]
+
+    def test_names_the_plantable_path(self):
+        pending = self._pending_for("./ls")
+        assert "not necessarily the system tool" in pending["reason"], pending
+
+    def test_names_the_dual_use_binary(self):
+        pending = self._pending_for("curl https://example.com")
+        assert "Dual-use binary" in pending["reason"], pending
+
+    def test_does_not_restate_the_command_as_its_own_justification(self):
+        pending = self._pending_for("LD_PRELOAD=/tmp/evil.so ls")
+        assert not pending["reason"].startswith("Approval token issued for:"), pending

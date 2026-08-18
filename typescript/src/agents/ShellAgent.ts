@@ -194,7 +194,7 @@ export class ShellAgent extends BasicAgent {
         }
         // Approval verified and consumed (single-use) — fall through to execution.
       } else {
-        const token = this.execSafety.issueApprovalToken(normalized);
+        const token = this.execSafety.issueApprovalToken(normalized, undefined, reason);
         return JSON.stringify({
           status: 'error',
           message: `Command blocked by safety policy: ${reason}. Request approval and retry with the same command plus approval_id.`,

@@ -227,7 +227,12 @@ class ExecSafety:
     # consumed exactly once for the exact same normalized command it was
     # issued for.
 
-    def issue_approval_token(self, cmd: str, ttl_seconds: float = 300.0) -> ApprovalToken:
+    def issue_approval_token(
+        self,
+        cmd: str,
+        ttl_seconds: float = 300.0,
+        reason: str | None = None,
+    ) -> ApprovalToken:
         token_id = f'token_{uuid.uuid4().hex}'
         normalized = self.normalize_command(cmd)
         token = ApprovalToken(
@@ -244,7 +249,15 @@ class ExecSafety:
             cmd=normalized,
             binary=self._parse_binary(normalized),
             safe=False,
-            reason=f'Approval token issued for: {normalized}',
+            # The policy already worked out why this needs a person; without
+            # it the reviewer sees the command restated back at them and has
+            # to re-derive the danger. The caller was getting this
+            # explanation and the reviewer was not.
+            reason=(
+                reason
+                if reason
+                else f'Approval token issued for: {normalized}'
+            ),
             status='pending',
         ))
 
@@ -299,6 +312,36 @@ class ExecSafety:
 
     def get_pending_approval_tokens(self) -> List[ApprovalToken]:
         return [t for t in self._tokens.values() if t.status == 'pending']
+
+    def list_pending_approvals(self) -> List[dict]:
+        """What a reviewer needs to decide, not just what is pending.
+
+        ApprovalToken carries no reason, so a reviewer listing tokens saw the
+        command and nothing about why it needs them. check_command already
+        worked that out; it is recorded on the audit entry and joined back
+        here. Mirrors the TypeScript view of the same name.
+        """
+        now = time.time()
+        pending = []
+        for token in self._tokens.values():
+            if token.status != 'pending' or token.expires_at <= now:
+                continue
+            entry = next(
+                (e for e in self._audit_log if e.id == token.id), None
+            )
+            pending.append({
+                'id': token.id,
+                'cmd': token.cmd,
+                'binary': self._parse_binary(token.cmd),
+                'reason': (
+                    entry.reason if entry and entry.reason
+                    else f'Approval required for: {token.cmd}'
+                ),
+                'created_at': token.created_at,
+                'expires_at': token.expires_at,
+                'kind': 'token',
+            })
+        return sorted(pending, key=lambda p: p['created_at'])
 
     def get_approval_token(self, token_id: str) -> Optional[ApprovalToken]:
         return self._tokens.get(token_id)

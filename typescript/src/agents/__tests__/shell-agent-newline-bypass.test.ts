@@ -167,3 +167,51 @@ describe('ShellAgent gates commands that reach a safe name by another route', ()
     expect(r.reason).toMatch(/not in the safe list/);
   });
 });
+
+/**
+ * The reviewer has to be told why, not just what.
+ *
+ * `checkCommand` works out precisely why a command needs a person — dual-use
+ * binary, environment assignment, plantable path — and that explanation went
+ * to the *caller* in the agent's error message. The approval queue recorded
+ * `Approval token issued for: <cmd>`, so the human deciding saw the command
+ * restated back at them and had to re-derive the danger themselves.
+ *
+ * Gating a command only helps if the person approving it can judge it.
+ */
+describe('the approval queue tells the reviewer why', () => {
+  async function pendingFor(command: string) {
+    const safety = new ExecSafety();
+    await new ShellAgent(safety).perform({ command });
+    const [pending] = safety.listPendingApprovals();
+    return pending;
+  }
+
+  it('names the environment assignment', async () => {
+    const p = await pendingFor('LD_PRELOAD=/tmp/evil.so ls');
+    expect(p.reason).toMatch(/Environment assignment/);
+    expect(p.cmd).toContain('LD_PRELOAD');
+  });
+
+  it('names the plantable path', async () => {
+    const p = await pendingFor('./ls');
+    expect(p.reason).toMatch(/not necessarily the system tool/);
+  });
+
+  it('names the dual-use binary', async () => {
+    const p = await pendingFor('curl https://example.com');
+    expect(p.reason).toMatch(/Dual-use binary 'curl'/);
+  });
+
+  it('does not restate the command as its own justification', async () => {
+    // The old text was `Approval token issued for: <cmd>`, which is what the
+    // reviewer already sees in the cmd field.
+    const p = await pendingFor('LD_PRELOAD=/tmp/evil.so ls');
+    expect(p.reason).not.toMatch(/^Approval token issued for:/);
+  });
+
+  it('still shows the full command, not just the binary', async () => {
+    const p = await pendingFor('LD_PRELOAD=/tmp/evil.so ls');
+    expect(p.cmd).toBe('LD_PRELOAD=/tmp/evil.so ls');
+  });
+});

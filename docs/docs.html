@@ -917,6 +917,11 @@ results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(a
 
       <h3>Approval Workflows</h3>
       <p>A command that <code>ExecSafety</code> classifies as needing review pauses before execution. In gateway mode this sends an <code>approval</code> event to subscribed clients and waits for a decision. Useful for high-stakes operations like database migrations or deployments.</p>
+      <p>Any client can resolve one — the macOS Bar shows a banner, and the CLI works anywhere the gateway does:</p>
+      <pre>openrappter approvals            <span class="cm"># what is waiting, and why each one needs a person</span>
+openrappter approvals approve &lt;id&gt;
+openrappter approvals deny &lt;id&gt;</pre>
+      <p>The list gives the reason alongside the command, because the reason is the part you cannot infer: <code>LD_PRELOAD=/tmp/x.so ls</code> reads as an ordinary <code>ls</code> until something says otherwise.</p>
 
       <h3>Rate Limiting</h3>
       <p>The WebSocket gateway enforces per-connection rate limits. For channel adapters, each channel can set its own rate limit in addition to the global gateway limit. Rate limits apply to both inbound message handling and outbound LLM API calls, protecting against runaway loops.</p>
@@ -995,6 +1000,16 @@ console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port
       <div class="info-box">
         <strong>That is an internal path, not a stable API.</strong> It works because nothing stops it, and it can move in any release. Config keys are validated by the Zod schema above; <code>provider</code> is not one of them.
       </div>
+
+      <h3>Backup &amp; Restore</h3>
+      <p>Everything above lives in <code>~/.openrappter/</code> — config, credentials, memory, skills. A backup is a snapshot of that directory with a manifest, and restoring puts the files back.</p>
+      <pre>openrappter backup                       <span class="cm"># what snapshots exist</span>
+openrappter backup create --reason "before upgrade"
+openrappter backup restore --yes         <span class="cm"># most recent, or pass an id</span>
+openrappter backup delete &lt;id&gt; --yes</pre>
+      <div class="warning-box">
+        <strong>Restoring overwrites your current data and does not snapshot what it replaces.</strong> It requires <code>--yes</code> for that reason. Take a backup before upgrading, not after something goes wrong — updating is a manual <code>npm install -g openrappter@latest</code>, so nothing snapshots on your behalf.
+      </div>
     </div>
 
     <!-- ── 13. API Reference ── -->
@@ -1018,6 +1033,8 @@ console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port
           <tr><td><code>openrappter skills list</code></td><td>List installed skills</td></tr>
           <tr><td><code>openrappter skills uninstall &lt;repo&gt;</code></td><td>Uninstall a skill</td></tr>
           <tr><td><code>openrappter config validate</code></td><td>Validate the current config file</td></tr>
+          <tr><td><code>openrappter approvals</code></td><td>List, approve or deny commands the safety policy gated</td></tr>
+          <tr><td><code>openrappter backup</code></td><td>Snapshot, list, restore or delete <code>~/.openrappter/</code></td></tr>
         </tbody>
       </table>
 

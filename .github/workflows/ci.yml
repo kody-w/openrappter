@@ -107,7 +107,9 @@ jobs:
         working-directory: macos
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      # Pinned by commit, matching release-bar.yml. A mutable tag on a
+      # third-party action lets its maintainer change what runs here.
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
         with:
           swift-version: '6.0'
       - run: swift build -c release --product OpenRappterBar

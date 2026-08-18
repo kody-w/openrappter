@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two conformance checks could not fail** — R8 asserts the RAPP substrate is
+  attributed, which its own docstring calls the licence condition, but it
+  tested for `rapp` as a plain substring, and open**rapp**ter contains it; the
+  check passed on a README with every mention of the substrate deleted (`mit`
+  was the same shape, satisfied by "commit"). R6 asserts the brainstem keeps
+  wire parity, but tested for the bare word `response`, which survives in
+  `send_response`; renaming every `"response":` key in the `/chat` envelope —
+  the exact breakage R6 exists to prevent — left it reporting parity. Both now
+  match the token rather than the substring.
 - **Three agents held capabilities they cannot reach** — `DocScannerAgent`,
   `NotesIntakeAgent` and `WebAgent` declared `process-exec` while importing no
   `child_process` at all; what they contain is regular-expression `.exec()`

@@ -375,7 +375,11 @@ def r6_kernel_parity():
     missing = [r for r in required if f'"{r}"' not in body and f"'{r}'" not in body]
     if missing:
         return False, "routes absent from the brainstem: %s" % ", ".join(missing)
-    if "response" not in body:
+    if '"response":' not in body and "'response':" not in body:
+        # The bare word is not evidence: `send_response` is a standard
+        # BaseHTTPRequestHandler method, so "response" appears in any server
+        # whatever its reply envelope looks like. Renaming every `"response":`
+        # key in the brainstem left this check passing.
         return False, "the /chat reply field `response` is not present"
     return True, "routes %s present; /chat replies in `response`" % ", ".join(required)
 
@@ -415,13 +419,22 @@ def r7_agents_are_portable():
 @check("R8", "The RAPP substrate is attributed.")
 def r8_attribution():
     """RAPP is open and MIT-licensed; this organism stands on it. Saying so is
-    both the licence condition and the point of the architecture."""
+    both the licence condition and the point of the architecture.
+
+    The token has to stand alone. `rapp` as a plain substring is satisfied by
+    the project's own name — openRAPPter contains it — so the check used to
+    pass on a README with every mention of the substrate deleted. A licence
+    condition that cannot fail is worse than none: it reports compliance
+    without ever having looked."""
+    substrate = re.compile(r"(?<![a-z0-9])rapp(?![a-z])")
+    licence = re.compile(r"(?<![a-z0-9])mit(?![a-z])")
     for name in ("README.md", "LICENSE", "NOTICE"):
         path = os.path.join(ROOT, name)
         if os.path.isfile(path):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 body = fh.read().lower()
-            if "rapp" in body and ("mit" in body or "rapp-1" in body):
+            if substrate.search(body) and (licence.search(body)
+                                           or "rapp-1" in body):
                 return True, f"{name} attributes the RAPP substrate"
     return False, "no file attributes RAPP as the underlying substrate"
 

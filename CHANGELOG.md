@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Pressing Stop in the Bar could do nothing, silently.** `abortChat` caught
+  its failure and discarded it, and `chatState` is only set to `.idle` on the
+  success path — so a refused or undelivered abort left the UI streaming, with
+  a Stop button that renders only while streaming and did nothing however many
+  times it was pressed. The failure is now reported, which also restores the
+  input, since `.error` is not `.streaming`.
+
 - **The Bar claimed auto-start was installed when it was not.** Writing the
   launchd plist and loading it were both discarded failures, with
   `autoStartInstalled = true` set immediately after regardless, so the completion

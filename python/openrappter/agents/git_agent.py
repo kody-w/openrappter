@@ -90,11 +90,20 @@ class GitAgent(BasicAgent):
         self._cwd = cwd or os.getcwd()
         self._exec_fn = exec_fn or self._default_exec
 
-    def _default_exec(self, cmd, cwd=None):
-        """Default exec using subprocess."""
+    def _default_exec(self, binary, args, cwd=None):
+        """Run a binary with an argument vector, never a command line.
+
+        This took a single string with ``shell=True`` and every caller built it
+        with an f-string, so caller-supplied values were shell syntax. Confirmed:
+        ``count='1 ; touch /tmp/x'`` created the file. ``name``, ``file_list``,
+        ``message`` and the ``gh pr create`` title, body and base were the same.
+
+        A list cannot be escaped out of -- each element reaches the process as
+        one argv entry, so a semicolon stays a semicolon.
+        """
         try:
             result = subprocess.run(
-                cmd, shell=True,
+                [binary, *args],
                 capture_output=True, text=True,
                 cwd=cwd or self._cwd,
                 timeout=30
@@ -143,7 +152,7 @@ class GitAgent(BasicAgent):
             })
 
     def _git_status(self):
-        result = self._exec_fn('git status --porcelain', self._cwd)
+        result = self._exec_fn('git', ['status', '--porcelain'], self._cwd)
         stdout = result.get('stdout', '')
         files = []
 
@@ -168,8 +177,8 @@ class GitAgent(BasicAgent):
         })
 
     def _git_diff(self):
-        stat_result = self._exec_fn('git diff --stat', self._cwd)
-        diff_result = self._exec_fn('git diff', self._cwd)
+        stat_result = self._exec_fn('git', ['diff', '--stat'], self._cwd)
+        diff_result = self._exec_fn('git', ['diff'], self._cwd)
 
         diff = diff_result.get('stdout', '')
         truncated = len(diff) > 10000
@@ -191,7 +200,7 @@ class GitAgent(BasicAgent):
     def _git_log(self, kwargs):
         count = kwargs.get('count', 10)
         fmt = '--pretty=format:{"hash":"%H","short":"%h","author":"%an","date":"%ai","subject":"%s"}'
-        result = self._exec_fn(f'git log -{count} {fmt}', self._cwd)
+        result = self._exec_fn('git', ['log', f'-{count}', *fmt.split()], self._cwd)
         stdout = result.get('stdout', '')
 
         commits = []
@@ -220,11 +229,11 @@ class GitAgent(BasicAgent):
         name = kwargs.get('name')
 
         if not name:
-            result = self._exec_fn('git branch --format="%(refname:short)"', self._cwd)
+            result = self._exec_fn('git', ['branch', '--format=%(refname:short)'], self._cwd)
             stdout = result.get('stdout', '')
             branches = [b.strip() for b in stdout.split('\n') if b.strip()]
 
-            current_result = self._exec_fn('git branch --show-current', self._cwd)
+            current_result = self._exec_fn('git', ['branch', '--show-current'], self._cwd)
             current = current_result.get('stdout', '').strip()
 
             data_slush = self.slush_out(
@@ -240,7 +249,7 @@ class GitAgent(BasicAgent):
             })
 
         # Create branch
-        result = self._exec_fn(f'git checkout -b {name}', self._cwd)
+        result = self._exec_fn('git', ['checkout', '-b', name], self._cwd)
 
         data_slush = self.slush_out(
             signals={'branch_created': name}
@@ -266,9 +275,9 @@ class GitAgent(BasicAgent):
 
         if files:
             file_list = ' '.join(files)
-            self._exec_fn(f'git add {file_list}', self._cwd)
+            self._exec_fn('git', ['add', *file_list.split()], self._cwd)
 
-        result = self._exec_fn(f'git commit -m "{message}"', self._cwd)
+        result = self._exec_fn('git', ['commit', '-m', message], self._cwd)
 
         data_slush = self.slush_out(
             signals={'committed': True, 'message': message}
@@ -293,10 +302,12 @@ class GitAgent(BasicAgent):
                 "message": "title is required for pr"
             })
 
-        body_flag = f' --body "{body}"' if body else ''
         result = self._exec_fn(
-            f'gh pr create --title "{title}"{body_flag} --base {base}',
-            self._cwd
+            'gh',
+            ['pr', 'create', '--title', title,
+             *(['--body', body] if body else []),
+             '--base', base],
+            self._cwd,
         )
 
         data_slush = self.slush_out(

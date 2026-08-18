@@ -12,7 +12,11 @@ from openrappter.agents.git_agent import GitAgent
 
 def make_exec(responses):
     """Build a deterministic exec function from a dict of command-prefix -> result."""
-    def exec_fn(cmd, cwd=None):
+    def exec_fn(binary, args, cwd=None):
+        # The agent now passes an argv rather than a command line -- a shell was
+        # reachable through the old string. Joining restores what these
+        # expectations were written against, without restoring the shell.
+        cmd = " ".join([binary, *args])
         for prefix, response in responses.items():
             if prefix in cmd:
                 return response
@@ -53,7 +57,7 @@ class TestGitAgentInit:
         assert agent._cwd == "/tmp"
 
     def test_accepts_custom_exec_fn(self):
-        fn = lambda cmd, cwd=None: {"stdout": "", "stderr": ""}
+        fn = lambda binary, args, cwd=None: {"stdout": "", "stderr": ""}
         agent = GitAgent(exec_fn=fn)
         assert agent._exec_fn is fn
 
@@ -228,7 +232,8 @@ class TestLogAction:
     def test_log_respects_count_parameter(self):
         captured = []
 
-        def exec_fn(cmd, cwd=None):
+        def exec_fn(binary, args, cwd=None):
+            cmd = " ".join([binary, *args])
             captured.append(cmd)
             return {"stdout": "", "stderr": ""}
 
@@ -305,7 +310,8 @@ class TestCommitAction:
     def test_commit_with_files_stages_them(self):
         staged = []
 
-        def exec_fn(cmd, cwd=None):
+        def exec_fn(binary, args, cwd=None):
+            cmd = " ".join([binary, *args])
             if "git add" in cmd:
                 staged.append(cmd)
                 return {"stdout": "", "stderr": ""}

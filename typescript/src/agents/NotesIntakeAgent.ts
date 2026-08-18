@@ -69,7 +69,17 @@ export class NotesIntakeAgent extends BasicAgent {
   }
 
   private async findMarkdownFiles(dirPath: string, depth = 0): Promise<string[]> {
-    if (depth > 4) return []; const results: string[] = []; let entries; try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return []; }
+    if (depth > 4) return [];
+    const results: string[] = [];
+    // See DocScannerAgent: swallowing this at the root reported success over a
+    // directory that does not exist. Deeper down, skipping is still correct.
+    let entries;
+    try {
+      entries = await readdir(dirPath, { withFileTypes: true });
+    } catch (err) {
+      if (depth === 0) throw err;
+      return [];
+    }
     for (const entry of entries) { if (results.length >= 200) break; const fullPath = join(dirPath, entry.name); if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') results.push(...await this.findMarkdownFiles(fullPath, depth + 1)); else if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') results.push(fullPath); }
     return results;
   }

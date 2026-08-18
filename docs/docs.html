@@ -247,7 +247,7 @@ openrappter models get</pre>
           <button class="code-tab-btn" onclick="switchTab(this,'py-agent')">Python</button>
         </div>
         <div id="ts-agent" class="code-tab-content active">
-<pre><span class="kw">import</span> { BasicAgent, AgentMetadata } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+<pre><span class="kw">import</span> { BasicAgent, type AgentMetadata } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
 
 <span class="kw">export class</span> <span class="typ">MyAgent</span> <span class="kw">extends</span> <span class="typ">BasicAgent</span> {
   <span class="fn">constructor</span>() {
@@ -267,11 +267,13 @@ openrappter models get</pre>
     <span class="kw">const</span> query <span class="op">=</span> kwargs.query <span class="kw">as</span> string;
     <span class="cm">// access sloshed context signals</span>
     <span class="kw">const</span> timeOfDay <span class="op">=</span> <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'temporal.time_of_day'</span>);
-    <span class="kw">return</span> { result<span class="op">:</span> <span class="str">`Hello from MyAgent at ${timeOfDay}`</span> };
+    <span class="kw">return</span> JSON.stringify({ result<span class="op">:</span> <span class="str">`Hello from MyAgent at ${timeOfDay}`</span> };
   }
 }</pre>
         </div>
         <div id="py-agent" class="code-tab-content">
+<span class="kw">import</span> json
+
 <pre><span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
 
 <span class="kw">class</span> <span class="typ">MyAgent</span>(BasicAgent):
@@ -292,7 +294,31 @@ openrappter models get</pre>
         query <span class="op">=</span> kwargs.get(<span class="str">"query"</span>, <span class="str">""</span>)
         <span class="cm"># access sloshed context signals</span>
         time_of_day <span class="op">=</span> self.<span class="fn">get_signal</span>(<span class="str">"temporal.time_of_day"</span>)
-        <span class="kw">return</span> {<span class="str">"result"</span><span class="op">:</span> <span class="str">f"Hello from MyAgent at {time_of_day}"</span>}</pre>
+        <span class="kw">return</span> json.dumps({<span class="str">"result"</span><span class="op">:</span> <span class="str">f"Hello from MyAgent at {time_of_day}"</span>})</pre>
+
+      <div class="info-box">
+        <strong><code>perform</code> returns a string, not an object.</strong> Every shipped agent returns <code>JSON.stringify(...)</code> in TypeScript and <code>json.dumps(...)</code> in Python — the base class declares <code>Promise&lt;string&gt;</code>, and the 240 <code>json.dumps</code> returns across the Python agents are the same contract. Earlier revisions of this page returned a bare object from both examples.
+      </div>
+
+      <h3>Agents you add yourself</h3>
+      <p>The example above is how an agent inside the repository is written. An agent you drop into <code>~/.openrappter/agents/</code> cannot import <code>BasicAgent</code> — the package entry point is the CLI, not a library, and importing it would run the CLI. Local agents are ESM modules that receive the base class instead:</p>
+      <pre><span class="cm">// ~/.openrappter/agents/my-agent.mjs</span>
+<span class="kw">export function</span> createAgent(BasicAgent) {
+  <span class="kw">class</span> MyAgent <span class="kw">extends</span> BasicAgent {
+    constructor() {
+      <span class="kw">super</span>(<span class="str">'MyAgent'</span>, {
+        name<span class="op">:</span> <span class="str">'MyAgent'</span>,
+        description<span class="op">:</span> <span class="str">'Does something useful'</span>,
+        parameters<span class="op">:</span> { type<span class="op">:</span> <span class="str">'object'</span>, properties<span class="op">:</span> { query<span class="op">:</span> { type<span class="op">:</span> <span class="str">'string'</span> } }, required<span class="op">:</span> [] },
+      });
+    }
+    <span class="kw">async</span> perform(kwargs) {
+      <span class="kw">return</span> JSON.stringify({ status<span class="op">:</span> <span class="str">'success'</span>, echo<span class="op">:</span> kwargs.query });
+    }
+  }
+  <span class="kw">return</span> MyAgent;
+}</pre>
+      <p>This is the shape <code>LearnNewAgent</code> generates and loads, and the reason for it is stated in its source: the factory avoids import resolution entirely, because the host passes the base class in.</p>
         </div>
       </div>
 

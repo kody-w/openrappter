@@ -78,7 +78,7 @@ const REGISTERED = [
  * the memory the product actually keeps, so reachable is no longer the wrong
  * move — the objection was to the implementation, not to the command existing.
  */
-const DELIBERATELY_UNREGISTERED = ['sessions', 'channels', 'send', 'login'];
+const DELIBERATELY_UNREGISTERED = ['channels', 'send', 'login'];
 
 let commands: string[];
 

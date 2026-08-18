@@ -328,6 +328,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The installer's checksum check could pass having verified nothing** — the
+  one-line install downloads a `gum` release tarball and verifies it against
+  the project's published `checksums.txt` using `sha256sum --ignore-missing`.
+  That flag is necessary, since the file lists every platform and only one
+  asset is downloaded, but GNU `sha256sum` exits 0 when it is left with nothing
+  to verify at all. An asset simply absent from the list therefore read as a
+  pass, so anyone able to serve the release could omit a line rather than forge
+  a hash. macOS `shasum` exits 1 in the same case, so whether the installer was
+  safe depended on which tool was installed — and `sha256sum` is tried first.
+  The downloaded file must now be named in the checksums before any verdict is
+  believed.
 - **Agents no longer build shell command lines by interpolation** — every
   remaining site in `ComputerUseAgent`, `DailyTipAgent`, `DemoRecorderAgent`,
   `HackerNewsAgent`, `OuroborosAgent` and `UpdateAgent` now passes an argument

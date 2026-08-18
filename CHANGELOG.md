@@ -358,6 +358,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **An environment assignment or a plantable path reached a safe-listed name** —
+  the binary parser skips leading `VAR=value` assignments and takes the
+  basename, both of which are right for classifying a command and neither of
+  which was treated as a risk. So `LD_PRELOAD=/tmp/x.so ls` was judged an
+  ordinary `ls` while the loader read the assignment after exec, and `./ls` was
+  judged the system tool while running whatever sits in the working directory.
+  The `env LD_PRELOAD=… ls` spelling already required approval, because `env`
+  is dual-use; the shell's own assignment syntax did not. Both now require
+  approval rather than being blocked, and `/bin` and `/usr/bin` stay ungated
+  since they are not writable without root.
 - **`git` is now treated as dual-use, because its configuration executes
   commands** — `git -c alias.x='!cmd' x` runs `cmd`, and `-c core.pager=` does
   the same wherever a pager is used. There is no separator and no substitution

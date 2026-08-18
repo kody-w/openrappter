@@ -306,3 +306,49 @@ class TestGitIsDualUse:
             result = safety.check_command(cmd)
             assert result.safe is True, cmd
             assert not result.requires_approval, cmd
+
+
+class TestReachingASafeNameByAnotherRoute:
+    """_parse_binary skips leading VAR=value assignments and takes the
+    basename. Both are right for classifying the command and neither was
+    evaluated as a risk, so two shapes ran ungated:
+
+      LD_PRELOAD=/tmp/x.so ls   the loader reads the assignment after exec;
+                                the `env LD_PRELOAD=...` spelling already
+                                required approval because env is dual-use
+      ./ls                      judged as the system ls by basename
+    """
+
+    def _safety(self):
+        from openrappter.security.exec_safety import ExecSafety
+        return ExecSafety()
+
+    def test_environment_assignment_is_gated(self):
+        safety = self._safety()
+        for cmd in ("LD_PRELOAD=/tmp/evil.so ls",
+                    "DYLD_INSERT_LIBRARIES=/tmp/evil.dylib ls"):
+            result = safety.check_command(cmd)
+            assert result.requires_approval is True, cmd
+            assert "Environment assignment" in result.reason, cmd
+
+    def test_a_plantable_path_is_gated(self):
+        safety = self._safety()
+        for cmd in ("./ls", "/tmp/ls"):
+            result = safety.check_command(cmd)
+            assert result.requires_approval is True, cmd
+
+    def test_system_directories_stay_ungated(self):
+        # Over-gating has a cost: every gated command needs a human.
+        safety = self._safety()
+        for cmd in ("/bin/ls -la", "/usr/bin/grep x f"):
+            assert not safety.check_command(cmd).requires_approval, cmd
+
+    def test_ordinary_commands_stay_ungated(self):
+        safety = self._safety()
+        for cmd in ("ls -la", "cat f", "echo hi"):
+            assert not safety.check_command(cmd).requires_approval, cmd
+
+    def test_an_unknown_path_binary_is_blocked_not_gated(self):
+        result = self._safety().check_command("scripts/build.sh")
+        assert result.safe is False
+        assert "not in the safe list" in result.reason

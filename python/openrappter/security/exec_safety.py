@@ -155,6 +155,44 @@ class ExecSafety:
             self._record_audit(cmd, binary, result, 'blocked')
             return result
 
+        # Two shapes reach a safe-listed name while running something else,
+        # and both are gated rather than blocked:
+        #
+        #   LD_PRELOAD=/tmp/x.so ls  — _parse_binary skips assignments to find
+        #     the binary, which is right for classification, but the assignment
+        #     is the dangerous part: the loader reads it after exec. The `env`
+        #     spelling already required approval because env is dual-use; the
+        #     shell's own assignment syntax did not.
+        #
+        #   ./ls                     — _parse_binary takes the basename, so a
+        #     file planted in the working directory is judged as the system
+        #     tool of the same name. Standard system directories are not
+        #     writable without root, so those stay ungated.
+        trimmed = cmd.strip()
+        has_env_prefix = bool(re.match(r'[A-Za-z_][A-Za-z0-9_]*=', trimmed))
+        invoked = next(
+            (part for part in trimmed.split() if '=' not in part), ''
+        )
+        trusted_dirs = ('/bin/', '/usr/bin/', '/sbin/', '/usr/sbin/')
+        path_qualified = '/' in invoked and not invoked.startswith(trusted_dirs)
+
+        if binary not in DUAL_USE_BINS and (has_env_prefix or path_qualified):
+            why = (
+                'Environment assignment before the command can change what it '
+                'loads'
+                if has_env_prefix
+                else f"Command is a path, so '{binary}' is not necessarily the "
+                     "system tool"
+            )
+            result = SafetyCheckResult(
+                safe=True,
+                binary=binary,
+                requires_approval=True,
+                reason=f'{why} — requires explicit approval',
+            )
+            self._record_audit(cmd, binary, result, 'pending')
+            return result
+
         result = (
             SafetyCheckResult(
                 safe=True,

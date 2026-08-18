@@ -106,3 +106,64 @@ describe('ShellAgent treats a single ampersand as a chain', () => {
     }
   });
 });
+
+/**
+ * Reaching a safe-listed name while running something else.
+ *
+ * `parseBinary` skips leading `VAR=value` assignments and takes the basename.
+ * Both are right for *classifying* the command and neither is evaluated as a
+ * risk, so two shapes slipped through ungated:
+ *
+ *   LD_PRELOAD=/tmp/x.so ls   the loader reads the assignment after exec. The
+ *                             `env LD_PRELOAD=… ls` spelling already required
+ *                             approval, because `env` is dual-use; the shell's
+ *                             own assignment syntax did not.
+ *   ./ls                      judged as the system `ls` by basename.
+ *
+ * Neither is blocked — both are gated, the same treatment `curl` and `npm`
+ * already get.
+ */
+describe('ShellAgent gates commands that reach a safe name by another route', () => {
+  const safety = new ExecSafety();
+
+  it('gates an environment assignment before the command', () => {
+    for (const cmd of [
+      'LD_PRELOAD=/tmp/evil.so ls',
+      'DYLD_INSERT_LIBRARIES=/tmp/evil.dylib ls',
+    ]) {
+      const r = safety.checkCommand(cmd);
+      expect(r.requiresApproval, cmd).toBe(true);
+      expect(r.reason, cmd).toMatch(/Environment assignment/);
+    }
+  });
+
+  it('gates a command given as a plantable path', () => {
+    for (const cmd of ['./ls', '/tmp/ls']) {
+      const r = safety.checkCommand(cmd);
+      expect(r.requiresApproval, cmd).toBe(true);
+      expect(r.reason, cmd).toMatch(/not necessarily the system tool/);
+    }
+  });
+
+  it('leaves the standard system directories ungated', () => {
+    // Over-gating has a cost: every gated command needs a human. /bin and
+    // /usr/bin are not writable without root, so the name is the tool.
+    for (const cmd of ['/bin/ls -la', '/usr/bin/grep x f']) {
+      expect(safety.checkCommand(cmd).requiresApproval, cmd).toBeFalsy();
+    }
+  });
+
+  it('leaves ordinary commands ungated', () => {
+    for (const cmd of ['ls -la', 'cat f', 'echo hi', 'jq .']) {
+      expect(safety.checkCommand(cmd).requiresApproval, cmd).toBeFalsy();
+    }
+  });
+
+  it('does not confuse an unknown path binary for a gated one', () => {
+    // `scripts/build.sh` is not on the safe list at all, so it is blocked
+    // outright rather than routed to approval.
+    const r = safety.checkCommand('scripts/build.sh');
+    expect(r.safe).toBe(false);
+    expect(r.reason).toMatch(/not in the safe list/);
+  });
+});

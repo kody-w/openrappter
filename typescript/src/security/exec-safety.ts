@@ -242,6 +242,43 @@ export class ExecSafety {
 
     // On the safe list. Dual-use binaries stay `safe` for backward compatibility
     // but are flagged so an approval layer can gate them.
+    //
+    // Two shapes reach a safe-listed name while running something else, and
+    // both are gated the same way rather than blocked outright:
+    //
+    //   LD_PRELOAD=/tmp/x.so ls   — `parseBinary` skips assignments to find the
+    //     binary, which is right for classification, but the assignment is the
+    //     dangerous part: the loader reads it after exec. The spelling with
+    //     `env` already required approval, because `env` is dual-use; the
+    //     shell's own assignment syntax did not.
+    //
+    //   ./ls                      — `parseBinary` takes the basename, so a file
+    //     planted in the working directory is judged as the system tool of the
+    //     same name.
+    const trimmed = cmd.trim();
+    const hasEnvPrefix = /^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed);
+    const invoked = trimmed.split(/\s+/).find((part) => !part.includes('=')) ?? '';
+    // A path only matters when the file could have been planted. The standard
+    // system directories are not writable without root, so `/usr/bin/git` is
+    // the tool it names; `./ls` or `/tmp/ls` is whatever someone put there.
+    const TRUSTED_BIN_DIRS = ['/bin/', '/usr/bin/', '/sbin/', '/usr/sbin/'];
+    const pathQualified = invoked.includes('/')
+      && !TRUSTED_BIN_DIRS.some((dir) => invoked.startsWith(dir));
+
+    if (!dualUse && (hasEnvPrefix || pathQualified)) {
+      const why = hasEnvPrefix
+        ? 'Environment assignment before the command can change what it loads'
+        : `Command is a path, so '${binary}' is not necessarily the system tool`;
+      const result: SafetyCheckResult = {
+        safe: true,
+        binary,
+        requiresApproval: true,
+        reason: `${why} — requires explicit approval`,
+      };
+      this.recordAudit(cmd, binary, result, 'pending');
+      return result;
+    }
+
     const result: SafetyCheckResult = dualUse
       ? { safe: true, binary, dualUse: true, requiresApproval: true }
       : { safe: true, binary };

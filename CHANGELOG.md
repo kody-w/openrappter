@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- `openrappter login <provider>` printed "Credentials have been saved to your config." while saving nothing: `initiateOAuthFlow` returns the token and `auth/oauth.ts` performs no filesystem writes at all. It now states plainly that the token is discarded and that persistent credential storage is not implemented. (The command remains unregistered.)
 - RPC-backed CLI commands printed a raw Node stack trace, naming internal `ws` frames, whenever the gateway was unreachable, refused the token, or did not know a method. Commander does not await an async action handler, so the rejection escaped as an unhandled promise rejection. Failures now print one actionable line and exit non-zero.
 - Consolidated six byte-identical private copies of `withClient` (`approvals`, `backup`, `channels`, `cron`, `send`, `sessions`) into `cli/with-client.ts`. The duplication is why the missing error handling existed in six places at once.
 - Every RPC-backed CLI command (`backup`, `approvals`, `cron`, `memory`, `flight`, ...) printed its output instantly and then hung for 30 seconds before exiting. `RpcClient.call()` armed a 30s timeout and never cleared it once the response arrived; a pending timer keeps Node's event loop alive. `openrappter backup list` went from 30.1s to 0.1s.

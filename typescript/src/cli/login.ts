@@ -38,7 +38,14 @@ export function registerLoginCommand(program: Command): void {
         if (result.refreshToken) {
           console.log('A refresh token was issued.');
         }
-        console.log('\nCredentials have been saved to your config.');
+        // Nothing persists this token. `initiateOAuthFlow` returns it and
+        // returns nothing else -- `auth/oauth.ts` performs no filesystem
+        // writes at all, and `OAuthTokenStore` is two in-memory Maps that the
+        // flow never calls. Claiming a save here is the same defect as the
+        // macOS Bar reporting success from a discarded write (#316): the user
+        // is told to stop worrying about something that did not happen.
+        console.log('\nThis token was NOT saved -- it is discarded when this command exits.');
+        console.log('Persistent credential storage is not implemented yet.');
       } catch (err) {
         console.error('\n\x1b[31mAuthentication failed:\x1b[0m', err instanceof Error ? err.message : String(err));
         process.exit(1);

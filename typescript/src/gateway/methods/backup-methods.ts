@@ -43,11 +43,15 @@ export function registerBackupMethods(
     }
   );
 
+  // Restoring overwrites the live data directory in place and keeps no copy
+  // of what it replaced, so it is at least as destructive as backup.delete —
+  // which has always required auth. Held to the same bar.
   server.registerMethod<{ id?: string }, BackupInfo>(
     'backup.restore',
     async (params) => {
       return restoreBackup(params?.id, dataDir);
-    }
+    },
+    { requiresAuth: true }
   );
 
   server.registerMethod<{ id: string }, { deleted: boolean }>(

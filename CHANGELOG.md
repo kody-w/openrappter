@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`openrappter backup`** — create, list, restore and delete snapshots of
+  `~/.openrappter/` from the terminal. The gateway has served all four
+  operations since the feature landed and the code behind them does real work,
+  but nothing shipped ever called them: an update could snapshot before it ran
+  and the user still had no way to reach that snapshot afterwards. A backup you
+  cannot restore is not a backup. `restore` overwrites the live files in place
+  and keeps no copy of what it replaced, so it requires an explicit `--yes`.
 - **`openrappter approvals`** — list, approve and deny commands the safety
   policy has gated, from the terminal. The gateway has served `exec.pending`
   and `exec.respond` for some time and the only client calling them was the
@@ -374,6 +381,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`backup.restore` replaced your data without authentication** — the gateway
+  required auth to *delete* a backup but not to restore one, though restoring
+  overwrites every file in `~/.openrappter/` in place and keeps no copy of what
+  it replaced. The more destructive of the two was the unguarded one. Restore
+  now requires auth, like delete.
 - **An environment assignment or a plantable path reached a safe-listed name** —
   the binary parser skips leading `VAR=value` assignments and takes the
   basename, both of which are right for classifying a command and neither of

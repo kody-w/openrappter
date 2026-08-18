@@ -12,10 +12,7 @@ export const __manifest__ = {
   description: 'Scans a directory for documents and notes, reporting file count, types, recent changes, and TODOs found.',
   author: 'Kody Wildfeuer',
   ring: 'ga',
-  capabilities: [
-    'filesystem-write',
-    'process-exec'
-  ],
+  capabilities: [],
   tags: [
     'openrappter',
     'doc-scanner'

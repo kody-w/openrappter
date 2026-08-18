@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Three agents held capabilities they cannot reach** — `DocScannerAgent`,
+  `NotesIntakeAgent` and `WebAgent` declared `process-exec` while importing no
+  `child_process` at all; what they contain is regular-expression `.exec()`
+  calls. The two scanners additionally declared `filesystem-write` while
+  importing only `readdir`, `stat` and `readFile`. Read-only scanners therefore
+  held the two most dangerous capabilities in the vocabulary, so a policy
+  denying either would have refused agents that only match text. `conformance.py`
+  enforces this as R5, but R5 reads Python agents only; TypeScript now has an
+  equivalent check, and R4, R5 and R7 say which runtime they cover.
 - **The conformance gate accepted a manifest that wasn't one** — R2 passed any
   non-Python agent whose file merely *contained* the substrings `__manifest__`
   and `rapp-agent/1.0`, and R3 checked required fields for Python agents only.

@@ -335,8 +335,9 @@ def r4_capabilities_honest():
                        f"{undeclared} ({hint})")
     if bad:
         return False, "; ".join(bad[:3])
-    return True, ("all %d agents declare every capability their syntax tree "
-                  "can reach" % len(agent_files()))
+    return True, ("all %d Python agents declare every capability their syntax "
+                  "tree can reach; TypeScript is covered by "
+                  "capability-reachability.test.ts" % len(agent_files()))
 
 
 @check("R5", "No agent over-declares a capability it cannot reach.")
@@ -355,7 +356,8 @@ def r5_no_over_declaration():
             noisy.append(f"{os.path.basename(path)} claims unused {extra}")
     if noisy:
         return False, "; ".join(noisy[:3])
-    return True, "no agent claims a capability its code does not use"
+    return True, ("no Python agent claims a capability its code does not use; "
+                  "TypeScript is covered by capability-reachability.test.ts")
 
 
 # ── kernel parity ────────────────────────────────────────────────────────────
@@ -404,7 +406,8 @@ def r7_agents_are_portable():
                 offenders.append(f"{os.path.basename(path)} hard-imports {module}")
     if offenders:
         return False, "; ".join(sorted(set(offenders))[:3])
-    return True, "agents import nothing from the kernel beyond basic_agent"
+    return True, ("Python agents import nothing from the kernel beyond "
+                  "basic_agent")
 
 
 # ── licence and provenance ───────────────────────────────────────────────────

@@ -181,6 +181,24 @@ gum_detect_arch() {
 
 verify_sha256sum_file() {
     local checksums="$1"
+    local target="$2"
+    # `--ignore-missing` is required here: the checksums file lists every
+    # platform's asset and only one was downloaded. But GNU sha256sum exits 0
+    # when that leaves it nothing to verify at all, so an asset simply absent
+    # from the list reads as a pass — anyone able to serve the release could
+    # omit the line rather than forge a hash. macOS `shasum` exits 1 in that
+    # case, so the safe behaviour depended on which tool happened to be
+    # installed, and sha256sum is preferred below.
+    #
+    # Require the file we actually downloaded to be named before believing any
+    # verdict. Exact match on the final field, allowing the `*` binary-mode
+    # marker some tools emit.
+    if ! awk -v t="$target" '
+        { name = $NF; sub(/^\*/, "", name); if (name == t) found = 1 }
+        END { exit found ? 0 : 1 }
+    ' "$checksums" 2>/dev/null; then
+        return 1
+    fi
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum --ignore-missing -c "$checksums" >/dev/null 2>&1
         return $?
@@ -252,7 +270,7 @@ bootstrap_gum_temp() {
         return 1
     fi
 
-    if ! (cd "$gum_tmpdir" && verify_sha256sum_file "checksums.txt"); then
+    if ! (cd "$gum_tmpdir" && verify_sha256sum_file "checksums.txt" "$asset"); then
         GUM_REASON="checksum unavailable or failed"
         return 1
     fi

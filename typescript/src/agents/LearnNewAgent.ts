@@ -13,7 +13,7 @@
  * This avoids import resolution issues — the host passes BasicAgent in.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -47,7 +47,16 @@ export const __manifest__ = {
   quality_tier: 'official',
   requires_env: []
 } as const;
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+// npm's own package-name grammar. Generated code is model-authored, so an
+// import specifier is untrusted input: reject anything that is not a package
+// name rather than letting it reach an install command.
+const NPM_PACKAGE_NAME = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
+export function isValidNpmPackageName(name: string): boolean {
+  return name.length > 0 && name.length <= 214 && NPM_PACKAGE_NAME.test(name);
+}
 
 /**
  * Truncate by code point, then encode as a JavaScript string literal.
@@ -635,7 +644,10 @@ ${performBody}
 
     try {
       for (const pkg of packages) {
-        const { stderr } = await execAsync(`npm install --save ${pkg}`, {
+        if (!isValidNpmPackageName(pkg)) {
+          return { success: false, error: `refusing to install invalid package name: ${JSON.stringify(pkg)}` };
+        }
+        const { stderr } = await execFileAsync('npm', ['install', '--save', pkg], {
           timeout: 60000,
           cwd: process.cwd(),
         });

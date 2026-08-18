@@ -489,7 +489,7 @@ openrappter models get</pre>
       query<span class="op">:</span> kwargs.topic,
       upstream_slush<span class="op">:</span> <span class="kw">this</span>.lastDataSlush
     });
-    <span class="kw">return</span> { plan<span class="op">:</span> research.summary };
+    <span class="kw">return</span> JSON.stringify({ plan<span class="op">:</span> research.summary });
   }
 }</pre>
     </div>

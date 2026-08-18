@@ -61,6 +61,12 @@ const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\b(?:password|pwd)\s*=\s*[^;\s]+/i,
   /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|credential)\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{8,}/i,
   /[?&](?:token|secret|password|credential|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)=/i,
+  // `key` and `sig` are credentials in a query string too, and the first is
+  // not hypothetical: the shipped Gemini provider builds
+  // `…:generateContent?key=<apiKey>`, so a recorded value carrying that URL
+  // wrote the key into the ledger. Guarded by a value length so an ordinary
+  // `?key=name` is left alone.
+  /[?&](?:key|sig|signature)=[A-Za-z0-9._~+/=-]{8,}/i,
   /(?:^|[{,\s])["']?(?:password|pwd|token|secret|credential|authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)["']?\s*[:=]/i,
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i,
 ];

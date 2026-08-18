@@ -358,6 +358,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A credential in a `?key=` parameter was recorded verbatim** — the flight
+  recorder scans recorded values for embedded secrets and already caught
+  `?token=`, `?api_key=`, `?access_token=` and `https://user:pass@host`. It did
+  not catch `?key=`, which is the parameter name Google uses, and which the
+  shipped Gemini provider builds into every request URL — so any recorded value
+  carrying that URL wrote the API key into the ledger in the clear. `?sig=`,
+  used to sign Azure blob URLs, had the same hole. Both are redacted now, with
+  a value-length guard so an ordinary `?key=name` is left readable.
 - **The installer's checksum check could pass having verified nothing** — the
   one-line install downloads a `gum` release tarball and verifies it against
   the project's published `checksums.txt` using `sha256sum --ignore-missing`.

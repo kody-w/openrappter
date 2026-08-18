@@ -53,12 +53,44 @@ jobs:
         run: shellcheck install.sh
 
   docs-sync:
-    name: Verify docs/install.sh is in sync
+    name: Verify the docs/ installer copies are in sync
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check docs/install.sh matches root install.sh
-        run: diff install.sh docs/install.sh
+      # Three installers are served from docs/ for GitHub Pages and must match
+      # the canonical copies at the repository root. This used to compare
+      # install.sh alone, so editing install.ps1 or install.bat and forgetting
+      # the docs/ copy would have shipped a stale script to every Windows user
+      # piping from Pages, with nothing to catch it.
+      #
+      # Discovered rather than listed, so a fourth pair is covered the day it
+      # appears.
+      - name: Check every docs/ installer matches its canonical copy
+        run: |
+          set -uo pipefail
+          checked=0
+          status=0
+          for canonical in install.*; do
+            [ -f "$canonical" ] || continue
+            served="docs/$canonical"
+            if [ ! -f "$served" ]; then
+              echo "::error::$canonical has no served copy at $served"
+              status=1
+              continue
+            fi
+            if ! diff -u "$canonical" "$served"; then
+              echo "::error::$served has drifted from $canonical"
+              status=1
+            fi
+            checked=$((checked + 1))
+          done
+          # Anti-vacuity: a glob that matched nothing would pass silently.
+          if [ "$checked" -lt 3 ]; then
+            echo "::error::expected at least 3 installer pairs, compared $checked"
+            exit 1
+          fi
+          echo "compared $checked installer pairs"
+          exit $status
 
   docker-smoke:
     name: Docker smoke test (npm method)

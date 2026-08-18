@@ -49,8 +49,41 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install shellcheck
         run: sudo apt-get install -y shellcheck
-      - name: Run shellcheck on install.sh
-        run: shellcheck install.sh
+      # Every shell script, not just install.sh. Lint that covers one file out
+      # of nineteen says nothing about the other eighteen, and the repository
+      # ships operational scripts — a pinned installer, a deploy script, an
+      # attachment sender — that are exactly where a quoting mistake hurts.
+      #
+      # Discovered rather than listed. A newer shellcheck may introduce checks
+      # that fail here; that is the intended trade, and the fix is a directive
+      # with a reason next to the line, as the existing ones carry.
+      - name: Run shellcheck on every shell script
+        run: |
+          set -uo pipefail
+          scripts=()
+          while IFS= read -r script; do
+            scripts+=("$script")
+          done < <(
+            find . -name '*.sh' \
+              -not -path './.git/*' \
+              -not -path '*/node_modules/*' \
+              -not -path '*/.build/*' \
+              | sort
+          )
+          # Anti-vacuity: a find that matched nothing would pass silently.
+          if [ "${#scripts[@]}" -lt 15 ]; then
+            echo "::error::expected at least 15 shell scripts, found ${#scripts[@]}"
+            exit 1
+          fi
+          status=0
+          for script in "${scripts[@]}"; do
+            if ! shellcheck "$script"; then
+              echo "::error::shellcheck findings in $script"
+              status=1
+            fi
+          done
+          echo "shellchecked ${#scripts[@]} scripts"
+          exit $status
 
   docs-sync:
     name: Verify the docs/ installer copies are in sync

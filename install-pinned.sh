@@ -138,6 +138,9 @@ install_node_runtime() {
     tar -xzf "$WORK_DIR/$archive" -C "$WORK_DIR/x"
     [ -d "$WORK_DIR/x/$base" ] || die "Node.js archive did not contain $base."
     mv "$WORK_DIR/x/$base" "$RUNTIME_DIR"
+    # Both tests are pure predicates, so `die` runs exactly when either is
+    # false. Not the A && B || C hazard SC2015 warns about.
+    # shellcheck disable=SC2015
     [ -x "$NODE" ] && [ -x "$NPM" ] || die "Extracted Node.js runtime is incomplete."
     printf '%s\n' "$expected" > "$RUNTIME_DIR/.archive-sha256"
     sha256_file "$NODE" > "$RUNTIME_DIR/.node-sha256"

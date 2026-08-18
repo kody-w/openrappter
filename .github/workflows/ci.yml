@@ -40,10 +40,39 @@ jobs:
           cache: npm
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
+      # `src/telephony/integration.test.ts` skips itself unless it finds the
+      # RAPP Second Brain binary. It looks at RSB_BIN, then ~/rapp-secondbrain,
+      # then ~/.local/bin — which is exactly where the installers in
+      # release.yml and flight-recorder.yml put it. Nothing installed it in the
+      # job that runs the suite, so eleven integration tests covering call
+      # negotiation, approval, the audit chain and concurrent writers had never
+      # executed in CI. They pass; they were simply never asked to.
+      #
+      # Pinned and checksummed, matching release.yml.
+      - name: Install RAPP Second Brain so the telephony integration tests run
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          RSB_SHA=7846dfdd5e2c74ea2201e1b141269df359b4ce5a
+          curl -fsSL \
+            "https://raw.githubusercontent.com/kody-w/rapp-secondbrain/$RSB_SHA/install.sh" \
+            -o "$RUNNER_TEMP/rsb-install.sh"
+          echo "6fbe9cf84a2b911384957743250e09bacb2c03a5be917974589255e89334d848  $RUNNER_TEMP/rsb-install.sh" \
+            | sha256sum -c -
+          RSB_REF="$RSB_SHA" bash "$RUNNER_TEMP/rsb-install.sh"
+          test -x "$HOME/.local/bin/rsb"
       - run: npm run lint
       # vitest (esbuild) does not type-check — tsc is the only gate for type errors
       - run: npm run build
-      - run: npm test
+      # One run, two reporters: the readable one for a human scanning the log,
+      # and JSON so the skip budget below has something to check.
+      - name: Run the suite
+        run: npm test -- --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/vitest.json"
+      # `284 passed | 3 skipped` reads like success. It was how eleven
+      # telephony integration tests went unexecuted in every environment
+      # (#280). Every skip must now be named, with where it does run.
+      - name: Skip budget
+        run: node ../tools/skip-budget.mjs "$RUNNER_TEMP/vitest.json"
 
   # Dedicated gate for the dashboard UI surface (typescript/ui) — a separate
   # npm project (own lockfile/deps) that the generic `typescript` job above
@@ -107,7 +136,9 @@ jobs:
         working-directory: macos
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
+      # Pinned by commit, matching release-bar.yml. A mutable tag on a
+      # third-party action lets its maintainer change what runs here.
+      - uses: swift-actions/setup-swift@7ca6abe6b3b0e8b5421b88be48feee39cbf52c6a # v2
         with:
           swift-version: '6.0'
       - run: swift build -c release --product OpenRappterBar

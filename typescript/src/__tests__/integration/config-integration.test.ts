@@ -129,6 +129,36 @@ describe('Config Integration', () => {
       delete process.env.B_VAR;
     });
 
+    /**
+     * `${VAR:-default}` is documented on the docs site, with
+     * `api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}` as the example.
+     *
+     * The loader's own regex was `/\$\{(\w+)\}/g`, which matches neither `:`
+     * nor `-`, so that example expanded to nothing and survived into the config
+     * as the literal string — surfacing much later as a rejected credential.
+     * A second implementation in `config/env-expand.ts` did support the form and
+     * had tests proving it, but nothing outside those tests ever called it.
+     *
+     * These cover the function the loader actually uses.
+     */
+    it('should use the default when the variable is unset', () => {
+      delete process.env.ABSENT_API_KEY;
+      expect(substituteEnvVars('${ABSENT_API_KEY:-sk-placeholder}')).toBe('sk-placeholder');
+    });
+
+    it('should prefer the variable over the default when it is set', () => {
+      process.env.PRESENT_API_KEY = 'sk-real';
+      expect(substituteEnvVars('${PRESENT_API_KEY:-sk-placeholder}')).toBe('sk-real');
+      delete process.env.PRESENT_API_KEY;
+    });
+
+    it('should accept a default containing punctuation', () => {
+      delete process.env.ABSENT_URL;
+      expect(substituteEnvVars('${ABSENT_URL:-http://localhost:8080/v1}')).toBe(
+        'http://localhost:8080/v1',
+      );
+    });
+
     it('should leave strings without vars unchanged', () => {
       expect(substituteEnvVars('no vars here')).toBe('no vars here');
     });

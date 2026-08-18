@@ -58,6 +58,16 @@ export const channelConfigSchema = z.object({
   enabled: z.boolean().default(false),
   allowFrom: z.array(z.string()).optional(),
   mentionGating: z.boolean().optional(),
+  // `readIMessageConfig` reads these three straight off the raw config, and the
+  // schema did not know them. Unknown keys are stripped rather than rejected, so
+  // a config that ran the iMessage channel over BlueBubbles came back out of the
+  // schema with `mode` and `pollInterval` gone — and re-reading it selected the
+  // `applescript` default instead. Nothing loads channels through the schema
+  // today, which is the only reason that was latent rather than a transport
+  // silently changing under someone.
+  mode: z.enum(['applescript', 'bluebubbles']).optional(),
+  pollInterval: z.number().int().min(250).optional(),
+  staleAfterMs: z.number().int().positive().optional(),
 });
 
 export const gatewayConfigSchema = z.object({

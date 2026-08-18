@@ -31,6 +31,22 @@ const roots: string[] = [];
 const originalSkills = process.env.OPENRAPPTER_SKILLS_DIR;
 const originalAutomations = process.env.OPENRAPPTER_AUTOMATIONS_DIR;
 
+/**
+ * These tests drive a real SQLite store and a real temp directory per case,
+ * which is the point of them -- the privacy guarantees they cover are about
+ * what actually reaches disk. That cost is fine on Linux and macOS and is not
+ * fine against vitest's 5s default on the Windows runner, where this file was
+ * measured at 62s for 25 tests, one case at 8.4s and its neighbour at 3.0s.
+ *
+ * The 5s default made the slowest case a coin flip in the merge gate: it
+ * failed the cross-runtime job on an unrelated PR, then passed unchanged on
+ * re-run. Raising the ceiling for this file keeps the failure signal honest --
+ * a test here now fails because the behaviour is wrong, not because the runner
+ * was busy. Scoped to this file rather than the global config so every other
+ * suite keeps the tighter default.
+ */
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 function tempRoot(): string {
   const root = mkdtempSync(path.join(os.tmpdir(), 'openrappter-show-'));
   roots.push(root);

@@ -1291,6 +1291,3 @@ Revenue's up 12 percent and customers are happier - looking good this quarter.
   }
 }
 
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max - 3) + "...";
-}

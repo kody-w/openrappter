@@ -651,16 +651,29 @@ describe('Gateway RPC Methods', () => {
       });
     });
 
-    it('should default to requiresAuth: false when not specified', () => {
-      // Most methods don't specify requiresAuth, so should default to false
-      const authRequiredCount = Array.from(methods.values()).filter(
-        (info) => info.requiresAuth
-      ).length;
+    it('should require auth for exactly the methods that change or expose rappter state', () => {
+      // Asserted as a set rather than a count: a count still passes when one
+      // method quietly loses auth and another gains it.
+      const authRequired = Array.from(methods.entries())
+        .filter(([, info]) => info.requiresAuth)
+        .map(([name]) => name)
+        .sort();
 
-      // rappter.summon, rappter.create, rappter.load, rappter.unload,
-      // rappter.reload, rappter.load-template, rappter.save, rappter.restore,
-      // rappter.forget, backup.delete require auth
-      expect(authRequiredCount).toBe(10);
+      expect(authRequired).toEqual([
+        // Destructive on ~/.openrappter/: restore overwrites the live files in
+        // place and keeps no copy of what it replaced.
+        'backup.delete',
+        'backup.restore',
+        'rappter.create',
+        'rappter.forget',
+        'rappter.load',
+        'rappter.load-template',
+        'rappter.reload',
+        'rappter.restore',
+        'rappter.save',
+        'rappter.summon',
+        'rappter.unload',
+      ]);
     });
   });
 });

@@ -113,6 +113,12 @@ export const DUAL_USE_BINS = new Set([
   'chmod', 'chown',
   // Utilities with built-in command execution or shell escapes
   'find', 'awk', 'sed', 'tar', 'env',
+  // git runs whatever its configuration tells it to. `git -c alias.x='!cmd' x`
+  // executes `cmd`, and `-c core.pager=` does the same wherever a pager is
+  // used. Verified: `git -c alias.x='!touch /tmp/marker' x` creates the file.
+  // Nothing in the injection patterns can see this — there is no separator,
+  // no substitution, and the binary is on the safe list.
+  'git',
   // Filesystem-mutating utilities
   'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
   // Commands with output-file or system-mutation modes
@@ -131,6 +137,10 @@ const INJECTION_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
   // Command chaining (must come before pipe-chain to avoid || matching as pipe)
   { pattern: /\|\|/, type: 'or-chain' },
   { pattern: /&&/, type: 'and-chain' },
+  // A single `&` is a separator too, not just a background marker: `ls & rm x`
+  // runs both. `&&` was covered and this was not, so the policy called it safe
+  // and the second command ran unreviewed. Same shape as the pipe rule below.
+  { pattern: /(?<!&)&(?!&)/, type: 'background-chain' },
   { pattern: /;/, type: 'semicolon-chain' },
   // Pipe chains (single | only, after || is already handled)
   { pattern: /(?<!\|)\|(?!\|)/, type: 'pipe-chain' },
@@ -232,6 +242,43 @@ export class ExecSafety {
 
     // On the safe list. Dual-use binaries stay `safe` for backward compatibility
     // but are flagged so an approval layer can gate them.
+    //
+    // Two shapes reach a safe-listed name while running something else, and
+    // both are gated the same way rather than blocked outright:
+    //
+    //   LD_PRELOAD=/tmp/x.so ls   — `parseBinary` skips assignments to find the
+    //     binary, which is right for classification, but the assignment is the
+    //     dangerous part: the loader reads it after exec. The spelling with
+    //     `env` already required approval, because `env` is dual-use; the
+    //     shell's own assignment syntax did not.
+    //
+    //   ./ls                      — `parseBinary` takes the basename, so a file
+    //     planted in the working directory is judged as the system tool of the
+    //     same name.
+    const trimmed = cmd.trim();
+    const hasEnvPrefix = /^[A-Za-z_][A-Za-z0-9_]*=/.test(trimmed);
+    const invoked = trimmed.split(/\s+/).find((part) => !part.includes('=')) ?? '';
+    // A path only matters when the file could have been planted. The standard
+    // system directories are not writable without root, so `/usr/bin/git` is
+    // the tool it names; `./ls` or `/tmp/ls` is whatever someone put there.
+    const TRUSTED_BIN_DIRS = ['/bin/', '/usr/bin/', '/sbin/', '/usr/sbin/'];
+    const pathQualified = invoked.includes('/')
+      && !TRUSTED_BIN_DIRS.some((dir) => invoked.startsWith(dir));
+
+    if (!dualUse && (hasEnvPrefix || pathQualified)) {
+      const why = hasEnvPrefix
+        ? 'Environment assignment before the command can change what it loads'
+        : `Command is a path, so '${binary}' is not necessarily the system tool`;
+      const result: SafetyCheckResult = {
+        safe: true,
+        binary,
+        requiresApproval: true,
+        reason: `${why} — requires explicit approval`,
+      };
+      this.recordAudit(cmd, binary, result, 'pending');
+      return result;
+    }
+
     const result: SafetyCheckResult = dualUse
       ? { safe: true, binary, dualUse: true, requiresApproval: true }
       : { safe: true, binary };
@@ -386,7 +433,7 @@ export class ExecSafety {
    * Issue a single-use approval token scoped to the exact normalized command.
    * Does not block; the token starts out 'pending' until resolved.
    */
-  issueApprovalToken(cmd: string, ttlMs = 300_000): ApprovalToken {
+  issueApprovalToken(cmd: string, ttlMs = 300_000, reason?: string): ApprovalToken {
     const id = `token_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const normalized = this.normalizeCommand(cmd);
     const token: ApprovalToken = {
@@ -403,7 +450,13 @@ export class ExecSafety {
       cmd: normalized,
       binary: this.parseBinary(normalized),
       safe: false,
-      reason: `Approval token issued for: ${normalized}`,
+      reason: reason
+        // The policy already worked out why this needs a person; without it the
+        // reviewer sees the command restated back at them and has to re-derive
+        // the danger themselves. The caller was getting this explanation and
+        // the reviewer was not, which is the wrong way round.
+        ? reason
+        : `Approval token issued for: ${normalized}`,
       status: 'pending',
       timestamp: token.createdAt,
     });

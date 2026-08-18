@@ -7,10 +7,11 @@
  * Actions: check, update, changelog
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { appleScriptLiteral } from './applescript.js';
 import os from 'os';
 import https from 'https';
 import { BasicAgent } from './BasicAgent.js';
@@ -46,7 +47,7 @@ export class UpdateAgent extends BasicAgent {
   private homeDir: string;
   private tsDir: string;
 
-  constructor() {
+  constructor(homeDir?: string) {
     const metadata: AgentMetadata = {
       name: 'Update',
       description: 'Check for updates and self-update openrappter from the public repo.',
@@ -63,7 +64,9 @@ export class UpdateAgent extends BasicAgent {
       },
     };
     super('Update', metadata);
-    this.homeDir = path.join(os.homedir(), '.openrappter');
+    // Injectable so the stash handling can be tested against a real repository
+    // rather than a replica of it.
+    this.homeDir = homeDir ?? path.join(os.homedir(), '.openrappter');
     this.tsDir = path.join(this.homeDir, 'typescript');
   }
 
@@ -220,16 +223,25 @@ export class UpdateAgent extends BasicAgent {
       });
     }
 
+    const stashLabel = `openrappter-update-${Date.now()}`;
+    let stashed = false;
     try {
-      // Stash any local changes
-      execSync('git stash --include-untracked 2>/dev/null || true', {
-        cwd: this.homeDir,
-        stdio: 'pipe',
-        timeout: 10000,
-      });
+      // Stash any local changes.
+      //
+      // `git stash` on a clean tree prints "No local changes to save" and
+      // exits 0 without creating an entry, so an unconditional `git stash pop`
+      // afterwards restores whatever was on top of the stack — which may be
+      // work the owner stashed days ago, and pop drops it. Only pop what this
+      // update actually saved.
+      const stashOutput = execFileSync(
+        'git',
+        ['stash', 'push', '--include-untracked', '-m', stashLabel],
+        { cwd: this.homeDir, encoding: 'utf-8', timeout: 10000 },
+      );
+      stashed = !stashOutput.includes('No local changes to save');
 
       // Pull latest
-      const pullOutput = execSync('git pull origin main 2>&1', {
+      const pullOutput = execFileSync('git', ['pull', 'origin', 'main'], {
         cwd: this.homeDir,
         encoding: 'utf-8',
         timeout: 30000,
@@ -247,12 +259,26 @@ export class UpdateAgent extends BasicAgent {
         });
       }
 
-      // Pop stash
-      execSync('git stash pop 2>/dev/null || true', {
-        cwd: this.homeDir,
-        stdio: 'pipe',
-        timeout: 10000,
-      });
+      // Restore what we stashed. A failing pop leaves conflict markers in the
+      // working tree and keeps the entry; reporting success there would tell
+      // the owner their update worked while their build is full of `<<<<<<<`.
+      if (stashed) {
+        try {
+          execFileSync('git', ['stash', 'pop'], {
+            cwd: this.homeDir,
+            encoding: 'utf-8',
+            timeout: 10000,
+          });
+        } catch {
+          return JSON.stringify({
+            status: 'error',
+            message:
+              `Updated, but your local changes could not be restored: they conflict `
+              + `with the new version. They are safe in the stash entry "${stashLabel}" — `
+              + `resolve with: git stash pop`,
+          });
+        }
+      }
 
       const newVersion = this.getLocalVersion();
 
@@ -260,8 +286,9 @@ export class UpdateAgent extends BasicAgent {
       if (process.platform === 'darwin' && !alreadyUpToDate) {
         try {
           const msg = `Updated: ${local} → ${newVersion}`;
-          execSync(
-            `osascript -e 'display notification "${msg}" with title "🦖 openrappter updated"'`,
+          execFileSync(
+            'osascript',
+            ['-e', `display notification "${appleScriptLiteral(msg)}" with title "🦖 openrappter updated"`],
             { timeout: 5000, stdio: 'pipe' },
           );
         } catch { /* non-critical */ }
@@ -278,9 +305,16 @@ export class UpdateAgent extends BasicAgent {
         restart_needed: !alreadyUpToDate,
       });
     } catch (err) {
+      // Anything failing between the stash and the pop leaves the owner's work
+      // saved but not restored. Saying "Update failed" alone sends them looking
+      // for changes that are sitting in a stash entry they never made.
+      const stranded = stashed
+        ? ` Your local changes are saved in the stash entry "${stashLabel}" — `
+          + 'restore them with: git stash pop'
+        : '';
       return JSON.stringify({
         status: 'error',
-        message: `Update failed: ${(err as Error).message}`,
+        message: `Update failed: ${(err as Error).message}.${stranded}`,
         local_version: local,
       });
     }

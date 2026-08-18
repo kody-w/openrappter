@@ -83,7 +83,6 @@
     <div class="sidebar-title">Releases</div>
     <ul class="sidebar-nav">
       <li><a href="./changelog.html">Changelog</a></li>
-      <li><a href="./release-notes-1.14.0-evolution.html">v1.14.0 Notes</a></li>
       <li><a href="./release-notes-1.13.0-evolution.html">v1.13.0 Notes</a></li>
       <li><a href="./release-notes-1.12.0-evolution.html">v1.12.0 Notes</a></li>
       <li><a href="./release-notes-1.11.0-evolution.html">v1.11.0 Notes</a></li>
@@ -149,55 +148,69 @@ openrappter doctor
     <!-- ── 2. Configuration ── -->
     <div id="configuration" class="doc-section">
       <h2>Configuration</h2>
-      <p>OpenRappter reads its configuration from <code>~/.openrappter/config.yaml</code>. The file is created with sensible defaults on first run. All values can be overridden with environment variables.</p>
+      <p>OpenRappter reads its configuration from <code>~/.openrappter/config.json5</code>. The format is JSON5 — JSON with comments, unquoted keys and trailing commas. The file is optional; when it is absent the defaults below apply.</p>
 
-      <h3>Example config.yaml</h3>
-      <pre># ~/.openrappter/config.yaml
+      <div class="info-box">
+        <strong>It is <code>config.json5</code>, not <code>config.yaml</code>.</strong> Earlier revisions of this page showed YAML throughout. Neither runtime has ever parsed YAML — the loaders are <code>JSON5.parse</code> in TypeScript and a comment-stripping <code>json.loads</code> in Python — so a <code>config.yaml</code> written from those examples was not read, and produced no error, because a missing config file is a supported state. (A previous revision of this box said the runtime looks only at <code>config.json5</code>. That was too strong: see <a href="#config-system">Loading Order</a>.)
+      </div>
 
-provider:
-  default: copilot          # copilot | anthropic | openai | gemini | ollama
-  copilot:
-    model: gpt-4o           # model passed to the Copilot API
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-    model: claude-opus-4-6
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    model: gpt-4o
-  ollama:
-    base_url: http://localhost:11434
-    model: llama3.2
+      <h3>Example config.json5</h3>
+      <pre><span class="cm">// ~/.openrappter/config.json5</span>
+{
+  models: [
+    {
+      id: "default",
+      provider: "openai",        <span class="cm">// anthropic | openai | gemini | bedrock | ollama | copilot</span>
+      model: "gpt-4o",
+      auth: { type: "api-key", token_env: "OPENAI_API_KEY" },
+    },
+  ],
 
-memory:
-  provider: openai          # openai | gemini | local
-  chunkTokens: 512
-  chunkOverlap: 64
+  memory: {
+    provider: "openai",          <span class="cm">// openai | gemini | local</span>
+    chunkTokens: 512,
+    chunkOverlap: 64,
+  },
 
-gateway:
-  port: 18790
-  bind: loopback            # loopback | all
-  auth:
-    mode: none              # none | password
+  gateway: {
+    port: 18790,
+    bind: "loopback",            <span class="cm">// loopback | all</span>
+    auth: { mode: "none" },      <span class="cm">// none | password</span>
+  },
 
-security:
-  approvalPolicy: allowlist # deny | allowlist | full
-  allowlists:
-    commands: []            # if non-empty, only these commands are permitted
-    tools: []
-    domains: []
+  security: {
+    approvalPolicy: "allowlist", <span class="cm">// deny | allowlist | full</span>
+    allowlists: {
+      commands: [],              <span class="cm">// if non-empty, only these are permitted</span>
+      tools: [],
+      domains: [],
+    },
+  },
 
-logging:
-  level: info               # debug | info | warn | error
-  file: ~/.openrappter/logs/openrappter.log</pre>
+  logging: {
+    level: "info",               <span class="cm">// debug | info | warn | error</span>
+    file: "~/.openrappter/logs/openrappter.log",
+  },
+}</pre>
+
+      <div class="info-box">
+        <strong>There is no <code>provider:</code> section.</strong> Earlier revisions showed one, with the default provider and per-provider API keys nested under it. No such key exists in the schema, and unknown keys are discarded silently, so that block configured nothing. Models are declared in the <code>models</code> array above, and each entry names the environment variable its API key comes from in <code>auth.token_env</code>.
+      </div>
+
+      <h3>Choosing the active model</h3>
+      <p>Which model runs is not held in <code>config.json5</code>. It is <code>OPENRAPPTER_MODEL</code> in <code>~/.openrappter/.env</code>, and the command that writes it is:</p>
+      <pre>openrappter models            <span class="cm"># discover what is available</span>
+openrappter models set gpt-4o
+openrappter models get</pre>
 
       <h3>Environment Variable Expansion</h3>
-      <p>Any value in the YAML can reference environment variables using <code>${VAR_NAME}</code> syntax. The config loader expands these at parse time. This is the recommended way to handle API keys — keep them out of the config file and source them from your shell profile or a <code>.env</code> file.</p>
+      <p>Any string value can reference environment variables with <code>${VAR_NAME}</code>. Unset variables resolve to an empty string; use <code>${VAR_NAME:-default_value}</code> to supply a fallback. This is the recommended way to handle API keys — keep them out of the config file and source them from your shell profile or a <code>.env</code> file.</p>
 
       <h3>Zod Validation</h3>
-      <p>The configuration schema is defined and validated with Zod v4 at <code>typescript/src/config/schema.ts</code>. On startup, if any required field is missing or has the wrong type, openrappter prints a structured error with the exact path and expected type — not a raw crash.</p>
+      <p>The schema is defined with Zod v4 at <code>typescript/src/config/schema.ts</code>, and <code>openrappter config validate</code> checks a file against it. It is not run on startup: the CLI loads <code>~/.openrappter/config.json</code> through a separate path that reads fields directly and does not validate. Unknown keys are <em>discarded silently</em> rather than rejected, which is why a misspelled or invented key validates cleanly and does nothing — and why a key the schema has not been taught about is worth reporting rather than assuming harmless.</p>
 
       <h3>Live Reload</h3>
-      <p>The config system uses a file watcher. When <code>config.yaml</code> is saved, the running process picks up the new values without a restart. Provider keys, log levels, rate limits, and gateway settings all hot-reload. Changes to the memory backend require a restart.</p>
+      <p>There is none. <code>config/watcher.ts</code> implements one and nothing constructs it, in either runtime — no other code watches the file either. Earlier revisions of this page said a running process picks up a saved config without a restart, and that log levels, rate limits and gateway settings all hot-reload. Restart after changing configuration.</p>
 
       <h3>Environment Variables Reference</h3>
       <table class="doc-table">
@@ -208,12 +221,16 @@ logging:
           <tr><td><code>ANTHROPIC_API_KEY</code></td><td>Anthropic Claude API key</td><td>—</td></tr>
           <tr><td><code>OPENAI_API_KEY</code></td><td>OpenAI API key</td><td>—</td></tr>
           <tr><td><code>GEMINI_API_KEY</code></td><td>Google Gemini API key</td><td>—</td></tr>
-          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td>Override config file path</td><td><code>~/.openrappter/config.yaml</code></td></tr>
-          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td>Override log level</td><td><code>info</code></td></tr>
+          <tr><td><code>OLLAMA_URL</code></td><td>Ollama endpoint</td><td><code>http://localhost:11434</code></td></tr>
+          <tr><td><code>COPILOT_GITHUB_TOKEN</code></td><td>GitHub token for the Copilot provider</td><td>—</td></tr>
+          <tr><td><code>OPENRAPPTER_MODEL</code></td><td>Active model; written by <code>openrappter models set</code></td><td>—</td></tr>
           <tr><td><code>OPENRAPPTER_PORT</code></td><td>Override gateway port</td><td><code>18790</code></td></tr>
-          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td>Override default provider</td><td><code>copilot</code></td></tr>
         </tbody>
       </table>
+
+      <div class="info-box">
+        <!-- unimplemented --><strong>There is no telemetry, so there is nothing to opt out of.</strong> Earlier revisions of this page listed <code>OPENRAPPTER_NO_TELEMETRY</code> as disabling anonymous usage stats. Nothing anywhere in either runtime read that variable, and no usage stats are collected or sent — so the variable did nothing and the sentence described a product that does not exist. Local-first means this one.
+      </div>
     </div>
 
     <!-- ── 3. Agents Reference ── -->
@@ -230,7 +247,7 @@ logging:
           <button class="code-tab-btn" onclick="switchTab(this,'py-agent')">Python</button>
         </div>
         <div id="ts-agent" class="code-tab-content active">
-<pre><span class="kw">import</span> { BasicAgent, AgentMetadata } <span class="kw">from</span> <span class="str">'openrappter'</span>;
+<pre><span class="kw">import</span> { BasicAgent, type AgentMetadata } <span class="kw">from</span> <span class="str">'./BasicAgent.js'</span>;
 
 <span class="kw">export class</span> <span class="typ">MyAgent</span> <span class="kw">extends</span> <span class="typ">BasicAgent</span> {
   <span class="fn">constructor</span>() {
@@ -250,11 +267,13 @@ logging:
     <span class="kw">const</span> query <span class="op">=</span> kwargs.query <span class="kw">as</span> string;
     <span class="cm">// access sloshed context signals</span>
     <span class="kw">const</span> timeOfDay <span class="op">=</span> <span class="kw">this</span>.<span class="fn">getSignal</span>(<span class="str">'temporal.time_of_day'</span>);
-    <span class="kw">return</span> { result<span class="op">:</span> <span class="str">`Hello from MyAgent at ${timeOfDay}`</span> };
+    <span class="kw">return</span> JSON.stringify({ result<span class="op">:</span> <span class="str">`Hello from MyAgent at ${timeOfDay}`</span> };
   }
 }</pre>
         </div>
         <div id="py-agent" class="code-tab-content">
+<span class="kw">import</span> json
+
 <pre><span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
 
 <span class="kw">class</span> <span class="typ">MyAgent</span>(BasicAgent):
@@ -275,7 +294,31 @@ logging:
         query <span class="op">=</span> kwargs.get(<span class="str">"query"</span>, <span class="str">""</span>)
         <span class="cm"># access sloshed context signals</span>
         time_of_day <span class="op">=</span> self.<span class="fn">get_signal</span>(<span class="str">"temporal.time_of_day"</span>)
-        <span class="kw">return</span> {<span class="str">"result"</span><span class="op">:</span> <span class="str">f"Hello from MyAgent at {time_of_day}"</span>}</pre>
+        <span class="kw">return</span> json.dumps({<span class="str">"result"</span><span class="op">:</span> <span class="str">f"Hello from MyAgent at {time_of_day}"</span>})</pre>
+
+      <div class="info-box">
+        <strong><code>perform</code> returns a string, not an object.</strong> Every shipped agent returns <code>JSON.stringify(...)</code> in TypeScript and <code>json.dumps(...)</code> in Python — the base class declares <code>Promise&lt;string&gt;</code>, and the 240 <code>json.dumps</code> returns across the Python agents are the same contract. Earlier revisions of this page returned a bare object from both examples.
+      </div>
+
+      <h3>Agents you add yourself</h3>
+      <p>The example above is how an agent inside the repository is written. An agent you drop into <code>~/.openrappter/agents/</code> cannot import <code>BasicAgent</code> — the package entry point is the CLI, not a library, and importing it would run the CLI. Local agents are ESM modules that receive the base class instead:</p>
+      <pre><span class="cm">// ~/.openrappter/agents/my-agent.mjs</span>
+<span class="kw">export function</span> createAgent(BasicAgent) {
+  <span class="kw">class</span> MyAgent <span class="kw">extends</span> BasicAgent {
+    constructor() {
+      <span class="kw">super</span>(<span class="str">'MyAgent'</span>, {
+        name<span class="op">:</span> <span class="str">'MyAgent'</span>,
+        description<span class="op">:</span> <span class="str">'Does something useful'</span>,
+        parameters<span class="op">:</span> { type<span class="op">:</span> <span class="str">'object'</span>, properties<span class="op">:</span> { query<span class="op">:</span> { type<span class="op">:</span> <span class="str">'string'</span> } }, required<span class="op">:</span> [] },
+      });
+    }
+    <span class="kw">async</span> perform(kwargs) {
+      <span class="kw">return</span> JSON.stringify({ status<span class="op">:</span> <span class="str">'success'</span>, echo<span class="op">:</span> kwargs.query });
+    }
+  }
+  <span class="kw">return</span> MyAgent;
+}</pre>
+      <p>This is the shape <code>LearnNewAgent</code> generates and loads, and the reason for it is stated in its source: the factory avoids import resolution entirely, because the host passes the base class in.</p>
         </div>
       </div>
 
@@ -446,7 +489,7 @@ logging:
       query<span class="op">:</span> kwargs.topic,
       upstream_slush<span class="op">:</span> <span class="kw">this</span>.lastDataSlush
     });
-    <span class="kw">return</span> { plan<span class="op">:</span> research.summary };
+    <span class="kw">return</span> JSON.stringify({ plan<span class="op">:</span> research.summary });
   }
 }</pre>
     </div>
@@ -458,50 +501,30 @@ logging:
 
       <h3>GitHub Copilot (default)</h3>
       <p>Zero-configuration. Uses your existing GitHub Copilot subscription via the <code>gh</code> CLI token. No API key setup required. This is the recommended provider for getting started because authentication is handled inline on first use.</p>
-      <pre><span class="cm"># config.yaml</span>
-provider:
-  default: copilot
-  copilot:
-    model: gpt-4o    <span class="cm"># or gpt-4o-mini, claude-3.5-sonnet, o1-mini</span></pre>
+      <pre><span class="cm"># Copilot reuses your GitHub credentials</span>
+export COPILOT_GITHUB_TOKEN=...
+openrappter models set gpt-4o</pre>
 
       <h3>Anthropic</h3>
       <p>Access Claude models including claude-opus-4-6, claude-sonnet-4-5, and claude-haiku-3-5. Requires an Anthropic API key.</p>
-      <pre><span class="cm"># config.yaml</span>
-provider:
-  default: anthropic
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-    model: claude-opus-4-6
-    max_tokens: 8192</pre>
+      <pre>export ANTHROPIC_API_KEY=...
+openrappter models set claude-opus-4-6</pre>
 
       <h3>OpenAI</h3>
       <p>Supports all GPT-4o and o-series models. Compatible with any OpenAI-compatible endpoint by setting a custom <code>base_url</code>.</p>
-      <pre><span class="cm"># config.yaml</span>
-provider:
-  default: openai
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    model: gpt-4o
-    base_url: https://api.openai.com/v1    <span class="cm"># override for compatible endpoints</span></pre>
+      <pre>export OPENAI_API_KEY=...
+openrappter models set gpt-4o</pre>
 
       <h3>Google Gemini</h3>
       <p>Access Gemini 2.0 Flash, Gemini 1.5 Pro, and experimental models via Google AI Studio credentials.</p>
-      <pre><span class="cm"># config.yaml</span>
-provider:
-  default: gemini
-  gemini:
-    api_key: ${GEMINI_API_KEY}
-    model: gemini-2.0-flash-exp</pre>
+      <pre>export GEMINI_API_KEY=...
+openrappter models set gemini-2.0-flash-exp</pre>
 
       <h3>Ollama (local)</h3>
       <p>Run models entirely locally with no API key or internet connection required. Requires a running Ollama instance. Pull models with <code>ollama pull llama3.2</code> before use.</p>
-      <pre><span class="cm"># config.yaml</span>
-provider:
-  default: ollama
-  ollama:
-    base_url: http://localhost:11434
-    model: llama3.2          <span class="cm"># any model available in your Ollama instance</span>
-    timeout: 120000          <span class="cm"># ms — local models can be slow on first load</span></pre>
+      <pre><span class="cm"># Ollama needs no key; point at the instance if it is not local</span>
+export OLLAMA_URL=http://localhost:11434
+openrappter models set llama3.2</pre>
 
       <h3>Provider Registry Pattern</h3>
       <p>Providers are registered at <code>typescript/src/providers/registry.ts</code>. To add a custom provider, implement the <code>LLMProvider</code> interface and register it before starting the agent runtime:</p>
@@ -524,7 +547,7 @@ registry.<span class="fn">register</span>({
     <!-- ── 6. Messaging Channels ── -->
     <div id="channels" class="doc-section">
       <h2>Messaging Channels</h2>
-      <p>OpenRappter connects to 15+ messaging platforms through a unified channel interface. All channels implement the same <code>Channel</code> interface: <code>send(message)</code>, <code>receive(handler)</code>, and <code>connect()</code>. Add a channel in <code>config.yaml</code> and it is automatically registered with the router.</p>
+      <p>OpenRappter connects to 15+ messaging platforms through a unified channel interface. All channels implement the same <code>Channel</code> interface: <code>send(message)</code>, <code>receive(handler)</code>, and <code>connect()</code>. Add a channel in <code>config.json5</code> and it is automatically registered with the router.</p>
 
       <h3>Supported Channels</h3>
       <table class="doc-table">
@@ -551,23 +574,16 @@ registry.<span class="fn">register</span>({
       </table>
 
       <h3>Channel Configuration</h3>
-      <pre><span class="cm"># config.yaml</span>
-channels:
-  slack:
-    enabled: true
-    bot_token: ${SLACK_BOT_TOKEN}
-    signing_secret: ${SLACK_SIGNING_SECRET}
-    default_channel: <span class="str">"#general"</span>
+      <pre><span class="cm">// ~/.openrappter/config.json5</span>
+{
+  channels: {
+    slack:    { enabled: true },
+    discord:  { enabled: true },
+    telegram: { enabled: true, allowFrom: ["12345678"] },
+  },
+}</pre>
 
-  discord:
-    enabled: true
-    bot_token: ${DISCORD_BOT_TOKEN}
-    guild_id: ${DISCORD_GUILD_ID}
-
-  telegram:
-    enabled: true
-    bot_token: ${TELEGRAM_BOT_TOKEN}
-    allowed_chat_ids: []    <span class="cm"># empty = allow all chats</span></pre>
+      <p>Credentials are not held in the config file. Each adapter reads its own environment variables — <code>SLACK_BOT_TOKEN</code>, <code>DISCORD_BOT_TOKEN</code>, <code>TELEGRAM_BOT_TOKEN</code> and so on. A per-channel <code>bot_token</code> key does not exist in the schema and is discarded on load.</p>
 
       <h3>Channel Registry Pattern</h3>
       <p>Channels are loaded from <code>typescript/src/channels/</code>. To implement a custom channel, extend the <code>BaseChannel</code> class and register it by name. The channel will then be available in the router and reachable via <code>MessageAgent</code>.</p>
@@ -590,7 +606,7 @@ channels:
 
       <h3>Starting the Gateway</h3>
       <pre>openrappter gateway --port 18790</pre>
-      <p>Configure it in <code>config.yaml</code> under <code>gateway.port</code>, <code>gateway.bind</code> (<code>loopback</code> or <code>all</code>) and <code>gateway.auth.mode</code>. The default port is <code>18790</code>.</p>
+      <p>Configure it in <code>config.json5</code> under <code>gateway.port</code>, <code>gateway.bind</code> (<code>loopback</code> or <code>all</code>) and <code>gateway.auth.mode</code>. The default port is <code>18790</code>.</p>
 
       <h3>Connection Lifecycle</h3>
       <ol>
@@ -681,7 +697,7 @@ channels:
       <h3>Rate Limiting</h3>
       <p>The gateway allows 100 requests per minute per connection. Exceeding it returns an error frame with code <code>-32001</code> and the message <code>Rate limit exceeded</code>. Frame-carrying methods (currently <code>zen.publish</code>) draw on a separate budget of 120 frames per 2 seconds, so neither can exhaust the other's allowance.</p>
       <div class="info-box">
-        <strong>Not configurable.</strong> These limits are compile-time constants; there is no <code>config.yaml</code> key for them, and no <code>retry_after</code> is sent.
+        <strong>Not configurable.</strong> These limits are compile-time constants; there is no <code>config.json5</code> key for them, and no <code>retry_after</code> is sent.
       </div>
     </div>
 
@@ -817,7 +833,7 @@ grouped by file with line-level comments.</span></pre>
 
       <h3>Embeddings</h3>
       <p>The TypeScript runtime generates embeddings using a local model (default: <code>all-MiniLM-L6-v2</code> via <code>@xenova/transformers</code>). Embeddings run entirely on-device with no API calls. The first run downloads the model (~25MB) and caches it at <code>~/.openrappter/models/</code>.</p>
-      <p>To use an API-based embedding provider instead, set <code>memory.embedding_provider: openai</code> in <code>config.yaml</code>. This uses the <code>text-embedding-3-small</code> model by default.</p>
+      <p>To use an API-based embedding provider instead, set <code>memory.provider</code> to <code>openai</code> in <code>config.json5</code>. This uses the <code>text-embedding-3-small</code> model by default.</p>
 
       <h3>Hybrid Search</h3>
       <p>Memory queries use hybrid search: a combination of vector similarity (cosine distance on embeddings) and keyword BM25 scoring. The two scores are combined with a configurable weight (default: 60% semantic, 40% keyword). This outperforms pure vector search on queries that contain specific identifiers, names, or technical terms.</p>
@@ -906,7 +922,7 @@ results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(a
       <p>OpenRappter operates with the same OS-level permissions as the user who runs it. Because agents can execute shell commands and read/write files, the framework includes several layers of protection. Security is opt-in by default for ease of development — enable stricter controls before deploying in shared or production environments.</p>
 
       <h3>ShellAgent Sandboxing</h3>
-      <p>ShellAgent is the primary attack surface for prompt injection via shell execution. Its limits are enforced in code by <code>ExecSafety</code>, not read from <code>config.yaml</code>:</p>
+      <p>ShellAgent is the primary attack surface for prompt injection via shell execution. Its limits are enforced in code by <code>ExecSafety</code>, not read from <code>config.json5</code>:</p>
       <ul>
         <li><strong>Injection detection</strong> — every command is normalised and checked before execution; substitutions and chaining that would escape the intended command are rejected.</li>
         <li><strong>Safe-binary classification</strong> — binaries are classed as safe or dual-use. A dual-use binary (one that is ordinary in isolation and dangerous in combination) requires approval rather than being silently allowed.</li>
@@ -918,41 +934,65 @@ results <span class="op">=</span> memory_agent.<span class="fn">perform</span>(a
 
       <h3>Approval Workflows</h3>
       <p>A command that <code>ExecSafety</code> classifies as needing review pauses before execution. In gateway mode this sends an <code>approval</code> event to subscribed clients and waits for a decision. Useful for high-stakes operations like database migrations or deployments.</p>
+      <p>Any client can resolve one — the macOS Bar shows a banner, and the CLI works anywhere the gateway does:</p>
+      <pre>openrappter approvals            <span class="cm"># what is waiting, and why each one needs a person</span>
+openrappter approvals approve &lt;id&gt;
+openrappter approvals deny &lt;id&gt;</pre>
+      <p>The list gives the reason alongside the command, because the reason is the part you cannot infer: <code>LD_PRELOAD=/tmp/x.so ls</code> reads as an ordinary <code>ls</code> until something says otherwise.</p>
 
       <h3>Rate Limiting</h3>
-      <p>The WebSocket gateway enforces per-connection rate limits. For channel adapters, each channel can set its own rate limit in addition to the global gateway limit. Rate limits apply to both inbound message handling and outbound LLM API calls, protecting against runaway loops.</p>
+      <p>The WebSocket gateway allows 100 requests per minute per connection, refusing the rest with error code <code>-32001</code>. That limit is a compile-time constant, and it is the only rate limit the framework imposes on itself. Earlier revisions of this page also promised a per-channel limit and a limit on outbound LLM calls "protecting against runaway loops"; neither exists. The one per-channel cap that does exist is an experimental setting for outbound iMessages per hour, and providers such as Copilot retry with backoff when the <em>provider</em> rate-limits them, which is a reaction to someone else's limit rather than a budget of our own.</p>
 
       <h3>Audit Logging</h3>
-      <p>When <code>logging.level: debug</code> or when <code>logging.audit: true</code> is set, all agent invocations, shell commands executed, files written, and channel messages sent are written to the audit log at <code>~/.openrappter/logs/audit.jsonl</code>. Each entry is a newline-delimited JSON object with timestamp, agent name, action, arguments, result status, and duration.</p>
+      <p>There is no separate audit log. Earlier revisions of this page described one at <code>~/.openrappter/logs/audit.jsonl</code>, enabled with <code>logging.audit: true</code>. No such key exists in the schema and no such file is ever written, so a reader who set it got a config that validated cleanly and an audit trail that was never there.</p>
+      <p>The <a href="#local-capture">Flight Recorder</a> is the mechanism that does exist. It is a correlated ledger of trace, context, provider, tool and agent lifecycle events, shared by both runtimes, and it is what to reach for when you need to know what a rappter actually did:</p>
+      <pre>openrappter flight status
+openrappter flight events
+openrappter flight export <span class="cm"># integrity-checked bundle</span></pre>
+      <p><code>logging.level: debug</code> raises log verbosity. The real logging keys are <code>level</code>, <code>file</code>, <code>maxSize</code>, <code>rotation</code> and <code>redaction</code>.</p>
 
       <h3>Gateway Authentication</h3>
-      <p>By default the gateway binds to <code>127.0.0.1</code> and is not accessible from external networks. For remote access, set a shared secret in <code>config.yaml</code>:</p>
-      <pre><span class="cm"># config.yaml</span>
-gateway:
-  host: 0.0.0.0
-  secret: ${GATEWAY_SECRET}    <span class="cm"># required in Authorization: Bearer header</span></pre>
+      <p>By default the gateway binds to <code>127.0.0.1</code> and is not reachable from other machines. For remote access, set the bind and a password in <code>config.json5</code>:</p>
+      <pre><span class="cm">// ~/.openrappter/config.json5</span>
+{
+  gateway: {
+    bind: "all",                 <span class="cm">// loopback | all</span>
+    auth: {
+      mode: "password",          <span class="cm">// none | password</span>
+      password: "${GATEWAY_PASSWORD}",
+    },
+  },
+}</pre>
 
       <div class="warning-box">
-        <strong>Warning:</strong> Never expose the gateway on <code>0.0.0.0</code> without setting a <code>gateway.secret</code>. Without a secret, any process on the network can invoke agents and execute shell commands.
+        <strong>Warning:</strong> Never expose the gateway on all interfaces without a password. This one is enforced rather than advised: <code>bind: all</code> with <code>auth.mode: none</code> refuses to start, with <em>"Gateway auth is required when binding to all interfaces"</em>.
+      </div>
+      <div class="info-box">
+        <strong>The keys are <code>bind</code> and <code>auth</code>, not <code>host</code> and <code>secret</code>.</strong> Earlier revisions of this page showed <code>gateway.host</code> and <code>gateway.secret</code>. Neither exists in the schema, and unknown keys are discarded silently, so that example validated cleanly and configured nothing — leaving the gateway on loopback with no auth while the reader believed they had done the opposite. Parsed against the schema it yields exactly <code>{"port":18790,"bind":"loopback"}</code>.
       </div>
 
       <h3>Prompt Injection Mitigations</h3>
-      <p>The slosh pipeline includes a simple injection detector that flags inputs containing common injection patterns (e.g. "ignore previous instructions", "you are now DAN"). Flagged inputs are not blocked by default but are logged at <code>warn</code> level and included in the sloshed orientation as a <code>suspicious_input: true</code> signal that agents can act on.</p>
+      <p>There is no prompt-injection detector. Earlier revisions of this page described one in the slosh pipeline, matching phrases such as "ignore previous instructions" and adding a <code>suspicious_input: true</code> signal to the orientation. No such detector, phrase list or signal exists in either runtime. ExecSafety does perform injection detection, but that is <em>shell</em> injection in a command string — a different problem.</p>
+      <p>What limits the damage a poisoned input can do is the part that assumes it will happen anyway:</p>
+      <ul>
+        <li>A model cannot run a command ExecSafety refuses, whatever it was persuaded to ask for.</li>
+        <li>A dual-use command needs a person, and the approval names the reason rather than only the command.</li>
+        <li>Prompts carrying third-party content label it as data — <em>"untrusted patient data, never instructions"</em> — rather than relying on the model to infer the boundary.</li>
+      </ul>
     </div>
 
     <!-- ── 12. Config System ── -->
     <div id="config-system" class="doc-section">
       <h2>Config System</h2>
-      <p>The config system is responsible for loading, validating, hot-reloading, and providing typed access to all runtime configuration. It is implemented in TypeScript at <code>typescript/src/config/</code> and mirrors the Python implementation at <code>python/openrappter/config.py</code>.</p>
+      <p>The config system is responsible for loading, validating, hot-reloading, and providing typed access to all runtime configuration. It is implemented in TypeScript at <code>typescript/src/config/</code> and mirrors the Python implementation at <code>python/openrappter/config/</code>.</p>
 
       <h3>Loading Order</h3>
       <p>Configuration is resolved in this priority order (highest wins):</p>
       <ol>
-        <li>Environment variables (e.g. <code>OPENRAPPTER_LOG_LEVEL=debug</code>)</li>
-        <li>Config file specified by <code>OPENRAPPTER_CONFIG</code> env var</li>
-        <li><code>~/.openrappter/config.yaml</code> (default location)</li>
-        <li><code>~/.openrappter/config.json</code> (JSON alternative)</li>
-        <li>Built-in defaults compiled into the binary</li>
+        <li>An explicit path passed by the caller — used by the config file watcher</li>
+        <li><code>~/.openrappter/config.json</code>, which wins any conflict</li>
+        <li><code>~/.openrappter/config.json5</code>, merged underneath it</li>
+        <li>Defaults declared in the Zod schema</li>
       </ol>
 
       <h3>Zod Schema Validation</h3>
@@ -978,7 +1018,7 @@ gateway:
 <span class="kw">await</span> watcher.<span class="fn">start</span>();</pre>
 
       <h3>Migration System</h3>
-      <p>As OpenRappter evolves, config schemas change. The migration system tracks the config format version in a <code>_version</code> field and automatically upgrades older config files to the current schema. Migrations are defined as transform functions in <code>typescript/src/config/migrations/</code>. The original file is backed up to <code>config.yaml.bak</code> before any migration is applied.</p>
+      <p>As OpenRappter evolves, config schemas change. The migration system tracks the config format version in a <code>_version</code> field and automatically upgrades older config files to the current schema. Migrations are defined as transform functions in <code>typescript/src/config/migrations/</code>. The original file is backed up to <code>config.json5.bak</code> before any migration is applied.</p>
 
       <h3>Environment Variable Expansion</h3>
       <p>Values using <code>${VAR_NAME}</code> syntax are expanded at load time. Unset variables resolve to an empty string by default. Use <code>${VAR_NAME:-default_value}</code> syntax to provide a fallback:</p>
@@ -995,6 +1035,16 @@ provider:
 console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port);      <span class="cm">// 18790</span></pre>
       <div class="info-box">
         <strong>That is an internal path, not a stable API.</strong> It works because nothing stops it, and it can move in any release. Config keys are validated by the Zod schema above; <code>provider</code> is not one of them.
+      </div>
+
+      <h3>Backup &amp; Restore</h3>
+      <p>Everything above lives in <code>~/.openrappter/</code> — config, credentials, memory, skills. A backup is a snapshot of that directory with a manifest, and restoring puts the files back.</p>
+      <pre>openrappter backup                       <span class="cm"># what snapshots exist</span>
+openrappter backup create --reason "before upgrade"
+openrappter backup restore --yes         <span class="cm"># most recent, or pass an id</span>
+openrappter backup delete &lt;id&gt; --yes</pre>
+      <div class="warning-box">
+        <strong>Restoring overwrites your current data and does not snapshot what it replaces.</strong> It requires <code>--yes</code> for that reason. Take a backup before upgrading, not after something goes wrong — updating is a manual <code>npm install -g openrappter@latest</code>, so nothing snapshots on your behalf.
       </div>
     </div>
 
@@ -1019,6 +1069,8 @@ console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port
           <tr><td><code>openrappter skills list</code></td><td>List installed skills</td></tr>
           <tr><td><code>openrappter skills uninstall &lt;repo&gt;</code></td><td>Uninstall a skill</td></tr>
           <tr><td><code>openrappter config validate</code></td><td>Validate the current config file</td></tr>
+          <tr><td><code>openrappter approvals</code></td><td>List, approve or deny commands the safety policy gated</td></tr>
+          <tr><td><code>openrappter backup</code></td><td>Snapshot, list, restore or delete <code>~/.openrappter/</code></td></tr>
         </tbody>
       </table>
 
@@ -1064,12 +1116,7 @@ console.<span class="fn">log</span>(config.gateway<span class="op">?.</span>port
           <tr><td><code>SLACK_BOT_TOKEN</code></td><td>—</td><td>Slack bot token for channel integration</td></tr>
           <tr><td><code>DISCORD_BOT_TOKEN</code></td><td>—</td><td>Discord bot token</td></tr>
           <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>—</td><td>Telegram BotFather token</td></tr>
-          <tr><td><code>GATEWAY_SECRET</code></td><td>—</td><td>Bearer secret for gateway authentication</td></tr>
-          <tr><td><code>OPENRAPPTER_CONFIG</code></td><td><code>~/.openrappter/config.yaml</code></td><td>Override config file location</td></tr>
-          <tr><td><code>OPENRAPPTER_LOG_LEVEL</code></td><td><code>info</code></td><td>debug / info / warn / error</td></tr>
           <tr><td><code>OPENRAPPTER_PORT</code></td><td><code>18790</code></td><td>Gateway WebSocket port</td></tr>
-          <tr><td><code>OPENRAPPTER_PROVIDER</code></td><td><code>copilot</code></td><td>Override default LLM provider</td></tr>
-          <tr><td><code>OPENRAPPTER_NO_TELEMETRY</code></td><td>—</td><td>Set to any value to disable anonymous usage stats</td></tr>
         </tbody>
       </table>
 

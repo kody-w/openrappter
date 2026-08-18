@@ -15,6 +15,11 @@ vi.mock('child_process', () => ({
   exec: vi.fn((_cmd: string, cb: Function) =>
     cb(new Error('exec should not be called in dry-run mode'), '', '')
   ),
+  execFile: vi.fn((_file: string, _args: string[], cb?: Function) => {
+    const err = new Error('execFile should not be called in dry-run mode');
+    if (cb) return cb(err, '', '');
+    throw err;
+  }),
 }));
 vi.mock('util', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;

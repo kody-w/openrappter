@@ -65,11 +65,22 @@ public final class OnboardingViewModel {
 
     // MARK: - Paths
 
-    private let homeDir = NSHomeDirectory() + "/.openrappter"
+    /// Injectable so the write path can be tested against a temp directory
+    /// rather than the real `~/.openrappter`. Defaults to the real one.
+    private let homeDir: String
+    /// Injectable for the same reason as `homeDir`: the failure path can then
+    /// be exercised without writing a real launch agent or calling launchctl.
+    private let launchAgentsDir: String
     private var envFilePath: String { homeDir + "/.env" }
     private var configFilePath: String { homeDir + "/config.json" }
 
-    public init() {}
+    public init(
+        homeDir: String = NSHomeDirectory() + "/.openrappter",
+        launchAgentsDir: String = NSHomeDirectory() + "/Library/LaunchAgents"
+    ) {
+        self.homeDir = homeDir
+        self.launchAgentsDir = launchAgentsDir
+    }
 
     // MARK: - Step Navigation
 
@@ -154,7 +165,10 @@ public final class OnboardingViewModel {
 
     public func saveManualToken(_ token: String) {
         guard !token.isEmpty else { return }
-        saveEnvVar("GITHUB_TOKEN", value: token)
+        guard saveEnvVar("GITHUB_TOKEN", value: token) else {
+            authState = .failed("Could not write the token to \(envFilePath)")
+            return
+        }
         authState = .success
     }
 
@@ -162,7 +176,10 @@ public final class OnboardingViewModel {
 
     public func connectTelegram() {
         guard !telegramToken.isEmpty else { return }
-        saveEnvVar("TELEGRAM_BOT_TOKEN", value: telegramToken)
+        guard saveEnvVar("TELEGRAM_BOT_TOKEN", value: telegramToken) else {
+            errorMessage = "Could not write the Telegram token to \(envFilePath)"
+            return
+        }
         telegramSkipped = false
         // Validate token
         Task {
@@ -192,14 +209,33 @@ public final class OnboardingViewModel {
             // Start daemon via shell
             do {
                 let nodePath = resolveNodePath()
-                let indexPath = homeDir + "/typescript/dist/index.js"
+                // Same resolution the launch agent uses, and for the same
+                // reason. This hardcoded `homeDir + "/typescript/dist/index.js"`,
+                // where homeDir is ~/.openrappter — the runtime DATA directory,
+                // not the code. On a machine where that directory happened to
+                // contain an old checkout it started a build that had stopped
+                // updating; on one where it does not, `process.run()` throws and
+                // onboarding reports "Could not start daemon" on a perfectly good
+                // install. `installLaunchAgent` was corrected to ask
+                // `resolveProjectPath()`; this, twenty lines above it, was not.
+                let projectPath = ProcessManager.resolveProjectPath()
+                let nested = projectPath + "/typescript/dist/index.js"
+                let root = projectPath + "/dist/index.js"
+                let indexPath = FileManager.default.fileExists(atPath: nested) ? nested : root
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: nodePath)
                 process.arguments = [indexPath, "--daemon"]
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = FileHandle.nullDevice
-                process.environment = ProcessInfo.processInfo.environment
+                // PATH from `nodeSearchPath()`, not this app's own environment.
+                // A Finder-launched menu bar app inherits launchd's session PATH,
+                // which is the four-entry one with no node and no copilot in it —
+                // the plist below already says so, and the daemon started here
+                // was inheriting exactly that for its own children.
+                var environment = ProcessInfo.processInfo.environment
+                environment["PATH"] = ProcessManager.nodeSearchPath()
+                process.environment = environment
                 try process.run()
 
                 // Wait for gateway to start
@@ -249,14 +285,52 @@ public final class OnboardingViewModel {
         return nil
     }
 
-    private func saveEnvVar(_ key: String, value: String) {
+    /// Write one variable into `~/.openrappter/.env`, preserving the rest.
+    ///
+    /// Returns `false` if the value did not reach disk, and the caller is
+    /// expected to say so rather than report success.
+    ///
+    /// Two failures were previously indistinguishable from success. The read was
+    /// `(try? String(contentsOfFile:)) ?? ""`, so a file that exists and cannot
+    /// be decoded produced an empty string, and the rewrite below then replaced
+    /// every other variable with just this one. `.env` is shared with the CLI —
+    /// `openrappter models set` keeps `OPENRAPPTER_MODEL` there — so that is not
+    /// confined to onboarding's own keys. And the write itself was `try?`, so a
+    /// failure to save a token looked exactly like saving it.
+    ///
+    /// The TypeScript `saveEnv` has verified its own read-back since #159. This
+    /// does the same thing, for the same reason.
+    @discardableResult
+    private func saveEnvVar(_ key: String, value: String) -> Bool {
         try? FileManager.default.createDirectory(atPath: homeDir, withIntermediateDirectories: true)
-        var content = (try? String(contentsOfFile: envFilePath, encoding: .utf8)) ?? ""
-        // Remove existing key
+
+        var content: String
+        if FileManager.default.fileExists(atPath: envFilePath) {
+            // Present but unreadable is the dangerous case: starting from "" here
+            // discards everything already in the file.
+            guard let existing = try? String(contentsOfFile: envFilePath, encoding: .utf8) else {
+                return false
+            }
+            content = existing
+        } else {
+            content = ""
+        }
+
         content = content.split(separator: "\n").filter { !$0.hasPrefix("\(key)=") }.joined(separator: "\n")
         if !content.isEmpty { content += "\n" }
         content += "\(key)=\(value)\n"
-        try? content.write(toFile: envFilePath, atomically: true, encoding: .utf8)
+
+        do {
+            try content.write(toFile: envFilePath, atomically: true, encoding: .utf8)
+        } catch {
+            return false
+        }
+
+        guard let readBack = try? String(contentsOfFile: envFilePath, encoding: .utf8),
+              readBack == content else {
+            return false
+        }
+        return true
     }
 
     private func saveConfig() {
@@ -270,8 +344,9 @@ public final class OnboardingViewModel {
         }
     }
 
-    private func installLaunchAgent() {
-        let plistPath = NSHomeDirectory() + "/Library/LaunchAgents/com.openrappter.daemon.plist"
+    /// Internal rather than private so the failure path is reachable from a
+    /// test without writing a real launch agent or invoking launchctl.
+    func installLaunchAgent() {
         let nodePath = resolveNodePath()
         // Resolve the CODE directory, which is not the data directory.
         //
@@ -283,45 +358,74 @@ public final class OnboardingViewModel {
         // machine. `resolveProjectPath()` already ranks the released build above
         // that directory; it simply was not being asked.
         let projectPath = ProcessManager.resolveProjectPath()
-        let indexPath = projectPath + "/typescript/dist/index.js"
-        let fallbackIndexPath = projectPath + "/dist/index.js"
         // A deployed release has dist/ at its root; a source checkout has it
-        // under typescript/. Pick whichever actually exists rather than assuming.
-        let resolvedIndex = FileManager.default.fileExists(atPath: indexPath) ? indexPath : fallbackIndexPath
-        let logPath = homeDir + "/daemon.log"
+        // under typescript/. `LaunchAgentManager` appends `/dist/index.js`, so
+        // hand it whichever base makes that true rather than assuming one.
+        let base = FileManager.default.fileExists(atPath: projectPath + "/typescript/dist/index.js")
+            ? projectPath + "/typescript"
+            : projectPath
 
-        // PATH comes from `nodeSearchPath()`, not from this app's own
-        // environment. A Finder-launched menu-bar app inherits launchd's
-        // session PATH, so the previous version baked a four-entry PATH with
-        // no node and no copilot into the plist — which is exactly the
-        // configuration the daemon on this machine was running under.
-        let plist = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key><string>com.openrappter.daemon</string>
-            <key>ProgramArguments</key><array>
-                <string>\(nodePath)</string>
-                <string>\(resolvedIndex)</string>
-                <string>--daemon</string>
-            </array>
-            <key>RunAtLoad</key><true/>
-            <key>KeepAlive</key><true/>
-            <key>StandardOutPath</key><string>\(logPath)</string>
-            <key>StandardErrorPath</key><string>\(logPath)</string>
-            <key>EnvironmentVariables</key><dict>
-                <key>PATH</key><string>\(ProcessManager.nodeSearchPath())</string>
-                <key>HOME</key><string>\(NSHomeDirectory())</string>
-            </dict>
-        </dict>
-        </plist>
-        """
+        // Onboarding used to write its own plist, at
+        // `com.openrappter.daemon.plist`, while `LaunchAgentManager` — which
+        // Settings' "Start at login" toggle reads and writes — manages
+        // `com.openrappter.gateway.plist`. Two different agents: the toggle
+        // showed off after onboarding had just installed one, turning it on
+        // added a second job starting the same gateway on the same port, and
+        // turning it off could never remove the one onboarding made. The
+        // duplicate plist builder is gone; there is one agent now.
+        let manager = LaunchAgentManager(launchAgentsDir: launchAgentsDir)
+        do {
+            try manager.install(nodePath: nodePath, projectPath: base, port: 18790)
+        } catch {
+            autoStartInstalled = false
+            errorMessage = "Could not install auto-start: \(error.localizedDescription)"
+            return
+        }
 
-        try? FileManager.default.createDirectory(atPath: (plistPath as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try? plist.write(toFile: plistPath, atomically: true, encoding: .utf8)
-        _ = try? shellSync("launchctl", args: ["load", "-w", plistPath])
+        // `launchctl` reports refusal through its exit status, which the Bar's
+        // `shellSync` discards along with stderr.
+        let status = shellStatus("launchctl", args: ["load", "-w", manager.plistPath])
+        guard status == 0 else {
+            autoStartInstalled = false
+            errorMessage = "Auto-start was written but launchctl refused it (exit \(status)). "
+                + "The daemon will not start automatically after a reboot."
+            return
+        }
+
+        removeLegacyDaemonAgent()
         autoStartInstalled = true
+    }
+
+    /// Remove the agent onboarding used to install under its own label.
+    ///
+    /// Anyone who onboarded before this was unified has a
+    /// `com.openrappter.daemon` job that Settings cannot see or remove, still
+    /// starting a second gateway on every login.
+    private func removeLegacyDaemonAgent() {
+        let legacyPath = launchAgentsDir + "/com.openrappter.daemon.plist"
+        guard FileManager.default.fileExists(atPath: legacyPath) else { return }
+        _ = shellStatus("launchctl", args: ["unload", "-w", legacyPath])
+        try? FileManager.default.removeItem(atPath: legacyPath)
+    }
+
+    /// Exit status of a command, for the cases where the status is the answer.
+    ///
+    /// `shellSync` returns stdout and drops the status, which is right for
+    /// reading `gh auth token` and wrong for asking whether `launchctl` accepted
+    /// something.
+    private func shellStatus(_ executable: String, args: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = [executable] + args
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return -1
+        }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 
     private func isPortOpen(port: Int) -> Bool {

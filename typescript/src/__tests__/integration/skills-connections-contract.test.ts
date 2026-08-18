@@ -21,7 +21,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import WebSocket from 'ws';
 import { GatewayServer, type SkillsRegistryLike } from '../../gateway/server.js';

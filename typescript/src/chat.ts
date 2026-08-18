@@ -52,13 +52,21 @@ async function inlineAuth(): Promise<string | null> {
       // Try to open browser
       import("child_process")
         .then((cp) => {
-          const cmd =
+          // `start` is a cmd.exe builtin rather than an executable, so it
+          // cannot be spawned directly. `rundll32 url.dll,FileProtocolHandler`
+          // is the documented way to open a URL on Windows without a shell.
+          const [cmd, leading] =
             process.platform === "darwin"
-              ? "open"
+              ? ["open", [] as string[]]
               : process.platform === "win32"
-                ? "start"
-                : "xdg-open";
-          cp.exec(`${cmd} ${url}`);
+                ? ["rundll32", ["url.dll,FileProtocolHandler"]]
+                : ["xdg-open", [] as string[]];
+          // `url` is the verification URI from the device-code response, so
+          // it is server-supplied. Through a shell -- unquoted, as this was --
+          // a crafted value would be command syntax. execFile passes it as one
+          // argument, the way telephony/providers/macos.ts already opens `tel:`
+          // links.
+          cp.execFile(cmd, [...leading, url], () => {});
         })
         .catch(() => {});
     });

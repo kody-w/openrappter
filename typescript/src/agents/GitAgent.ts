@@ -12,7 +12,7 @@
 
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 
 export const __manifest__ = {
@@ -34,7 +34,23 @@ export const __manifest__ = {
   quality_tier: 'official',
   requires_env: []
 } as const;
-export type ExecFn = (cmd: string, cwd?: string) => { stdout: string; stderr: string };
+/**
+ * Runs a binary with an argument vector, never a command line.
+ *
+ * This took a single string and every caller built it by interpolation, so
+ * caller-controlled values reached a shell. Confirmed: `count` of
+ * `'1 ; touch /tmp/x'` created the file. `name`, `fileList`, `message`, and the
+ * `gh pr create` title, body and base were all interpolated the same way.
+ *
+ * An array cannot be escaped out of -- `execFileSync` hands each element to the
+ * process as one argv entry, so a semicolon is a semicolon rather than a
+ * separator. The binary is explicit because this agent drives `git` and `gh`.
+ */
+export type ExecFn = (
+  binary: string,
+  args: string[],
+  cwd?: string,
+) => { stdout: string; stderr: string };
 
 export class GitAgent extends BasicAgent {
   private cwd: string;
@@ -91,9 +107,13 @@ export class GitAgent extends BasicAgent {
     this.execFn = options?.execFn ?? this.defaultExec;
   }
 
-  private defaultExec(cmd: string, cwd?: string): { stdout: string; stderr: string } {
+  private defaultExec(
+    binary: string,
+    args: string[],
+    cwd?: string,
+  ): { stdout: string; stderr: string } {
     try {
-      const stdout = execSync(cmd, {
+      const stdout = execFileSync(binary, args, {
         cwd: cwd ?? this.cwd,
         encoding: 'utf-8',
         timeout: 30000,
@@ -148,7 +168,7 @@ export class GitAgent extends BasicAgent {
   }
 
   private gitStatus(): string {
-    const { stdout } = this.execFn('git status --porcelain', this.cwd);
+    const { stdout } = this.execFn('git', ['status', '--porcelain'], this.cwd);
     const files: Array<{ status: string; file: string }> = [];
 
     if (stdout) {
@@ -175,8 +195,8 @@ export class GitAgent extends BasicAgent {
   }
 
   private gitDiff(): string {
-    const { stdout: stat } = this.execFn('git diff --stat', this.cwd);
-    const { stdout: diff } = this.execFn('git diff', this.cwd);
+    const { stdout: stat } = this.execFn('git', ['diff', '--stat'], this.cwd);
+    const { stdout: diff } = this.execFn('git', ['diff'], this.cwd);
 
     const truncated = diff.length > 10000;
     const content = diff.slice(0, 10000);
@@ -197,19 +217,28 @@ export class GitAgent extends BasicAgent {
 
   private gitLog(kwargs: Record<string, unknown>): string {
     const count = (kwargs.count as number) ?? 10;
-    const format = '--pretty=format:{"hash":"%H","short":"%h","author":"%an","date":"%ai","subject":"%s"}';
-    const { stdout } = this.execFn(`git log -${count} ${format}`, this.cwd);
+    // Fields separated by US (0x1f) rather than built into JSON by git. A
+    // subject containing a double quote produced an unparseable line, and the
+    // parse error was swallowed, so those commits vanished from the result and
+    // from `count` with nothing to say they had. Commit subjects quote things
+    // all the time.
+    const fields = ['%H', '%h', '%an', '%ai', '%s'];
+    const format = `--pretty=format:${fields.join('%x1f')}`;
+    const { stdout } = this.execFn('git', ['log', `-${count}`, format], this.cwd);
 
     const commits: Array<Record<string, string>> = [];
     if (stdout) {
       for (const line of stdout.split('\n')) {
-        if (line.trim()) {
-          try {
-            commits.push(JSON.parse(line));
-          } catch {
-            // skip malformed lines
-          }
-        }
+        if (!line.trim()) continue;
+        const parts = line.split('\x1f');
+        if (parts.length !== fields.length) continue;
+        commits.push({
+          hash: parts[0],
+          short: parts[1],
+          author: parts[2],
+          date: parts[3],
+          subject: parts[4],
+        });
       }
     }
 
@@ -231,10 +260,10 @@ export class GitAgent extends BasicAgent {
 
     if (!name) {
       // List branches
-      const { stdout } = this.execFn('git branch --format="%(refname:short)"', this.cwd);
+      const { stdout } = this.execFn('git', ['branch', '--format="%(refname:short)"'], this.cwd);
       const branches = stdout ? stdout.split('\n').filter(b => b.trim()) : [];
 
-      const { stdout: current } = this.execFn('git branch --show-current', this.cwd);
+      const { stdout: current } = this.execFn('git', ['branch', '--show-current'], this.cwd);
 
       const dataSlush = this.slushOut({
         signals: { branch_count: branches.length, current_branch: current.trim() },
@@ -250,7 +279,7 @@ export class GitAgent extends BasicAgent {
     }
 
     // Create branch
-    const { stdout, stderr } = this.execFn(`git checkout -b ${name}`, this.cwd);
+    const { stdout, stderr } = this.execFn('git', ['checkout', '-b', name], this.cwd);
 
     const dataSlush = this.slushOut({
       signals: { branch_created: name },
@@ -279,11 +308,11 @@ export class GitAgent extends BasicAgent {
     // Stage files
     if (files && files.length > 0) {
       const fileList = files.join(' ');
-      this.execFn(`git add ${fileList}`, this.cwd);
+      this.execFn('git', ['add', ...fileList.split(' ').filter(Boolean)], this.cwd);
     }
 
     // Commit
-    const { stdout, stderr } = this.execFn(`git commit -m "${message}"`, this.cwd);
+    const { stdout, stderr } = this.execFn('git', ['commit', '-m', message], this.cwd);
 
     const dataSlush = this.slushOut({
       signals: { committed: true, message },
@@ -310,9 +339,9 @@ export class GitAgent extends BasicAgent {
       });
     }
 
-    const bodyFlag = body ? ` --body "${body}"` : '';
     const { stdout, stderr } = this.execFn(
-      `gh pr create --title "${title}"${bodyFlag} --base ${base}`,
+      'gh',
+      ['pr', 'create', '--title', title, ...(body ? ['--body', body] : []), '--base', base],
       this.cwd,
     );
 

@@ -204,3 +204,184 @@ class TestActionInference:
         result = json.loads(agent.perform(command="echo direct"))
         assert result["status"] == "success"
         assert "direct" in result["output"]
+
+
+class TestNewlineBypass:
+    """The exec safety policy checked one string and ran another.
+
+    normalize_command collapses all whitespace, newlines included, so the
+    injection rule for newlines never saw one: the policy judged the flattened
+    single line safe and subprocess.run then executed the original, newline and
+    all — two commands, neither approved.
+
+    This file is also the one exempted from the no-shell-command-building
+    guard, on the grounds that exec safety gates it, which only holds while the
+    gate cannot be stepped around.
+    """
+
+    def test_a_newline_command_is_refused(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls\ntouch /tmp/exec-safety-bypass-proof"))
+        assert result["status"] == "error", result
+        assert result.get("blocked") is True, result
+        assert "newline-injection" in result["message"], result
+        # Not turned into an approval request either: a reviewer would have
+        # been shown the flattened line rather than what would run.
+        assert "approval_id" not in result, result
+
+    def test_a_carriage_return_is_refused(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls\rtouch /tmp/x"))
+        assert result.get("blocked") is True, result
+
+    def test_the_two_spellings_really_did_disagree(self):
+        # Pins the premise. If normalization stops swallowing newlines, this
+        # fails and the guard can go.
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        raw = "ls\ntouch /tmp/x"
+        assert safety.check_command(raw).safe is False
+        assert safety.check_command(safety.normalize_command(raw)).safe is True
+
+    def test_an_ordinary_command_still_runs(self):
+        # Anti-vacuity: a guard that blocked everything would pass the above.
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="echo hello"))
+        assert result["status"] == "success", result
+        assert "hello" in result["output"]
+
+
+class TestSingleAmpersandChain:
+    """A single `&` chains commands too.
+
+    The injection patterns covered `&&` and not `&`, so "ls & touch /tmp/x" was
+    judged safe and both commands ran. Verified in a real shell:
+    `sh -c 'ls / >/dev/null & touch /tmp/marker'` creates the marker.
+    """
+
+    def test_a_background_chain_is_blocked(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls & touch /tmp/amp-bypass-proof"))
+        assert result.get("blocked") is True, result
+        assert "background-chain" in result["message"], result
+
+    def test_a_trailing_ampersand_is_blocked(self):
+        from openrappter.security.exec_safety import ExecSafety
+        assert ExecSafety().check_command("ls &").safe is False
+
+    def test_double_ampersand_keeps_its_own_reason(self):
+        # The new rule must not swallow the existing one.
+        from openrappter.security.exec_safety import ExecSafety
+        result = ExecSafety().check_command("ls && touch /tmp/x")
+        assert result.safe is False
+        assert "and-chain" in result.reason
+
+    def test_ordinary_commands_are_untouched(self):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        for cmd in ("echo hello", "ls -la", "git status"):
+            assert safety.check_command(cmd).safe is True, cmd
+
+
+class TestGitIsDualUse:
+    """git runs whatever its configuration tells it to.
+
+    `git -c alias.x='!cmd' x` executes `cmd`; there is no separator and no
+    substitution, so nothing in the injection patterns can see it, and git was
+    on the safe list. Verified against a real repository: the alias form
+    creates the marker file.
+    """
+
+    def test_git_is_classified_dual_use(self):
+        from openrappter.security.exec_safety import ExecSafety, DUAL_USE_BINS
+        assert "git" in DUAL_USE_BINS
+        result = ExecSafety().check_command("git -c alias.x=!touch /tmp/x x")
+        assert result.safe is True            # still on the safe list
+        assert result.requires_approval is True  # but a human has to look
+
+    def test_ordinary_read_only_binaries_are_still_not_dual_use(self):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        for cmd in ("ls -la", "cat f", "grep x f", "echo hi"):
+            result = safety.check_command(cmd)
+            assert result.safe is True, cmd
+            assert not result.requires_approval, cmd
+
+
+class TestReachingASafeNameByAnotherRoute:
+    """_parse_binary skips leading VAR=value assignments and takes the
+    basename. Both are right for classifying the command and neither was
+    evaluated as a risk, so two shapes ran ungated:
+
+      LD_PRELOAD=/tmp/x.so ls   the loader reads the assignment after exec;
+                                the `env LD_PRELOAD=...` spelling already
+                                required approval because env is dual-use
+      ./ls                      judged as the system ls by basename
+    """
+
+    def _safety(self):
+        from openrappter.security.exec_safety import ExecSafety
+        return ExecSafety()
+
+    def test_environment_assignment_is_gated(self):
+        safety = self._safety()
+        for cmd in ("LD_PRELOAD=/tmp/evil.so ls",
+                    "DYLD_INSERT_LIBRARIES=/tmp/evil.dylib ls"):
+            result = safety.check_command(cmd)
+            assert result.requires_approval is True, cmd
+            assert "Environment assignment" in result.reason, cmd
+
+    def test_a_plantable_path_is_gated(self):
+        safety = self._safety()
+        for cmd in ("./ls", "/tmp/ls"):
+            result = safety.check_command(cmd)
+            assert result.requires_approval is True, cmd
+
+    def test_system_directories_stay_ungated(self):
+        # Over-gating has a cost: every gated command needs a human.
+        safety = self._safety()
+        for cmd in ("/bin/ls -la", "/usr/bin/grep x f"):
+            assert not safety.check_command(cmd).requires_approval, cmd
+
+    def test_ordinary_commands_stay_ungated(self):
+        safety = self._safety()
+        for cmd in ("ls -la", "cat f", "echo hi"):
+            assert not safety.check_command(cmd).requires_approval, cmd
+
+    def test_an_unknown_path_binary_is_blocked_not_gated(self):
+        result = self._safety().check_command("scripts/build.sh")
+        assert result.safe is False
+        assert "not in the safe list" in result.reason
+
+
+class TestTheApprovalQueueTellsTheReviewerWhy:
+    """check_command works out precisely why a command needs a person, and that
+    explanation went to the caller in the agent's error message. The approval
+    queue recorded 'Approval token issued for: <cmd>', so the human deciding
+    saw the command restated back at them.
+
+    Gating a command only helps if the person approving it can judge it.
+    """
+
+    def _pending_for(self, command):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        ShellAgent(exec_safety=safety).perform(command=command)
+        return safety.list_pending_approvals()[0]
+
+    def test_names_the_environment_assignment(self):
+        pending = self._pending_for("LD_PRELOAD=/tmp/evil.so ls")
+        assert "Environment assignment" in pending["reason"], pending
+        assert "LD_PRELOAD" in pending["cmd"]
+
+    def test_names_the_plantable_path(self):
+        pending = self._pending_for("./ls")
+        assert "not necessarily the system tool" in pending["reason"], pending
+
+    def test_names_the_dual_use_binary(self):
+        pending = self._pending_for("curl https://example.com")
+        assert "Dual-use binary" in pending["reason"], pending
+
+    def test_does_not_restate_the_command_as_its_own_justification(self):
+        pending = self._pending_for("LD_PRELOAD=/tmp/evil.so ls")
+        assert not pending["reason"].startswith("Approval token issued for:"), pending

@@ -139,7 +139,13 @@ public final class ChatViewModel {
                 chatState = .idle
                 streamingText = ""
             } catch {
-                // Silently ignore abort failures
+                // Not silent: the Stop button only renders while `chatState` is
+                // `.streaming`, so a failed abort left the UI streaming with a
+                // button that did nothing however many times it was pressed, and
+                // no way to tell that the request had not landed. Surfacing the
+                // failure also restores the input, because `.error` is not
+                // `.streaming`.
+                chatState = .error("Could not stop the response: \(error.localizedDescription)")
             }
         }
     }

@@ -33,6 +33,11 @@ export function registerUpdateCommand(program: Command): void {
         console.log('\n\x1b[33mA new version is available!\x1b[0m');
         console.log('\nTo update, run:');
         console.log('  npm install -g openrappter@latest');
+        // Updating is a manual npm install, so nothing in the product can
+        // snapshot first. This is the one moment the user is known to be
+        // about to change the installation, so it is where the offer belongs.
+        console.log('\nTo be able to go back if it goes wrong, first run:');
+        console.log('  openrappter backup create --reason "before upgrade"');
       } else {
         console.log('\n\x1b[32mYou are using the latest version.\x1b[0m');
       }

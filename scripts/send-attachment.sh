@@ -63,6 +63,8 @@ STAGE_DIR="$HOME/Pictures/.openrappter-outbox"
 mkdir -p "$STAGE_DIR"
 STAGED="$STAGE_DIR/$(date +%s)-$$-$(basename "$SOURCE")"
 
+# Invoked by the trap below, which shellcheck does not trace.
+# shellcheck disable=SC2317
 cleanup() { rm -f "$STAGED"; }
 trap cleanup EXIT
 

@@ -200,7 +200,7 @@ export class ComputerUseAgent extends BasicAgent {
     const filename = `screenshot_${Date.now()}_${this.screenshotCounter++}.png`;
     const filepath = join(tmpdir(), filename);
 
-    await execAsync(`/usr/sbin/screencapture -x -C ${filepath}`);
+    await this.runFile('/usr/sbin/screencapture', ['-x', '-C', filepath]);
 
     // Get screen dimensions
     const { stdout: dimOut } = await execAsync(
@@ -567,38 +567,21 @@ export class ComputerUseAgent extends BasicAgent {
   private async readScreen(): Promise<string> {
     // Take a screenshot and try to extract text via macOS Vision framework
     const screenshotPath = join(tmpdir(), `ocr_${Date.now()}.png`);
-    await execAsync(`/usr/sbin/screencapture -x -C ${screenshotPath}`);
+    await this.runFile('/usr/sbin/screencapture', ['-x', '-C', screenshotPath]);
 
     // Use shortcuts or python with Vision framework for OCR
     try {
-      const { stdout } = await execAsync(
-        `python3 -c "
+      const { stdout } = await execFileAsync(
+        'python3',
+        [
+          '-c',
+          `
+import sys
 import Quartz
 from Foundation import NSURL
 import Vision
 
-
-export const __manifest__ = {
-  schema: 'rapp-agent/1.0',
-  name: '@openrappter/computer-use',
-  version: '1.0.0',
-  display_name: 'Computer Use',
-  description: 'Controls the computer like a person \u2014 takes screenshots, moves the mouse, clicks, types, scrolls, and launches apps. Uses macOS native APIs (CoreGraphics, AppleScript, Accessibility).',
-  author: 'Kody Wildfeuer',
-  ring: 'ga',
-  capabilities: [
-    'filesystem-write',
-    'process-exec'
-  ],
-  tags: [
-    'openrappter',
-    'computer-use'
-  ],
-  category: 'automation',
-  quality_tier: 'official',
-  requires_env: []
-} as const;
-url = NSURL.fileURLWithPath_('${screenshotPath}')
+url = NSURL.fileURLWithPath_(sys.argv[1])
 request = Vision.VNRecognizeTextRequest.alloc().init()
 request.setRecognitionLevel_(1)
 handler = Vision.VNImageRequestHandler.alloc().initWithURL_options_(url, None)
@@ -609,8 +592,10 @@ for obs in results:
     candidate = obs.topCandidates_(1)[0]
     texts.append(candidate.string())
 print('\\n'.join(texts))
-"`,
-        { timeout: 15000 }
+`,
+          screenshotPath,
+        ],
+        { timeout: 15000, encoding: 'utf8' }
       );
 
       // Clean up screenshot
@@ -781,3 +766,24 @@ int main() {
     }
   }
 }
+
+export const __manifest__ = {
+  schema: 'rapp-agent/1.0',
+  name: '@openrappter/computer-use',
+  version: '1.0.0',
+  display_name: 'Computer Use',
+  description: 'Controls the computer like a person \u2014 takes screenshots, moves the mouse, clicks, types, scrolls, and launches apps. Uses macOS native APIs (CoreGraphics, AppleScript, Accessibility).',
+  author: 'Kody Wildfeuer',
+  ring: 'ga',
+  capabilities: [
+    'filesystem-write',
+    'process-exec'
+  ],
+  tags: [
+    'openrappter',
+    'computer-use'
+  ],
+  category: 'automation',
+  quality_tier: 'official',
+  requires_env: []
+} as const;

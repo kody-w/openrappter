@@ -33,6 +33,12 @@ DUAL_USE_BINS = {
     'node', 'python', 'python3', 'tsx', 'tsc', 'vitest',
     'chmod', 'chown',
     'find', 'awk', 'sed', 'tar', 'env',
+    # git runs whatever its configuration tells it to.
+    # `git -c alias.x='!cmd' x` executes `cmd`, and `-c core.pager=` does the
+    # same wherever a pager is used. Verified: the alias form creates the file.
+    # Nothing in the injection patterns can see this — there is no separator,
+    # no substitution, and the binary is on the safe list.
+    'git',
     'mkdir', 'cp', 'mv', 'touch', 'gzip', 'gunzip', 'zip', 'unzip',
     'date', 'sort', 'uniq',
 }
@@ -46,6 +52,10 @@ INJECTION_PATTERNS = [
     (re.compile(r'<\(.*\)'), 'process-substitution'),
     (re.compile(r'\|\|'), 'or-chain'),
     (re.compile(r'&&'), 'and-chain'),
+    # A single `&` is a separator too, not just a background marker:
+    # `ls & rm x` runs both. `&&` was covered and this was not, so the policy
+    # called it safe and the second command ran unreviewed.
+    (re.compile(r'(?<!&)&(?!&)'), 'background-chain'),
     (re.compile(r';'), 'semicolon-chain'),
     (re.compile(r'(?<!\|)\|(?!\|)'), 'pipe-chain'),
     # Any output redirection can mutate absolute, relative, or home paths.
@@ -145,6 +155,44 @@ class ExecSafety:
             self._record_audit(cmd, binary, result, 'blocked')
             return result
 
+        # Two shapes reach a safe-listed name while running something else,
+        # and both are gated rather than blocked:
+        #
+        #   LD_PRELOAD=/tmp/x.so ls  — _parse_binary skips assignments to find
+        #     the binary, which is right for classification, but the assignment
+        #     is the dangerous part: the loader reads it after exec. The `env`
+        #     spelling already required approval because env is dual-use; the
+        #     shell's own assignment syntax did not.
+        #
+        #   ./ls                     — _parse_binary takes the basename, so a
+        #     file planted in the working directory is judged as the system
+        #     tool of the same name. Standard system directories are not
+        #     writable without root, so those stay ungated.
+        trimmed = cmd.strip()
+        has_env_prefix = bool(re.match(r'[A-Za-z_][A-Za-z0-9_]*=', trimmed))
+        invoked = next(
+            (part for part in trimmed.split() if '=' not in part), ''
+        )
+        trusted_dirs = ('/bin/', '/usr/bin/', '/sbin/', '/usr/sbin/')
+        path_qualified = '/' in invoked and not invoked.startswith(trusted_dirs)
+
+        if binary not in DUAL_USE_BINS and (has_env_prefix or path_qualified):
+            why = (
+                'Environment assignment before the command can change what it '
+                'loads'
+                if has_env_prefix
+                else f"Command is a path, so '{binary}' is not necessarily the "
+                     "system tool"
+            )
+            result = SafetyCheckResult(
+                safe=True,
+                binary=binary,
+                requires_approval=True,
+                reason=f'{why} — requires explicit approval',
+            )
+            self._record_audit(cmd, binary, result, 'pending')
+            return result
+
         result = (
             SafetyCheckResult(
                 safe=True,
@@ -179,7 +227,12 @@ class ExecSafety:
     # consumed exactly once for the exact same normalized command it was
     # issued for.
 
-    def issue_approval_token(self, cmd: str, ttl_seconds: float = 300.0) -> ApprovalToken:
+    def issue_approval_token(
+        self,
+        cmd: str,
+        ttl_seconds: float = 300.0,
+        reason: str | None = None,
+    ) -> ApprovalToken:
         token_id = f'token_{uuid.uuid4().hex}'
         normalized = self.normalize_command(cmd)
         token = ApprovalToken(
@@ -196,7 +249,15 @@ class ExecSafety:
             cmd=normalized,
             binary=self._parse_binary(normalized),
             safe=False,
-            reason=f'Approval token issued for: {normalized}',
+            # The policy already worked out why this needs a person; without
+            # it the reviewer sees the command restated back at them and has
+            # to re-derive the danger. The caller was getting this
+            # explanation and the reviewer was not.
+            reason=(
+                reason
+                if reason
+                else f'Approval token issued for: {normalized}'
+            ),
             status='pending',
         ))
 
@@ -251,6 +312,36 @@ class ExecSafety:
 
     def get_pending_approval_tokens(self) -> List[ApprovalToken]:
         return [t for t in self._tokens.values() if t.status == 'pending']
+
+    def list_pending_approvals(self) -> List[dict]:
+        """What a reviewer needs to decide, not just what is pending.
+
+        ApprovalToken carries no reason, so a reviewer listing tokens saw the
+        command and nothing about why it needs them. check_command already
+        worked that out; it is recorded on the audit entry and joined back
+        here. Mirrors the TypeScript view of the same name.
+        """
+        now = time.time()
+        pending = []
+        for token in self._tokens.values():
+            if token.status != 'pending' or token.expires_at <= now:
+                continue
+            entry = next(
+                (e for e in self._audit_log if e.id == token.id), None
+            )
+            pending.append({
+                'id': token.id,
+                'cmd': token.cmd,
+                'binary': self._parse_binary(token.cmd),
+                'reason': (
+                    entry.reason if entry and entry.reason
+                    else f'Approval required for: {token.cmd}'
+                ),
+                'created_at': token.created_at,
+                'expires_at': token.expires_at,
+                'kind': 'token',
+            })
+        return sorted(pending, key=lambda p: p['created_at'])
 
     def get_approval_token(self, token_id: str) -> Optional[ApprovalToken]:
         return self._tokens.get(token_id)

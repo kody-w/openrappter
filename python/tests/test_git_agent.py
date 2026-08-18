@@ -12,7 +12,11 @@ from openrappter.agents.git_agent import GitAgent
 
 def make_exec(responses):
     """Build a deterministic exec function from a dict of command-prefix -> result."""
-    def exec_fn(cmd, cwd=None):
+    def exec_fn(binary, args, cwd=None):
+        # The agent now passes an argv rather than a command line -- a shell was
+        # reachable through the old string. Joining restores what these
+        # expectations were written against, without restoring the shell.
+        cmd = " ".join([binary, *args])
         for prefix, response in responses.items():
             if prefix in cmd:
                 return response
@@ -53,7 +57,7 @@ class TestGitAgentInit:
         assert agent._cwd == "/tmp"
 
     def test_accepts_custom_exec_fn(self):
-        fn = lambda cmd, cwd=None: {"stdout": "", "stderr": ""}
+        fn = lambda binary, args, cwd=None: {"stdout": "", "stderr": ""}
         agent = GitAgent(exec_fn=fn)
         assert agent._exec_fn is fn
 
@@ -183,13 +187,38 @@ class TestDiffAction:
 
 class TestLogAction:
     def _make_commit_line(self, hash_val="abc123", author="Dev", subject="Fix bug"):
-        return json.dumps({
-            "hash": hash_val * 6,
-            "short": hash_val,
-            "author": author,
-            "date": "2026-01-01 10:00:00",
-            "subject": subject,
-        })
+        # Mirrors what `--pretty=format:%H%x1f%h%x1f%an%x1f%ai%x1f%s` emits.
+        return "\x1f".join([
+            hash_val * 6,
+            hash_val,
+            author,
+            "2026-01-01 10:00:00",
+            subject,
+        ])
+
+    def test_log_keeps_a_commit_whose_subject_quotes_something(self):
+        """git used to build the JSON itself, so a quote made the line
+        unparseable and the commit was dropped without a word — including from
+        `count`."""
+        lines = "\n".join([
+            self._make_commit_line("aaa", subject='fix: handle "empty" input'),
+            self._make_commit_line("bbb", subject="chore: plain"),
+        ])
+        exec_fn = make_exec({"git log": {"stdout": lines, "stderr": ""}})
+        agent = GitAgent(exec_fn=exec_fn)
+        result = json.loads(agent.perform(action="log"))
+        assert result["count"] == 2, result
+        subjects = [c["subject"] for c in result["commits"]]
+        assert 'fix: handle "empty" input' in subjects
+        assert "chore: plain" in subjects
+
+    def test_log_keeps_a_commit_whose_subject_has_a_backslash(self):
+        lines = self._make_commit_line("ccc", subject=r"fix: escape \n properly")
+        exec_fn = make_exec({"git log": {"stdout": lines, "stderr": ""}})
+        agent = GitAgent(exec_fn=exec_fn)
+        result = json.loads(agent.perform(action="log"))
+        assert result["count"] == 1, result
+        assert result["commits"][0]["subject"] == r"fix: escape \n properly"
 
     def test_log_returns_success(self):
         line = self._make_commit_line()
@@ -228,7 +257,8 @@ class TestLogAction:
     def test_log_respects_count_parameter(self):
         captured = []
 
-        def exec_fn(cmd, cwd=None):
+        def exec_fn(binary, args, cwd=None):
+            cmd = " ".join([binary, *args])
             captured.append(cmd)
             return {"stdout": "", "stderr": ""}
 
@@ -305,7 +335,8 @@ class TestCommitAction:
     def test_commit_with_files_stages_them(self):
         staged = []
 
-        def exec_fn(cmd, cwd=None):
+        def exec_fn(binary, args, cwd=None):
+            cmd = " ".join([binary, *args])
             if "git add" in cmd:
                 staged.append(cmd)
                 return {"stdout": "", "stderr": ""}

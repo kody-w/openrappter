@@ -200,6 +200,72 @@ def declared_manifest(path):
     return None
 
 
+def _js_balanced_block(text, start):
+    """(start, end) of the `{...}` beginning at or after `start`, nesting-aware."""
+    open_at = text.find("{", start)
+    if open_at == -1:
+        return None
+    depth = 0
+    for i in range(open_at, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return open_at, i + 1
+    return None
+
+
+def js_declared_manifest(path):
+    """Read a TypeScript/JavaScript `__manifest__` statically.
+
+    Deliberately does not import the module, for the same reason
+    `declared_manifest` does not: deciding whether to trust a file by running
+    it is the wrong order.
+
+    A declaration only counts if it is code. A generated manifest block was
+    once inserted at an offset that fell inside the Python source string
+    `ComputerUseAgent.ts` passes to `python3`; the file then contained every
+    substring a text check looks for while exporting no manifest at all. A
+    manifest block spans lines, and the only JavaScript string that can span
+    lines is a template literal, so an odd number of backticks before the
+    declaration means it is inside one and is not a declaration."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+    except OSError:
+        return None
+    for m in re.finditer(r"(?m)^\s*(?:export\s+)?(?:const|let|var)?\s*"
+                         r"__manifest__\s*[:=]", body):
+        if len(re.findall(r"(?<!\\)`", body[:m.start()])) % 2:
+            continue  # inside a template literal, so not a declaration
+        block = _js_balanced_block(body, m.end())
+        if block is None:
+            continue
+        raw = body[block[0]:block[1]]
+        man = {}
+        for key, value in re.findall(
+                r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
+                r"(\[[^\]]*\]|'[^']*'|\"[^\"]*\"|[^,\n]+)", raw):
+            value = value.strip().rstrip(",")
+            if value.startswith("["):
+                man[key] = [a or b for a, b in
+                            re.findall(r"'([^']*)'|\"([^\"]*)\"", value)]
+            elif value[:1] in "'\"":
+                man[key] = value[1:-1]
+            else:
+                man[key] = value
+        if man:
+            return man
+    return None
+
+
+def any_declared_manifest(path):
+    """The manifest a file declares, whatever language it is written in."""
+    return (declared_manifest(path) if path.endswith(".py")
+            else js_declared_manifest(path))
+
+
 # ── the agent contract ───────────────────────────────────────────────────────
 
 @check("R1", "Every agent is a single file, in every language.")
@@ -223,13 +289,8 @@ def r2_manifest_present():
         return None, "no agents found"
     missing = []
     for path in files:
-        if path.endswith(".py"):
-            man = declared_manifest(path)
-            ok = man is not None and man.get("schema") == AGENT_SCHEMA
-        else:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                body = fh.read()
-            ok = "__manifest__" in body and AGENT_SCHEMA in body
+        man = any_declared_manifest(path)
+        ok = man is not None and man.get("schema") == AGENT_SCHEMA
         if not ok:
             missing.append(os.path.relpath(path, ROOT))
     if missing:
@@ -243,8 +304,8 @@ def r2_manifest_present():
 def r3_manifest_complete():
     required = ["schema", "name", "version", "description", "capabilities"]
     bad = []
-    for path in agent_files():
-        man = declared_manifest(path) or {}
+    for path in all_agent_files():
+        man = any_declared_manifest(path) or {}
         gaps = [k for k in required if k not in man]
         if gaps:
             bad.append(f"{os.path.basename(path)} lacks {gaps}")
@@ -274,8 +335,9 @@ def r4_capabilities_honest():
                        f"{undeclared} ({hint})")
     if bad:
         return False, "; ".join(bad[:3])
-    return True, ("all %d agents declare every capability their syntax tree "
-                  "can reach" % len(agent_files()))
+    return True, ("all %d Python agents declare every capability their syntax "
+                  "tree can reach; TypeScript is covered by "
+                  "capability-reachability.test.ts" % len(agent_files()))
 
 
 @check("R5", "No agent over-declares a capability it cannot reach.")
@@ -294,7 +356,8 @@ def r5_no_over_declaration():
             noisy.append(f"{os.path.basename(path)} claims unused {extra}")
     if noisy:
         return False, "; ".join(noisy[:3])
-    return True, "no agent claims a capability its code does not use"
+    return True, ("no Python agent claims a capability its code does not use; "
+                  "TypeScript is covered by capability-reachability.test.ts")
 
 
 # ── kernel parity ────────────────────────────────────────────────────────────
@@ -312,7 +375,11 @@ def r6_kernel_parity():
     missing = [r for r in required if f'"{r}"' not in body and f"'{r}'" not in body]
     if missing:
         return False, "routes absent from the brainstem: %s" % ", ".join(missing)
-    if "response" not in body:
+    if '"response":' not in body and "'response':" not in body:
+        # The bare word is not evidence: `send_response` is a standard
+        # BaseHTTPRequestHandler method, so "response" appears in any server
+        # whatever its reply envelope looks like. Renaming every `"response":`
+        # key in the brainstem left this check passing.
         return False, "the /chat reply field `response` is not present"
     return True, "routes %s present; /chat replies in `response`" % ", ".join(required)
 
@@ -343,7 +410,8 @@ def r7_agents_are_portable():
                 offenders.append(f"{os.path.basename(path)} hard-imports {module}")
     if offenders:
         return False, "; ".join(sorted(set(offenders))[:3])
-    return True, "agents import nothing from the kernel beyond basic_agent"
+    return True, ("Python agents import nothing from the kernel beyond "
+                  "basic_agent")
 
 
 # ── licence and provenance ───────────────────────────────────────────────────
@@ -351,22 +419,46 @@ def r7_agents_are_portable():
 @check("R8", "The RAPP substrate is attributed.")
 def r8_attribution():
     """RAPP is open and MIT-licensed; this organism stands on it. Saying so is
-    both the licence condition and the point of the architecture."""
+    both the licence condition and the point of the architecture.
+
+    The token has to stand alone. `rapp` as a plain substring is satisfied by
+    the project's own name — openRAPPter contains it — so the check used to
+    pass on a README with every mention of the substrate deleted. A licence
+    condition that cannot fail is worse than none: it reports compliance
+    without ever having looked."""
+    substrate = re.compile(r"(?<![a-z0-9])rapp(?![a-z])")
+    licence = re.compile(r"(?<![a-z0-9])mit(?![a-z])")
     for name in ("README.md", "LICENSE", "NOTICE"):
         path = os.path.join(ROOT, name)
         if os.path.isfile(path):
             with open(path, encoding="utf-8", errors="replace") as fh:
                 body = fh.read().lower()
-            if "rapp" in body and ("mit" in body or "rapp-1" in body):
+            if substrate.search(body) and (licence.search(body)
+                                           or "rapp-1" in body):
                 return True, f"{name} attributes the RAPP substrate"
     return False, "no file attributes RAPP as the underlying substrate"
 
 
-@check("R9", "The repository contains no credential of its own.")
-def r9_no_secrets():
+def keyring_broker():
+    """The credential broker R9 will use, or None.
+
+    Both R9 and the tests that verify the broker's JSON contract must look in
+    the same place. When the tests looked only in ~/.local/bin while R9 also
+    honoured PATH, a machine with the broker on PATH alone ran R9 while
+    skipping every contract test — so the check executed against a contract
+    nothing had checked. CI installs to ~/.local/bin, which is why the two
+    agreed there and the drift went unnoticed."""
     broker = shutil.which("rapp-keyring") or \
         os.path.expanduser("~/.local/bin/rapp-keyring")
-    if not (os.path.isfile(broker) and os.access(broker, os.X_OK)):
+    if os.path.isfile(broker) and os.access(broker, os.X_OK):
+        return broker
+    return None
+
+
+@check("R9", "The repository contains no credential of its own.")
+def r9_no_secrets():
+    broker = keyring_broker()
+    if broker is None:
         return None, ("rapp-keyring not installed; cannot run the credential scan "
                       "(curl -fsSL https://kody-w.github.io/rapp-keyring/install.sh | bash)")
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT,

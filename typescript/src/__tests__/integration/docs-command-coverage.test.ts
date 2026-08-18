@@ -38,13 +38,22 @@ const repoRoot = path.resolve(tsRoot, '..');
  */
 
 /** Documentation that instructs a reader to run something. */
+/**
+ * Every document that tells a reader to run something.
+ *
+ * This used to be the HTML docs and README.md only. `docs/*.md` was excluded,
+ * which included `docs/cli-commands.md` — the file the sibling test reads to
+ * decide whether a registered command is documented. So that reference was
+ * trusted as an oracle in one direction and never checked in the other: it
+ * could name a command the CLI does not register and nothing would fail.
+ */
 function docFiles(): string[] {
   const docsDir = path.join(repoRoot, 'docs');
-  const html = fs
+  const entries = fs
     .readdirSync(docsDir)
-    .filter((f) => f.endsWith('.html'))
+    .filter((f) => f.endsWith('.html') || f.endsWith('.md'))
     .map((f) => path.join(docsDir, f));
-  return [...html, path.join(repoRoot, 'README.md')].filter((f) => fs.existsSync(f));
+  return [...entries, path.join(repoRoot, 'README.md')].filter((f) => fs.existsSync(f));
 }
 
 /**
@@ -139,7 +148,13 @@ interface Help {
   acceptsPositional: boolean;
 }
 
-const helpCache = new Map<string, Help | null>();
+/**
+ * Keyed on the command path, holding the in-flight promise rather than the
+ * resolved value. Two callers asking for the same help at the same time then
+ * share one `tsx` start instead of racing to populate the cache after both
+ * have already paid for it.
+ */
+const helpCache = new Map<string, Promise<Help | null>>();
 
 /**
  * The help for a command path, as the CLI itself reports it.
@@ -148,9 +163,16 @@ const helpCache = new Map<string, Help | null>();
  * is measured against current source and never against a stale build — the same
  * choice PR #177 made, and for the same reason.
  */
-async function readHelp(commandPath: string[]): Promise<Help | null> {
+function readHelp(commandPath: string[]): Promise<Help | null> {
   const key = commandPath.join(' ');
-  if (helpCache.has(key)) return helpCache.get(key) ?? null;
+  const inFlight = helpCache.get(key);
+  if (inFlight) return inFlight;
+  const pending = loadHelp(commandPath, key);
+  helpCache.set(key, pending);
+  return pending;
+}
+
+async function loadHelp(commandPath: string[], key: string): Promise<Help | null> {
 
   const tsx = path.join(tsRoot, 'node_modules', '.bin', 'tsx');
   let stdout = '';
@@ -161,7 +183,6 @@ async function readHelp(commandPath: string[]): Promise<Help | null> {
       env: { ...process.env, NO_COLOR: '1' },
     }));
   } catch {
-    helpCache.set(key, null);
     return null;
   }
 
@@ -172,7 +193,6 @@ async function readHelp(commandPath: string[]): Promise<Help | null> {
   // was swallowed as a chat message".
   const expectedUsage = `Usage: openrappter${key ? ` ${key}` : ''}`;
   if (!usage.startsWith(expectedUsage)) {
-    helpCache.set(key, null);
     return null;
   }
 
@@ -220,7 +240,6 @@ async function readHelp(commandPath: string[]): Promise<Help | null> {
     expectsSubcommand: /\[command\]/.test(usage),
     acceptsPositional,
   };
-  helpCache.set(key, help);
   return help;
 }
 
@@ -347,14 +366,54 @@ describe('documentation only tells readers to run commands that exist', () => {
     expect(total).toBeGreaterThan(20);
   });
 
-  it('documents no command the CLI does not register', async () => {
-    const problems: Problem[] = [];
+  it('leaves no registered command undocumented', () => {
+    // The other direction, and it was the unguarded one. This file has always
+    // checked that documentation names only real commands; nothing checked
+    // that real commands are named anywhere. `hatch` and `doctor` had zero
+    // mentions in README.md or docs/ — a headline capability and the
+    // diagnostics entry point, both undiscoverable without --help.
+    //
+    // docs/cli-commands.md is the reference that satisfies this. Listing a
+    // command there is the minimum; describing it properly elsewhere is better
+    // and is not something a test can judge.
+    const reference = fs.readFileSync(
+      path.resolve(tsRoot, '..', 'docs/cli-commands.md'),
+      'utf8',
+    );
+    const undocumented = [...rootHelp.subcommands.keys()]
+      .filter((name) => !new RegExp(`\\\`${name}\\\``).test(reference))
+      .sort();
+    expect(undocumented).toEqual([]);
+  });
 
+  it('documents no command the CLI does not register', async () => {
+    const invocations: { argv: { value: string; quoted: boolean }[]; file: string; line: string }[] = [];
     for (const file of docFiles()) {
       for (const { argv, line } of documentedInvocations(file)) {
-        problems.push(...(await checkInvocation(argv, path.relative(repoRoot, file), line, rootHelp)));
+        invocations.push({ argv, file: path.relative(repoRoot, file), line });
       }
     }
+
+    // Each distinct command path costs one `tsx` cold start, and the walk used
+    // to pay for them one after another — the slowest test in the repository at
+    // ~15s, on the critical path of every PR. The work is IO-bound on process
+    // startup, so a bounded number run at once. Bounded rather than unbounded
+    // because a CI runner that swaps is how a slow suite becomes a flaky one.
+    const CONCURRENCY = 8;
+    const results: Problem[][] = new Array(invocations.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, invocations.length) }, async () => {
+        for (let i = next++; i < invocations.length; i = next++) {
+          const { argv, file, line } = invocations[i];
+          results[i] = await checkInvocation(argv, file, line, rootHelp);
+        }
+      }),
+    );
+
+    // Indexed rather than pushed, so the report reads in document order however
+    // the workers interleave.
+    const problems = results.flat();
 
     const report = problems
       .map((p) => `  ${p.file}\n    $ ${p.line}\n    ${p.detail}`)

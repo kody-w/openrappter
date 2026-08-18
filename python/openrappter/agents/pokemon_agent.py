@@ -770,6 +770,23 @@ def public_runtime_status(runtime_dir: Path = DEFAULT_RUNTIME_DIR) -> dict[str, 
     return public
 
 
+class SettingError(ValueError):
+    """A caller-supplied setting is not the number it has to be."""
+
+
+def numeric_setting(kwargs: Any, field: str, default: Any, cast: Any) -> Any:
+    """Coerce a caller-supplied setting, or say which one was wrong.
+
+    These arrive from a model, so they can be any string at all. `int("abc")`
+    raises ValueError, nothing above catches ValueError, and one odd argument
+    took the whole agent down rather than coming back as a refusal."""
+    raw = kwargs.get(field, default)
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        raise SettingError(f"{field} must be a number, got {raw!r}") from None
+
+
 def positive_finite_float(value: Any) -> float:
     try:
         parsed = float(value)
@@ -1052,6 +1069,37 @@ class PokemonAgent(BasicAgent):
         )
         log_handle = os.fdopen(log_descriptor, "a", encoding="utf-8")
         instance_id = uuid.uuid4().hex
+        try:
+            port_setting = numeric_setting(kwargs, "port", DEFAULT_PORT, int)
+            max_clips_setting = numeric_setting(
+                kwargs, "max_clips", DEFAULT_MAX_CLIPS, int
+            )
+            max_states_setting = numeric_setting(
+                kwargs, "max_states", DEFAULT_MAX_STATES, int
+            )
+            max_storage_setting = numeric_setting(
+                kwargs, "max_storage_gb", DEFAULT_MAX_STORAGE_GB, float
+            )
+            min_free_setting = numeric_setting(
+                kwargs, "min_free_gb", DEFAULT_MIN_FREE_GB, float
+            )
+            # Validated here rather than where it is used, which is after the
+            # supervisor has been spawned: a bad value there left a live
+            # process behind with nothing tracking it.
+            minimum_startup_timeout = (
+                COPILOT_START_TIMEOUT_SECONDS
+                + COPILOT_STOP_TIMEOUT_SECONDS * 2
+                + 10
+            )
+            startup_timeout = max(
+                numeric_setting(
+                    kwargs, "startup_timeout", minimum_startup_timeout, float
+                ),
+                minimum_startup_timeout,
+            )
+        except SettingError as error:
+            log_handle.close()
+            return json.dumps({"status": "error", "message": str(error)})
         command = [
             sys.executable,
             "-m",
@@ -1062,19 +1110,19 @@ class PokemonAgent(BasicAgent):
             "--runtime-dir",
             str(runtime_dir),
             "--port",
-            str(int(kwargs.get("port", DEFAULT_PORT))),
+            str(port_setting),
             "--clip-minutes",
             str(clip_minutes),
             "--instance-id",
             instance_id,
             "--max-clips",
-            str(int(kwargs.get("max_clips", DEFAULT_MAX_CLIPS))),
+            str(max_clips_setting),
             "--max-states",
-            str(int(kwargs.get("max_states", DEFAULT_MAX_STATES))),
+            str(max_states_setting),
             "--max-storage-gb",
-            str(float(kwargs.get("max_storage_gb", DEFAULT_MAX_STORAGE_GB))),
+            str(max_storage_setting),
             "--min-free-gb",
-            str(float(kwargs.get("min_free_gb", DEFAULT_MIN_FREE_GB))),
+            str(min_free_setting),
             "--open-viewer",
         ]
         if kwargs.get("visible", True):
@@ -1088,17 +1136,8 @@ class PokemonAgent(BasicAgent):
             start_new_session=True,
         )
         log_handle.close()
-        minimum_startup_timeout = (
-            COPILOT_START_TIMEOUT_SECONDS
-            + COPILOT_STOP_TIMEOUT_SECONDS * 2
-            + 10
-        )
-        startup_timeout = max(
-            float(kwargs.get("startup_timeout", minimum_startup_timeout)),
-            minimum_startup_timeout,
-        )
         deadline = time.monotonic() + startup_timeout
-        viewer_url = f"http://127.0.0.1:{int(kwargs.get('port', DEFAULT_PORT))}"
+        viewer_url = f"http://127.0.0.1:{port_setting}"
         while time.monotonic() < deadline:
             child_status = read_json(runtime_dir / "status.json")
             child_instance = child_status.get("instance_id")

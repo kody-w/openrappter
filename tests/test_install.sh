@@ -64,6 +64,7 @@ assert_executable() {
 
 # ── Source the script for function access ───────────────────
 export OPENRAPPTER_INSTALL_SH_NO_RUN=1
+# shellcheck disable=SC1090
 source "$INSTALL_SCRIPT"
 
 # Pre-load script content for content assertion tests
@@ -521,6 +522,58 @@ if echo "$banner_output" | grep -q "openrappter\|OpenRappter"; then
 else
   fail "banner missing 'openrappter'"
 fi
+
+# ── Checksum verification ───────────────────────────────────
+# `--ignore-missing` is needed because checksums.txt lists every platform and
+# only one asset is downloaded. But GNU sha256sum exits 0 when that leaves it
+# nothing to verify at all, so an asset absent from the list used to read as a
+# pass — omitting a line was enough, no forged hash required. macOS shasum
+# exits 1 in the same case, so safety depended on which tool was installed.
+printf "\n\033[1m▸ Checksum verification\033[0m\n"
+
+ck_asset="gum_0.17.0_Linux_x86_64.tar.gz"
+ck_other="gum_0.17.0_Darwin_arm64.tar.gz"
+
+ck_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+ck_run() {
+  # $1 = checksums body, $2 = target name; asset file is always created
+  local dir
+  dir="$(mktemp -d)"
+  printf 'pretend tarball\n' > "$dir/$ck_asset"
+  printf '%s' "$1" > "$dir/checksums.txt"
+  ( cd "$dir" && verify_sha256sum_file checksums.txt "$2" ) && echo 0 || echo 1
+  rm -rf "$dir"
+}
+
+ck_tmp="$(mktemp -d)"
+printf 'pretend tarball\n' > "$ck_tmp/$ck_asset"
+ck_good="$(ck_hash "$ck_tmp/$ck_asset")"
+rm -rf "$ck_tmp"
+
+assert_eq "$(ck_run "$ck_good  $ck_asset
+" "$ck_asset")" "0" "a matching asset verifies"
+
+assert_eq "$(ck_run "0000000000000000000000000000000000000000000000000000000000000000  $ck_asset
+" "$ck_asset")" "1" "a tampered asset is rejected"
+
+# The defect: every other platform listed, the downloaded one absent.
+assert_eq "$(ck_run "0000000000000000000000000000000000000000000000000000000000000000  $ck_other
+" "$ck_asset")" "1" "an asset absent from the checksums is not a pass"
+
+# Anti-vacuity: the normal case lists assets that were never downloaded.
+assert_eq "$(ck_run "0000000000000000000000000000000000000000000000000000000000000000  $ck_other
+$ck_good  $ck_asset
+" "$ck_asset")" "0" "other platforms being listed does not break a real check"
+
+assert_eq "$(ck_run "$ck_good *$ck_asset
+" "$ck_asset")" "0" "binary-mode marker is accepted"
 
 # ── Results ─────────────────────────────────────────────────
 printf "\n\033[1m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n"

@@ -10,7 +10,13 @@ public final class LaunchAgentManager {
 
     private let fileManager = FileManager.default
 
-    public init() {}
+    /// Injectable so callers under test can point at a scratch directory rather
+    /// than writing a real launch agent into the developer's home.
+    private let launchAgentsDir: String
+
+    public init(launchAgentsDir: String = NSHomeDirectory() + "/Library/LaunchAgents") {
+        self.launchAgentsDir = launchAgentsDir
+    }
 
     // MARK: - Public API
 
@@ -134,11 +140,7 @@ public final class LaunchAgentManager {
 
     // MARK: - Private
 
-    private var launchAgentsDir: String {
-        NSHomeDirectory() + "/Library/LaunchAgents"
-    }
-
-    private var plistPath: String {
+    public var plistPath: String {
         launchAgentsDir + "/" + Self.plistFilename
     }
 

@@ -353,9 +353,18 @@ export async function initiateOAuthFlow(
   const { url, state } = client.getAuthorizationUrl();
 
   // Open browser
-  const open = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  const { exec } = await import('child_process');
-  exec(`${open} "${url}"`);
+  // `start` is a cmd.exe builtin and cannot be spawned; rundll32 is the
+  // shell-free way to hand a URL to the Windows default handler.
+  const [open, leading] = process.platform === 'darwin'
+    ? ['open', [] as string[]]
+    : process.platform === 'win32'
+      ? ['rundll32', ['url.dll,FileProtocolHandler']]
+      : ['xdg-open', [] as string[]];
+  const { execFile } = await import('child_process');
+  // Server-supplied verification URI: quoting it into a shell string leaves a
+  // crafted `"` able to close the quote. One argv entry cannot be escaped out
+  // of at all.
+  execFile(open, [...leading, url], () => {});
 
   console.log(`\nOpen this URL if the browser did not open:\n${url}\n`);
 

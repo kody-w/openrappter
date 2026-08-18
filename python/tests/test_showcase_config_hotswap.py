@@ -116,6 +116,46 @@ def test_substitute_env_vars_missing_var_becomes_empty_string(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 6b. ${VAR:-default} — the documented fallback form
+#
+# The docs site shows `api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}`, but the
+# pattern was `\$\{(\w+)\}`, and neither ':' nor '-' is \w. That example matched
+# nothing and survived into the config as the literal string, to be rejected
+# later as a bad credential rather than at load time. Both runtimes had the same
+# gap, so fixing only one would have traded a bug for a parity divergence.
+# ---------------------------------------------------------------------------
+
+def test_substitute_env_vars_uses_default_when_unset(monkeypatch):
+    monkeypatch.delenv('ABSENT_API_KEY', raising=False)
+    config = {'providers': {'api_key': '${ABSENT_API_KEY:-sk-placeholder}'}}
+    result = substitute_env_vars(config)
+    assert result['providers']['api_key'] == 'sk-placeholder'
+
+
+def test_substitute_env_vars_prefers_the_variable_over_the_default(monkeypatch):
+    monkeypatch.setenv('PRESENT_API_KEY', 'sk-real')
+    config = {'providers': {'api_key': '${PRESENT_API_KEY:-sk-placeholder}'}}
+    result = substitute_env_vars(config)
+    assert result['providers']['api_key'] == 'sk-real'
+
+
+def test_substitute_env_vars_default_may_contain_punctuation(monkeypatch):
+    monkeypatch.delenv('ABSENT_URL', raising=False)
+    config = {'providers': {'url': '${ABSENT_URL:-http://localhost:8080/v1}'}}
+    result = substitute_env_vars(config)
+    assert result['providers']['url'] == 'http://localhost:8080/v1'
+
+
+def test_substitute_env_vars_empty_variable_is_not_replaced_by_default(monkeypatch):
+    # Set but empty is a deliberate value, not an absent one. TypeScript's `??`
+    # draws the line in the same place, and the two runtimes have to agree.
+    monkeypatch.setenv('EMPTY_API_KEY', '')
+    config = {'providers': {'api_key': '${EMPTY_API_KEY:-sk-placeholder}'}}
+    result = substitute_env_vars(config)
+    assert result['providers']['api_key'] == ''
+
+
+# ---------------------------------------------------------------------------
 # 7. JSON Schema export
 # ---------------------------------------------------------------------------
 

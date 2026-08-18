@@ -99,11 +99,27 @@ def test_the_scan_can_parse_every_agent():
         ast.parse(path.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("path", agent_files(), ids=lambda p: p.name)
+def checked_files() -> list[Path]:
+    """Every agent except the one that runs shell commands by design.
+
+    Filtered rather than skipped. The acceptance gate refuses a suite with any
+    skip in it -- "exit=0, skipped checks present" -- which is the right policy
+    and caught the first version of this file. A skip would also have made the
+    exemption invisible in the run output, where it is easiest to stop noticing.
+    """
+    return [p for p in agent_files() if p.name != GATED_BY_EXEC_SAFETY]
+
+
+@pytest.mark.parametrize("path", checked_files(), ids=lambda p: p.name)
 def test_no_agent_builds_a_shell_command_from_data(path: Path):
-    if path.name == GATED_BY_EXEC_SAFETY:
-        pytest.skip("runs shell commands by design; gated by ExecSafety")
     assert shell_offenders(path) == []
+
+
+def test_exactly_one_agent_is_exempt():
+    # The exemption list is one name. If it grows, that should be a visible
+    # decision rather than a quiet one.
+    exempt = {p.name for p in agent_files()} - {p.name for p in checked_files()}
+    assert exempt == {GATED_BY_EXEC_SAFETY}
 
 
 def test_the_exempt_agent_is_still_gated():

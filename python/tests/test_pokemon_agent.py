@@ -1985,6 +1985,7 @@ def test_clip_indices_continue_beyond_four_digits(tmp_path):
         ("port", ""),
         ("max_clips", "lots"),
         ("max_storage_gb", "big"),
+        ("startup_timeout", "soon"),
     ],
 )
 def test_a_non_numeric_setting_is_an_error_not_a_crash(monkeypatch, tmp_path, field, value):

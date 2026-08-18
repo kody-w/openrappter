@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The config schema did not know settings the runtime reads.** `channels.*`
+  accepted only `enabled`, `allowFrom` and `mentionGating`, while
+  `readIMessageConfig` reads `mode`, `pollInterval` and `staleAfterMs` off the
+  raw config. Unknown keys are stripped rather than rejected, so a config running
+  iMessage over BlueBubbles came back out of the schema without its transport,
+  and re-reading it selected the `applescript` default — a working setup quietly
+  reconfigured. Nothing routes channels through the schema today, which is the
+  only reason this was latent rather than live. The schema now declares all
+  three, and a test asserts that what the reader understands survives it.
+
 - **The tutorial's agent returned the wrong type too.** `GreeterAgent`, the
   worked example a reader builds and tests, returned a bare object from
   `perform` in both runtimes — the same defect corrected in the Agents Reference,

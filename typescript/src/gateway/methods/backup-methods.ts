@@ -2,10 +2,16 @@
  * Backup RPC methods — snapshot & restore ~/.openrappter/ user data.
  *
  * Methods:
- *   backup.create   — Create a new backup (auto-runs before updates)
+ *   backup.create   — Create a new backup
  *   backup.list     — List available backups
  *   backup.restore  — Restore from a specific backup (or latest)
  *   backup.delete   — Delete a specific backup
+ *
+ * `backup.create` used to be documented here as auto-running before updates.
+ * It never did: nothing in either runtime called it, and updating is a manual
+ * `npm install -g openrappter@latest`, so there is no in-product step it could
+ * have hung off. `openrappter update` now points at `openrappter backup create`
+ * when it finds a new version, which is the moment the snapshot is worth taking.
  */
 
 import {

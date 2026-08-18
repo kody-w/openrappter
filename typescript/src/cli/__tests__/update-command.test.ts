@@ -123,4 +123,34 @@ describe('update command', () => {
     expect(result.exitCode).toBeUndefined();
     expect(result.stdout).toContain('You are using the latest version.');
   });
+
+  /**
+   * `backup.create` was documented as auto-running before updates. It never
+   * did — nothing called it, and updating is a manual `npm install -g`, so
+   * there is no in-product step it could have hung off. Since the product
+   * cannot snapshot for you, the moment it tells you to change the
+   * installation is where it should say a snapshot is possible.
+   */
+  it('points at a backup when it offers an update', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '999.0.0' }) }),
+    );
+
+    const result = await runUpdate([]);
+
+    expect(result.stdout).toContain('A new version is available!');
+    expect(result.stdout).toContain('openrappter backup create');
+  });
+
+  it('does not mention backups when there is nothing to update to', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '0.0.1' }) }),
+    );
+
+    const result = await runUpdate([]);
+
+    expect(result.stdout).not.toContain('openrappter backup create');
+  });
 });

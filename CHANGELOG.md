@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`openrappter update` now says how to be able to go back.** `backup.create`
+  was documented as auto-running before updates. It never did: nothing in
+  either runtime called it, and updating is a manual
+  `npm install -g openrappter@latest`, so there was no in-product step it could
+  have hung off. The claim was removed, and the moment the CLI tells you a new
+  version exists — the one moment it knows you are about to change the
+  installation — it now points at `openrappter backup create`.
+
 - **The approval queue told the reviewer what, not why** — the safety policy
   works out precisely why a command needs a person (dual-use binary,
   environment assignment, plantable path) and sent that explanation to the

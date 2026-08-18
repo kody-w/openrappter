@@ -44,6 +44,22 @@ RAPPTERBOOK_CATEGORIES = {
 REPO_NODE_ID = "R_kgDORPJAUg"
 
 
+def _bounded_int(value, fallback, low, high):
+    """An int within bounds, or the documented default.
+
+    Rejects rather than coerces. ``int("5")`` would work and ``int("")`` raises,
+    so accepting numeric strings means the same path has to handle the ones that
+    do not convert -- simpler to take only what is already a number. ``bool`` is
+    excluded because ``True`` is an ``int`` in Python and a caller passing a
+    flag here means something other than "1 story".
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return fallback
+    if value != value or value in (float("inf"), float("-inf")):  # NaN / infinities
+        return fallback
+    return min(max(int(value), low), high)
+
+
 class HackerNewsAgent(BasicAgent):
     def __init__(self):
         self.name = "HackerNews"
@@ -82,7 +98,11 @@ class HackerNewsAgent(BasicAgent):
 
     def perform(self, **kwargs):
         action = kwargs.get("action", "run")
-        count = min(max(kwargs.get("count", 5), 1), 10)
+        # `min`/`max` compare directly, so anything that is not already an int
+        # raises TypeError -- and this line sits above the try below, so it
+        # escaped `perform` uncaught. `{"count": null}` from a JSON client is
+        # enough: None is not absent, so the default never applied.
+        count = _bounded_int(kwargs.get("count"), 5, 1, 10)
         channel = kwargs.get("channel", "general")
         # Default to dry-run — must explicitly pass dryRun=False to post for real
         dry_run = kwargs.get("dryRun", True) is not False

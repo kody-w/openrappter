@@ -75,9 +75,13 @@ if missing:
     print(f"WARNING: not extracted: {sorted(missing)}", file=sys.stderr)
 EXTRACT
 
-# The helpers expect these; the installer sets them later.
+# The helpers expect these; the installer sets them later. Read by the sourced
+# helpers rather than by this file, which is what SC2034 sees.
+# shellcheck disable=SC2034
 VERBOSE=0
+# shellcheck disable=SC2034
 GUM=""
+# shellcheck disable=SC2034
 TMPFILES=()
 # shellcheck disable=SC1090
 source "$HELPERS"

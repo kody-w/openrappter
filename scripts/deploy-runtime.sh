@@ -90,6 +90,10 @@ ln -sfn "$TARGET" "$CURRENT"
 printf '  current  -> %s\n' "$(readlink "$CURRENT")"
 
 # Keep the last five releases so a rollback target always exists.
+# `find` cannot order by mtime, which is the whole point here: keep the five
+# newest releases. Release directories are created by this script with
+# timestamp names, so they contain no whitespace.
+# shellcheck disable=SC2012
 ls -1dt "$RELEASES"/* 2>/dev/null | tail -n +6 | while read -r old; do
   [ "$old" = "$TARGET" ] || rm -rf "$old"
 done

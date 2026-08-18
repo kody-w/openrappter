@@ -95,7 +95,6 @@ fi
 
 # ── failures stay diagnosable ────────────────────────────────────────────
 output="$(bash -c "source '$HARNESS'; run_quiet_step 'Broken step' bash -c 'echo \"pip: no matching distribution\" >&2; exit 1'" 2>&1)"
-status=$?
 assert_contains "$output" "pip: no matching distribution" "surfaces the real error from the log"
 assert_contains "$output" "--verbose" "points at --verbose for more detail"
 
@@ -150,8 +149,8 @@ copy_at() {
     bash -c "source '$HARNESS'; spinner_reassurance $1 'Installing Python packages'"
 }
 
-[[ -z "$(copy_at 5)" ]] && ok "stays quiet for the first few seconds" || bad "stays quiet for the first few seconds"
-[[ -n "$(copy_at 25)" ]] && ok "says something by 25s" || bad "says something by 25s"
+if [[ -z "$(copy_at 5)" ]]; then ok "stays quiet for the first few seconds"; else bad "stays quiet for the first few seconds"; fi
+if [[ -n "$(copy_at 25)" ]]; then ok "says something by 25s"; else bad "says something by 25s"; fi
 assert_contains "$(copy_at 65)" "slow by nature" "explains that pip is slow by nature"
 assert_contains "$(copy_at 200)" "several minutes" "sets expectations past three minutes"
 

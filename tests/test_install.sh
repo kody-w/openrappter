@@ -64,6 +64,7 @@ assert_executable() {
 
 # ── Source the script for function access ───────────────────
 export OPENRAPPTER_INSTALL_SH_NO_RUN=1
+# shellcheck disable=SC1090
 source "$INSTALL_SCRIPT"
 
 # Pre-load script content for content assertion tests

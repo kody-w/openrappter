@@ -54,7 +54,18 @@ export class DocScannerAgent extends BasicAgent {
   private async scanDirectory(dirPath: string, depth = 0): Promise<FileInfo[]> {
     if (depth > 5) return [];
     const results: FileInfo[] = [];
-    let entries; try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return []; }
+    // Swallowing this at any depth reported `status: success` with zero files
+    // for a path that does not exist, which a caller cannot tell apart from an
+    // empty directory -- a typo'd path looked like a clean scan. Below the root
+    // it is still right to skip: one unreadable subdirectory should not abort a
+    // scan of everything else.
+    let entries;
+    try {
+      entries = await readdir(dirPath, { withFileTypes: true });
+    } catch (err) {
+      if (depth === 0) throw err;
+      return [];
+    }
     for (const entry of entries) {
       if (results.length >= MAX_FILES) break;
       if (entry.isDirectory() && !SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) { results.push(...await this.scanDirectory(join(dirPath, entry.name), depth + 1)); }

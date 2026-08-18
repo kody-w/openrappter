@@ -36,6 +36,19 @@ public struct ApprovalBannerView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        // Why this needs a person, not just what it is. The
+                        // Approve button is right below, and the safety policy
+                        // already worked out the reason — `LD_PRELOAD=… ls`
+                        // reads as an ordinary `ls` until something says the
+                        // assignment is the dangerous part. The detail screen
+                        // showed this; the surface you can approve from did
+                        // not.
+                        if let description = first.description {
+                            Text(description)
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .lineLimit(2)
+                        }
                     }
 
                     Spacer()

@@ -268,16 +268,17 @@
     <span class="kw">const</span> name = kwargs.name <span class="kw">as</span> string;
     <span class="kw">const</span> hour = <span class="kw">new</span> <span class="fn">Date</span>().getHours();
     <span class="kw">const</span> greeting = hour &lt; 12 ? <span class="str">'Good morning'</span> : hour &lt; 18 ? <span class="str">'Good afternoon'</span> : <span class="str">'Good evening'</span>;
-    <span class="kw">return</span> {
+    <span class="kw">return</span> JSON.stringify({
       message: <span class="str">`${greeting}, ${name}!`</span>,
       data_slush: { greeted_user: name, time_of_day: greeting }
-    };
+    });
   }
 }</code></pre>
           </div>
           <div class="code-tab-content" id="py-step5">
 <pre><code><span class="comment"># python/openrappter/agents/greeter_agent.py</span>
 <span class="kw">from</span> openrappter.agents.basic_agent <span class="kw">import</span> BasicAgent
+<span class="kw">import</span> json
 <span class="kw">from</span> datetime <span class="kw">import</span> datetime
 
 <span class="kw">class</span> GreeterAgent(BasicAgent):
@@ -300,10 +301,10 @@
         name = kwargs.<span class="fn">get</span>(<span class="str">'name'</span>, <span class="str">'World'</span>)
         hour = datetime.<span class="fn">now</span>().hour
         greeting = <span class="str">'Good morning'</span> <span class="kw">if</span> hour &lt; 12 <span class="kw">else</span> <span class="str">'Good afternoon'</span> <span class="kw">if</span> hour &lt; 18 <span class="kw">else</span> <span class="str">'Good evening'</span>
-        <span class="kw">return</span> {
+        <span class="kw">return</span> json.dumps({
             <span class="str">"message"</span>: <span class="kw">f</span><span class="str">"{greeting}, {name}!"</span>,
             <span class="str">"data_slush"</span>: {<span class="str">"greeted_user"</span>: name, <span class="str">"time_of_day"</span>: greeting}
-        }</code></pre>
+        })</code></pre>
           </div>
         </div>
 
@@ -359,7 +360,8 @@
 describe(<span class="str">'GreeterAgent'</span>, () => {
   it(<span class="str">'returns a greeting with the provided name'</span>, <span class="kw">async</span> () => {
     <span class="kw">const</span> agent = <span class="kw">new</span> <span class="fn">GreeterAgent</span>();
-    <span class="kw">const</span> result = <span class="kw">await</span> agent.<span class="fn">perform</span>({ name: <span class="str">'Alice'</span> });
+    <span class="kw">const</span> raw = <span class="kw">await</span> agent.<span class="fn">perform</span>({ name: <span class="str">'Alice'</span> });
+    <span class="kw">const</span> result = JSON.parse(raw);
     expect(result.message).<span class="fn">toContain</span>(<span class="str">'Alice'</span>);
     expect(result.data_slush.greeted_user).<span class="fn">toBe</span>(<span class="str">'Alice'</span>);
   });

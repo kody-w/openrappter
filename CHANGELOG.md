@@ -53,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The tutorial's agent returned the wrong type too.** `GreeterAgent`, the
+  worked example a reader builds and tests, returned a bare object from
+  `perform` in both runtimes — the same defect corrected in the Agents Reference,
+  and the same one that makes the TypeScript version fail to compile. Both now
+  return `JSON.stringify(...)` / `json.dumps(...)`, the Python example imports
+  `json` to do it, and the accompanying test parses the string before asserting
+  on it. The architecture page's reference to `python/openrappter/config.py` was
+  also updated; that module is now a package.
+
 - **The agent-authoring example could not work.** The page that teaches the
   framework's main extension point opened with
   `import { BasicAgent, AgentMetadata } from 'openrappter'`. The package entry

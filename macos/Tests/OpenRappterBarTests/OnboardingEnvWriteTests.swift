@@ -118,5 +118,32 @@ func runOnboardingEnvWriteTests() async {
             try expect(source.contains("removeLegacyDaemonAgent"),
                        "a stale daemon agent from an earlier onboarding must be removed")
         }
+
+        await test("starts the daemon from the code directory, not the data directory") {
+            // `installLaunchAgent` was corrected to resolve the project path
+            // rather than assume the daemon lives under ~/.openrappter, which is
+            // where runtime data goes. `startDaemon` kept the original
+            // assumption, so onboarding either started a stale checkout that
+            // happened to be there or failed to start anything at all.
+            //
+            // Source-level: spawning a real daemon to observe this is not
+            // something a test should do.
+            let path = #filePath.replacingOccurrences(
+                of: "Tests/OpenRappterBarTests/OnboardingEnvWriteTests.swift",
+                with: "Sources/OpenRappterBar/ViewModels/OnboardingViewModel.swift"
+            )
+            let source = try String(contentsOfFile: path, encoding: .utf8)
+            let code = source
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+                .joined(separator: "\n")
+
+            try expect(!code.contains("homeDir + \"/typescript/dist/index.js\""),
+                       "the daemon path must not be assumed under the data directory")
+            try expect(code.contains("ProcessManager.resolveProjectPath()"),
+                       "startDaemon and installLaunchAgent must resolve the same way")
+            try expect(code.contains("ProcessManager.nodeSearchPath()"),
+                       "a Finder-launched app's inherited PATH has no node in it")
+        }
     }
 }

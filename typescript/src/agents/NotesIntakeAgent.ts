@@ -12,10 +12,7 @@ export const __manifest__ = {
   description: 'Scans an Obsidian vault or notes directory, extracts action items, tags, and identifies smart reminders by urgency.',
   author: 'Kody Wildfeuer',
   ring: 'ga',
-  capabilities: [
-    'filesystem-write',
-    'process-exec'
-  ],
+  capabilities: [],
   tags: [
     'openrappter',
     'notes-intake'

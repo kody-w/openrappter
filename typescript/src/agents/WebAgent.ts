@@ -27,8 +27,7 @@ export const __manifest__ = {
   author: 'Kody Wildfeuer',
   ring: 'ga',
   capabilities: [
-    'network',
-    'process-exec'
+    'network'
   ],
   tags: [
     'openrappter',

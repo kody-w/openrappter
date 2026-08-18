@@ -161,6 +161,23 @@ export class ShellAgent extends BasicAgent {
     }
 
     const normalized = this.execSafety.normalizeCommand(command);
+
+    // A newline cannot survive normalization: `normalizeCommand` collapses all
+    // whitespace, so a command checked in its normalized form never shows the
+    // newline that INJECTION_PATTERNS has a rule for. Rejecting outright is the
+    // honest resolution — collapsing it instead would run something the caller
+    // did not write, and checking one string while executing another is how
+    // this was wrong to begin with.
+    if (/[\r\n]/.test(command)) {
+      return JSON.stringify({
+        status: 'error',
+        message:
+          'Command blocked by safety policy: Injection pattern detected: newline-injection. '
+          + 'Send one command per call.',
+        blocked: true,
+      });
+    }
+
     const safety = this.execSafety.checkCommand(normalized);
 
     if (!safety.safe || safety.requiresApproval) {
@@ -189,7 +206,14 @@ export class ShellAgent extends BasicAgent {
     }
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
+      // Execute the string that was checked and approved, not the raw input.
+      // `normalizeCommand` collapses whitespace, which includes newlines — so
+      // checking `normalized` while running `command` meant the
+      // newline-injection pattern never saw the newline it exists to catch:
+      // `ls\ntouch /tmp/x` normalizes to a safe-looking single line, passes
+      // the policy, and then runs both commands. One string, checked,
+      // approved, and executed, is the only shape without that gap.
+      const { stdout, stderr } = await execAsync(normalized, {
         timeout: 30000,
         cwd: process.cwd(),
       });

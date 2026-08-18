@@ -46,6 +46,10 @@ INJECTION_PATTERNS = [
     (re.compile(r'<\(.*\)'), 'process-substitution'),
     (re.compile(r'\|\|'), 'or-chain'),
     (re.compile(r'&&'), 'and-chain'),
+    # A single `&` is a separator too, not just a background marker:
+    # `ls & rm x` runs both. `&&` was covered and this was not, so the policy
+    # called it safe and the second command ran unreviewed.
+    (re.compile(r'(?<!&)&(?!&)'), 'background-chain'),
     (re.compile(r';'), 'semicolon-chain'),
     (re.compile(r'(?<!\|)\|(?!\|)'), 'pipe-chain'),
     # Any output redirection can mutate absolute, relative, or home paths.

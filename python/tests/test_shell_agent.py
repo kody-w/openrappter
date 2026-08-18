@@ -249,3 +249,35 @@ class TestNewlineBypass:
         result = json.loads(agent.perform(command="echo hello"))
         assert result["status"] == "success", result
         assert "hello" in result["output"]
+
+
+class TestSingleAmpersandChain:
+    """A single `&` chains commands too.
+
+    The injection patterns covered `&&` and not `&`, so "ls & touch /tmp/x" was
+    judged safe and both commands ran. Verified in a real shell:
+    `sh -c 'ls / >/dev/null & touch /tmp/marker'` creates the marker.
+    """
+
+    def test_a_background_chain_is_blocked(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls & touch /tmp/amp-bypass-proof"))
+        assert result.get("blocked") is True, result
+        assert "background-chain" in result["message"], result
+
+    def test_a_trailing_ampersand_is_blocked(self):
+        from openrappter.security.exec_safety import ExecSafety
+        assert ExecSafety().check_command("ls &").safe is False
+
+    def test_double_ampersand_keeps_its_own_reason(self):
+        # The new rule must not swallow the existing one.
+        from openrappter.security.exec_safety import ExecSafety
+        result = ExecSafety().check_command("ls && touch /tmp/x")
+        assert result.safe is False
+        assert "and-chain" in result.reason
+
+    def test_ordinary_commands_are_untouched(self):
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        for cmd in ("echo hello", "ls -la", "git status"):
+            assert safety.check_command(cmd).safe is True, cmd

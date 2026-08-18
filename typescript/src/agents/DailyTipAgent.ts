@@ -284,11 +284,23 @@ export class DailyTipAgent extends BasicAgent {
   }
 
   private async sendSpecificDay(day: number): Promise<string> {
-    if (day < 1 || day > 30) {
+    // `kwargs.day` arrives as an unchecked cast, so a caller can hand this a
+    // float or a string. Both slip past a bare range check -- 1.5 is within
+    // 1..30, and comparing "abc" to a number is false either way -- and then
+    // index TIPS with a fraction or NaN, yielding undefined. Reading .title off
+    // that threw a TypeError instead of the structured error this function is
+    // written to return.
+    if (!Number.isInteger(day) || day < 1 || day > 30) {
       return JSON.stringify({ status: 'error', message: 'Day must be 1-30' });
     }
 
     const tip = TIPS[day - 1];
+    if (!tip) {
+      // Unreachable while TIPS covers 1..30, which a test pins. Kept because
+      // sendTodaysTip already checks the same thing, and the asymmetry is what
+      // made this the crashing path rather than the reporting one.
+      return JSON.stringify({ status: 'error', message: `No tip for day ${day}` });
+    }
     this.sendNotification(tip.title, tip.body, tip.command);
 
     return JSON.stringify({

@@ -185,20 +185,14 @@ describe('GitAgent', () => {
 
   describe('log action', () => {
     it('should return parsed commits array from git log output', async () => {
-      const commit1 = JSON.stringify({
-        hash: 'abc1234567890',
-        short: 'abc1234',
-        author: 'Alice',
-        date: '2026-01-01 12:00:00 +0000',
-        subject: 'feat: initial commit',
-      });
-      const commit2 = JSON.stringify({
-        hash: 'def5678901234',
-        short: 'def5678',
-        author: 'Bob',
-        date: '2026-01-02 09:00:00 +0000',
-        subject: 'fix: bug squash',
-      });
+      // Mirrors `--pretty=format:%H%x1f%h%x1f%an%x1f%ai%x1f%s`.
+      const commitLine = (f: string[]) => f.join('\x1f');
+      const commit1 = commitLine([
+        'abc1234567890', 'abc1234', 'Alice', '2026-01-01 12:00:00 +0000', 'feat: initial commit',
+      ]);
+      const commit2 = commitLine([
+        'def5678901234', 'def5678', 'Bob', '2026-01-02 09:00:00 +0000', 'fix: bug squash',
+      ]);
       const exec = createMockExec({
         'git log': { stdout: `${commit1}\n${commit2}`, stderr: '' },
       });
@@ -212,6 +206,29 @@ describe('GitAgent', () => {
       expect(parsed.commits[0].author).toBe('Alice');
       expect(parsed.commits[1].subject).toBe('fix: bug squash');
       expect(parsed.count).toBe(2);
+    });
+
+    it('keeps a commit whose subject quotes something', async () => {
+      // git used to build the JSON itself, so a double quote in a subject made
+      // the line unparseable and the commit was dropped without a word —
+      // including from `count`.
+      const line = (f: string[]) => f.join('\x1f');
+      const quoted = line([
+        'aaa1111', 'aaa1111', 'Alice', '2026-01-01 12:00:00 +0000', 'fix: handle "empty" input',
+      ]);
+      const plain = line([
+        'bbb2222', 'bbb2222', 'Bob', '2026-01-02 09:00:00 +0000', 'chore: plain',
+      ]);
+      const exec = createMockExec({
+        'git log': { stdout: `${quoted}\n${plain}`, stderr: '' },
+      });
+      const agent = new GitAgent({ execFn: exec });
+      const parsed = JSON.parse(await agent.perform({ action: 'log' }));
+
+      expect(parsed.count).toBe(2);
+      expect(parsed.commits.map((c: { subject: string }) => c.subject)).toContain(
+        'fix: handle "empty" input',
+      );
     });
 
     it('should respect the count parameter in the git log command', async () => {

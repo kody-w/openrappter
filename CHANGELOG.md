@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`git log` silently omitted commits whose subject contains a quote** — both
+  runtimes asked git to build JSON directly, with
+  `--pretty=format:{"hash":"%H",…,"subject":"%s"}`. A subject containing a
+  double quote or a backslash produced an unparseable line, and the parse error
+  was discarded, so those commits vanished from the result *and* from the
+  reported `count` with nothing to indicate it. Commit subjects quote things
+  routinely. Fields are now separated by a control character git cannot collide
+  with, and parsed positionally.
 - **`openrappter update` could restore a stash it never made** — the updater
   stashes local changes, pulls, rebuilds, then pops. But `git stash` on a clean
   tree prints "No local changes to save" and exits 0 *without creating an

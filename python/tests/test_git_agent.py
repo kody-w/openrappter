@@ -187,13 +187,38 @@ class TestDiffAction:
 
 class TestLogAction:
     def _make_commit_line(self, hash_val="abc123", author="Dev", subject="Fix bug"):
-        return json.dumps({
-            "hash": hash_val * 6,
-            "short": hash_val,
-            "author": author,
-            "date": "2026-01-01 10:00:00",
-            "subject": subject,
-        })
+        # Mirrors what `--pretty=format:%H%x1f%h%x1f%an%x1f%ai%x1f%s` emits.
+        return "\x1f".join([
+            hash_val * 6,
+            hash_val,
+            author,
+            "2026-01-01 10:00:00",
+            subject,
+        ])
+
+    def test_log_keeps_a_commit_whose_subject_quotes_something(self):
+        """git used to build the JSON itself, so a quote made the line
+        unparseable and the commit was dropped without a word — including from
+        `count`."""
+        lines = "\n".join([
+            self._make_commit_line("aaa", subject='fix: handle "empty" input'),
+            self._make_commit_line("bbb", subject="chore: plain"),
+        ])
+        exec_fn = make_exec({"git log": {"stdout": lines, "stderr": ""}})
+        agent = GitAgent(exec_fn=exec_fn)
+        result = json.loads(agent.perform(action="log"))
+        assert result["count"] == 2, result
+        subjects = [c["subject"] for c in result["commits"]]
+        assert 'fix: handle "empty" input' in subjects
+        assert "chore: plain" in subjects
+
+    def test_log_keeps_a_commit_whose_subject_has_a_backslash(self):
+        lines = self._make_commit_line("ccc", subject=r"fix: escape \n properly")
+        exec_fn = make_exec({"git log": {"stdout": lines, "stderr": ""}})
+        agent = GitAgent(exec_fn=exec_fn)
+        result = json.loads(agent.perform(action="log"))
+        assert result["count"] == 1, result
+        assert result["commits"][0]["subject"] == r"fix: escape \n properly"
 
     def test_log_returns_success(self):
         line = self._make_commit_line()

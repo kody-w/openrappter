@@ -199,19 +199,31 @@ class GitAgent(BasicAgent):
 
     def _git_log(self, kwargs):
         count = kwargs.get('count', 10)
-        fmt = '--pretty=format:{"hash":"%H","short":"%h","author":"%an","date":"%ai","subject":"%s"}'
-        result = self._exec_fn('git', ['log', f'-{count}', *fmt.split()], self._cwd)
+        # Fields separated by US (0x1f) rather than built into JSON by git.
+        # A subject containing a double quote produced an unparseable line,
+        # and the parse error was swallowed, so those commits vanished from
+        # the result and from `count` with nothing to say they had. Commit
+        # subjects quote things all the time.
+        fields = ('%H', '%h', '%an', '%ai', '%s')
+        fmt = '--pretty=format:' + '%x1f'.join(fields)
+        result = self._exec_fn('git', ['log', f'-{count}', fmt], self._cwd)
         stdout = result.get('stdout', '')
 
         commits = []
         if stdout:
             for line in stdout.split('\n'):
-                line = line.strip()
-                if line:
-                    try:
-                        commits.append(json.loads(line))
-                    except json.JSONDecodeError:
-                        pass
+                if not line.strip():
+                    continue
+                parts = line.split('\x1f')
+                if len(parts) != len(fields):
+                    continue
+                commits.append({
+                    'hash': parts[0],
+                    'short': parts[1],
+                    'author': parts[2],
+                    'date': parts[3],
+                    'subject': parts[4],
+                })
 
         data_slush = self.slush_out(
             signals={'commit_count': len(commits)}

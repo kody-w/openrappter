@@ -118,3 +118,40 @@ describe('agent capability vocabulary', () => {
     expect(unused).toEqual([]);
   });
 });
+
+/**
+ * The check above reads capabilities out of the *source text*. That is enough
+ * to catch a misspelt capability, but not enough to notice that the manifest
+ * is not a manifest.
+ *
+ * `ComputerUseAgent` carried a generated `__manifest__` block inserted at a
+ * byte offset that landed inside the Python source string used for OCR. The
+ * regex above matched it and passed, while the module exported no manifest at
+ * all and the OCR script was a syntax error. A declaration the runtime never
+ * evaluates is not a declaration.
+ */
+describe('agent manifests are real exports, not just matching text', () => {
+  it('every agent actually exports __manifest__ at runtime', async () => {
+    const missing: string[] = [];
+    for (const file of agentFiles()) {
+      const mod = (await import(
+        /* @vite-ignore */ path.join(agentsDir, file)
+      )) as Record<string, unknown>;
+      if (typeof mod.__manifest__ === 'undefined') missing.push(file);
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('the exported capabilities are the ones the source text advertises', async () => {
+    // Anti-drift: if these two ever disagree, the text-based check above is
+    // reading something the product does not.
+    for (const file of agentFiles()) {
+      const mod = (await import(
+        /* @vite-ignore */ path.join(agentsDir, file)
+      )) as Record<string, { capabilities?: readonly string[] } | undefined>;
+      const exported = [...(mod.__manifest__?.capabilities ?? [])].sort();
+      const fromText = [...declaredCapabilities(file)].sort();
+      expect(exported, `${file} manifest text and export disagree`).toEqual(fromText);
+    }
+  });
+});

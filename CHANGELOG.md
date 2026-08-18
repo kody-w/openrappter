@@ -53,6 +53,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The documented configuration file was one neither runtime reads.** The docs
+  site showed `~/.openrappter/config.yaml` throughout, in YAML. The loader is
+  `JSON5.parse` in TypeScript and a comment-stripping `json.loads` in Python,
+  and it looks only for `config.json5`. A file written from those examples was
+  never read and raised no error, because an absent config file is a supported
+  state. Every example on the page is now JSON5 under the real filename, and a
+  new guard parses each one the way the loader does.
+
+- **Five more documented config keys configured nothing.** Unknown keys are
+  stripped rather than rejected, so each of these validated cleanly and did
+  nothing: the whole `provider:` section, which was the headline example for
+  choosing an LLM and supplying API keys; per-channel credentials such as
+  `bot_token`; and `memory.embedding_provider`. Providers are configured by
+  environment variable and the active model by `openrappter models set`, which
+  is what the page now says. The same guard fails on any documented key the
+  schema discards.
+
 - **`${VAR:-default}` in config did nothing.** The documented fallback form —
   `api_key: ${ANTHROPIC_API_KEY:-sk-placeholder}` on the docs site — was matched
   by neither runtime's substitution pattern, since `\w` covers neither `:` nor

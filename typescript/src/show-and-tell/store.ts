@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -6,7 +7,6 @@ import {
   mkdirSync,
   rmSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -99,7 +99,7 @@ const CONSENT_AUTHORITY = Symbol('show-and-tell-interactive-consent');
 export function showAndTellRoot(): string {
   return path.resolve(
     process.env.OPENRAPPTER_SHOW_AND_TELL_DIR ??
-      path.join(os.homedir(), '.openrappter', 'show-and-tell'),
+      openrappterPath('show-and-tell'),
   );
 }
 

@@ -1,5 +1,5 @@
+import { openrappterHome } from './openrappter-home.js';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 
 export interface DiagnosticCheck {
@@ -31,7 +31,7 @@ export async function runDiagnostics(): Promise<DiagnosticCheck[]> {
   }
 
   // Check config directory exists
-  const configDir = join(homedir(), '.openrappter');
+  const configDir = openrappterHome();
   if (existsSync(configDir)) {
     checks.push({
       name: 'Config Directory',

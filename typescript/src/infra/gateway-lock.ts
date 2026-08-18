@@ -1,3 +1,4 @@
+import { openrappterPath } from './openrappter-home.js';
 import {
   chmodSync,
   closeSync,
@@ -11,7 +12,6 @@ import {
 } from 'fs';
 import { createHash } from 'crypto';
 import { createRequire } from 'module';
-import { homedir } from 'os';
 import { dirname, join } from 'path';
 
 /**
@@ -26,7 +26,7 @@ import { dirname, join } from 'path';
  * which then reported a running alpha as dead. #110
  */
 export function defaultGatewayLockFile(): string {
-  return join(homedir(), '.openrappter', 'gateway.pid');
+  return openrappterPath('gateway.pid');
 }
 
 export const ALPHA_GATEWAY_PORT = 18790;
@@ -151,7 +151,7 @@ export function gatewayLockFileFor(options: {
     return defaultGatewayLockFile();
   }
   const key = canonicalInstanceKey(instance || String(options.port));
-  return join(homedir(), '.openrappter', 'instances', key, 'gateway.pid');
+  return openrappterPath('instances', key, 'gateway.pid');
 }
 
 /**
@@ -238,7 +238,7 @@ export function gatewayLockFileForPort(port: number): string {
   }
 
   try {
-    const root = join(homedir(), '.openrappter', 'instances');
+    const root = openrappterPath('instances');
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       const record = readGatewayEndpoint(gatewayEndpointFileFor({ instance: entry.name }));

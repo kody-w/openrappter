@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * The organism, read as anatomy rather than as a directory listing.
  *
@@ -207,7 +208,7 @@ export interface LiveSignals {
 }
 
 export function readAnatomy(
-  home: string = path.join(os.homedir(), '.openrappter'),
+  home: string = openrappterHome(),
   live: LiveSignals = { awake: false },
 ): Anatomy {
   const organs: Organ[] = [];

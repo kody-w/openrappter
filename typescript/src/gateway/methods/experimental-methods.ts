@@ -1,3 +1,4 @@
+import { openrappterPath } from '../../infra/openrappter-home.js';
 /**
  * Experimental features RPC methods.
  *
@@ -6,7 +7,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { experimentalConfigSchema, experimentalFeatureDescriptions } from '../../config/sections/experimental.js';
 
 interface MethodRegistrar {
@@ -17,7 +17,7 @@ interface MethodRegistrar {
   ): void;
 }
 
-const CONFIG_PATH = path.join(os.homedir(), '.openrappter', 'experimental.json');
+const CONFIG_PATH = openrappterPath('experimental.json');
 
 function loadExperimentalConfig(): Record<string, unknown> {
   try {

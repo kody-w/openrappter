@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * LearnNewAgent - Meta-agent that creates new agents from natural language.
  *
@@ -17,7 +18,6 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
@@ -150,7 +150,7 @@ export class LearnNewAgent extends BasicAgent {
       },
     };
     super('LearnNew', metadata);
-    this.agentsDir = agentsDir ?? path.join(os.homedir(), '.openrappter', 'agents');
+    this.agentsDir = agentsDir ?? openrappterPath('agents');
     this.provider = provider ?? null;
   }
 

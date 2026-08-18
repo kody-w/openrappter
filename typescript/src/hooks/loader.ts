@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Hook Loader
  *
@@ -33,7 +34,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import type { HookDefinition, HookPhase } from './types.js';
 
 /** All valid hook phases — used to validate frontmatter. */
@@ -159,7 +159,7 @@ export class HookLoader {
   private hooksDir: string;
 
   constructor(hooksDir?: string) {
-    this.hooksDir = hooksDir ?? path.join(os.homedir(), '.openrappter', 'hooks');
+    this.hooksDir = hooksDir ?? openrappterPath('hooks');
   }
 
   /**

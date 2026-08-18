@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,7 +12,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -75,7 +75,7 @@ function delay(ms: number): Promise<void> {
 export function desktopControlRoot(): string {
   return path.resolve(
     process.env.OPENRAPPTER_DESKTOP_CONTROL_DIR ??
-      path.join(os.homedir(), '.openrappter', 'desktop-control'),
+      openrappterPath('desktop-control'),
   );
 }
 

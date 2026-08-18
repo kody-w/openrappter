@@ -1,3 +1,4 @@
+import { openrappterHome } from './openrappter-home.js';
 /**
  * Release Channel — Switch between production and experimental branches.
  *
@@ -21,7 +22,6 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 
 // This module is ESM: `__dirname` is not a global here. Every other file that
@@ -38,7 +38,7 @@ export interface ChannelConfig {
   promoteEnabled: boolean;    // must be manually enabled
 }
 
-const HOME_DIR = path.join(os.homedir(), '.openrappter');
+const HOME_DIR = openrappterHome();
 const CHANNEL_FILE = path.join(HOME_DIR, 'channel.json');
 
 const DEFAULT_CONFIG: ChannelConfig = {

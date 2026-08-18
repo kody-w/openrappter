@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * UpdateAgent - Self-update agent for openrappter.
  *
@@ -12,7 +13,6 @@ import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { appleScriptLiteral } from './applescript.js';
-import os from 'os';
 import https from 'https';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
@@ -66,7 +66,7 @@ export class UpdateAgent extends BasicAgent {
     super('Update', metadata);
     // Injectable so the stash handling can be tested against a real repository
     // rather than a replica of it.
-    this.homeDir = homeDir ?? path.join(os.homedir(), '.openrappter');
+    this.homeDir = homeDir ?? openrappterHome();
     this.tsDir = path.join(this.homeDir, 'typescript');
   }
 

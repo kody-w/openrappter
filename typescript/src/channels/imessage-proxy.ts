@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * Thin consumer-plane proxy for the canonical Python iMessage sidecar.
  *
@@ -7,7 +8,6 @@
 
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { BaseChannel } from './base.js';
@@ -19,7 +19,7 @@ const LABEL = 'com.openrappter.imessage';
 export class IMessageProxyChannel extends BaseChannel {
   private readonly home: string;
 
-  constructor(home = process.env.OPENRAPPTER_HOME ?? path.join(os.homedir(), '.openrappter')) {
+  constructor(home = process.env.OPENRAPPTER_HOME ?? openrappterHome()) {
     super('imessage', 'imessage');
     this.home = home;
     this.refreshStatus();

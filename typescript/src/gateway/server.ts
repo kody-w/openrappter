@@ -1,3 +1,4 @@
+import { openrappterHome, openrappterPath } from '../infra/openrappter-home.js';
 /**
  * WebSocket Gateway Server
  * openclaw-compatible protocol: connect handshake, frame-based messaging,
@@ -10,7 +11,6 @@ import { parseSenses } from '../channels/senses.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import type {
   GatewayConfig,
   GatewayStatus,
@@ -495,7 +495,7 @@ export class GatewayServer {
   /* ---- persistence ---- */
 
   private get dataDir(): string {
-    const dir = this.config.dataDir ?? path.join(os.homedir(), '.openrappter');
+    const dir = this.config.dataDir ?? openrappterHome();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -1174,7 +1174,7 @@ export class GatewayServer {
     // Voice UI (the rappter-vui fauna player) — served same-origin so it can
     // reach this gateway over WebSocket without mixed-content blocking.
     if ((req.url === '/vui' || req.url === '/vui/' || req.url === '/vui/index.html') && req.method === 'GET') {
-      const vuiPath = path.join(os.homedir(), '.openrappter', 'vui', 'index.html');
+      const vuiPath = openrappterPath('vui', 'index.html');
       fs.readFile(vuiPath, (err, data) => {
         if (err) {
           res.writeHead(404, { 'Content-Type': 'text/plain', ...corsHeaders });

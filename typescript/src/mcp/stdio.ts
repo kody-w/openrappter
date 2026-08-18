@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Expose this organism's agents to the Copilot CLI as MCP tools.
  *
@@ -17,7 +18,6 @@
  */
 
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
 import { AgentRegistry } from '../agents/AgentRegistry.js';
 import { createMcpServer } from './server.js';
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const recorder = await ensureFlightRecorderFromEnv();
   const registry = new AgentRegistry(
     path.join(HERE, '..', 'agents'),
-    process.env.OPENRAPPTER_AGENTS_DIR ?? path.join(os.homedir(), '.openrappter', 'agents'),
+    process.env.OPENRAPPTER_AGENTS_DIR ?? openrappterPath('agents'),
   );
 
   const agents = await registry.getAllAgents();

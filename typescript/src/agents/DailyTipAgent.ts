@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * DailyTipAgent - Onboarding drip campaign via native notifications.
  *
@@ -12,9 +13,7 @@
 
 import { execSync, execFileSync } from 'child_process';
 import fs from 'fs/promises';
-import path from 'path';
 import { appleScriptLiteral } from './applescript.js';
-import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
@@ -112,7 +111,7 @@ export class DailyTipAgent extends BasicAgent {
       },
     };
     super('DailyTip', metadata);
-    this.stateFile = path.join(os.homedir(), '.openrappter', 'tip-state.json');
+    this.stateFile = openrappterPath('tip-state.json');
   }
 
   private async getState(): Promise<{ startDate: string; lastDay: number }> {

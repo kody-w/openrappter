@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * The always-on half: poll Google Voice, decide, reply, remember.
  *
@@ -23,8 +24,7 @@
  */
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
 import { ChromeSession } from './providers/chrome-cdp.js';
 import { GoogleVoiceBrowserDriver } from './providers/google-voice-browser.js';
@@ -33,7 +33,7 @@ import {
   type InboxMessage, type WatchPolicy, type WatchState,
 } from './watch.js';
 
-export const STATE_PATH = join(homedir(), '.openrappter', 'google-voice-watch.json');
+export const STATE_PATH = openrappterPath('google-voice-watch.json');
 
 /** Answers an inbound message. Returning null means "say nothing". */
 export type Responder = (message: InboxMessage) => Promise<string | null>;

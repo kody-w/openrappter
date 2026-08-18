@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * DM Pairing Manager
  * Manages pairing codes for direct message authentication
@@ -5,8 +6,7 @@
 
 import { randomInt } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { dirname } from 'path';
 
 export interface PairingCode {
   code: string;
@@ -26,7 +26,7 @@ export class DMPairingManager {
   private pairingPath: string;
 
   constructor() {
-    this.pairingPath = join(homedir(), '.openrappter', 'pairing.json');
+    this.pairingPath = openrappterPath('pairing.json');
     this.loadPaired();
   }
 

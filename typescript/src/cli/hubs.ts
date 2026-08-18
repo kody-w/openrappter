@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * RappterHub / ClawHub commands.
  *
@@ -22,15 +23,9 @@
 import type { Command } from 'commander';
 import { spawnSync } from 'child_process';
 import { existsSync } from 'fs';
-import { homedir } from 'os';
 import path from 'path';
 
 const HUBS = ['rappterhub', 'clawhub'] as const;
-
-/** The install root the launcher and installer agree on. */
-export function openrappterHome(): string {
-  return process.env.OPENRAPPTER_HOME || path.join(homedir(), '.openrappter');
-}
 
 export interface PythonRuntime {
   /** Interpreter to run. */

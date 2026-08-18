@@ -20,7 +20,6 @@ the one shared method where that distinction has consequences.
 from __future__ import annotations
 
 import sys
-import types
 
 import pytest
 
@@ -31,7 +30,34 @@ EXPECTED_KEYS = {"name", "description", "parameters", "module", "file", "source"
 
 
 @pytest.fixture
-def registry(tmp_path, monkeypatch):
+def clean_agents_namespace():
+    """Remove the stub `agents` modules other suites leave in `sys.modules`.
+
+    `test_google_voice_agent.py`, `test_brainstem_compliance.py` and
+    `test_twin_agent.py` install a stub `agents` / `agents.basic_agent` at
+    import time to simulate the grail brainstem, and those stubs persist for the
+    rest of the run. The loader's `setdefault` then finds one already present
+    and leaves it, so the probe below subclasses a different `BasicAgent` than
+    the registry checks against and is never discovered.
+
+    These tests found that the hard way: all four passed alone and three failed
+    under the full suite. The one that failed first was the anti-vacuity check,
+    which is the only reason the shape assertions did not quietly pass over an
+    empty listing.
+    """
+    saved = {
+        name: sys.modules.pop(name)
+        for name in ("agents", "agents.basic_agent")
+        if name in sys.modules
+    }
+    try:
+        yield
+    finally:
+        sys.modules.update(saved)
+
+
+@pytest.fixture
+def registry(tmp_path, clean_agents_namespace):
     """A registry over a directory holding one minimal agent."""
     agent_dir = tmp_path / "agents"
     agent_dir.mkdir()

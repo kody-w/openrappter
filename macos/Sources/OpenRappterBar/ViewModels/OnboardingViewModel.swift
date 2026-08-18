@@ -209,14 +209,33 @@ public final class OnboardingViewModel {
             // Start daemon via shell
             do {
                 let nodePath = resolveNodePath()
-                let indexPath = homeDir + "/typescript/dist/index.js"
+                // Same resolution the launch agent uses, and for the same
+                // reason. This hardcoded `homeDir + "/typescript/dist/index.js"`,
+                // where homeDir is ~/.openrappter — the runtime DATA directory,
+                // not the code. On a machine where that directory happened to
+                // contain an old checkout it started a build that had stopped
+                // updating; on one where it does not, `process.run()` throws and
+                // onboarding reports "Could not start daemon" on a perfectly good
+                // install. `installLaunchAgent` was corrected to ask
+                // `resolveProjectPath()`; this, twenty lines above it, was not.
+                let projectPath = ProcessManager.resolveProjectPath()
+                let nested = projectPath + "/typescript/dist/index.js"
+                let root = projectPath + "/dist/index.js"
+                let indexPath = FileManager.default.fileExists(atPath: nested) ? nested : root
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: nodePath)
                 process.arguments = [indexPath, "--daemon"]
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = FileHandle.nullDevice
-                process.environment = ProcessInfo.processInfo.environment
+                // PATH from `nodeSearchPath()`, not this app's own environment.
+                // A Finder-launched menu bar app inherits launchd's session PATH,
+                // which is the four-entry one with no node and no copilot in it —
+                // the plist below already says so, and the daemon started here
+                // was inheriting exactly that for its own children.
+                var environment = ProcessInfo.processInfo.environment
+                environment["PATH"] = ProcessManager.nodeSearchPath()
+                process.environment = environment
                 try process.run()
 
                 // Wait for gateway to start

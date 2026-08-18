@@ -53,6 +53,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Onboarding started the daemon from the data directory, not the code.**
+  `startDaemon` hardcoded `~/.openrappter/typescript/dist/index.js`, which is the
+  runtime data directory. On a machine where that path happened to hold an old
+  checkout it started a build that had stopped updating; on one where it does
+  not — most installs — the spawn throws and onboarding reports "Could not start
+  daemon" on a perfectly good installation. `installLaunchAgent` had already been
+  corrected to ask `ProcessManager.resolveProjectPath()`; `startDaemon`, twenty
+  lines above it in the same file, had not. It also passed this app's own
+  environment to the daemon, so a Finder-launched Bar handed down launchd's
+  session `PATH` — the one with no node and no copilot in it, which the plist
+  beneath it already explains — leaving the daemon's own children unable to find
+  the tools they shell out to.
+
 - **Onboarding and Settings installed two different launch agents.** Onboarding
   wrote its own `com.openrappter.daemon.plist` while `LaunchAgentManager` — which
   the Settings "Start at login" toggle reads and writes — manages

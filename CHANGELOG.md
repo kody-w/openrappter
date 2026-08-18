@@ -53,6 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The two runtimes defaulted to different OpenAI models.** `providers/openai.ts`
+  used `gpt-4o` and `providers/openai_compatible.py` used `gpt-4o-mini` for the
+  same provider against the same endpoint, so an identical call answered from a
+  different model — and a different cost and capability — depending on which
+  runtime made it. Neither value was written down and nothing compared them. The
+  grail brainstem settles it: its default and its safety net are both `gpt-4o`,
+  which TypeScript already matched. Python now does too, and a test reads the
+  constant out of the TypeScript source so neither side can move alone.
+
 - **The two runtimes disagreed on which `/chat` requests are valid.** The grail
   brainstem rejects a `conversation_history` entry whose role is not `user`,
   `assistant` or `tool` — including a caller-supplied `system` turn — with an

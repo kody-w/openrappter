@@ -40,7 +40,13 @@ from openrappter.providers.types import (
 )
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_MODEL = "gpt-4o-mini"
+# Matches `DEFAULT_MODEL` in typescript/src/providers/openai.ts and the grail
+# brainstem, whose default and safety net are both `gpt-4o`. This was
+# `gpt-4o-mini`, so the same provider on the same endpoint answered from a
+# different model depending on which runtime you asked — a difference in cost
+# and capability, not a deliberate one: the Copilot provider agrees across both
+# runtimes on `gpt-4.1`, which is what drift looks like next to a decision. #276
+DEFAULT_MODEL = "gpt-4o"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
 DEFAULT_MAX_RESPONSE_HEADER_BYTES = 64 * 1024

@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- `openrappter channel status` threw `ReferenceError: __dirname is not defined` on every invocation. `infra/channel.ts` is ESM but used a bare `__dirname`, which type-checks (`@types/node` declares it) and only fails when the statement runs -- so `channel promote`, which never reaches that line, worked. Four other files already defined the `fileURLToPath(import.meta.url)` shim; this one was missed.
+- Removed `src/cli/channel.ts`, an unregistered duplicate of the live inline `channel` command. Two copies of the same logic means a fix can land in the unreachable one.
 
 - **The two runtimes defaulted to different OpenAI models.** `providers/openai.ts`
   used `gpt-4o` and `providers/openai_compatible.py` used `gpt-4o-mini` for the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 /**
@@ -21,9 +21,6 @@ import { resolve } from 'path';
  * Each of the six is dormant for a measured reason, not an oversight. Verified
  * against the running gateway and the OAuth flow, not by reading:
  *
- *  - registerChannelCommand  — `openrappter channel` IS live, but as an inline
- *    command in index.ts (release-channel status/switch/promote), and this
- *    module is a duplicate of it. Wiring it double-registers `channel`.
  *  - registerChannelsCommand — sends `{channel}`; `channels.connect` /
  *    `channels.disconnect` read `params.type`, so both would pass `undefined`
  *    to the registry.
@@ -48,6 +45,7 @@ import { resolve } from 'path';
 
 const CLI_INDEX = resolve(__dirname, '../../cli/index.ts');
 const MAIN = resolve(__dirname, '../../index.ts');
+const CLI_DIR = resolve(__dirname, '../../cli');
 
 /**
  * The six exports `index.ts` must never invoke, each with the evidence for why.
@@ -57,10 +55,6 @@ const MAIN = resolve(__dirname, '../../index.ts');
  * a later reader deciding "just register it" needs to see the failure first.
  */
 const INTENTIONALLY_DORMANT = new Map<string, string>([
-  [
-    'registerChannelCommand',
-    'release-channel management is already live as an inline `channel` command in index.ts; this module duplicates it, so wiring double-registers `channel`',
-  ],
   [
     'registerChannelsCommand',
     'sends {channel}; gateway channels.connect/disconnect read params.type, so both pass undefined to the channel registry',
@@ -160,13 +154,13 @@ describe('the dormant CLI command modules stay out of the program', () => {
     expect([...dormant, ...wired].sort()).toEqual([...exports].sort());
   });
 
-  it('registerChannelCommand stays dormant even though `channel` is a live command', () => {
-    // The subtle case the task calls out: a dormant module can coexist with a
-    // working command of the same name. `openrappter channel` works via an
-    // inline `.command('channel')` in index.ts (release channels), not via this
-    // module — which is a duplicate of that inline command. Pin both facts so
-    // deleting the inline command, or wiring the duplicate, is caught.
-    expect(invokedByMain('registerChannelCommand')).toBe(false);
+  it('`channel` is served by the inline command, with no duplicate module', () => {
+    // `openrappter channel` (release channels) works via an inline
+    // `.command('channel')` in index.ts. A `cli/channel.ts` duplicating it was
+    // deleted: having two copies means a fix can land in the unreachable one,
+    // which is exactly how the macOS launch-agent bug survived. Pin both halves
+    // -- the live command must stay, and the duplicate must not come back.
     expect(readFileSync(MAIN, 'utf-8')).toMatch(/\.command\('channel'\)/);
+    expect(existsSync(resolve(CLI_DIR, 'channel.ts'))).toBe(false);
   });
 });

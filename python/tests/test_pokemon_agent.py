@@ -1972,3 +1972,57 @@ def test_clip_indices_continue_beyond_four_digits(tmp_path):
     recorder.clips_dir = clips_dir
 
     assert recorder._next_index() == 10001
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="The Copilot SDK-backed Pokemon runtime requires Python 3.11+",
+)
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("port", "abc"),
+        ("port", ""),
+        ("max_clips", "lots"),
+        ("max_storage_gb", "big"),
+    ],
+)
+def test_a_non_numeric_setting_is_an_error_not_a_crash(monkeypatch, tmp_path, field, value):
+    """A model chooses these kwargs, so they arrive as whatever it produced.
+
+    `int(kwargs.get("port", DEFAULT_PORT))` raises ValueError on anything
+    non-numeric, and nothing above it catches ValueError, so a single odd
+    argument took the agent down instead of coming back as a refusal.
+    """
+    rom = make_rom(tmp_path / "Pokemon Red.gb")
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+
+    class Process:
+        pid = 4321
+
+        def poll(self):
+            return None
+
+    def fake_popen(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("must not spawn a supervisor with an invalid setting")
+
+    monkeypatch.setattr(
+        pokemon_module.importlib.util, "find_spec", lambda name: object()
+    )
+    monkeypatch.setattr(pokemon_module.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(pokemon_module, "ensure_copilot_runtime", lambda: None)
+    monkeypatch.setattr(pokemon_module.subprocess, "Popen", fake_popen)
+
+    result = json.loads(
+        PokemonAgent().perform(
+            action="start",
+            rom_path=str(rom),
+            runtime_dir=str(runtime_dir),
+            **{field: value},
+        )
+    )
+
+    assert result["status"] == "error", result
+    assert field in result["message"], result["message"]

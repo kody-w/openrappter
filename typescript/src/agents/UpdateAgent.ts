@@ -7,10 +7,11 @@
  * Actions: check, update, changelog
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { appleScriptLiteral } from './applescript.js';
 import os from 'os';
 import https from 'https';
 import { BasicAgent } from './BasicAgent.js';
@@ -260,8 +261,9 @@ export class UpdateAgent extends BasicAgent {
       if (process.platform === 'darwin' && !alreadyUpToDate) {
         try {
           const msg = `Updated: ${local} → ${newVersion}`;
-          execSync(
-            `osascript -e 'display notification "${msg}" with title "🦖 openrappter updated"'`,
+          execFileSync(
+            'osascript',
+            ['-e', `display notification "${appleScriptLiteral(msg)}" with title "🦖 openrappter updated"`],
             { timeout: 5000, stdio: 'pipe' },
           );
         } catch { /* non-critical */ }

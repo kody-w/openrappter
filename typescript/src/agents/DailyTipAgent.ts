@@ -10,9 +10,10 @@
  * Actions: tip (show today's), preview (show all), send (force specific day)
  */
 
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
+import { appleScriptLiteral } from './applescript.js';
 import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
@@ -146,17 +147,17 @@ export class DailyTipAgent extends BasicAgent {
       // Clickable notification — opens web UI or menu bar app on click
       const openTarget = hasBar ? barApp : webUrl;
       const subtitle = hasBar ? 'Click to open OpenRappter Bar' : 'Click to open web dashboard';
-      const escapedTitle = title.replace(/"/g, '\\"');
-      const escapedBody = `${body}\n\n💡 Try: ${command}`.replace(/"/g, '\\"');
-      const escapedSubtitle = subtitle.replace(/"/g, '\\"');
       try {
-        const iconFlag = hasBar
-          ? `-appIcon "${barApp}/Contents/Resources/AppIcon.icns"`
-          : '';
-        execSync(
-          `terminal-notifier -title "${escapedTitle}" -subtitle "${escapedSubtitle}" -message "${escapedBody}" -open "${openTarget}" ${iconFlag} -group openrappter`,
-          { timeout: 5000, stdio: 'pipe' },
-        );
+        // Passed as an argument vector, so no shell quoting is involved.
+        const args = [
+          '-title', title,
+          '-subtitle', subtitle,
+          '-message', `${body}\n\n💡 Try: ${command}`,
+          '-open', openTarget,
+        ];
+        if (hasBar) args.push('-appIcon', `${barApp}/Contents/Resources/AppIcon.icns`);
+        args.push('-group', 'openrappter');
+        execFileSync('terminal-notifier', args, { timeout: 5000, stdio: 'pipe' });
       } catch {
         // Fall back to osascript
         this.sendOsascriptNotification(title, body, command);
@@ -164,12 +165,11 @@ export class DailyTipAgent extends BasicAgent {
     } else if (process.platform === 'darwin') {
       this.sendOsascriptNotification(title, body, command);
     } else if (process.platform === 'linux') {
-      const escapedTitle = title.replace(/"/g, '\\"');
-      const fullBody = `${body}\n\n💡 Try: ${command}`.replace(/"/g, '\\"');
       try {
         // notify-send with --action for clickable on modern desktops
-        execSync(
-          `notify-send "${escapedTitle}" "${fullBody}" --app-name=openrappter`,
+        execFileSync(
+          'notify-send',
+          [title, `${body}\n\n💡 Try: ${command}`, '--app-name=openrappter'],
           { timeout: 5000, stdio: 'pipe' },
         );
       } catch {
@@ -179,11 +179,14 @@ export class DailyTipAgent extends BasicAgent {
   }
 
   private sendOsascriptNotification(title: string, body: string, command: string): void {
-    const escapedTitle = title.replace(/"/g, '\\"');
-    const escapedBody = `${body}\\n\\n💡 Try: ${command}`.replace(/"/g, '\\"');
+    // Escaping here is for the AppleScript string literal, not a shell: the
+    // script is handed to osascript as a single argument.
+    const escapedTitle = appleScriptLiteral(title);
+    const escapedBody = appleScriptLiteral(`${body}\n\n💡 Try: ${command}`);
     try {
-      execSync(
-        `osascript -e 'display notification "${escapedBody}" with title "${escapedTitle}"'`,
+      execFileSync(
+        'osascript',
+        ['-e', `display notification "${escapedBody}" with title "${escapedTitle}"`],
         { timeout: 5000, stdio: 'pipe' },
       );
     } catch {

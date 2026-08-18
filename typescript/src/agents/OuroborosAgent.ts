@@ -19,7 +19,7 @@ import type { LLMProvider } from '../providers/types.js';
 import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { join } from 'path';
 import { HOME_DIR } from '../env.js';
@@ -1035,12 +1035,18 @@ export class OuroborosAgent extends BasicAgent {
       const gen5Source = readFileSync(gen5Path, 'utf-8');
       gen5Lines = gen5Source.split('\n').length;
       try {
-        diff = execSync(`diff -u "${selfPath}" "${gen5Path}" || true`, {
+        diff = execFileSync('diff', ['-u', selfPath, gen5Path], {
           encoding: 'utf-8',
           timeout: 5000,
         });
-      } catch {
-        diff = `[diff unavailable — Gen 0: ${selfSource.split('\n').length} lines, Gen 5: ${gen5Lines} lines]`;
+      } catch (e) {
+        // diff exits non-zero when the files differ, which is the expected
+        // case here, and carries the output we want on the error. The old
+        // `|| true` hid that, making a real failure look like an empty diff.
+        const out = (e as { stdout?: string }).stdout;
+        diff = out && out.length > 0
+          ? out
+          : `[diff unavailable — Gen 0: ${selfSource.split('\n').length} lines, Gen 5: ${gen5Lines} lines]`;
       }
     }
 

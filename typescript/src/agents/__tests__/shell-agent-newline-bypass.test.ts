@@ -65,3 +65,44 @@ describe('ShellAgent runs only what the safety policy checked', () => {
     expect(String(result.output)).toContain('hello');
   });
 });
+
+/**
+ * A single `&` chains commands too.
+ *
+ * `INJECTION_PATTERNS` covered `&&` and not `&`, so `ls & touch /tmp/x` was
+ * judged safe and both commands ran — `ls` is a safe binary, which is what
+ * made the pair look unremarkable. Verified in a real shell:
+ * `sh -c 'ls / >/dev/null & touch /tmp/marker'` creates the marker.
+ *
+ * Same shape as the newline bypass above: a separator the policy did not know
+ * about, on a command whose visible binary is harmless.
+ */
+describe('ShellAgent treats a single ampersand as a chain', () => {
+  it('blocks a background chain', async () => {
+    const agent = new ShellAgent(new ExecSafety());
+    const result = JSON.parse(await agent.perform({ command: 'ls & touch /tmp/amp-bypass-proof' }));
+    expect(result.blocked).toBe(true);
+    expect(result.message).toMatch(/background-chain/);
+  });
+
+  it('blocks a trailing ampersand', async () => {
+    const safety = new ExecSafety();
+    expect(safety.checkCommand('ls &').safe).toBe(false);
+  });
+
+  it('still reports && as an and-chain rather than reclassifying it', async () => {
+    // The new rule must not swallow the existing one: `&&` has its own reason,
+    // and a lookaround that matched it would change every existing message.
+    const safety = new ExecSafety();
+    const result = safety.checkCommand('ls && touch /tmp/x');
+    expect(result.safe).toBe(false);
+    expect(result.reason).toMatch(/and-chain/);
+  });
+
+  it('leaves ordinary commands alone', () => {
+    const safety = new ExecSafety();
+    for (const cmd of ['echo hello', 'ls -la', 'git status']) {
+      expect(safety.checkCommand(cmd).safe, cmd).toBe(true);
+    }
+  });
+});

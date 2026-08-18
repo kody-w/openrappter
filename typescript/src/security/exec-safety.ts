@@ -131,6 +131,10 @@ const INJECTION_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
   // Command chaining (must come before pipe-chain to avoid || matching as pipe)
   { pattern: /\|\|/, type: 'or-chain' },
   { pattern: /&&/, type: 'and-chain' },
+  // A single `&` is a separator too, not just a background marker: `ls & rm x`
+  // runs both. `&&` was covered and this was not, so the policy called it safe
+  // and the second command ran unreviewed. Same shape as the pipe rule below.
+  { pattern: /(?<!&)&(?!&)/, type: 'background-chain' },
   { pattern: /;/, type: 'semicolon-chain' },
   // Pipe chains (single | only, after || is already handled)
   { pattern: /(?<!\|)\|(?!\|)/, type: 'pipe-chain' },

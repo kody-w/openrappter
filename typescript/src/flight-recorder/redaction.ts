@@ -56,6 +56,19 @@ export const DEFAULT_EXCLUDED_PATH_PATTERNS: readonly RegExp[] = [
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})\b/i,
   /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/,
+  // The providers this repository actually reads keys for. Without these, a
+  // bare token in a recorded value went to the ledger verbatim: the key-based
+  // rules only fire when the surrounding field is named something like
+  // `apiKey`, and a token quoted inside a longer string has no such field.
+  // Lengths are deliberately tight, because blanking a value that was not a
+  // secret costs the record its usefulness.
+  /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b/,          // OpenAI, Anthropic
+  /\bAIza[A-Za-z0-9_-]{35}\b/,                          // Google
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/,                   // Slack bot/user
+  /\bxapp-[0-9]-[A-Za-z0-9-]{10,}\b/,                   // Slack app-level
+  /\b[0-9]{8,10}:AA[A-Za-z0-9_-]{33}\b/,                // Telegram bot
+  /\btskey-[a-z]+-[A-Za-z0-9]{10,}\b/,                  // Tailscale
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/, // JWT
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
   /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*:[^@\s/]+@/i,
   /\b(?:password|pwd)\s*=\s*[^;\s]+/i,

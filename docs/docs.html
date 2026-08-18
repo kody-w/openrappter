@@ -207,10 +207,10 @@ openrappter models get</pre>
       <p>Any string value can reference environment variables with <code>${VAR_NAME}</code>. Unset variables resolve to an empty string; use <code>${VAR_NAME:-default_value}</code> to supply a fallback. This is the recommended way to handle API keys — keep them out of the config file and source them from your shell profile or a <code>.env</code> file.</p>
 
       <h3>Zod Validation</h3>
-      <p>The configuration schema is defined and validated with Zod v4 at <code>typescript/src/config/schema.ts</code>. On startup, if any field has the wrong type, openrappter prints a structured error with the exact path and expected type — not a raw crash. Note that unknown keys are <em>discarded silently</em> rather than rejected, which is why a misspelled or invented key validates cleanly and does nothing.</p>
+      <p>The schema is defined with Zod v4 at <code>typescript/src/config/schema.ts</code>, and <code>openrappter config validate</code> checks a file against it. It is not run on startup: the CLI loads <code>~/.openrappter/config.json</code> through a separate path that reads fields directly and does not validate. Unknown keys are <em>discarded silently</em> rather than rejected, which is why a misspelled or invented key validates cleanly and does nothing — and why a key the schema has not been taught about is worth reporting rather than assuming harmless.</p>
 
       <h3>Live Reload</h3>
-      <p>The config system uses a file watcher. When <code>config.json5</code> is saved, the running process picks up the new values without a restart. Log levels, rate limits, and gateway settings all hot-reload. Changes to the memory backend require a restart.</p>
+      <p>There is none. <code>config/watcher.ts</code> implements one and nothing constructs it, in either runtime — no other code watches the file either. Earlier revisions of this page said a running process picks up a saved config without a restart, and that log levels, rate limits and gateway settings all hot-reload. Restart after changing configuration.</p>
 
       <h3>Environment Variables Reference</h3>
       <table class="doc-table">

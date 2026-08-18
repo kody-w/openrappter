@@ -206,7 +206,7 @@ class ShellAgent(BasicAgent):
                     })
                 # Approval verified and consumed (single-use) — fall through to execution.
             else:
-                token = self._exec_safety.issue_approval_token(normalized)
+                token = self._exec_safety.issue_approval_token(normalized, reason=reason)
                 return json.dumps({
                     "status": "error",
                     "message": f"Command blocked by safety policy: {reason}. "

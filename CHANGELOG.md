@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The approval queue told the reviewer what, not why** — the safety policy
+  works out precisely why a command needs a person (dual-use binary,
+  environment assignment, plantable path) and sent that explanation to the
+  *caller* in the agent's error message. The queue a human reads recorded
+  `Approval token issued for: <command>`, so the reviewer saw the command
+  restated back at them and had to re-derive the danger themselves. The
+  policy's reason now reaches the queue. On the Python side the reviewer saw
+  nothing at all — its approval token carries no reason field — so it gains the
+  same merged `list_pending_approvals` view TypeScript has.
 - **`git log` silently omitted commits whose subject contains a quote** — both
   runtimes asked git to build JSON directly, with
   `--pretty=format:{"hash":"%H",…,"subject":"%s"}`. A subject containing a

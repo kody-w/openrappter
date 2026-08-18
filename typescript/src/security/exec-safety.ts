@@ -433,7 +433,7 @@ export class ExecSafety {
    * Issue a single-use approval token scoped to the exact normalized command.
    * Does not block; the token starts out 'pending' until resolved.
    */
-  issueApprovalToken(cmd: string, ttlMs = 300_000): ApprovalToken {
+  issueApprovalToken(cmd: string, ttlMs = 300_000, reason?: string): ApprovalToken {
     const id = `token_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const normalized = this.normalizeCommand(cmd);
     const token: ApprovalToken = {
@@ -450,7 +450,13 @@ export class ExecSafety {
       cmd: normalized,
       binary: this.parseBinary(normalized),
       safe: false,
-      reason: `Approval token issued for: ${normalized}`,
+      reason: reason
+        // The policy already worked out why this needs a person; without it the
+        // reviewer sees the command restated back at them and has to re-derive
+        // the danger themselves. The caller was getting this explanation and
+        // the reviewer was not, which is the wrong way round.
+        ? reason
+        : `Approval token issued for: ${normalized}`,
       status: 'pending',
       timestamp: token.createdAt,
     });

@@ -25,7 +25,7 @@ describe('flight recorder redaction of credentials in URLs', () => {
   it('redacts a Google-style key parameter', () => {
     const url =
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro'
-      + ':generateContent?key=AIzaSyD-EXAMPLE-1234567890abcdef';
+      + ':generateContent?key=EXAMPLE-NOT-A-REAL-VALUE-000000';
     expect(sanitizeFlightValue(url)).toBe('[redacted]');
   });
 
@@ -41,10 +41,10 @@ describe('flight recorder redaction of credentials in URLs', () => {
   it('still redacts the parameter names it already knew', () => {
     // Anti-regression: the new pattern must not have replaced the old one.
     for (const url of [
-      'https://api.example.com/v1?token=EXAMPLE1234567890abcdef',
-      'https://api.example.com/v1?api_key=sk-EXAMPLE1234567890abcdef',
-      'https://api.example.com/v1?access_token=ghp_EXAMPLE1234567890abc',
-      'https://user:hunter2@api.example.com/v1',
+      'https://api.example.com/v1?token=EXAMPLE-NOT-A-REAL-VALUE-333333',
+      'https://api.example.com/v1?api_key=EXAMPLE-NOT-A-REAL-VALUE-222222',
+      'https://api.example.com/v1?access_token=EXAMPLE-NOT-A-REAL-VALUE-111111',
+      'https://user:not-a-real-password@api.example.com/v1',
     ]) {
       expect(sanitizeFlightValue(url), url).toBe('[redacted]');
     }

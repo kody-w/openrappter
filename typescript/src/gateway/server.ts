@@ -121,6 +121,26 @@ export function normalizeChatTarget(value: unknown): ChatTarget {
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 const DEFAULT_CONNECTION_TIMEOUT = 120000;
 const DEFAULT_SHUTDOWN_TIMEOUT = 250;
+
+/**
+ * Largest inbound WebSocket frame the gateway will accept, in bytes.
+ *
+ * The handshake has always advertised this number in `policy.maxPayload`, and
+ * nothing enforced it: `WebSocketServer` was constructed without a `maxPayload`
+ * option, so `ws` applied its own 100 MB default. The gateway told every client
+ * its limit was 5 MB and accepted twenty times that.
+ *
+ * It is one constant now, read by both the server that enforces it and the
+ * handshake that reports it, because the bug was that the number existed twice
+ * and only one copy did anything.
+ *
+ * Comfortably above everything that legitimately arrives: `zen.publish` frames
+ * are capped at 256 KB by `ZEN_MAX_FRAME_BYTES`, and the HTTP body limit is
+ * 2 MB, described there as generous for a chat turn carrying forty turns of
+ * history.
+ */
+const MAX_WS_PAYLOAD_BYTES = 5_000_000;
+
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 /**
@@ -761,6 +781,7 @@ export class GatewayServer {
 
     this.wss = new WebSocketServer({
       server: this.httpServer,
+      maxPayload: MAX_WS_PAYLOAD_BYTES,
       verifyClient: (info: { req: IncomingMessage }) => this.validateRequestSource(info.req).ok,
     });
     this.startedAt = Date.now();
@@ -2168,7 +2189,7 @@ export class GatewayServer {
         events: Object.values(GatewayEvents),
       },
       policy: {
-        maxPayload: 5_000_000,
+        maxPayload: MAX_WS_PAYLOAD_BYTES,
         maxBufferedBytes: 10_000_000,
         tickIntervalMs: this.config.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL,
       },

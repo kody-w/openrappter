@@ -480,6 +480,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The gateway advertised a payload limit it did not enforce.** The handshake
+  has always reported `policy.maxPayload: 5000000`, while `WebSocketServer` was
+  constructed without a `maxPayload` option — so `ws` applied its own 100 MB
+  default and the gateway accepted twenty times what it told every client its
+  limit was. The number is now one constant, read both by the server that
+  enforces it and the handshake that reports it. Nothing legitimate is affected:
+  `zen.publish` frames are capped at 256 KB and the HTTP body limit is 2 MB.
+
 - **`backup.restore` replaced your data without authentication** — the gateway
   required auth to *delete* a backup but not to restore one, though restoring
   overwrites every file in `~/.openrappter/` in place and keeps no copy of what

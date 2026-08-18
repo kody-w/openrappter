@@ -200,6 +200,72 @@ def declared_manifest(path):
     return None
 
 
+def _js_balanced_block(text, start):
+    """(start, end) of the `{...}` beginning at or after `start`, nesting-aware."""
+    open_at = text.find("{", start)
+    if open_at == -1:
+        return None
+    depth = 0
+    for i in range(open_at, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return open_at, i + 1
+    return None
+
+
+def js_declared_manifest(path):
+    """Read a TypeScript/JavaScript `__manifest__` statically.
+
+    Deliberately does not import the module, for the same reason
+    `declared_manifest` does not: deciding whether to trust a file by running
+    it is the wrong order.
+
+    A declaration only counts if it is code. A generated manifest block was
+    once inserted at an offset that fell inside the Python source string
+    `ComputerUseAgent.ts` passes to `python3`; the file then contained every
+    substring a text check looks for while exporting no manifest at all. A
+    manifest block spans lines, and the only JavaScript string that can span
+    lines is a template literal, so an odd number of backticks before the
+    declaration means it is inside one and is not a declaration."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            body = fh.read()
+    except OSError:
+        return None
+    for m in re.finditer(r"(?m)^\s*(?:export\s+)?(?:const|let|var)?\s*"
+                         r"__manifest__\s*[:=]", body):
+        if len(re.findall(r"(?<!\\)`", body[:m.start()])) % 2:
+            continue  # inside a template literal, so not a declaration
+        block = _js_balanced_block(body, m.end())
+        if block is None:
+            continue
+        raw = body[block[0]:block[1]]
+        man = {}
+        for key, value in re.findall(
+                r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
+                r"(\[[^\]]*\]|'[^']*'|\"[^\"]*\"|[^,\n]+)", raw):
+            value = value.strip().rstrip(",")
+            if value.startswith("["):
+                man[key] = [a or b for a, b in
+                            re.findall(r"'([^']*)'|\"([^\"]*)\"", value)]
+            elif value[:1] in "'\"":
+                man[key] = value[1:-1]
+            else:
+                man[key] = value
+        if man:
+            return man
+    return None
+
+
+def any_declared_manifest(path):
+    """The manifest a file declares, whatever language it is written in."""
+    return (declared_manifest(path) if path.endswith(".py")
+            else js_declared_manifest(path))
+
+
 # ── the agent contract ───────────────────────────────────────────────────────
 
 @check("R1", "Every agent is a single file, in every language.")
@@ -223,13 +289,8 @@ def r2_manifest_present():
         return None, "no agents found"
     missing = []
     for path in files:
-        if path.endswith(".py"):
-            man = declared_manifest(path)
-            ok = man is not None and man.get("schema") == AGENT_SCHEMA
-        else:
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                body = fh.read()
-            ok = "__manifest__" in body and AGENT_SCHEMA in body
+        man = any_declared_manifest(path)
+        ok = man is not None and man.get("schema") == AGENT_SCHEMA
         if not ok:
             missing.append(os.path.relpath(path, ROOT))
     if missing:
@@ -243,8 +304,8 @@ def r2_manifest_present():
 def r3_manifest_complete():
     required = ["schema", "name", "version", "description", "capabilities"]
     bad = []
-    for path in agent_files():
-        man = declared_manifest(path) or {}
+    for path in all_agent_files():
+        man = any_declared_manifest(path) or {}
         gaps = [k for k in required if k not in man]
         if gaps:
             bad.append(f"{os.path.basename(path)} lacks {gaps}")

@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The conformance gate accepted a manifest that wasn't one** — R2 passed any
+  non-Python agent whose file merely *contained* the substrings `__manifest__`
+  and `rapp-agent/1.0`, and R3 checked required fields for Python agents only.
+  Both were satisfied by `ComputerUseAgent.ts` at a point when it exported no
+  manifest at all, so the gate reported a clean run over a broken contract.
+  Both checks now read the declaration itself, which also surfaced
+  `morning_brief_agent.js` carrying a name that is not `@scope/slug`; it is now
+  `@openrappter/morning-brief`.
 - **`read_screen` never worked, and Computer Use declared no capabilities** — a
   generated manifest block had been inserted at a byte offset that fell inside
   the Python source string `ComputerUseAgent` uses for OCR. The agent therefore

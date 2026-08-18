@@ -15,7 +15,7 @@ import os from 'os';
 
 export const __manifest__ = {
   schema: 'rapp-agent/1.0',
-  name: '@openrappter/morning_brief_agent',
+  name: '@openrappter/morning-brief',
   version: '1.0.0',
   display_name: 'morning_brief_agent',
   description: 'Daily briefing: weather, calendar, priorities from memory, spoken via TTS.',

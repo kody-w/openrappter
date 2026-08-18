@@ -141,6 +141,22 @@ const DEFAULT_SHUTDOWN_TIMEOUT = 250;
  */
 const MAX_WS_PAYLOAD_BYTES = 5_000_000;
 
+/**
+ * Most the gateway will hold in a client's outbound queue before giving up on
+ * it, in bytes.
+ *
+ * The handshake has always advertised this in `policy.maxBufferedBytes`, and
+ * `sendFrame` was `ws.send(...)` with nothing looking at `bufferedAmount` — so
+ * a client that stopped reading was buffered without limit. `zen.publish`
+ * carries frames of up to 256 KB at up to 30fps, so a stalled subscriber can
+ * accumulate megabytes a second in a process that is meant to run for weeks.
+ *
+ * Sharing the constant with the handshake is the point, the same way
+ * `MAX_WS_PAYLOAD_BYTES` is shared: the previous value was enforced nowhere and
+ * announced anyway.
+ */
+const MAX_BUFFERED_BYTES = 10_000_000;
+
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = 100;
 /**
@@ -2190,7 +2206,7 @@ export class GatewayServer {
       },
       policy: {
         maxPayload: MAX_WS_PAYLOAD_BYTES,
-        maxBufferedBytes: 10_000_000,
+        maxBufferedBytes: MAX_BUFFERED_BYTES,
         tickIntervalMs: this.config.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL,
       },
     };
@@ -2208,6 +2224,17 @@ export class GatewayServer {
 
   /** Send a protocol frame */
   private sendFrame(ws: WebSocket, frame: Record<string, unknown>): void {
+    // A connection this far behind is not reading. Sending more only grows the
+    // queue, so it is closed rather than fed.
+    //
+    // 1013 rather than 1009: 1009 is "message too big", which describes an
+    // inbound frame the peer could not handle, and this is the opposite — the
+    // peer is not consuming what it asked for. 1013 says the server is shedding
+    // the connection and reconnecting is reasonable, which is the truth here.
+    if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+      try { ws.close(1013, 'Outbound buffer limit exceeded'); } catch { /* already gone */ }
+      return;
+    }
     try { ws.send(JSON.stringify(frame)); } catch { /* ignore */ }
   }
 

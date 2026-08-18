@@ -174,6 +174,23 @@ class ShellAgent(BasicAgent):
             })
 
         normalized = self._exec_safety.normalize_command(command)
+
+        # A newline cannot survive normalization: normalize_command collapses
+        # all whitespace, so a command checked in its normalized form never
+        # shows the newline that the injection patterns have a rule for.
+        # Rejecting outright is the honest resolution — collapsing it instead
+        # would run something the caller did not write, and checking one string
+        # while executing another is how this was wrong to begin with.
+        if "\n" in command or "\r" in command:
+            return json.dumps({
+                "status": "error",
+                "message": (
+                    "Command blocked by safety policy: Injection pattern "
+                    "detected: newline-injection. Send one command per call."
+                ),
+                "blocked": True,
+            })
+
         safety = self._exec_safety.check_command(normalized)
 
         if not safety.safe or safety.requires_approval:
@@ -200,8 +217,16 @@ class ShellAgent(BasicAgent):
                 })
 
         try:
+            # Execute the string that was checked and approved, not the raw
+            # input. `normalize_command` collapses whitespace, which includes
+            # newlines — so checking `normalized` while running `command` meant
+            # the newline-injection pattern never saw the newline it exists to
+            # catch: "ls\ntouch /tmp/x" normalizes to a safe-looking single
+            # line, passes the policy, and then runs both commands. One string,
+            # checked, approved, and executed, is the only shape without that
+            # gap.
             result = subprocess.run(
-                command,
+                normalized,
                 shell=True,
                 capture_output=True,
                 text=True,

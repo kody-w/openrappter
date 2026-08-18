@@ -204,3 +204,48 @@ class TestActionInference:
         result = json.loads(agent.perform(command="echo direct"))
         assert result["status"] == "success"
         assert "direct" in result["output"]
+
+
+class TestNewlineBypass:
+    """The exec safety policy checked one string and ran another.
+
+    normalize_command collapses all whitespace, newlines included, so the
+    injection rule for newlines never saw one: the policy judged the flattened
+    single line safe and subprocess.run then executed the original, newline and
+    all — two commands, neither approved.
+
+    This file is also the one exempted from the no-shell-command-building
+    guard, on the grounds that exec safety gates it, which only holds while the
+    gate cannot be stepped around.
+    """
+
+    def test_a_newline_command_is_refused(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls\ntouch /tmp/exec-safety-bypass-proof"))
+        assert result["status"] == "error", result
+        assert result.get("blocked") is True, result
+        assert "newline-injection" in result["message"], result
+        # Not turned into an approval request either: a reviewer would have
+        # been shown the flattened line rather than what would run.
+        assert "approval_id" not in result, result
+
+    def test_a_carriage_return_is_refused(self):
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="ls\rtouch /tmp/x"))
+        assert result.get("blocked") is True, result
+
+    def test_the_two_spellings_really_did_disagree(self):
+        # Pins the premise. If normalization stops swallowing newlines, this
+        # fails and the guard can go.
+        from openrappter.security.exec_safety import ExecSafety
+        safety = ExecSafety()
+        raw = "ls\ntouch /tmp/x"
+        assert safety.check_command(raw).safe is False
+        assert safety.check_command(safety.normalize_command(raw)).safe is True
+
+    def test_an_ordinary_command_still_runs(self):
+        # Anti-vacuity: a guard that blocked everything would pass the above.
+        agent = ShellAgent()
+        result = json.loads(agent.perform(command="echo hello"))
+        assert result["status"] == "success", result
+        assert "hello" in result["output"]

@@ -358,6 +358,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The shell agent checked one command and executed another** — it normalized
+  the command, ran the safety policy against the normalized form, and then
+  executed the *raw* input. `normalizeCommand` collapses all whitespace,
+  newlines included, so the injection rule written specifically for `[\r\n]`
+  never saw one: `ls\ntouch /tmp/x` flattens to a single line that the policy
+  calls safe, and the original then ran with the newline intact — two commands,
+  neither approved, no approval prompt. Both runtimes were affected, including
+  the Python `shell_agent.py` that is exempted from the
+  no-shell-command-building guard on the grounds that exec safety gates it.
+  Commands containing a newline are now refused outright, because collapsing
+  one would execute something the caller did not write.
 - **A credential in a `?key=` parameter was recorded verbatim** — the flight
   recorder scans recorded values for embedded secrets and already caught
   `?token=`, `?api_key=`, `?access_token=` and `https://user:pass@host`. It did

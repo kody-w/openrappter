@@ -59,10 +59,25 @@ def _split_words(key: str) -> list:
     return [part.lower() for part in _NON_ALNUM.split(spaced) if part]
 
 
+def _is_secret_word(word: str) -> bool:
+    """True when one word makes a field a secret, singular or plural.
+
+    ``cookies`` is exactly as sensitive as ``cookie``. Plurals looked handled
+    because ``tokens``, ``secrets`` and ``credentials`` are all caught — but
+    they are caught by the *fragment* pass, which is substring-based, not by
+    being spelled out above. So a word survived pluralisation only if it also
+    happened to be a fragment. ``cookie``, ``jwt`` and ``signature`` are words
+    only, and their plurals fell through every branch into the clear.
+    """
+    if word in _SECRET_WORDS:
+        return True
+    return word.endswith("s") and word[:-1] in _SECRET_WORDS
+
+
 def is_secret_key(key: str) -> bool:
     """True when a field of this name must never be logged verbatim."""
     words = _split_words(key)
-    if any(word in _SECRET_WORDS for word in words):
+    if any(_is_secret_word(word) for word in words):
         return True
 
     if words and words[-1] in ("key", "keys"):

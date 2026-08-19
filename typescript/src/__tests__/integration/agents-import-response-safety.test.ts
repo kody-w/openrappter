@@ -20,7 +20,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { GatewayServer } from '../../gateway/server.js';
+import type { ServerResponse } from 'http';
+import { GatewayServer, writeJsonResponse } from '../../gateway/server.js';
 import { reserveTestPort } from '../support/test-port.js';
 
 let server: GatewayServer | undefined;
@@ -119,5 +120,49 @@ describe('an import result that cannot be serialised', () => {
     // A serialisable failure is the importer's own answer and keeps its 400.
     expect(status).toBe(400);
     expect(body.error).toBe('name taken');
+  });
+});
+
+describe('writeJsonResponse on an already-committed response', () => {
+  /**
+   * The property the three catches around the body handler now depend on.
+   * Before this, the file contained zero `res.headersSent` checks, so a catch
+   * reached after its route had already answered wrote a second status line --
+   * which is the actual mechanism that ended the process, rather than the
+   * serialisation failure that led there.
+   */
+  function fakeResponse(headersSent: boolean): {
+    calls: string[];
+    res: ServerResponse;
+  } {
+    const calls: string[] = [];
+    const res = {
+      headersSent,
+      writeHead(): unknown { calls.push('writeHead'); return res; },
+      end(payload?: unknown): unknown {
+        calls.push(payload === undefined ? 'end()' : 'end(body)');
+        return res;
+      },
+    };
+    return { calls, res: res as unknown as ServerResponse };
+  }
+
+  it('writes head and body when nothing has been sent', () => {
+    const { calls, res } = fakeResponse(false);
+
+    writeJsonResponse(res, 200, { ok: true });
+
+    expect(calls).toEqual(['writeHead', 'end(body)']);
+  });
+
+  it('closes the response without a second head once headers are sent', () => {
+    const { calls, res } = fakeResponse(true);
+
+    writeJsonResponse(res, 500, { error: 'too late' });
+
+    // No second status line: that is ERR_HTTP_HEADERS_SENT, and in an async
+    // handler node 20 exits on it. The response is ended so the socket is not
+    // left open instead.
+    expect(calls).toEqual(['end()']);
   });
 });

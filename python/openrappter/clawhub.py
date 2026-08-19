@@ -5,6 +5,7 @@ Allows openrappter to search, install, and use ClawHub skills.
 Skills are SKILL.md files with YAML frontmatter that get wrapped as openrappter agents.
 """
 from openrappter.paths import openrappter_path
+from openrappter.atomic_io import read_json_object, write_json_atomic
 
 import json
 import os
@@ -256,17 +257,11 @@ class ClawHubClient:
 
     def _load_lock(self) -> dict:
         """Load the lock file tracking installed skills."""
-        if self._lock_file.exists():
-            try:
-                return json.loads(self._lock_file.read_text())
-            except json.JSONDecodeError:
-                pass
-        return {"installed": {}}
+        return read_json_object(self._lock_file, {"installed": {}})
 
     def _save_lock(self, lock: dict):
         """Save the lock file."""
-        self._lock_file.parent.mkdir(parents=True, exist_ok=True)
-        self._lock_file.write_text(json.dumps(lock, indent=2))
+        write_json_atomic(self._lock_file, lock)
 
     def search(self, query: str) -> list[dict]:
         """

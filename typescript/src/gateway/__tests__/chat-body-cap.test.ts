@@ -13,9 +13,13 @@
  * The accumulation was `body += chunk.toString()` with no limit, on a gateway
  * meant to face peers on a shared wire — where untrusted is the normal case.
  *
- * This is a DELIBERATE divergence from the brainstem, which has no cap.
+ * This was a DELIBERATE divergence from the brainstem, which had no cap.
  * Everywhere else on /chat the rule is to match it exactly; here, matching it
- * would mean copying a hole.
+ * would have meant copying a hole.
+ *
+ * The brainstem has since adopted the same 2 MB limit and the same
+ * OPENRAPPTER_MAX_BODY_BYTES override, so there is now a counterpart to
+ * compare against and /chat answers the rapp-chat error envelope in both.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -28,6 +32,13 @@ import type { AgentRequest } from '../types.js';
 const PORT = 19812;
 const BASE = `http://127.0.0.1:${PORT}`;
 const CAP = 2 * 1024 * 1024;
+/** What /chat answers when the body is refused -- the contract envelope, the
+ *  same one the brainstem sends and the same one /chat's 401 and 503 use. */
+const CHAT_TOO_LARGE = {
+  schema: 'rapp-chat/1.0',
+  status: 'error',
+  error: 'Request body too large',
+};
 
 let server: GatewayServer;
 let dataDir: string;
@@ -74,9 +85,9 @@ describe('an oversized body is refused at the door', () => {
     const got = await postRaw('/chat', huge);
 
     expect(got.status).toBe(413);
-    // 413 has no brainstem counterpart -- it has no body cap -- so nothing
-    // can be compared here and the bare shape stays.
-    expect(got.body).toEqual({ error: 'Request body too large' });
+    // The brainstem answers this exact envelope now; a bare {error} here was
+    // the one /chat rejection in this file whose shape differed from the rest.
+    expect(got.body).toEqual(CHAT_TOO_LARGE);
     // THE POINT: the agent — and behind it a paid API — was never invoked.
     expect(handlerCalls).toBe(before);
   });
@@ -96,7 +107,7 @@ describe('an oversized body is refused at the door', () => {
     const got = await postRaw('/chat', enormous);
 
     expect(got.status).toBe(413);
-    expect(got.body).toEqual({ error: 'Request body too large' });
+    expect(got.body).toEqual(CHAT_TOO_LARGE);
     expect(handlerCalls).toBe(before);
   });
 
@@ -104,7 +115,7 @@ describe('an oversized body is refused at the door', () => {
     const huge = JSON.stringify({ user_input: 'x'.repeat(CAP + 1024) });
     const got = await postRaw('/chat?x=1', huge);
     expect(got.status).toBe(413);
-    expect(got.body).toEqual({ error: 'Request body too large' });
+    expect(got.body).toEqual(CHAT_TOO_LARGE);
   });
 
   it('names the limit on non-chat POSTs, which have no parity obligation', async () => {

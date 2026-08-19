@@ -27,6 +27,7 @@ import glob
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import socket
@@ -1182,6 +1183,33 @@ def _run_chat_within_trace(
 # ── HTTP server (stdlib — the wire is the contract, not the framework) ───────
 
 
+#: Default ceiling on a POST body. Generous for a chat turn carrying dozens of
+#: turns of history, and far below anything a model API accepts, so it never
+#: bites a request that was going to work.
+DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024
+
+
+def _resolve_max_body_bytes():
+    """Read `OPENRAPPTER_MAX_BODY_BYTES`, falling back to the default.
+
+    Parsed as a float so `2.5e6` and `2500000` both work, matching the
+    TypeScript gateway's `Number(...)`. Anything unparseable, infinite or
+    non-positive falls back rather than raising: a bad environment variable
+    should not stop the daemon from starting, and silently removing the cap
+    would be the worst of the available answers.
+    """
+    raw = os.environ.get("OPENRAPPTER_MAX_BODY_BYTES")
+    if raw is None:
+        return DEFAULT_MAX_BODY_BYTES
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_BODY_BYTES
+    if not math.isfinite(value) or value <= 0:
+        return DEFAULT_MAX_BODY_BYTES
+    return int(value)
+
+
 class BrainstemHandler(BaseHTTPRequestHandler):
     #: Seconds a single connection may stall before the socket read gives up.
     #:
@@ -1195,6 +1223,23 @@ class BrainstemHandler(BaseHTTPRequestHandler):
     #: a client still sending data resets the timer. TypeScript is covered by
     #: node's own `requestTimeout`/`headersTimeout`; this runtime had nothing.
     timeout = 30
+    #: Largest POST body this brainstem will buffer, in bytes.
+    #:
+    #: The stall guard above bounds a caller that claims bytes and never sends
+    #: them. It does nothing about the opposite caller -- one that claims a lot
+    #: and sends it as fast as the socket allows -- because that read never
+    #: stalls. Measured against this server before the cap existed:
+    #:
+    #:     one POST /chat of 64 MB   peak RSS 33 MB -> 180 MB in 0.04s
+    #:     six concurrent of 16 MB   peak RSS 33 MB -> 146 MB in 0.34s
+    #:
+    #: `read` is per connection and `ThreadingHTTPServer` gives every request a
+    #: thread, so the cost is per caller and nothing bounded it. No credential
+    #: is needed to spend it.
+    #:
+    #: 2 MB and `OPENRAPPTER_MAX_BODY_BYTES` are the TypeScript gateway's, whose
+    #: own comment records the divergence and asks this runtime to adopt them.
+    max_body_bytes = _resolve_max_body_bytes()
     server_version = f"OpenRappterBrainstem/{__version__}"
 
     def _send(self, code, payload):
@@ -1208,6 +1253,30 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):  # quiet request logging
         pass
+
+    def _discard_body(self, length):
+        """Read an over-sized body and throw it away, so the 413 is readable.
+
+        Memory stays at one chunk however much was claimed -- discarding is the
+        whole point, and accumulating here would re-create the defect the cap
+        exists to close.
+
+        Bounded rather than unbounded: past `max_body_bytes * 8` this stops
+        reading and answers anyway. A caller that far over the limit has stopped
+        being a request worth being polite to, and draining it in full would
+        hand it the server's time instead of its memory.
+        """
+        remaining = min(length, self.max_body_bytes * 8)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (TimeoutError, socket.timeout, OSError):
+            # The caller stopped sending. The 413 may not reach it, but the
+            # bytes are already not being buffered, which is what mattered.
+            pass
 
     # ── GET ──
     def flush_headers(self):
@@ -1362,6 +1431,16 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 "schema": "rapp-chat/1.0",
                 "status": "error",
                 "error": "Content-Length must not be negative",
+            })
+        if length > self.max_body_bytes:
+            # Drain first, answer second. Replying the instant the limit is
+            # known ends the response while the caller is still uploading, and
+            # it gets a connection reset instead of the 413 it needs to read.
+            self._discard_body(length)
+            return self._send(413, {
+                "schema": "rapp-chat/1.0",
+                "status": "error",
+                "error": "Request body too large",
             })
         try:
             raw = self.rfile.read(length) if length else b""

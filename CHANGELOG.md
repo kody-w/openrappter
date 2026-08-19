@@ -78,6 +78,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The brainstem read a POST body of any size a caller cared to declare. It
+  buffered exactly `Content-Length` bytes with no ceiling, and the existing
+  30-second stall budget did not cover it -- that guard bounds a caller which
+  claims bytes and never sends them, and the dangerous caller is the opposite
+  one, which sends everything it claims as fast as the socket allows. Measured
+  against a real brainstem, with no credential: one 64 MB POST took peak RSS
+  from 33 MB to 180 MB in 0.04s, and six concurrent 16 MB POSTs added 113 MB,
+  because the read is per connection and `ThreadingHTTPServer` gives every
+  request a thread. Now capped at 2 MB with an `OPENRAPPTER_MAX_BODY_BYTES`
+  override, answering 413; both figures are the TypeScript gateway's, whose own
+  comment recorded the gap and asked this runtime to close it. Peak RSS is now
+  flat regardless of what is offered. The oversized body is drained and
+  discarded before the refusal is sent, because answering while the caller is
+  still uploading resets the connection and it gets no readable response.
+
+- The TypeScript gateway answered its `/chat` 413 with a bare `{error}`, the one
+  `/chat` rejection whose shape differed from every other -- its own 401 and 503
+  on that path, and everything the brainstem sends, use the `rapp-chat/1.0`
+  error envelope required by `contracts/rapp-chat-v1.json`. It was written that
+  way deliberately, because at the time the brainstem had no body cap and so no
+  counterpart to agree with. It has one now, so both runtimes answer the same
+  status and the same envelope.
+
 - A field named `cookies` was written to the structured log in the clear, while
   `cookie` was redacted. The same held for `signatures` and `jwts` -- and for
   `sessionCookies` and `setCookies`, which is the shape a `Set-Cookie` header or

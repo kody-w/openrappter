@@ -67,6 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+
+- `openrappter audit` printed a blocking-finding count that ignored
+  `--fail-on`. The exit code honoured the flag while the summary counted
+  against a fixed `critical|high` set, so `--fail-on critical` could report
+  "1 at high or critical" and still exit 0, and `--fail-on low` could report
+  "0 at high or critical" while exiting 1. The count now uses the threshold in
+  effect and names it.
 - `agent.tool` omitted `toolCallId`, the field the chat list keys its rows on. Two tools finishing in the same millisecond therefore resolved to the same key, and the second *updated* the first's row instead of adding one -- so a tool vanished from the transcript.
 - The Flight Recorder ledger ignored `OPENRAPPTER_HOME` in **both** runtimes, so relocating an installation moved everything except the database recording it. TypeScript spelled the path across three lines, which is how it escaped the migration that moved the other 46 sites -- and the guard meant to catch stragglers, whose pattern could not match its own formatting.
 - `agent.tool` reported every **successful** tool call as a failure in chat. The event added in the previous change sent `status: 'ok'`, and the chat UI -- which has read this event since before it was emitted -- renders `status === 'success' ? '✓' : '✗'`, so `'ok'` fell to the cross. Emitter and consumer are now pinned to one vocabulary.

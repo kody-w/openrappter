@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- `OpenRappterConfig` was hand-written and declared **6** sections while the schema validating it declared **21**, so fifteen sections -- including `security`, `network`, `voice` and `plugins` -- were parsed and then invisible to every consumer: reading them was a compile error. The type is now derived from the schema, so the two cannot diverge.
 - The security auditor read `~/.openrappter/config.yml`, a file the product does not write (it writes `config.json5`), and its missing-file branch returns no findings -- so a check that reports "Gateway exposed without authentication" at critical severity had never examined anything. It now parses the real config through the loader.
 - Removed two auditor checks for settings this product does not have (`cdp`, `dmOnly`). The CDP one used an unparenthesised alternation, `/cdp.*host:\s*['\"]?0\.0\.0\.0|all['\"]?/i`, so the bare substring `all` matched anywhere -- pointed at the real config it reported remote DevTools exposure at critical on a machine with no such setting.
 - `getConfigPath()` and five other paths captured the data directory at import time, so `OPENRAPPTER_HOME` was ignored once a module had loaded.

@@ -82,7 +82,14 @@ describe('no source file hardcodes the data directory', () => {
   it('every path to the data directory goes through the helper', () => {
     const offenders = sourceFiles()
       .filter((f) => f !== HELPER)
-      .filter((f) => /homedir\(\)\s*,\s*'\.openrappter'/.test(readFileSync(f, 'utf-8')))
+      // Whitespace-tolerant, including newlines: `flight-recorder/recorder.ts`
+      // spelled the same path across three lines and the original single-line
+      // pattern walked straight past it, so this guard reported zero
+      // offenders while one remained. A regex that cannot see the formatting
+      // it is policing is the shape this file exists to prevent.
+      .filter((f) =>
+        /homedir\(\)\s*,\s*["']\.openrappter["']/.test(readFileSync(f, 'utf-8')),
+      )
       .map((f) => relative(SRC, f))
       .sort();
 

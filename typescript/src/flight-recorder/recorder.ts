@@ -22,7 +22,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -60,12 +59,18 @@ import {
   type FlightRecorderPrivacy,
   type FlightTraceContext,
 } from "./types.js";
+import { openrappterPath } from "../infra/openrappter-home.js";
 
-const DEFAULT_DB = path.join(
-  os.homedir(),
-  ".openrappter",
-  "flight-recorder.db",
-);
+// Resolved at call time through the shared helper, like every other path into
+// the data directory. Spelled across three lines, this escaped the migration in
+// #331 and the guard that was supposed to catch it -- so `OPENRAPPTER_HOME`
+// moved the whole installation except the ledger.
+//
+// `python/openrappter/flight_recorder.py` resolves the same file the same way,
+// deliberately: the two runtimes must not end up writing to different ledgers.
+function defaultDatabasePath(): string {
+  return openrappterPath("flight-recorder.db");
+}
 const DEFAULT_RETENTION = 10_000;
 const RETENTION_BATCH_RATIO = 0.1;
 let environmentRecorder: Promise<FlightRecorder> | null = null;
@@ -440,7 +445,7 @@ export class FlightRecorder {
 
   private async initializeOnce(): Promise<void> {
     try {
-      const databasePath = this.options.databasePath ?? DEFAULT_DB;
+      const databasePath = this.options.databasePath ?? defaultDatabasePath();
       const createsLedger = this.ledger === null;
       if (!this.options.inMemory && createsLedger) {
         const directory = path.dirname(databasePath);
@@ -600,7 +605,7 @@ export class FlightRecorder {
     const trace = this.currentTrace();
     return {
       OPENRAPPTER_FLIGHT_RECORDER: "1",
-      OPENRAPPTER_FLIGHT_DB: this.options.databasePath ?? DEFAULT_DB,
+      OPENRAPPTER_FLIGHT_DB: this.options.databasePath ?? defaultDatabasePath(),
       OPENRAPPTER_FLIGHT_RETENTION: String(this.options.retentionEvents),
       OPENRAPPTER_FLIGHT_RECORD_IO:
         this.privacy.recordIO === true ? "1" : "0",
@@ -1172,7 +1177,7 @@ export class FlightRecorder {
       lastError: this.lastError,
       databasePath: this.options.inMemory
         ? ":memory:"
-        : (this.options.databasePath ?? DEFAULT_DB),
+        : (this.options.databasePath ?? defaultDatabasePath()),
     };
   }
 

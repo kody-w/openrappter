@@ -3961,7 +3961,13 @@ class FlightRecorder:
         self.database_path = str(
             configured_database_path
             if configured_database_path is not None
-            else Path.home() / ".openrappter" / "flight-recorder.db"
+            # `OPENRAPPTER_HOME` moves the whole installation, and the ledger
+            # has to move with it: `typescript/src/flight-recorder/recorder.ts`
+            # resolves this same file the same way, so a runtime that ignored
+            # the variable would write to a different ledger than its twin.
+            else Path(
+                os.environ.get("OPENRAPPTER_HOME", Path.home() / ".openrappter")
+            ) / "flight-recorder.db"
         )
         self.in_memory = bool(
             in_memory

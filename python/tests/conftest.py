@@ -3,6 +3,7 @@
 import json
 import sys
 import threading
+import importlib
 import pytest
 from pathlib import Path
 
@@ -160,3 +161,38 @@ def server(tmp_path, monkeypatch):
     base = f"http://127.0.0.1:{httpd.server_address[1]}"
     yield base
     httpd.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def isolate_agent_memory_store(monkeypatch, tmp_path_factory):
+    """Keep the agent memory store out of the developer's real home directory.
+
+    Both memory agents default `memory_file` to `~/.openrappter/memory.json`.
+    Tests that care point it somewhere else, so this never mattered while the
+    only callers were tests. The iMessage trust context now recalls memory on
+    every inbound message and builds its own agent, so an unpatched test reads
+    whatever the developer happens to have remembered -- making `familiarity`
+    and the projected facts depend on the machine, and reading personal data
+    into a test run. Redirect the default; explicit assignment still wins.
+
+    The store lives outside the test's own `tmp_path` because tests that list a
+    directory count its entries.
+    """
+    store = tmp_path_factory.mktemp("agent-memory") / "memory.json"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    for module, name in (
+        ("openrappter.agents.context_memory_agent", "ContextMemoryAgent"),
+        ("openrappter.agents.manage_memory_agent", "ManageMemoryAgent"),
+    ):
+        try:
+            cls = getattr(importlib.import_module(module), name)
+        except Exception:  # pragma: no cover - module not importable in this env
+            continue
+        original = cls.__init__
+
+        def patched(self, *args, __original=original, **kwargs):
+            __original(self, *args, **kwargs)
+            self.home = store.parent
+            self.memory_file = store
+
+        monkeypatch.setattr(cls, "__init__", patched)

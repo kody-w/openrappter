@@ -11,14 +11,14 @@
  * missing-file branch returns `[]` -- indistinguishable from a clean bill of
  * health.
  *
- * Exit codes are the point of having this in a terminal: `1` when anything
- * high or critical is found, so it can gate a script.
+ * Exit codes are the point of having this in a terminal: `1` when anything at
+ * or above `--fail-on` is found, so it can gate a script. The printed summary
+ * counts against that same threshold -- an earlier version counted against a
+ * fixed `critical|high` set while exiting on `--fail-on`, so the two disagreed
+ * whenever the flag was not left at its default.
  */
 import type { Command } from 'commander';
 import { SecurityAuditor, type AuditFinding } from '../security/audit.js';
-
-/** Severities that should fail a scripted run. */
-const BLOCKING = new Set(['critical', 'high']);
 
 const ORDER: Record<string, number> = {
   critical: 0,
@@ -64,10 +64,11 @@ export function registerAuditCommand(program: Command): void {
             console.log(`    ${finding.detail}`);
             if (finding.remediation) console.log(`    fix: ${finding.remediation}`);
           }
-          const blocking = findings.filter((f) => BLOCKING.has(f.severity)).length;
+          const level = options.failOn ?? 'high';
+          const blocking = findings.filter((f) => severityRank(f) <= threshold).length;
           console.log(
             `\n  ${findings.length} finding${findings.length === 1 ? '' : 's'}`
-            + `, ${blocking} at high or critical.\n`,
+            + `, ${blocking} at or above ${level}.\n`,
           );
         }
       }

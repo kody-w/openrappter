@@ -554,7 +554,7 @@ class IMessageService:
         participants.add(sender)
         consent_action = self._consent_action(str(message.get("text") or ""))
         event_id = self.state.transport_event_id(str(message["guid"]))
-        return {
+        context: dict[str, Any] = {
             "trusted": True,
             "channel": "imessage",
             "principal_id": sender,
@@ -590,6 +590,13 @@ class IMessageService:
                 else None
             ),
         }
+        # This recall used to sit after an unconditional `return`, so it never
+        # ran and `context` was not even a defined name here. The brainstem
+        # reads `familiarity` and `authorized_memory_data` off this context, so
+        # every iMessage turn was projected with no memory and an unknown
+        # sender. Recall is best-effort enrichment on the inbound hot path: any
+        # failure degrades to "no memory, not familiar" rather than dropping
+        # the message. ContextMemoryAgent applies the audience filter itself.
         memory_agent = ContextMemoryAgent()
         try:
             recalled = json.loads(
@@ -599,7 +606,7 @@ class IMessageService:
                     _trusted_context=context,
                 )
             )
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except Exception:  # noqa: BLE001 - recall must never drop an inbound message
             recalled = {}
         context["authorized_memory_data"] = (
             recalled.get("memories", []) if isinstance(recalled, Mapping) else []

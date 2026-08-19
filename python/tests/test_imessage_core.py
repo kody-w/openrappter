@@ -624,3 +624,116 @@ def test_cross_process_memory_writes_are_serialized(tmp_path):
         process.join(timeout=10)
         assert process.exitcode == 0
     assert len(json.loads(memory_file.read_text())) == 8
+
+
+def _scoped_memory_agents(monkeypatch, tmp_path):
+    """Point every ContextMemoryAgent the service builds at a temp memory file."""
+
+    class _Scoped(ContextMemoryAgent):
+        def __init__(self):
+            super().__init__()
+            self.memory_file = tmp_path / "memory.json"
+
+    monkeypatch.setattr("openrappter.imessage.service.ContextMemoryAgent", _Scoped)
+    manager = ManageMemoryAgent()
+    manager.memory_file = tmp_path / "memory.json"
+    return manager
+
+
+def _capturing_service(tmp_path, seen):
+    def runner(prompt, history, session, trust):
+        seen.append(dict(trust))
+        return {"response": f"reply:{prompt}"}
+
+    return IMessageService(
+        config(tmp_path),
+        supervisor=FakeSupervisor(),
+        chat_runner=runner,
+    )
+
+
+def dm_message(guid="DM-1", rowid=7, text="hello"):
+    return {
+        "id": rowid,
+        "guid": guid,
+        "text": text,
+        "sender": FRIEND,
+        "is_from_me": False,
+        "is_group": False,
+        "service": "iMessage",
+        "chat_id": 9,
+        "chat_guid": f"iMessage;-;{FRIEND}",
+        "participants": [FRIEND],
+    }
+
+
+def test_trust_context_projects_authorized_memory_into_the_turn(monkeypatch, tmp_path):
+    # The brainstem reads `authorized_memory_data` and `familiarity` off the
+    # trust context. Both were unreachable, so iMessage turns had no recall.
+    manager = _scoped_memory_agents(monkeypatch, tmp_path)
+    seen: list[dict] = []
+    service = _capturing_service(tmp_path, seen)
+
+    assert service.process_message(owner_message(guid="U1", rowid=1)) == "replied"
+    owner_trust = seen[0]
+    assert owner_trust["authorized_memory_data"] == []
+    assert owner_trust["familiarity"] is False
+
+    # Store through the very context the service produced, so the audience ids
+    # match what a real turn would carry.
+    manager.perform(content="the garage code is amber", _trusted_context=owner_trust)
+
+    assert service.process_message(owner_message(guid="U2", rowid=2, text="garage")) == "replied"
+    recalled = seen[1]
+    assert [item["message"] for item in recalled["authorized_memory_data"]] == [
+        "the garage code is amber"
+    ]
+    assert recalled["familiarity"] is True
+    # The projection is a summary, never the raw trust envelope.
+    assert all("trust" not in item for item in recalled["authorized_memory_data"])
+
+
+def test_trust_context_withholds_owner_memory_from_another_audience(monkeypatch, tmp_path):
+    manager = _scoped_memory_agents(monkeypatch, tmp_path)
+    seen: list[dict] = []
+    service = _capturing_service(tmp_path, seen)
+
+    assert service.process_message(owner_message(guid="U1", rowid=1)) == "replied"
+    manager.perform(content="the garage code is amber", _trusted_context=seen[0])
+
+    assert service.process_message(dm_message(guid="D1", rowid=5, text="@rappter garage")) == "replied"
+    assert seen[1]["authorized_memory_data"] == []
+    assert seen[1]["familiarity"] is False
+
+    assert service.process_message(group_message(guid="G1", rowid=6, text="@rappter garage")) == "replied"
+    assert seen[2]["authorized_memory_data"] == []
+
+
+def test_trust_context_survives_an_unreadable_memory_store(monkeypatch, tmp_path):
+    # Recall is enrichment on the inbound hot path: an unreadable store must
+    # degrade to "no memory", never drop the message.
+    class _Broken(ContextMemoryAgent):
+        def perform(self, **kwargs):
+            raise OSError("memory.json is not readable")
+
+    monkeypatch.setattr("openrappter.imessage.service.ContextMemoryAgent", _Broken)
+    seen: list[dict] = []
+    service = _capturing_service(tmp_path, seen)
+
+    assert service.process_message(owner_message(guid="U1", rowid=1)) == "replied"
+    assert seen[0]["authorized_memory_data"] == []
+    assert seen[0]["familiarity"] is False
+
+
+def test_trust_context_ignores_non_json_recall(monkeypatch, tmp_path):
+    class _Garbage(ContextMemoryAgent):
+        def perform(self, **kwargs):
+            return "not json at all"
+
+    monkeypatch.setattr("openrappter.imessage.service.ContextMemoryAgent", _Garbage)
+    seen: list[dict] = []
+    service = _capturing_service(tmp_path, seen)
+
+    assert service.process_message(owner_message(guid="U1", rowid=1)) == "replied"
+    assert seen[0]["authorized_memory_data"] == []
+    assert seen[0]["familiarity"] is False

@@ -2,8 +2,11 @@
 
 import json
 import sys
+import threading
 import pytest
 from pathlib import Path
+
+from openrappter import brainstem
 
 #: Mirrors ``requires-python`` in pyproject.toml. Kept in sync by a test.
 MIN_PYTHON = (3, 10)
@@ -133,3 +136,27 @@ def sample_memories(tmp_memory_file):
     }
     tmp_memory_file.write_text(json.dumps(memories, indent=2))
     return tmp_memory_file
+
+
+@pytest.fixture()
+def server(tmp_path, monkeypatch):
+    """A real brainstem on a loopback port, hermetic and torn down after.
+
+    Lives here rather than in `test_openrappter_brainstem.py` because more than
+    one module needs it: `test_brainstem_http_framing.py` drives the same server
+    with hand-built requests. A second copy would be a second thing to keep in
+    step with the fixture it was copied from.
+    """
+    monkeypatch.setattr(brainstem, "BRAINSTEM_HOME", tmp_path)
+    monkeypatch.setattr(brainstem, "AGENTS_PATH", tmp_path / "agents")
+    monkeypatch.setattr(brainstem, "SOUL_PATH", tmp_path / "soul.md")
+    # Keep tests hermetic: never reach for a real GitHub token
+    monkeypatch.setattr(brainstem, "_github_token", lambda: None)
+    (tmp_path / "agents").mkdir()
+
+    httpd = brainstem.serve(port=0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    yield base
+    httpd.shutdown()

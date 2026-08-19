@@ -70,23 +70,6 @@ def post_multipart(url, filename, content):
     return status, json.loads(resp)
 
 
-@pytest.fixture()
-def server(tmp_path, monkeypatch):
-    monkeypatch.setattr(brainstem, "BRAINSTEM_HOME", tmp_path)
-    monkeypatch.setattr(brainstem, "AGENTS_PATH", tmp_path / "agents")
-    monkeypatch.setattr(brainstem, "SOUL_PATH", tmp_path / "soul.md")
-    # Keep tests hermetic: never reach for a real GitHub token
-    monkeypatch.setattr(brainstem, "_github_token", lambda: None)
-    (tmp_path / "agents").mkdir()
-
-    httpd = brainstem.serve(port=0)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{httpd.server_address[1]}"
-    yield base
-    httpd.shutdown()
-
-
 def test_health_envelope_matches_kernel_shape(server):
     status, health = get_json(f"{server}/health")
     assert status == 200

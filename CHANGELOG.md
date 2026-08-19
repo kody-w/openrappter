@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A field named `cookies` was written to the structured log in the clear, while
+  `cookie` was redacted. The same held for `signatures` and `jwts` -- and for
+  `sessionCookies` and `setCookies`, which is the shape a `Set-Cookie` header or
+  a cookie jar actually arrives in. Plurals looked handled because `tokens`,
+  `secrets` and `credentials` were all caught, but those are caught by the
+  substring fragment pass rather than by being listed as words: a word survived
+  pluralisation only if it happened to also be a fragment. `cookie`, `jwt` and
+  `signature` are words only, so their plurals fell through every branch. Fixed
+  in both runtimes as a rule rather than three more words. The test that pins
+  the two runtimes to each other compares the word tables, which cannot see a
+  rule -- it stayed green through the whole bug, and would have stayed green
+  with one runtime fixed and the other not, so it now pins the rule as well.
+
 - The flight recorder's excluded-path list covered `.env`, `.ssh`, `.aws/credentials`
   and `.pem`/`.key`/`.p12`, but not `.netrc`, `.npmrc`, `.pypirc`, `.pgpass`,
   `.htpasswd`, `.gnupg`, `.docker/config.json`, `.kube/config`, private keys

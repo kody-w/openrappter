@@ -189,7 +189,7 @@ class LocalStorageManager:
         return True
 
     def ensure_directory_exists(self, *args, **kwargs):
-        BRAINSTEM_HOME.mkdir(parents=True, exist_ok=True)
+        _secure_dir(BRAINSTEM_HOME)
 
     @classmethod
     def _lock_for(cls, path):
@@ -369,8 +369,70 @@ def _token_file():
     return Path(BRAINSTEM_HOME) / ".copilot_token"
 
 
+#: Everything under `BRAINSTEM_HOME` is private to the account that runs the
+#: brainstem: the saved Copilot credential, and the agent files the server
+#: imports and then executes. `mkdir()` without a mode yields `0o777 & ~umask`,
+#: which is 0755 under the usual umask — every account on the machine can list
+#: the directory and read what is in it. These helpers exist so that no caller
+#: has to remember the mode; `imessage/config.py` already does the same thing.
+def _secure_dir(path):
+    """Create `path` private to this account, tightening it if it already exists."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
+def _write_private_file(path, payload):
+    """Write `payload` to `path` atomically and readable only by this account.
+
+    Atomic because the previous `write_text` truncated the file before writing:
+    a crash or a full disk part-way through left a half-written token behind,
+    and `_read_token_file` reads that as "not logged in" with nothing to say
+    why. The replacement is a rename over a fully-written temporary file, so a
+    reader sees either the old credential or the new one, never a fragment.
+    """
+    path = Path(path)
+    _secure_dir(path.parent)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _harden_existing(path):
+    """Tighten a file an older build left readable by other accounts.
+
+    Fixing the write path alone would only protect people who log in again;
+    anyone already holding a 0644 token would keep it until it expired.
+    """
+    try:
+        mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        return
+    if mode & 0o077:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
 def _read_token_file():
     """Kernel format: JSON {access_token, refresh_token?}; legacy plain text supported."""
+    _harden_existing(_token_file())
     try:
         raw = _token_file().read_text(encoding="utf-8").strip()
     except OSError:
@@ -386,8 +448,7 @@ def _read_token_file():
 
 
 def _save_token_file(data):
-    Path(BRAINSTEM_HOME).mkdir(parents=True, exist_ok=True)
-    _token_file().write_text(json.dumps(data), encoding="utf-8")
+    _write_private_file(_token_file(), json.dumps(data).encode("utf-8"))
 
 
 def _http_form(url, data, timeout=15):
@@ -1608,7 +1669,7 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             if not filename.endswith("_agent.py"):
                 filename = filename[:-3] + "_agent.py"
             AGENTS_PATH.mkdir(parents=True, exist_ok=True)
-            (AGENTS_PATH / filename).write_bytes(body)
+            _write_private_file(AGENTS_PATH / filename, body)
             loaded = _load_agent_from_file(str(AGENTS_PATH / filename))
             if not loaded:
                 return self._send(200, {"error": f"Saved {filename}, but it did not load as an agent — check the file for errors."})
@@ -1642,8 +1703,8 @@ class BrainstemServer(ThreadingHTTPServer):
 
 
 def serve(port=DEFAULT_PORT, host=os.environ.get("OPENRAPPTER_BRAINSTEM_HOST", "127.0.0.1")):
-    BRAINSTEM_HOME.mkdir(parents=True, exist_ok=True)
-    AGENTS_PATH.mkdir(parents=True, exist_ok=True)
+    _secure_dir(BRAINSTEM_HOME)
+    _secure_dir(AGENTS_PATH)
     server = BrainstemServer((host, port), BrainstemHandler)
     agents = load_agents()
     print(f"\n{EMOJI} OpenRappter Brainstem v{__version__} on http://localhost:{server.server_address[1]}")

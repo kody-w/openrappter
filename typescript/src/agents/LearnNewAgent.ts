@@ -231,9 +231,21 @@ export class LearnNewAgent extends BasicAgent {
     // Hot-load the agent
     const hotLoadResult = await this.hotLoadAgent(filePath, className, name);
 
+    // An agent that does not load is not a created agent.
+    //
+    // This used to report `status: 'success'` and "Created and loaded" no
+    // matter what, with the failure recorded only as `hot_loaded: false`
+    // further down the same payload. `agentResultIsError` classifies on
+    // `status`, so every composition layer treated a broken agent as a working
+    // one -- and the only other symptom was a WARN on each gateway start,
+    // which is where nobody is looking. A real `morning_brief_agent.js`, whose
+    // header says it was auto-generated here, had been failing to load on
+    // every start for at least ten days (#144).
     const result: Record<string, unknown> = {
-      status: 'success',
-      message: `Created and loaded agent '${name}'`,
+      status: hotLoadResult.success ? 'success' : 'error',
+      message: hotLoadResult.success
+        ? `Created and loaded agent '${name}'`
+        : `Wrote agent '${name}', but it could not be loaded — the file is at ${filePath} and needs fixing`,
       agent_name: name,
       file_path: filePath,
       hot_loaded: hotLoadResult.success,

@@ -50,6 +50,9 @@ function isolatedHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'lockport-home-'));
   homes.push(home);
   vi.stubEnv('HOME', home);
+  // OPENRAPPTER_HOME outranks HOME when resolving the data dir, and
+  // the suite sets it globally, so the sandbox needs both redirected.
+  vi.stubEnv('OPENRAPPTER_HOME', `${home}/.openrappter`);
   return home;
 }
 

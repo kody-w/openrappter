@@ -107,6 +107,9 @@ describe('a rappter records where it actually landed', () => {
     const home = mkdtempSync(join(tmpdir(), 'rappter-home-'));
     homes.push(home);
     vi.stubEnv('HOME', home);
+    // OPENRAPPTER_HOME outranks HOME when resolving the data dir, and
+    // the suite sets it globally, so the sandbox needs both redirected.
+    vi.stubEnv('OPENRAPPTER_HOME', `${home}/.openrappter`);
 
     expect(() => writeGatewayEndpoint({
       instance: '\0/impossible', port: 1, pid: 1, startedAt: 'x',
@@ -233,6 +236,9 @@ function isolatedHome(): string {
   const home = mkdtempSync(join(tmpdir(), 'roster-home-'));
   sandboxes.push(home);
   vi.stubEnv('HOME', home);
+  // OPENRAPPTER_HOME outranks HOME when resolving the data dir, and
+  // the suite sets it globally, so the sandbox needs both redirected.
+  vi.stubEnv('OPENRAPPTER_HOME', `${home}/.openrappter`);
   return home;
 }
 

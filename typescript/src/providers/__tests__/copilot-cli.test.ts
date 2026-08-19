@@ -1,5 +1,4 @@
-import { homedir } from 'node:os';
-import path from 'node:path';
+import { openrappterPath } from '../../infra/openrappter-home.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   COPILOT_CLI_MAX_PROMPT_BYTES,
@@ -252,11 +251,10 @@ describe('CopilotCliProvider', () => {
 
     await provider.chat([{ role: 'user', content: 'hello' }]);
 
-    const expectedHome = path.join(
-      homedir(),
-      '.openrappter',
-      'copilot-imessage-home',
-    );
+    // Resolved the way the provider resolves it, so a relocated install
+    // (OPENRAPPTER_HOME) is compared against the right directory rather than
+    // against a path the provider would never use.
+    const expectedHome = openrappterPath('copilot-imessage-home');
     expect(homePreparer).toHaveBeenCalledWith(expectedHome, 0o700);
     expect(calls[0].options.env).toMatchObject({
       COPILOT_HOME: expectedHome,

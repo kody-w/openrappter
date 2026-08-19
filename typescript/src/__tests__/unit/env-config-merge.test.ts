@@ -35,6 +35,10 @@ beforeEach(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'openrappter-cfg-'));
   // os.homedir() honours $HOME on POSIX, so this relocates HOME_DIR/CONFIG_FILE.
   process.env.HOME = home;
+  // The data directory resolves OPENRAPPTER_HOME before HOME, and the
+  // suite sets it globally (vitest.setup.ts), so redirecting HOME alone
+  // would leave this test pointed at the shared temp home.
+  process.env.OPENRAPPTER_HOME = `${home}/.openrappter`;
   await fs.mkdir(path.join(home, '.openrappter'), { recursive: true });
   home = path.join(home, '.openrappter');
 });

@@ -3,7 +3,7 @@
  *
  * The runtime lock was one file per home directory:
  *
- *   join(homedir(), '.openrappter', 'gateway.pid')
+ *   openrappterPath('gateway.pid')
  *
  * No port, no instance in the path, and `index.ts` called `acquireLock()` with
  * no arguments — so exactly ONE rappter could run per machine. Measured before
@@ -26,6 +26,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
+import { openrappterPath } from '../../infra/openrappter-home.js';
 import { join } from 'node:path';
 import {
   ALPHA_GATEWAY_PORT,
@@ -51,7 +52,26 @@ function take(filePath: string, pid: number): boolean {
 describe('the alpha is exactly where it always was', () => {
   it('resolves to the original path with no arguments', () => {
     expect(gatewayLockFileFor()).toBe(defaultGatewayLockFile());
-    expect(defaultGatewayLockFile()).toBe(join(homedir(), '.openrappter', 'gateway.pid'));
+
+    // The guarantee this file is about is that an existing install is never
+    // migrated. Expressed against openrappterPath so it still holds when
+    // OPENRAPPTER_HOME relocates the install, and asserted directly below for
+    // the default case, which is the one existing users are in.
+    expect(defaultGatewayLockFile()).toBe(openrappterPath('gateway.pid'));
+  });
+
+  it('is the historical ~/.openrappter path when nothing overrides it', () => {
+    // The compatibility promise stated literally, for the case every existing
+    // user is in. The assertions above use openrappterPath so they survive a
+    // relocated install; this one pins that a default install did not move.
+    const saved = process.env.OPENRAPPTER_HOME;
+    delete process.env.OPENRAPPTER_HOME;
+    try {
+      expect(defaultGatewayLockFile()).toBe(join(homedir(), '.openrappter', 'gateway.pid'));
+    } finally {
+      if (saved === undefined) delete process.env.OPENRAPPTER_HOME;
+      else process.env.OPENRAPPTER_HOME = saved;
+    }
   });
 
   // An existing install passes its port explicitly; it must not be migrated.
@@ -64,12 +84,12 @@ describe('a twin gets its own', () => {
   it('keys by port when no id is given', () => {
     const twin = gatewayLockFileFor({ port: 19901 });
     expect(twin).not.toBe(defaultGatewayLockFile());
-    expect(twin).toBe(join(homedir(), '.openrappter', 'instances', '19901', 'gateway.pid'));
+    expect(twin).toBe(openrappterPath('instances', '19901', 'gateway.pid'));
   });
 
   it('prefers an explicit id over the port', () => {
     expect(gatewayLockFileFor({ instance: 'scout', port: 19901 }))
-      .toBe(join(homedir(), '.openrappter', 'instances', 'scout', 'gateway.pid'));
+      .toBe(openrappterPath('instances', 'scout', 'gateway.pid'));
   });
 
   // A twin id reaches a filesystem path. It must not be able to walk out of

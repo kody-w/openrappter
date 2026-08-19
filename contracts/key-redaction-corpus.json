@@ -1,0 +1,28 @@
+{
+  "_comment": "Field NAMES both runtimes' flight recorders must agree on. Read by typescript/src/flight-recorder/key-redaction-parity.test.ts and python/tests/test_key_redaction_parity.py, so a name added to one runtime's list cannot silently miss the other. Its sibling value-redaction-corpus.json covers the other half of the question: that file asks whether a VALUE looks like a secret, this one asks whether a KEY says it is one. A value that looks like nothing in particular -- an opaque random string, which is what most API keys and session keys are -- can only be caught by its key.",
+
+  "_must_redact_comment": "Every name here was written to the flight log in the clear before this corpus existed, in both runtimes. The rules matched `token`, `secret` and `authorization` as exact words while matching `password`, `credential` and `cookie` as prefixes, so the singular of the first three was redacted and the plural was not. The qualified `*Key` names were missed by a different gap: a fixed substring list held `apikey` and `privatekey` but not `sshKey`, `signingKey` or the rest.",
+  "must_redact": [
+    "token", "tokens", "apiToken", "apiTokens", "accessToken", "accessTokens",
+    "refreshToken", "refreshTokens", "sessionToken", "session_tokens",
+    "secret", "secrets", "clientSecret", "clientSecrets", "app_secret",
+    "authorization", "authorizations", "password", "passwords", "passwd",
+    "passphrase", "credential", "credentials", "cookie", "cookies",
+    "sessionCookies", "apiKey", "api_key", "apikey", "privateKey",
+    "private_key", "privatekey", "signingKey", "masterKey", "encryptionKey",
+    "sessionKey", "sshKey", "clientKey", "accessKeys", "identityKey",
+    "identity_key", "identitykey",
+    "__proto__", "constructor", "prototype"
+  ],
+
+  "_must_keep_comment": "Redacting these would be a bug of the opposite kind, and the flight recorder is deliberately conservative about it: a ledger that redacts too much keeps the record and loses the ability to read it. `key`, `auth`, `salt`, `nonce`, `bearer`, `id`, `name` and `path` are left readable on purpose -- `key` alone is one of the most common field names there is (map entries, config entries, sort keys, and the keyboard shortcut Show-and-Tell records), and `bearer` appears in this codebase only as a local variable, never as a recorded field. Values that actually look like credentials are still caught by value-redaction-corpus.json regardless of the name they arrive under.",
+  "must_keep": [
+    "key", "keys", "auth", "salt", "nonce", "id", "name", "path", "bearer",
+    "keyCount", "keyId", "keyword", "monkey", "turnkey", "publicKey",
+    "username", "email", "hostname", "duration", "status", "message",
+    "requestId", "sessionId", "agent", "model", "timestamp"
+  ],
+
+  "_counts_comment": "`token` is the one secret word that is also a unit of measurement. Usage accounting records these on every provider call, and a bare number cannot be a credential, so the VALUE decides: these names are redacted when they carry a string and kept when they carry a number. The name alone cannot tell `apiTokens` from `inputTokens`.",
+  "counts": ["inputTokens", "outputTokens", "totalTokens", "cachedTokens"]
+}

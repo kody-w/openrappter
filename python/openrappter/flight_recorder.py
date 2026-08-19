@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence
 from urllib.parse import parse_qsl, unquote, urlparse
 
+
+
 FLIGHT_EVENT_SCHEMA = "openrappter-event/1.0"
 FLIGHT_EXPORT_SCHEMA = "openrappter-flight-export/1.0"
 DEFAULT_RETENTION_EVENTS = 10_000
@@ -1211,19 +1213,90 @@ def _is_prototype_pollution_key(key: str) -> bool:
     return _normalized_key(key) in {"constructor", "prototype"}
 
 
-def _is_sensitive_key(key: str, privacy: Optional[Mapping[str, Any]]) -> bool:
+#: Words that make a trailing ``key`` a credential.
+#:
+#: Bare ``key`` is deliberately absent, and that is the whole point of the list.
+#: ``key`` is one of the most common field names there is -- map entries, config
+#: entries, cache entries, sort keys -- and Show-and-Tell records which keyboard
+#: shortcut was pressed under it. Redacting it would blank most of a ledger
+#: whose purpose is to be read afterwards. Qualified names carry no such
+#: ambiguity: nothing calls a sort key ``sshKey``.
+_SECRET_KEY_QUALIFIERS = frozenset({
+    "access", "api", "app", "client", "encryption", "master", "private",
+    "secret", "session", "signing", "ssh", "token",
+})
+
+#: Prefixes that make a whole word a credential.
+#:
+#: These are prefixes rather than exact words because the singular and the
+#: plural are equally secret. Matching ``token`` and ``secret`` exactly while
+#: matching ``password`` and ``credential`` as prefixes is what let ``tokens``,
+#: ``secrets`` and ``clientSecrets`` reach the flight log in the clear.
+_SECRET_WORD_PREFIXES = (
+    "authorization", "cookie", "credential", "passphrase", "passwd",
+    "password", "secret", "token",
+)
+
+#: Sentinel for "the caller has no value in hand", distinct from a real ``None``.
+_UNKNOWN_VALUE = object()
+
+
+def _is_token_count(normalized: str, value: Any) -> bool:
+    """Is this a measurement that merely shares a word with a credential?
+
+    ``token`` is the one secret word here that is also a unit. Usage accounting
+    records ``inputTokens`` and ``outputTokens`` on every provider call, and
+    blanking those protects nothing -- a bare number cannot be a credential --
+    while it does destroy the numbers the Bar reports and the cross-runtime
+    usage vector in ``contracts/usage-v1.json``.
+
+    The value has to decide, because the name cannot: ``apiTokens`` and
+    ``inputTokens`` are the same shape and only one of them holds credentials.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return normalized.endswith(("token", "tokens"))
+
+
+def _is_sensitive_key(
+    key: str,
+    privacy: Optional[Mapping[str, Any]],
+    value: Any = _UNKNOWN_VALUE,
+) -> bool:
+    """Does this field name mean the value must never be recorded?
+
+    This list is deliberately conservative and stays that way: a ledger that
+    redacts too much keeps the record and loses the ability to read it, which is
+    a real failure and not a safe default. ``auth``, ``salt``, ``nonce``,
+    ``bearer``, ``id``, ``name``, ``path`` and bare ``key`` are all left
+    readable on purpose.
+
+    What it was not was *consistent*. It matched ``token``, ``secret`` and
+    ``authorization`` as exact words while matching ``password``, ``credential``
+    and ``cookie`` as prefixes, so the singular of the first three was redacted
+    and the plural was not -- ``secrets``, ``tokens``, ``clientSecrets`` and
+    ``apiTokens`` were all written to the flight log in the clear. Nothing about
+    conservatism required that; the plural of a credential is still a credential.
+    """
     if _is_prototype_pollution_key(key):
         return True
     normalized = _normalized_key(key)
+    configured = _privacy_value(privacy, "redactedKeys", "redacted_keys", default=()) or ()
+    if any(_normalized_key(str(candidate)) == normalized for candidate in configured):
+        return True
+    if _is_token_count(normalized, value):
+        return False
     words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key).lower()
     words = [word for word in re.split(r"[^a-z0-9]+", words) if word]
-    if any(
-        word in {"token", "secret", "authorization"}
-        or word.startswith(("password", "credential", "cookie"))
-        for word in words
+    if any(word.startswith(_SECRET_WORD_PREFIXES) for word in words):
+        return True
+    if (
+        len(words) > 1
+        and words[-1] in {"key", "keys"}
+        and any(word in _SECRET_KEY_QUALIFIERS for word in words[:-1])
     ):
         return True
-    if any(
+    return any(
         candidate in normalized
         for candidate in (
             "apikey",
@@ -1233,10 +1306,7 @@ def _is_sensitive_key(key: str, privacy: Optional[Mapping[str, Any]]) -> bool:
             "refreshtoken",
             "identitykey",
         )
-    ):
-        return True
-    configured = _privacy_value(privacy, "redactedKeys", "redacted_keys", default=()) or ()
-    return any(_normalized_key(str(candidate)) == normalized for candidate in configured)
+    )
 
 
 def is_excluded_flight_path(value: str, privacy: Optional[Mapping[str, Any]] = None) -> bool:
@@ -1809,7 +1879,7 @@ def _sanitize_recursive(
                     == EXCLUDED_PATH
                 ):
                     result[sanitized_key] = EXCLUDED_PATH
-                elif _is_sensitive_key(string_key, privacy):
+                elif _is_sensitive_key(string_key, privacy, value[key]):
                     result[sanitized_key] = REDACTED
                 elif (
                     _is_file_locator_key(string_key)

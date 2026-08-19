@@ -115,45 +115,127 @@ function isPrototypePollutionKey(key: string): boolean {
   return normalized === "constructor" || normalized === "prototype";
 }
 
-function isSensitiveKey(key: string, privacy?: FlightRecorderPrivacy): boolean {
+/**
+ * The one place the canonical rules are deliberately not followed.
+ *
+ * `security/secret-keys` treats a field named exactly `key` as a secret, on the
+ * reasoning that such a field is a value rather than a label for one. That is
+ * right for config display and gateway logs and wrong here: Show-and-Tell
+ * records which keyboard shortcut was pressed under `key`, and only after
+ * proving the value is a named key or a modifier combination like `cmd+c`
+ * (free text goes to `keyLength`/`keyStored: false` instead). Redacting it
+ * would delete the substance of the recording to protect a value whose grammar
+ * does not admit a secret.
+ *
+ * Qualified names are unaffected: `apiKey` and `sessionKey` normalize to
+ * something other than `key`, so they are still redacted. Value patterns still
+ * apply to whatever this field holds.
+ */
+/**
+ * Words that make a trailing `key` a credential.
+ *
+ * Bare `key` is deliberately absent, and that is the whole point of the list.
+ * `key` is one of the most common field names there is — map entries, config
+ * entries, cache entries, sort keys — and Show-and-Tell records which keyboard
+ * shortcut was pressed under it. Redacting it would blank most of a ledger
+ * whose purpose is to be read afterwards. Qualified names carry no such
+ * ambiguity: nothing calls a sort key `sshKey`.
+ */
+const SECRET_KEY_QUALIFIERS = new Set([
+  'access', 'api', 'app', 'client', 'encryption', 'master', 'private',
+  'secret', 'session', 'signing', 'ssh', 'token',
+]);
+
+/**
+ * Prefixes that make a whole word a credential.
+ *
+ * These are prefixes rather than exact words because the singular and the
+ * plural are equally secret. Matching `token` and `secret` exactly while
+ * matching `password` and `credential` as prefixes is what let `tokens`,
+ * `secrets` and `clientSecrets` reach the flight log in the clear.
+ */
+const SECRET_WORD_PREFIXES = [
+  'authorization', 'cookie', 'credential', 'passphrase', 'passwd',
+  'password', 'secret', 'token',
+];
+
+/**
+ * Is this a measurement that merely shares a word with a credential?
+ *
+ * `token` is the one secret word here that is also a unit. Usage accounting
+ * records `inputTokens` and `outputTokens` on every provider call, and blanking
+ * those protects nothing — a bare number cannot be a credential — while it does
+ * destroy the numbers the Bar reports and the cross-runtime usage vector in
+ * `contracts/usage-v1.json`.
+ *
+ * The value has to decide, because the name cannot: `apiTokens` and
+ * `inputTokens` are the same shape and only one of them holds credentials.
+ */
+function isTokenCount(normalized: string, value: unknown): boolean {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+  return normalized.endsWith('token') || normalized.endsWith('tokens');
+}
+
+/**
+ * Does this field name mean the value must never be recorded?
+ *
+ * This list is deliberately conservative and stays that way: a ledger that
+ * redacts too much keeps the record and loses the ability to read it, which is
+ * a real failure and not a safe default. `auth`, `salt`, `nonce`, `bearer`,
+ * `id`, `name`, `path` and bare `key` are all left readable on purpose.
+ *
+ * What it was not was *consistent*. It matched `token`, `secret` and
+ * `authorization` as exact words while matching `password`, `credential` and
+ * `cookie` as prefixes, so the singular of the first three was redacted and the
+ * plural was not — `secrets`, `tokens`, `clientSecrets` and `apiTokens` were all
+ * written to the flight log in the clear. Nothing about conservatism required
+ * that; the plural of a credential is still a credential.
+ */
+function isSensitiveKey(
+  key: string,
+  privacy?: FlightRecorderPrivacy,
+  value: unknown = undefined,
+): boolean {
   if (isPrototypePollutionKey(key)) return true;
 
   const normalized = normalizedKey(key);
+  if (
+    (privacy?.redactedKeys ?? []).some(
+      (candidate) => normalizedKey(candidate) === normalized,
+    )
+  ) {
+    return true;
+  }
+  if (isTokenCount(normalized, value)) return false;
+
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
   if (
-    words.some(
-      (word) =>
-        word === "token" ||
-        word === "secret" ||
-        word.startsWith("password") ||
-        word.startsWith("credential") ||
-        word === "authorization" ||
-        word.startsWith("cookie"),
+    words.some((word) =>
+      SECRET_WORD_PREFIXES.some((prefix) => word.startsWith(prefix)),
     )
   ) {
     return true;
   }
-
   if (
-    [
-      "apikey",
-      "privatekey",
-      "sessiontoken",
-      "accesstoken",
-      "refreshtoken",
-      "identitykey",
-    ].some((candidate) => normalized.includes(candidate))
+    words.length > 1 &&
+    (words[words.length - 1] === "key" || words[words.length - 1] === "keys") &&
+    words.slice(0, -1).some((word) => SECRET_KEY_QUALIFIERS.has(word))
   ) {
     return true;
   }
 
-  return (privacy?.redactedKeys ?? []).some(
-    (candidate) => normalizedKey(candidate) === normalized,
-  );
+  return [
+    "apikey",
+    "privatekey",
+    "sessiontoken",
+    "accesstoken",
+    "refreshtoken",
+    "identitykey",
+  ].some((candidate) => normalized.includes(candidate));
 }
 
 function testPattern(pattern: RegExp, value: string): boolean {
@@ -1088,7 +1170,7 @@ function sanitizeRecursive(
                 !containsExcludedFileLocator(entryValue, privacy)
               ? EXCLUDED_PATH
             : classifiedKey !== undefined &&
-                isSensitiveKey(classifiedKey, privacy)
+                isSensitiveKey(classifiedKey, privacy, entryValue)
             ? REDACTED
             : sanitizeRecursive(entryValue, privacy, ancestors);
         return [sanitizedKey, sanitizedValue] as [unknown, unknown];
@@ -1145,15 +1227,15 @@ function sanitizeRecursive(
         entries.push([sanitizedKey, EXCLUDED_PATH]);
         continue;
       }
-      if (isSensitiveKey(classifiedKey, privacy)) {
-        entries.push([sanitizedKey, REDACTED]);
-        continue;
-      }
       let entryValue: unknown;
       try {
         entryValue = record[key];
       } catch {
         entryValue = UNSERIALIZABLE;
+      }
+      if (isSensitiveKey(classifiedKey, privacy, entryValue)) {
+        entries.push([sanitizedKey, REDACTED]);
+        continue;
       }
       const locator = isFileLocatorKey(key)
         ? flightPathString(entryValue)

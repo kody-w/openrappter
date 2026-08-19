@@ -78,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The flight recorder wrote 19 secret-bearing field names to disk in the clear,
+  in both runtimes. Its redaction rules matched `token`, `secret` and
+  `authorization` as exact words while matching `password`, `credential` and
+  `cookie` as prefixes, so `secrets`, `tokens`, `clientSecrets` and `apiTokens`
+  were recorded verbatim while their singulars were redacted; a separate fixed
+  substring list held `apikey` and `privatekey` but not `sshKey`, `signingKey`,
+  `masterKey`, `encryptionKey`, `sessionKey` or `clientKey`. Field names are now
+  matched consistently, and `contracts/key-redaction-corpus.json` holds the
+  agreed list for both runtimes. The recorder's deliberate conservatism is
+  unchanged: `key`, `auth`, `salt`, `nonce` and `bearer` stay readable, and a
+  numeric `inputTokens` is still a count rather than a credential.
+
 - Two concurrent `POST /login` calls each started a separate device-code grant,
   and the second overwrote the first. One caller was left holding a `user_code`
   that `/login/poll` was no longer polling for, so that user could authorise

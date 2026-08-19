@@ -2321,7 +2321,32 @@ export class GatewayServer {
       try { ws.close(1013, 'Outbound buffer limit exceeded'); } catch { /* already gone */ }
       return;
     }
-    try { ws.send(JSON.stringify(frame)); } catch { /* ignore */ }
+    let payload: string;
+    try {
+      payload = JSON.stringify(frame);
+    } catch {
+      // A frame that cannot be serialised used to be swallowed by the `catch`
+      // below, so the caller was never answered at all. Over HTTP the same
+      // method returns a JSON-RPC error (#361); over this transport it returned
+      // silence, which a client awaiting `id` cannot distinguish from a hung
+      // server -- it waits for its own timeout, or forever if it has none.
+      //
+      // Only a frame carrying an `id` has someone waiting on it. An event has
+      // no correlator and no awaiting caller, so there is nothing to answer and
+      // it is dropped as before.
+      const id = typeof frame.id === 'string' ? frame.id : '';
+      if (!id) return;
+      payload = JSON.stringify({
+        type: 'res',
+        id,
+        ok: false,
+        error: {
+          code: RPC_ERROR.INTERNAL_ERROR,
+          message: 'Result could not be serialised',
+        },
+      });
+    }
+    try { ws.send(payload); } catch { /* ignore */ }
   }
 
   private checkRateLimit(connId: string): boolean {

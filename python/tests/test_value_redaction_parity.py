@@ -77,3 +77,37 @@ class TestValueRedactionCorpus:
         """`?key=name` is a field name; `?key=<40 chars>` is a credential."""
         assert not redacts("https://example.com/?key=name")
         assert redacts("https://example.com/?key=AIzaSyD-EXAMPLE-1234567890abcdef")
+
+
+class TestLedgerLocation:
+    """The two runtimes must write to the same ledger.
+
+    `OPENRAPPTER_HOME` relocates the whole installation. The ledger escaped
+    that in both runtimes -- python spelled `Path.home() / ".openrappter"` and
+    typescript spelled the same path across three lines, which is why the
+    guard in `openrappter-home.test.ts` walked past it. A runtime that ignored
+    the variable would record to a different database than its twin, which is
+    the split #330 was about.
+    """
+
+    def test_the_ledger_follows_openrappter_home(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("OPENRAPPTER_HOME", str(tmp_path))
+        import importlib
+
+        import openrappter.flight_recorder as fr
+
+        importlib.reload(fr)
+        assert fr.FlightRecorder().database_path == str(tmp_path / "flight-recorder.db")
+
+    def test_it_falls_back_to_the_home_directory(self, monkeypatch):
+        from pathlib import Path
+
+        monkeypatch.delenv("OPENRAPPTER_HOME", raising=False)
+        import importlib
+
+        import openrappter.flight_recorder as fr
+
+        importlib.reload(fr)
+        assert fr.FlightRecorder().database_path == str(
+            Path.home() / ".openrappter" / "flight-recorder.db"
+        )

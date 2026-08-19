@@ -78,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A WebSocket RPC whose result could not be serialised was never answered.
+  `sendFrame` wrapped `ws.send(JSON.stringify(frame))` in a `try`/`catch` that
+  ignored the failure, so the caller waited on an `id` that would never arrive
+  while the connection stayed open and every other call worked. The same method
+  over HTTP answers a JSON-RPC error. It now answers one here too, carrying the
+  caller's `id`; frames with no `id` -- events, which nobody is awaiting -- are
+  still dropped.
+
 - A registered RPC method returning a value `JSON.stringify` refuses -- a cycle,
   a BigInt -- terminated the gateway. `/rpc` serialised the result as the
   argument to `res.end()`, after `res.writeHead()` had committed a status line,

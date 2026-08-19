@@ -354,6 +354,15 @@ _copilot_cache = {"token": None, "endpoint": None, "expires_at": 0}
 _pending_login = None
 _login_result = {}
 
+#: Device login is one state machine spread across three routes, and
+#: `ThreadingHTTPServer` gives every request its own thread. Both mutators
+#: check `_pending_login` and then act on it, so without this two concurrent
+#: `POST /login` calls each started a *separate* device-code grant and the
+#: second overwrote the first. One caller was then shown a `user_code` that
+#: `/login/poll` was no longer polling for: that user authorises correctly on
+#: GitHub and the login never completes, with no error anywhere to explain it.
+_LOGIN_GUARD = threading.RLock()
+
 
 def _token_file():
     return Path(BRAINSTEM_HOME) / ".copilot_token"
@@ -561,46 +570,47 @@ def start_device_login():
     """Begin the GitHub device-code flow. Returns {user_code, verification_uri}."""
     global _pending_login, _login_result
     import time
+    with _LOGIN_GUARD:
+        if _pending_login and time.time() < _pending_login.get("expires_at", 0):
+            return {"user_code": _pending_login["user_code"],
+                    "verification_uri": _pending_login["verification_uri"]}
 
-    if _pending_login and time.time() < _pending_login.get("expires_at", 0):
-        return {"user_code": _pending_login["user_code"],
-                "verification_uri": _pending_login["verification_uri"]}
-
-    _login_result = {}
-    data = _http_form("https://github.com/login/device/code", {"client_id": COPILOT_CLIENT_ID})
-    _pending_login = {
-        "device_code": data["device_code"],
-        "user_code": data["user_code"],
-        "verification_uri": data["verification_uri"],
-        "interval": data.get("interval", 5),
-        "expires_at": time.time() + data.get("expires_in", 900),
-    }
-    return {"user_code": data["user_code"], "verification_uri": data["verification_uri"]}
+        _login_result = {}
+        data = _http_form("https://github.com/login/device/code", {"client_id": COPILOT_CLIENT_ID})
+        _pending_login = {
+            "device_code": data["device_code"],
+            "user_code": data["user_code"],
+            "verification_uri": data["verification_uri"],
+            "interval": data.get("interval", 5),
+            "expires_at": time.time() + data.get("expires_in", 900),
+        }
+        return {"user_code": data["user_code"], "verification_uri": data["verification_uri"]}
 
 
 def poll_device_login():
     """One poll of the device-code grant. Persists the token on success."""
     global _pending_login, _login_result
-    if not _pending_login:
-        return {"status": "idle"}
-    data = _http_form("https://github.com/login/oauth/access_token", {
-        "client_id": COPILOT_CLIENT_ID,
-        "device_code": _pending_login["device_code"],
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-    })
-    if data.get("access_token"):
-        _save_token_file({"access_token": data["access_token"],
-                          "refresh_token": data.get("refresh_token", "")})
+    with _LOGIN_GUARD:
+        if not _pending_login:
+            return {"status": "idle"}
+        data = _http_form("https://github.com/login/oauth/access_token", {
+            "client_id": COPILOT_CLIENT_ID,
+            "device_code": _pending_login["device_code"],
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        })
+        if data.get("access_token"):
+            _save_token_file({"access_token": data["access_token"],
+                              "refresh_token": data.get("refresh_token", "")})
+            _pending_login = None
+            _login_result = {"status": "success"}
+            _copilot_cache["token"] = None  # force fresh exchange with the new token
+            return _login_result
+        error = data.get("error", "authorization_pending")
+        if error in ("authorization_pending", "slow_down"):
+            return {"status": "pending"}
         _pending_login = None
-        _login_result = {"status": "success"}
-        _copilot_cache["token"] = None  # force fresh exchange with the new token
+        _login_result = {"status": "error", "error": error}
         return _login_result
-    error = data.get("error", "authorization_pending")
-    if error in ("authorization_pending", "slow_down"):
-        return {"status": "pending"}
-    _pending_login = None
-    _login_result = {"status": "error", "error": error}
-    return _login_result
 
 
 def login_status():

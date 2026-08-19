@@ -104,7 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `test_all_core_agents_importable` ended in `assert True`, so it only proved
   the imports resolved -- renaming `ShellAgent.perform` left it green. It now
-  asserts the contract its name implies.
+  requires each agent to implement `perform` itself. Asserting merely that the
+  attribute exists was not enough: they all subclass `BasicAgent`, which also
+  defines `perform`, so a subclass that lost its own implementation would
+  inherit one and still pass.
 
 - `python3 -m nanorappter` did not work. Both the module docstring and the
   CLI's own help text advertise it, but there was no `__main__.py`, so the

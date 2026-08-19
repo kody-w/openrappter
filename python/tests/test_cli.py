@@ -45,8 +45,10 @@ class TestAgentDiscovery:
         from openrappter.agents.learn_new_agent import LearnNewAgent
 
         # `assert True` used to stand here, so the test only proved the imports
-        # resolved: renaming `ShellAgent.perform` left it green. Assert the
-        # contract the name implies instead.
+        # resolved. Checking `getattr` is not enough either: every one of these
+        # subclasses BasicAgent, which also defines `perform`, so a subclass
+        # that lost its own implementation would still inherit one and pass.
+        # Each agent is required to implement `perform` itself.
         for agent in (
             BasicAgent,
             ShellAgent,
@@ -54,8 +56,8 @@ class TestAgentDiscovery:
             ContextMemoryAgent,
             LearnNewAgent,
         ):
-            assert callable(getattr(agent, "perform", None)), (
-                f"{agent.__name__} does not expose perform()"
+            assert callable(agent.__dict__.get("perform")), (
+                f"{agent.__name__} does not implement perform() itself"
             )
 
     def test_core_agents_instantiate(self):

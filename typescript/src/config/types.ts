@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+import type { openRappterConfigSchema } from './schema.js';
 /**
  * Configuration system types
  */
@@ -49,17 +51,22 @@ export interface MemoryConfig {
   chunkOverlap: number;
 }
 
-export interface OpenRappterConfig {
-  models?: ModelConfig[];
-  agents?: {
-    list?: AgentConfig[];
-    defaults?: Partial<AgentConfig>;
-  };
-  channels?: Record<string, ChannelConfig>;
-  gateway?: GatewayConfig;
-  cron?: { enabled: boolean };
-  memory?: MemoryConfig;
-}
+/**
+ * The shape `loadConfig()` returns — derived from the schema that validates it.
+ *
+ * This was a hand-written interface listing **6** sections while
+ * `openRappterConfigSchema` validated **21**. The loader parses with the
+ * schema and returns this type, so fifteen sections were accepted, validated
+ * and then invisible: reading `config.security` or `config.network` was a type
+ * error, and the only way to reach one was a local cast.
+ *
+ * That is a structural reason those sections are read by nothing (#219, #235),
+ * not a coincidence — and `security/audit.ts` had to cast to see `browser`.
+ *
+ * Deriving it means the two cannot drift again: adding a section to the schema
+ * adds it here.
+ */
+export type OpenRappterConfig = z.infer<typeof openRappterConfigSchema>;
 
 export interface ConfigWatcherOptions {
   path: string;

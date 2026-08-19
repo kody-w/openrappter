@@ -79,15 +79,16 @@ function invokedMethodModules(): Set<string> {
  * than a wiring fix. Shrink-only: the list below fails if one starts being
  * emitted while still listed.
  */
-const LISTENED_BUT_NEVER_EMITTED = new Set([
+const LISTENED_BUT_NEVER_EMITTED = new Set<string>([
   // `channel.status` came off this list when the gateway started emitting it
   // on channels.connect/disconnect — see channel-status-event.test.ts.
-  'agent.tool',
+  // `agent.tool` came off it when the assistant started reporting each
+  // finished tool call — see agent-tool-event.test.ts. The list is empty, and
+  // being shrink-only, it should stay that way.
 ]);
 
 const DECLARED_BUT_NEVER_EMITTED = new Set([
   'agent.stream',
-  'agent.tool',
   'channel',
   'channel.message',
   'chat.message',

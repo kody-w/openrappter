@@ -266,6 +266,50 @@ interface ConfigWriteParams {
   config?: string;
   baseHash?: string;
 }
+/**
+ * Write a JSON response so that serialising it cannot take the process down.
+ *
+ * The order matters and used to be wrong in several places:
+ *
+ *     res.writeHead(200, ...);                 // status line committed
+ *     res.end(JSON.stringify(result));         // throws HERE
+ *
+ * `JSON.stringify` runs as the argument to `res.end()`, so a value it refuses
+ * -- a cycle, a BigInt -- throws with the reply already begun. Every one of
+ * those sites sits inside a `try`, and the `catch` then writes a second status
+ * line onto the same response: `ERR_HTTP_HEADERS_SENT`, raised in an async
+ * handler, which node 20 turns into an unhandled rejection and exits on. #359
+ * fixed one such path in `/readyz`; `/rpc` was reachable the same way through
+ * any registered method, which is public API.
+ *
+ * Serialising first means a bad value produces a clean 500 instead, and the
+ * `headersSent` check means nothing here can ever append to a reply in flight.
+ */
+export function writeJsonResponse(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+  fallback: unknown = { status: 'error', error: 'Response could not be serialised' },
+): void {
+  let payload: string;
+  let code = status;
+  try {
+    payload = JSON.stringify(body);
+  } catch {
+    code = 500;
+    payload = JSON.stringify(fallback);
+  }
+  if (res.headersSent) {
+    // Nothing valid is left to say and a second status line would
+    // desynchronise the connection. End what is already out there.
+    res.end();
+    return;
+  }
+  res.writeHead(code, { 'Content-Type': 'application/json', ...headers });
+  res.end(payload);
+}
+
 export interface GatewayReadiness {
   ready: boolean;
   status: 'ready' | 'degraded';
@@ -1582,8 +1626,13 @@ export class GatewayServer {
             try {
               const responseBody = await this.runWithTimeout(responsePromise);
               if (!this.isGenerationActive(requestGeneration)) return;
-              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify(responseBody));
+              writeJsonResponse(res, 200, responseBody, corsHeaders, {
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: 'Response could not be serialised',
+                session_id: sessionId,
+                sessionId,
+              });
             } catch (error) {
               if (idempotencyKey && !(error instanceof GatewayTimeoutError)) {
                 this.httpChatIdempotency.delete(idempotencyKey);
@@ -1643,8 +1692,14 @@ export class GatewayServer {
               if (!this.isGenerationActive(requestGeneration)) return;
               this.metrics.recordRequest('success');
               logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'success', durationMs: Date.now() - dispatchStartedAt });
-              res.writeHead(200, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result }));
+              writeJsonResponse(res, 200, { jsonrpc: '2.0', id: parsed.id, result }, corsHeaders, {
+                jsonrpc: '2.0',
+                id: parsed.id,
+                error: {
+                  code: RPC_ERROR.INTERNAL_ERROR,
+                  message: 'Result could not be serialised',
+                },
+              });
             } catch (error) {
               if (
                 error instanceof GatewayStoppedError

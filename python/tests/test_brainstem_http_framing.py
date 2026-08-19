@@ -195,3 +195,69 @@ class TestAgentImportFraming:
         saved = brainstem.AGENTS_PATH / "a_agent.py"
         assert saved.exists()
         assert saved.read_bytes() == b"print(1)"
+
+
+def _raw_get(base, path=b"/health", timeout=15):
+    parts = urllib.parse.urlparse(base)
+    conn = socket.create_connection((parts.hostname, parts.port), timeout=timeout)
+    try:
+        conn.sendall(b"GET " + path + b" HTTP/1.1\r\nHost: x\r\n\r\n")
+        data = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        conn.close()
+    if not data:
+        return None, b""
+    head, _, rest = data.partition(b"\r\n\r\n")
+    return int(head.split(b"\r\n")[0].split(b" ")[1]), rest
+
+
+def _raising(*_args, **_kwargs):
+    raise RuntimeError("deliberate failure planted by the test")
+
+
+class TestNoRequestEndsWithoutAReply:
+    """An exception inside a route must become a status, never a closed socket.
+
+    Three separate handlers were fixed for this one at a time -- `Content-Length`
+    parsing (#355), multipart framing (#356), and any failure while serving
+    `/health`, which returned nothing at all until the guard was added. The
+    point of testing it here is that the next unguarded line, wherever it is,
+    is already covered.
+    """
+
+    def test_a_failing_get_route_answers_500_rather_than_dropping(self, server, monkeypatch):
+        monkeypatch.setattr(brainstem, "load_agents", _raising)
+        status, body = _raw_get(server, b"/health")
+        assert status == 500, "a failing route must answer, not close the connection"
+        assert b"Internal error" in body
+
+    def test_a_failing_chat_route_answers_in_the_contract_envelope(self, server, monkeypatch):
+        """`/chat` replies are fixed by `contracts/rapp-chat-v1.json`.
+
+        `_validate_conversation_history` runs before the handler's own
+        `except Exception`, so raising there reaches the dispatch guard.
+        """
+        monkeypatch.setattr(brainstem, "_validate_conversation_history", _raising)
+        status, body = _raw_post(server, b"Content-Length: 19\r\n")
+        assert status == 500
+        assert b'"schema": "rapp-chat/1.0"' in body
+        assert b'"status": "error"' in body
+
+    def test_the_caller_is_not_handed_our_stack_trace(self, server, monkeypatch):
+        """The operator gets the traceback; the caller gets a sentence."""
+        monkeypatch.setattr(brainstem, "load_agents", _raising)
+        _, body = _raw_get(server, b"/health")
+        assert b"Traceback" not in body
+        assert b"deliberate failure planted by the test" not in body
+        assert b"brainstem.py" not in body
+
+    def test_healthy_requests_are_unaffected(self, server):
+        """Anti-vacuity: the guard must not change a request that works."""
+        status, body = _raw_get(server, b"/health")
+        assert status == 200
+        assert b'"status": "ok"' in body

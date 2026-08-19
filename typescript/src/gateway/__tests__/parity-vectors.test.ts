@@ -42,6 +42,7 @@ export const VECTOR_CASES = [
   { name: 'session-id-minted', tier: 'core' },
   { name: 'voice-sentinel-split', tier: 'full' },
   { name: 'user-input-wins-over-message-alias', tier: 'core' },
+  { name: 'history-carried-to-model', tier: 'core' },
 ] as const;
 
 describe('envelope-level vectors (decidable without a model)', () => {
@@ -123,12 +124,18 @@ describe('vectors that need a live model — declared, not silently skipped', ()
     'system-context-injection',
     'finish-reason-agnostic-trigger',
     'empty-input-400',
+    // The only vector that reaches the model carrying a conversation_history.
+    // Every other one arrives with an empty transcript, so nothing could see a
+    // runtime dropping or reordering it -- python was forwarding `user` and
+    // `assistant` while validating the wider `_HISTORY_ROLES`, discarding a
+    // `tool` turn after answering 200.
+    'history-carried-to-model',
   ];
 
   it('names them, so the tier claim is auditable', () => {
     // These are loop semantics inside the provider, not envelope shape. They are
     // exercised by the live-daemon run reported alongside this suite.
-    expect(needsModel.length).toBe(7);
+    expect(needsModel.length).toBe(8);
     for (const n of needsModel) {
       expect(VECTOR_CASES.map(v => v.name)).toContain(n);
     }

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Parity vector `history-carried-to-model`, the only one that reaches the model
+  carrying a valid `conversation_history`. Every other vector arrived with an
+  empty transcript -- the one vector that carries history is rejected 400
+  before the model is called -- so the corpus could not detect a runtime that
+  dropped, reordered or truncated a transcript, and the harness's
+  `outbound_history_roles` assertion was declared by no vector at all.
+- `parity_harness.py` now checks the outbound user message on **every** vector
+  that reaches the model, defaulting to the request's `user_input`, instead of
+  only on the single vector that opted in (#250).
 - `openrappter service status` reports whether launchd actually supervises the gateway that is answering. The two can disagree permanently and nothing said so: on the machine that prompted this, a gateway started outside launchd had held the port for 13 days, so all 29 supervised starts exited 1 with `EADDRINUSE` while `/health` returned 200 and `doctor` reported the same message it reports when supervision is correct.
 - `openrappter audit` runs the security auditor and exits non-zero on high or critical findings. `SecurityAuditor` had five checks and was constructed by nothing but its own test.
 - The gateway now emits `agent.tool` as each tool call finishes, so tool use appears in chat. The chat UI has registered a listener for it since it was written and the event had no emit site anywhere, so the feature had never worked. The payload carries the tool's name, outcome and duration -- never its arguments, which can hold secrets.
@@ -67,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+
+- The Python brainstem accepted a `tool` turn in `conversation_history`,
+  answered 200, and then dropped it before the model saw it. Validation used
+  `_HISTORY_ROLES` (`user`, `assistant`, `tool`) while the line that forwards
+  history to the model carried a second, narrower hand-written tuple. A caller
+  replaying a transcript had no way to learn it had been edited, and the model
+  reasoned about tool results it could no longer see. TypeScript forwards the
+  turn; the two runtimes now agree, and the forwarding filter reuses
+  `_HISTORY_ROLES` so the two lists cannot drift apart again.
 
 - `POST /chat` rejections diverged between the runtimes. TypeScript answered a
   malformed request with a bare `{error}` while the Python brainstem answered

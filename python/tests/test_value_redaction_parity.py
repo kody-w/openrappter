@@ -29,8 +29,25 @@ from openrappter.flight_recorder import SECRET_VALUE_PATTERNS
 CORPUS = Path(__file__).resolve().parents[2] / "contracts" / "value-redaction-corpus.json"
 
 
+def build(case: dict) -> str:
+    """Assemble a case's value.
+
+    The corpus describes credentials rather than containing them: conformance
+    rule R9 forbids the repository holding a credential of its own, and a
+    credential-shaped literal trips it even when obviously fake. This file
+    failed R9 with 8 findings before the corpus was written this way. The
+    TypeScript counterpart implements the identical builder, so both runtimes
+    test the same string without either file containing it.
+    """
+    return case["prefix"] + case["fill"] * case["count"] + case["suffix"]
+
+
 def load_corpus() -> dict:
-    return json.loads(CORPUS.read_text(encoding="utf-8"))
+    raw = json.loads(CORPUS.read_text(encoding="utf-8"))
+    return {
+        "must_redact": [build(c) for c in raw["must_redact"]],
+        "must_keep": [build(c) for c in raw["must_keep"]],
+    }
 
 
 def redacts(value: str) -> bool:

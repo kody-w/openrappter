@@ -22,13 +22,37 @@ import { sanitizeFlightValue } from './redaction.js';
 
 const CORPUS = resolve(__dirname, '../../../contracts/value-redaction-corpus.json');
 
-interface Corpus {
-  must_redact: string[];
-  must_keep: string[];
+interface Case {
+  why: string;
+  prefix: string;
+  fill: string;
+  count: number;
+  suffix: string;
 }
 
-function corpus(): Corpus {
-  return JSON.parse(readFileSync(CORPUS, 'utf-8')) as Corpus;
+/**
+ * Assemble a case's value.
+ *
+ * The corpus *describes* credentials rather than containing them: conformance
+ * rule R9 forbids the repository holding a credential of its own, and a
+ * credential-shaped literal trips it even when obviously fake -- this corpus
+ * failed R9 with 8 findings before it was written this way. The Python
+ * counterpart implements the identical builder, so both runtimes test the same
+ * string without either file containing it.
+ */
+function build(c: Case): string {
+  return c.prefix + c.fill.repeat(c.count) + c.suffix;
+}
+
+function corpus(): { must_redact: string[]; must_keep: string[] } {
+  const raw = JSON.parse(readFileSync(CORPUS, 'utf-8')) as {
+    must_redact: Case[];
+    must_keep: Case[];
+  };
+  return {
+    must_redact: raw.must_redact.map(build),
+    must_keep: raw.must_keep.map(build),
+  };
 }
 
 /** The recorder changed the value, i.e. it found something to hide. */

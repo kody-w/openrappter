@@ -1,12 +1,35 @@
 /**
  * Send Command
- * Send messages from the CLI to one or all connected channels.
+ * Send a message to a connected channel.
  *
  * Usage:
- *   send <channel> <message>          - send to a specific channel
- *   send --all <message>              - broadcast to all connected channels
+ *   send <channel> <message>
  *   send --channel telegram --to <chatId> <message>
  *   send <channel> <message> --file <path>   - send with attachment
+ *
+ * ## What was wrong
+ *
+ * Every field name was wrong. `channels.send` takes a `SendMessageRequest`
+ * (`gateway/types.ts:246`) -- `{ channelId, conversationId, content,
+ * attachments }` -- and this sent `{ channel, message, target, attachment }`,
+ * so all four arrived `undefined` (#206).
+ *
+ * `--metadata` is removed rather than repaired: `SendMessageRequest` has no
+ * such field, so the flag could only ever be accepted and discarded. A flag
+ * that reads as configuration and changes nothing is the shape this cleanup
+ * keeps finding.
+ *
+ * ## Why `--all` is refused rather than fixed
+ *
+ * It called `channels.broadcast`, which **no gateway registers**. That is not
+ * a rename: the options are to implement it server-side, drop the flag, or fan
+ * out client-side over `channels.list` -- and this command sends real messages
+ * to real people, so "message every connected channel" is a decision about
+ * blast radius, not a contract fix. Until it is made, the flag says so instead
+ * of calling a method that does not exist.
+ *
+ * The command stays unregistered either way; see
+ * `dormant-cli-commands-stay-dormant.test.ts`.
  */
 
 import type { Command } from 'commander';
@@ -21,7 +44,6 @@ export function registerSendCommand(program: Command): void {
     .description('Send a message to a channel or broadcast to all channels')
     .option('-a, --all', 'Broadcast message to all connected channels')
     .option('-t, --target <target>', 'Target (room/user/chat ID)')
-    .option('-m, --metadata <json>', 'Additional metadata as JSON')
     .option('-f, --file <path>', 'Attach a file to the message')
     .option('--channel <channel>', 'Channel name (alternative to positional arg)')
     .option('--to <target>', 'Target ID (alternative to --target)')
@@ -32,7 +54,6 @@ export function registerSendCommand(program: Command): void {
         options: {
           all?: boolean;
           target?: string;
-          metadata?: string;
           file?: string;
           channel?: string;
           to?: string;
@@ -61,26 +82,52 @@ export function registerSendCommand(program: Command): void {
 
         await withClient(async (client) => {
           if (options.all) {
-            // Broadcast to all channels
-            const params: Record<string, unknown> = { message };
-            if (attachment) params.attachment = attachment;
-            if (options.metadata) params.metadata = JSON.parse(options.metadata);
-
-            const result = await client.call('channels.broadcast', params);
-            console.log('Broadcast sent:', result);
+            // `channels.broadcast` is not a gateway method. Failing here is
+            // the honest outcome: the alternative was a method-not-found stack
+            // trace that read like a transport fault rather than a missing
+            // feature.
+            console.error(
+              '\n  --all is not supported: the gateway has no broadcast method.'
+              + '\n  Send to one channel at a time: openrappter send <channel> <message>\n',
+            );
+            process.exitCode = 1;
+            return;
           } else {
             if (!channel) {
               console.error('Error: channel is required when not using --all');
               process.exit(1);
             }
 
-            const params: Record<string, unknown> = { channel, message };
-            if (target) params.target = target;
-            if (attachment) params.attachment = attachment;
-            if (options.metadata) params.metadata = JSON.parse(options.metadata);
+            if (!target) {
+              console.error(
+                '\n  A target is required: channels.send needs a conversation to deliver to.'
+                + '\n  Pass one with --to <id> (or --target <id>).\n',
+              );
+              process.exitCode = 1;
+              return;
+            }
 
-            const result = await client.call('channels.send', params);
-            console.log('Message sent:', result);
+            // `SendMessageRequest`, spelled exactly as the gateway reads it.
+            const params: Record<string, unknown> = {
+              channelId: channel,
+              conversationId: target,
+              content: message,
+            };
+            if (attachment) params.attachments = [attachment];
+
+            const result = (await client.call('channels.send', params)) as
+              | { sent?: boolean }
+              | undefined;
+
+            // The gateway answers `{ sent: true }`. Reporting "Message sent"
+            // without reading that is how a delivery failure gets recorded as
+            // a success (#134).
+            if (result?.sent) {
+              console.log(`Message sent to ${channel}.`);
+            } else {
+              console.error(`\n  The gateway did not confirm delivery to ${channel}.\n`);
+              process.exitCode = 1;
+            }
           }
         });
       },

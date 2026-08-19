@@ -1104,15 +1104,31 @@ export class GatewayServer {
             reason: this.wss ? undefined : 'gateway_stopped',
           });
       void readiness.then(result => {
+        // Serialised BEFORE any byte is written. This used to stringify as the
+        // argument to `res.end()`, after `writeHead` had already committed a
+        // status line, so a report that cannot be serialised threw with the
+        // reply half sent -- and the `.catch` below then called `writeHead`
+        // again on that same response. That is ERR_HTTP_HEADERS_SENT inside a
+        // discarded promise, which on node 20 is an unhandled rejection, which
+        // terminates the process. One GET /readyz killed the daemon.
+        const payload = JSON.stringify({
+          ...result,
+          timestamp: new Date().toISOString(),
+        });
         res.writeHead(result.ready ? 200 : 503, {
           'Content-Type': 'application/json',
           Connection: 'close',
         });
-        res.end(JSON.stringify({
-          ...result,
-          timestamp: new Date().toISOString(),
-        }));
+        res.end(payload);
       }).catch(() => {
+        // Belt as well as braces: whatever failed, this must not be the thing
+        // that takes the gateway down. If the reply has already begun there is
+        // nothing valid left to say, and appending a second status line would
+        // desynchronise the connection.
+        if (res.headersSent) {
+          res.end();
+          return;
+        }
         res.writeHead(503, {
           'Content-Type': 'application/json',
           Connection: 'close',

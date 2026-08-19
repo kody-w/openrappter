@@ -78,6 +78,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An interrupted write destroyed the record of which agents are installed.
+  `_save_lock` used `Path.write_text`, which truncates the visible file before
+  writing a byte and never flushes it to disk. Killing a process during that
+  call and watching the file, `lock.json` was left zero length and unparseable
+  in 5 of 5 attempts. What that cost was more specific than an empty list:
+  `list_installed` and `load_agent` scan the filesystem, and only `uninstall`
+  reads the lock. So a lost lock left the agent still listed, still running its
+  code, and impossible to remove -- `uninstall` answered "Agent 'demo' not
+  found" for something plainly there. Writes now go to a temporary file beside
+  the target, are flushed, and are renamed into place, so a reader sees either
+  the old lock or the new one and never a half-written one. Killed during the
+  write the previous lock survived intact; killed after the rename the new lock
+  was complete; 5 of 5 in both directions. A lock that is already damaged is
+  now moved aside instead of being silently treated as "nothing is installed",
+  because the next save used to overwrite the only evidence of what had been
+  there. Also fixes a crash found while testing this: a lock holding valid JSON
+  that is not an object reached `lock["installed"]` and raised `TypeError` out
+  of `install`, measured for `[]`, `"hello"`, `null` and `123`. ClawHub's lock
+  gets the same durable write; nothing observable is fixed there, since its
+  lock is written but never read for anything that changes behaviour.
+
 - Installing an agent could delete any directory on the machine.
   `rappterhub install` split a reference on the first slash only, so
   everything after it became part of the destination path. It then ran

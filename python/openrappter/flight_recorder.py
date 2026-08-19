@@ -142,6 +142,26 @@ def _cleanup_process_owner_paths() -> None:
 SECRET_VALUE_PATTERNS = (
     re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})\b", re.I | re.ASCII),
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b", re.ASCII),
+    # The providers this repository actually reads keys for. Ported from
+    # typescript/src/flight-recorder/redaction.ts, which carried them while
+    # this list did not -- so a bare token in a recorded value reached the
+    # Python ledger verbatim. The key-based rules only fire when the
+    # surrounding field is named something like `api_key`, and a token quoted
+    # inside a longer string has no such field.
+    #
+    # Lengths are deliberately tight: blanking a value that was not a secret
+    # costs the record its usefulness, which is the opposite failure and just
+    # as real.
+    re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b", re.ASCII),  # OpenAI, Anthropic
+    re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b", re.ASCII),                 # Google
+    re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}\b", re.ASCII),          # Slack bot/user
+    re.compile(r"\bxapp-[0-9]-[A-Za-z0-9-]{10,}\b", re.ASCII),          # Slack app-level
+    re.compile(r"\b[0-9]{8,10}:AA[A-Za-z0-9_-]{33}\b", re.ASCII),       # Telegram bot
+    re.compile(r"\btskey-[a-z]+-[A-Za-z0-9]{10,}\b", re.ASCII),         # Tailscale
+    re.compile(
+        r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+        re.ASCII,
+    ),  # JWT
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.I | re.ASCII),
     re.compile(r"\b[a-z][a-z0-9+.-]*://[^/\s:@]*:[^@\s/]+@", re.I | re.ASCII),
     re.compile(r"\b(?:password|pwd)\s*=\s*[^;\s]+", re.I | re.ASCII),
@@ -151,6 +171,12 @@ SECRET_VALUE_PATTERNS = (
         r"[A-Za-z0-9._~+/=-]{8,}",
         re.I | re.ASCII,
     ),
+    # `key` and `sig` are credentials in a query string too, and the first is
+    # not hypothetical: the shipped Gemini provider builds
+    # `...:generateContent?key=<apiKey>`, so a recorded value carrying that URL
+    # wrote the key into the ledger. Guarded by a value length so an ordinary
+    # `?key=name` is left alone.
+    re.compile(r"[?&](?:key|sig|signature)=[A-Za-z0-9._~+/=-]{8,}", re.I | re.ASCII),
     re.compile(
         r"[?&](?:token|secret|password|credential|authorization|"
         r"api[_-]?key|access[_-]?token|refresh[_-]?token|"

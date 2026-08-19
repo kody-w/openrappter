@@ -23,6 +23,7 @@ Run `openrappter <command> --help` for a command's own options.
 | `memory` |  | Search and record what this rappter remembers |
 | `sessions` |  | Inspect and manage chat sessions |
 | `channels` |  | Inspect and control messaging channels |
+| `audit` | `[options]` | Check this installation for security problems |
 | `config` |  | Manage configuration |
 | `doctor` | `[options]` | Run system diagnostics and health checks |
 | `twins` | `[options]` | Which rappters are running on this device |

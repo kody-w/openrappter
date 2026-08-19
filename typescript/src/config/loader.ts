@@ -10,7 +10,6 @@ import { validateConfig } from './schema.js';
 import type { OpenRappterConfig } from './types.js';
 import { expandEnvVars } from './env-expand.js';
 
-const DEFAULT_CONFIG_DIR = openrappterHome();
 const DEFAULT_CONFIG_FILE = 'config.json5';
 
 /**
@@ -49,9 +48,9 @@ function substituteDeep(obj: unknown): unknown {
 
 export function getConfigPath(profile?: string): string {
   if (profile) {
-    return join(DEFAULT_CONFIG_DIR, `config.${profile}.json5`);
+    return join(openrappterHome(), `config.${profile}.json5`);
   }
-  return join(DEFAULT_CONFIG_DIR, DEFAULT_CONFIG_FILE);
+  return join(openrappterHome(), DEFAULT_CONFIG_FILE);
 }
 
 export function parseConfigContent(content: string): unknown {

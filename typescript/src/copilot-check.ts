@@ -6,10 +6,9 @@ import path from 'path';
 
 const execAsync = promisify(exec);
 
-const OPENRAPPTER_DIR = openrappterHome();
-const CREDENTIALS_DIR = path.join(OPENRAPPTER_DIR, 'credentials');
+const CREDENTIALS_DIR = path.join(openrappterHome(), 'credentials');
 const GITHUB_TOKEN_FILE = path.join(CREDENTIALS_DIR, 'github-token.json');
-const AUTH_PROFILES_FILE = path.join(OPENRAPPTER_DIR, 'auth-profiles.json');
+const AUTH_PROFILES_FILE = path.join(openrappterHome(), 'auth-profiles.json');
 
 interface CachedGitHubToken {
   token: string;

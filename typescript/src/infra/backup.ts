@@ -15,7 +15,6 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const DEFAULT_HOME_DIR = openrappterHome();
 const MAX_BACKUPS = 5;
 
 // Directories and files to skip (transient / large / regenerable)
@@ -48,7 +47,7 @@ export interface BackupManifest {
  * Create a timestamped backup of ~/.openrappter/.
  * Returns metadata about the created backup.
  */
-export function createBackup(reason?: string, homeDir = DEFAULT_HOME_DIR): BackupInfo {
+export function createBackup(reason?: string, homeDir = openrappterHome()): BackupInfo {
   const backupsDir = path.join(homeDir, 'backups');
   fs.mkdirSync(backupsDir, { recursive: true });
 
@@ -114,7 +113,7 @@ export function createBackup(reason?: string, homeDir = DEFAULT_HOME_DIR): Backu
  * Copies files back into ~/.openrappter/, overwriting current versions.
  * Does NOT delete files that weren't in the backup.
  */
-export function restoreBackup(backupId?: string, homeDir = DEFAULT_HOME_DIR): BackupInfo {
+export function restoreBackup(backupId?: string, homeDir = openrappterHome()): BackupInfo {
   const backups = listBackups(homeDir);
   if (backups.length === 0) {
     throw new Error('No backups found in ~/.openrappter/backups/');
@@ -160,7 +159,7 @@ export function restoreBackup(backupId?: string, homeDir = DEFAULT_HOME_DIR): Ba
 /**
  * List all available backups, most recent first.
  */
-export function listBackups(homeDir = DEFAULT_HOME_DIR): BackupInfo[] {
+export function listBackups(homeDir = openrappterHome()): BackupInfo[] {
   const backupsDir = path.join(homeDir, 'backups');
   if (!fs.existsSync(backupsDir)) return [];
 
@@ -212,7 +211,7 @@ export function listBackups(homeDir = DEFAULT_HOME_DIR): BackupInfo[] {
 /**
  * Delete a specific backup by ID.
  */
-export function deleteBackup(backupId: string, homeDir = DEFAULT_HOME_DIR): boolean {
+export function deleteBackup(backupId: string, homeDir = openrappterHome()): boolean {
   if (
     typeof backupId !== 'string'
     || !backupId

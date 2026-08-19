@@ -17,20 +17,19 @@ interface MethodRegistrar {
   ): void;
 }
 
-const CONFIG_PATH = openrappterPath('experimental.json');
 
 function loadExperimentalConfig(): Record<string, unknown> {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+    return JSON.parse(fs.readFileSync(openrappterPath('experimental.json'), 'utf-8'));
   } catch {
     return {};
   }
 }
 
 function saveExperimentalConfig(config: Record<string, unknown>): void {
-  const dir = path.dirname(CONFIG_PATH);
+  const dir = path.dirname(openrappterPath('experimental.json'));
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+  fs.writeFileSync(openrappterPath('experimental.json'), JSON.stringify(config, null, 2));
 }
 
 export function registerExperimentalMethods(server: MethodRegistrar, _deps?: Record<string, unknown>): void {

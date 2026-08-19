@@ -1,4 +1,5 @@
-import { openrappterHome, openrappterPath } from '../infra/openrappter-home.js';
+import { openrappterHome } from '../infra/openrappter-home.js';
+import { getConfigPath, loadConfig } from '../config/loader.js';
 /**
  * Security Auditor
  * Performs security checks and returns findings
@@ -89,20 +90,24 @@ export class SecurityAuditor {
    */
   checkGatewayConfig(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = openrappterPath('config.yml');
+    const configPath = getConfigPath();
 
     if (!existsSync(configPath)) {
       return findings; // No config yet
     }
 
     try {
-      const configContent = readFileSync(configPath, 'utf8');
+      // Parsed, not pattern-matched. The previous version tested
+      // `/auth:\s*none/i` and `/bind:\s*['"]?0\.0\.0\.0|all['"]?/i` against raw
+      // text: both are YAML-shaped and the product writes JSON5, where the
+      // same settings read `auth: { mode: 'none' }`. The second pattern was
+      // also mis-parenthesised -- the alternation binds as
+      // `bind:\s*['"]?0\.0\.0\.0` OR `all['"]?`, so the bare substring "all"
+      // anywhere in the file set it, including in `allowlists` or `install`.
+      const config = loadConfig({ path: configPath });
+      const gateway = config.gateway;
 
-      // Check for auth mode 'none' with bind 'all'
-      const authNoneMatch = /auth:\s*none/i.test(configContent);
-      const bindAllMatch = /bind:\s*['"]?0\.0\.0\.0|all['"]?/i.test(configContent);
-
-      if (authNoneMatch && bindAllMatch) {
+      if (gateway?.bind === 'all' && (gateway.auth?.mode ?? 'none') === 'none') {
         findings.push({
           checkId: 'gw-001',
           severity: 'critical',
@@ -112,19 +117,18 @@ export class SecurityAuditor {
         });
       }
 
-      // Check token length if token auth is used
-      const tokenMatch = configContent.match(/token:\s*['"]?([^'"\n\s]+)['"]?/);
-      if (tokenMatch && tokenMatch[1]) {
-        const token = tokenMatch[1];
-        if (token.length < 32) {
-          findings.push({
-            checkId: 'gw-002',
-            severity: 'high',
-            title: 'Gateway token is too short',
-            detail: `Token length is ${token.length} characters, recommended minimum is 32`,
-            remediation: 'Generate a longer token using: openssl rand -hex 32',
-          });
-        }
+      // `gatewayConfigSchema` has no `token` field -- the secret is
+      // `gateway.auth.password` -- so the previous regex could never match
+      // anything the product writes.
+      const password = gateway?.auth?.password;
+      if (gateway?.auth?.mode === 'password' && password && password.length < 32) {
+        findings.push({
+          checkId: 'gw-002',
+          severity: 'high',
+          title: 'Gateway password is too short',
+          detail: `Password length is ${password.length} characters, recommended minimum is 32`,
+          remediation: 'Generate a longer secret using: openssl rand -hex 32',
+        });
       }
     } catch (error) {
       findings.push({
@@ -143,7 +147,7 @@ export class SecurityAuditor {
    */
   checkChannelSecurity(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = openrappterPath('config.yml');
+    const configPath = getConfigPath();
 
     if (!existsSync(configPath)) {
       return findings;
@@ -154,8 +158,12 @@ export class SecurityAuditor {
 
       // Placeholder: Check for DM-only policies
       // Future: Parse YAML and check channel-specific security settings
-      const dmOnlyMatch = /dmOnly:\s*false/i.test(configContent);
-      if (dmOnlyMatch) {
+      // `dmOnly` appears nowhere in this product's configuration -- not in
+      // `channelConfigSchema`, not anywhere outside this file -- so
+      // `/dmOnly:\s*false/i` could never match anything the loader writes.
+      // Kept as a raw-text check *only* because a user may hand-write it, and
+      // reported at a lower confidence than a parsed setting would be.
+      if (/\bdmOnly\s*:\s*false\b/i.test(configContent)) {
         findings.push({
           checkId: 'ch-001',
           severity: 'info',
@@ -181,7 +189,7 @@ export class SecurityAuditor {
    */
   checkConfigSecrets(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = openrappterPath('config.yml');
+    const configPath = getConfigPath();
 
     if (!existsSync(configPath)) {
       return findings;
@@ -222,7 +230,7 @@ export class SecurityAuditor {
           severity: 'high',
           title: 'Config file is readable by others',
           detail: `Config file has mode ${mode.toString(8)}, allowing read access beyond owner`,
-          remediation: 'Run: chmod 600 ~/.openrappter/config.yml',
+          remediation: `Run: chmod 600 ${getConfigPath()}`,
         });
       }
     } catch (error) {
@@ -242,7 +250,7 @@ export class SecurityAuditor {
    */
   checkBrowserSecurity(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = openrappterPath('config.yml');
+    const configPath = getConfigPath();
 
     if (!existsSync(configPath)) {
       return findings;
@@ -252,20 +260,22 @@ export class SecurityAuditor {
       const configContent = readFileSync(configPath, 'utf8');
 
       // Check for remote CDP exposure
-      const cdpRemoteMatch = /cdp.*host:\s*['"]?0\.0\.0\.0|all['"]?/i.test(configContent);
-      if (cdpRemoteMatch) {
-        findings.push({
-          checkId: 'br-001',
-          severity: 'critical',
-          title: 'Chrome DevTools Protocol exposed remotely',
-          detail: 'CDP is configured to accept remote connections without authentication',
-          remediation: 'Bind CDP to localhost only or use authentication',
-        });
-      }
-
-      // Check for headless mode disabled (can leak screen content)
-      const headlessMatch = /headless:\s*false/i.test(configContent);
-      if (headlessMatch) {
+      // The CDP check that used to live here is gone. It tested
+      // `/cdp.*host:\s*['"]?0\.0\.0\.0|all['"]?/i`, which carries the same
+      // mis-parenthesised alternation as the old gateway check -- the bare
+      // substring "all" anywhere in the file matched -- and `cdp` is not a
+      // setting this product has: `browserConfigSchema` declares only
+      // `headless`, `profile`, `timeout` and `viewport`. Pointed at the real
+      // config it reported "Chrome DevTools Protocol exposed remotely" at
+      // CRITICAL against a machine with no such setting. A check for a
+      // setting that cannot exist is not a check.
+      // `OpenRappterConfig` declares 7 sections while the schema validates 21,
+      // so `browser` is invisible to the type even though the loader returns
+      // it. Narrowed here rather than widened globally, which is its own
+      // change -- and part of why config.security and config.network are
+      // unread (#219, #235): nothing can see them without doing this.
+      const config = loadConfig({ path: configPath }) as { browser?: { headless?: boolean } };
+      if (config.browser?.headless === false) {
         findings.push({
           checkId: 'br-002',
           severity: 'low',

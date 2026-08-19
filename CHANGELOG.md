@@ -78,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The brainstem dispatch guard appended a second response when a route failed
+  after it had already begun replying, so the caller received
+  `HTTP/1.0 200 OK ... HTTP/1.0 500 ...` concatenated inside one reply. The
+  guard now detects that bytes are committed and closes the connection instead.
+- `DELETE` was not dispatched through that guard, so a failing `DELETE` still
+  closed the connection with no status line. All three verbs the handler serves
+  now go through it, and a test enumerates them rather than naming them.
+
 - An exception raised while serving a brainstem request closed the connection
   without a status line. `BaseHTTPRequestHandler` dispatches straight into
   `do_GET`/`do_POST`, so anything escaping them unwound into `socketserver`,

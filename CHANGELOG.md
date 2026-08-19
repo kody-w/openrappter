@@ -78,6 +78,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The brainstem saved your Copilot credential world-readable. `_save_token_file`
+  used `Path.write_text`, which takes the process umask, so
+  `~/.openrappter/brainstem/.copilot_token` landed at mode 0644 inside a 0755
+  directory -- every account on the machine could read it. The file holds both
+  `access_token` and the long-lived `refresh_token`, so one read outlives the
+  access token's expiry. Under a permissive umask (0o000, as some container
+  images set) it was 0666: another account could *replace* the credential.
+  Now written 0600 into a 0700 directory, and a token left over from an older
+  build is tightened on the next read rather than waiting for the next login.
+  Two things made this unambiguous: the flight recorder already redacts
+  `.copilot_token` out of captured logs, so the codebase knew the file was
+  sensitive; and the TypeScript runtime already writes the same credential with
+  `mode: 0o600`. Every other secret in the Python tree used the strict pattern
+  too -- this was the one place that did not.
+
+- Saving that credential was not atomic. `write_text` truncates before it
+  writes, so a crash or a full disk part-way through left a half-written token,
+  which reads back as "not logged in" with nothing to explain why. It is now a
+  rename over a fully-written temporary file, so a reader sees either the old
+  credential or the new one, never a fragment. Agent files imported through
+  `/agents/import` go through the same path, so a truncated upload can no
+  longer be loaded as a broken agent, and they are no longer written
+  world-readable either.
+
+- `test_all_core_agents_importable` ended in `assert True`, so it only proved
+  the imports resolved -- renaming `ShellAgent.perform` left it green. It now
+  asserts the contract its name implies.
+
 - `python3 -m nanorappter` did not work. Both the module docstring and the
   CLI's own help text advertise it, but there was no `__main__.py`, so the
   documented command failed with "No module named nanorappter.__main__" -- the

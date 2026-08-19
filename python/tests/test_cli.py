@@ -43,7 +43,20 @@ class TestAgentDiscovery:
         from openrappter.agents.manage_memory_agent import ManageMemoryAgent
         from openrappter.agents.context_memory_agent import ContextMemoryAgent
         from openrappter.agents.learn_new_agent import LearnNewAgent
-        assert True
+
+        # `assert True` used to stand here, so the test only proved the imports
+        # resolved: renaming `ShellAgent.perform` left it green. Assert the
+        # contract the name implies instead.
+        for agent in (
+            BasicAgent,
+            ShellAgent,
+            ManageMemoryAgent,
+            ContextMemoryAgent,
+            LearnNewAgent,
+        ):
+            assert callable(getattr(agent, "perform", None)), (
+                f"{agent.__name__} does not expose perform()"
+            )
 
     def test_core_agents_instantiate(self):
         from openrappter.agents.shell_agent import ShellAgent

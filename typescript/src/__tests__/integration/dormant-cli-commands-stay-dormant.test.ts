@@ -21,9 +21,6 @@ import { resolve } from 'path';
  * Each of the six is dormant for a measured reason, not an oversight. Verified
  * against the running gateway and the OAuth flow, not by reading:
  *
- *  - registerChannelsCommand — sends `{channel}`; `channels.connect` /
- *    `channels.disconnect` read `params.type`, so both would pass `undefined`
- *    to the registry.
  *  - registerSendCommand     — sends `{channel, message, target}`;
  *    `channels.send` reads `{channelId, conversationId, content}`, and `--all`
  *    calls `channels.broadcast`, which the gateway never registers.
@@ -51,10 +48,6 @@ const CLI_DIR = resolve(__dirname, '../../cli');
  * a later reader deciding "just register it" needs to see the failure first.
  */
 const INTENTIONALLY_DORMANT = new Map<string, string>([
-  [
-    'registerChannelsCommand',
-    'sends {channel}; gateway channels.connect/disconnect read params.type, so both pass undefined to the channel registry',
-  ],
   [
     'registerSendCommand',
     'sends {channel,message,target}; channels.send reads {channelId,conversationId,content}, and --all calls channels.broadcast which the gateway never registers',

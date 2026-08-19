@@ -1,3 +1,4 @@
+from openrappter.paths import openrappter_path
 #!/usr/bin/env python3
 """
 🦖 openrappter — rapp Agent Orchestrator
@@ -83,7 +84,7 @@ class AgentRegistry:
         self.skills_dir = (
             Path(skills_dir)
             if skills_dir is not None
-            else Path.home() / ".openrappter" / "skills"
+            else openrappter_path("skills")
         )
         self.load_skills = load_skills
         self._agents = {}

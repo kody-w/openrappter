@@ -4,8 +4,9 @@ ContextMemoryAgent - Memory recall agent for retrieving stored memories.
 Recalls and provides context based on stored memories from past interactions.
 Uses local JSON file storage (no external dependencies).
 """
-
 from __future__ import annotations
+
+import os
 
 import json
 from pathlib import Path
@@ -73,7 +74,7 @@ class ContextMemoryAgent(BasicAgent):
         super().__init__(name=self.name, metadata=self.metadata)
         
         # Storage setup
-        self.home = Path.home() / ".openrappter"
+        self.home = Path(os.environ.get("OPENRAPPTER_HOME") or Path.home() / ".openrappter")
         self.memory_file = self.home / "memory.json"
     
     def perform(self, **kwargs):

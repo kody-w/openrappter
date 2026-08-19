@@ -1,6 +1,7 @@
 """Configuration for the supervised ``imsg rpc`` iMessage transport."""
 
 from __future__ import annotations
+from openrappter.paths import openrappter_path
 
 import json
 import os
@@ -11,7 +12,7 @@ from typing import Any, Mapping
 
 
 IMSG_PINNED_VERSION = "0.12.3"
-DEFAULT_CONFIG_PATH = Path.home() / ".openrappter" / "imessage" / "config.json"
+DEFAULT_CONFIG_PATH = openrappter_path("imessage", "config.json")
 
 
 class ConfigError(ValueError):
@@ -107,7 +108,7 @@ class IMessageConfig:
     mention_tokens: tuple[str, ...] = ("@rappter", "@openrappter", "@rapp")
     reply_prefix: str = "🦖 "
     state_dir: Path = field(
-        default_factory=lambda: Path.home() / ".openrappter" / "imessage" / "state"
+        default_factory=lambda: openrappter_path("imessage", "state")
     )
     imsg_path: str = "imsg"
     imsg_version: str = IMSG_PINNED_VERSION
@@ -171,7 +172,7 @@ class IMessageConfig:
         state_dir = (
             Path(os.path.expanduser(str(state_value)))
             if state_value
-            else Path.home() / ".openrappter" / "imessage" / "state"
+            else openrappter_path("imessage", "state")
         )
         try:
             request_timeout = float(raw.get("request_timeout_seconds", 30.0))

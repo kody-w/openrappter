@@ -74,4 +74,17 @@ describe('agent.tool status vocabulary', () => {
     const success: AgentToolEvent['status'] = 'success';
     expect(source).toContain(`tool.status === '${success}'`);
   });
+
+  it('the emitter sends the field the UI keys its list on', () => {
+    // `chat.ts` does `const id = data.toolCallId ?? \`tool_\${Date.now()}\``.
+    // Without `toolCallId`, two tools finishing in the same millisecond
+    // resolve to the same key and the second *updates* the first's row rather
+    // than adding one -- so a tool silently disappears from the transcript.
+    const ui = readFileSync(CHAT_UI, 'utf-8');
+    expect(ui).toMatch(/data\.toolCallId/);
+
+    const assistant = readFileSync(ASSISTANT, 'utf-8');
+    expect(assistant).toMatch(/toolCallId: string;/);
+    expect(assistant).toMatch(/onToolEvent\(\{[^}]*toolCallId/);
+  });
 });

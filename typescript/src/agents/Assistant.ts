@@ -140,6 +140,16 @@ export interface AssistantConversationMessage {
  * subscribed client, which is a wider audience than a local trace file.
  */
 export interface AgentToolEvent {
+  /**
+   * The model's own id for this call.
+   *
+   * The chat UI keys its list on `toolCallId ?? \`tool_${Date.now()}\``, so
+   * omitting it made two tools that finished in the same millisecond collide:
+   * the second *updated* the first's row instead of adding one, and its name
+   * was never shown. Sending the id the model already assigned removes the
+   * guess.
+   */
+  toolCallId: string;
   /** Conversation this ran in. */
   sessionId: string;
   /** The tool the model asked for. */
@@ -307,6 +317,7 @@ export class Assistant {
    */
   private emitToolEvent(
     sessionId: string,
+    toolCallId: string,
     name: string,
     status: 'success' | 'error',
     /** A `performance.now()` reading, matching the Flight Recorder's clock. */
@@ -315,7 +326,7 @@ export class Assistant {
     if (!this.onToolEvent) return;
     try {
       const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
-      this.onToolEvent({ sessionId, name, status, durationMs });
+      this.onToolEvent({ sessionId, toolCallId, name, status, durationMs });
     } catch {
       // Intentionally ignored; see the note above.
     }
@@ -1040,7 +1051,7 @@ export class Assistant {
       // product disagreeing on the wire is the failure PARITY §0 is about.
       if (!agent) {
         const msg = `Agent '${agentName}' not found.`;
-        this.emitToolEvent(conversationKey, agentName, 'error', started);
+        this.emitToolEvent(conversationKey, tc.id, agentName, 'error', started);
         agentLogs.push(formatFlightAgentLog(agentName, msg));
         await recorder.record({
           kind: "tool.call.failed",
@@ -1072,7 +1083,7 @@ export class Assistant {
         // often as by throwing (#134), so the absence of an exception proves
         // nothing on its own.
         const failed = agentResultIsError(resultStr);
-        this.emitToolEvent(conversationKey, agentName, failed ? 'error' : 'success', started);
+        this.emitToolEvent(conversationKey, tc.id, agentName, failed ? 'error' : 'success', started);
         let structuredResult: unknown = sanitizeFlightValue(resultStr);
         try {
           structuredResult = sanitizeFlightValue(JSON.parse(resultStr));
@@ -1103,7 +1114,7 @@ export class Assistant {
         return resultStr;
       } catch (err) {
         const message = (err as Error).message;
-        this.emitToolEvent(conversationKey, agentName, 'error', started);
+        this.emitToolEvent(conversationKey, tc.id, agentName, 'error', started);
         agentLogs.push(formatFlightAgentLog(agentName, message, true));
         const result = `Error: ${message}`;
         await recorder.record({

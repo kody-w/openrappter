@@ -29,6 +29,7 @@ import importlib.util
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1171,6 +1172,18 @@ def _run_chat_within_trace(
 
 
 class BrainstemHandler(BaseHTTPRequestHandler):
+    #: Seconds a single connection may stall before the socket read gives up.
+    #:
+    #: `do_POST` reads exactly `Content-Length` bytes. A caller may claim any
+    #: number and then send nothing, and without a timeout that read blocks for
+    #: as long as the connection is held open. `ThreadingHTTPServer` gives each
+    #: request its own thread, so the server keeps answering others -- but the
+    #: threads accumulate, one per request, for free.
+    #:
+    #: This bounds the stall without rejecting any request that succeeds today:
+    #: a client still sending data resets the timer. TypeScript is covered by
+    #: node's own `requestTimeout`/`headersTimeout`; this runtime had nothing.
+    timeout = 30
     server_version = f"OpenRappterBrainstem/{__version__}"
 
     def _send(self, code, payload):
@@ -1235,8 +1248,39 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
     # ── POST ──
     def do_POST(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b""
+        # `int(...)` used to run bare here, as the first statement of the
+        # method. `Content-Length: abc` raised ValueError out of do_POST and the
+        # caller got no HTTP response at all -- not a 400, nothing, the
+        # connection simply closed. `Content-Length: -5` did the same. Both are
+        # answered 400 by the TypeScript gateway, which is where these came from:
+        # the same three headers were sent to both runtimes.
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else 0
+        except (TypeError, ValueError):
+            return self._send(400, {
+                "schema": "rapp-chat/1.0",
+                "status": "error",
+                "error": "Content-Length must be an integer",
+            })
+        if length < 0:
+            return self._send(400, {
+                "schema": "rapp-chat/1.0",
+                "status": "error",
+                "error": "Content-Length must not be negative",
+            })
+        try:
+            raw = self.rfile.read(length) if length else b""
+        except (TimeoutError, socket.timeout, OSError):
+            # The caller claimed more than it sent and then stopped. Nothing
+            # useful can be parsed, and the socket is already unusable.
+            return
+        if length and len(raw) < length:
+            return self._send(400, {
+                "schema": "rapp-chat/1.0",
+                "status": "error",
+                "error": "Request body shorter than Content-Length",
+            })
 
         if self.path == "/chat":
             try:

@@ -272,6 +272,25 @@ def observe_typescript(vector, driver=TS_DRIVER):
     return Observation(status, body, rounds, outbound, tools_first)
 
 
+def default_outbound_user_input(vector):
+    """The text the model must receive when the vector does not say otherwise.
+
+    `user_input` is the spec key and wins over the `message` alias, matching
+    both runtimes (#335). Returned trimmed, because both runtimes trim before
+    dispatching. `None` means "do not check": the vector sends no usable input,
+    so the model is not expected to be called at all.
+    """
+    request = vector.get("request") or {}
+    if not isinstance(request, dict):
+        return None
+    raw = request.get("user_input")
+    if raw is None:
+        raw = request.get("message")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.strip()
+
+
 def check(vector, obs):
     """Judge one observation against one vector.
 
@@ -367,20 +386,28 @@ def check(vector, obs):
         if any(needle in json.dumps(messages) for messages in obs.outbound):
             failures.append(f"outbound carried {needle!r}, which should have been filtered")
 
-    if "outbound_user_input" in expect:
-        # What the model was actually asked. The corpus could assert the reply,
-        # the history roles and the system prompt, but never the user turn --
-        # so a runtime that resolved the wrong request field sent the model
-        # different text and still passed every vector. That is not
-        # hypothetical: python read `message` in preference to `user_input`,
-        # so `{"user_input":"A","message":"B"}` answered B while typescript and
-        # the grail answered A, both with a 200.
-        sent = (
-            obs.outbound[0][-1].get("content") if obs.outbound and obs.outbound[0] else None
-        )
-        if sent != expect["outbound_user_input"]:
+    # What the model was actually asked. The corpus could assert the reply, the
+    # history roles and the system prompt, but never the user turn -- so a
+    # runtime that resolved the wrong request field sent the model different
+    # text and still passed every vector. That is not hypothetical: python read
+    # `message` in preference to `user_input`, so `{"user_input":"A",
+    # "message":"B"}` answered B while typescript and the grail answered A,
+    # both with a 200.
+    #
+    # This is checked on EVERY vector that reaches the model, not only the one
+    # that opts in. When only the alias vector asserted it, the corpus could
+    # still not see a runtime that mangled the input just for requests carrying
+    # history, or on a later tool round -- conditions that vector does not
+    # create. #250 asked for exactly this assertion; one instance of it was not
+    # the same as having it.
+    expected_outbound = expect.get("outbound_user_input")
+    if expected_outbound is None:
+        expected_outbound = default_outbound_user_input(vector)
+    if expected_outbound is not None and obs.outbound and obs.outbound[0]:
+        sent = obs.outbound[0][-1].get("content")
+        if sent != expected_outbound:
             failures.append(
-                f"outbound user input: expected {expect['outbound_user_input']!r}, got {sent!r}"
+                f"outbound user input: expected {expected_outbound!r}, got {sent!r}"
             )
 
     if "outbound_system_prompt_contains" in expect:

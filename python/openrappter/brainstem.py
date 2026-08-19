@@ -815,7 +815,15 @@ def _run_chat_within_trace(
     messages = [{"role": "system", "content": system_prompt}]
     if memory_data_message:
         messages.append({"role": "user", "content": memory_data_message})
-    messages.extend(h for h in history if isinstance(h, dict) and h.get("role") in ("user", "assistant"))
+    # `_HISTORY_ROLES`, not a second hand-written tuple. This line used to read
+    # `in ("user", "assistant")` while validation at line ~98 accepted the wider
+    # set, so a `tool` turn was accepted, answered 200, and then dropped before
+    # the model saw it -- the caller had no way to learn its transcript had been
+    # edited. TypeScript forwards it, which is the divergence the parity corpus
+    # could not see: no vector reached the model with any history at all.
+    messages.extend(
+        h for h in history if isinstance(h, dict) and h.get("role") in _HISTORY_ROLES
+    )
     messages.append({"role": "user", "content": user_input})
     recorder.record(
         {

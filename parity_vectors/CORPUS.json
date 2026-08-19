@@ -1,14 +1,15 @@
 {
   "canonicalization": "sha256 over JSON with sorted keys and (',',':') separators, UTF-8",
-  "corpus_sha256": "6c1fd49aa724f516742d3275c2348e942521df3915ac1b1a6b0548a862820859",
+  "corpus_sha256": "c92f0b5c765324f51613c4ca477ac411cee2c56ff03b6e0cadbf1b99688c4d86",
   "spec": "rapp-runtime-parity/1.0",
-  "vector_count": 15,
+  "vector_count": 16,
   "vectors": {
     "agent-not-found": "a65276f5906db37733007fc549a9804cb4b1b7dc37771bcfda1a0e62e36024e3",
     "agent-raises": "403437bd5f515cdf9e189f7ff46c2b1a3fcf0c123dd9f6f62beb073d37295815",
     "bad-arguments-fallback": "ccc4de2395e5d6e775741073758931fcbb170419b5293f379781833e9e7396b2",
     "empty-input-400": "b70ce40465bcd2f8c362e35d96a5bb7edccb5b30ce0b34c2ff46f6837c4de3a0",
     "finish-reason-agnostic-trigger": "0c4713b71821456ae863534a69e611ea7ded0994f078cf6a19fc746e982e6ed4",
+    "history-carried-to-model": "90d2edad36e203ae0354472dac65c46f243f5cc28accd1ecc883fd41c6029464",
     "history-role-filter": "c8062fd137bf8ce5cb8c7bb8e0ba59f42995dc6587aaa2000fe1272d96793ba7",
     "multi-round-tools": "2510ed9a6a409dce848a7488b1ec6b4e2cba625e0823d22cd869af44fd59fe02",
     "no-agents-passthrough": "deaefc9651fd958e6ad5b0980907bf3209fb7a48d3c3349e551dbe7401356564",

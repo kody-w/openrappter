@@ -116,3 +116,30 @@ describe('describeSupervision', () => {
     expect(message).toContain('EADDRINUSE');
   });
 });
+
+describe('one vocabulary for one launchd job', () => {
+  it('service status is the supervision shape plus the exit code', async () => {
+    // `openrappter service status` and `openrappter imessage service-status`
+    // describe the **same** job -- `getIMessageServiceStatus` is named for its
+    // caller, not its subject, and reads `com.openrappter.gateway`. This
+    // command first re-derived those facts under its own names
+    // (`registered`/`launchdPid`/`recordedPid`), so the repository carried two
+    // vocabularies for one question. Pinned so a third cannot appear.
+    const { readFileSync } = await import('fs');
+    const { resolve } = await import('path');
+    const source = readFileSync(resolve(__dirname, '../../cli/service-status.ts'), 'utf-8');
+
+    expect(source).toMatch(/getIMessageServiceStatus\(\)/);
+    expect(source).toMatch(/IMessageServiceStatus\s*&\s*\{/);
+
+    // The names it must not reintroduce *as status fields*. Scoped to the
+    // exported type rather than the whole file: `parseLaunchctlRow` returns a
+    // `registered` flag legitimately, and a blanket search flagged it -- the
+    // same over-broad assertion that flagged a doc-comment in #346.
+    const shape = /export type ServiceStatus[\s\S]*?\n\};/.exec(source);
+    expect(shape, 'ServiceStatus should be declared as a type alias').toBeTruthy();
+    for (const invented of ['registered', 'launchdPid', 'recordedPid', 'recordedAlive']) {
+      expect(shape![0]).not.toContain(invented);
+    }
+  });
+});

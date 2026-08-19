@@ -214,12 +214,19 @@ class Observation:
 def observe_python(vector, brainstem):
     """Drive the Python runtime over real HTTP with a scripted model."""
     with runtime_under_test(vector, brainstem) as (base, model):
-        request = dict(vector.get("request") or {})
-        payload = {"user_input": request.get("user_input", "")}
-        if "session_id" in request:
-            payload["session_id"] = request["session_id"]
-        if request.get("conversation_history") is not None:
-            payload["conversation_history"] = request["conversation_history"]
+        # Send the vector's request body as written.
+        #
+        # This used to rebuild the payload from three whitelisted keys, so any
+        # other field a vector declared was dropped before it reached the
+        # runtime -- silently. A vector could therefore name a field, look like
+        # it tested it, and test nothing: `{"user_input":"A","message":"B"}`
+        # arrived as `{"user_input":"A"}` and passed on a runtime that reads
+        # `message` in preference to `user_input`.
+        #
+        # `ts_parity_driver.mjs` had the same defect and was fixed for the same
+        # reason: "a driver that reimplements the thing under test can only ever
+        # confirm itself". That fix did not travel to this half of the harness.
+        payload = dict(vector.get("request") or {})
         status, body = post_chat(base, payload)
         return Observation(
             status=status,
@@ -359,6 +366,22 @@ def check(vector, obs):
     for needle in expect.get("outbound_must_not_contain", []):
         if any(needle in json.dumps(messages) for messages in obs.outbound):
             failures.append(f"outbound carried {needle!r}, which should have been filtered")
+
+    if "outbound_user_input" in expect:
+        # What the model was actually asked. The corpus could assert the reply,
+        # the history roles and the system prompt, but never the user turn --
+        # so a runtime that resolved the wrong request field sent the model
+        # different text and still passed every vector. That is not
+        # hypothetical: python read `message` in preference to `user_input`,
+        # so `{"user_input":"A","message":"B"}` answered B while typescript and
+        # the grail answered A, both with a 200.
+        sent = (
+            obs.outbound[0][-1].get("content") if obs.outbound and obs.outbound[0] else None
+        )
+        if sent != expect["outbound_user_input"]:
+            failures.append(
+                f"outbound user input: expected {expect['outbound_user_input']!r}, got {sent!r}"
+            )
 
     if "outbound_system_prompt_contains" in expect:
         needle = expect["outbound_system_prompt_contains"]

@@ -41,6 +41,7 @@ export const VECTOR_CASES = [
   { name: 'finish-reason-agnostic-trigger', tier: 'core' },
   { name: 'session-id-minted', tier: 'core' },
   { name: 'voice-sentinel-split', tier: 'full' },
+  { name: 'user-input-wins-over-message-alias', tier: 'core' },
 ] as const;
 
 describe('envelope-level vectors (decidable without a model)', () => {

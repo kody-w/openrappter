@@ -31,17 +31,26 @@ def _run(tier, report=None, runtime="python"):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=600)
 
 
+EXPECTED_VECTORS = {
+    "empty-input-400", "no-agents-passthrough", "single-tool-then-answer",
+    "parallel-tool-calls", "multi-round-tools", "round-cap-3",
+    "bad-arguments-fallback", "agent-not-found", "agent-raises",
+    "history-role-filter", "system-context-injection",
+    "finish-reason-agnostic-trigger", "session-id-minted",
+    "voice-sentinel-split", "user-input-wins-over-message-alias",
+}
+
+
 class TestParityCorpus:
     def test_corpus_covers_every_required_class(self):
-        """§5.3 names fourteen classes; a corpus missing one cannot attest."""
-        required = {
-            "empty-input-400", "no-agents-passthrough", "single-tool-then-answer",
-            "parallel-tool-calls", "multi-round-tools", "round-cap-3",
-            "bad-arguments-fallback", "agent-not-found", "agent-raises",
-            "history-role-filter", "system-context-injection",
-            "finish-reason-agnostic-trigger", "session-id-minted",
-            "voice-sentinel-split",
-        }
+        """§5.3 names fourteen classes; a corpus missing one cannot attest.
+
+        `user-input-wins-over-message-alias` is a fifteenth, added because the
+        fourteen could not see the request-field precedence: python read
+        `message` in preference to `user_input`, so it sent the model different
+        text than typescript and the grail and every vector still passed.
+        """
+        required = EXPECTED_VECTORS
         present = {
             json.loads(p.read_text(encoding="utf-8"))["name"]
             for p in VECTORS.glob("*.json") if p.name != "CORPUS.json"
@@ -151,6 +160,6 @@ class TestParityCorpus:
         assert set(report["summary"]["runtimes_measured"]) == {"python", "typescript"}
         for name in ("python", "typescript"):
             block = report["runtimes"][name]["summary"]
-            assert block["total"] == 14, name
+            assert block["total"] == len(EXPECTED_VECTORS), name
             assert block["failed"] == 0, (name, report["runtimes"][name]["results"])
             assert block["not_executed"] == 0, name

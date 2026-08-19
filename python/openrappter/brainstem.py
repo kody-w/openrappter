@@ -1237,12 +1237,23 @@ class BrainstemHandler(BaseHTTPRequestHandler):
                 data = None
             if not isinstance(data, dict):
                 return self._send(400, {"error": "Request body must be a JSON object"})
-            raw_message = (
-                data.get("message")
-                if isinstance(data.get("message"), str)
-                else data.get("user_input")
-            )
-            user_input = raw_message.strip() if isinstance(raw_message, str) else ""
+            # `user_input` is authoritative, exactly as the grail and the
+            # TypeScript runtime have it. This used to prefer `message`
+            # whenever it was a string, so `{"user_input":"A","message":"B"}`
+            # answered B here and A everywhere else -- both with a 200, so the
+            # divergence was a silently different prompt rather than an error.
+            # The grail reads no alias at all; `message` survives only as a
+            # PARITY §3 extra axis, consulted when the spec's key is absent.
+            raw_message = data.get("user_input")
+            if raw_message is None:
+                raw_message = data.get("message", "")
+            if not isinstance(raw_message, str):
+                return self._send(400, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": "user_input must be a string",
+                })
+            user_input = raw_message.strip()
             # History is validated BEFORE the empty-input check, because the
             # grail does: `{"user_input":"","conversation_history":"nope"}`
             # reports the array problem, not the missing input. Measured on

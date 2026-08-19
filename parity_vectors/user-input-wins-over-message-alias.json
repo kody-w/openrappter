@@ -1,0 +1,34 @@
+{
+  "expect": {
+    "model_called": true,
+    "outbound_user_input": "CANONICAL",
+    "status": 200
+  },
+  "fixture": {
+    "agents": [],
+    "model": {
+      "kind": "scripted"
+    },
+    "soul": "You are a helper."
+  },
+  "id": "rapp-parity-vector",
+  "model_script": [
+    {
+      "emit": {
+        "content": "ok"
+      }
+    }
+  ],
+  "name": "user-input-wins-over-message-alias",
+  "request": {
+    "conversation_history": [],
+    "message": "ALIAS",
+    "session_id": "fixed-session-0003",
+    "user_input": "CANONICAL"
+  },
+  "spec": "rapp-runtime-parity/1.0",
+  "tags": {
+    "core": true,
+    "edge": false
+  }
+}

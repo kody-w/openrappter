@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /agents/import` ended the gateway process when the injected agent
+  importer returned a value `JSON.stringify` refuses. The status line was
+  committed before the body was serialised, so the throw arrived with the reply
+  already begun and the outer catch wrote a second status line --
+  `ERR_HTTP_HEADERS_SENT`, which node exits on. The caller received no response
+  at all. It now answers 503 with an error envelope.
+- The three catch blocks around the HTTP body handler wrote a status line
+  without checking whether one had already been sent, so any route that threw
+  after answering ended the process rather than the request. They now close an
+  already-committed response instead of re-heading it.
+
 - `/rpc` answered HTTP 500 when a result could not be serialised, while every
   other JSON-RPC-level failure on that endpoint -- method not found, timeout,
   internal error -- answers HTTP 200 and carries the fault in the `error`

@@ -1379,8 +1379,22 @@ export class GatewayServer {
               return;
             }
             const result = await this.agentImporter(filename, Buffer.from(contents, 'utf-8'));
-            res.writeHead(result.status === 'ok' ? 200 : 400, { 'Content-Type': 'application/json', ...corsHeaders });
-            res.end(JSON.stringify(result));
+            // `agentImporter` is injected through the public `setAgentImporter`,
+            // so its return value is caller-supplied and may not be
+            // serialisable. Writing the head first and serialising second threw
+            // after the response was committed, the outer catch wrote a second
+            // head, and Node ended the process on ERR_HTTP_HEADERS_SENT -- the
+            // same shape as /readyz and /rpc.
+            writeJsonResponse(
+              res,
+              result.status === 'ok' ? 200 : 400,
+              result,
+              corsHeaders,
+              { status: 'error', error: 'Import result could not be serialised' },
+              // 503, matching this route's own "cannot install agents": the
+              // importer did not produce a usable answer.
+              503,
+            );
             return;
           }
 
@@ -1484,9 +1498,12 @@ export class GatewayServer {
                 agentLogs: (result.agentLogs ?? []).join('\n'),
               })));
             } catch (error) {
-              res.writeHead(error instanceof GatewayTimeoutError ? 504 : 503,
-                { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({ error: (error as Error).message }));
+              writeJsonResponse(
+                res,
+                error instanceof GatewayTimeoutError ? 504 : 503,
+                { error: (error as Error).message },
+                corsHeaders,
+              );
             }
             return;
           }
@@ -1648,17 +1665,18 @@ export class GatewayServer {
                 this.httpChatIdempotency.delete(idempotencyKey);
               }
               if (!this.isGenerationActive(requestGeneration)) return;
-              res.writeHead(
+              writeJsonResponse(
+                res,
                 error instanceof GatewayTimeoutError ? 504 : 503,
-                { 'Content-Type': 'application/json', ...corsHeaders }
+                {
+                  schema: 'rapp-chat/1.0',
+                  status: 'error',
+                  error: (error as Error).message,
+                  session_id: sessionId,
+                  sessionId,
+                },
+                corsHeaders,
               );
-              res.end(JSON.stringify({
-                schema: 'rapp-chat/1.0',
-                status: 'error',
-                error: (error as Error).message,
-                session_id: sessionId,
-                sessionId,
-              }));
             }
             return;
           }
@@ -1779,8 +1797,14 @@ export class GatewayServer {
           // `json.loads` and replies through `_send` -- verified by posting
           // `not json at all` to it.) A `/chat` caller must not be able to tell
           // the two runtimes apart by their parse errors either.
-          res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-          res.end(JSON.stringify(
+          // This is the last catch around the whole body handler, so it sees
+          // more than a malformed request: anything a route throws after it has
+          // already answered arrives here too. Writing a second head in that
+          // case is what ends the process, so it goes through the helper, which
+          // closes an already-committed response instead of re-heading it.
+          writeJsonResponse(
+            res,
+            400,
             pathOnly === '/chat'
               ? {
                 schema: 'rapp-chat/1.0',
@@ -1788,7 +1812,8 @@ export class GatewayServer {
                 error: 'Request body must be a JSON object',
               }
               : { error: 'Invalid JSON' },
-          ));
+            corsHeaders,
+          );
         }
       });
       return;

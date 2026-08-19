@@ -67,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- `agent.tool` omitted `toolCallId`, the field the chat list keys its rows on. Two tools finishing in the same millisecond therefore resolved to the same key, and the second *updated* the first's row instead of adding one -- so a tool vanished from the transcript.
 - The Flight Recorder ledger ignored `OPENRAPPTER_HOME` in **both** runtimes, so relocating an installation moved everything except the database recording it. TypeScript spelled the path across three lines, which is how it escaped the migration that moved the other 46 sites -- and the guard meant to catch stragglers, whose pattern could not match its own formatting.
 - `agent.tool` reported every **successful** tool call as a failure in chat. The event added in the previous change sent `status: 'ok'`, and the chat UI -- which has read this event since before it was emitted -- renders `status === 'success' ? '✓' : '✗'`, so `'ok'` fell to the cross. Emitter and consumer are now pinned to one vocabulary.
 - The dormant `send` CLI sent `{ channel, message, target }` where `channels.send` reads `{ channelId, conversationId, content }`, so every field arrived `undefined` at the channel registry. `--metadata` is removed (no such field exists, so it was accepted and discarded) and `--all` now refuses instead of calling `channels.broadcast`, which no gateway registers. The command remains unregistered.

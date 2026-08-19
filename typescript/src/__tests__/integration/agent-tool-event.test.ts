@@ -90,6 +90,7 @@ describe('agent.tool is emitted for each finished tool call', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({
       sessionId: 'session-a',
+      toolCallId: 'call_1',
       name: 'secret_tool',
       status: 'success',
     });
@@ -137,7 +138,24 @@ describe('agent.tool is emitted for each finished tool call', () => {
     // without any named property looking wrong.
     expect(JSON.stringify(seen)).not.toContain('hunter2');
     expect(JSON.stringify(seen)).not.toContain('password');
-    expect(Object.keys(seen[0]).sort()).toEqual(['durationMs', 'name', 'sessionId', 'status']);
+    expect(Object.keys(seen[0]).sort()).toEqual([
+      'durationMs', 'name', 'sessionId', 'status', 'toolCallId',
+    ]);
+  });
+
+  it('carries the model call id so two tools cannot collide', async () => {
+    // The chat UI keys its list on `toolCallId ?? `tool_${Date.now()}``, so
+    // without this two tools finishing in the same millisecond rendered as one
+    // row and the second name was lost. Reproduced against the UI's own
+    // keying logic before this field was added.
+    const assistant = assistantWithScriptedTool('ok');
+    const seen: AgentToolEvent[] = [];
+    assistant.onToolEvent = (event) => seen.push(event);
+
+    await assistant.getResponse('do the thing', undefined, undefined, 'session-g');
+
+    expect(seen[0].toolCallId).toBe('call_1');
+    expect(seen[0].toolCallId).toBeTruthy();
   });
 
   it('a throwing subscriber does not break the turn', async () => {

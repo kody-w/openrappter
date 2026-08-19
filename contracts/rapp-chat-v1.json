@@ -2,21 +2,35 @@
   "schema": "rapp-chat-contract/1.0",
   "brand": "RAPP + X™",
   "principle": "UI is optional. Humans, AIs, twins, rapplications, Brainstems, and neighborhood peers use the same /chat capability surface.",
+  "enforced_by": [
+    "python/tests/test_openrappter_brainstem.py",
+    "typescript/src/__tests__/integration/rapp-chat-contract.test.ts"
+  ],
   "endpoint": {
     "method": "POST",
     "path": "/chat"
   },
   "request": {
-    "required": ["message"],
+    "canonical_input": "user_input",
+    "required_one_of": ["user_input", "message"],
+    "precedence": [
+      "`user_input` is the spec key and wins whenever it is present, even when",
+      "it is present and invalid -- a caller sending the documented field gets",
+      "the documented behaviour, including its errors. `message` is a PARITY §3",
+      "extra axis consulted only when `user_input` is absent entirely.",
+      "Both runtimes were aligned on this in #335; the earlier version of this",
+      "file described the reverse and was never executed, so it never noticed."
+    ],
     "properties": {
       "schema": "rapp-chat/1.0",
-      "message": "string",
+      "user_input": "string",
+      "message": "string?",
       "session_id": "string?",
       "idempotency_key": "string?",
       "conversation_history": "array?"
     },
-    "legacy_aliases": {
-      "user_input": "message",
+    "aliases": {
+      "message": "user_input",
       "sessionId": "session_id",
       "history": "conversation_history"
     }
@@ -28,7 +42,12 @@
         "status",
         "response",
         "content",
-        "session_id"
+        "session_id",
+        "sessionId",
+        "agent_logs",
+        "voice_mode",
+        "model",
+        "requested_model"
       ],
       "properties": {
         "schema": "rapp-chat/1.0",
@@ -38,6 +57,10 @@
         "session_id": "string",
         "sessionId": "string",
         "agent_logs": "string",
+        "voice_mode": "boolean",
+        "model": "string",
+        "requested_model": "string",
+        "voice_response": "string?",
         "idempotency_key": "string?"
       }
     },

@@ -1457,16 +1457,25 @@ export class GatewayServer {
             // the transcript.
             const parsedRequest = parseChatRequest(parsed);
             if (!parsedRequest.ok) {
-              // Bare `{error}`, exactly as the brainstem writes it. PARITY §3
-              // permits extra axes, but the goal on this wire is stronger than
-              // §3: a peer must not be able to tell which runtime answered. A
-              // single malformed request was enough to fingerprint us, because
-              // ours carried `schema` and `status` and the brainstem's does not.
-              // Those keys survive on the paths the brainstem has no
-              // counterpart for (401 auth, 503, 409, 504) — nothing can be
-              // compared there, so nothing diverges.
+              // The same three keys `brainstem.py` writes -- verified by posting
+              // each malformed body to both runtimes, not by reading either.
+              //
+              // This used to send a bare `{error}` to avoid fingerprinting,
+              // citing a brainstem that replies `jsonify({"error": ...}), 400`.
+              // No such brainstem is in this repository: `brainstem.py` has no
+              // Flask and no `jsonify`, it answers through `_send`, and its
+              // rejections carry `schema` and `status`. Stripping them here
+              // therefore produced the divergence the change set out to remove
+              // -- one malformed request separated the runtimes on four of five
+              // bodies. `contracts/rapp-chat-v1.json` fixes the shape and both
+              // runtimes are now tested against the file rather than against a
+              // belief about each other.
               res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
-              res.end(JSON.stringify({ error: parsedRequest.error }));
+              res.end(JSON.stringify({
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: parsedRequest.error,
+              }));
               return;
             }
             const message = parsedRequest.value.userInput;
@@ -1670,13 +1679,19 @@ export class GatewayServer {
           }
         } catch {
           // The brainstem answers malformed JSON with the same sentence it uses
-          // for a non-object body — `get_json(silent=True)` yields None and
-          // falls into the same branch. A `/chat` caller must not be able to
-          // tell the two runtimes apart by their parse errors either.
+          // for a non-object body, and in the same envelope. (The `get_json`
+          // this comment used to cite is Flask; the brainstem here catches
+          // `json.loads` and replies through `_send` -- verified by posting
+          // `not json at all` to it.) A `/chat` caller must not be able to tell
+          // the two runtimes apart by their parse errors either.
           res.writeHead(400, { 'Content-Type': 'application/json', ...corsHeaders });
           res.end(JSON.stringify(
             pathOnly === '/chat'
-              ? { error: 'Request body must be a JSON object' }
+              ? {
+                schema: 'rapp-chat/1.0',
+                status: 'error',
+                error: 'Request body must be a JSON object',
+              }
               : { error: 'Invalid JSON' },
           ));
         }

@@ -15,17 +15,35 @@
  * the actual bytes off an actual socket, and the negative control is part of the
  * job — a test that cannot fail on the old code is decoration.
  *
- * Ground truth is `brainstem.py`, whose rejection is
- * `return jsonify({"error": ...}), 400` — one key, nothing else.
+ * Ground truth WAS STATED HERE INCORRECTLY, and the correction is the reason
+ * this header is long.
+ *
+ * It read: "Ground truth is `brainstem.py`, whose rejection is
+ * `return jsonify({"error": ...}), 400` — one key, nothing else."
+ *
+ * No such brainstem is in this repository. `python/openrappter/brainstem.py`
+ * imports no Flask, contains no `jsonify`, and answers through `_send`; its
+ * rejections carry `schema`, `status` and `error`. That was checked by posting
+ * every body below to the running brainstem and reading the keys back, which is
+ * the check the sentence above replaced.
+ *
+ * So this file asserted a one-key body to avoid a fingerprint and thereby
+ * created one: four of five malformed requests separated the runtimes.
+ *
+ * Ground truth is now `contracts/rapp-chat-v1.json`, which both runtimes are
+ * tested against -- here and in `python/tests/test_openrappter_brainstem.py` --
+ * so neither can be adjusted toward a belief about the other again.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { GatewayServer } from '../server.js';
 import type { AgentRequest } from '../types.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 19811;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -70,8 +88,22 @@ async function post(target: string, raw: string): Promise<{ status: number; body
   return { status: res.status, body, text };
 }
 
-/** Exactly what brainstem.py writes for a rejected request. */
-const brainstemRejects = (error: string) => ({ status: 400, body: { error } });
+interface ErrorContract {
+  response: { error: { required: string[]; properties: Record<string, string> } };
+}
+const CONTRACT: ErrorContract = JSON.parse(
+  readFileSync(resolve(__dirname, '../../../../contracts/rapp-chat-v1.json'), 'utf-8'),
+);
+
+/** The rejection body the contract fixes, with `error` filled in. */
+function contractRejects(error: string): { status: number; body: Record<string, unknown> } {
+  const body: Record<string, unknown> = {};
+  for (const key of CONTRACT.response.error.required) {
+    const spec = CONTRACT.response.error.properties[key];
+    body[key] = key === 'error' ? error : spec;
+  }
+  return { status: 400, body };
+}
 
 const REJECTIONS: Array<[label: string, raw: string, error: string]> = [
   ['a non-object body', '[]', 'Request body must be a JSON object'],
@@ -93,15 +125,22 @@ describe('a rejection carries nothing that names the runtime', () => {
       const got = await post('/chat', raw);
       // The assertion the old instrument could not make: the WHOLE body.
       // Comparing only `.error` passed while `schema` and `status` sat beside it.
-      expect({ status: got.status, body: got.body }).toEqual(brainstemRejects(error));
-      expect(Object.keys(got.body as object)).toEqual(['error']);
+      expect({ status: got.status, body: got.body }).toEqual(contractRejects(error));
+      expect(Object.keys(got.body as object).sort())
+        .toEqual([...CONTRACT.response.error.required].sort());
     });
   }
 
   it('leaks no fingerprint key on any rejection', async () => {
     for (const [, raw] of REJECTIONS) {
       const got = await post('/chat', raw);
-      for (const tell of ['schema', 'status', 'content', 'sessionId', 'session_id']) {
+      // Anything the contract does not declare is a tell: it is a key one
+      // runtime emits and the other has no reason to.
+      const declared = new Set(Object.keys(CONTRACT.response.error.properties));
+      for (const key of Object.keys(got.body as object)) {
+        expect(declared.has(key), `undeclared key ${key} for body ${raw}`).toBe(true);
+      }
+      for (const tell of ['content', 'response', 'model', 'agent_logs']) {
         expect(got.body, `${tell} present for body ${raw}`).not.toHaveProperty(tell);
       }
     }
@@ -116,7 +155,7 @@ describe('a query string does not change which endpoint this is', () => {
     it(`validates ${target} exactly as /chat`, async () => {
       const got = await post(target, '{"user_input":"hi","conversation_history":"nope"}');
       expect({ status: got.status, body: got.body })
-        .toEqual(brainstemRejects('conversation_history must be an array'));
+        .toEqual(contractRejects('conversation_history must be an array'));
       // The old fallthrough is unmistakable in the bytes.
       expect(got.text).not.toContain('Received:');
     });

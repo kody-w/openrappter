@@ -158,29 +158,108 @@ def test_chat_validates_input_like_the_kernel(server):
     assert body["error"] == "user_input is required"
 
 
+CONTRACT = json.loads(
+    (Path(__file__).parents[2] / "contracts" / "rapp-chat-v1.json").read_text()
+)
+
+
+def _fixed_values(properties):
+    """Keys whose literal value the contract pins, e.g. status -> "success"."""
+    return {
+        key: spec
+        for key, spec in properties.items()
+        if spec not in ("string", "boolean", "array") and not spec.endswith("?")
+    }
+
+
 def test_rapp_chat_v1_contract(server, monkeypatch):
-    contract = json.loads(
-        (Path(__file__).parents[2] / "contracts" / "rapp-chat-v1.json").read_text()
-    )
-    assert contract["brand"] == "RAPP + X™"
+    """Every assertion is driven by the contract file, not by a literal here.
+
+    This test used to load the contract and check one thing -- that
+    ``brand`` was ``RAPP + X"`` -- while asserting hardcoded field names for
+    everything else. Appending a required key named ``a_field_nothing_emits``
+    to the success response left it green, so the ``required`` arrays
+    constrained nothing on either runtime.
+    """
+    assert CONTRACT["brand"] == "RAPP + X\u2122"
     monkeypatch.setattr(
         brainstem,
         "llm_chat",
         lambda _messages, _tools: ({"role": "assistant", "content": "canonical"}, "gpt-4o"),
     )
+    canonical = CONTRACT["request"]["canonical_input"]
     status, body = post_json(f"{server}/chat", {
         "schema": "rapp-chat/1.0",
-        "message": "hello",
+        canonical: "hello",
         "session_id": "shared-session",
         "idempotency_key": "shared-idempotency",
         "conversation_history": [],
     })
     assert status == 200
-    assert body["schema"] == "rapp-chat/1.0"
-    assert body["status"] == "success"
+
+    missing = [k for k in CONTRACT["response"]["success"]["required"] if k not in body]
+    assert not missing, f"contract requires these and /chat omitted them: {missing}"
+
+    for key, value in _fixed_values(CONTRACT["response"]["success"]["properties"]).items():
+        assert body[key] == value, f"{key} is fixed by the contract"
+
     assert body["response"] == body["content"] == "canonical"
     assert body["session_id"] == body["sessionId"] == "shared-session"
     assert body["idempotency_key"] == "shared-idempotency"
+
+
+def test_rapp_chat_v1_error_envelope(server):
+    """A rejection carries exactly the keys the contract fixes."""
+    canonical = CONTRACT["request"]["canonical_input"]
+    required = CONTRACT["response"]["error"]["required"]
+    declared = set(CONTRACT["response"]["error"]["properties"])
+
+    for payload in (
+        [],
+        {canonical: 123},
+        {canonical: "   "},
+        {canonical: "hi", "conversation_history": "nope"},
+    ):
+        status, body = post_json(f"{server}/chat", payload)
+        assert status == 400, payload
+        missing = [k for k in required if k not in body]
+        assert not missing, f"{payload}: contract requires {missing}"
+        undeclared = [k for k in body if k not in declared]
+        assert not undeclared, f"{payload}: undeclared keys {undeclared}"
+
+    for key, value in _fixed_values(CONTRACT["response"]["error"]["properties"]).items():
+        status, body = post_json(f"{server}/chat", {canonical: "   "})
+        assert body[key] == value, f"{key} is fixed by the contract"
+
+
+def test_rapp_chat_v1_request_aliases(server, monkeypatch):
+    """Each alias the contract declares is accepted, and loses to the spec key."""
+    monkeypatch.setattr(
+        brainstem,
+        "llm_chat",
+        lambda messages, _tools: (
+            {"role": "assistant", "content": messages[-1]["content"]},
+            "gpt-4o",
+        ),
+    )
+    canonical = CONTRACT["request"]["canonical_input"]
+
+    for key in CONTRACT["request"]["required_one_of"]:
+        status, _ = post_json(f"{server}/chat", {key: "hello"})
+        assert status == 200, f"{key} alone should be accepted"
+
+    alias_for_input = next(
+        alias for alias, target in CONTRACT["request"]["aliases"].items()
+        if target == canonical
+    )
+    status, body = post_json(f"{server}/chat", {
+        canonical: "from-spec-key",
+        alias_for_input: "from-alias",
+    })
+    assert status == 200
+    # The precedence the contract records, and the divergence #335 closed.
+    assert "from-spec-key" in body["response"]
+    assert "from-alias" not in body["response"]
 
 
 def test_rapp_chat_idempotency_prevents_duplicate_execution(server, monkeypatch):

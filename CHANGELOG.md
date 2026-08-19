@@ -68,6 +68,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /chat` rejections diverged between the runtimes. TypeScript answered a
+  malformed request with a bare `{error}` while the Python brainstem answered
+  with `{schema, status, error}`, so one malformed body identified which
+  runtime replied -- on four of five bodies tested. The TypeScript comment
+  justifying the bare shape cited a brainstem returning
+  `jsonify({"error": ...}), 400`; no such brainstem is in this repository.
+  Both runtimes now emit the envelope `contracts/rapp-chat-v1.json` fixes, on
+  every rejection path including unparseable JSON.
+
 - `openrappter audit` printed a blocking-finding count that ignored
   `--fail-on`. The exit code honoured the flag while the summary counted
   against a fixed `critical|high` set, so `--fail-on critical` could report
@@ -598,6 +607,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no OpenRappter code reads. It now documents the flow that ships.
 
 ### Changed
+
+- `contracts/rapp-chat-v1.json` is now executable. It was read by one test,
+  which asserted only that `brand` was `RAPP + X™` and hardcoded every other
+  field, so appending a required key nothing emits left the suite green.
+  Both runtimes now drive their assertions from the file. The contract was
+  also corrected to describe verified behaviour: `user_input` is the canonical
+  input and `message` its alias, not the reverse, and the success envelope
+  requires all ten keys both runtimes actually emit.
 
 - `openrappter service status` now derives its report from the same
   `getIMessageServiceStatus()` used by `openrappter imessage service-status`,

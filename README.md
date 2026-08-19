@@ -201,7 +201,11 @@ reported after real agent-tool evidence and a post-operative verification pass.
 rapplications, Brainstems, and neighborhood peers. Python and TypeScript accept
 the same `rapp-chat/1.0` envelope; UI, TUI, menu bar, and other clients are
 projections over that headless contract, not separate capability paths. See
-[`contracts/rapp-chat-v1.json`](contracts/rapp-chat-v1.json).
+[`contracts/rapp-chat-v1.json`](contracts/rapp-chat-v1.json), which both
+runtimes are tested against -- its `required` arrays drive the assertions in
+`python/tests/test_openrappter_brainstem.py` and
+`typescript/src/__tests__/integration/rapp-chat-contract.test.ts`, so a key
+added there fails both suites until both runtimes emit it.
 
 ```bash
 # Install and go

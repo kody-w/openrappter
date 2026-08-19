@@ -1236,7 +1236,14 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             except ValueError:
                 data = None
             if not isinstance(data, dict):
-                return self._send(400, {"error": "Request body must be a JSON object"})
+                # Same envelope as every other rejection on this wire; a bare
+                # `{error}` here was the one malformed body whose reply differed
+                # in shape from the rest. contracts/rapp-chat-v1.json fixes it.
+                return self._send(400, {
+                    "schema": "rapp-chat/1.0",
+                    "status": "error",
+                    "error": "Request body must be a JSON object",
+                })
             # `user_input` is authoritative, exactly as the grail and the
             # TypeScript runtime have it. This used to prefer `message`
             # whenever it was a string, so `{"user_input":"A","message":"B"}`

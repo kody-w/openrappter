@@ -74,7 +74,8 @@ describe('an oversized body is refused at the door', () => {
     const got = await postRaw('/chat', huge);
 
     expect(got.status).toBe(413);
-    // Bare {error}, like every other rejection on this wire.
+    // 413 has no brainstem counterpart -- it has no body cap -- so nothing
+    // can be compared here and the bare shape stays.
     expect(got.body).toEqual({ error: 'Request body too large' });
     // THE POINT: the agent — and behind it a paid API — was never invoked.
     expect(handlerCalls).toBe(before);
@@ -139,6 +140,6 @@ describe('the cap never bites a real request', () => {
   it('still rejects a malformed body on its own terms, not as oversize', async () => {
     const got = await postRaw('/chat', '{"user_input":123}');
     expect(got.status).toBe(400);
-    expect(got.body).toEqual({ error: 'user_input must be a string' });
+    expect(got.body).toEqual({ schema: 'rapp-chat/1.0', status: 'error', error: 'user_input must be a string' });
   });
 });

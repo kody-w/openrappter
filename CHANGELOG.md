@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `openrappter audit` runs the security auditor and exits non-zero on high or critical findings. `SecurityAuditor` had five checks and was constructed by nothing but its own test.
 - The gateway now emits `agent.tool` as each tool call finishes, so tool use appears in chat. The chat UI has registered a listener for it since it was written and the event had no emit site anywhere, so the feature had never worked. The payload carries the tool's name, outcome and duration -- never its arguments, which can hold secrets.
 
 - **`openrappter memory`** — search, record and forget what a rappter remembers.
@@ -65,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability its syntax tree can reach, per the RAPP agent contract.
 
 ### Fixed
+- The security auditor read `~/.openrappter/config.yml`, a file the product does not write (it writes `config.json5`), and its missing-file branch returns no findings -- so a check that reports "Gateway exposed without authentication" at critical severity had never examined anything. It now parses the real config through the loader.
+- Removed two auditor checks for settings this product does not have (`cdp`, `dmOnly`). The CDP one used an unparenthesised alternation, `/cdp.*host:\s*['\"]?0\.0\.0\.0|all['\"]?/i`, so the bare substring `all` matched anywhere -- pointed at the real config it reported remote DevTools exposure at critical on a machine with no such setting.
+- `getConfigPath()` and five other paths captured the data directory at import time, so `OPENRAPPTER_HOME` was ignored once a module had loaded.
 - The Python runtime read `message` in preference to `user_input`, so `{"user_input":"A","message":"B"}` sent the model **B** while the TypeScript runtime and the grail brainstem sent **A** -- both answering 200, so the divergence was a silently different prompt rather than an error. It also had no `user_input must be a string` rejection, answering 200 where the grail returns 400.
 - The parity harness rebuilt each request from three whitelisted keys, so any other field a vector declared was dropped before reaching the runtime. A vector could name a field, look like it tested it, and test nothing.
 - `openrappter channels` now works and is registered. `connect`/`disconnect` sent `{ channel }` where every gateway handler reads `params.type`, so both passed `undefined` to the registry. `connect --config` was a silent no-op -- `channels.connect` ignores everything but `type` -- and now performs the `channels.configure` call it implied. Adds `configure`, `probe` and `config`, which reach gateway methods no client called; `config` output is redacted.

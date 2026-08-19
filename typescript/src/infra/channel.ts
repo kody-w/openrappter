@@ -38,8 +38,7 @@ export interface ChannelConfig {
   promoteEnabled: boolean;    // must be manually enabled
 }
 
-const HOME_DIR = openrappterHome();
-const CHANNEL_FILE = path.join(HOME_DIR, 'channel.json');
+const CHANNEL_FILE = path.join(openrappterHome(), 'channel.json');
 
 const DEFAULT_CONFIG: ChannelConfig = {
   current: 'stable',
@@ -61,7 +60,7 @@ export function loadChannelConfig(): ChannelConfig {
 }
 
 export function saveChannelConfig(config: ChannelConfig): void {
-  fs.mkdirSync(HOME_DIR, { recursive: true });
+  fs.mkdirSync(openrappterHome(), { recursive: true });
   fs.writeFileSync(CHANNEL_FILE, JSON.stringify(config, null, 2) + '\n');
 }
 

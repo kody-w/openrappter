@@ -37,6 +37,10 @@ function scratchHome(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'memory-cli-'));
   scratchHomes.push(dir);
   process.env.HOME = dir;
+  // The data directory resolves OPENRAPPTER_HOME before HOME, and the
+  // suite sets it globally (vitest.setup.ts), so redirecting HOME alone
+  // would leave this test pointed at the shared temp home.
+  process.env.OPENRAPPTER_HOME = `${dir}/.openrappter`;
   return dir;
 }
 

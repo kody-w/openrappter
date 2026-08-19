@@ -39,6 +39,10 @@ function isolatedHomeEnv(home: string): NodeJS.ProcessEnv {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
+    // Setting HOME alone is not enough: the data directory resolves through
+    // OPENRAPPTER_HOME first, and this spreads process.env, so the suite-wide
+    // temp home would otherwise be inherited and outrank the one under test.
+    OPENRAPPTER_HOME: join(home, '.openrappter'),
   };
 }
 

@@ -1269,10 +1269,11 @@ export class GatewayServer {
        * openrappter 503). Rejecting at the door costs nothing and is the same
        * answer every time.
        *
-       * This is a DELIBERATE divergence from the brainstem, which has no cap.
-       * Everywhere else on /chat the rule is to match it exactly; here matching
-       * it would mean copying a hole. The brainstem should adopt the same cap —
-       * it is a different repository and not mine to change.
+       * This was a DELIBERATE divergence from the brainstem, which had no cap:
+       * everywhere else on /chat the rule is to match it exactly, and here
+       * matching it would have meant copying a hole. The brainstem has since
+       * adopted the same limit and the same environment variable, so /chat now
+       * answers the same status AND the same envelope in both runtimes.
        */
       req.on('data', (chunk: Buffer) => {
         if (bodyTooLarge) {
@@ -1309,7 +1310,7 @@ export class GatewayServer {
           if (!res.writableEnded) {
             res.writeHead(413, { 'Content-Type': 'application/json', ...corsHeaders });
             res.end(JSON.stringify(isChat
-              ? { error: 'Request body too large' }
+              ? { schema: 'rapp-chat/1.0', status: 'error', error: 'Request body too large' }
               : { error: 'Request body too large', limit_bytes: this.maxHttpBodyBytes }));
           }
           return;

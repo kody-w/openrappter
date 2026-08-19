@@ -24,10 +24,13 @@ not wedge the server; it leaked one thread per request instead, which is a
 slower version of the same thing on a daemon meant to run for weeks.
 """
 import inspect
+import json
 import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import pytest
 
 from openrappter import brainstem
 
@@ -122,6 +125,122 @@ class TestStallBudget:
         """
         assert isinstance(brainstem.BrainstemHandler.timeout, (int, float))
         assert 0 < brainstem.BrainstemHandler.timeout <= 120
+
+
+class TestRequestBodyCap:
+    """The body is bounded, so one caller cannot spend the daemon's memory.
+
+    `_route_post` read exactly `Content-Length` bytes into memory with no
+    ceiling. The stall budget above does not touch this: it bounds a caller that
+    claims bytes and never sends them, and the dangerous caller is the opposite
+    one, which sends everything it claims as fast as the socket allows.
+
+    Measured against this server before the cap, as peak RSS of the test
+    process, with no credential of any kind:
+
+        one POST /chat of 64 MB    33 MB -> 180 MB   in 0.04s
+        six concurrent of 16 MB    33 MB -> 146 MB   in 0.34s
+
+    `read` is per connection and `ThreadingHTTPServer` gives every request its
+    own thread, so that cost is per caller. After the cap both are flat at
+    ~39 MB. The limit and the environment variable are the TypeScript gateway's,
+    whose comment asked this runtime to adopt them.
+    """
+
+    CAP = 4096
+
+    @pytest.fixture
+    def cap(self, monkeypatch):
+        """Shrink the cap so the tests need kilobytes, not megabytes."""
+        monkeypatch.setattr(brainstem.BrainstemHandler, "max_body_bytes", self.CAP)
+        return self.CAP
+
+    @staticmethod
+    def _sized(nbytes):
+        """A syntactically valid /chat body of exactly `nbytes` bytes."""
+        prefix, suffix = b'{"user_input": "', b'"}'
+        return prefix + b"x" * (nbytes - len(prefix) - len(suffix)) + suffix
+
+    def test_a_body_over_the_cap_is_refused(self, server, cap):
+        body = self._sized(cap * 4)
+        status, _ = _raw_post(
+            server, f"Content-Length: {len(body)}\r\n".encode(), body=body
+        )
+        assert status == 413
+
+    def test_the_refusal_uses_the_contract_envelope(self, server, cap):
+        """Same shape as every other rejection on this wire, and now the same
+        shape the TypeScript gateway sends -- it had a bare `{error}` here,
+        which was the one /chat rejection whose envelope differed."""
+        body = self._sized(cap * 4)
+        _, raw = _raw_post(
+            server, f"Content-Length: {len(body)}\r\n".encode(), body=body
+        )
+        assert json.loads(raw) == {
+            "schema": "rapp-chat/1.0",
+            "status": "error",
+            "error": "Request body too large",
+        }
+
+    def test_a_body_exactly_at_the_cap_is_still_accepted(self, server, cap):
+        """A ceiling, not a fence one byte inside it."""
+        body = self._sized(cap)
+        status, _ = _raw_post(
+            server, f"Content-Length: {len(body)}\r\n".encode(), body=body
+        )
+        assert status != 413
+
+    def test_a_claimed_gigabyte_is_refused_on_the_claim_alone(self, server, cap):
+        """The claim is judged before the bytes are read, not after.
+
+        This is the whole shape of the fix. Reading first and judging after is
+        what made the size of the read the caller's choice; before the cap this
+        answered 400 `shorter than Content-Length`, having tried to read it.
+        """
+        status, raw = _raw_post(
+            server, b"Content-Length: 1000000000\r\n", body=b"x" * 20, half_close=True
+        )
+        assert status == 413
+        assert b"too large" in raw
+
+    def test_an_ordinary_turn_is_unaffected_by_the_default_cap(self, server):
+        """Anti-vacuity, on the real 2 MB default rather than the shrunken one."""
+        status, _ = _raw_post(server, b"Content-Length: 19\r\n")
+        assert status not in (400, 413, None)
+
+
+class TestBodyCapConfiguration:
+    def test_the_default_is_two_megabytes(self):
+        """The TypeScript gateway's number. Both runtimes answer 413 at the
+        same size, which is the only reason a peer can predict either."""
+        assert brainstem.DEFAULT_MAX_BODY_BYTES == 2 * 1024 * 1024
+        assert brainstem.BrainstemHandler.max_body_bytes > 0
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("4096", 4096),
+            ("2.5e6", 2500000),
+            ("", brainstem.DEFAULT_MAX_BODY_BYTES),
+            ("nonsense", brainstem.DEFAULT_MAX_BODY_BYTES),
+            ("0", brainstem.DEFAULT_MAX_BODY_BYTES),
+            ("-1", brainstem.DEFAULT_MAX_BODY_BYTES),
+            ("inf", brainstem.DEFAULT_MAX_BODY_BYTES),
+            ("nan", brainstem.DEFAULT_MAX_BODY_BYTES),
+        ],
+    )
+    def test_the_override_falls_back_rather_than_removing_the_cap(
+        self, monkeypatch, raw, expected
+    ):
+        """Every unusable value keeps a cap. `0`, `-1` and `inf` are the ones
+        that matter: read literally they mean "no limit", which is the state
+        this whole class exists to prevent, reachable by typo."""
+        monkeypatch.setenv("OPENRAPPTER_MAX_BODY_BYTES", raw)
+        assert brainstem._resolve_max_body_bytes() == expected
+
+    def test_an_absent_variable_uses_the_default(self, monkeypatch):
+        monkeypatch.delenv("OPENRAPPTER_MAX_BODY_BYTES", raising=False)
+        assert brainstem._resolve_max_body_bytes() == brainstem.DEFAULT_MAX_BODY_BYTES
 
 
 def _multipart_post(base, content_type, body, timeout=15):

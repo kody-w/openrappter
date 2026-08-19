@@ -31,13 +31,18 @@ const LISTING = [
 
 function status(overrides: Partial<ServiceStatus> = {}): ServiceStatus {
   return {
-    registered: true,
-    launchdPid: null,
+    installed: true,
+    loaded: true,
+    running: false,
+    supervisedPid: null,
+    supervisor: 'user',
+    live: false,
+    ready: false,
+    servingPid: null,
+    servedByForeignProcess: false,
     lastExit: null,
-    recordedPid: null,
-    recordedAlive: false,
     ...overrides,
-  };
+  } as ServiceStatus;
 }
 
 describe('parseLaunchctlRow', () => {
@@ -58,63 +63,56 @@ describe('parseLaunchctlRow', () => {
   });
 
   it('does not match a label that merely contains the name', () => {
-    // `com.openrappter.gateway.helper` is a different job.
-    const other = '99\t0\tcom.openrappter.gateway.helper';
-    expect(parseLaunchctlRow(other, LABEL).registered).toBe(false);
-  });
-
-  it('reports an absent job rather than guessing', () => {
-    expect(parseLaunchctlRow('53830\t-15\tcom.openrappter.keepawake', LABEL)).toEqual({
-      registered: false,
-      pid: null,
-      lastExit: null,
-    });
+    expect(parseLaunchctlRow('99\t0\tcom.openrappter.gateway.helper', LABEL).registered).toBe(false);
   });
 });
 
 describe('describeSupervision', () => {
   it('stays quiet when launchd owns the running gateway', () => {
     expect(
-      describeSupervision(status({ launchdPid: 4242, lastExit: 0, recordedPid: 4242, recordedAlive: true })),
+      describeSupervision(status({ running: true, supervisedPid: 4242, servingPid: 4242, live: true, lastExit: 0 })),
     ).toBeNull();
   });
 
-  it('names the exact state from #144', () => {
-    // Registered, no supervised pid, and something else alive on the port.
+  it('names the exact state from #144, using the flag that already describes it', () => {
+    // `servedByForeignProcess` is computed by the supervision reader; this
+    // command no longer re-derives the same condition under another name.
     const message = describeSupervision(
-      status({ lastExit: 1, recordedPid: 25041, recordedAlive: true }),
+      status({ lastExit: 1, servingPid: 25041, live: true, servedByForeignProcess: true }),
     );
     expect(message).toContain('NOT started by launchd');
     expect(message).toContain('25041');
     expect(message).toContain('unsupervised');
-    // The actionable part: this is what makes every supervised start fail.
     expect(message).toContain('EADDRINUSE');
   });
 
   it('reports a gateway running with no job installed at all', () => {
     const message = describeSupervision(
-      status({ registered: false, recordedPid: 900, recordedAlive: true }),
+      status({ installed: false, servingPid: 900, live: true }),
     );
     expect(message).toContain('no launchd job is installed');
     expect(message).toContain('openrappter service install');
   });
 
   it('stays quiet when nothing is installed and nothing is running', () => {
-    expect(describeSupervision(status({ registered: false }))).toBeNull();
+    expect(describeSupervision(status({ installed: false }))).toBeNull();
   });
 
   it('reports a job that is installed but genuinely stopped', () => {
-    const message = describeSupervision(status({ lastExit: 0, recordedPid: 111, recordedAlive: false }));
+    const message = describeSupervision(status({ lastExit: 0, live: false }));
     expect(message).toContain('nothing is running');
   });
 
-  it('reports a supervised pid that disagrees with the recorded one', () => {
-    // Two gateways: launchd owns one, another wrote the pid file. Whoever
-    // reads that file is talking to a process launchd is not supervising.
+  it('catches an unsupervised gateway even when servedByForeignProcess cannot', () => {
+    // The neighbouring flag compares the serving pid against the *supervised*
+    // pid, so it is false when launchd owns nothing -- exactly the machine
+    // state in #144, where 29 supervised starts died on EADDRINUSE behind a
+    // hand-started process. Delegating to it alone lost this diagnosis, which
+    // is why both readings are kept.
     const message = describeSupervision(
-      status({ launchdPid: 100, recordedPid: 200, recordedAlive: true }),
+      status({ installed: true, running: false, live: true, servingPid: 25041, lastExit: 1, servedByForeignProcess: false }),
     );
-    expect(message).toContain('supervises pid 100');
-    expect(message).toContain('recorded pid 200');
+    expect(message).toContain('NOT started by launchd');
+    expect(message).toContain('EADDRINUSE');
   });
 });

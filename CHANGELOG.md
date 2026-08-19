@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `openrappter service status` reports whether launchd actually supervises the gateway that is answering. The two can disagree permanently and nothing said so: on the machine that prompted this, a gateway started outside launchd had held the port for 13 days, so all 29 supervised starts exited 1 with `EADDRINUSE` while `/health` returned 200 and `doctor` reported the same message it reports when supervision is correct.
 - `openrappter audit` runs the security auditor and exits non-zero on high or critical findings. `SecurityAuditor` had five checks and was constructed by nothing but its own test.
 - The gateway now emits `agent.tool` as each tool call finishes, so tool use appears in chat. The chat UI has registered a listener for it since it was written and the event had no emit site anywhere, so the feature had never worked. The payload carries the tool's name, outcome and duration -- never its arguments, which can hold secrets.
 

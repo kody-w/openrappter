@@ -19,8 +19,8 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { GatewayServer } from '../../gateway/server.js';
+import type { GatewayReadiness } from '../../gateway/server.js';
 import { reserveTestPort } from '../support/test-port.js';
-import type { GatewayReadiness } from '../../gateway/types.js';
 
 let server: GatewayServer | undefined;
 

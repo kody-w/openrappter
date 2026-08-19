@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GET /readyz` could terminate the gateway. The handler serialised its report
+  as the argument to `res.end()`, after `res.writeHead()` had already committed
+  a status line, so a report that could not be serialised threw mid-reply and
+  the attached `.catch()` called `res.writeHead()` again on the same response.
+  That raised `ERR_HTTP_HEADERS_SENT` inside a discarded promise, which node
+  treats as an unhandled rejection and the process exits. The report is now
+  serialised before any byte is written, and the error path refuses to write
+  over a reply already in flight.
+
 - The brainstem dispatch guard appended a second response when a route failed
   after it had already begun replying, so the caller received
   `HTTP/1.0 200 OK ... HTTP/1.0 500 ...` concatenated inside one reply. The

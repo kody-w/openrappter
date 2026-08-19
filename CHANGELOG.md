@@ -589,6 +589,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and desktop smoke tests were hardened for concurrent and Windows runs.
 
 ### Security
+- The Python flight recorder wrote four kinds of credential to the ledger verbatim that the TypeScript one redacts: a `?key=` query parameter (the shape the shipped Gemini provider builds), Slack `xox*-` tokens, `sk-` OpenAI/Anthropic keys, and JWTs. The two `SECRET_VALUE_PATTERNS` lists had drifted, in one direction only. Both now read a shared corpus at `contracts/value-redaction-corpus.json`.
 
 - **A client that stopped reading was buffered without limit.** The handshake
   advertised `policy.maxBufferedBytes: 10000000` and `sendFrame` was

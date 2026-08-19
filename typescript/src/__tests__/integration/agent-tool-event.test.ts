@@ -21,7 +21,7 @@ import type { LLMProvider } from '../../providers/types.js';
 
 /** An agent whose only job is to succeed or throw on demand. */
 class ScriptedTool extends BasicAgent {
-  constructor(private readonly behaviour: 'ok' | 'throws') {
+  constructor(private readonly behaviour: 'ok' | 'throws' | 'resolves-error') {
     super('secret_tool', {
       name: 'secret_tool',
       description: 'does a thing',
@@ -31,6 +31,11 @@ class ScriptedTool extends BasicAgent {
 
   async perform(): Promise<string> {
     if (this.behaviour === 'throws') throw new Error('tool exploded');
+    if (this.behaviour === 'resolves-error') {
+      // The failure mode #134 is about: the agent returns normally and reports
+      // the failure *inside* the envelope. No exception is thrown.
+      return JSON.stringify({ status: 'error', message: 'could not reach service' });
+    }
     return 'tool result';
   }
 }
@@ -63,7 +68,7 @@ function scriptedProvider(): LLMProvider {
   };
 }
 
-function assistantWithScriptedTool(behaviour: 'ok' | 'throws'): Assistant {
+function assistantWithScriptedTool(behaviour: 'ok' | 'throws' | 'resolves-error'): Assistant {
   const tool = new ScriptedTool(behaviour);
   return new Assistant(new Map([[tool.name, tool]]), {
     provider: scriptedProvider(),
@@ -100,6 +105,21 @@ describe('agent.tool is emitted for each finished tool call', () => {
     assistant.onToolEvent = (event) => seen.push(event);
 
     await assistant.getResponse('do the thing', undefined, undefined, 'session-b');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ name: 'secret_tool', status: 'error' });
+  });
+
+  it('reports a tool that resolves with an error envelope', async () => {
+    // The branch a throwing tool never reaches. Agents report failure by
+    // resolving with `{"status":"error"}` at least as often as by throwing,
+    // and trusting the absence of an exception is how #134 recorded an
+    // undelivered alert as sent.
+    const assistant = assistantWithScriptedTool('resolves-error');
+    const seen: AgentToolEvent[] = [];
+    assistant.onToolEvent = (event) => seen.push(event);
+
+    await assistant.getResponse('do the thing', undefined, undefined, 'session-f');
 
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ name: 'secret_tool', status: 'error' });

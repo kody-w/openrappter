@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * See and create the rappters running on this device. — #107
  *
@@ -16,7 +17,6 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, openSync } from 'fs';
-import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -164,7 +164,7 @@ export function registerRappterCommand(program: Command): void {
         return;
       }
       const entry = resolve(fileURLToPath(import.meta.url), '..', '..', 'index.js');
-      const logDir = join(homedir(), '.openrappter', 'logs');
+      const logDir = openrappterPath('logs');
       mkdirSync(logDir, { recursive: true });
       const logFile = join(logDir, `twin-${instance}.log`);
 

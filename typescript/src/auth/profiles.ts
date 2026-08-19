@@ -1,6 +1,6 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 export interface AuthProfile {
   id: string;
@@ -17,7 +17,7 @@ export class AuthProfileStore {
   private profilesPath: string;
   private profiles: AuthProfile[] = [];
 
-  constructor(configDir = path.join(os.homedir(), '.openrappter')) {
+  constructor(configDir = openrappterHome()) {
     this.profilesPath = path.join(configDir, 'auth-profiles.json');
     this.ensureConfigDir();
     this.load();

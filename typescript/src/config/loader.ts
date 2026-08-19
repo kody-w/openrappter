@@ -1,16 +1,16 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * Configuration loader - reads and parses config files
  */
 
 import { readFileSync, existsSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import JSON5 from 'json5';
 import { validateConfig } from './schema.js';
 import type { OpenRappterConfig } from './types.js';
 import { expandEnvVars } from './env-expand.js';
 
-const DEFAULT_CONFIG_DIR = join(homedir(), '.openrappter');
+const DEFAULT_CONFIG_DIR = openrappterHome();
 const DEFAULT_CONFIG_FILE = 'config.json5';
 
 /**

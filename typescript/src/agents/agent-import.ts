@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Install an agent file dropped onto openrappter, and make it usable now.
  *
@@ -19,7 +20,6 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { introspectPythonAgents } from './PythonAgent.js';
 import type { AgentRegistry } from './AgentRegistry.js';
 
@@ -50,7 +50,7 @@ export function safeAgentFilename(raw: string): string {
 
 /** Where user agents live. Matches the registry's default. */
 export function userAgentsDir(): string {
-  return path.join(os.homedir(), '.openrappter', 'agents');
+  return openrappterPath('agents');
 }
 
 async function readIfExists(p: string): Promise<Buffer | null> {

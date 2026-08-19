@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * AgentRegistry - Dynamic agent discovery and management.
  *
@@ -7,7 +8,6 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
@@ -72,7 +72,7 @@ export class AgentRegistry {
 
   constructor(
     agentsDir: string,
-    userAgentsDir = path.join(os.homedir(), '.openrappter', 'agents'),
+    userAgentsDir = openrappterPath('agents'),
   ) {
     this.agentsDir = agentsDir;
     this.userAgentsDir = userAgentsDir;

@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * The record of which agents actually ran, so `agent_logs` can be true.
  *
@@ -27,7 +28,6 @@
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
 import {
@@ -57,7 +57,7 @@ function requestToken(requestId: string): string {
 }
 
 function journalPath(requestId?: string): string {
-  const dir = process.env.OPENRAPPTER_HOME ?? path.join(os.homedir(), '.openrappter');
+  const dir = process.env.OPENRAPPTER_HOME ?? openrappterHome();
   return path.join(
     dir,
     requestId
@@ -276,7 +276,7 @@ export function invocationsSince(
  * agent call.
  */
 export function trimJournal(_keep = 500): void {
-  const dir = process.env.OPENRAPPTER_HOME ?? path.join(os.homedir(), '.openrappter');
+  const dir = process.env.OPENRAPPTER_HOME ?? openrappterHome();
   try {
     prepareJournalDirectory(dir);
   } catch {

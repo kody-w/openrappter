@@ -1,3 +1,4 @@
+import { openrappterHome } from './openrappter-home.js';
 /**
  * Backup & Restore — protects ~/.openrappter/ user data before updates.
  *
@@ -14,7 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const DEFAULT_HOME_DIR = path.join(os.homedir(), '.openrappter');
+const DEFAULT_HOME_DIR = openrappterHome();
 const MAX_BACKUPS = 5;
 
 // Directories and files to skip (transient / large / regenerable)

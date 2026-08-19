@@ -1,11 +1,10 @@
+import { openrappterHome, openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Security Auditor
  * Performs security checks and returns findings
  */
 
 import { statSync, existsSync, lstatSync, readFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
 
 export interface AuditFinding {
   checkId: string;
@@ -21,7 +20,7 @@ export class SecurityAuditor {
    */
   checkFilesystemPerms(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const openrappterDir = join(homedir(), '.openrappter');
+    const openrappterDir = openrappterHome();
 
     // Check if directory exists
     if (!existsSync(openrappterDir)) {
@@ -90,7 +89,7 @@ export class SecurityAuditor {
    */
   checkGatewayConfig(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = join(homedir(), '.openrappter', 'config.yml');
+    const configPath = openrappterPath('config.yml');
 
     if (!existsSync(configPath)) {
       return findings; // No config yet
@@ -144,7 +143,7 @@ export class SecurityAuditor {
    */
   checkChannelSecurity(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = join(homedir(), '.openrappter', 'config.yml');
+    const configPath = openrappterPath('config.yml');
 
     if (!existsSync(configPath)) {
       return findings;
@@ -182,7 +181,7 @@ export class SecurityAuditor {
    */
   checkConfigSecrets(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = join(homedir(), '.openrappter', 'config.yml');
+    const configPath = openrappterPath('config.yml');
 
     if (!existsSync(configPath)) {
       return findings;
@@ -243,7 +242,7 @@ export class SecurityAuditor {
    */
   checkBrowserSecurity(): AuditFinding[] {
     const findings: AuditFinding[] = [];
-    const configPath = join(homedir(), '.openrappter', 'config.yml');
+    const configPath = openrappterPath('config.yml');
 
     if (!existsSync(configPath)) {
       return findings;

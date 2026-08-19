@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Doctor Command
  * System diagnostics and health checks for openrappter.
@@ -21,8 +22,7 @@
 import type { Command } from 'commander';
 import { execFileSync, execSync } from 'child_process';
 import { existsSync, statfsSync, statSync } from 'fs';
-import { homedir, tmpdir } from 'os';
-import { join } from 'path';
+import { tmpdir } from 'os';
 import { createConnection } from 'net';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
@@ -186,7 +186,7 @@ function checkApiKeys(): CheckResult {
 }
 
 function checkDatabase(): CheckResult {
-  const dbPath = join(homedir(), '.openrappter', 'openrappter.db');
+  const dbPath = openrappterPath('openrappter.db');
   try {
     if (existsSync(dbPath)) {
       const stat = statSync(dbPath);
@@ -214,8 +214,8 @@ function checkDatabase(): CheckResult {
 }
 
 function checkMemorySystem(): CheckResult {
-  const memPath = join(homedir(), '.openrappter', 'memory.json');
-  const memDir = join(homedir(), '.openrappter', 'memories');
+  const memPath = openrappterPath('memory.json');
+  const memDir = openrappterPath('memories');
   if (existsSync(memPath) || existsSync(memDir)) {
     return { name: 'Memory System', status: 'pass', message: 'Memory storage found' };
   }

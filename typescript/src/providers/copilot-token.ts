@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Direct GitHub Copilot token exchange — no CLI dependency.
  *
@@ -7,7 +8,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { createHash } from 'crypto';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ export interface ResolvedCopilotToken {
 // ── Token cache ──────────────────────────────────────────────────────────────
 
 function getDefaultCachePath(): string {
-  return path.join(os.homedir(), '.openrappter', 'credentials', 'copilot-token.json');
+  return openrappterPath('credentials', 'copilot-token.json');
 }
 
 function loadCachedToken(cachePath: string): CachedCopilotToken | null {

@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -11,7 +12,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -232,7 +232,7 @@ export async function buildShowAndTellArtifacts(
   if (target === 'skill' || target === 'all') {
     const root = path.resolve(
       process.env.OPENRAPPTER_SKILLS_DIR ??
-        path.join(os.homedir(), '.openrappter', 'skills'),
+        openrappterPath('skills'),
     );
     const directory = destination(root, name, analysis.sessionId, 'skill');
     const markdown = renderShowAndTellSkill(analysis, path.basename(directory));
@@ -263,7 +263,7 @@ export async function buildShowAndTellArtifacts(
   if (target === 'automation' || target === 'all') {
     const root = path.resolve(
       process.env.OPENRAPPTER_AUTOMATIONS_DIR ??
-        path.join(os.homedir(), '.openrappter', 'automations'),
+        openrappterPath('automations'),
     );
     const directory = destination(root, name, analysis.sessionId, 'automation');
     const content = renderAutomation(analysis, path.basename(directory));

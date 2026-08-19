@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Workspace identity & session management.
  *
@@ -8,7 +9,6 @@
 
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ export interface AgentIdentity {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-export const WORKSPACE_DIR = path.join(os.homedir(), '.openrappter', 'workspace');
+export const WORKSPACE_DIR = openrappterPath('workspace');
 
 const STATE_FILE = 'workspace-state.json';
 

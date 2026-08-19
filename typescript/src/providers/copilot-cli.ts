@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -426,7 +427,7 @@ export class CopilotCliProvider implements LLMProvider {
       || 'copilot';
     this.copilotHome =
       options.copilotHome?.trim()
-      || path.join(homedir(), '.openrappter', 'copilot-imessage-home');
+      || openrappterPath('copilot-imessage-home');
     this.model = options.model?.trim() || COPILOT_CLI_DEFAULT_MODEL;
     this.timeoutMs = boundInteger(
       options.timeoutMs,

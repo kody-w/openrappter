@@ -1,3 +1,4 @@
+import { openrappterPath } from './openrappter-home.js';
 /**
  * Who is running on this device. — #107
  *
@@ -24,8 +25,6 @@
  */
 
 import { readdirSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -78,7 +77,7 @@ export interface RappterStatus {
 /** Every instance name this device has a directory for. */
 export function knownInstanceNames(): string[] {
   try {
-    return readdirSync(join(homedir(), '.openrappter', 'instances'), { withFileTypes: true })
+    return readdirSync(openrappterPath('instances'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();

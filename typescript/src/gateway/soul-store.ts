@@ -1,3 +1,4 @@
+import { openrappterPath } from '../infra/openrappter-home.js';
 /**
  * Soul Config Persistence — save/load rappter soul configs as JSON files.
  *
@@ -7,7 +8,6 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import type { RappterSoulConfig } from './rappter-manager.js';
 
@@ -32,7 +32,7 @@ export class SoulStore {
   readonly soulsDir: string;
 
   constructor(soulsDir?: string) {
-    this.soulsDir = soulsDir ?? path.join(os.homedir(), '.openrappter', 'souls');
+    this.soulsDir = soulsDir ?? openrappterPath('souls');
   }
 
   private filePath(id: string): string {

@@ -1,3 +1,4 @@
+import { openrappterHome, openrappterPath } from '../infra/openrappter-home.js';
 /**
  * MemoryAgent - Memory storage and recall agent.
  *
@@ -10,7 +11,6 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata, MemoryEcho } from './types.js';
 
@@ -50,7 +50,7 @@ export class MemoryAgent extends BasicAgent {
   private memoryDir: string;
   private memoryFile: string;
 
-  constructor(memoryDir = path.join(os.homedir(), '.openrappter')) {
+  constructor(memoryDir = openrappterHome()) {
     const metadata: AgentMetadata = {
       name: 'Memory',
       description: 'Stores and recalls facts in persistent memory. Use "remember" to store, "recall" to retrieve.',
@@ -141,7 +141,7 @@ export class MemoryAgent extends BasicAgent {
 
   /** Load all memory entries — used by Assistant for context injection */
   static async loadAllMemories(): Promise<Record<string, MemoryEntry>> {
-    const memFile = path.join(os.homedir(), '.openrappter', 'memory.json');
+    const memFile = openrappterPath('memory.json');
     try {
       const data = await fs.readFile(memFile, 'utf-8');
       return JSON.parse(data);

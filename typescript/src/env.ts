@@ -1,9 +1,9 @@
+import { openrappterHome } from './infra/openrappter-home.js';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import JSON5 from 'json5';
 
-export const HOME_DIR = path.join(os.homedir(), '.openrappter');
+export const HOME_DIR = openrappterHome();
 export const CONFIG_FILE = path.join(HOME_DIR, 'config.json');
 /**
  * The schema-validated loader (`config/loader.ts`) reads `config.json5`, so a

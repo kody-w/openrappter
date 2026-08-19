@@ -1,3 +1,4 @@
+import { openrappterHome } from '../infra/openrappter-home.js';
 /**
  * DreamAgent - Offline memory consolidation.
  *
@@ -10,7 +11,6 @@
 import { randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import os from 'os';
 import { BasicAgent } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
@@ -112,7 +112,7 @@ export class DreamAgent extends BasicAgent {
       },
     };
     super('Dream', metadata);
-    this.memoryDir = path.join(os.homedir(), '.openrappter');
+    this.memoryDir = openrappterHome();
     this.memoryFile = path.join(this.memoryDir, 'memory.json');
   }
 

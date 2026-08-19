@@ -267,12 +267,7 @@ export class SecurityAuditor {
       // config it reported "Chrome DevTools Protocol exposed remotely" at
       // CRITICAL against a machine with no such setting. A check for a
       // setting that cannot exist is not a check.
-      // `OpenRappterConfig` declares 7 sections while the schema validates 21,
-      // so `browser` is invisible to the type even though the loader returns
-      // it. Narrowed here rather than widened globally, which is its own
-      // change -- and part of why config.security and config.network are
-      // unread (#219, #235): nothing can see them without doing this.
-      const config = loadConfig({ path: configPath }) as { browser?: { headless?: boolean } };
+      const config = loadConfig({ path: configPath });
       if (config.browser?.headless === false) {
         findings.push({
           checkId: 'br-002',

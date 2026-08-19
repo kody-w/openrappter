@@ -120,8 +120,19 @@ describe('channels CLI contract', () => {
     // The gateway-driven tests above would still pass if cli/channels.ts
     // drifted back, so read what it actually sends.
     const source = readFileSync(resolve(__dirname, '../../cli/channels.ts'), 'utf-8');
-    expect(source).not.toMatch(/client\.call\([^)]*\{\s*channel\s*[,}]/);
-    expect(source.match(/\btype\b\s*[,}]/g)?.length).toBeGreaterThanOrEqual(4);
+
+    // Every object literal passed to client.call, checked for a `channel`
+    // property in any form. An earlier version of this test only matched
+    // `{ channel }` shorthand and let `{ channel: type }` through -- it passed
+    // against a deliberately reintroduced bug, which is how it was found.
+    const payloads = [...source.matchAll(/client\.call\(\s*'[^']+'\s*,\s*(\{[^}]*\})/g)]
+      .map((m) => m[1]);
+    expect(payloads.length).toBeGreaterThanOrEqual(4);
+
+    for (const payload of payloads) {
+      expect(payload).not.toMatch(/\bchannel\b/);
+    }
+    expect(payloads.filter((p) => /\btype\b/.test(p)).length).toBeGreaterThanOrEqual(4);
   });
 
   it('a channel config is redacted before printing', async () => {

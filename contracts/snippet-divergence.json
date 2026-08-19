@@ -1,0 +1,93 @@
+{
+  "_comment": "generateSnippet (TypeScript) and generate_snippet (Python) do not agree. This file records exactly how, so the divergence cannot widen unnoticed and nobody has to re-derive it -- #68 asked for it to be written down rather than resolved by whoever diffs it next.",
+  "_status": "UNRESOLVED. Neither side is agreed canonical. Choosing belongs to whoever owns what a memory snippet should look like: TypeScript trims to word boundaries and reads better; Python backfills so the snippet uses the max_length the caller asked for. Changing either is a deliberate act that changes output for every existing caller.",
+  "_differences": [
+    "Which match wins: python takes the first query TERM that matches; typescript takes the earliest POSITION across all terms.",
+    "Window: python backfills to always reach max_length when content allows; typescript uses match +/- half and never backfills.",
+    "Boundaries: typescript trims to spaces; python does not.",
+    "Degenerate input: python returns content[:max_length]; typescript falls through to position 0 then trims."
+  ],
+  "max_length": 40,
+  "cases": [
+    {
+      "label": "no match",
+      "content": "the quick brown fox jumps over the lazy dog and keeps running far away into the woods",
+      "query": "zzz",
+      "python": "the quick brown fox jumps over the lazy ",
+      "typescript": "the quick brown fox...",
+      "agree": false
+    },
+    {
+      "label": "match mid",
+      "content": "the quick brown fox jumps over the lazy dog and keeps running far away into the woods",
+      "query": "fox jumps",
+      "python": "the quick brown fox jumps over the lazy ...",
+      "typescript": "the quick brown fox jumps over the...",
+      "agree": false
+    },
+    {
+      "label": "multi-term order",
+      "content": "alpha beta gamma delta epsilon zeta",
+      "query": "zeta alpha",
+      "python": "alpha beta gamma delta epsilon zeta",
+      "typescript": "alpha beta gamma...",
+      "agree": false
+    },
+    {
+      "label": "short terms only",
+      "content": "the quick brown fox",
+      "query": "a i",
+      "python": "the quick brown fox",
+      "typescript": "the quick brown fox",
+      "agree": true
+    },
+    {
+      "label": "empty query",
+      "content": "the quick brown fox",
+      "query": "",
+      "python": "the quick brown fox",
+      "typescript": "the quick brown fox",
+      "agree": true
+    },
+    {
+      "label": "empty content",
+      "content": "",
+      "query": "anything",
+      "python": "",
+      "typescript": "",
+      "agree": true
+    },
+    {
+      "label": "match at start",
+      "content": "fox jumps over the lazy dog and keeps running far away into the woods for a while",
+      "query": "fox",
+      "python": "fox jumps over the lazy dog and keeps ru...",
+      "typescript": "fox jumps over the...",
+      "agree": false
+    },
+    {
+      "label": "match at end",
+      "content": "the lazy dog and keeps running far away into the woods with the clever fox runs",
+      "query": "clever fox runs",
+      "python": "... into the woods with the clever fox runs",
+      "typescript": "...the woods with the clever fox runs",
+      "agree": false
+    },
+    {
+      "label": "content shorter than max",
+      "content": "tiny",
+      "query": "tiny",
+      "python": "tiny",
+      "typescript": "tiny",
+      "agree": true
+    },
+    {
+      "label": "case insensitive",
+      "content": "the quick Brown FOX jumps over the lazy dog and keeps going onward",
+      "query": "brown fox",
+      "python": "the quick Brown FOX jumps over the lazy ...",
+      "typescript": "the quick Brown FOX jumps over...",
+      "agree": false
+    }
+  ]
+}

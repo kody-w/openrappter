@@ -146,6 +146,21 @@ class TestAFailedWriteDoesNotDamageWhatWasThere:
 
         assert temporaries(tmp_path) == []
 
+    def test_an_unserialisable_value_touches_nothing_on_disk(self, tmp_path):
+        """Serialise first, then touch the filesystem.
+
+        The cleanup handler already removes a temporary file, so it hides
+        whether the ordering is right -- both orders leave no temporary. What
+        it does not hide is the parent directory: serialising late creates the
+        directory tree for a call that was always going to fail.
+        """
+        target = tmp_path / "not-there-yet" / "lock.json"
+
+        with pytest.raises(TypeError):
+            write_json_atomic(target, {"installed": object()})
+
+        assert not target.parent.exists()
+
 
 class TestPermissionsAreNotQuietlyChanged:
     def test_a_new_file_is_owner_only(self, tmp_path):

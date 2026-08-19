@@ -45,10 +45,11 @@ def write_json_atomic(
 ) -> None:
     """Write ``value`` as JSON so an interrupted write cannot destroy ``path``.
 
-    The payload is serialised before anything on disk is touched, so a value
-    that cannot be encoded leaves no temporary file behind and does not
-    disturb the file already there.
-
+    The payload is serialised before anything on disk is touched. A value that
+    cannot be encoded therefore leaves no trace at all -- not the temporary
+    file, and not the parent directory, which would otherwise be created as a
+    side effect of a call that went on to fail.
+    
     An existing file keeps the permissions it already has: this writes data,
     it does not decide policy, and silently loosening a file someone tightened
     on purpose would be worse than the bug it is fixing. A file being created

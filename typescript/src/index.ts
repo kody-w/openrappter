@@ -503,6 +503,15 @@ async function startGatewayInProcess(opts?: {
     return list;
   });
 
+  // `agent.tool` had a listener in the chat UI and no emit site anywhere, so
+  // tool use never appeared (#195). The assistant reports each finished call
+  // and the gateway forwards it; the payload carries the tool's name and
+  // outcome only, never its arguments.
+  const { GatewayEvents } = await import('./gateway/types.js');
+  assistant.onToolEvent = (event) => {
+    server.broadcastEvent(GatewayEvents.AGENT_TOOL, event);
+  };
+
   server.setAgentHandler(async (req, stream) => {
     const conversationKey = req.sessionId || req.conversationId || 'default';
     if (req.conversationHistory) {

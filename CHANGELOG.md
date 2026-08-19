@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The gateway now emits `agent.tool` as each tool call finishes, so tool use appears in chat. The chat UI has registered a listener for it since it was written and the event had no emit site anywhere, so the feature had never worked. The payload carries the tool's name, outcome and duration -- never its arguments, which can hold secrets.
 
 - **`openrappter memory`** — search, record and forget what a rappter remembers.
   The module was complete and had never been registered, so `openrappter memory`

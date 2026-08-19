@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The brainstem's dispatch guard could deliver a server error to the client as
+  `200 OK`. It recorded that a reply had begun in `end_headers`, but
+  `send_response` does not write -- it buffers the status line, and nothing is
+  flushed until `end_headers`. A route raising in between therefore left a
+  status line buffered while the guard believed nothing had been sent, so the
+  guard appended a second one and both flushed together; a parsing client read
+  the first and took the error body as a success payload. The guard now tracks
+  the flush itself, and withdraws a buffered-but-unsent status line so the
+  error is the only reply.
+
 - `POST /agents/import` ended the gateway process when the injected agent
   importer returned a value `JSON.stringify` refuses. The status line was
   committed before the body was serialised, so the throw arrived with the reply

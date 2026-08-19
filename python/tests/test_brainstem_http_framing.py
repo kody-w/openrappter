@@ -25,7 +25,9 @@ slower version of the same thing on a daemon meant to run for weeks.
 """
 import inspect
 import socket
+import urllib.error
 import urllib.parse
+import urllib.request
 
 from openrappter import brainstem
 
@@ -313,6 +315,63 @@ class TestTheGuardItself:
         reply = _raw_request(server)
         assert reply.count(b"HTTP/1.0") == 1, "a second status line was appended"
         assert reply.endswith(b"HALF!")
+
+    def test_a_route_that_raised_before_flushing_still_gets_a_clean_500(
+        self, server, monkeypatch
+    ):
+        """The window between composing a status line and sending it.
+
+        The test above covers a reply already on the wire. This covers the step
+        before it, which the guard got wrong in the opposite direction:
+        `send_response` does not write, it buffers, and nothing is flushed until
+        `end_headers`. A route raising in between left a status line buffered
+        while the guard believed nothing had been sent, so the guard appended
+        its own and both flushed together.
+
+        The failure was quiet, which is why it outlived the one above: the
+        client did not see two replies and an error, it saw one reply and a
+        success. `urllib` parsed `200 OK` and read `{"error": ...}` as the body.
+        """
+
+        def buffered_then_failed(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            raise RuntimeError("deliberate failure before the reply was flushed")
+
+        monkeypatch.setattr(brainstem.BrainstemHandler, "_route_get", buffered_then_failed)
+        reply = _raw_request(server)
+
+        assert reply.count(b"HTTP/1.0") == 1, "a second status line was appended"
+        # Nothing had reached the socket, so the half-composed reply is
+        # withdrawn rather than merely abandoned: the caller gets the error.
+        assert reply.startswith(b"HTTP/1.0 500"), reply[:60]
+        assert b"Internal error" in reply
+
+    def test_the_withdrawn_status_line_does_not_reach_a_parsing_client(
+        self, server, monkeypatch
+    ):
+        """What the caller's own HTTP client concludes.
+
+        Counting status lines in raw bytes is how the defect was found, but not
+        how it would have been suffered. A client does not count them -- it
+        parses the first and treats the rest as headers, so a server error
+        arrived as a success carrying an error body, which is the shape of bug
+        that survives a long time in production.
+        """
+
+        def buffered_then_failed(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            raise RuntimeError("deliberate failure before the reply was flushed")
+
+        monkeypatch.setattr(brainstem.BrainstemHandler, "_route_get", buffered_then_failed)
+        try:
+            with urllib.request.urlopen(server + "/health", timeout=15) as response:
+                parsed = response.status
+        except urllib.error.HTTPError as failure:
+            parsed = failure.code
+
+        assert parsed == 500, "a failure was delivered to the client as a success"
 
     def test_delete_is_guarded_too(self, server, monkeypatch):
         """`do_DELETE` was left out of the guard that was described as general."""

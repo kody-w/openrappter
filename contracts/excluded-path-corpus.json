@@ -1,0 +1,51 @@
+{
+  "_comment": "File paths both runtimes' flight recorders must agree to exclude. Read by python/tests/test_excluded_path_parity.py and typescript/src/flight-recorder/excluded-path-parity.test.ts, so a pattern added to one runtime cannot silently miss the other.",
+
+  "_why_it_matters": "Exclusion is not about hiding the path -- a path is not a secret. When a recorded object carries a file locator for an excluded path, EVERY sibling field in that object is replaced with [excluded-path], including `content`. So a credential file missing from this list means its CONTENTS are written to the flight log. Value-pattern matching rescues contents that happen to look like a known credential shape, but it is unreliable: a .pgpass line and an .npmrc auth token both reached the log verbatim before these entries existed.",
+
+  "must_exclude": [
+    "/Users/k/.env",
+    "/Users/k/.env.production",
+    "/srv/app/.git-credentials",
+    "/Users/k/.aws/credentials",
+    "/Users/k/.ssh/id_rsa",
+    "/Users/k/.ssh/config",
+    "/Users/k/.gnupg/secring.gpg",
+    "/backup/id_rsa",
+    "/backup/id_ed25519",
+    "/backup/id_ecdsa",
+    "/Users/k/.netrc",
+    "/Users/k/_netrc",
+    "/Users/k/.npmrc",
+    "/Users/k/.pypirc",
+    "/Users/k/.pgpass",
+    "/var/www/.htpasswd",
+    "/Users/k/.docker/config.json",
+    "/Users/k/.kube/config",
+    "/Users/k/.copilot_token",
+    "/etc/ssl/private.pem",
+    "/etc/ssl/tls.key",
+    "/etc/ssl/cert.p12",
+    "/etc/ssl/cert.pfx",
+    "/opt/app/keystore.jks",
+    "/opt/app/release.keystore",
+    "/srv/client_secret.json",
+    "/srv/service-account.json"
+  ],
+
+  "_must_keep_comment": "Over-exclusion is worse here than in key redaction: a single false positive blanks every sibling field in the object, so an ordinary file can destroy a whole record. Public keys are the sharp case -- a PUBLIC key is not a secret, and the trailing anchor in the id_* pattern is what keeps `id_rsa.pub` readable. Note that anything under ~/.ssh is excluded wholesale by the directory rule, deliberately and regardless of name, so the .pub cases below are deliberately outside it.",
+  "must_keep": [
+    "/backup/id_rsa.pub",
+    "/backup/id_ed25519.pub",
+    "/Users/k/project/monkey.py",
+    "/Users/k/project/keystore_helper.ts",
+    "/Users/k/project/telnetrc.md",
+    "/Users/k/project/src/env.ts",
+    "/Users/k/project/environment.yml",
+    "/Users/k/project/docker-compose.yml",
+    "/Users/k/project/README.md",
+    "/Users/k/project/package.json",
+    "/Users/k/.config/app/settings.json",
+    "/Users/k/project/keys.md"
+  ]
+}

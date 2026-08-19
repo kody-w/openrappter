@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The flight recorder's excluded-path list covered `.env`, `.ssh`, `.aws/credentials`
+  and `.pem`/`.key`/`.p12`, but not `.netrc`, `.npmrc`, `.pypirc`, `.pgpass`,
+  `.htpasswd`, `.gnupg`, `.docker/config.json`, `.kube/config`, private keys
+  copied out of `~/.ssh`, or the `.pfx`/`.jks`/`.keystore` siblings of `.p12`.
+  Exclusion blanks every sibling field of a recorded file locator, so an absent
+  pattern meant those files' **contents** were recorded — an `.npmrc` auth token
+  and a `.pgpass` line were written verbatim. Both runtimes now share
+  `contracts/excluded-path-corpus.json`. Public keys outside `~/.ssh`
+  (`id_rsa.pub`) stay readable.
+
 - The flight recorder wrote 19 secret-bearing field names to disk in the clear,
   in both runtimes. Its redaction rules matched `token`, `secret` and
   `authorization` as exact words while matching `password`, `credential` and

@@ -5,6 +5,7 @@ Allows openrappter to search, install, and use agents from RappterHub.
 Agents are directories with AGENT.md manifests and implementation files.
 """
 from openrappter.paths import openrappter_path
+from openrappter.atomic_io import read_json_object, write_json_atomic
 
 import json
 import os
@@ -156,16 +157,11 @@ class RappterHubClient:
 
     def _load_lock(self) -> dict:
         """Load the lock file tracking installed agents."""
-        if LOCK_FILE.exists():
-            try:
-                return json.loads(LOCK_FILE.read_text())
-            except json.JSONDecodeError:
-                pass
-        return {"installed": {}, "version": 1}
+        return read_json_object(LOCK_FILE, {"installed": {}, "version": 1})
 
     def _save_lock(self, lock: dict):
         """Save the lock file."""
-        LOCK_FILE.write_text(json.dumps(lock, indent=2))
+        write_json_atomic(LOCK_FILE, lock)
 
     def search(self, query: str) -> list[dict]:
         """Search for agents in the registry."""

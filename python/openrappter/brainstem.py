@@ -1200,6 +1200,18 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         pass
 
     # ── GET ──
+    def end_headers(self):
+        """Record that bytes are committed to the wire.
+
+        `_guarded` needs to know whether a reply has already begun. Once a
+        status line and headers are out, a second `send_response` does not
+        replace them -- it appends, and the caller receives two responses
+        concatenated inside one. There is no standard flag for this, so it is
+        set at the one point every reply passes through.
+        """
+        self._response_started = True
+        super().end_headers()
+
     def _guarded(self, route):
         """Run a route so that no request can end without a reply.
 
@@ -1223,6 +1235,15 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             # The detail goes to the operator, not the caller: it is a stack
             # trace of our internals and the caller can do nothing with it.
             traceback.print_exc()
+            if getattr(self, "_response_started", False):
+                # Too late to say anything: the status line and headers are
+                # already on the wire. Sending a second response here appended
+                # `HTTP/1.0 500 ...` to the body of the first, which is a worse
+                # outcome than the dropped connection this guard exists to
+                # prevent -- a truncated reply is at least recognisably broken,
+                # while two concatenated responses are not. Close instead.
+                self.close_connection = True
+                return
             try:
                 if self.path.split("?")[0] == "/chat":
                     self._send(500, {
@@ -1243,6 +1264,9 @@ class BrainstemHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._guarded(self._route_post)
+
+    def do_DELETE(self):
+        self._guarded(self._route_delete)
 
     def _route_get(self):
         if self.path == "/health":
@@ -1485,7 +1509,7 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         self._send(404, {"error": "Not found"})
 
     # ── DELETE ──
-    def do_DELETE(self):
+    def _route_delete(self):
         if self.path.startswith("/agents/"):
             filename = os.path.basename(self.path[len("/agents/"):])
             target = AGENTS_PATH / filename

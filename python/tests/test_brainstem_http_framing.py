@@ -23,6 +23,7 @@ one already did.
 not wedge the server; it leaked one thread per request instead, which is a
 slower version of the same thing on a daemon meant to run for weeks.
 """
+import inspect
 import socket
 import urllib.parse
 
@@ -261,3 +262,82 @@ class TestNoRequestEndsWithoutAReply:
         status, body = _raw_get(server, b"/health")
         assert status == 200
         assert b'"status": "ok"' in body
+
+
+def _raw_request(base, verb=b"GET", path=b"/health", timeout=15):
+    """Send a bare request and return the whole reply, framing included."""
+    parts = urllib.parse.urlparse(base)
+    conn = socket.create_connection((parts.hostname, parts.port), timeout=timeout)
+    try:
+        conn.sendall(verb + b" " + path + b" HTTP/1.1\r\nHost: x\r\n\r\n")
+        data = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        conn.close()
+    return data
+
+
+class TestTheGuardItself:
+    """Two defects in the dispatch guard added by #357, found by auditing it.
+
+    The guard turned a dropped connection into a `500`. Both of these are ways
+    it did not finish the job it claimed to have done generally.
+    """
+
+    def test_a_route_that_already_replied_does_not_get_a_second_response(
+        self, server, monkeypatch
+    ):
+        """The guard must not append a status line to a reply in progress.
+
+        Before this, a route that wrote its headers and then raised produced
+
+            HTTP/1.0 200 OK ... HALF!HTTP/1.0 500 Internal Server Error ...
+
+        -- two responses concatenated inside one, which is a worse failure than
+        the dropped connection the guard exists to prevent. A truncated reply is
+        recognisably broken; this is not.
+        """
+
+        def half_written(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "5")
+            self.end_headers()
+            self.wfile.write(b"HALF!")
+            raise RuntimeError("deliberate failure after the reply began")
+
+        monkeypatch.setattr(brainstem.BrainstemHandler, "_route_get", half_written)
+        reply = _raw_request(server)
+        assert reply.count(b"HTTP/1.0") == 1, "a second status line was appended"
+        assert reply.endswith(b"HALF!")
+
+    def test_delete_is_guarded_too(self, server, monkeypatch):
+        """`do_DELETE` was left out of the guard that was described as general."""
+        monkeypatch.setattr(brainstem, "AGENTS_PATH", None)
+        reply = _raw_request(server, b"DELETE", b"/agents/x.py")
+        assert reply, "a failing DELETE must answer, not close the connection"
+        assert reply.split(b"\r\n")[0].split(b" ")[1] == b"500"
+
+    def test_a_healthy_delete_is_unaffected(self, server):
+        """Anti-vacuity: the guard must not change a DELETE that works."""
+        reply = _raw_request(server, b"DELETE", b"/agents/not-there.py")
+        assert reply.split(b"\r\n")[0].split(b" ")[1] == b"404"
+
+    def test_every_verb_the_handler_serves_is_dispatched_through_the_guard(self):
+        """The gap this class exists for was a verb, so name them all.
+
+        `do_DELETE` existed for the whole life of the guard and was not wrapped,
+        because the fix was written by editing the two methods that were in
+        front of me rather than by asking which methods there were.
+        """
+        verbs = [
+            name for name in dir(brainstem.BrainstemHandler)
+            if name.startswith("do_")
+        ]
+        assert verbs, "expected the handler to serve at least one verb"
+        for verb in verbs:
+            source = inspect.getsource(getattr(brainstem.BrainstemHandler, verb))
+            assert "_guarded(" in source, f"{verb} does not go through _guarded"

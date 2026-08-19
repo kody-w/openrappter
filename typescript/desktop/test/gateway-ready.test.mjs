@@ -122,6 +122,43 @@ test('kills the child and reports the budget when it never reports ready', async
   assert.deepEqual(child.killed, ['SIGTERM']);
 });
 
+test('a gateway that is merely slow still starts the desktop', async () => {
+  // The case the budget exists to get wrong or right. `onExit` already reports
+  // a gateway that dies, and `error` reports one that never spawns, so this
+  // timer only ever fires on a process that is alive and has not finished
+  // starting -- a cold first run, an antivirus scan, a loaded machine. Killing
+  // it there turns a slow start into a failed one.
+  const child = new FakeChild();
+  const waiting = waitForGatewayReady(child, { port: 18790, timeoutMs: 200 });
+
+  setTimeout(() => {
+    child.emit('message', {
+      schema: GATEWAY_READY_SCHEMA,
+      pid: child.pid,
+      port: 18790,
+    });
+  }, 120);
+
+  await waiting;
+  assert.deepEqual(child.killed, [], 'a slow but healthy gateway must not be killed');
+});
+
+test('a gateway that dies is reported long before the budget expires', async () => {
+  // The other half of the argument: widening the budget must not slow down a
+  // genuine failure, because exit is what reports those.
+  const child = new FakeChild();
+  const started = Date.now();
+  const waiting = waitForGatewayReady(child, { port: 18790, timeoutMs: 60_000 });
+
+  setTimeout(() => child.emit('exit', 1, null), 20);
+
+  await assert.rejects(waiting, /exited during desktop startup \(1\)/);
+  assert.ok(
+    Date.now() - started < 5_000,
+    'a crashed gateway must fail fast regardless of the readiness budget',
+  );
+});
+
 test('a late ready message cannot resolve a already-rejected wait', async () => {
   const child = new FakeChild();
   const waiting = waitForGatewayReady(child, { port: 18790, timeoutMs: 40 });
@@ -149,7 +186,17 @@ test('stops listening once settled', async () => {
 test('the default budget is the one the error message promises', () => {
   // The message states a number of seconds; if the constant and the text ever
   // disagree the error would misreport how long the app actually waited.
-  assert.equal(GATEWAY_READY_TIMEOUT_MS, 30_000);
+  assert.equal(GATEWAY_READY_TIMEOUT_MS, 120_000);
+});
+
+test('the default budget is generous enough to survive a cold start', () => {
+  // Raised from 30s in #223. Pinned as a floor rather than an exact value so a
+  // future increase does not need to touch this test, but a quiet return to a
+  // budget that kills healthy gateways does.
+  assert.ok(
+    GATEWAY_READY_TIMEOUT_MS >= 60_000,
+    'a budget under a minute kills gateways that are merely slow to start',
+  );
 });
 
 /**

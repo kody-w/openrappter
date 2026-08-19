@@ -83,18 +83,33 @@ class TestWritingSurvivesInterruption:
 
         The file would be atomically replaced by something a crash could still
         leave empty, which is most of the bug over again.
+
+        This has to tell the payload's fsync apart from the directory's. An
+        earlier version of this test only asserted that os.fsync was called at
+        all, and mutation testing showed it passing with the payload sync
+        deleted -- the directory sync was quietly satisfying it.
         """
-        synced = []
+        events = []
         real_fsync = os.fsync
+        real_replace = os.replace
 
         def recording_fsync(descriptor):
-            synced.append(descriptor)
+            kind = "dir" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file"
+            events.append(f"fsync-{kind}")
             return real_fsync(descriptor)
 
+        def recording_replace(source, destination):
+            events.append("replace")
+            return real_replace(source, destination)
+
         monkeypatch.setattr(os, "fsync", recording_fsync)
+        monkeypatch.setattr(os, "replace", recording_replace)
         write_json_atomic(tmp_path / "lock.json", {"installed": {}})
 
-        assert synced, "the payload was never fsynced"
+        assert "fsync-file" in events, f"the payload was never fsynced: {events}"
+        assert events.index("fsync-file") < events.index("replace"), (
+            f"the rename happened before the bytes were flushed: {events}"
+        )
 
     def test_a_directory_that_cannot_be_synced_is_not_an_error(self, tmp_path, monkeypatch):
         """Windows cannot open a directory as a descriptor. That must not fail

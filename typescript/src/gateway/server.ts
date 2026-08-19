@@ -291,13 +291,14 @@ export function writeJsonResponse(
   body: unknown,
   headers: Record<string, string> = {},
   fallback: unknown = { status: 'error', error: 'Response could not be serialised' },
+  fallbackStatus = 500,
 ): void {
   let payload: string;
   let code = status;
   try {
     payload = JSON.stringify(body);
   } catch {
-    code = 500;
+    code = fallbackStatus;
     payload = JSON.stringify(fallback);
   }
   if (res.headersSent) {
@@ -1626,13 +1627,22 @@ export class GatewayServer {
             try {
               const responseBody = await this.runWithTimeout(responsePromise);
               if (!this.isGenerationActive(requestGeneration)) return;
-              writeJsonResponse(res, 200, responseBody, corsHeaders, {
-                schema: 'rapp-chat/1.0',
-                status: 'error',
-                error: 'Response could not be serialised',
-                session_id: sessionId,
-                sessionId,
-              });
+              writeJsonResponse(
+                res,
+                200,
+                responseBody,
+                corsHeaders,
+                {
+                  schema: 'rapp-chat/1.0',
+                  status: 'error',
+                  error: 'Response could not be serialised',
+                  session_id: sessionId,
+                  sessionId,
+                },
+                // 503, matching this handler's own catch for an internal
+                // failure, rather than a third status for the same situation.
+                503,
+              );
             } catch (error) {
               if (idempotencyKey && !(error instanceof GatewayTimeoutError)) {
                 this.httpChatIdempotency.delete(idempotencyKey);
@@ -1692,14 +1702,28 @@ export class GatewayServer {
               if (!this.isGenerationActive(requestGeneration)) return;
               this.metrics.recordRequest('success');
               logGatewayRequest('gateway', 'rpc.dispatch', { transport: 'http', outcome: 'success', durationMs: Date.now() - dispatchStartedAt });
-              writeJsonResponse(res, 200, { jsonrpc: '2.0', id: parsed.id, result }, corsHeaders, {
-                jsonrpc: '2.0',
-                id: parsed.id,
-                error: {
-                  code: RPC_ERROR.INTERNAL_ERROR,
-                  message: 'Result could not be serialised',
+              writeJsonResponse(
+                res,
+                200,
+                { jsonrpc: '2.0', id: parsed.id, result },
+                corsHeaders,
+                {
+                  jsonrpc: '2.0',
+                  id: parsed.id,
+                  error: {
+                    code: RPC_ERROR.INTERNAL_ERROR,
+                    message: 'Result could not be serialised',
+                  },
                 },
-              });
+                // HTTP 200, like every other JSON-RPC-level failure on this
+                // endpoint: method-not-found, timeout and internal-error all
+                // answer 200 and carry the fault in `error`. 401 is the one
+                // exception and it is a transport refusal, not an RPC result.
+                // #361 shipped this as a 500, so a client that checks the
+                // status before parsing saw a serialisation failure as a
+                // transport error while seeing a timeout as an RPC error.
+                200,
+              );
             } catch (error) {
               if (
                 error instanceof GatewayStoppedError

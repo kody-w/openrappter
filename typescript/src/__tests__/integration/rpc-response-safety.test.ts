@@ -58,7 +58,10 @@ describe('an RPC method returning a value that cannot be serialised', () => {
     const port = await startWithMethod(cyclic);
 
     const { status, body } = await callRpc(port, 'plugin.result');
-    expect(status).toBe(500);
+    // HTTP 200, like every other JSON-RPC-level failure on this endpoint. A
+    // client that checks the status before parsing must see this the same way
+    // it sees a timeout, not as a transport error.
+    expect(status).toBe(200);
     const error = body.error as { code?: number; message?: string } | undefined;
     expect(error?.code).toBe(RPC_ERROR.INTERNAL_ERROR);
     // The id is echoed so a caller can still correlate the failure.
@@ -81,7 +84,7 @@ describe('an RPC method returning a value that cannot be serialised', () => {
     const port = await startWithMethod(cyclic);
     for (let i = 0; i < 3; i += 1) {
       const { status } = await callRpc(port, 'plugin.result');
-      expect(status, `call ${i + 1}`).toBe(500);
+      expect(status, `call ${i + 1}`).toBe(200);
     }
   });
 
@@ -89,8 +92,9 @@ describe('an RPC method returning a value that cannot be serialised', () => {
     // A different reason for the same failure, so the fix is not tied to
     // cycles specifically.
     const port = await startWithMethod(() => ({ big: BigInt(1) }));
-    const { status } = await callRpc(port, 'plugin.result');
-    expect(status).toBe(500);
+    const { status, body } = await callRpc(port, 'plugin.result');
+    expect(status).toBe(200);
+    expect((body.error as { code?: number })?.code).toBe(RPC_ERROR.INTERNAL_ERROR);
 
     const live = await fetch(`http://127.0.0.1:${port}/livez`, {
       signal: AbortSignal.timeout(5000),
@@ -107,6 +111,31 @@ describe('an RPC method returning an ordinary value', () => {
     const { status, body } = await callRpc(port, 'plugin.result');
     expect(status).toBe(200);
     expect(body.result).toEqual({ hello: 'world' });
+    expect(body.id).toBe(7);
+  });
+});
+
+describe('every JSON-RPC-level failure answers with the same HTTP status', () => {
+  /**
+   * The endpoint carries RPC faults in the `error` member and keeps HTTP 200
+   * for all of them; 401 is the single exception and it is a transport refusal
+   * rather than an RPC result.
+   *
+   * Tested as a rule over several failures rather than asserted once, because
+   * #361 added a fourth failure mode and gave it a 500 without noticing the
+   * three beside it. A client that checks the status before parsing would have
+   * read that one as a transport error and the rest as RPC errors.
+   */
+  it.each([
+    ['a method that does not exist', 'no.such.method', () => ({ fine: true })],
+    ['a method that throws', 'plugin.result', () => { throw new Error('boom'); }],
+    ['a result that cannot be serialised', 'plugin.result', cyclic],
+  ])('%s answers 200 with an error member', async (_label, method, result) => {
+    const port = await startWithMethod(result);
+
+    const { status, body } = await callRpc(port, method);
+    expect(status).toBe(200);
+    expect(body.error, 'the fault belongs in the error member').toBeTruthy();
     expect(body.id).toBe(7);
   });
 });

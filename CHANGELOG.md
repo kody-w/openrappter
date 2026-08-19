@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `/rpc` answered HTTP 500 when a result could not be serialised, while every
+  other JSON-RPC-level failure on that endpoint -- method not found, timeout,
+  internal error -- answers HTTP 200 and carries the fault in the `error`
+  member. A client that checks the status before parsing saw one failure mode
+  as a transport error and the rest as RPC errors. It now answers 200 like the
+  others.
+
 - A WebSocket RPC whose result could not be serialised was never answered.
   `sendFrame` wrapped `ws.send(JSON.stringify(frame))` in a `try`/`catch` that
   ignored the failure, so the caller waited on an `id` that would never arrive

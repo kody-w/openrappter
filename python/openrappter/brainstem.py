@@ -1407,11 +1407,27 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             filename = os.path.basename(match.group(1))
             if not filename.endswith(".py"):
                 return self._send(400, {"error": "Only .py files are supported"})
-            # Extract the file part's body (between the first blank line after
-            # the filename header and the closing boundary)
+            # A boundary is what separates the file from the envelope around it.
+            # Without one, `split("boundary=")[-1]` returned the whole
+            # Content-Type, the closing `rsplit` matched nothing, and the part's
+            # trailing delimiter was written into the agent file as source --
+            # verified, the saved bytes were `print(1)\r\n------X--\r\n`. That
+            # answered 200 while storing something that cannot parse.
+            if "boundary=" not in content_type:
+                return self._send(400, {"error": "multipart/form-data requires a boundary"})
             boundary = content_type.split("boundary=")[-1].encode()
-            part = raw.split(b'filename="' + match.group(1).encode() + b'"', 1)[1]
-            body = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n--" + boundary, 1)[0]
+            # Extract the file part's body (between the first blank line after
+            # the filename header and the closing boundary).
+            #
+            # Both indexes below used to run unguarded. A part with no blank line
+            # after its headers raised IndexError out of do_POST, and the caller
+            # got no HTTP response at all -- the connection simply closed. Same
+            # failure the Content-Length parsing had, in the handler next door.
+            try:
+                part = raw.split(b'filename="' + match.group(1).encode() + b'"', 1)[1]
+                body = part.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n--" + boundary, 1)[0]
+            except IndexError:
+                return self._send(400, {"error": "Malformed multipart body"})
             if not filename.endswith("_agent.py"):
                 filename = filename[:-3] + "_agent.py"
             AGENTS_PATH.mkdir(parents=True, exist_ok=True)

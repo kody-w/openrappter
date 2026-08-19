@@ -78,6 +78,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Installing an agent could delete any directory on the machine.
+  `rappterhub install` split a reference on the first slash only, so
+  everything after it became part of the destination path. It then ran
+  `shutil.rmtree` on that path and cloned into it, which handed a single
+  reference both arbitrary deletion and arbitrary file write. With the agents
+  directory at `~/.openrappter/agents`: `evil/../precious` deleted
+  `~/.openrappter/precious`, `evil//etc/cron.d` resolved to `/etc/cron.d`,
+  `http://host/path/..` resolved to `~/.openrappter` itself -- config, agents,
+  and the Copilot token -- and `x//` resolved to `/`. The absolute-path cases
+  are why this needed an allow-list rather than a check for `..`: joining an
+  absolute path discards the left-hand side entirely, so no amount of traversal
+  filtering would have caught them. Both halves of a reference must now be one
+  ordinary directory segment. `uninstall` is guarded too, since a lock file
+  written by an older build can already record a path outside the agents
+  directory, and nothing that deletes a directory tree should believe a JSON
+  field.
+
 - The brainstem saved your Copilot credential world-readable. `_save_token_file`
   used `Path.write_text`, which takes the process umask, so
   `~/.openrappter/brainstem/.copilot_token` landed at mode 0644 inside a 0755

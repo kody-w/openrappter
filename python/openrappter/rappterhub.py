@@ -25,6 +25,43 @@ REGISTRY_URL = "https://api.rappterhub.dev"
 REGISTRY_GITHUB = "https://github.com/rappterhub/registry"
 LOCK_FILE = RAPPTERHUB_DIR / "lock.json"
 
+# An agent reference is `author/name`, and each half names one directory
+# segment. Anything else -- a separator, `..`, a leading `/` -- would let the
+# installed path land outside the agents directory, where install() deletes
+# whatever it finds and git clone writes whatever a remote repository sends.
+_SAFE_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _is_safe_segment(segment: str) -> bool:
+    """True if `segment` names exactly one directory inside its parent.
+
+    Deliberately an allow-list. Rejecting `..` is not enough: `Path("/a") /
+    "/etc"` is `/etc`, because an absolute right-hand operand discards the
+    left one entirely, and `Path("/a") / "/"` is `/`.
+
+    Requiring the first character to be alphanumeric is what rejects `.`,
+    `..`, dotfiles, and names that git or a shell would read as a flag.
+    """
+    return bool(_SAFE_SEGMENT.fullmatch(segment))
+
+
+def _is_within(base: Path, candidate: Path) -> bool:
+    """True if `candidate` is `base` itself or something inside it.
+
+    Resolved on both sides so an intermediate symlink cannot smuggle a path
+    back out of `base`. A path that cannot be resolved at all -- an embedded
+    null byte raises ValueError, not OSError -- is not within anything.
+    """
+    try:
+        base_resolved = base.resolve()
+        candidate_resolved = candidate.resolve()
+    except (OSError, ValueError):
+        return False
+    return (
+        candidate_resolved == base_resolved
+        or base_resolved in candidate_resolved.parents
+    )
+
 
 @dataclass
 class RappterAgent:
@@ -152,10 +189,20 @@ class RappterHubClient:
         # Parse agent reference
         if "/" in agent_ref and not agent_ref.startswith("http"):
             author, name = agent_ref.split("/", 1)
+            if not _is_safe_segment(author) or not _is_safe_segment(name):
+                return {
+                    "status": "error",
+                    "message": f"Invalid agent reference: {agent_ref}. Use format: author/name"
+                }
             source = f"{REGISTRY_GITHUB}/raw/main/agents/{author}/{name}"
         elif agent_ref.startswith("http"):
             source = agent_ref
             name = agent_ref.rstrip("/").split("/")[-1]
+            if not _is_safe_segment(name):
+                return {
+                    "status": "error",
+                    "message": f"Cannot derive a safe agent name from URL: {agent_ref}"
+                }
             author = "unknown"
         else:
             return {
@@ -172,6 +219,14 @@ class RappterHubClient:
             }
 
         target_dir = self.agents_dir / name
+
+        # Belt and braces: the name is already validated, but nothing that
+        # deletes a directory tree should trust a single check.
+        if not _is_within(self.agents_dir, target_dir):
+            return {
+                "status": "error",
+                "message": f"Refusing to install outside the agents directory: {target_dir}"
+            }
 
         try:
             if target_dir.exists():
@@ -313,6 +368,18 @@ class RappterHubClient:
 
         info = lock["installed"][found_ref]
         agent_path = Path(info.get("path", ""))
+
+        # The lock file is just a file on disk, and an install from before
+        # this path was validated could have recorded somewhere arbitrary.
+        # Never delete a tree because a JSON field said so.
+        if not _is_within(self.agents_dir, agent_path):
+            return {
+                "status": "error",
+                "message": (
+                    f"Refusing to remove '{agent_path}': it is outside the agents "
+                    f"directory. Delete it by hand if you trust it."
+                )
+            }
 
         if agent_path.exists():
             shutil.rmtree(agent_path)

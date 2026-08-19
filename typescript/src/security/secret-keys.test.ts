@@ -27,6 +27,11 @@ describe('isSecretKey', () => {
     'api-key', 'Cookie', 'signature',
     // Missed until an outside review checked: no jwt, bearer or pem.
     'jwt', 'bearerToken', 'privatePem',
+    // Plurals. `tokens`, `secrets` and `credentials` were already caught, but
+    // only because those three are also substring fragments — the plural of a
+    // word that was *only* a word went into the log in the clear.
+    'cookies', 'sessionCookies', 'setCookies',
+    'signatures', 'requestSignatures', 'jwts',
     // A trailing `key` with a qualifier that makes it sensitive.
     'accessKey', 'encryptionKey', 'masterKey', 'sshKey', 'key', 'keys',
   ])('treats %s as secret', (key) => {
@@ -43,6 +48,11 @@ describe('isSecretKey', () => {
     // `key` counted as a whole word anywhere in the name. An outside review
     // caught the claim; these are the names it blanked.
     'keyCount', 'keyId', 'publicKey', 'keyspace',
+    // Ordinary plurals. Matching `cookies` must not start matching these: the
+    // plural rule strips one trailing `s`, so anything whose stem is not
+    // itself a secret word has to stay readable.
+    'status', 'address', 'process', 'class', 'headers', 'params', 'results',
+    'sessions', 'scopes', 'permissions', 'authors',
   ])('does not treat %s as secret', (key) => {
     expect(isSecretKey(key)).toBe(false);
   });

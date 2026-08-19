@@ -30,6 +30,11 @@ SECRET_NAMES = [
     "authToken", "Cookie", "signature",
     # Missed until an outside review checked.
     "jwt", "bearerToken", "privatePem",
+    # Plurals. `tokens`, `secrets` and `credentials` were already caught, but
+    # only because those three are also substring fragments — the plural of a
+    # word that was *only* a word went into the log in the clear.
+    "cookies", "sessionCookies", "setCookies",
+    "signatures", "requestSignatures", "jwts",
     # A trailing `key` with a qualifier that makes it sensitive.
     "accessKey", "encryptionKey", "masterKey", "sshKey", "key", "keys",
 ]
@@ -40,6 +45,11 @@ BENIGN_NAMES = [
     "durationMs", "outcome",
     # Blanked by the previous rule, which counted `key` anywhere in the name.
     "keyCount", "keyId", "publicKey", "keyspace",
+    # Ordinary plurals. Matching `cookies` must not start matching these: the
+    # plural rule strips one trailing `s`, so anything whose stem is not itself
+    # a secret word has to stay readable.
+    "status", "address", "process", "class", "headers", "params", "results",
+    "sessions", "scopes", "permissions", "authors",
 ]
 
 
@@ -84,6 +94,14 @@ class TestGatewayLogRedaction:
 
 
 class TestRuntimeAgreement:
+    @staticmethod
+    def _typescript_source() -> str:
+        ts_path = (
+            Path(__file__).resolve().parents[2]
+            / "typescript" / "src" / "security" / "secret-keys.ts"
+        )
+        return ts_path.read_text(encoding="utf-8")
+
     def test_the_typescript_answer_lists_the_same_words(self):
         """The bug was two runtimes disagreeing, so pin them to each other.
 
@@ -109,3 +127,22 @@ class TestRuntimeAgreement:
             assert f"'{word}'" in source, f"TypeScript is missing the word {word!r}"
         for fragment in _SECRET_FRAGMENTS:
             assert f"'{fragment}'" in source, f"TypeScript is missing the fragment {fragment!r}"
+
+    def test_the_typescript_answer_applies_the_same_plural_rule(self):
+        """Agreeing on the words is not the same as agreeing on the answer.
+
+        `cookies` leaked because of a missing rule, not a missing word: every
+        table above was already correct while the plural went into the log in
+        the clear. A comparison of tables stays green through that bug, and
+        stays green if one runtime is fixed and the other is not — which is the
+        drift this class exists to catch.
+        """
+        source = self._typescript_source()
+
+        assert "function isSecretWord" in source, (
+            "TypeScript is missing the plural rule, so `cookies`, `signatures` "
+            "and `jwts` leak there while Python redacts them."
+        )
+        assert "word.slice(0, -1)" in source, (
+            "TypeScript's plural rule no longer strips one trailing 's'."
+        )

@@ -57,9 +57,24 @@ function splitWords(key: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * True when one word makes a field a secret, singular or plural.
+ *
+ * `cookies` is exactly as sensitive as `cookie`. Plurals looked handled
+ * because `tokens`, `secrets` and `credentials` are all caught — but they are
+ * caught by the *fragment* pass, which is substring-based, not by being
+ * spelled out above. So a word survived pluralisation only if it also happened
+ * to be a fragment. `cookie`, `jwt` and `signature` are words only, and their
+ * plurals fell through every branch into the clear.
+ */
+function isSecretWord(word: string): boolean {
+  if (SECRET_WORDS.has(word)) return true;
+  return word.endsWith('s') && SECRET_WORDS.has(word.slice(0, -1));
+}
+
 export function isSecretKey(key: string): boolean {
   const words = splitWords(key);
-  if (words.some(word => SECRET_WORDS.has(word))) return true;
+  if (words.some(word => isSecretWord(word))) return true;
 
   const last = words[words.length - 1];
   if (last === 'key' || last === 'keys') {

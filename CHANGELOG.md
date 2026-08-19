@@ -78,6 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Two concurrent `POST /login` calls each started a separate device-code grant,
+  and the second overwrote the first. One caller was left holding a `user_code`
+  that `/login/poll` was no longer polling for, so that user could authorise
+  correctly on GitHub and the brainstem would report `pending` indefinitely with
+  no error to explain it. The device-login state machine is now serialised.
+
 - The brainstem's dispatch guard could deliver a server error to the client as
   `200 OK`. It recorded that a reply had begun in `end_headers`, but
   `send_response` does not write -- it buffers the status line, and nothing is

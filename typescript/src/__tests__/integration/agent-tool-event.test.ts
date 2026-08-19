@@ -91,7 +91,7 @@ describe('agent.tool is emitted for each finished tool call', () => {
     expect(seen[0]).toMatchObject({
       sessionId: 'session-a',
       name: 'secret_tool',
-      status: 'ok',
+      status: 'success',
     });
     expect(seen[0].durationMs).toBeGreaterThanOrEqual(0);
   });

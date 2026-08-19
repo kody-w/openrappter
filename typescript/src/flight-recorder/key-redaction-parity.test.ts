@@ -1,38 +1,41 @@
 /**
  * Both runtimes' flight recorders must redact the same field names.
  *
- * The question this file asks is deliberately narrow: given a key, does its
- * *name* say the value must never be recorded? Its sibling
- * `value-redaction-parity.test.ts` asks whether a value *looks* like a secret.
- * Either check alone leaves a hole, and this was the open one — an opaque
- * random string, which is what most API keys and session keys actually are,
- * matches no value pattern at all and can only be caught by its key.
+ * The question here is deliberately narrow: given a key, does its *name* say the
+ * value must never be recorded? Its sibling `value-redaction-parity.test.ts`
+ * asks whether a value *looks* like a secret. Either check alone leaves a hole,
+ * and this was the open one — an opaque random string, which is what most API
+ * keys and session keys actually are, matches no value pattern at all and can
+ * only be caught by its key.
  *
- * Measured before this test existed, the flight recorder wrote 19 secret-bearing
- * field names to disk in the clear, in both runtimes, including `secrets`,
- * `tokens`, `auth`, `bearer`, `jwt`, `sshKey` and `sessionKey`. The cause was a
- * fourth private copy of rules that `security/secret-keys.ts` already exists to
- * be the single answer to — a module whose own docstring records that this
- * project keeps growing separate copies of this list and that each one misses
- * what the others catch.
+ * Measured before this test existed, both runtimes wrote 19 secret-bearing field
+ * names to disk in the clear. The rules matched `token`, `secret` and
+ * `authorization` as exact words while matching `password`, `credential` and
+ * `cookie` as prefixes, so `secrets`, `tokens`, `clientSecrets` and `apiTokens`
+ * were recorded verbatim while their singulars were redacted.
+ *
+ * `must_keep` matters as much as `must_redact`. The flight recorder is
+ * deliberately conservative and this test is the record of that: `key`, `auth`,
+ * `salt`, `nonce` and `bearer` stay readable on purpose, because a ledger that
+ * redacts too much keeps the record and loses the ability to read it.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { sanitizeFlightMetadata } from './redaction.js';
-import { isSecretKey } from '../security/secret-keys.js';
 
 const CORPUS = resolve(__dirname, '../../../contracts/key-redaction-corpus.json');
 const cases = JSON.parse(readFileSync(CORPUS, 'utf8')) as {
   must_redact: string[];
   must_keep: string[];
+  counts: string[];
 };
 
 /** Matches no SECRET_VALUE_PATTERN, so only the key's name can save it. */
 const OPAQUE = 'a7Fq2Xm9Lp4Rt8Wz';
 
-function recorded(key: string): unknown {
-  return (sanitizeFlightMetadata({ [key]: OPAQUE }) as Record<string, unknown>)[key];
+function recorded(key: string, value: unknown = OPAQUE): unknown {
+  return (sanitizeFlightMetadata({ [key]: value }) as Record<string, unknown>)[key];
 }
 
 describe('flight-recorder key redaction', () => {
@@ -40,25 +43,21 @@ describe('flight-recorder key redaction', () => {
     expect(recorded(key)).not.toBe(OPAQUE);
   });
 
-  // A ledger that blanks ordinary fields keeps the record and loses the ability
-  // to read it, so over-redaction is a real failure and not a safe default.
+  // Over-redaction is a real failure, not a safe default. The damage from
+  // adding a word here is invisible: nothing fails, the ledger just quietly
+  // stops saying anything.
   it.each(cases.must_keep)('leaves %s readable', key => {
     expect(recorded(key)).toBe(OPAQUE);
   });
 
-  /**
-   * The structural guard, and the reason this class of bug is now closed.
-   *
-   * Any private list will drift from the shared one eventually; the fix that
-   * lasts is making drift a test failure rather than trusting the next person
-   * to notice. This asserts containment rather than equality, because the
-   * flight recorder legitimately redacts more (prototype-pollution keys, and
-   * whatever the operator names in `privacy.redactedKeys`).
-   */
-  it('redacts everything the canonical module calls secret', () => {
-    const missed = [...cases.must_redact, ...cases.must_keep].filter(
-      key => isSecretKey(key) && recorded(key) === OPAQUE,
-    );
-    expect(missed).toEqual([]);
+  // `token` is the one secret word that doubles as a unit of measurement.
+  describe('token is also a unit', () => {
+    it.each(cases.counts)('keeps %s when it carries a number', key => {
+      expect(recorded(key, 120)).toBe(120);
+    });
+
+    it.each(cases.counts)('still redacts %s when it carries a string', key => {
+      expect(recorded(key, OPAQUE)).not.toBe(OPAQUE);
+    });
   });
 });

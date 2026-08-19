@@ -20,8 +20,8 @@
 /** Whole words that make a field a secret. */
 const SECRET_WORDS = new Set([
   'apikey', 'auth', 'authorization', 'bearer', 'credential', 'credentials',
-  'cookie', 'jwt', 'passphrase', 'passwd', 'password', 'pat', 'pem', 'secret',
-  'secrets', 'signature', 'token', 'tokens',
+  'cookie', 'cookies', 'jwt', 'passphrase', 'passwd', 'password', 'pat', 'pem',
+  'secret', 'secrets', 'signature', 'token', 'tokens',
 ]);
 
 /**
@@ -37,14 +37,22 @@ const SECRET_WORDS = new Set([
  * something that makes it sensitive — and not when it merely appears.
  */
 const SECRET_KEY_QUALIFIERS = new Set([
-  'access', 'api', 'app', 'auth', 'client', 'encryption', 'master', 'private',
-  'secret', 'session', 'signing', 'ssh', 'token',
+  'access', 'api', 'app', 'auth', 'client', 'encryption', 'identity', 'master',
+  'private', 'secret', 'session', 'signing', 'ssh', 'token',
 ]);
 
-/** Fragments that are unambiguous even when glued to other text. */
+/**
+ * Fragments that are unambiguous even when glued to other text.
+ *
+ * `privatekey` and `identitykey` are here because the word rules cannot reach
+ * them: run together with no separator there is nothing to split on, and
+ * `identity` is not a qualifier that makes a trailing `key` secret. Both were
+ * caught only by the flight recorder's private copy of this logic, so retiring
+ * that copy would have quietly stopped redacting them.
+ */
 const SECRET_FRAGMENTS = [
-  'apikey', 'api_key', 'authorization', 'credential', 'passphrase',
-  'password', 'secret', 'token',
+  'apikey', 'api_key', 'authorization', 'credential', 'identitykey',
+  'passphrase', 'password', 'privatekey', 'secret', 'token',
 ];
 
 /** Split `apiKey`, `api_key`, `api-key` and `API KEY` into their words. */

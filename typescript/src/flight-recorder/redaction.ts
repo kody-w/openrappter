@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isSecretKey } from "../security/secret-keys.js";
 import type { FlightRecorderPrivacy } from "./types.js";
 
 const REDACTED = "[redacted]";
@@ -115,42 +116,24 @@ function isPrototypePollutionKey(key: string): boolean {
   return normalized === "constructor" || normalized === "prototype";
 }
 
+/**
+ * Does this field name mean the value must never be recorded?
+ *
+ * The word and fragment rules live in `../security/secret-keys`, which exists
+ * because this project kept growing separate answers to that question and each
+ * one missed what the others caught. This module had a fourth: it matched
+ * `token` and `secret` as exact words while matching `password`, `credential`
+ * and `cookie` as prefixes, so `tokens`, `secrets` and `clientSecrets` were
+ * written to the flight log in the clear.
+ *
+ * The two rules below are genuinely specific to flight recording rather than
+ * forgotten duplicates, so they stay.
+ */
 function isSensitiveKey(key: string, privacy?: FlightRecorderPrivacy): boolean {
   if (isPrototypePollutionKey(key)) return true;
+  if (isSecretKey(key)) return true;
 
   const normalized = normalizedKey(key);
-  const words = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  if (
-    words.some(
-      (word) =>
-        word === "token" ||
-        word === "secret" ||
-        word.startsWith("password") ||
-        word.startsWith("credential") ||
-        word === "authorization" ||
-        word.startsWith("cookie"),
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    [
-      "apikey",
-      "privatekey",
-      "sessiontoken",
-      "accesstoken",
-      "refreshtoken",
-      "identitykey",
-    ].some((candidate) => normalized.includes(candidate))
-  ) {
-    return true;
-  }
-
   return (privacy?.redactedKeys ?? []).some(
     (candidate) => normalizedKey(candidate) === normalized,
   );

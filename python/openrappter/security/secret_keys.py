@@ -26,8 +26,8 @@ import re
 #: Whole words that make a field a secret.
 _SECRET_WORDS = frozenset({
     "apikey", "auth", "authorization", "bearer", "credential", "credentials",
-    "cookie", "jwt", "passphrase", "passwd", "password", "pat", "pem", "secret",
-    "secrets", "signature", "token", "tokens",
+    "cookie", "cookies", "jwt", "passphrase", "passwd", "password", "pat",
+    "pem", "secret", "secrets", "signature", "token", "tokens",
 })
 
 #: Words that make a trailing ``key`` secret.
@@ -37,14 +37,20 @@ _SECRET_WORDS = frozenset({
 #: ``apiKey`` and ``privateKey`` through. So it counts when it is what the field
 #: *is* — the last word, qualified by something that makes it sensitive.
 _SECRET_KEY_QUALIFIERS = frozenset({
-    "access", "api", "app", "auth", "client", "encryption", "master", "private",
-    "secret", "session", "signing", "ssh", "token",
+    "access", "api", "app", "auth", "client", "encryption", "identity",
+    "master", "private", "secret", "session", "signing", "ssh", "token",
 })
 
 #: Fragments unambiguous even when glued to other text.
+#:
+#: ``privatekey`` and ``identitykey`` are here because the word rules cannot
+#: reach them: run together with no separator there is nothing to split on, and
+#: ``identity`` is not a qualifier that makes a trailing ``key`` secret. Both
+#: were caught only by the flight recorder's private copy of this logic, so
+#: retiring that copy would have quietly stopped redacting them.
 _SECRET_FRAGMENTS = (
-    "apikey", "api_key", "authorization", "credential", "passphrase",
-    "password", "secret", "token",
+    "apikey", "api_key", "authorization", "credential", "identitykey",
+    "passphrase", "password", "privatekey", "secret", "token",
 )
 
 _CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")

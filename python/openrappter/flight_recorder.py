@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence
 from urllib.parse import parse_qsl, unquote, urlparse
 
+from .security.secret_keys import is_secret_key
+
 FLIGHT_EVENT_SCHEMA = "openrappter-event/1.0"
 FLIGHT_EXPORT_SCHEMA = "openrappter-flight-export/1.0"
 DEFAULT_RETENTION_EVENTS = 10_000
@@ -1212,29 +1214,23 @@ def _is_prototype_pollution_key(key: str) -> bool:
 
 
 def _is_sensitive_key(key: str, privacy: Optional[Mapping[str, Any]]) -> bool:
+    """Does this field name mean the value must never be recorded?
+
+    The word and fragment rules live in ``security.secret_keys``, which exists
+    because this project kept growing separate answers to that question and each
+    one missed what the others caught. This module had a fourth: it matched
+    ``token`` and ``secret`` as exact words while matching ``password``,
+    ``credential`` and ``cookie`` as prefixes, so ``tokens``, ``secrets`` and
+    ``clientSecrets`` were written to the flight log in the clear.
+
+    The two rules below are genuinely specific to flight recording rather than
+    forgotten duplicates, so they stay.
+    """
     if _is_prototype_pollution_key(key):
         return True
+    if is_secret_key(key):
+        return True
     normalized = _normalized_key(key)
-    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", key).lower()
-    words = [word for word in re.split(r"[^a-z0-9]+", words) if word]
-    if any(
-        word in {"token", "secret", "authorization"}
-        or word.startswith(("password", "credential", "cookie"))
-        for word in words
-    ):
-        return True
-    if any(
-        candidate in normalized
-        for candidate in (
-            "apikey",
-            "privatekey",
-            "sessiontoken",
-            "accesstoken",
-            "refreshtoken",
-            "identitykey",
-        )
-    ):
-        return True
     configured = _privacy_value(privacy, "redactedKeys", "redacted_keys", default=()) or ()
     return any(_normalized_key(str(candidate)) == normalized for candidate in configured)
 

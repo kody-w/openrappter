@@ -238,13 +238,17 @@ describe('CLI Commands', () => {
       }
     });
 
-    it('all register functions should accept program parameter', () => {
+    it('all register functions should accept a Command to attach to', () => {
       const commandFiles = commandModules();
 
       for (const file of commandFiles) {
         const content = readFileSync(join(CLI_DIR, file), 'utf-8');
+        // The rule is that a register function is handed the Command it should
+        // attach to. That is usually the root `program`, but `service-status.ts`
+        // attaches to the `service` subcommand, where naming the parameter
+        // `program` would say something untrue. The type is what matters.
         // `registerHubCommands` registers two, like registerTelephonyCommands does.
-        expect(content).toMatch(/function register\w+Commands?\(\s*program:\s*Command/);
+        expect(content).toMatch(/function register\w+Commands?\(\s*\w+:\s*Command/);
       }
     });
   });

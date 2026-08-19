@@ -23,6 +23,7 @@ import { registerMemoryCommand } from './cli/memory.js';
 import { registerSessionsCommand } from './cli/sessions.js';
 import { registerChannelsCommand } from './cli/channels.js';
 import { registerAuditCommand } from './cli/audit.js';
+import { registerServiceStatusCommand } from './cli/service-status.js';
 import { registerConfigCommand } from './cli/config.js';
 import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
@@ -2110,6 +2111,8 @@ async function installManagedGatewayService(
 const serviceCommand = program
   .command('service')
   .description('Manage the launchd-supervised OpenRappter gateway');
+
+registerServiceStatusCommand(serviceCommand);
 
 serviceCommand
   .command('install')

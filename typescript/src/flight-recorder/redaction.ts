@@ -46,8 +46,19 @@ export const DEFAULT_REDACTED_KEYS: ReadonlySet<string> = new Set([
 export const DEFAULT_EXCLUDED_PATH_PATTERNS: readonly RegExp[] = [
   /(?:^|[\\/])\.env(?:\.[^\\/]+)?(?:$|[\\/])/i,
   /(?:^|[\\/])(?:\.git-credentials|credentials?|application_default_credentials|service[-_.]?account|client[-_.]?secret)(?:\.[^\\/]*)?$/i,
-  /\.(?:pem|key|p12)(?:$|[?#])/i,
+  /\.(?:pem|key|p12|pfx|jks|keystore)(?:$|[?#])/i,
   /(?:^|[\\/])\.ssh(?:[\\/]|$)/i,
+  /(?:^|[\\/])\.gnupg(?:[\\/]|$)/i,
+  // Private SSH keys copied out of ~/.ssh. The trailing anchor is what keeps
+  // `id_rsa.pub` readable: a public key is not a secret, and blanking it would
+  // cost the record for nothing.
+  /(?:^|[\\/])id_(?:rsa|dsa|ecdsa|ed25519)(?:$|[\\/])/i,
+  // Files whose entire purpose is to hold a credential. `.netrc` is matched
+  // with `[._]` because Windows spells it `_netrc`.
+  /(?:^|[\\/])[._]netrc(?:$|[\\/])/i,
+  /(?:^|[\\/])\.(?:npmrc|pypirc|pgpass|htpasswd)(?:$|[\\/])/i,
+  /(?:^|[\\/])\.docker[\\/]config\.json(?:$|[\\/])/i,
+  /(?:^|[\\/])\.kube[\\/]config(?:$|[\\/])/i,
   /(?:^|[\\/])\.aws[\\/]credentials(?:$|[\\/])/i,
   /(?:^|[\\/])\.copilot_token(?:$|[\\/])/i,
   /\.identity-key(?:\.\d+\.[0-9a-f-]+\.tmp)?(?:$|[?#])/i,

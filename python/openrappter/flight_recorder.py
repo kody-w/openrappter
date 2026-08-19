@@ -119,8 +119,19 @@ DEFAULT_EXCLUDED_PATH_PATTERNS = (
         r"client[-_.]?secret)(?:\.[^\\/]*)?$",
         re.I,
     ),
-    re.compile(r"\.(?:pem|key|p12)(?:$|[?#])", re.I),
+    re.compile(r"\.(?:pem|key|p12|pfx|jks|keystore)(?:$|[?#])", re.I),
     re.compile(r"(?:^|[\\/])\.ssh(?:[\\/]|$)", re.I),
+    re.compile(r"(?:^|[\\/])\.gnupg(?:[\\/]|$)", re.I),
+    #: Private SSH keys copied out of ~/.ssh. The trailing anchor is what keeps
+    #: `id_rsa.pub` readable: a public key is not a secret, and blanking it
+    #: would cost the record for nothing.
+    re.compile(r"(?:^|[\\/])id_(?:rsa|dsa|ecdsa|ed25519)(?:$|[\\/])", re.I),
+    #: Files whose entire purpose is to hold a credential. `.netrc` is matched
+    #: with `[._]` because Windows spells it `_netrc`.
+    re.compile(r"(?:^|[\\/])[._]netrc(?:$|[\\/])", re.I),
+    re.compile(r"(?:^|[\\/])\.(?:npmrc|pypirc|pgpass|htpasswd)(?:$|[\\/])", re.I),
+    re.compile(r"(?:^|[\\/])\.docker[\\/]config\.json(?:$|[\\/])", re.I),
+    re.compile(r"(?:^|[\\/])\.kube[\\/]config(?:$|[\\/])", re.I),
     re.compile(r"(?:^|[\\/])\.aws[\\/]credentials(?:$|[\\/])", re.I),
     re.compile(r"(?:^|[\\/])\.copilot_token(?:$|[\\/])", re.I),
     re.compile(

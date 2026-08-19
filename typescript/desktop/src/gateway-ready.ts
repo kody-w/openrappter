@@ -22,13 +22,21 @@ export const GATEWAY_READY_SCHEMA = 'openrappter-gateway-ready/1.0';
  * modules, an antivirus scan — which is the case where killing it is least
  * likely to be the right answer.
  *
- * Left at the original 30s. A Windows CI run has failed on it once and passed
- * on re-run, which is not enough to justify picking a different number; the
- * question is open in issue #223. Callers can override it, and now that this
- * handshake is testable a future change can be made against evidence rather
- * than guessed at.
+ * Raised from 30s to 120s (#223). The evidence that was missing when this said
+ * "one CI flake is not enough":
+ *
+ *   - The failure recurred, on a CLI-only change that cannot affect startup.
+ *   - Setting exactly this budget to 120s in the Windows smoke step held for
+ *     30 consecutive runs.
+ *   - The costs are asymmetric. A budget that is too small kills a healthy
+ *     gateway and quits the app; one that is too large only delays the report
+ *     of a genuine *hang*, because a gateway that crashes is reported by
+ *     `onExit` in milliseconds regardless of this number. There is a test for
+ *     each half of that.
+ *
+ * The number is the one already proven in CI rather than a fresh guess.
  */
-export const GATEWAY_READY_TIMEOUT_MS = 30_000;
+export const GATEWAY_READY_TIMEOUT_MS = 120_000;
 
 /**
  * The environment variable an operator can use to widen that budget.

@@ -144,7 +144,19 @@ export interface AgentToolEvent {
   sessionId: string;
   /** The tool the model asked for. */
   name: string;
-  status: 'ok' | 'error';
+  /**
+   * `'success'`, not `'ok'`.
+   *
+   * The chat UI has rendered this event since before it was emitted, and it
+   * reads the value literally:
+   *
+   *     tool.status === 'running' ? spinner : tool.status === 'success' ? '✓' : '✗'
+   *
+   * so `'ok'` matched neither arm and drew every *successful* tool call with
+   * the failure mark. The emitter must speak the consumer's vocabulary, and
+   * `chat-tool-event-contract.test.ts` now pins the two together.
+   */
+  status: 'success' | 'error';
   durationMs: number;
 }
 
@@ -296,7 +308,7 @@ export class Assistant {
   private emitToolEvent(
     sessionId: string,
     name: string,
-    status: 'ok' | 'error',
+    status: 'success' | 'error',
     /** A `performance.now()` reading, matching the Flight Recorder's clock. */
     startedAt: number,
   ): void {
@@ -1060,7 +1072,7 @@ export class Assistant {
         // often as by throwing (#134), so the absence of an exception proves
         // nothing on its own.
         const failed = agentResultIsError(resultStr);
-        this.emitToolEvent(conversationKey, agentName, failed ? 'error' : 'ok', started);
+        this.emitToolEvent(conversationKey, agentName, failed ? 'error' : 'success', started);
         let structuredResult: unknown = sanitizeFlightValue(resultStr);
         try {
           structuredResult = sanitizeFlightValue(JSON.parse(resultStr));

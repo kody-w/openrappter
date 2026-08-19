@@ -38,9 +38,10 @@ def _is_safe_segment(segment: str) -> bool:
     Deliberately an allow-list. Rejecting `..` is not enough: `Path("/a") /
     "/etc"` is `/etc`, because an absolute right-hand operand discards the
     left one entirely, and `Path("/a") / "/"` is `/`.
+
+    Requiring the first character to be alphanumeric is what rejects `.`,
+    `..`, dotfiles, and names that git or a shell would read as a flag.
     """
-    if segment in (".", ".."):
-        return False
     return bool(_SAFE_SEGMENT.fullmatch(segment))
 
 
@@ -48,12 +49,13 @@ def _is_within(base: Path, candidate: Path) -> bool:
     """True if `candidate` is `base` itself or something inside it.
 
     Resolved on both sides so an intermediate symlink cannot smuggle a path
-    back out of `base`.
+    back out of `base`. A path that cannot be resolved at all -- an embedded
+    null byte raises ValueError, not OSError -- is not within anything.
     """
     try:
         base_resolved = base.resolve()
         candidate_resolved = candidate.resolve()
-    except OSError:
+    except (OSError, ValueError):
         return False
     return (
         candidate_resolved == base_resolved

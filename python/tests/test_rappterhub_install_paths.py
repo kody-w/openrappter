@@ -167,6 +167,48 @@ class TestLegitimateInstallsStillWork:
         assert not (stale / "old.txt").exists()
 
 
+class TestEachGuardIsPinnedIndependently:
+    """The guards overlap, so outcome-only tests let any single one rot.
+
+    Each test below asserts on the message of the layer it targets, so
+    removing that layer changes the answer even though a later layer would
+    still keep the user safe.
+    """
+
+    @pytest.mark.parametrize("ref", ["evil/../precious", "evil//etc", "evil/sub/dir"])
+    def test_the_reference_validator_is_what_rejects_a_bad_name(
+        self, hub, monkeypatch, ref
+    ):
+        _no_network(monkeypatch)
+        result = hub.install(ref)
+        assert "Invalid agent reference" in result["message"]
+
+    def test_the_url_validator_is_what_rejects_a_bad_url(self, hub, monkeypatch):
+        _no_network(monkeypatch)
+        result = hub.install("http://127.0.0.1:1/path/..")
+        assert "Cannot derive a safe agent name from URL" in result["message"]
+
+    def test_the_containment_check_catches_a_symlinked_target(
+        self, hub, victim, monkeypatch
+    ):
+        """A valid name whose directory is a symlink pointing outside.
+
+        This passes the reference validator, so only the containment check
+        can stop it.
+        """
+        _no_network(monkeypatch)
+        (hub.agents_dir / "someagent").symlink_to(victim, target_is_directory=True)
+
+        result = hub.install("someauthor/someagent")
+
+        assert "Refusing to install outside" in result["message"]
+        assert (victim / "important.txt").read_text() == "irreplaceable"
+
+    def test_a_null_byte_is_answered_not_raised(self, tmp_path):
+        """resolve() raises ValueError, not OSError, on an embedded null."""
+        assert rh._is_within(tmp_path, Path("/tmp/na\x00me")) is False
+
+
 class TestContainment:
     def test_a_path_inside_is_accepted(self, tmp_path):
         assert rh._is_within(tmp_path, tmp_path / "a" / "b")

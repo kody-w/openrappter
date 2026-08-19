@@ -38,6 +38,7 @@ EXPECTED_VECTORS = {
     "history-role-filter", "system-context-injection",
     "finish-reason-agnostic-trigger", "session-id-minted",
     "voice-sentinel-split", "user-input-wins-over-message-alias",
+    "history-carried-to-model",
 }
 
 
@@ -49,6 +50,16 @@ class TestParityCorpus:
         fourteen could not see the request-field precedence: python read
         `message` in preference to `user_input`, so it sent the model different
         text than typescript and the grail and every vector still passed.
+
+        `history-carried-to-model` is a sixteenth. Every one of the fifteen
+        reached the model with an EMPTY history -- the only vector carrying a
+        `conversation_history` is `history-role-filter`, which is rejected 400
+        before the model is called. So the corpus could not see a runtime that
+        dropped or reordered a valid transcript, and the harness's
+        `outbound_history_roles` assertion was declared by no vector at all.
+        Arming it found python forwarding only `user` and `assistant` while
+        validating the wider `_HISTORY_ROLES`, so a `tool` turn was accepted,
+        answered 200, and discarded before the model saw it.
         """
         required = EXPECTED_VECTORS
         present = {

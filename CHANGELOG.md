@@ -592,6 +592,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `openrappter service status` now derives its report from the same
+  `getIMessageServiceStatus()` used by `openrappter imessage service-status`,
+  instead of re-reading launchd through a parallel implementation. Both
+  commands describe one launchd job (`com.openrappter.gateway`), so they now
+  describe it with one vocabulary; `service status` adds only `lastExit`.
+
 - The Electron desktop is the authority for OpenRappter Bar authentication,
   and desktop smoke tests were hardened for concurrent and Windows runs.
 

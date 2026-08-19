@@ -102,12 +102,12 @@ describe('the paths it does implement are unaffected', () => {
   it('still validates /chat rather than 404-ing it', async () => {
     const got = await post('/chat', '{"user_input":123}');
     expect(got.status).toBe(400);
-    expect(got.body).toEqual({ error: 'user_input must be a string' });
+    expect(got.body).toEqual({ schema: 'rapp-chat/1.0', status: 'error', error: 'user_input must be a string' });
   });
 
   it('still treats /chat with a query string as /chat', async () => {
     const got = await post('/chat?x=1', '{"user_input":"hi","conversation_history":"nope"}');
     expect(got.status).toBe(400);
-    expect(got.body).toEqual({ error: 'conversation_history must be an array' });
+    expect(got.body).toEqual({ schema: 'rapp-chat/1.0', status: 'error', error: 'conversation_history must be an array' });
   });
 });

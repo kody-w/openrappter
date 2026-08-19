@@ -1,0 +1,40 @@
+{
+  "_comment": "Values both runtimes' flight recorders must agree on. TypeScript reads this in typescript/src/flight-recorder/__tests__/value-redaction-parity.test.ts; Python reads it in python/tests/test_value_redaction_parity.py. One file so a pattern added to one list cannot silently miss the other -- the drift that let TypeScript redact ?key=, xox*, sk- and JWTs while Python passed all four through.",
+  "must_redact": [
+    "https://api.example.com/v1?key=AIzaSyD-EXAMPLE-1234567890abcdef",
+    "https://api.example.com/v1?token=abcdef123456",
+    "https://api.example.com/v1?api_key=abcdef123456",
+    "https://api.example.com/v1?sig=abcdef123456789",
+    "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "github_pat_aaaaaaaaaaaaaaaaaaaa",
+    "AKIAAAAAAAAAAAAAAAAA",
+    "ASIAAAAAAAAAAAAAAAAA",
+    "Bearer abcdefghijklmnop",
+    "https://user:pass@host/path",
+    "password=hunter2",
+    "api_key: sk-abcdefghijklmnop",
+    "sk-abcdefghijklmnopqrstuvwx",
+    "sk-ant-abcdefghijklmnopqrstuvwx",
+    "AIzaSyD-EXAMPLE-1234567890abcdefghijklm",
+    "xoxb-1234-5678-abcdefghijk",
+    "xapp-1-ABCDEFGHIJK",
+    "123456789:AAabcdefghijklmnopqrstuvwxyz1234567",
+    "tskey-auth-abcdefghijklmnop",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "-----BEGIN OPENSSH PRIVATE KEY-----"
+  ],
+  "_must_keep_comment": "Redacting these would be its own failure: a ledger that blanks ordinary values keeps the record and loses the ability to read it. Both runtimes must leave them intact.",
+  "must_keep": [
+    "just a normal sentence with no secret",
+    "port 18790 and a key_count of 7",
+    "https://api.example.com/v1?key=name",
+    "GET /health 200 in 4ms",
+    "sk-",
+    "Bearer",
+    "the user asked about their public_key",
+    "/Users/someone/.openrappter/config.json5",
+    "eyJ",
+    "AKIA"
+  ]
+}

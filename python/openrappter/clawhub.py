@@ -4,6 +4,7 @@ ClawHub Integration for openrappter
 Allows openrappter to search, install, and use ClawHub skills.
 Skills are SKILL.md files with YAML frontmatter that get wrapped as openrappter agents.
 """
+from openrappter.paths import openrappter_path
 
 import json
 import os
@@ -16,7 +17,7 @@ from dataclasses import dataclass, field
 
 
 # Default skills directory
-SKILLS_DIR = Path.home() / ".openrappter" / "skills"
+SKILLS_DIR = openrappter_path("skills")
 
 
 @dataclass

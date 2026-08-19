@@ -14,6 +14,7 @@ supplied configuration rather than silently defaulting to memory-only
 behavior: unless ``type='memory'`` is explicitly requested, a persistent
 SQLite-backed adapter is returned.
 """
+from openrappter.paths import openrappter_path
 
 import abc
 import contextlib
@@ -26,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-DEFAULT_DB_PATH = Path.home() / ".openrappter" / "storage.db"
+DEFAULT_DB_PATH = openrappter_path("storage.db")
 
 # Bump when the schema changes. Each entry is (version, sql_statements).
 _MIGRATIONS = [

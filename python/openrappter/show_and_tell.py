@@ -1,6 +1,7 @@
 """Cross-runtime Show-and-Tell recording, analysis, and artifact building."""
 
 from __future__ import annotations
+from openrappter.paths import openrappter_path
 
 import hashlib
 import json
@@ -60,7 +61,7 @@ def show_and_tell_root() -> Path:
     return Path(
         os.environ.get(
             "OPENRAPPTER_SHOW_AND_TELL_DIR",
-            str(Path.home() / ".openrappter" / "show-and-tell"),
+            str(openrappter_path("show-and-tell")),
         )
     ).expanduser().absolute()
 
@@ -1739,7 +1740,7 @@ def build_artifacts(
         root = Path(
             os.environ.get(
                 "OPENRAPPTER_SKILLS_DIR",
-                str(Path.home() / ".openrappter" / "skills"),
+                str(openrappter_path("skills")),
             )
         ).expanduser().absolute()
         directory = _destination(root, name, analysis["sessionId"], "skill")
@@ -1781,7 +1782,7 @@ def build_artifacts(
         root = Path(
             os.environ.get(
                 "OPENRAPPTER_AUTOMATIONS_DIR",
-                str(Path.home() / ".openrappter" / "automations"),
+                str(openrappter_path("automations")),
             )
         ).expanduser().absolute()
         directory = _destination(root, name, analysis["sessionId"], "automation")

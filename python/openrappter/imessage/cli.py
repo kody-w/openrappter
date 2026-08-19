@@ -1,6 +1,7 @@
 """Command-line entry point for the canonical OpenRappter iMessage service."""
 
 from __future__ import annotations
+from openrappter.paths import openrappter_path
 
 import argparse
 import json
@@ -52,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     init.add_argument(
         "--imsg",
-        default=str(Path.home() / ".openrappter" / "bin" / "imsg"),
+        default=str(openrappter_path("bin", "imsg")),
     )
     init.add_argument("--account-id", default="default")
     init.add_argument("--instance-id")

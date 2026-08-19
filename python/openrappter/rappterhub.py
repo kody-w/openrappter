@@ -4,6 +4,7 @@ RappterHub Integration for openrappter
 Allows openrappter to search, install, and use agents from RappterHub.
 Agents are directories with AGENT.md manifests and implementation files.
 """
+from openrappter.paths import openrappter_path
 
 import json
 import os
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 
 # Configuration
 RAPPTERHUB_DIR = Path.home() / ".rappterhub"
-AGENTS_DIR = Path.home() / ".openrappter" / "agents"
+AGENTS_DIR = openrappter_path("agents")
 REGISTRY_URL = "https://api.rappterhub.dev"
 REGISTRY_GITHUB = "https://github.com/rappterhub/registry"
 LOCK_FILE = RAPPTERHUB_DIR / "lock.json"

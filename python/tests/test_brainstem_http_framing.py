@@ -26,6 +26,7 @@ slower version of the same thing on a daemon meant to run for weeks.
 import inspect
 import json
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -202,6 +203,24 @@ class TestRequestBodyCap:
         )
         assert status == 413
         assert b"too large" in raw
+
+    def test_a_claim_far_over_the_cap_is_answered_without_waiting_for_it(self, server, cap):
+        """No half-close: the caller claims a gigabyte and then just stops.
+
+        Draining exists so the 413 is readable rather than a reset, but it is
+        only worth doing for a body that is about to arrive. Past `cap * 8` the
+        refusal goes out at once -- otherwise this request holds a thread for
+        the full 30s timeout waiting on bytes that were never coming, which is
+        a cheaper thing to ask of the server than the memory ever was.
+        """
+        started = time.monotonic()
+        status, raw = _raw_post(
+            server, b"Content-Length: 1000000000\r\n", body=b"x" * 20, timeout=10
+        )
+        elapsed = time.monotonic() - started
+        assert status == 413
+        assert b"too large" in raw
+        assert elapsed < 5, f"took {elapsed:.1f}s -- it waited for the body"
 
     def test_an_ordinary_turn_is_unaffected_by_the_default_cap(self, server):
         """Anti-vacuity, on the real 2 MB default rather than the shrunken one."""

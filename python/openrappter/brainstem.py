@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 import time
 import types
 import urllib.error
@@ -1199,7 +1200,51 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         pass
 
     # ── GET ──
+    def _guarded(self, route):
+        """Run a route so that no request can end without a reply.
+
+        `BaseHTTPRequestHandler` dispatches straight into `do_GET`/`do_POST`, and
+        an exception that escapes them unwinds into `socketserver`, which logs a
+        traceback and closes the socket. The caller sees a connection drop, not a
+        status -- indistinguishable from the server having gone away.
+
+        That was not hypothetical. Three handlers had already been fixed for it
+        one at a time: a non-numeric `Content-Length` (#355), a multipart part
+        with no blank line (#356), and before this change any exception raised
+        while serving `/health` did the same. Fixing them individually leaves the
+        next one to be found the same way, so the guarantee belongs here.
+
+        The per-route `except Exception` blocks stay: they can say something
+        specific about a failure this one can only call internal.
+        """
+        try:
+            route()
+        except Exception:
+            # The detail goes to the operator, not the caller: it is a stack
+            # trace of our internals and the caller can do nothing with it.
+            traceback.print_exc()
+            try:
+                if self.path.split("?")[0] == "/chat":
+                    self._send(500, {
+                        "schema": "rapp-chat/1.0",
+                        "status": "error",
+                        "error": "Internal error",
+                    })
+                else:
+                    self._send(500, {"error": "Internal error"})
+            except Exception:
+                # The response was already partly written, or the socket is
+                # gone. Nothing further can be delivered; do not mask the
+                # original failure with a second one.
+                pass
+
     def do_GET(self):
+        self._guarded(self._route_get)
+
+    def do_POST(self):
+        self._guarded(self._route_post)
+
+    def _route_get(self):
         if self.path == "/health":
             agents = load_agents()
             self._send(200, {
@@ -1247,7 +1292,7 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "Not found"})
 
     # ── POST ──
-    def do_POST(self):
+    def _route_post(self):
         # `int(...)` used to run bare here, as the first statement of the
         # method. `Content-Length: abc` raised ValueError out of do_POST and the
         # caller got no HTTP response at all -- not a 400, nothing, the

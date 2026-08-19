@@ -67,6 +67,13 @@ jobs:
         shell: pwsh
         run: |
           $env:OPENRAPPTER_DESKTOP_SMOKE = "1"
+          # A cold Windows runner does not always start the gateway inside the
+          # 30s default, and the smoke test then fails with "did not become
+          # ready in 30 seconds" while passing unchanged on re-run. The module
+          # already exposes this budget for exactly that case; the step just
+          # never used it. 120s is still far below the 5-minute step timeout,
+          # so a genuinely hung gateway still fails the job.
+          $env:OPENRAPPTER_GATEWAY_READY_TIMEOUT_MS = "120000"
           .\node_modules\.bin\electron.cmd .
 
       - name: Build unpacked macOS application

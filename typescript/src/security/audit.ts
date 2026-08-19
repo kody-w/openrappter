@@ -257,8 +257,6 @@ export class SecurityAuditor {
     }
 
     try {
-      const configContent = readFileSync(configPath, 'utf8');
-
       // Check for remote CDP exposure
       // The CDP check that used to live here is gone. It tested
       // `/cdp.*host:\s*['"]?0\.0\.0\.0|all['"]?/i`, which carries the same

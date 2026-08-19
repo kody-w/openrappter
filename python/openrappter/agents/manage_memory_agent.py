@@ -99,7 +99,7 @@ class ManageMemoryAgent(BasicAgent):
         super().__init__(name=self.name, metadata=self.metadata)
         
         # Storage setup
-        self.home = Path(os.environ.get("OPENRAPPTER_HOME") or Path.home() / ".openrappter")
+        self.home = Path.home() / ".openrappter"
         self.memory_file = self.home / "memory.json"
         self.home.mkdir(exist_ok=True)
     

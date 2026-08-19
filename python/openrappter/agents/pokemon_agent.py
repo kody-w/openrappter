@@ -83,9 +83,7 @@ BADGE_NAMES = (
     "Volcano",
     "Earth",
 )
-DEFAULT_RUNTIME_DIR = Path(
-    os.environ.get("OPENRAPPTER_HOME") or Path.home() / ".openrappter"
-) / "pokemon-red"
+DEFAULT_RUNTIME_DIR = Path.home() / ".openrappter" / "pokemon-red"
 DEFAULT_PORT = 8765
 MAX_BUTTONS_PER_DECISION = 16
 MAX_DECISIONS_PER_SESSION = 24

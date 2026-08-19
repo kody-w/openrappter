@@ -11,13 +11,22 @@ split survived: ``MemoryAgent`` resolved ``openrappterHome()`` while
 Both work; neither sees what the other wrote. That is worse than ignoring the
 variable, and it is exactly the split #330 was filed about.
 
-## Why agents are exempt from the helper, not from the rule
+## Why agents are excluded entirely
 
-Agents may not import from the kernel — RAPP/1 R7, enforced by
-``test_brainstem_compliance.py``, which loads each agent the way the brainstem
-does. Importing ``openrappter.paths`` broke three of them. They therefore
-resolve the variable inline, and this guard accepts that spelling while still
-rejecting a bare ``Path.home()``.
+Two architectural rules box them in from both sides:
+
+* **R7** — an agent must load with no kernel imports, enforced by
+  ``test_brainstem_compliance.py``. Importing ``openrappter.paths`` broke three
+  agents outright.
+* **R4** — declared capabilities must cover everything the code can reach, and
+  ``conformance.py`` classifies any ``os.environ`` read as ``credential-access``.
+  Resolving the variable inline therefore failed conformance.
+
+So an agent can neither import the helper nor read the environment. Three of
+them still hardcode the directory as a result, and ``memory.json`` remains
+split between the runtimes when ``OPENRAPPTER_HOME`` is set. Closing that needs
+the home injected by the loader rather than discovered by the agent — a design
+change, not a path rewrite, and not something to force by breaking a rule.
 """
 
 from __future__ import annotations
@@ -79,6 +88,10 @@ class TestDataDirectoryIsNotHardcoded:
     def test_no_module_hardcodes_the_data_directory(self):
         offenders: list[str] = []
         for path in source_files():
+            # Agents are excluded for the reasons in this file's docstring:
+            # R7 forbids the import and R4 forbids the environment read.
+            if path.parent.name == "agents":
+                continue
             offenders.extend(offending_lines(path))
 
         assert offenders == [], (

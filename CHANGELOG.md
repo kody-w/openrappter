@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Python brainstem answered nothing at all to a malformed `Content-Length`.
+  `do_POST` opened with a bare `int(self.headers.get("Content-Length") or 0)`,
+  so `Content-Length: abc` raised `ValueError` out of the handler and the
+  connection closed with no HTTP reply; `Content-Length: -5` did the same. Both
+  are now `400`, in the same error envelope as every other rejection. The
+  TypeScript gateway already answered `400` to both.
+- A `Content-Length` larger than the body sent held a brainstem request thread
+  open indefinitely. `BrainstemHandler` now carries a 30 second socket timeout,
+  so a caller that stops sending is dropped instead of parked forever, and a
+  short body followed by a close is refused with `400`.
+
 - The Python brainstem accepted a `tool` turn in `conversation_history`,
   answered 200, and then dropped it before the model saw it. Validation used
   `_HISTORY_ROLES` (`user`, `assistant`, `tool`) while the line that forwards

@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An exception raised while serving a brainstem request closed the connection
+  without a status line. `BaseHTTPRequestHandler` dispatches straight into
+  `do_GET`/`do_POST`, so anything escaping them unwound into `socketserver`,
+  which logs a traceback and drops the socket -- to the caller, indistinguishable
+  from the server going away. `GET /health` did this whenever agent loading
+  failed. Both verbs are now dispatched through a guard that answers `500`,
+  using the `contracts/rapp-chat-v1.json` envelope on `/chat`, and the traceback
+  goes to the operator rather than the caller.
+
 - `POST /agents/import` dropped the connection without a status line when a
   multipart part carried no blank line after its headers: two unguarded
   `split(...)[1]` indexes raised `IndexError` out of the handler. Malformed

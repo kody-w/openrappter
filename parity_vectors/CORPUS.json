@@ -1,8 +1,8 @@
 {
   "canonicalization": "sha256 over JSON with sorted keys and (',',':') separators, UTF-8",
-  "corpus_sha256": "4bd0157ff68ada48856de4d74605a55edc4c0355fc0ed396b03216b4dac7a6c0",
+  "corpus_sha256": "6c1fd49aa724f516742d3275c2348e942521df3915ac1b1a6b0548a862820859",
   "spec": "rapp-runtime-parity/1.0",
-  "vector_count": 14,
+  "vector_count": 15,
   "vectors": {
     "agent-not-found": "a65276f5906db37733007fc549a9804cb4b1b7dc37771bcfda1a0e62e36024e3",
     "agent-raises": "403437bd5f515cdf9e189f7ff46c2b1a3fcf0c123dd9f6f62beb073d37295815",
@@ -17,6 +17,7 @@
     "session-id-minted": "dda4a21939f679f806f2a47ca4625692cd45549df64e4a18cbd0ea285fb31822",
     "single-tool-then-answer": "b55e1d6043baa4afa6494b77de19fbd930003f2369bf8aef3da0c2de57f1fc7d",
     "system-context-injection": "a52b1c07b31842c6a6f918311b1ca6c53145086ce281ff34a0ad73a766d538ca",
+    "user-input-wins-over-message-alias": "8b60eb030387edaeffca84038ebe50f3f10bd24a5c350ac7ce151b689290320a",
     "voice-sentinel-split": "6f12df957d953ec3e082fe062b62be32570762af5d5123d6aaea06773340f5aa"
   }
 }

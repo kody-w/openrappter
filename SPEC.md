@@ -43,7 +43,8 @@ nothing to fetch and nothing in the estate that executes the vectors.
 
 So we wrote a candidate corpus and harness rather than leave the tier claim unfalsifiable:
 
-- `parity_vectors/` — 14 vectors, one per class required by §5.3, to the §5.1 schema and
+- `parity_vectors/` — 15 vectors: one per class required by §5.3, plus
+  `user-input-wins-over-message-alias`, to the §5.1 schema and
   content-addressed per §5. They carry nothing openrappter-specific and can be offered
   upstream unchanged. Corpus sha256 is in `parity_vectors/CORPUS.json`.
 - `parity_harness.py` — runs them against **both runtimes**, with a scripted model injected

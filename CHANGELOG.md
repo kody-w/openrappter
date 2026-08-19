@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A registered RPC method returning a value `JSON.stringify` refuses -- a cycle,
+  a BigInt -- terminated the gateway. `/rpc` serialised the result as the
+  argument to `res.end()`, after `res.writeHead()` had committed a status line,
+  so the throw landed mid-reply and the surrounding `catch` wrote a second
+  status line: `ERR_HTTP_HEADERS_SENT`, an unhandled rejection, process exit.
+  `registerMethod` is the extension point plugins use, so this was reachable by
+  design. The call now answers a JSON-RPC `INTERNAL_ERROR` and the daemon stays
+  up.
+
 - `GET /readyz` could terminate the gateway. The handler serialised its report
   as the argument to `res.end()`, after `res.writeHead()` had already committed
   a status line, so a report that could not be serialised threw mid-reply and

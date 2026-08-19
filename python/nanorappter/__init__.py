@@ -30,6 +30,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+#: Largest POST body the optional HTTP gateway will read, matching the limit
+#: the brainstem and the TypeScript gateway both use.
+MAX_BODY_BYTES = 2 * 1024 * 1024
+
 
 class NanoAgent:
     """Base class for all nanorappter agents.
@@ -178,9 +182,13 @@ class Gateway:
 
 def serve(gateway: Gateway, port: int = 9999) -> None:
     """Optional HTTP server. GET = status, POST = notify or JSON-RPC."""
-    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
     class H(BaseHTTPRequestHandler):
+        # A caller that claims bytes and never sends them would otherwise hold
+        # its thread open forever.
+        timeout = 30
+
         def do_GET(self):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -188,17 +196,79 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
             self.end_headers()
             self.wfile.write(json.dumps(gateway.status(), indent=2).encode())
 
+        def _content_length(self) -> int:
+            """Declared body size, or -1 if the header cannot be trusted.
+
+            Anything non-numeric or negative is -1. Negative matters most:
+            rfile.read(-1) means "read until EOF", so a caller could hold the
+            socket open and block indefinitely.
+            """
+            raw = self.headers.get("Content-Length", "")
+            if not raw:
+                return 0
+            try:
+                length = int(raw)
+            except (TypeError, ValueError):
+                return -1
+            return length if length >= 0 else -1
+
+        def _refuse(self, status: int, message: str) -> None:
+            payload = json.dumps({"error": message}).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _discard_body(self, length: int) -> None:
+            """Read and throw away an oversized body before refusing it.
+
+            Answering the moment the limit is known ends the response while the
+            caller is still uploading, and it gets a connection reset instead of
+            a readable error.
+            """
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+
         def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))) if int(self.headers.get("Content-Length", 0)) else {}
+            length = self._content_length()
+            if length < 0:
+                self._refuse(400, "invalid Content-Length")
+                return
+            if length > MAX_BODY_BYTES:
+                # Only a body that is about to arrive anyway is worth draining,
+                # and only so the refusal is readable rather than a reset. A
+                # caller claiming far more than the cap is refused at once: it
+                # has already been told no, and reading megabytes to be polite
+                # about it just hands it the time instead of the memory.
+                if length <= MAX_BODY_BYTES * 8:
+                    self._discard_body(length)
+                self._refuse(413, f"request body too large (limit {MAX_BODY_BYTES} bytes)")
+                return
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self._refuse(400, "invalid JSON body")
+                return
+            if not isinstance(body, dict):
+                self._refuse(400, "body must be a JSON object")
+                return
             if body.get("jsonrpc"):
                 result = gateway.handle_jsonrpc(body)
             else:
                 result = gateway.notify(body.get("agent_id", ""), body.get("event", ""), body.get("detail", {}))
+            payload = json.dumps(result).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
+            self.wfile.write(payload)
 
         def do_OPTIONS(self):
             self.send_response(204)
@@ -209,7 +279,11 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
 
         def log_message(self, *a): pass
 
-    server = HTTPServer(("127.0.0.1", port), H)
+    # Threading, because one caller must not be able to stall every other one:
+    # a single-threaded server blocks its accept loop for the whole of a slow
+    # request.
+    server = ThreadingHTTPServer(("127.0.0.1", port), H)
+    server.daemon_threads = True
     print(f"nanorappter gateway → http://localhost:{port}  ({len(gateway.agents)} agents)")
     server.serve_forever()
 

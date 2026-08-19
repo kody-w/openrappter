@@ -1261,12 +1261,10 @@ class BrainstemHandler(BaseHTTPRequestHandler):
         whole point, and accumulating here would re-create the defect the cap
         exists to close.
 
-        Bounded rather than unbounded: past `max_body_bytes * 8` this stops
-        reading and answers anyway. A caller that far over the limit has stopped
-        being a request worth being polite to, and draining it in full would
-        hand it the server's time instead of its memory.
+        The caller decides whether draining is worth it at all; see the call
+        site. This reads exactly what it is asked to.
         """
-        remaining = min(length, self.max_body_bytes * 8)
+        remaining = length
         try:
             while remaining > 0:
                 chunk = self.rfile.read(min(65536, remaining))
@@ -1436,7 +1434,13 @@ class BrainstemHandler(BaseHTTPRequestHandler):
             # Drain first, answer second. Replying the instant the limit is
             # known ends the response while the caller is still uploading, and
             # it gets a connection reset instead of the 413 it needs to read.
-            self._discard_body(length)
+            #
+            # Only a body that is about to arrive anyway is worth draining. Past
+            # `max_body_bytes * 8` the refusal goes out immediately: the caller
+            # has already been told no, and waiting on bytes it may never send
+            # would hand it a thread for the whole timeout instead of memory.
+            if length <= self.max_body_bytes * 8:
+                self._discard_body(length)
             return self._send(413, {
                 "schema": "rapp-chat/1.0",
                 "status": "error",

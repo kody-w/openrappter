@@ -78,6 +78,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `python3 -m nanorappter` did not work. Both the module docstring and the
+  CLI's own help text advertise it, but there was no `__main__.py`, so the
+  documented command failed with "No module named nanorappter.__main__" -- the
+  `if __name__ == "__main__"` guard in `__init__.py` only fires for
+  `python3 nanorappter/__init__.py`, which nothing documents. The whole CLI,
+  including `serve`, was unreachable by its own instructions.
+
+- Every malformed request to the nanorappter gateway crashed its handler and
+  returned nothing at all: a non-numeric `Content-Length`, a body that was not
+  JSON, and a body that was valid JSON but not an object (`[1,2]`, `"x"`, `42`,
+  `null` all raise `AttributeError` on `.get()`). Each now gets a 400.
+
+- A single connection could take the whole nanorappter gateway offline. A
+  negative `Content-Length` was passed straight to `rfile.read(-1)`, which
+  means "read until EOF", and the server was a single-threaded `HTTPServer`, so
+  one caller sending `Content-Length: -1` and a single byte -- then simply not
+  closing the socket -- blocked the accept loop and every other caller timed
+  out until it disconnected. Content-Length is now validated, the server is
+  threading so no one caller can stall the rest, and a stalled request cannot
+  hold its thread past the socket timeout. The gateway also now caps request
+  bodies at the same 2 MB the other two runtimes use.
+
+- The brainstem drained an over-sized body before refusing it even when the
+  declared size was far past the cap, so a caller could claim a gigabyte, send
+  nothing, and hold a thread for the full 30-second timeout to receive a refusal
+  it had already earned. Draining exists to make the 413 readable rather than a
+  connection reset, which is only worth doing for a body that is about to
+  arrive; past `8 x` the cap the refusal now goes out immediately.
+
 - The brainstem read a POST body of any size a caller cared to declare. It
   buffered exactly `Content-Length` bytes with no ceiling, and the existing
   30-second stall budget did not cover it -- that guard bounds a caller which

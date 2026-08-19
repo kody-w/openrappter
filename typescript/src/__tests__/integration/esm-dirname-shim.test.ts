@@ -29,7 +29,14 @@ function sourceFiles(dir: string = SRC, out: string[] = []): string[] {
     if (entry.isDirectory()) {
       if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
       sourceFiles(full, out);
-    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
+    } else if (
+      entry.name.endsWith('.ts')
+      && !entry.name.endsWith('.d.ts')
+      // Tests run under vitest, which provides `__dirname`; the rule is about
+      // shipped ESM. Excluding the `__tests__` directory was not enough --
+      // `.test.ts` files also live beside the code they cover.
+      && !entry.name.endsWith('.test.ts')
+    ) {
       out.push(full);
     }
   }

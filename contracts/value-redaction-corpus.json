@@ -1,0 +1,233 @@
+{
+  "_comment": "Values both runtimes' flight recorders must agree on. Read by typescript/src/flight-recorder/value-redaction-parity.test.ts and python/tests/test_value_redaction_parity.py, so a pattern added to one SECRET_VALUE_PATTERNS list cannot silently miss the other -- the drift that let TypeScript redact ?key=, xox*, sk- and JWTs while Python passed all four through.",
+  "_build_comment": "Credentials are DESCRIBED, not stored. Conformance rule R9 forbids the repository containing a credential of its own, and a credential-shaped literal trips it (and any secret scanner) even when obviously fake -- this file failed R9 with 8 findings before it was written this way. Each case is assembled as prefix + fill*count + suffix, by a builder both runtimes implement identically, so they test the same string without either file containing it.",
+  "must_redact": [
+    {
+      "why": "Gemini provider builds this URL",
+      "prefix": "https://api.example.com/v1?key=AIza",
+      "fill": "b",
+      "count": 35,
+      "suffix": ""
+    },
+    {
+      "why": "query-string token",
+      "prefix": "https://api.example.com/v1?token=",
+      "fill": "b",
+      "count": 12,
+      "suffix": ""
+    },
+    {
+      "why": "query-string api_key",
+      "prefix": "https://api.example.com/v1?api_key=",
+      "fill": "b",
+      "count": 12,
+      "suffix": ""
+    },
+    {
+      "why": "query-string signature",
+      "prefix": "https://api.example.com/v1?sig=",
+      "fill": "b",
+      "count": 12,
+      "suffix": ""
+    },
+    {
+      "why": "GitHub personal token",
+      "prefix": "gh",
+      "fill": "p",
+      "count": 1,
+      "suffix": "_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "why": "GitHub fine-grained token",
+      "prefix": "github_",
+      "fill": "p",
+      "count": 1,
+      "suffix": "at_bbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "why": "AWS access key id",
+      "prefix": "AK",
+      "fill": "I",
+      "count": 1,
+      "suffix": "ABBBBBBBBBBBBBBBB"
+    },
+    {
+      "why": "AWS temporary key id",
+      "prefix": "AS",
+      "fill": "I",
+      "count": 1,
+      "suffix": "ABBBBBBBBBBBBBBBB"
+    },
+    {
+      "why": "bearer header",
+      "prefix": "Bearer ",
+      "fill": "b",
+      "count": 16,
+      "suffix": ""
+    },
+    {
+      "why": "credentials in a URL",
+      "prefix": "https://user:",
+      "fill": "b",
+      "count": 8,
+      "suffix": "@host/path"
+    },
+    {
+      "why": "password assignment",
+      "prefix": "password=",
+      "fill": "b",
+      "count": 8,
+      "suffix": ""
+    },
+    {
+      "why": "labelled api key",
+      "prefix": "api_key: ",
+      "fill": "b",
+      "count": 20,
+      "suffix": ""
+    },
+    {
+      "why": "OpenAI key",
+      "prefix": "sk-",
+      "fill": "b",
+      "count": 24,
+      "suffix": ""
+    },
+    {
+      "why": "Anthropic key",
+      "prefix": "sk-ant-",
+      "fill": "b",
+      "count": 24,
+      "suffix": ""
+    },
+    {
+      "why": "Google API key",
+      "prefix": "AIza",
+      "fill": "b",
+      "count": 35,
+      "suffix": ""
+    },
+    {
+      "why": "Slack bot token",
+      "prefix": "xoxb-",
+      "fill": "b",
+      "count": 20,
+      "suffix": ""
+    },
+    {
+      "why": "Slack app-level token",
+      "prefix": "xapp-1-",
+      "fill": "B",
+      "count": 12,
+      "suffix": ""
+    },
+    {
+      "why": "Telegram bot token",
+      "prefix": "123456789:AA",
+      "fill": "b",
+      "count": 33,
+      "suffix": ""
+    },
+    {
+      "why": "Tailscale auth key",
+      "prefix": "tskey-auth-",
+      "fill": "b",
+      "count": 16,
+      "suffix": ""
+    },
+    {
+      "why": "JWT",
+      "prefix": "eyJ",
+      "fill": "b",
+      "count": 12,
+      "suffix": ".eyJbbbbbbbbbbbb.bbbbbbbbbbbbbbbb"
+    },
+    {
+      "why": "RSA private key header",
+      "prefix": "-----BEGIN RSA PRIVATE KEY",
+      "fill": "-",
+      "count": 5,
+      "suffix": ""
+    },
+    {
+      "why": "OpenSSH private key header",
+      "prefix": "-----BEGIN OPENSSH PRIVATE KEY",
+      "fill": "-",
+      "count": 5,
+      "suffix": ""
+    }
+  ],
+  "_must_keep_comment": "Redacting these would be its own failure: a ledger that blanks ordinary values keeps the record and loses the ability to read it. Several are bare prefixes of real credential patterns, so a rule without a length guard blanks them.",
+  "must_keep": [
+    {
+      "why": "ordinary prose",
+      "prefix": "just a normal sentence with no secret",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "readable numbers",
+      "prefix": "port 18790 and a key_count of 7",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "a query key that names a field",
+      "prefix": "https://api.example.com/v1?key=name",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "a log line",
+      "prefix": "GET /health 200 in 4ms",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "bare OpenAI prefix",
+      "prefix": "sk-",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "bare bearer word",
+      "prefix": "Bearer",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "a public key mentioned in prose",
+      "prefix": "the user asked about their public_key",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "a config path",
+      "prefix": "/Users/someone/.openrappter/config.json5",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "bare JWT prefix",
+      "prefix": "eyJ",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    },
+    {
+      "why": "bare AWS prefix",
+      "prefix": "AKIA",
+      "fill": "",
+      "count": 0,
+      "suffix": ""
+    }
+  ]
+}

@@ -119,3 +119,79 @@ class TestStallBudget:
         """
         assert isinstance(brainstem.BrainstemHandler.timeout, (int, float))
         assert 0 < brainstem.BrainstemHandler.timeout <= 120
+
+
+def _multipart_post(base, content_type, body, timeout=15):
+    """POST to /agents/import with hand-built multipart framing."""
+    parts = urllib.parse.urlparse(base)
+    conn = socket.create_connection((parts.hostname, parts.port), timeout=timeout)
+    try:
+        conn.sendall(
+            b"POST /agents/import HTTP/1.1\r\nHost: x\r\nContent-Type: "
+            + content_type
+            + b"\r\nContent-Length: "
+            + str(len(body)).encode()
+            + b"\r\n\r\n"
+            + body
+        )
+        conn.shutdown(socket.SHUT_WR)
+        data = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    finally:
+        conn.close()
+    if not data:
+        return None, b""
+    head, _, rest = data.partition(b"\r\n\r\n")
+    return int(head.split(b"\r\n")[0].split(b" ")[1]), rest
+
+
+BOUNDARY = b"multipart/form-data; boundary=----X"
+WELL_FORMED = (
+    b'------X\r\nContent-Disposition: form-data; name="f"; filename="a.py"'
+    b"\r\n\r\nprint(1)\r\n------X--\r\n"
+)
+
+
+class TestAgentImportFraming:
+    """`/agents/import` parses multipart by hand, and hand-rolled parsers fall over.
+
+    This is the same defect as `Content-Length` one handler above: an unguarded
+    index raised out of `do_POST`, so a malformed upload closed the connection
+    without ever sending a status line.
+    """
+
+    def test_a_part_with_no_blank_line_is_a_400_not_a_dropped_connection(self, server):
+        body = (
+            b'------X\r\nContent-Disposition: form-data; name="f"; filename="a.py"'
+            b"\r\n------X--\r\n"
+        )
+        status, payload = _multipart_post(server, BOUNDARY, body)
+        assert status == 400, "a malformed part must be answered, not dropped"
+        assert b"Malformed multipart" in payload
+
+    def test_a_missing_boundary_is_refused_rather_than_silently_corrupting(self, server):
+        """Without a boundary the delimiter was written into the agent as source.
+
+        The saved bytes were `print(1)\\r\\n------X--\\r\\n` and the endpoint
+        answered 200, so the caller was told the import succeeded while the file
+        on disk could not parse.
+        """
+        status, payload = _multipart_post(server, b"multipart/form-data", WELL_FORMED)
+        assert status == 400
+        assert b"boundary" in payload
+
+    def test_a_well_formed_upload_still_imports(self, server):
+        """Anti-vacuity: the guards must not reject a real upload."""
+        status, _ = _multipart_post(server, BOUNDARY, WELL_FORMED)
+        assert status == 200
+
+    def test_the_saved_agent_is_exactly_the_uploaded_source(self, server):
+        """The bytes on disk are the file, with no envelope left in them."""
+        _multipart_post(server, BOUNDARY, WELL_FORMED)
+        saved = brainstem.AGENTS_PATH / "a_agent.py"
+        assert saved.exists()
+        assert saved.read_bytes() == b"print(1)"

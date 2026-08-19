@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `POST /agents/import` dropped the connection without a status line when a
+  multipart part carried no blank line after its headers: two unguarded
+  `split(...)[1]` indexes raised `IndexError` out of the handler. Malformed
+  multipart is now `400`.
+- `POST /agents/import` accepted `multipart/form-data` with no `boundary`
+  parameter and wrote the part's closing delimiter into the agent file as
+  source -- the saved bytes were `print(1)\r\n------X--\r\n` -- while
+  answering `200`. A missing boundary is now `400`.
+
 - The Python brainstem answered nothing at all to a malformed `Content-Length`.
   `do_POST` opened with a bare `int(self.headers.get("Content-Length") or 0)`,
   so `Content-Length: abc` raised `ValueError` out of the handler and the

@@ -26,7 +26,7 @@ import {
   type RappterStatus,
 } from '../infra/roster.js';
 import { canonicalInstanceKey } from '../infra/gateway-lock.js';
-import { portTypedOnCommandLine } from '../infra/cli-port.js';
+import { portFromFlag, portTypedOnCommandLine } from '../infra/cli-port.js';
 
 const EMOJI = '🦖';
 
@@ -104,13 +104,7 @@ export function registerRappterCommand(program: Command): void {
     .command('hatch')
     .description('Hatch a twin rappter on this device')
     .argument('<name>', 'what to call it')
-    .option('--port <port>', 'override the port derived from the name', (value: string) => {
-      const port = Number.parseInt(value, 10);
-      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-        throw new Error(`Invalid port: ${value}`);
-      }
-      return port;
-    })
+    .option('--port <port>', 'override the port derived from the name', portFromFlag)
     .action(async (name: string, options: { port?: number }, command: Command) => {
       const typed = name.trim();
       if (!typed) {

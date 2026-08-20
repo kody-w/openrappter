@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Tests no longer reserve a port and then race something else to bind it.
+  Reserving means binding a port, closing it, and handing the number over to be
+  bound again, which leaves a window in which anything may take it — the window
+  that failed CI on 2026-08-19. Now that the gateway reports the port it bound,
+  the 26 files that start one pass port 0 and ask afterwards, and the three that
+  start a plain `http` server read it back from `address()`. Two callers remain
+  and are inherent rather than an oversight: neither starts a server, and both
+  need a port number that stays unbound — candidate ports to hand the burrow
+  beacon, and an address nothing answers on to prove pairing with an unreachable
+  peer fails.
 - The gateway could not report the port it actually bound. `listen(0)` asks the
   kernel to choose a free port, and nothing read that choice back, so
   `config.port` stayed `0`: the startup log said `127.0.0.1:0`, and

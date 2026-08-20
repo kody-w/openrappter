@@ -34,7 +34,7 @@ import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
 import { registerUpdateCommand } from './cli/update.js';
 import { registerHubCommands } from './cli/hubs.js';
-import { portFromEnvironment, portTypedOnCommandLine } from './infra/cli-port.js';
+import { portFromEnvironment, portFromFlag, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
   ensureFlightRecorderFromEnv,
@@ -1048,13 +1048,7 @@ program
     'Name this rappter, so an alpha and its hatched twins can run on one device. '
     + 'Omit it for the alpha. Also settable as OPENRAPPTER_INSTANCE.',
   )
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  })
+  .option('--port <port>', 'Gateway port', portFromFlag)
   .option('-s, --status', 'Show status')
   .option('-l, --list-agents', 'List available agents')
   .option('--exec <agent>', 'Execute a specific agent')
@@ -2112,13 +2106,7 @@ registerServiceStatusCommand(serviceCommand);
 serviceCommand
   .command('install')
   .description('Install or adopt the gateway service')
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  }, 18790)
+  .option('--port <port>', 'Gateway port', portFromFlag, 18790)
   .action(async (options: { port: number }, command: Command) => {
     // The root's --port swallows this command's own, so ask where the user
     // actually typed it before installing a service on the wrong port. #108
@@ -2148,13 +2136,7 @@ const imessageCommand = program
 imessageCommand
   .command('install-service')
   .description('Install and start the launchd-supervised gateway')
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  }, 18790)
+  .option('--port <port>', 'Gateway port', portFromFlag, 18790)
   .action(async (options: { port: number }, command: Command) => {
     const port = portTypedOnCommandLine(command) ?? options.port;
     const { readIMessageConfig } = await import('./channels/imessage-gateway.js');
@@ -2187,13 +2169,7 @@ imessageCommand
   .command('service-status')
   .description('Show sanitized launchd, liveness, and readiness status')
   .option('--json', 'Print machine-readable JSON')
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  }, 18790)
+  .option('--port <port>', 'Gateway port', portFromFlag, 18790)
   .action(async (options: { json?: boolean; port: number }, command: Command) => {
     const port = portTypedOnCommandLine(command) ?? options.port;
     const { getIMessageServiceStatus } = await import(
@@ -2235,13 +2211,7 @@ imessageCommand
   .command('diagnose')
   .description('Run privacy-safe iMessage readiness diagnostics')
   .option('--json', 'Print machine-readable JSON')
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  }, 18790)
+  .option('--port <port>', 'Gateway port', portFromFlag, 18790)
   .action(async (options: { json?: boolean; port: number }, command: Command) => {
     const port = portTypedOnCommandLine(command) ?? options.port;
     const managedEnv = await loadEnv();
@@ -2638,13 +2608,7 @@ registerHubCommands(program);
 program
   .command('gateway')
   .description('Start the gateway server (same runtime as `openrappter --daemon`)')
-  .option('--port <port>', 'Gateway port', (value: string) => {
-    const port = Number.parseInt(value, 10);
-    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`Invalid port: ${value}`);
-    }
-    return port;
-  })
+  .option('--port <port>', 'Gateway port', portFromFlag)
   .option(
     '--instance <id>',
     'Name this rappter, so an alpha and its hatched twins can run on one device.',

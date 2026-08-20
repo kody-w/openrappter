@@ -24,6 +24,7 @@ const CONTRACT = JSON.parse(
 ) as {
   shared: string[];
   python_only: Record<string, string[]>;
+  health_checks: { shared: string[]; typescript_only: Record<string, string[]> };
   what_this_does_not_pin?: string[];
 };
 
@@ -70,5 +71,44 @@ describe('gateway RPC parity with the Python runtime', () => {
     const have = await registered();
     const crossed = Object.keys(CONTRACT.python_only).filter((m) => have.has(m)).sort();
     expect(crossed).toEqual([]);
+  });
+});
+
+describe('health checks parity with the Python runtime', () => {
+  /**
+   * `health` is shared, and `checks` is the part a monitor actually reads. The
+   * contract described it in prose as agreeing between the runtimes; it did
+   * not — TypeScript reported five checks and Python two. Prose cannot fail a
+   * build, so the disagreement survived. Python has the matching test.
+   */
+  async function healthChecks(): Promise<Set<string>> {
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
+    await server.start();
+    const method = (server as unknown as {
+      methods: Map<string, { handler: () => Promise<{ checks: Record<string, unknown> }> }>;
+    }).methods.get('health')!;
+    return new Set(Object.keys((await method.handler()).checks));
+  }
+
+  it('the contract declares the check names', () => {
+    // Guards the rest: an empty list would make every assertion vacuous.
+    expect(CONTRACT.health_checks.shared.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('reports every shared check', async () => {
+    const have = await healthChecks();
+    const missing = CONTRACT.health_checks.shared.filter((c) => !have.has(c)).sort();
+    expect(missing).toEqual([]);
+  });
+
+  it('reports nothing beyond shared plus its own declared extras', async () => {
+    // The whole point: a new check cannot appear without being classified,
+    // which is how `checks` drifted apart unnoticed in the first place.
+    const explained = new Set([
+      ...CONTRACT.health_checks.shared,
+      ...Object.keys(CONTRACT.health_checks.typescript_only),
+    ]);
+    const unexplained = [...(await healthChecks())].filter((c) => !explained.has(c)).sort();
+    expect(unexplained).toEqual([]);
   });
 });

@@ -96,8 +96,13 @@ jobs:
 
   # Dedicated gate for the real-socket gateway integration/observability
   # surfaces. Bounded so a hung real socket/connection can't stall CI
-  # indefinitely, and uploads only a small, targeted log on failure (no
-  # verbose default vitest/CI output dump).
+  # indefinitely.
+  #
+  # Output goes to a file rather than the console because these suites log a
+  # line per server start: a green run is ~500 lines of "Gateway server started
+  # on ...", which is noise nobody reads. But a *red* run has to explain itself,
+  # so the log is printed below when the tests don't pass. Piping through `tee`
+  # instead would trade one problem for the other.
   gateway-realtime:
     name: Gateway Integration & Observability (real sockets)
     runs-on: ubuntu-latest
@@ -114,14 +119,22 @@ jobs:
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
       - name: Run real-socket gateway tests (bounded per-test timeout)
+        # Bounded here as well as on the job. A job-level timeout *cancels*,
+        # and a cancelled job skips `if: failure()` steps, so a hang would
+        # throw away the log that explains the hang. Failing the step instead
+        # keeps the diagnostics below reachable, with job budget to spare.
+        timeout-minutes: 4
         run: |
           npx vitest run \
             src/__tests__/integration/gateway.test.ts \
             src/__tests__/integration/gateway-observability.test.ts \
             --testTimeout=15000 --hookTimeout=15000 \
             --reporter=default > gateway-realtime.log 2>&1
+      - name: Explain the failure in the log above
+        if: failure() || cancelled()
+        run: cat gateway-realtime.log || echo "the tests produced no output before dying"
       - name: Upload concise log on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: gateway-realtime-failure-log

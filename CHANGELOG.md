@@ -78,6 +78,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failing gateway-realtime CI job would not say why it failed. Its output is
+  redirected to a file — rightly, since a green run is ~500 lines of "Gateway
+  server started on ..." — but nothing ever printed that file, so the console
+  showed the command, then `Process completed with exit code 1`, and nothing
+  else. Diagnosing the port collision behind the 2026-08-19 failure meant
+  downloading and unzipping an artifact. The log is now printed when the tests
+  don't pass, and a green run stays as quiet as before.
+- The same job discarded its log entirely if the tests hung, which is the one
+  case its timeout exists for. A job-level `timeout-minutes` *cancels* the job,
+  and a cancelled job skips `if: failure()` steps, so both the artifact upload
+  and any diagnosis were skipped exactly when they were needed. Measured on a
+  throwaway workflow rather than assumed: a job-level timeout yields
+  `cancelled` and skips `failure()`, while a step-level one yields `failure`.
+  The test step is now bounded itself, so a hang fails rather than cancels, and
+  the diagnostic steps additionally accept `cancelled()` as a backstop.
 - Tests no longer reserve a port and then race something else to bind it.
   Reserving means binding a port, closing it, and handing the number over to be
   bound again, which leaves a window in which anything may take it — the window

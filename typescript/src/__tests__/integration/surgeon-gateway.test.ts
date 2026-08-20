@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { GatewayServer } from '../../gateway/server.js';
 import type { SurgeonService } from '../../surgeon/service.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 function connect(port: number): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
@@ -41,7 +40,6 @@ describe('surgeon gateway integration', () => {
   });
 
   it('advertises and serves the surgeon while protecting mutating turns', async () => {
-    const port = await reserveTestPort();
     const service = {
       getPatient: vi.fn(async () => ({ patient: 'OpenRappter', state: 'stable' })),
       listCases: vi.fn(() => []),
@@ -52,12 +50,13 @@ describe('surgeon gateway integration', () => {
       operate: vi.fn(),
     } as unknown as SurgeonService;
     server = new GatewayServer({
-      port,
+      port: 0,
       bind: 'loopback',
       auth: { mode: 'token', tokens: ['surgeon-token'] },
     });
     server.setSurgeonService(service);
     await server.start();
+    const port = server.port;
 
     const socket = await connect(port);
     const hello = await request(socket, 'connect', 'connect', {

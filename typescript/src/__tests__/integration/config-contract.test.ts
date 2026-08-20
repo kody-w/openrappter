@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * Binds the config clients to the handler that actually runs.
@@ -34,10 +33,10 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<{ port: number; configPath: string }> {
-  const port = await reserveTestPort();
   dataDir = mkdtempSync(join(tmpdir(), 'cfg-contract-'));
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
   await server.start();
+  const port = server.port;
   return { port, configPath: join(dataDir, 'config.yaml') };
 }
 

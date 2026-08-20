@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
 
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * The advertised payload limit has to be the enforced one.
@@ -48,9 +47,9 @@ async function handshake(port: number): Promise<Record<string, unknown>> {
 
 describe('gateway payload limit', () => {
   it('enforces the limit it advertises', async () => {
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
     await server.start();
+    const port = server.port;
 
     const res = await handshake(port);
     const payload = res.payload as { policy?: { maxPayload?: number } } | undefined;
@@ -74,9 +73,9 @@ describe('gateway payload limit', () => {
   }, 30_000);
 
   it('accepts a frame comfortably inside the limit', async () => {
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
     await server.start();
+    const port = server.port;
 
     const res = await handshake(port);
     // The handshake itself is the proof: a connection that completes a request

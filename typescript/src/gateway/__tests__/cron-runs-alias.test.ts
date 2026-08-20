@@ -20,7 +20,6 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { GatewayServer } from '../server.js';
-import { reserveTestPort } from '../../__tests__/support/test-port.js';
 
 let server: GatewayServer | undefined;
 const temps: string[] = [];
@@ -50,9 +49,9 @@ function schedulerWithHistory() {
 async function boot(): Promise<number> {
   const dataDir = mkdtempSync(join(tmpdir(), 'cron-runs-alias-'));
   temps.push(dataDir);
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
   await server.start();
+  const port = server.port;
   server.setCronService(schedulerWithHistory() as never);
   return port;
 }
@@ -105,9 +104,9 @@ describe('cron.runs', () => {
   it('answers { runs: [] } when no scheduler is wired, rather than throwing', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'cron-runs-bare-'));
     temps.push(dataDir);
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
     await server.start();
+    const port = server.port;
 
     const { result, error } = await rpc(port, 'cron.runs', { jobId: 'job1' });
     expect(error).toBeUndefined();

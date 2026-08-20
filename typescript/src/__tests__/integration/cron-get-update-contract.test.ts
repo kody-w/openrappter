@@ -5,7 +5,6 @@ import { join } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
 import { CronService } from '../../cron/service.js';
 import { createCronGatewayAdapter } from '../../cron/gateway-adapter.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * `cron.get` read only the gateway's file fallback, never the live scheduler.
@@ -41,15 +40,15 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<number> {
-  const port = await reserveTestPort();
   dataDir = mkdtempSync(join(tmpdir(), 'cron-get-'));
 
   const service = new CronService();
   await service.start({ execute: async () => 'ok' });
   cron = service;
 
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
   await server.start();
+  const port = server.port;
   server.setCronService(createCronGatewayAdapter({ service, persist: () => {} }));
   return port;
 }

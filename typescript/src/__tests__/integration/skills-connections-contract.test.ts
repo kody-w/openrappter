@@ -58,15 +58,15 @@ interface StartOptions {
 }
 
 async function startServer(options: StartOptions = {}): Promise<number> {
-  const port = await reserveTestPort();
   const dataDir = scratch('skills-contract-');
   server = new GatewayServer({
-    port,
+    port: 0,
     bind: 'loopback',
     auth: options.auth ?? { mode: 'none' },
     dataDir,
   });
   await server.start();
+  const port = server.port;
   if (options.bundledSkillsDir !== undefined) server.setBundledSkillsDir(options.bundledSkillsDir);
   if (options.skillsRegistry) server.setSkillsRegistry(options.skillsRegistry);
   return port;

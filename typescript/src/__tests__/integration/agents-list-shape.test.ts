@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * `agents.list` answers with a shape, and that shape must not drift.
@@ -29,8 +28,7 @@ const EXPECTED_KEYS = ['description', 'id', 'type'];
 async function listFrom(
   entries: { id: string; type: string; description?: string }[],
 ): Promise<Record<string, unknown>[]> {
-  const port = await reserveTestPort();
-  const server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  const server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   server.setAgentList(() => entries);
   try {
     await server.start();

@@ -22,7 +22,6 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONTRACT = resolve(__dirname, '../../../../contracts/rapp-chat-v1.json');
@@ -52,8 +51,7 @@ afterEach(async () => {
 
 /** Start a gateway whose agent echoes the prompt it was handed. */
 async function startGateway(): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   server.setAgentHandler(async (request) => ({
     // `sessionId` is required by AgentResponse; the gateway echoes whatever the
     // handler returns, so a stub that omits it is not a conforming handler.
@@ -62,6 +60,7 @@ async function startGateway(): Promise<number> {
     agentLogs: [],
   }));
   await server.start();
+  const port = server.port;
   return port;
 }
 

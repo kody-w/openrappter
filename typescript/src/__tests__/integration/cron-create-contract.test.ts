@@ -5,7 +5,6 @@ import { join } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
 import { CronService } from '../../cron/service.js';
 import { createCronGatewayAdapter } from '../../cron/gateway-adapter.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * Binds the macOS Bar's cron payload to the handler that actually runs.
@@ -40,7 +39,6 @@ afterEach(async () => {
 
 /** Wires CronService into GatewayServer with the daemon's own adapter. */
 async function startServer(): Promise<{ port: number; service: CronService; fired: string[] }> {
-  const port = await reserveTestPort();
   dataDir = mkdtempSync(join(tmpdir(), 'cron-contract-'));
 
   const fired: string[] = [];
@@ -53,8 +51,9 @@ async function startServer(): Promise<{ port: number; service: CronService; fire
   });
   cron = service;
 
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
   await server.start();
+  const port = server.port;
   server.setCronService(createCronGatewayAdapter({ service, persist: () => {} }));
 
   return { port, service, fired };
@@ -160,10 +159,10 @@ describe('cron.create contract, against the wired gateway', () => {
 
   it('refuses before touching the file store, so no half-written job survives', async () => {
     // No cron service: the file-backed fallback path.
-    const port = await reserveTestPort();
     dataDir = mkdtempSync(join(tmpdir(), 'cron-contract-'));
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
     await server.start();
+    const port = server.port;
 
     const { error } = await rpc(port, 'cron.add', { name: 'x', schedule: '* * * * *' });
     expect(error?.message).toMatch(/non-empty `message`/);
@@ -173,10 +172,10 @@ describe('cron.create contract, against the wired gateway', () => {
   });
 
   it('the file-only fallback normalises the legacy spelling too', async () => {
-    const port = await reserveTestPort();
     dataDir = mkdtempSync(join(tmpdir(), 'cron-contract-'));
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
     await server.start();
+    const port = server.port;
 
     await rpc(port, 'cron.create', legacyBarPayload('from an old bar'));
 

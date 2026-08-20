@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { resolve, join } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * The dormant method modules stay dormant.
@@ -88,8 +87,7 @@ afterEach(async () => {
 });
 
 async function registered(): Promise<Set<string>> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   server.setSurgeonService({} as never);
   server.setRappterManager({} as never);
   await server.start();

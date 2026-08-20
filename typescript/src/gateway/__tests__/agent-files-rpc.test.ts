@@ -28,7 +28,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, rmSyn
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { GatewayServer } from '../server.js';
-import { reserveTestPort } from '../../__tests__/support/test-port.js';
 import { userAgentsDir } from '../../agents/agent-import.js';
 
 let server: GatewayServer | undefined;
@@ -77,9 +76,9 @@ async function boot(): Promise<Fixture> {
   writeFileSync(secretPath, 'TOP SECRET\n');
   symlinkSync(outside, join(agentsRoot, 'escape'), 'dir');
 
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir });
   await server.start();
+  const port = server.port;
   return { port, agentsRoot, outside, secretPath };
 }
 
@@ -376,14 +375,14 @@ describe('mutating and content-bearing calls require the credential', () => {
     mkdirSync(agentsRoot, { recursive: true });
     writeFileSync(join(agentsRoot, 'hello_agent.py'), 'print("hello")\n');
 
-    const port = await reserveTestPort();
     server = new GatewayServer({
-      port,
+      port: 0,
       bind: 'loopback',
       auth: { mode: 'token', tokens: ['s3cret'] },
       dataDir,
     });
     await server.start();
+    const port = server.port;
     return { port, agentsRoot };
   }
 

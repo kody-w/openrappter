@@ -4,7 +4,6 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { GatewayServer as RuntimeGatewayServer } from '../../gateway/server.js';
 import type { GatewayConfig } from '../../gateway/types.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * The channels screen updates when a channel connects or disconnects.
@@ -116,10 +115,10 @@ describe('channel.status reaches subscribers', () => {
 
   async function startWithRegistry(): Promise<{ port: number; connected: () => boolean }> {
     const { registry, connected } = fakeRegistry();
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
     (server as unknown as { channelRegistry: unknown }).channelRegistry = registry;
     await server.start();
+    const port = server.port;
     return { port, connected };
   }
 

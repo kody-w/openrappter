@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import { GatewayServer } from '../../gateway/server.js';
 import { GatewayEvents } from '../../gateway/types.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * The Bar's approval screen listens for an `approval` event that nothing sent.
@@ -35,9 +34,9 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   await server.start();
+  const port = server.port;
   return port;
 }
 

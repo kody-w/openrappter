@@ -5,7 +5,6 @@ import { WebSocket } from 'ws';
 import { GatewayServer } from '../../gateway/server.js';
 import { ShellAgent } from '../../agents/ShellAgent.js';
 import { getSharedExecSafety, resetSharedExecSafety } from '../../security/exec-safety.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * Binds the macOS Bar's approval screen to handlers that actually run.
@@ -50,9 +49,9 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, dataDir: sandbox });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, dataDir: sandbox });
   await server.start();
+  const port = server.port;
   return port;
 }
 

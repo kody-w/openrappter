@@ -18,7 +18,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 import { RPC_ERROR } from '../../gateway/types.js';
 
 let server: GatewayServer | undefined;
@@ -70,12 +69,12 @@ function call(
 }
 
 async function connect(): Promise<WebSocket> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   server.registerMethod('plugin.bad', async () => cyclic());
   server.registerMethod('plugin.big', async () => ({ big: BigInt(1) }));
   server.registerMethod('plugin.good', async () => ({ hello: 'world' }));
   await server.start();
+  const port = server.port;
 
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
   await new Promise((resolve) => ws.once('open', resolve));

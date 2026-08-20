@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * `docs/AUTONOMOUS.md` hands an autonomous agent a list of RPC methods to
@@ -34,8 +33,7 @@ afterEach(async () => {
 });
 
 async function registeredMethods(): Promise<Set<string>> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   await server.start();
   const registry = (server as unknown as {
     methods: Map<string, unknown>;

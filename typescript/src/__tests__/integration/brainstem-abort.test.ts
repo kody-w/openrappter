@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import WebSocket from 'ws';
 
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * Stop has to stop the brainstem, not just stop the gateway listening.
@@ -84,9 +83,9 @@ describe('aborting a brainstem turn', () => {
       return new Response('{}');
     }) as unknown as typeof fetch);
 
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
     await server.start();
+    const port = server.port;
 
     const ws = await connect(port);
     await rpc(ws, 'c-1', 'connect', {

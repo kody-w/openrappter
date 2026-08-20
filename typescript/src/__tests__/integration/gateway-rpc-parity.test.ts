@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * The TypeScript gateway registers the shared RPC surface, and nothing that the
@@ -36,8 +35,7 @@ afterEach(async () => {
 });
 
 async function registered(): Promise<Set<string>> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   await server.start();
   return new Set((server as unknown as { methods: Map<string, unknown> }).methods.keys());
 }

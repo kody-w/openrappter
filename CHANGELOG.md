@@ -78,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gate read JavaScript manifests without knowing what a string was. It
+  counted braces to find the manifest block and then matched `key: value` per
+  line, so a `}` inside a description ended the manifest early and dropped
+  every field after it, a `{` inside a description or a comment meant the block
+  never closed and the manifest vanished entirely, a value stopped at the first
+  apostrophe, `'a ' + 'b'` kept only `'a '`, `\u2014` was never decoded, and a
+  nested object hoisted its keys — so a nested `capabilities` overwrote the
+  declared one. Measured against real JavaScript across the 35 shipped JS/TS
+  agents, **6 were already being misread**. The block scan and the value reader
+  now skip strings and comments, decode escapes, join concatenations, and parse
+  nested objects in place; all 35 now match the language exactly.
+
 - `conformance.py`'s capability table carried an entry nothing read. The
   `credential-access` capability listed `"attrs": {"environ"}`, but the syntax
   walker only ever consumed `modules`, `calls` and `builtins` — so the one entry

@@ -225,19 +225,186 @@ def declared_manifest(path):
     return None
 
 
+_JS_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f",
+               "v": "\v", "0": "\0"}
+_JS_IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+
+
+def _js_skip_atom(text, i):
+    """Index just past the string or comment starting at `i`, else None.
+
+    Brace counting that does not know about these is the defect this exists to
+    prevent. A `}` inside a description ended the manifest early and dropped
+    every field after it; a `{` in a comment meant the block never closed and
+    the manifest vanished entirely."""
+    ch = text[i]
+    if ch in "'\"`":
+        j = i + 1
+        while j < len(text):
+            if text[j] == "\\":
+                j += 2
+                continue
+            if text[j] == ch:
+                return j + 1
+            j += 1
+        return len(text)  # unterminated; treat the rest as opaque
+    if text.startswith("//", i):
+        nl = text.find("\n", i)
+        return len(text) if nl < 0 else nl
+    if text.startswith("/*", i):
+        end = text.find("*/", i + 2)
+        return len(text) if end < 0 else end + 2
+    return None
+
+
+def _js_skip_space(text, i, end):
+    """Index of the next thing that is neither whitespace nor a comment."""
+    while i < end:
+        if text[i] in " \t\r\n":
+            i += 1
+        elif text.startswith("//", i) or text.startswith("/*", i):
+            i = _js_skip_atom(text, i)
+        else:
+            break
+    return i
+
+
+def _js_string_at(text, i):
+    """(value, next index) for the quoted string at `i`, escapes decoded.
+
+    Decoding matters because the value is compared against the contract: a
+    name read as raw source would carry backslashes the runtime never sees."""
+    quote, out, j = text[i], [], i + 1
+    while j < len(text):
+        ch = text[j]
+        if ch == "\\":
+            esc = text[j + 1:j + 2]
+            if esc == "u" and re.fullmatch(r"[0-9a-fA-F]{4}", text[j + 2:j + 6]):
+                out.append(chr(int(text[j + 2:j + 6], 16)))
+                j += 6
+            elif esc == "x" and re.fullmatch(r"[0-9a-fA-F]{2}", text[j + 2:j + 4]):
+                out.append(chr(int(text[j + 2:j + 4], 16)))
+                j += 4
+            else:
+                out.append(_JS_ESCAPES.get(esc, esc))
+                j += 2
+            continue
+        if ch == quote:
+            return "".join(out), j + 1
+        out.append(ch)
+        j += 1
+    return "".join(out), len(text)
+
+
+def _js_value_at(text, i, end):
+    """(value, next index) for the JavaScript value starting at `i`."""
+    i = _js_skip_space(text, i, end)
+    if i >= end:
+        return None, i
+    ch = text[i]
+    if ch in "'\"`":
+        value, i = _js_string_at(text, i)
+        while True:  # `'half ' + 'half'` is one string, not the first half
+            plus = _js_skip_space(text, i, end)
+            if text[plus:plus + 1] != "+":
+                break
+            nxt = _js_skip_space(text, plus + 1, end)
+            if text[nxt:nxt + 1] not in ("'", '"', "`"):
+                break
+            more, i = _js_string_at(text, nxt)
+            value += more
+        return value, i
+    if ch == "[":
+        items, j, depth = [], i + 1, 1
+        while j < end and depth:
+            if text[j] in "'\"`" and depth == 1:
+                item, j = _js_string_at(text, j)
+                items.append(item)
+                continue
+            skip = _js_skip_atom(text, j)
+            if skip is not None:
+                j = skip
+                continue
+            if text[j] in "[{":
+                depth += 1
+            elif text[j] in "]}":
+                depth -= 1
+                if not depth:
+                    return items, j + 1
+            j += 1
+        return items, j
+    if ch == "{":
+        block = _js_balanced_block(text, i)
+        if block is None:
+            return {}, end
+        # Parsed, not hoisted: a nested `capabilities` used to land in the
+        # manifest itself, and last one written won.
+        return _js_object_entries(text, block[0], block[1]), block[1]
+    j = i
+    while j < end and text[j] not in ",\n":
+        j += 1
+    return text[i:j].strip(), j
+
+
+def _js_object_entries(text, lo, hi):
+    """Keys declared at the top level of the object literal `text[lo:hi]`."""
+    out, i = {}, lo + 1
+    while i < hi - 1:
+        skip = _js_skip_atom(text, i)
+        if skip is not None and text[i] not in "'\"":
+            i = min(skip, hi - 1)
+            continue
+        if text[i] in " \t\r\n,":
+            i += 1
+            continue
+        if text[i] in "'\"":
+            key, j = _js_string_at(text, i)
+        else:
+            m = _JS_IDENT.match(text, i, hi)
+            if m is None:
+                i += 1
+                continue
+            key, j = m.group(0), m.end()
+        j = _js_skip_space(text, j, hi)
+        if text[j:j + 1] != ":":
+            i = max(j, i + 1)
+            continue
+        value, i = _js_value_at(text, j + 1, hi - 1)
+        if value is not None:
+            out[key] = value
+    return out
+
+
 def _js_balanced_block(text, start):
-    """(start, end) of the `{...}` beginning at or after `start`, nesting-aware."""
-    open_at = text.find("{", start)
+    """(start, end) of the `{...}` beginning at or after `start`.
+
+    Nesting-aware, and aware that a brace inside a string or a comment is
+    punctuation rather than structure."""
+    open_at, i = -1, start
+    while i < len(text):
+        skip = _js_skip_atom(text, i)
+        if skip is not None:
+            i = skip
+            continue
+        if text[i] == "{":
+            open_at = i
+            break
+        i += 1
     if open_at == -1:
         return None
-    depth = 0
-    for i in range(open_at, len(text)):
+    depth, i = 0, open_at
+    while i < len(text):
+        skip = _js_skip_atom(text, i)
+        if skip is not None:
+            i = skip
+            continue
         if text[i] == "{":
             depth += 1
         elif text[i] == "}":
             depth -= 1
             if depth == 0:
                 return open_at, i + 1
+        i += 1
     return None
 
 
@@ -254,7 +421,11 @@ def js_declared_manifest(path):
     substring a text check looks for while exporting no manifest at all. A
     manifest block spans lines, and the only JavaScript string that can span
     lines is a template literal, so an odd number of backticks before the
-    declaration means it is inside one and is not a declaration."""
+    declaration means it is inside one and is not a declaration.
+
+    Reading the block is a small scan rather than a line-oriented regex,
+    because a line-oriented one cannot tell a brace in a description from the
+    end of the manifest, and stopped a quoted value at the first apostrophe."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             body = fh.read()
@@ -267,19 +438,7 @@ def js_declared_manifest(path):
         block = _js_balanced_block(body, m.end())
         if block is None:
             continue
-        raw = body[block[0]:block[1]]
-        man = {}
-        for key, value in re.findall(
-                r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
-                r"(\[[^\]]*\]|'[^']*'|\"[^\"]*\"|[^,\n]+)", raw):
-            value = value.strip().rstrip(",")
-            if value.startswith("["):
-                man[key] = [a or b for a, b in
-                            re.findall(r"'([^']*)'|\"([^\"]*)\"", value)]
-            elif value[:1] in "'\"":
-                man[key] = value[1:-1]
-            else:
-                man[key] = value
+        man = _js_object_entries(body, block[0], block[1])
         if man:
             return man
     return None

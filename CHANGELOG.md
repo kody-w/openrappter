@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The config view no longer prints config values into a model-visible desktop
+  snapshot. `config` is a view `DesktopControlAgent` is told it can navigate to,
+  and the view already redacted values twice over -- raw mode keeps the file in
+  a `<textarea>` and scalars go in an `<input>`, both excluded from snapshots,
+  with inputs reported only as empty/set -- but nested values fell back to a
+  `<pre>` JSON dump that printed them verbatim. A channel with an array field
+  (`allowFrom` is in the schema) fails the "all sub-values are flat" check, so a
+  configured Telegram or Discord channel rendered its whole object, `botToken`
+  included, straight into the snapshot text. The dumps now carry
+  `data-desktop-private`, so the operator still sees their config and the model
+  does not.
+
 - Show-and-Tell's privacy boundary is now regression-tested against the real
   component instead of a hand-written fixture. A single `data-desktop-private`
   wrapper is the only thing keeping recordings, narration transcripts and their

@@ -315,3 +315,136 @@ class TestQuarantine:
 
         monkeypatch.setattr(os, "replace", refusing_replace)
         assert read_json_object(target, {"installed": {}}) == {"installed": {}}
+
+
+class TestFieldsTheCallerWillIndexInto:
+    """Checking that the file is an object stopped one level short.
+
+    Measured against the released code, with nothing actually installed:
+
+        {}                                     KeyError: 'installed'
+        {"version": 1}                         KeyError: 'installed'
+        {"installed": null}                    TypeError: not iterable
+        {"installed": 7}                       TypeError: not iterable
+        {"installed": "alice/tool-and-more"}   "already installed"  <- wrong
+        {"installed": ["alice/tool"]}          "already installed"  <- wrong
+
+    The last two are the reason this is not merely a crash bug. ``in`` against
+    a string is a substring test and against a list a membership test, so both
+    answer True and install refuses to do anything, reporting an agent as
+    present that was never installed.
+    """
+
+    def test_a_missing_field_is_filled_in_rather_than_exploding(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text("{}")
+
+        result = read_json_object(target, {"installed": {}}, object_fields=("installed",))
+
+        assert result["installed"] == {}
+
+    def test_filling_a_missing_field_keeps_the_rest_of_the_file(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text(json.dumps({"version": 3, "note": "hand written"}))
+
+        result = read_json_object(
+            target, {"installed": {}, "version": 1}, object_fields=("installed",)
+        )
+
+        assert result == {"version": 3, "note": "hand written", "installed": {}}
+
+    def test_a_missing_field_does_not_move_the_file_aside(self, tmp_path):
+        """There is nothing there to preserve, and a file that predates the
+        key is not damaged -- quarantining it would punish it for being old."""
+        target = tmp_path / "lock.json"
+        target.write_text(json.dumps({"version": 1}))
+
+        read_json_object(target, {"installed": {}}, object_fields=("installed",))
+
+        assert target.exists()
+        assert not [p for p in tmp_path.iterdir() if "corrupt" in p.name]
+
+    def test_a_field_absent_from_the_default_too_becomes_an_empty_object(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text("{}")
+
+        result = read_json_object(target, {}, object_fields=("installed",))
+
+        assert result == {"installed": {}}
+
+    def test_the_filled_in_field_is_still_the_caller_s_to_mutate(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text("{}")
+        default = {"installed": {}}
+
+        result = read_json_object(target, default, object_fields=("installed",))
+        result["installed"]["a/b"] = {"name": "b"}
+
+        assert default["installed"] == {"a/b": {"name": "b"}}
+
+    @pytest.mark.parametrize(
+        "payload",
+        ['"alice/tool-and-then-some"', "[]", '["alice/tool"]', "null", "7", "true"],
+    )
+    def test_a_field_holding_the_wrong_type_is_moved_aside(self, tmp_path, payload):
+        target = tmp_path / "lock.json"
+        target.write_text('{"installed": %s}' % payload)
+
+        result = read_json_object(
+            target, {"installed": {}}, object_fields=("installed",)
+        )
+
+        assert result == {"installed": {}}
+        assert not target.exists()
+
+    def test_the_wrongly_typed_value_is_preserved_not_discarded(self, tmp_path):
+        """Something wrote that value. Whatever it meant, it is evidence."""
+        target = tmp_path / "lock.json"
+        target.write_text('{"installed": "alice/tool"}')
+
+        read_json_object(target, {"installed": {}}, object_fields=("installed",))
+
+        kept = [p for p in tmp_path.iterdir() if "corrupt" in p.name]
+        assert len(kept) == 1
+        assert kept[0].read_text() == '{"installed": "alice/tool"}'
+
+    def test_a_healthy_file_is_untouched(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text(json.dumps({"installed": {"a/b": {"name": "b"}}}))
+
+        result = read_json_object(
+            target, {"installed": {}}, object_fields=("installed",)
+        )
+
+        assert result == {"installed": {"a/b": {"name": "b"}}}
+        assert target.exists()
+
+    def test_every_named_field_is_checked_not_just_the_first(self, tmp_path):
+        target = tmp_path / "lock.json"
+        target.write_text(json.dumps({"installed": {}, "pinned": "nope"}))
+
+        result = read_json_object(
+            target, {"installed": {}, "pinned": {}}, object_fields=("installed", "pinned")
+        )
+
+        assert result == {"installed": {}, "pinned": {}}
+        assert not target.exists()
+
+    def test_naming_no_fields_leaves_the_old_behaviour_alone(self, tmp_path):
+        """The two registry clients are the only callers today. Anyone else
+        passing a dict-shaped default has not asked for this and must not get
+        their file moved aside because of it."""
+        target = tmp_path / "lock.json"
+        target.write_text("{}")
+
+        assert read_json_object(target, {"installed": {}}) == {}
+        assert target.exists()
+
+    def test_a_missing_file_still_gives_the_default_untouched(self, tmp_path):
+        default = {"installed": {}, "version": 1}
+
+        result = read_json_object(
+            tmp_path / "nope.json", default, object_fields=("installed",)
+        )
+
+        assert result is default

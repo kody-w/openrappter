@@ -1,10 +1,17 @@
 """
-DashboardHandler - HTTP dashboard handler for agent management and trace storage.
+DashboardHandler - in-memory trace store and agent executor.
 
-Provides in-memory trace storage with circular buffer and agent execution
-with automatic trace recording.
+Holds registered agents plus a bounded (circular) trace buffer, and executes
+an agent by name while recording a trace for the call.
 
-Mirrors TypeScript gateway/dashboard.ts
+Partial port of TypeScript gateway/dashboard.ts. That module is an HTTP
+handler -- it owns `handle(req, res)`, `sendJson()` and a `prefix` used to
+route requests under `/api` -- and none of that HTTP surface is ported here.
+This class is the storage and execution half only; callers wire it up to a
+transport themselves. The limitation is recorded in the gateway/dashboard
+note in .claude/skills/ts-python-parity-check/SKILL.md and pinned by
+TestDashboardHttpSurfaceIsNotPorted in
+python/tests/test_showcase_living_dashboard.py.
 """
 
 import time
@@ -19,7 +26,6 @@ class DashboardHandler:
         self._agents = {}  # name -> agent
         self._traces = []  # list of trace entry dicts
         self._max_traces = options.get('max_traces', 500)
-        self._prefix = options.get('prefix', '/api')
 
     def register_agent(self, agent):
         """Register a single agent."""
@@ -81,7 +87,9 @@ class DashboardHandler:
             try:
                 result = json.loads(result_str) if isinstance(result_str, str) else result_str
             except (json.JSONDecodeError, TypeError):
-                result = {'raw': result_str}
+                # Mirrors dashboard.ts:398 -- a non-JSON agent result is
+                # wrapped so that result['status'] is present either way.
+                result = {'status': 'success', 'raw': result_str}
 
             self.add_trace({
                 'agent_name': agent_name,

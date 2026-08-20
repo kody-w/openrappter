@@ -252,3 +252,103 @@ describe('agent-reachable UI action boundary', () => {
     );
   });
 });
+
+/**
+ * The action union already has an anti-rot test above ("forces a new desktop
+ * action to be classified"). Parameters had no such test, and one rotted: the
+ * schema advertised `query: 'Natural-language fallback.'` while `perform`
+ * forwarded a fixed key allowlist that never contained it. A model that used
+ * the documented fallback had its instruction dropped, `action` defaulted to
+ * `snapshot`, and the reply came back `status: "success"` — a request reported
+ * as performed that never was.
+ */
+describe('DesktopControl parameter contract', () => {
+  function advertisedParameters(): string[] {
+    const agent = new DesktopControlAgent(
+      undefined as unknown as DesktopCommandQueue,
+    );
+    const parameters = agent.metadata.parameters as {
+      properties: Record<string, unknown>;
+    };
+    return Object.keys(parameters.properties);
+  }
+
+  function forwardedParameters(): string[] {
+    const source = readFileSync(
+      new URL('../agents/DesktopControlAgent.ts', import.meta.url),
+      'utf8',
+    );
+    const block = source.match(
+      /const args: Record<string, unknown> = \{\};\s*for \(const key of \[([\s\S]*?)\]\)/,
+    );
+    expect(block).not.toBeNull();
+    return [...block![1].matchAll(/'([a-zA-Z_]+)'/g)].map((m) => m[1]);
+  }
+
+  it('never advertises a parameter that perform() silently drops', () => {
+    const advertised = advertisedParameters();
+    const forwarded = forwardedParameters();
+
+    // Anti-vacuity: a regex or schema that stopped matching would pass the
+    // comparison below by measuring two empty sets against each other.
+    expect(advertised).toContain('action');
+    expect(advertised.length).toBeGreaterThanOrEqual(9);
+    expect(forwarded.length).toBeGreaterThanOrEqual(8);
+
+    // `action` selects the command; every other advertised parameter is an
+    // argument and must actually reach the queue.
+    const declaredArgs = advertised.filter((name) => name !== 'action');
+    expect([...declaredArgs].sort()).toEqual([...forwarded].sort());
+  });
+
+  it('does not advertise the unimplemented natural-language query parameter', () => {
+    expect(advertisedParameters()).not.toContain('query');
+  });
+
+  it('refuses a prose-only call instead of substituting a snapshot and reporting success', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'desktop-prose-'));
+    try {
+      const queue = new DesktopCommandQueue(root);
+      const agent = new DesktopControlAgent(queue);
+
+      const result = JSON.parse(
+        await agent.perform({ query: 'go to the agents view' }),
+      );
+
+      expect(result.status).toBe('error');
+      expect(result.message).toMatch(/typed action/i);
+      // The prose must not be laundered into a snapshot: nothing was queued.
+      expect(queue.claimNext()).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still runs a typed action that carries stray prose alongside it', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'desktop-typed-'));
+    try {
+      const queue = new DesktopCommandQueue(root);
+      const agent = new DesktopControlAgent(queue);
+
+      const pending = agent.perform({
+        action: 'navigate',
+        view: 'agents',
+        query: 'go to the agents view',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const command = queue.claimNext();
+
+      // Scope guard: rejecting prose must not reject a well-formed command.
+      expect(command?.action).toBe('navigate');
+      expect(command?.args).toEqual({ view: 'agents' });
+
+      queue.complete(command!, {
+        status: 'success',
+        result: { view: 'agents' },
+      });
+      expect(JSON.parse(await pending).status).toBe('success');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `DesktopControl` no longer advertises a `query` parameter that it silently
+  threw away. The schema offered `query: 'Natural-language fallback.'` --
+  copied from `ShowAndTell`, where every `query` really does land in a free-text
+  field -- but `perform` forwards a fixed key allowlist that never contained it.
+  A model that took the documented fallback at its word had the instruction
+  stripped, `action` defaulted to `snapshot`, and the reply came back
+  `status: "success"`: a request reported as performed that never ran. Wiring it
+  up was not the fix either, because the only fields it could plausibly feed are
+  `value`, which reaches `setControlValue`, and `view`, which reaches the
+  navigation allowlist. The dead parameter is gone, a prose-only call is now
+  refused with an error naming the typed actions instead of being answered with
+  a substituted snapshot, and a typed action that happens to carry stray prose
+  still runs unchanged. A new contract test asserts every advertised parameter
+  other than `action` actually reaches the command queue, so schema and
+  implementation cannot drift apart again in either direction.
+
 - The debug view's RPC console can no longer be read or driven by desktop
   automation. `debug` is in the enforced navigable view list, and the console
   invokes whatever gateway method is typed into it, so an agent could set the

@@ -78,10 +78,21 @@ export class DesktopControlAgent extends BasicAgent {
             type: 'string',
             description: 'Complete single-file agent source for install_agent.',
           },
-          query: {
-            type: 'string',
-            description: 'Natural-language fallback.',
-          },
+          // There is deliberately no `query` parameter here.
+          //
+          // This schema used to advertise `query: 'Natural-language fallback.'`,
+          // copied from ShowAndTellAgent, where every `query` genuinely lands in
+          // a free-text field (`kwargs.note ?? kwargs.query`). Desktop control
+          // has no free-text field: every parameter is a control signal, and
+          // `perform` forwards a fixed key allowlist that never included
+          // `query`. So a model that took the fallback at its word had the
+          // instruction stripped, `action` silently defaulted to `snapshot`,
+          // and got `status: "success"` back for a request nobody performed.
+          //
+          // It is not safe to simply wire it up either: the only fields it
+          // could plausibly feed are `value`, which reaches `setControlValue`,
+          // and `view`, which reaches the navigation allowlist. Typed actions
+          // are the contract; prose is refused below rather than guessed at.
         },
         required: [],
       },
@@ -90,6 +101,21 @@ export class DesktopControlAgent extends BasicAgent {
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
+    // A caller working from a stale schema can still send prose. Substituting a
+    // snapshot for it and reporting success is the one outcome worse than
+    // failing, because the caller is told its instruction ran. Refuse instead —
+    // the same "reject, never coerce" rule the numeric guards use. An explicit
+    // typed action wins, so `{ action: 'click', query: 'the save button' }`
+    // keeps working and only the ambiguous prose-only call is rejected.
+    if (typeof kwargs.action !== 'string' && typeof kwargs.query === 'string' && kwargs.query.trim() !== '') {
+      return JSON.stringify({
+        status: 'error',
+        action: 'snapshot',
+        message:
+          'DesktopControl takes a typed action, not a natural-language query. ' +
+          'Use action with one of: snapshot, navigate, click, input, select, scroll, wait, install_agent.',
+      });
+    }
     const action = (
       typeof kwargs.action === 'string' ? kwargs.action : 'snapshot'
     ) as DesktopControlAction;

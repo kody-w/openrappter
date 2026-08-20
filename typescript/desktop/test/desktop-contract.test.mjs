@@ -167,6 +167,11 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
 // the flag without widening that allowlist would fail only in the release
 // smoke run, which is the worst place to find out.
 
+// A Windows checkout can carry CRLF, and these assertions slice on line
+// shapes, so normalise first. Without this the slice lookup fails outright on
+// Windows rather than quietly returning the wrong text.
+const mainSource = main.replace(/\r\n/g, '\n');
+
 function functionBody(source, name) {
   const start = source.indexOf(`\nasync function ${name}(`);
   assert.notEqual(start, -1, `main.ts no longer declares ${name}`);
@@ -185,7 +190,7 @@ const CONSENT_DIALOG_FUNCTIONS = [
 test('only the agent install consent dialog answers to the smoke flag', () => {
   const gated = [];
   for (const name of CONSENT_DIALOG_FUNCTIONS) {
-    const body = functionBody(main, name);
+    const body = functionBody(mainSource, name);
     // Anti-vacuity: if a rename or refactor empties one of these slices the
     // loop would silently pass, so require the dialog to still be in there.
     assert.match(
@@ -199,8 +204,8 @@ test('only the agent install consent dialog answers to the smoke flag', () => {
 });
 
 test('the smoke run never asks narration or voice to do the gated work', () => {
-  const smokeScript = main.slice(
-    main.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
+  const smokeScript = mainSource.slice(
+    mainSource.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
   );
   assert.ok(smokeScript.length > 1000, 'could not locate the smoke script');
   assert.match(smokeScript, /\.narration\(\{/);
@@ -210,7 +215,7 @@ test('the smoke run never asks narration or voice to do the gated work', () => {
 });
 
 test('the Show-and-Tell consent bypass needs a second per-request factor', () => {
-  const body = functionBody(main, 'handleShowAndTell');
+  const body = functionBody(mainSource, 'handleShowAndTell');
   assert.match(
     body,
     /OPENRAPPTER_DESKTOP_SMOKE === '1'[\s\S]{0,60}input\.__smoke === true/,

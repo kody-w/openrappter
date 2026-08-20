@@ -78,6 +78,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- TypeScript agents could not be checked for `credential-access` or
+  `dynamic-code` at all. `conformance.py` knows five capabilities and hands
+  TypeScript coverage to `capability-reachability.test.ts`, saying so in R4's
+  own success message — but that file's evidence table held only three, so two
+  capabilities were undetectable in either direction. `PythonAgent.ts` was
+  wrong both ways at once: it reads `process.env.OPENRAPPTER_PYTHON` and
+  declared no `credential-access` (Python's table has always counted any
+  environment read — `pokemon_agent.py` declares it for a ROM path), and its
+  correct `dynamic-code` declaration could not be corroborated because the
+  runner it spawns loads an arbitrary `.py` file by path. The table now carries
+  all five, `PythonAgent.ts` declares what it reads, and a new test asserts the
+  two runtimes can detect the same capabilities so the mirror cannot drift
+  again. Over-declaration is deliberately *not* reported for `dynamic-code`:
+  evidence proves reach, absence of evidence does not prove its opposite, and a
+  false alarm there would push someone to delete a true declaration.
+
 - The gate read JavaScript manifests without knowing what a string was. It
   counted braces to find the manifest block and then matched `key: value` per
   line, so a `}` inside a description ended the manifest early and dropped

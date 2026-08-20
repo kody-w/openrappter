@@ -71,7 +71,14 @@ export const __manifest__ = {
   //                   into it, so the code executed is not this file's code
   // A strain that forbids either MUST withhold this agent. Undeclared, it would
   // have been the quietest way in the repo to run arbitrary code.
+  //   credential-access — `process.env.OPENRAPPTER_PYTHON` picks the
+  //                   interpreter. A config name rather than a secret, but the
+  //                   contract counts any environment read, because nothing
+  //                   reading this file can tell the two apart. The Python
+  //                   table has always counted it; the TypeScript one could not
+  //                   see it, which is why this sat here undeclared.
   capabilities: [
+    'credential-access',
     'process-exec',
     'dynamic-code',
   ],

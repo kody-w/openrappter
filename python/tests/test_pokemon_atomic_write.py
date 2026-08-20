@@ -217,6 +217,25 @@ class TestTheOrdinaryWriteStillBehaves:
         atomic_write_json(path, SMALL)
         assert oct(path.stat().st_mode & 0o777) == oct(0o600)
 
+    def test_it_stays_owner_only_even_under_a_hostile_umask(
+        self, runtime: Path
+    ) -> None:
+        """The open mode is only a request; umask subtracts from it.
+
+        Under an ordinary umask the create mode already lands on 0600, which
+        makes the explicit chmod look redundant -- a mutation removing it
+        survived a test that asserted the mode without controlling the umask.
+        A umask of 0377 strips the write bit at create time, so only the chmod
+        can put it back.
+        """
+        path = runtime / "status.json"
+        previous = os.umask(0o377)
+        try:
+            atomic_write_json(path, SMALL)
+        finally:
+            os.umask(previous)
+        assert oct(path.stat().st_mode & 0o777) == oct(0o600)
+
     def test_it_creates_a_missing_parent_directory(self, tmp_path: Path) -> None:
         path = tmp_path / "made" / "up" / "status.json"
         atomic_write_json(path, SMALL)

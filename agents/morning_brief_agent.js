@@ -32,7 +32,7 @@ export const __manifest__ = {
   category: 'general',
   quality_tier: 'official',
   requires_env: []
-} as const;
+};
 export function createAgent(BasicAgent) {
 
   // Lazy-load sibling agents from the built-in agents directory

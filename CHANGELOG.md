@@ -78,6 +78,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A shipped agent could not be loaded at all. `agents/morning_brief_agent.js`
+  ended its manifest with `} as const;` — TypeScript, in a `.js` file — so Node
+  threw `Unexpected identifier 'as'` before reading any of it. It had been that
+  way for 26 days, since the commit that put a `__manifest__` on all 43 agents.
+  The RAPP conformance gate reported `8 passed, 0 failed` either way, because it
+  reads the manifest out of the file and never asks Node whether the file can be
+  loaded; the only symptom was one WARN per gateway start. Shipped agents are now
+  loaded the way the registry loads them — import, `createAgent(BasicAgent)`,
+  `new AgentClass()` — so an unloadable one fails CI instead of going quiet.
 - `--evolve` was parsed by passing `parseInt` straight to commander, which calls
   a parser as `fn(value, previous)` — so the previous value silently became
   `parseInt`'s **radix**. `--evolve 9 --evolve 9` parsed to `NaN`, and because

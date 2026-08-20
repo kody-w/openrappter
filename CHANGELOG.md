@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gateway could not report the port it actually bound. `listen(0)` asks the
+  kernel to choose a free port, and nothing read that choice back, so
+  `config.port` stayed `0`: the startup log said `127.0.0.1:0`, and
+  `getStatus()`, `/status` and the anatomy view all answered `0` — the anatomy
+  page renders `port ${live.port ?? 18790}`, and zero is not nullish, so it
+  displayed "port 0". The cost showed up in CI. Because a server on port 0
+  could not say where it was, tests pre-reserved a port by binding it, closing
+  it, and handing the bare number over to be bound again, which leaves a window
+  in which anything may take it. On 2026-08-19 two vitest workers were handed
+  `127.0.0.1:36297`; one held it and the other failed with `EADDRINUSE`. The
+  server now reads the bound port back and exposes it, and the gateway
+  integration and observability suites ask for port 0 and then ask the server
+  where it landed, which has no window at all.
 - The Pokemon runtime corrupted its own state files when two threads wrote at
   once. `atomic_write_json` named its temporary after the process id, which
   threads share, so it was one name for the whole process rather than one per

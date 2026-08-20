@@ -25,7 +25,6 @@ import {
   logGatewayRequest,
 } from '../../gateway/observability.js';
 import WebSocket from 'ws';
-import { reserveTestPort } from '../support/test-port.js';
 
 let testDataDir = '';
 
@@ -162,9 +161,9 @@ describe('Gateway Observability', () => {
 
   describe('GatewayServer wiring', () => {
     it('a brand-new server instance reports zeroed metrics via /status and /health', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       const status = await fetchJson(`http://127.0.0.1:${port}/status`);
       const health = await fetchJson(`http://127.0.0.1:${port}/health`);
@@ -174,9 +173,9 @@ describe('Gateway Observability', () => {
     });
 
     it('never counts /health or /status polling as an RPC request', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       for (let i = 0; i < 5; i++) {
         await fetchJson(`http://127.0.0.1:${port}/health`);
@@ -188,9 +187,9 @@ describe('Gateway Observability', () => {
     });
 
     it('increments the success counter exactly once per successful WS RPC dispatch', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -209,9 +208,9 @@ describe('Gateway Observability', () => {
     });
 
     it('increments the error counter exactly once for an unknown method over WS', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -225,10 +224,10 @@ describe('Gateway Observability', () => {
     });
 
     it('increments the auth_failure counter exactly once for a requiresAuth method called unauthenticated', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'token', tokens: ['secret-token'] } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'token', tokens: ['secret-token'] } });
       server.registerMethod('protected.thing', async () => ({ ok: true }), { requiresAuth: true });
       await server.start();
+      const port = server.port;
 
       // HTTP path: no credential supplied against a token-mode server
       const res = await fetch(`http://127.0.0.1:${port}/`, {
@@ -244,9 +243,9 @@ describe('Gateway Observability', () => {
     });
 
     it('increments the rate_limited counter exactly once when the WS rate limit window is exceeded', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -269,10 +268,10 @@ describe('Gateway Observability', () => {
     }, 15000);
 
     it('increments the timeout counter exactly once when a handler exceeds an opt-in executionTimeoutMs', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' }, executionTimeoutMs: 50 });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' }, executionTimeoutMs: 50 });
       server.registerMethod('slow.thing', () => new Promise((resolve) => setTimeout(() => resolve({ done: true }), 2000)));
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -287,10 +286,10 @@ describe('Gateway Observability', () => {
     }, 10000);
 
     it('does not enforce a timeout when executionTimeoutMs is unset (default, non-breaking)', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       server.registerMethod('slow.thing', () => new Promise((resolve) => setTimeout(() => resolve({ done: true }), 150)));
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -301,9 +300,9 @@ describe('Gateway Observability', () => {
     });
 
     it('tracks the active connections gauge as WS clients connect and disconnect', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port = server.port;
 
       const ws1 = await connectWs(port);
       await doConnect(ws1);
@@ -323,14 +322,14 @@ describe('Gateway Observability', () => {
     });
 
     it('tracks the active agent executions gauge while an agent run is in flight, and clears it after', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       let releaseAgent: (() => void) | undefined;
       server.setAgentHandler(async (req) => {
         await new Promise<void>((resolve) => { releaseAgent = resolve; });
         return { content: 'done', sessionId: req.sessionId ?? 'x', finishReason: 'stop' };
       });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -351,8 +350,7 @@ describe('Gateway Observability', () => {
     });
 
     it('tracks cronService runs with the same execution gauge', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       let releaseRun: (() => void) | undefined;
       let markStarted: (() => void) | undefined;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
@@ -368,6 +366,7 @@ describe('Gateway Observability', () => {
         disable: async () => undefined,
       });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -386,8 +385,7 @@ describe('Gateway Observability', () => {
     });
 
     it('clears the cron execution gauge when the trigger branch fails', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       server.setCronService({
         list: () => [],
         run: async () => { throw new Error('cron failed'); },
@@ -395,6 +393,7 @@ describe('Gateway Observability', () => {
         disable: async () => undefined,
       });
       await server.start();
+      const port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -407,9 +406,9 @@ describe('Gateway Observability', () => {
     });
 
     it('a fresh server instance always starts with zeroed counters (predictable reset per instance/start)', async () => {
-      const port1 = await reserveTestPort();
-      const server1 = new GatewayServer({ port: port1, bind: 'loopback', auth: { mode: 'none' } });
+      const server1 = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server1.start();
+      const port1 = server1.port;
       const ws1 = await connectWs(port1);
       await doConnect(ws1);
       await rpc(ws1, 'ping');
@@ -418,17 +417,17 @@ describe('Gateway Observability', () => {
       ws1.close();
       await server1.stop();
 
-      const port2 = await reserveTestPort();
-      server = new GatewayServer({ port: port2, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      const port2 = server.port;
       const status2 = await fetchJson(`http://127.0.0.1:${port2}/status`);
       expect((status2.metrics as Record<string, number>).rpcRequestsTotal).toBe(0);
     });
 
     it('restarting the same server instance (stop then start) resets counters back to zero', async () => {
-      const port = await reserveTestPort();
-      server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+      server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
+      let port = server.port;
 
       const ws = await connectWs(port);
       await doConnect(ws);
@@ -440,6 +439,7 @@ describe('Gateway Observability', () => {
       await server.stop();
       await new Promise((r) => setTimeout(r, 50));
       await server.start();
+      port = server.port;
       await new Promise((r) => setTimeout(r, 50));
 
       const after = await fetchJson(`http://127.0.0.1:${port}/status`);

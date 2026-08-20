@@ -1,35 +1,44 @@
 /**
  * Port allocation for tests that bind real sockets.
  *
- * The previous approach guessed: `34000 + Math.floor(Math.random() * 10000)`,
+ * The original approach guessed: `34000 + Math.floor(Math.random() * 10000)`,
  * with no check that anything was listening there. That is a birthday problem
- * wearing a disguise — ~74 draws across three files, run in parallel vitest
- * workers, on a CI runner that has its own listeners. It failed exactly as the
- * arithmetic predicts:
+ * wearing a disguise, and it failed exactly as the arithmetic predicts.
  *
- *     × increments the auth_failure counter exactly once ...
- *       → listen EADDRINUSE: address already in use 127.0.0.1:35212
+ * Asking the kernel is better, but it is not a fix. This helper binds port 0,
+ * reads the port the OS chose, then *closes* the probe so the caller can bind
+ * it. Between that close and the caller's bind the port belongs to nobody, and
+ * anything on the machine may take it.
  *
- * Instead of guessing, ask the kernel. Binding port 0 makes the OS assign a
- * free ephemeral port, which it will not hand to another concurrent listener.
- * We then close our probe so the caller can bind it.
+ * A previous version of this comment claimed that window was safe in practice,
+ * because "ephemeral ports are handed out cyclically, so an immediate reuse
+ * does not happen", and because we never return the same port twice. Both
+ * claims are about a single process. Vitest runs test files in separate worker
+ * processes, so the `issued` set below is not shared, and on 2026-08-19 two
+ * workers were handed the same port:
  *
- * Two windows remain, and both are narrow by construction:
+ *     gateway-observability.test.ts: Gateway server started on 127.0.0.1:36297
+ *     gateway.test.ts > should respond to GET /health
+ *       Gateway server error: listen EADDRINUSE: address already in use 127.0.0.1:36297
  *
- *  - Between our close and the caller's bind, the OS could theoretically
- *    reassign the port. In practice ephemeral ports are handed out cyclically,
- *    so an immediate reuse does not happen.
- *  - A different process could guess our port. Nothing in this repo guesses
- *    any more, which is the point of routing every caller through here.
+ * So treat this helper as a last resort. If the thing you are starting can
+ * report the port it bound, pass it port 0 and ask it afterwards -- there is
+ * no window at all in that arrangement, because the socket is never closed.
+ * `GatewayServer` does this via its `port` getter, which is why the gateway
+ * integration and observability suites no longer appear below.
  *
- * We additionally never return the same port twice within a process, so a test
- * file cannot collide with itself no matter what the kernel recycles.
+ * The remaining callers here start servers that have no such accessor.
  */
 import net from 'net';
 
 const issued = new Set<number>();
 
-/** Ask the OS for a free TCP port on the loopback interface. */
+/**
+ * Ask the OS for a free TCP port on the loopback interface.
+ *
+ * Prefer binding port 0 on the real server and reading the port back. Use this
+ * only when the server cannot tell you which port it bound.
+ */
 export async function reserveTestPort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const port = await askKernelForAPort();

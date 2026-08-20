@@ -929,7 +929,6 @@ describe('Gateway Integration', () => {
     it('serializes an immediate restart behind an in-progress stop', async () => {
       server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
       await server.start();
-      const port = server.port;
 
       const stopping = server.stop();
       const restarting = server.start();

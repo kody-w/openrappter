@@ -826,6 +826,7 @@ export class OpenRappterShowAndTell extends LitElement {
                         ${this.narrationState !== 'ready'
                           ? html`
                               <button
+                                data-desktop-sensitive="model-download"
                                 ?disabled=${this.busy || this.narrationPhase !== 'idle'}
                                 @click=${() => void this.ensureNarrationModel()
                                   .catch((error) => {
@@ -835,6 +836,7 @@ export class OpenRappterShowAndTell extends LitElement {
                             `
                           : nothing}
                         <button
+                          data-desktop-sensitive="microphone"
                           class=${this.narrationRecording ? 'danger' : ''}
                           ?disabled=${this.busy || this.narrationPhase === 'loading'}
                           @click=${() => void (

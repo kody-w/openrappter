@@ -34,7 +34,7 @@ import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
 import { registerUpdateCommand } from './cli/update.js';
 import { registerHubCommands } from './cli/hubs.js';
-import { portTypedOnCommandLine } from './infra/cli-port.js';
+import { portFromEnvironment, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
   ensureFlightRecorderFromEnv,
@@ -130,7 +130,7 @@ async function startGatewayInProcess(opts?: {
     readIMessageConfig,
   } = await import('./channels/imessage-gateway.js');
 
-  const port = opts?.port ?? parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+  const port = opts?.port ?? portFromEnvironment() ?? 18790;
   const token = process.env.OPENRAPPTER_TOKEN || undefined;
   const silent = opts?.silent ?? false;
   const log = (...args: unknown[]) => { if (!silent) console.log(...args); };
@@ -1118,10 +1118,7 @@ async function runRootCommand(
 
           let markerState: 'preparing' | 'active' = 'active';
           let expiresAt = 0;
-          let delegatedPort = Number.parseInt(
-            process.env.OPENRAPPTER_PORT ?? '18790',
-            10,
-          );
+          let delegatedPort = portFromEnvironment() ?? 18790;
           try {
             const marker = JSON.parse(
               fs.readFileSync(gatewayDelegationMarker, 'utf8'),
@@ -1276,9 +1273,7 @@ async function runRootCommand(
       declareCurrentInstance(lockInstance);
       const explicitPort = options.port
         ? Number(options.port)
-        : (process.env.OPENRAPPTER_PORT
-          ? Number(process.env.OPENRAPPTER_PORT)
-          : undefined);
+        : portFromEnvironment();
       const lockPort = gatewayPortFor({
         instance: lockInstance,
         port: explicitPort,
@@ -1349,7 +1344,7 @@ async function runRootCommand(
       declareCurrentInstance(lockInstance);
       const explicitPort = options.port
         ? Number(options.port)
-        : (process.env.OPENRAPPTER_PORT ? Number(process.env.OPENRAPPTER_PORT) : undefined);
+        : portFromEnvironment();
       const lockPort = gatewayPortFor({ instance: lockInstance, port: explicitPort });
       const lockFile = gatewayLockFileFor({ instance: lockInstance, port: lockPort });
       if (!acquireLock({ filePath: GATEWAY_LIFECYCLE_LOCK })) {
@@ -1822,7 +1817,7 @@ program
     log.step(`Step ${totalSteps} of ${totalSteps} — Starting background daemon`);
 
     let daemonStarted = false;
-    const daemonPort = parseInt(process.env.OPENRAPPTER_PORT ?? '18790', 10);
+    const daemonPort = portFromEnvironment() ?? 18790;
 
     // Check if daemon is already running
     let alreadyRunning = false;

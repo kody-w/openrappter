@@ -62,7 +62,11 @@ CAPABILITY_EVIDENCE = {
     "credential-access": {
         "modules": {"keyring", "netrc", "getpass"},
         "calls": {"os.getenv", "os.environ.get", "getpass.getpass"},
-        "attrs": {"environ"},
+        # Read in any position, not just as a call. `os.environ["OPENAI_KEY"]`
+        # is a subscript, `dict(os.environ)` an argument, `os.environ.copy()`
+        # a method this table does not name. All three reach the same secrets
+        # as the `os.environ.get` above, so all three have to count.
+        "attrs": {"environ", "environb"},
     },
     "filesystem-write": {
         "modules": {"shutil"},
@@ -140,6 +144,12 @@ def observed_capabilities(path):
     `loads` would make every `json.loads` a dynamic-code finding, and a control
     that cries wolf on ordinary code gets switched off, and then it protects
     nothing.
+
+    `attrs` entries match an attribute in *any* position, because the reads
+    worth catching are not calls: `os.environ["TOKEN"]` is a subscript and
+    `dict(os.environ)` is an argument. Matching an attribute name this broadly
+    is only safe for names that mean one thing (`environ`); it is not a
+    mechanism to reach for casually.
     """
     try:
         with open(path, "rb") as fh:
@@ -154,11 +164,26 @@ def observed_capabilities(path):
             names = [a.name.split(".")[0] for a in node.names]
         elif isinstance(node, ast.ImportFrom) and node.module:
             names = [node.module.split(".")[0]]
+            # `from os import environ` binds the name directly, so every later
+            # use is a bare Name that no attribute rule can see. Catch it here,
+            # at the one point where the provenance is still visible.
+            for cap, spec in CAPABILITY_EVIDENCE.items():
+                for alias in node.names:
+                    if alias.name in spec.get("attrs", set()):
+                        found.add(cap)
+                        evidence.append(
+                            f"{cap}: from {node.module} import {alias.name}")
         for cap, spec in CAPABILITY_EVIDENCE.items():
             for name in names:
                 if name in spec.get("modules", set()):
                     found.add(cap)
                     evidence.append(f"{cap}: import {name}")
+
+        if isinstance(node, ast.Attribute):
+            for cap, spec in CAPABILITY_EVIDENCE.items():
+                if node.attr in spec.get("attrs", set()):
+                    found.add(cap)
+                    evidence.append(f"{cap}: {node.attr}")
 
         if isinstance(node, ast.Call):
             call = dotted(node.func)

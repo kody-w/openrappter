@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The capability-reachability gate asserted about agents whose source it could
+  not fully see. It excluded an agent that statically imports deep internals —
+  "the source is the whole story" only holds for self-contained files — but read
+  static `import ... from` lines only, so `await import('../infra/gateway-lock.js')`
+  was invisible to it. Three of the thirteen agents it asserted against reached
+  deep modules that way. Dynamic imports now count, and a computed specifier
+  excludes the file outright, since nothing static can say what it loads. No
+  mis-declaration was hiding behind this; the assertions were simply resting on
+  a premise that was not true. The anti-vacuity floor now sits at the true count
+  so the set cannot erode one agent at a time.
 - A shipped agent could not be loaded at all. `agents/morning_brief_agent.js`
   ended its manifest with `} as const;` — TypeScript, in a `.js` file — so Node
   threw `Unexpected identifier 'as'` before reading any of it. It had been that

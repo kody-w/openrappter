@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `conformance.py`'s capability table carried an entry nothing read. The
+  `credential-access` capability listed `"attrs": {"environ"}`, but the syntax
+  walker only ever consumed `modules`, `calls` and `builtins` — so the one entry
+  written to catch environment reads was inert. Ten of ten realistic forms went
+  unseen, including `os.environ["OPENAI_API_KEY"]`, `dict(os.environ)` and
+  `from os import environ`; only `os.getenv` and `os.environ.get` were caught, so
+  an agent passed or failed on which spelling its author happened to prefer. The
+  walker now reads `attrs` in any position and at the import site, and a new test
+  fails if *any* key in the table goes unread, so a dead key cannot recur
+  silently. No agent was under-declaring; this was a hole in the gate.
+
 - The capability gate's evidence patterns could not see most ways of writing to
   disk. They are what decides whether an agent is holding an undeclared
   capability, and nothing tested them directly — they were only ever run against

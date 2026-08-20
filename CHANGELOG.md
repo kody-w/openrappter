@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `test_imessage_rpc.py` failed roughly half the time when run immediately
+  after the full suite, and passed when run warm -- the pattern that trains
+  people to re-run red builds instead of reading them. Root cause was a
+  1-second timeout in the two tests that assert *terminal* conditions (the RPC
+  child exited, or emitted unframeable output). Those conditions resolve as
+  soon as the child acts, so the timeout is only a safety net against a hang,
+  but 1s raced a cold Python interpreter spawn: warm, the request resolves in
+  ~25ms; the first spawn after heavy disk activity measured ~920ms against the
+  1s budget. Past that the client correctly raised `ImsgRpcTimeout` instead of
+  the expected terminal error and the assertion failed. The client was never
+  at fault. Raised the safety net to 30s via a named constant, which leaves
+  the tests just as fast -- they resolve on the terminal condition, not the
+  timeout -- and measurably more consistent (0.57s per run, against 0.72-1.89s
+  before).
+
 - Python's MCP server diverged from TypeScript on five wire-visible points,
   none of them covered by a test. The most serious: a tool whose agent
   *resolved* with a structured `{"status": "error"}` envelope was reported to

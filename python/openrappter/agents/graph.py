@@ -14,6 +14,7 @@ Mirrors TypeScript agents/graph.ts
 """
 
 import json
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -266,7 +267,7 @@ class AgentGraph:
                 kwargs['upstream_slush'] = upstream_slush
 
         try:
-            result_str = node.agent.execute(**kwargs)
+            result_str = self._execute_with_timeout(node.agent, kwargs)
             duration_ms = int((time.time() - node_start) * 1000)
 
             try:
@@ -302,6 +303,41 @@ class AgentGraph:
                 duration_ms=duration_ms,
                 status='error',
             )
+
+    def _execute_with_timeout(self, agent, kwargs):
+        """Execute an agent, enforcing the optional per-node timeout.
+
+        Mirrors AgentChain._execute_with_timeout. Raising TimeoutError here is
+        deliberate: _execute_node already turns any exception into an error
+        GraphNodeResult, so a timed-out node fails exactly like a raising one
+        and its dependents are skipped by the normal failure path.
+        """
+        if not self._node_timeout:
+            return agent.execute(**kwargs)
+
+        result = [None]
+        error = [None]
+
+        def run():
+            try:
+                result[0] = agent.execute(**kwargs)
+            except Exception as e:  # noqa: BLE001 - re-raised on the caller's thread
+                error[0] = e
+
+        # daemon=True: on timeout we abandon this worker, and a non-daemon
+        # thread would block interpreter exit until the node we gave up on
+        # finally returns -- making the timeout buy nothing.
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(timeout=self._node_timeout / 1000)
+
+        if thread.is_alive():
+            raise TimeoutError(f"Node timeout after {self._node_timeout}ms")
+
+        if error[0] is not None:
+            raise error[0]
+
+        return result[0]
 
     def _should_skip(self, name, skipped, completed):
         """Determine whether a node should be skipped."""

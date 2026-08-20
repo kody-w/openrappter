@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python's `AgentGraph` accepted a `node_timeout` and then ignored it. The
+  constructor stored `self._node_timeout` and nothing ever read it again -- that
+  assignment was the only line in the whole file matching "timeout" -- so a node
+  that hung, hung the entire graph forever. TypeScript has always enforced its
+  `nodeTimeout`, and both `CLAUDE.md` and the Obsidian vault document the option
+  as part of `GraphOptions`, so the bound was promised in three places and
+  applied in one. Measured before the fix: a graph with a 100ms `node_timeout`
+  running a 3s node returned after 3.03s and reported the node as `success` --
+  the caller was told the work finished inside a budget it had blown by 30x.
+  It now fails that node at 100ms with `Node timeout after 100ms`, matching the
+  TypeScript message exactly, and dependents skip through the normal
+  failure path. The timeout is still opt-in: unset means unbounded, as before.
+
 - Step and node timeouts no longer outlive the work they bound. Both runtimes
   raced a step against a timer and then leaked the loser. In Python,
   `AgentChain` started its timeout worker with `threading.Thread(target=run)`

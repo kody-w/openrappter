@@ -380,7 +380,26 @@ export class OpenRappterDebug extends LitElement {
         </div>
       </div>
 
-      <div class="card">
+      <!--
+        The RPC console invokes any gateway method the operator types, so it is
+        a general-purpose escape from the bounded vocabulary DesktopControl
+        gives a model (navigate/snapshot/click/input/select/scroll/wait). Left
+        open, an agent could drive it to call config.get -- which returns the
+        whole config file and, unlike config.set/apply, requires no auth -- and
+        read the result straight out of the snapshot.
+
+        data-desktop-private on the card is what actually closes this: it
+        hides the result text and, because the same boundary check filters the
+        interactive list, drops these controls from the snapshot so no ref can
+        reach them. The per-control markers below are defence in depth, kept in
+        the same spirit as the Show-and-Tell surface, so restructuring the card
+        cannot quietly hand an agent arbitrary RPC.
+
+        This is deliberately narrower than the whole view: the status, models
+        and heartbeat cards render fixed, known-shape payloads, while only this
+        one renders whatever the operator asked for.
+      -->
+      <div class="card" data-desktop-private>
         <div class="card-header">🧪 RPC Test Console</div>
         <div class="card-body">
           <div class="rpc-form">
@@ -388,6 +407,7 @@ export class OpenRappterDebug extends LitElement {
               <label>Method</label>
               <input
                 type="text"
+                data-desktop-sensitive
                 placeholder="e.g. agents.list, channels.list"
                 .value=${this.rpcMethod}
                 @input=${(e: InputEvent) => {
@@ -401,6 +421,7 @@ export class OpenRappterDebug extends LitElement {
             <div>
               <label>Params (JSON)</label>
               <textarea
+                data-desktop-sensitive
                 placeholder="{}"
                 .value=${this.rpcParams}
                 @input=${(e: InputEvent) => {
@@ -409,7 +430,11 @@ export class OpenRappterDebug extends LitElement {
               ></textarea>
             </div>
             <div class="rpc-actions">
-              <button @click=${this.handleRpcCall} ?disabled=${this.rpcLoading}>
+              <button
+                data-desktop-sensitive
+                @click=${this.handleRpcCall}
+                ?disabled=${this.rpcLoading}
+              >
                 ${this.rpcLoading ? 'Calling…' : 'Call'}
               </button>
             </div>

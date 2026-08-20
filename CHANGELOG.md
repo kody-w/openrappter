@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The debug view's RPC console can no longer be read or driven by desktop
+  automation. `debug` is in the enforced navigable view list, and the console
+  invokes whatever gateway method is typed into it, so an agent could set the
+  method to `config.get` -- which returns the entire config file and, unlike
+  `config.set`/`config.apply`, requires no auth -- click Call, and read the
+  result out of the next snapshot. That bypassed the config view's own
+  redaction entirely. The console card is now marked `data-desktop-private`,
+  which both hides its output and drops its controls from the snapshot so no
+  ref can reach them, and each control additionally carries
+  `data-desktop-sensitive` as defence in depth. The status, models and
+  heartbeat cards render fixed, known-shape payloads and stay readable.
+
 - The config view no longer prints config values into a model-visible desktop
   snapshot. `config` is a view `DesktopControlAgent` is told it can navigate to,
   and the view already redacted values twice over -- raw mode keeps the file in

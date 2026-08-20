@@ -30,7 +30,7 @@ interface ActionItem { text: string; file: string; line: number; urgency: 'high'
 
 export class NotesIntakeAgent extends BasicAgent {
   constructor() {
-    const metadata: AgentMetadata = { name: 'NotesIntake', description: 'Scans an Obsidian vault or notes directory, extracts action items, tags, and identifies smart reminders by urgency.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Notes directory or Obsidian vault path' }, query: { type: 'string', description: 'Natural language query' } }, required: ['path'] } };
+    const metadata: AgentMetadata = { name: 'NotesIntake', description: 'Scans an Obsidian vault or notes directory, extracts action items, tags, and identifies smart reminders by urgency.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Notes directory or Obsidian vault path' } }, required: ['path'] } };
     super('NotesIntake', metadata);
   }
 

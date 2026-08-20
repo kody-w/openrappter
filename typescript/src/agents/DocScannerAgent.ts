@@ -31,7 +31,7 @@ interface FileInfo { path: string; name: string; ext: string; size: number; mtim
 
 export class DocScannerAgent extends BasicAgent {
   constructor() {
-    const metadata: AgentMetadata = { name: 'DocScanner', description: 'Scans a directory for documents and notes, reporting file count, types, recent changes, and TODOs found.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Directory to scan' }, query: { type: 'string', description: 'Natural language query' } }, required: ['path'] } };
+    const metadata: AgentMetadata = { name: 'DocScanner', description: 'Scans a directory for documents and notes, reporting file count, types, recent changes, and TODOs found.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Directory to scan' } }, required: ['path'] } };
     super('DocScanner', metadata);
   }
 

@@ -103,7 +103,6 @@ class DemoRecorderAgent(BasicAgent):
                         "type": "boolean",
                         "description": "Enable TTS narration (default true)",
                     },
-                    "query": {"type": "string", "description": "Natural language description"},
                 },
                 "required": [],
             },

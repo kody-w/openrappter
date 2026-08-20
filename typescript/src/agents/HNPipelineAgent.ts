@@ -27,7 +27,7 @@ interface Highlight { title: string; url: string; score: number; relevance_keywo
 export class HNPipelineAgent extends BasicAgent {
   private hnAgent: BasicAgent;
   constructor(hnAgent?: BasicAgent) {
-    const metadata: AgentMetadata = { name: 'HNPipeline', description: 'Fetches top Hacker News stories, filters by project-relevant keywords, and returns highlights.', parameters: { type: 'object', properties: { keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to filter stories by' }, count: { type: 'integer', description: 'Number of stories to fetch (1-10)' }, query: { type: 'string', description: 'Natural language query' } }, required: [] } };
+    const metadata: AgentMetadata = { name: 'HNPipeline', description: 'Fetches top Hacker News stories, filters by project-relevant keywords, and returns highlights.', parameters: { type: 'object', properties: { keywords: { type: 'array', items: { type: 'string' }, description: 'Keywords to filter stories by' }, count: { type: 'integer', description: 'Number of stories to fetch (1-10)' } }, required: [] } };
     super('HNPipeline', metadata);
     this.hnAgent = hnAgent || new HackerNewsAgent();
   }

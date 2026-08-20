@@ -258,10 +258,6 @@ export class DemoRecorderAgent extends BasicAgent {
             type: 'boolean',
             description: 'Enable TTS narration (default true)',
           },
-          query: {
-            type: 'string',
-            description: 'Natural language description of what to demo',
-          },
         },
         required: [],
       },
@@ -272,6 +268,24 @@ export class DemoRecorderAgent extends BasicAgent {
   }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
+    // This agent used to advertise a `query` natural-language parameter that
+    // nothing read. Prose fell through to the `record_rar` default, so a caller
+    // asking for some other demo silently got a screen recording of the RAR
+    // walkthrough and a success reply. Refuse rather than record the wrong
+    // thing; an explicit action still wins, so prose alongside one is ignored
+    // exactly as before.
+    if (
+      typeof kwargs.action !== 'string' &&
+      typeof kwargs.query === 'string' &&
+      kwargs.query.trim() !== ''
+    ) {
+      return JSON.stringify({
+        status: 'error',
+        message:
+          'DemoRecorder takes a typed action, not a natural-language query. ' +
+          'Use action with one of: record_rar, record_custom, list_scripts, status.',
+      });
+    }
     const action = (kwargs.action as string) || 'record_rar';
     const withNarration = kwargs.with_narration !== false;
     const outputName = kwargs.output_name ?? `demo_${Date.now()}`;

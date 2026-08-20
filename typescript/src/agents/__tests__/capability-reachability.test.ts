@@ -69,7 +69,42 @@ const EVIDENCE: Record<string, RegExp> = {
   'filesystem-write': new RegExp(
     `\\b(?:${FS_WRITE_VERBS.join('|')})(?:Sync)?\\b|\\b(?:rm|cp)(?:Sync)?\\s*\\(`,
   ),
+  // Any environment read, deliberately — matching the Python table, which
+  // counts `os.environ` in every position. Neither side can tell
+  // `OPENRAPPTER_PYTHON` from `OPENAI_API_KEY`; both are one subscript away
+  // from each other, and a table that tried to guess which names are secret
+  // would be wrong the first time someone invented a new one. Python already
+  // paid this false-positive cost -- `pokemon_agent.py` declares
+  // credential-access for `os.environ.get("OPENRAPPTER_POKEMON_ROM")`, a ROM
+  // path. Until now the TypeScript twin of that read declared nothing, so the
+  // same code got two verdicts depending on which language it was written in.
+  'credential-access':
+    /\bprocess\.env\b|from\s+['"]keytar['"]|\bfind-generic-password\b/,
+  // `import(` only when the specifier is computed: a literal `import('./x.js')`
+  // is an ordinary dependency, while a computed one runs code chosen at
+  // runtime.
+  'dynamic-code':
+    /\beval\s*\(|\bnew\s+Function\s*\(|\bvm\.runIn|from\s+['"](?:node:)?vm['"]|\bimport\s*\((?!\s*['"])/,
 };
+
+/**
+ * Capabilities that may not be reported as over-declared.
+ *
+ * Under-declaration and over-declaration are not mirror images, and treating
+ * them as one cost a correct declaration. Evidence in the file proves an agent
+ * *reaches* a capability; the absence of evidence does not prove it does not,
+ * because reaching it can be delegated. `PythonAgent.ts` is the live proof: it
+ * declares `dynamic-code` because `spawn('python3', [runner.py, ...])` loads
+ * an arbitrary `.py` file by path and calls into it. Nothing in the agent's own
+ * source can show that, so a regex would have called a true declaration false
+ * and pushed someone to delete it -- the permissive direction, and the one
+ * failure this file must never cause.
+ *
+ * The other capabilities stay in both directions because their evidence cannot
+ * be delegated out of the file: an import or a call is either written here or
+ * it is not.
+ */
+const NO_ABSENCE_PROOF = new Set(['dynamic-code']);
 
 function agentFiles(): string[] {
   return readdirSync(agentsDir)
@@ -193,6 +228,51 @@ describe('agents do not declare capabilities they cannot reach', () => {
       }
     });
 
+    it('sees any environment read, secret-looking or not', () => {
+      const cred = EVIDENCE['credential-access'];
+      expect(cred.test("const k = process.env.OPENAI_API_KEY;")).toBe(true);
+      expect(cred.test("const p = process.env.OPENRAPPTER_PYTHON ?? 'python3';"))
+        .toBe(true);
+      expect(cred.test('const { HOME } = process.env;')).toBe(true);
+      expect(cred.test("import keytar from 'keytar';")).toBe(true);
+      // Not an environment read. `env` as an ordinary word must not fire, or
+      // agents get pushed into declaring a capability they do not hold.
+      expect(cred.test('const env = buildEnvironment(opts);')).toBe(false);
+      expect(cred.test('// pass the environment through to the child')).toBe(false);
+    });
+
+    it('sees code chosen at runtime, but not an ordinary import', () => {
+      const dyn = EVIDENCE['dynamic-code'];
+      expect(dyn.test('const out = eval(expr);')).toBe(true);
+      expect(dyn.test('const f = new Function("return 1");')).toBe(true);
+      expect(dyn.test("import vm from 'node:vm';")).toBe(true);
+      expect(dyn.test('vm.runInNewContext(src);')).toBe(true);
+      expect(dyn.test('const mod = await import(specifier);')).toBe(true);
+      // A literal specifier is a dependency, not dynamic code. Every
+      // self-contained agent uses this form to reach BasicAgent.
+      expect(dyn.test("const mod = await import('./BasicAgent.js');")).toBe(false);
+      expect(dyn.test("import { spawn } from 'child_process';")).toBe(false);
+    });
+
+    it('every capability the contract knows has evidence here', () => {
+      // The Python table is the contract's other half. It had five entries
+      // while this one had three, so `credential-access` and `dynamic-code`
+      // could not be reported in TypeScript at all -- and R4 said in its own
+      // success message that TypeScript was covered by this file.
+      for (const cap of [
+        'process-exec', 'network', 'filesystem-write',
+        'credential-access', 'dynamic-code',
+      ]) {
+        expect(Object.keys(EVIDENCE)).toContain(cap);
+      }
+    });
+
+    it('nothing is exempted from over-declaration that is not a capability', () => {
+      for (const cap of NO_ABSENCE_PROOF) {
+        expect(Object.keys(EVIDENCE)).toContain(cap);
+      }
+    });
+
     it('sees network transports beyond http', () => {
       const net = EVIDENCE['network'];
       expect(net.test("import dgram from 'node:dgram';")).toBe(true);
@@ -212,7 +292,7 @@ describe('agents do not declare capabilities they cannot reach', () => {
         { capabilities?: readonly string[] } | undefined
       >;
       for (const cap of mod.__manifest__?.capabilities ?? []) {
-        const evidence = EVIDENCE[cap];
+        const evidence = NO_ABSENCE_PROOF.has(cap) ? undefined : EVIDENCE[cap];
         if (evidence && !evidence.test(source)) {
           over.push(`${file} declares ${cap} with nothing in the file that reaches it`);
         }

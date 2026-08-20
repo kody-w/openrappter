@@ -1,6 +1,7 @@
 """Tests for AgentChain - sequential agent pipeline with data_slush forwarding."""
 
 import json
+import threading
 import time
 import pytest
 
@@ -255,3 +256,65 @@ class TestEmptyChain:
         assert result.status == "success"
         assert len(result.steps) == 0
         assert result.final_result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: step timeout
+#
+# The timeout exists to bound how long a caller waits on one step. It only
+# does that if abandoning the step actually releases the process: a non-daemon
+# worker keeps the interpreter alive until the step we gave up on finishes,
+# so a 100ms timeout on a 5s step still costs the caller 5s at exit.
+# ---------------------------------------------------------------------------
+
+class SleepyAgent(BasicAgent):
+    """Sleeps well past the step timeout so the chain abandons it."""
+
+    def __init__(self, seconds=2.0):
+        self._seconds = seconds
+        metadata = {
+            "name": "Sleepy",
+            "description": "Sleeps",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+        super().__init__(name="Sleepy", metadata=metadata)
+
+    def perform(self, **kwargs):
+        time.sleep(self._seconds)
+        return json.dumps({"status": "success"})
+
+
+class TestStepTimeout:
+    def test_slow_step_times_out_and_releases_the_caller(self):
+        chain = AgentChain({"step_timeout": 100})
+        chain.add_step("slow", SleepyAgent(2.0))
+
+        started = time.time()
+        result = chain.run()
+        elapsed = time.time() - started
+
+        assert result.status == "error"
+        assert "timeout" in (result.error or "").lower()
+        # Released at the timeout, not at the sleeping step's own pace.
+        assert elapsed < 1.0, f"run() took {elapsed:.2f}s for a 100ms timeout"
+
+    def test_abandoned_worker_is_a_daemon_so_it_cannot_block_exit(self):
+        before = set(threading.enumerate())
+
+        chain = AgentChain({"step_timeout": 100})
+        chain.add_step("slow", SleepyAgent(2.0))
+        result = chain.run()
+        assert result.status == "error"
+
+        survivors = [
+            t for t in threading.enumerate()
+            if t not in before and t.is_alive()
+        ]
+        # Anti-vacuity: `all(...)` over an empty list passes and proves nothing,
+        # so first pin that the abandoned worker really is still running.
+        assert survivors, "expected the abandoned step worker to still be alive"
+        non_daemon = [t.name for t in survivors if not t.daemon]
+        assert not non_daemon, (
+            "these workers outlive the timeout as non-daemon threads and will "
+            f"block interpreter exit until the step finishes: {non_daemon}"
+        )

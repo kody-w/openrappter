@@ -5,7 +5,7 @@
  * cycle detection, and data_slush merging.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AgentGraph, createAgentGraph } from '../../agents/graph.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
 import type { AgentMetadata } from '../../agents/types.js';
@@ -318,5 +318,56 @@ describe('AgentGraph', () => {
       const result = await graph.run();
       expect(result.nodes.get('slow')?.status).toBe('error');
     });
+  });
+});
+
+// ── Node timeout: the timer must not outlive the node ──
+//
+// Same defect as AgentChain: executeWithTimeout raced the node against a
+// setTimeout it never cleared, so a node that finished well inside its budget
+// still left a pending timer holding the event loop open for the full window.
+
+class GatedNodeAgent extends BasicAgent {
+  constructor(private readonly gate: Promise<string>) {
+    const metadata: AgentMetadata = {
+      name: 'GatedNode',
+      description: 'Resolves only when the test releases it',
+      parameters: { type: 'object', properties: {}, required: [] },
+    };
+    super('GatedNode', metadata);
+  }
+
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
+    return this.gate;
+  }
+}
+
+describe('AgentGraph node timeout does not leak timers', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('clears the node timer when the node wins the race', async () => {
+    vi.useFakeTimers();
+
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+
+    const graph = createAgentGraph({ nodeTimeout: 300_000 })
+      .addNode({ name: 'gated', agent: new GatedNodeAgent(gate) });
+    const running = graph.run();
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Anti-vacuity: prove the timeout actually armed before asserting it is gone.
+    expect(vi.getTimerCount()).toBe(1);
+
+    release(JSON.stringify({ status: 'success' }));
+    await running;
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

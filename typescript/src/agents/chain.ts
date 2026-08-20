@@ -220,15 +220,22 @@ export class AgentChain {
     const promise = agent.execute(kwargs);
     if (!this.options.stepTimeout) return promise;
 
-    return Promise.race([
-      promise,
-      new Promise<string>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Step timeout after ${this.options.stepTimeout}ms`)),
-          this.options.stepTimeout,
-        )
-      ),
-    ]);
+    // The timer must be cleared on the winning path too: an uncleared timer
+    // stays pending and keeps the event loop alive long after the work is done.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<string>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Step timeout after ${this.options.stepTimeout}ms`)),
+            this.options.stepTimeout,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 }
 

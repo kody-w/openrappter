@@ -78,6 +78,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Nothing defended the line between an agent driving the desktop UI and an
+  agent asking to install another agent. `BasicAgent.run` pipes every agent's
+  result through `dispatchAgentUiCommands`, so the `ui_commands` channel is
+  open to any agent by design; the allowlist in `desktop-control/result.ts` is
+  what keeps `install_agent` off that channel. Adding `install_agent` to the
+  allowlist left all 5350 TypeScript tests green. A native approval dialog
+  still stands behind it, so this is defence in depth rather than the only
+  gate — but it is the gate that stops an agent from raising an install prompt
+  the user never asked for, and that dialog is skipped when
+  `OPENRAPPTER_DESKTOP_SMOKE=1`. The boundary is now asserted behaviourally:
+  a withheld action is refused, never reaches the queue, and does not stop the
+  permitted commands beside it. A third test forces any newly added desktop
+  action to be classified as agent-reachable or withheld.
+
 - TypeScript agents could not be checked for `credential-access` or
   `dynamic-code` at all. `conformance.py` knows five capabilities and hands
   TypeScript coverage to `capability-reachability.test.ts`, saying so in R4's

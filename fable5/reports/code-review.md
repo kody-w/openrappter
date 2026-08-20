@@ -27,7 +27,7 @@ Two findings in the same cluster were graded separately and **survive**:
 | Report line | Claim | Verdict |
 |---|---|---|
 | 173 | `chain.py` timeout threads not marked `daemon=True` | **CONFIRMED AND FIXED** in PR #403. Substantively correct and reproducible: a slow step kept the interpreter alive after `join()` returned (process exit 5.14s to 0.33s once fixed). |
-| 179 | `streaming.py` `_sessions` never evicted | **PLAUSIBLE, OPEN.** `_sessions` is real and, unlike `_subscribers` (deleted at line 154), is never deleted anywhere in the module. Not yet proven to be an observable leak; tracked as a lead, not a confirmed defect. |
+| 179 | `streaming.py` `_sessions` never evicted | **CONFIRMED AND FIXED.** Upgraded from PLAUSIBLE after measurement: 100 created-and-completed sessions retained 977 KB with no public API to release them, while `active_sessions` reported `0`. `delete_session()` added for parity with TypeScript's tested `deleteSession()`. |
 
 ### Why this is worse than a bad citation
 
@@ -214,7 +214,7 @@ _Fable 5 review of openrappter (Python/TypeScript) identified 9 findings across 
   - Fix: Wrap token.set() calls in try/finally to ensure tokens are always reset, or initialize context_snapshot to empty dict in execute() before setting token.
 - **🟠 MEDIUM — Streaming Manager Sessions Never Evicted - Unbounded Memory Growth** (gateway/streaming.py - Stream session lifecycle)
   - Evidence: `gateway/streaming.py:52-68, 70-77, 88-90 - _sessions dict grows indefinitely. create_session() adds entries, complete()/error() mark them done but never delete. No cleanup of completed sessions anywhere in the module.`
-  - **PLAUSIBLE, OPEN (2026-08-20).** `_sessions` is real, and unlike `_subscribers` (deleted at `streaming.py:154`) it is never deleted anywhere in the module. Not yet proven to produce an observable leak; tracked as a lead rather than a confirmed defect.
+  - **CONFIRMED AND FIXED (2026-08-20).** Upgraded from PLAUSIBLE after measurement. A churn loop of 100 sessions -- each created, pushed to, and completed -- left `len(_sessions) == 100`, `len(_subscribers) == 100` and 977 KB of block content retained, growing monotonically, while `active_sessions` reported `0`. The public API contained no method capable of removing a session. Fixed by adding `delete_session()`, mirroring TypeScript's tested `deleteSession()` at `streaming.ts:198`. Note the severity framing above is broader than the evidence supports: Python's `stream_manager` singleton has no production callers today, so this was a latent public-API defect rather than an active production leak.
   - Fix: Add explicit delete(session_id) method and call it from handlers after status is transmitted to client, or implement LRU eviction with max_sessions limit.
 - **🟠 MEDIUM — JSON Serialization Error Path in Python Gateway Does Not Preserve Request ID** (gateway/server.py - RPC error handling)
   - Evidence: `gateway/server.py:756-774 - If json.dumps(result) succeeds but json.loads(encoded) fails with RecursionError/OverflowError (line 764), error frame is sent. However, this catches ALL serialization issues after result is computed. Better to validate result schema earlier.`

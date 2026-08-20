@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Four more agents advertised a `query` parameter that no implementation reads,
+  the same defect fixed for `DesktopControl` in #401. A sweep of both runtimes
+  found every case, and the severity was not uniform. `DemoRecorder` (both
+  runtimes) defaults `action` to `record_rar`, so prose fell through and
+  recorded a screen capture of the RAR walkthrough, wrote the video to disk,
+  and returned success for a demo nobody asked for. `HNPipeline` declares
+  `required: []`, so prose returned the default-keyword stories as a success.
+  `DocScanner` and `NotesIntake` declare `required: ['path']` and so failed
+  safe with "path is required" -- a misleading schema rather than a false
+  success. All five advertised parameters are removed, and `DemoRecorder` now
+  refuses a prose-only call rather than recording the wrong demo, while a typed
+  action carrying stray prose still runs unchanged.
+
+- Agents can no longer advertise a parameter nothing reads. `capability-reachability`
+  already stopped an agent declaring a capability it cannot reach; the same check
+  now exists one level down for parameters, across both runtimes -- 34 TypeScript
+  agents and 21 Python agents, 284 advertised parameters. The check is
+  deliberately permissive, treating any mention of the name outside the metadata
+  block as a use, so it cannot redden CI over a spelling it does not recognise.
+  It carries anti-vacuity floors because an extractor returning nothing would
+  satisfy every "no dead parameters" assertion perfectly: the first draft of the
+  sweep did exactly that for Python, silently reporting a clean runtime that had
+  a dead parameter sitting in it.
+
 - `DesktopControl` no longer advertises a `query` parameter that it silently
   threw away. The schema offered `query: 'Natural-language fallback.'` --
   copied from `ShowAndTell`, where every `query` really does land in a free-text

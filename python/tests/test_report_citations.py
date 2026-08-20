@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -178,8 +179,17 @@ def test_the_headline_fabrication_is_still_marked():
 
 
 def test_gate_would_catch_a_newly_invented_symbol(scan):
-    """The detector must fire on a symbol that certainly does not exist."""
-    assert not _symbol_exists("_ThisSymbolIsFabricated_zzq"), \
+    """The detector must fire on a symbol that certainly does not exist.
+
+    The canary is built at runtime rather than written as a literal. A literal
+    would be committed into this very file, `*.py` is searched, and the symbol
+    would therefore exist -- the test would silently invert and start asserting
+    that a real symbol is absent. That is the same self-reference trap as the
+    `*.md` exclusion above: an artifact must never be able to prove its own
+    citation.
+    """
+    canary = "_absent_symbol_" + uuid.uuid4().hex
+    assert not _symbol_exists(canary), \
         "existence check returned true for an invented symbol"
     # ...and must still confirm real ones, so it is not just always-false.
     assert _symbol_exists("_execute_with_timeout"), \

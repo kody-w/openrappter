@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import secrets
 import sys
 import threading
@@ -34,17 +35,95 @@ def seed_consent(store, purpose):
     return token
 
 
+def load_contract():
+    return json.loads(
+        (Path(__file__).parents[2] / "contracts" / "show-and-tell-v1.json").read_text()
+    )
+
+
 def test_contract_and_session_schema_match(tmp_path):
     store = ShowAndTellStore(tmp_path / "show")
     session = store.create_session(intent_hint="Submit an expense report")
     assert session["schema"] == SHOW_AND_TELL_SCHEMA
     assert session["captureMode"] == "context"
 
-    contract = json.loads(
-        (Path(__file__).parents[2] / "contracts" / "show-and-tell-v1.json").read_text()
-    )
+    contract = load_contract()
     assert contract["session"]["schema"] == SHOW_AND_TELL_SCHEMA
     store.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_every_directory_the_store_creates_matches_the_contract_mode(tmp_path):
+    """The contract promises 0700; nothing used to check it.
+
+    ``mkdir(parents=True, mode=...)`` ignores the mode for ancestors, so the
+    root's parent was created world-readable while the leaf looked correct.
+    """
+    contract = load_contract()
+    expected = int(contract["privacy"]["directoryMode"], 8)
+    assert contract["privacy"]["directoryModeAppliesToCreatedAncestors"] is True, (
+        "the ancestor guarantee is the half that was silently missing"
+    )
+
+    root = tmp_path / "fresh" / "nested" / "show"
+    store = ShowAndTellStore(root)
+    session = store.create_session(intent_hint="expenses")
+    store.initialize()
+
+    created = [root, root.parent, root.parent.parent, store.session_dir(session["id"])]
+    assert [path.stat().st_mode & 0o777 for path in created] == [expected] * len(created)
+    store.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX modes")
+def test_files_the_store_writes_match_the_contract_mode(tmp_path):
+    contract = load_contract()
+    expected = int(contract["privacy"]["fileMode"], 8)
+
+    store = ShowAndTellStore(tmp_path / "show")
+    store.initialize()
+
+    assert store.database_path.stat().st_mode & 0o777 == expected
+    store.close()
+
+
+def test_contract_event_types_are_the_vocabulary_both_runtimes_share(tmp_path):
+    """A Python collector's events are read by the TypeScript analyzer.
+
+    Both runtimes open the same ``show-and-tell.db``, so the type vocabulary is
+    a cross-runtime contract. Renaming one used to fail nothing.
+    """
+    contract = load_contract()
+    declared = set(contract["event"]["types"])
+    assert len(declared) == len(contract["event"]["types"]), "duplicate event type"
+    assert declared, "contract declares no event types"
+
+    source = Path(__file__).parents[1] / "openrappter"
+    emitted = set()
+    pattern = re.compile(
+        r"""['"]((?:session|app|browser|frame|narration|manual|computer|collector)"""
+        r"""\.[a-z.]+)['"]"""
+    )
+    for path in [
+        source / "show_and_tell.py",
+        source / "show_and_tell_worker.py",
+        source / "agents" / "show_and_tell_agent.py",
+    ]:
+        emitted |= set(pattern.findall(path.read_text(encoding="utf-8")))
+
+    assert emitted == declared, (
+        "the emitted event vocabulary drifted from the contract; "
+        f"extra={sorted(emitted - declared)} missing={sorted(declared - emitted)}"
+    )
+
+
+def test_contract_session_states_match_the_store(tmp_path):
+    contract = load_contract()
+    source = (Path(__file__).parents[1] / "openrappter" / "show_and_tell.py").read_text()
+    for state in contract["session"]["states"]:
+        assert f"'{state}'" in source or f'"{state}"' in source, (
+            f"contract declares state {state!r} that the store never uses"
+        )
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges")

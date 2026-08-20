@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from openrappter.flight_recorder import (
     _assert_private_directory,
     _harden_private_path,
+    private_mkdir,
     sanitize_flight_value,
 )
 
@@ -67,7 +68,7 @@ def show_and_tell_root() -> Path:
 
 
 def _private_directory(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(path)
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"Show-and-Tell path is not a private directory: {path}")
     _harden_private_path(path, directory=True)

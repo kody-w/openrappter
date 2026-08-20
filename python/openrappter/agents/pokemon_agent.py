@@ -38,6 +38,29 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from typing import Any, Optional
 
+try:
+    from openrappter.flight_recorder import private_mkdir
+except ModuleNotFoundError:
+    # Brainstem/RAR loaders execute one agent file with only the BasicAgent
+    # contract available, so the package import is unavailable there. This
+    # agent creates a Copilot home, so fall back to an equivalent rather than
+    # failing closed -- the ancestors must be private in both load modes.
+    def private_mkdir(directory: Path) -> Path:
+        directory = Path(directory)
+        missing: list[Path] = []
+        candidate = directory
+        while not os.path.lexists(candidate):
+            missing.append(candidate)
+            if candidate.parent == candidate:
+                break
+            candidate = candidate.parent
+        for path in reversed(missing):
+            path.mkdir(mode=0o700, exist_ok=True)
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)  # private-mkdir-canonical
+        if not directory.is_symlink():
+            os.chmod(directory, 0o700)
+        return directory
+
 from openrappter.agents.basic_agent import BasicAgent
 
 
@@ -366,7 +389,7 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     temporary name redirected the write onto its target and truncated it, which
     the same measurement confirmed and which O_EXCL prevents.
     """
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(path.parent)
     payload = json.dumps(value, indent=2, sort_keys=True).encode("utf-8")
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -651,7 +674,7 @@ def seed_legacy_ram_provenance(runtime_dir: Path) -> None:
 
 
 def append_control(runtime_dir: Path, command: dict[str, Any]) -> None:
-    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(runtime_dir)
     os.chmod(runtime_dir, 0o700)
     command = {**command, "timestamp": utc_now()}
     if command.get("action") == "stop":
@@ -832,7 +855,7 @@ def acquire_runtime_lock(
 ) -> Any:
     if fcntl is None:
         raise RuntimeError("Pokemon runtime locking is unavailable on this platform")
-    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(runtime_dir)
     os.chmod(runtime_dir, 0o700)
     lock_path = runtime_dir / lock_name
     descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -1074,7 +1097,7 @@ class PokemonAgent(BasicAgent):
                 }
             )
 
-        runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_mkdir(runtime_dir)
         os.chmod(runtime_dir, 0o700)
         previous_config = read_json(runtime_dir / "config.json")
         seed_legacy_ram_provenance(runtime_dir)
@@ -1366,7 +1389,7 @@ def collision_ascii(pyboy: Any) -> Optional[str]:
 class ClipRecorder:
     def __init__(self, runtime_dir: Path, fps: int = 30):
         self.clips_dir = runtime_dir / "clips"
-        self.clips_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_mkdir(self.clips_dir)
         os.chmod(self.clips_dir, 0o700)
         self.fps = fps
         self.process: Optional[subprocess.Popen[bytes]] = None
@@ -1657,7 +1680,7 @@ class CopilotBrain:
         from copilot import CopilotClient
 
         copilot_home = self.runtime_dir / "copilot"
-        copilot_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_mkdir(copilot_home)
         os.chmod(copilot_home, 0o700)
         self.client = CopilotClient(
             mode="empty",
@@ -2083,7 +2106,7 @@ class PokemonRunner:
         self.run_id = uuid.uuid4().hex[:12]
         self.rom = Path(args.rom).expanduser().resolve()
         self.runtime_dir = Path(args.runtime_dir).expanduser().resolve()
-        self.runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_mkdir(self.runtime_dir)
         os.chmod(self.runtime_dir, 0o700)
         self.states_dir = self.runtime_dir / "states"
         self.screens_dir = self.runtime_dir / "screens"
@@ -3674,7 +3697,7 @@ def wait_supervisor_backoff(
 
 def supervisor_main(args: argparse.Namespace) -> int:
     runtime_dir = Path(args.runtime_dir).expanduser().resolve()
-    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(runtime_dir)
     os.chmod(runtime_dir, 0o700)
     if not args.instance_id:
         args.instance_id = uuid.uuid4().hex

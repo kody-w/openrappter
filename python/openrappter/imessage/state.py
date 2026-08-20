@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .config import IMessageConfig, normalize_handle
+from openrappter.flight_recorder import private_mkdir
 
 
 STATE_SCHEMA_VERSION = 2
@@ -547,7 +548,7 @@ class IMessageState:
 
     def _ensure_directory(self) -> None:
         try:
-            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            private_mkdir(self.directory)
             os.chmod(self.directory, 0o700)
         except OSError as error:
             raise StateError("unable to create the iMessage state directory") from error

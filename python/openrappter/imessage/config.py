@@ -1,6 +1,7 @@
 """Configuration for the supervised ``imsg rpc`` iMessage transport."""
 
 from __future__ import annotations
+from openrappter.flight_recorder import private_mkdir
 from openrappter.paths import openrappter_path
 
 import json
@@ -69,7 +70,7 @@ def _string_mapping(value: object, field_name: str) -> dict[str, str]:
 
 
 def _atomic_json_write(path: Path, value: Mapping[str, Any], mode: int = 0o600) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(path.parent)
     try:
         os.chmod(path.parent, 0o700)
     except OSError:

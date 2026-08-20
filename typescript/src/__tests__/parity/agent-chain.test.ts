@@ -4,7 +4,7 @@
  * Tests the sequential agent pipeline with automatic data_slush forwarding.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AgentChain, createAgentChain } from '../../agents/chain.js';
 import { ShellAgent } from '../../agents/ShellAgent.js';
 import { BasicAgent } from '../../agents/BasicAgent.js';
@@ -213,5 +213,70 @@ describe('AgentChain', () => {
       expect(result.steps).toEqual([]);
       expect(result.finalResult).toBeNull();
     });
+  });
+});
+
+// ── Step timeout: the timer must not outlive the step ──
+//
+// executeWithTimeout races the step against a setTimeout. If the step wins,
+// an uncleared timer stays pending for the full timeout, and a pending timer
+// keeps the Node event loop alive long after the work is finished. A chain
+// configured with a generous stepTimeout would hold the process open for that
+// entire window on a completely successful run.
+
+class GatedAgent extends BasicAgent {
+  constructor(private readonly gate: Promise<string>) {
+    const metadata: AgentMetadata = {
+      name: 'Gated',
+      description: 'Resolves only when the test releases it',
+      parameters: { type: 'object', properties: {}, required: [] },
+    };
+    super('Gated', metadata);
+  }
+
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
+    return this.gate;
+  }
+}
+
+describe('AgentChain step timeout does not leak timers', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('clears the step timer when the step wins the race', async () => {
+    vi.useFakeTimers();
+
+    let release!: (value: string) => void;
+    const gate = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+
+    const chain = new AgentChain({ stepTimeout: 300_000 });
+    chain.add('gated', new GatedAgent(gate));
+    const running = chain.run({});
+
+    // Let the race arm its timer before measuring.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Anti-vacuity: if the timeout never armed, "0 timers at the end" would
+    // pass for the wrong reason and this test would prove nothing.
+    expect(vi.getTimerCount()).toBe(1);
+
+    release(JSON.stringify({ status: 'success' }));
+    const result = await running;
+
+    expect(result.status).toBe('success');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('arms no timer at all when stepTimeout is unset', async () => {
+    vi.useFakeTimers();
+    const chain = new AgentChain();
+    chain.add('echo', new EchoAgent());
+    const result = await chain.run({ query: 'hi' });
+    expect(result.status).toBe('success');
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

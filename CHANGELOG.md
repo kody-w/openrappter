@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Step and node timeouts no longer outlive the work they bound. Both runtimes
+  raced a step against a timer and then leaked the loser. In Python,
+  `AgentChain` started its timeout worker with `threading.Thread(target=run)`
+  and no daemon flag, so when a step timed out the abandoned worker kept the
+  interpreter alive until the step we gave up on finally returned: a 100ms
+  timeout on a 5s step released `run()` in 0.20s but the process still took
+  5.14s to exit, so the timeout bought the caller nothing. In TypeScript,
+  `AgentChain` and `AgentGraph` raced against a `setTimeout` whose handle was
+  never captured, so it was never cleared; when the step won the race the timer
+  stayed pending and held the event loop open for the full window. A graph
+  configured with a five-minute `nodeTimeout` kept Node alive for five minutes
+  after a completely successful run. The Python worker is now a daemon and the
+  TypeScript timers are cleared in a `finally`, so both paths release the
+  process as soon as the work is done.
+
+- The step-timeout path had no test in either runtime, which is why both leaks
+  survived. It now has one, including a check that the timer is actually armed
+  before asserting it is gone -- without that, "no pending timers at the end"
+  passes just as well when the timeout was never set up at all.
+
 - Four more agents advertised a `query` parameter that no implementation reads,
   the same defect fixed for `DesktopControl` in #401. A sweep of both runtimes
   found every case, and the severity was not uniform. `DemoRecorder` (both

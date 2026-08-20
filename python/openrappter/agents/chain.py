@@ -191,7 +191,10 @@ class AgentChain:
             except Exception as e:
                 error[0] = e
 
-        thread = threading.Thread(target=run)
+        # daemon=True: on timeout we abandon this worker, and a non-daemon
+        # thread would block interpreter exit until the step we gave up on
+        # finally returns -- making the timeout buy nothing.
+        thread = threading.Thread(target=run, daemon=True)
         thread.start()
         thread.join(timeout=self._step_timeout / 1000)
 

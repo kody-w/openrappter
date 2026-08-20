@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Show-and-Tell's privacy boundary is now regression-tested against the real
+  component instead of a hand-written fixture. A single `data-desktop-private`
+  wrapper is the only thing keeping recordings, narration transcripts and their
+  controls out of a model-visible desktop snapshot, and the panel promises the
+  user "frames never go to Copilot", but every test asserting that built its own
+  markup, so narrowing or moving that div would have broken the promise
+  silently.
+- The `data-desktop-sensitive` markers in Show-and-Tell were on the wrong
+  controls: `model-download` sat on "Start recording" and `microphone` on the
+  note button, while "Download Whisper (~252 MB)" and "Start narration" -- which
+  performs the download *and* opens the microphone -- carried none. Not
+  reachable today, because the whole surface is `data-desktop-private`, so this
+  is defence in depth for if that wrapper ever narrows.
+
 ### Added
 
 - Parity vector `history-carried-to-model`, the only one that reaches the model

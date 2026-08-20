@@ -10,6 +10,9 @@ Mirrors TypeScript mcp/server.ts
 import json
 
 from openrappter import __version__
+from openrappter.result_status import agent_result_is_error
+
+PROTOCOL_VERSION = '2024-11-05'
 
 
 class McpServer:
@@ -47,22 +50,16 @@ class McpServer:
 
         if method == 'initialize':
             return self._json_rpc_result(request_id, {
-                'serverInfo': self._server_info,
+                'protocolVersion': PROTOCOL_VERSION,
                 'capabilities': {'tools': {}},
+                'serverInfo': self._server_info,
             })
 
         if method == 'tools/list':
-            tools = []
-            for name, agent in self._agents.items():
-                meta = agent.metadata if hasattr(agent, 'metadata') else {}
-                tools.append({
-                    'name': name,
-                    'description': meta.get('description', ''),
-                    'inputSchema': meta.get(
-                        'parameters',
-                        {'type': 'object', 'properties': {}},
-                    ),
-                })
+            tools = [
+                self._agent_to_tool(name, agent)
+                for name, agent in self._agents.items()
+            ]
             return self._json_rpc_result(request_id, {'tools': tools})
 
         if method == 'tools/call':
@@ -71,19 +68,23 @@ class McpServer:
             agent = self._agents.get(tool_name)
             if not agent:
                 return self._json_rpc_error(
-                    request_id, -32602, f'Tool not found: {tool_name}'
+                    request_id, -32602, f'Unknown tool: {tool_name}'
                 )
 
             try:
                 result_str = agent.execute(**tool_args)
-                text = (
-                    result_str
-                    if isinstance(result_str, str)
-                    else json.dumps(result_str)
-                )
-                return self._json_rpc_result(request_id, {
-                    'content': [{'type': 'text', 'text': text}],
-                })
+                # An agent that *resolves* with {"status": "error"} has still
+                # failed. Every composition layer routes through the shared
+                # classifier so the two runtimes cannot drift apart.
+                contract_error = agent_result_is_error(result_str)
+                result = {
+                    'content': [
+                        {'type': 'text', 'text': self._render(result_str)}
+                    ],
+                }
+                if contract_error:
+                    result['isError'] = True
+                return self._json_rpc_result(request_id, result)
             except Exception as e:
                 return self._json_rpc_result(request_id, {
                     'isError': True,
@@ -100,6 +101,42 @@ class McpServer:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _agent_to_tool(self, name, agent):
+        """Convert agent metadata to an MCP tool definition."""
+        meta = getattr(agent, 'metadata', None) or {}
+        parameters = meta.get('parameters') or {}
+        schema = {
+            'type': 'object',
+            'properties': parameters.get('properties', {}),
+        }
+        # Emit `required` only when non-empty: an empty list is not equivalent
+        # to omission for strict schema validators.
+        required = parameters.get('required') or []
+        if required:
+            schema['required'] = required
+        return {
+            'name': meta.get('name', name),
+            'description': meta.get('description', ''),
+            'inputSchema': schema,
+        }
+
+    def _render(self, result):
+        """Render an agent result as MCP text content.
+
+        JSON results are re-serialised with a stable indent so identical agent
+        output produces identical text in both runtimes; anything that is not
+        JSON passes through untouched.
+        """
+        content = result
+        if isinstance(result, str):
+            try:
+                content = json.loads(result)
+            except ValueError:
+                return result
+        if isinstance(content, str):
+            return content
+        return json.dumps(content, indent=2)
 
     def _json_rpc_result(self, request_id, result):
         return {'jsonrpc': '2.0', 'id': request_id, 'result': result}

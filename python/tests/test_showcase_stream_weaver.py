@@ -252,3 +252,111 @@ class TestDeleteSession:
         manager.create_session("sess_1")
 
         assert manager.delete_session("sess_1") is None
+
+
+# ---------------------------------------------------------------------------
+# Block identity, completion, and replacement
+#
+# These mirror three guarantees pinned by the TypeScript suite in
+# typescript/src/gateway/__tests__/streaming.test.ts:
+#   - 'adds a new block with auto-generated id'      (defaults)
+#   - 'respects a caller-supplied block id'          (id passthrough)
+#   - 'replaces an existing block with the same id'  (upsert semantics)
+#
+# The TS pushBlock takes the whole block as an object, so `done`, `id` and
+# `delta` are caller-supplied there. Python keeps its flatter positional
+# signature -- signature *shape* is not what parity means -- but must offer
+# the same capabilities.
+# ---------------------------------------------------------------------------
+
+class TestBlockIdentityAndCompletion:
+    def test_push_block_defaults_to_generated_id_and_not_done(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        block = manager.push_block("sess_1", "text", "hello")
+
+        uuid.UUID(block.id)  # raises if not a generated UUID
+        assert block.done is False
+        assert block.delta is None
+
+    def test_push_block_respects_caller_supplied_id(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        block = manager.push_block(
+            "sess_1", "thinking", "reasoning...", block_id="blk-custom"
+        )
+
+        assert block.id == "blk-custom"
+
+    def test_push_block_can_mark_a_block_done(self):
+        """`done` is a public field and the documented completion signal.
+
+        Before this was fixed no Python code path could ever set it True, so a
+        subscriber waiting on block.done waited forever.
+        """
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        block = manager.push_block("sess_1", "text", "final", done=True)
+
+        assert block.done is True
+
+        session = manager.get_session("sess_1")
+        assert session is not None
+        assert session.blocks[0].done is True
+
+    def test_push_block_replaces_existing_block_with_same_id(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        manager.push_block("sess_1", "text", "original", block_id="blk1")
+        manager.push_block("sess_1", "text", "updated", block_id="blk1", done=True)
+
+        session = manager.get_session("sess_1")
+        assert session is not None
+        assert len(session.blocks) == 1
+        assert session.blocks[0].content == "updated"
+        assert session.blocks[0].done is True
+
+    def test_push_block_stores_caller_supplied_delta(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        block = manager.push_block("sess_1", "text", "abc", delta="c")
+
+        assert block.delta == "c"
+
+    def test_replacement_notifies_subscribers_with_the_new_block(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+        seen = []
+        manager.on_block("sess_1", lambda b, s: seen.append((b.content, b.done)))
+
+        manager.push_block("sess_1", "text", "original", block_id="blk1")
+        manager.push_block("sess_1", "text", "updated", block_id="blk1", done=True)
+
+        assert seen == [("original", False), ("updated", True)]
+
+    def test_thinking_ts_call_pattern_is_expressible(self):
+        """typescript/src/gateway/thinking.ts:114 is the only production caller
+        of pushBlock, and it supplies id + done=True + metadata at once. A
+        Python port of that module has to be able to make the same call.
+        """
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        block = manager.push_block(
+            "sess_1",
+            "thinking",
+            "chain of thought",
+            metadata={"redacted": False},
+            done=True,
+            block_id="think-1",
+        )
+
+        assert block.id == "think-1"
+        assert block.type == "thinking"
+        assert block.done is True
+        assert block.metadata == {"redacted": False}

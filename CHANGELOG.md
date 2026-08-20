@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python's `StreamManager.push_block()` could not mark a block finished. The
+  `done` field was public, mirrored TypeScript, and was named in the module
+  docstring as the signal that a block is "marked done" -- but it was
+  hardcoded `False` at every construction site, so no Python code path could
+  ever set it `True` and a subscriber waiting on `block.done` waited forever.
+  It also always generated a fresh UUID, so the caller-supplied block id and
+  the replace-by-id upsert that TypeScript guarantees were both unreachable;
+  pushing an updated block appended a duplicate instead of revising the
+  original. `push_block()` now accepts keyword-only `done`, `block_id` and
+  `delta` and replaces a block whose id already exists, matching
+  `pushBlock` in `typescript/src/gateway/streaming.ts`. Existing positional
+  callers are unaffected. The module docstring claimed it mirrored the
+  TypeScript API "with one known exception" (the WebSocket transport hook),
+  so this gap was undocumented as well as unreachable.
+
 - `test_imessage_rpc.py` failed roughly half the time when run immediately
   after the full suite, and passed when run warm -- the pattern that trains
   people to re-run red builds instead of reading them. Root cause was a

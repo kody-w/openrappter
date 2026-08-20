@@ -32,7 +32,7 @@ const METHODS_DIR = resolve(__dirname, '../../gateway/methods');
 const SERVER = resolve(__dirname, '../../gateway/server.ts');
 
 /**
- * The five modules `GatewayServer` is meant to invoke.
+ * The production modules `GatewayServer` is meant to invoke.
  *
  * Anything else being called is the bug this file exists to catch. Listed
  * explicitly so wiring a sixth is a deliberate edit here, not a silent one.
@@ -41,6 +41,7 @@ const INTENTIONALLY_INVOKED = new Set([
   'registerAuthMethods',
   'registerBackupMethods',
   'registerRappterMethods',
+  'registerRappidMethods',
   'registerShowcaseMethods',
   'registerSurgeonMethods',
 ]);
@@ -120,7 +121,7 @@ describe('the dormant RPC method modules stay out of the gateway', () => {
     expect(unexpected).toEqual([]);
   });
 
-  it('the intentionally-invoked five really are invoked', () => {
+  it('the intentionally-invoked modules really are invoked', () => {
     // Guards the list above. If one is renamed or dropped, this fails rather
     // than silently shrinking the set of things anyone is checking.
     const missing = [...INTENTIONALLY_INVOKED].filter((fn) => !invokedByServer(fn)).sort();

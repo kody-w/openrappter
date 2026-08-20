@@ -30,6 +30,9 @@ from openrappter.flight_recorder import (
 SHOW_AND_TELL_SCHEMA = "openrappter-show-and-tell/1.0"
 SHOW_AND_TELL_ANALYSIS_SCHEMA = "openrappter-show-and-tell-analysis/1.0"
 SHOW_AND_TELL_AUTOMATION_SCHEMA = "openrappter-automation/1.0"
+SHOW_AND_TELL_BUNDLE_SCHEMA = "openrappter-show-and-tell-bundle/1.0"
+SHOW_AND_TELL_PLAN_SCHEMA = "openrappter-show-and-tell-plan/1.0"
+SHOW_AND_TELL_MARKETPLACE_SCHEMA = "openrappter-skill-marketplace/1.0"
 DEFAULT_MAX_DURATION_MS = 8 * 60 * 60 * 1000
 DEFAULT_POLL_INTERVAL_MS = 2_000
 SESSION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -55,6 +58,55 @@ PRIVATE_CONTEXT = re.compile(
     re.I,
 )
 _INITIALIZE_LOCK = threading.RLock()
+_CLOCK_LOCK = threading.Lock()
+_SESSION_CLOCKS: "dict[str, dict[str, int]]" = {}
+_MAX_TRACKED_SESSIONS = 64
+
+
+def session_elapsed_ms(
+    session_id: str,
+    started_at: int,
+    now: Optional[int] = None,
+    monotonic_ms: Optional[int] = None,
+) -> int:
+    """Milliseconds since ``started_at``, advanced by a monotonic clock.
+
+    ``sequence`` remains the order of a session and ``timestamp`` remains the
+    wall clock a person recognises. Timing evidence is read off this value,
+    which cannot move backwards when the system clock is corrected or the
+    machine resumes from sleep. Each process anchors once per session against
+    the session's recorded start, then advances that anchor monotonically.
+
+    Mirrors ``typescript/src/show-and-tell/clock.ts``.
+    """
+    if now is None:
+        now = int(time.time() * 1000)
+    if monotonic_ms is None:
+        monotonic_ms = time.monotonic_ns() // 1_000_000
+    with _CLOCK_LOCK:
+        anchor = _SESSION_CLOCKS.get(session_id)
+        if anchor is None:
+            base = max(0, int(now) - int(started_at))
+            if len(_SESSION_CLOCKS) >= _MAX_TRACKED_SESSIONS:
+                _SESSION_CLOCKS.pop(next(iter(_SESSION_CLOCKS)), None)
+            _SESSION_CLOCKS[session_id] = {
+                "base": base,
+                "monotonic": int(monotonic_ms),
+                "last": base,
+            }
+            return base
+        elapsed = anchor["base"] + max(0, int(monotonic_ms) - anchor["monotonic"])
+        anchor["last"] = max(anchor["last"], elapsed)
+        return anchor["last"]
+
+
+def reset_session_clock(session_id: Optional[str] = None) -> None:
+    """Drops anchors so a re-created session id starts from its own start."""
+    with _CLOCK_LOCK:
+        if session_id is None:
+            _SESSION_CLOCKS.clear()
+        else:
+            _SESSION_CLOCKS.pop(session_id, None)
 
 
 def show_and_tell_root() -> Path:
@@ -136,6 +188,36 @@ def privacy_reduced_url(value: Any) -> str:
         return ""
 
 
+def privacy_reduced_path(value: Any) -> str:
+    """A path example a plan can publish without publishing the machine.
+
+    An absolute path from one demonstration carries the operator's account name
+    and the shape of their disk, and a plan is read by whoever the skill is
+    shared with. Home becomes ``~``, which is the same instruction on any
+    machine; any other absolute path keeps only its last segment, which is the
+    part a reader needs in order to recognise what was chosen. A relative path
+    is discarded rather than guessed at: nothing here can say what it was
+    relative to.
+
+    Mirrors ``privacyReducedPath`` in
+    ``typescript/src/show-and-tell/privacy.ts``.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    normalized = _safe_text(value.strip(), 1000).replace("\\", "/")
+    home = str(Path.home()).replace("\\", "/").rstrip("/")
+    if normalized == "~" or normalized.startswith("~/"):
+        return normalized
+    if home and normalized == home:
+        return "~"
+    if home and normalized.startswith(f"{home}/"):
+        return f"~{normalized[len(home):]}"
+    if re.match(r"^(?:[A-Za-z]:/|/)", normalized):
+        segments = [segment for segment in normalized.split("/") if segment]
+        return f"<absolute>/{segments[-1]}" if segments else "<absolute>/path"
+    return ""
+
+
 def _opaque_segment(segment: str) -> bool:
     candidate = unquote(segment)
     if JWT_TOKEN.search(candidate):
@@ -174,6 +256,208 @@ def artifact_contains_sensitive_text(content: str) -> bool:
             sanitize_flight_value(line) != line for line in content.splitlines()
         )
     return _contains_jwt(parsed) or sanitize_flight_value(parsed) != parsed
+
+
+# Fixed-width replacement for anything sensitive. The width is constant on
+# purpose: a mask that mirrors the length of what it hid still discloses that
+# length, which is enough to tell a four digit PIN from a passphrase.
+SENSITIVE_MASK = "[redacted]"
+
+# Ordered most specific first, because masking rewrites the text as it goes.
+# Mirrors ``typescript/src/show-and-tell/privacy.ts``. Keep both in step.
+SENSITIVE_RULES: tuple[tuple[str, "re.Pattern[str]", bool], ...] = (
+    (
+        "private-key",
+        re.compile(
+            r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"
+            r"[\s\S]*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----"
+        ),
+        False,
+    ),
+    (
+        "jwt",
+        re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b"),
+        False,
+    ),
+    (
+        "token",
+        re.compile(
+            r"\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}"
+            r"|(?:AKIA|ASIA)[A-Z0-9]{16}|sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}"
+            r"|xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[0-9]-[A-Za-z0-9-]{10,}"
+            r"|AIza[A-Za-z0-9_-]{35}|tskey-[a-z]+-[A-Za-z0-9]{10,})\b"
+        ),
+        False,
+    ),
+    ("authorization", re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.I), False),
+    (
+        "credential-url",
+        re.compile(r"\b[a-z][a-z0-9+.-]*://[^/\s:@]+:[^@\s/]+@\S*", re.I),
+        False,
+    ),
+    (
+        "assignment",
+        re.compile(
+            r"\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token"
+            r"|refresh[_-]?token|client[_-]?secret|credential)\s*[:=]\s*"
+            r"[\"']?[^\s\"',;]{6,}",
+            re.I,
+        ),
+        False,
+    ),
+    # Ends on a digit so the mask cannot swallow the space after the number.
+    ("payment-card", re.compile(r"\b\d(?:[ -]?\d){12,18}\b"), True),
+    ("government-id", re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), False),
+    (
+        "email",
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b"),
+        False,
+    ),
+)
+
+# Kinds that must never reach an artifact. The rest are privacy problems that
+# masking genuinely solves.
+SENSITIVE_SECRET_KINDS = frozenset(
+    {
+        "jwt",
+        "token",
+        "authorization",
+        "credential-url",
+        "private-key",
+        "assignment",
+        "sanitizer",
+    }
+)
+
+_MAX_SCAN_DEPTH = 12
+_MAX_SCAN_NODES = 5_000
+
+
+def _luhn_valid(candidate: str) -> bool:
+    digits = [int(char) for char in candidate if char.isdigit()]
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    double = False
+    for digit in reversed(digits):
+        if double:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+        double = not double
+    return total % 10 == 0
+
+
+def _mask_text(value: str) -> tuple[str, dict[str, int]]:
+    counts: dict[str, int] = {}
+    text = value
+    for kind, pattern, confirm in SENSITIVE_RULES:
+        def replace(match: "re.Match[str]", kind=kind, confirm=confirm) -> str:
+            if confirm and not _luhn_valid(match.group(0)):
+                return match.group(0)
+            counts[kind] = counts.get(kind, 0) + 1
+            return SENSITIVE_MASK
+
+        text = pattern.sub(replace, text)
+    if text != SENSITIVE_MASK:
+        # The Flight Recorder sanitizer is the last opinion, applied per line
+        # the way ``artifact_contains_sensitive_text`` reads a document.
+        # Handing it a whole multi-line artifact makes it re-serialise embedded
+        # JSON, and a reformat is not a secret.
+        lines = text.split("\n")
+        changed = False
+        sanitized_lines = []
+        for line in lines:
+            sanitized = sanitize_flight_value(line)
+            if isinstance(sanitized, str) and sanitized != line:
+                counts["sanitizer"] = counts.get("sanitizer", 0) + 1
+                changed = True
+                sanitized_lines.append(sanitized)
+            else:
+                sanitized_lines.append(line)
+        if changed:
+            text = "\n".join(sanitized_lines)
+    return text, counts
+
+
+def mask_sensitive_text(value: str) -> str:
+    """Masks every sensitive run at a fixed width, keeping the sentence."""
+    if not isinstance(value, str):
+        return ""
+    return _mask_text(value)[0]
+
+
+def _walk_sensitive(
+    value: Any,
+    path: str,
+    depth: int,
+    state: dict[str, Any],
+    mask: bool,
+) -> Any:
+    state["nodes"] += 1
+    if depth > _MAX_SCAN_DEPTH or state["nodes"] > _MAX_SCAN_NODES:
+        _record_finding(state, path, "unscanned", 1)
+        return SENSITIVE_MASK if mask else value
+    if isinstance(value, str):
+        text, counts = _mask_text(value)
+        for kind, count in counts.items():
+            _record_finding(state, path, kind, count)
+        return text if mask else value
+    if isinstance(value, list):
+        mapped = [
+            _walk_sensitive(item, f"{path}[{index}]", depth + 1, state, mask)
+            for index, item in enumerate(value)
+        ]
+        return mapped if mask else value
+    if isinstance(value, dict):
+        mapped = {
+            key: _walk_sensitive(item, f"{path}.{key}", depth + 1, state, mask)
+            for key, item in value.items()
+        }
+        return mapped if mask else value
+    return value
+
+
+def _record_finding(state: dict[str, Any], path: str, kind: str, count: int) -> None:
+    key = (path, kind)
+    existing = state["findings"].get(key)
+    if existing:
+        existing["count"] += count
+    else:
+        state["findings"][key] = {"path": path, "kind": kind, "count": count}
+
+
+def _sorted_findings(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(
+        state["findings"].values(),
+        key=lambda finding: (finding["path"], finding["kind"]),
+    )
+
+
+def scan_sensitive_payload(value: Any, base_path: str = "$") -> list[dict[str, Any]]:
+    """Reports every sensitive value in a whole payload, by path and kind.
+
+    Reporting the path and the kind rather than the value keeps the report
+    itself safe to store and show.
+    """
+    state: dict[str, Any] = {"findings": {}, "nodes": 0}
+    _walk_sensitive(value, base_path, 0, state, False)
+    return _sorted_findings(state)
+
+
+def mask_sensitive_payload(
+    value: Any, base_path: str = "$"
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Returns a masked copy of the payload alongside what was masked."""
+    state: dict[str, Any] = {"findings": {}, "nodes": 0}
+    masked = _walk_sensitive(value, base_path, 0, state, True)
+    return masked, _sorted_findings(state)
+
+
+def has_secret_findings(findings: list[dict[str, Any]]) -> bool:
+    """True when any finding must never reach an artifact."""
+    return any(finding.get("kind") in SENSITIVE_SECRET_KINDS for finding in findings)
 
 
 def safe_computer_action_data(
@@ -275,6 +559,7 @@ class ShowAndTellStore:
               session_id TEXT NOT NULL REFERENCES show_sessions(id) ON DELETE CASCADE,
               sequence INTEGER NOT NULL,
               timestamp INTEGER NOT NULL,
+              elapsed_ms INTEGER,
               type TEXT NOT NULL,
               source TEXT NOT NULL,
               data_json TEXT NOT NULL,
@@ -287,6 +572,13 @@ class ShowAndTellStore:
               revision INTEGER NOT NULL,
               approved INTEGER NOT NULL DEFAULT 0,
               analysis_json TEXT NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS show_plans (
+              session_id TEXT PRIMARY KEY REFERENCES show_sessions(id) ON DELETE CASCADE,
+              revision INTEGER NOT NULL,
+              approved INTEGER NOT NULL DEFAULT 0,
+              plan_json TEXT NOT NULL,
               updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS show_artifacts (
@@ -306,10 +598,35 @@ class ShowAndTellStore:
             );
             """
                 )
+                self._migrate_event_elapsed_column(connection)
                 self._connection = connection
                 _private_file(self.database_path)
             except Exception:
                 connection.close()
+                raise
+
+    @staticmethod
+    def _migrate_event_elapsed_column(connection: sqlite3.Connection) -> None:
+        """Adds ``show_events.elapsed_ms`` to a database written before it.
+
+        The column is nullable on purpose: an older row has no honest monotonic
+        value, and deriving one from its wall-clock timestamp would launder a
+        guess into evidence. Readers report those rows as estimated instead.
+
+        Both runtimes open the same file, so two processes can reach this at
+        the same moment. Only SQLite's duplicate-column error is tolerated,
+        because that one means the other process won the race.
+        """
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(show_events)").fetchall()
+        }
+        if "elapsed_ms" in columns:
+            return
+        try:
+            connection.execute("ALTER TABLE show_events ADD COLUMN elapsed_ms INTEGER")
+        except sqlite3.OperationalError as error:
+            if "duplicate column name" not in str(error).lower():
                 raise
 
     def close(self) -> None:
@@ -533,7 +850,7 @@ class ShowAndTellStore:
         try:
             self.connection.execute("BEGIN IMMEDIATE")
             exists = self.connection.execute(
-                "SELECT id FROM show_sessions WHERE id = ?", (session_id,)
+                "SELECT id, started_at FROM show_sessions WHERE id = ?", (session_id,)
             ).fetchone()
             if not exists:
                 raise RuntimeError(f"Show-and-Tell session not found: {session_id}")
@@ -543,6 +860,9 @@ class ShowAndTellStore:
                 (session_id,),
             ).fetchone()
             now = int(time.time() * 1000)
+            elapsed_ms = session_elapsed_ms(
+                session_id, int(exists["started_at"]), now
+            )
             sanitized = sanitize_flight_value(data or {})
             if not isinstance(sanitized, dict):
                 sanitized = {}
@@ -551,6 +871,7 @@ class ShowAndTellStore:
                 "sessionId": session_id,
                 "sequence": int(row["sequence"]),
                 "timestamp": now,
+                "elapsedMs": elapsed_ms,
                 "type": str(event_type)[:120],
                 "source": str(source)[:120],
                 "data": sanitized,
@@ -558,14 +879,15 @@ class ShowAndTellStore:
             self.connection.execute(
                 """
                 INSERT INTO show_events(
-                  id, session_id, sequence, timestamp, type, source, data_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                  id, session_id, sequence, timestamp, elapsed_ms, type, source, data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event["id"],
                     session_id,
                     event["sequence"],
                     now,
+                    elapsed_ms,
                     event["type"],
                     event["source"],
                     json.dumps(sanitized, ensure_ascii=False),
@@ -593,12 +915,14 @@ class ShowAndTellStore:
                 data = json.loads(row["data_json"])
             except json.JSONDecodeError:
                 data = {}
+            elapsed = row["elapsed_ms"] if "elapsed_ms" in row.keys() else None
             events.append(
                 {
                     "id": row["id"],
                     "sessionId": row["session_id"],
                     "sequence": row["sequence"],
                     "timestamp": row["timestamp"],
+                    "elapsedMs": int(elapsed) if elapsed is not None else None,
                     "type": row["type"],
                     "source": row["source"],
                     "data": data if isinstance(data, dict) else {},
@@ -735,6 +1059,52 @@ class ShowAndTellStore:
             analysis
             if isinstance(analysis, dict)
             and analysis.get("schema") == SHOW_AND_TELL_ANALYSIS_SCHEMA
+            else None
+        )
+
+    def save_plan(self, plan: dict[str, Any]) -> None:
+        self.initialize()
+        if plan.get("schema") != SHOW_AND_TELL_PLAN_SCHEMA or not plan.get("sessionId"):
+            raise ValueError("Invalid Show-and-Tell skill plan.")
+        sanitized = sanitize_flight_value(plan)
+        if not isinstance(sanitized, dict):
+            raise ValueError("Plan could not be sanitized.")
+        self.connection.execute(
+            """
+            INSERT INTO show_plans(
+              session_id, revision, approved, plan_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              revision = excluded.revision,
+              approved = excluded.approved,
+              plan_json = excluded.plan_json,
+              updated_at = excluded.updated_at
+            """,
+            (
+                plan["sessionId"],
+                int(plan["revision"]),
+                1 if plan.get("approved") else 0,
+                json.dumps(sanitized, ensure_ascii=False),
+                plan["updatedAt"],
+            ),
+        )
+
+    def get_plan(self, session_id: str) -> Optional[dict[str, Any]]:
+        self.initialize()
+        row = self.connection.execute(
+            "SELECT plan_json FROM show_plans WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            plan = json.loads(row["plan_json"])
+        except json.JSONDecodeError:
+            return None
+        return (
+            plan
+            if isinstance(plan, dict)
+            and plan.get("schema") == SHOW_AND_TELL_PLAN_SCHEMA
             else None
         )
 
@@ -1727,6 +2097,7 @@ def build_artifacts(
     store: ShowAndTellStore,
     analysis: dict[str, Any],
     target: str = "skill",
+    plan: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     if not analysis.get("approved"):
         raise RuntimeError(
@@ -1734,7 +2105,13 @@ def build_artifacts(
         )
     if target not in {"skill", "automation", "all"}:
         target = "skill"
-    name = _slugify(analysis.get("title") or analysis["intent"])
+    if plan is not None and not plan.get("approved"):
+        raise RuntimeError(
+            "Approve the Show-and-Tell plan before building artifacts from it."
+        )
+    name = _slugify(
+        (plan or {}).get("title") or analysis.get("title") or analysis["intent"]
+    )
     artifacts = []
     if target in {"skill", "all"}:
         root = Path(
@@ -1744,16 +2121,29 @@ def build_artifacts(
             )
         ).expanduser().absolute()
         directory = _destination(root, name, analysis["sessionId"], "skill")
-        markdown = _render_skill(analysis, directory.name)
+        if plan is None:
+            markdown = _render_skill(analysis, directory.name)
+        else:
+            # An approved plan is what the reviewer read: its templated steps,
+            # trigger contract and confirmations are what gets written, not the
+            # raw analysis text underneath it.
+            from openrappter.show_and_tell_marketplace import render_marketplace_skill
+
+            markdown = render_marketplace_skill(plan, directory.name)
         manifest = json.dumps(
             {
                 "id": f"show-and-tell/{directory.name}",
                 "name": directory.name,
                 "version": "1.0.0",
-                "description": analysis["intent"],
+                "description": (plan or {}).get("intent") or analysis["intent"],
                 "tags": ["show-and-tell", "recorded-workflow"],
                 "sourceSessionId": analysis["sessionId"],
                 "sourceAnalysisRevision": analysis["revision"],
+                **(
+                    {"sourcePlanRevision": plan["revision"]}
+                    if plan is not None
+                    else {}
+                ),
                 "generatedBy": "OpenRappter Show-and-Tell",
             },
             indent=2,
@@ -1924,17 +2314,21 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
                     ),
                 }
             )
-        checks.append(
-            {
-                "name": f"{artifact['kind']}-integrity",
-                "ok": digest == artifact["contentHash"],
-                "detail": (
-                    "Content hash matches."
-                    if digest == artifact["contentHash"]
-                    else "Content hash changed."
-                ),
-            }
-        )
+        if artifact["kind"] != "marketplace":
+            # A marketplace artifact's hash covers three files, so the single
+            # recorded path cannot reproduce it. `_marketplace_checks` owns
+            # that comparison and reports it under the same name.
+            checks.append(
+                {
+                    "name": f"{artifact['kind']}-integrity",
+                    "ok": digest == artifact["contentHash"],
+                    "detail": (
+                        "Content hash matches."
+                        if digest == artifact["contentHash"]
+                        else "Content hash changed."
+                    ),
+                }
+            )
         checks.append(
             {
                 "name": f"{artifact['kind']}-privacy",
@@ -1974,7 +2368,83 @@ def test_artifacts(store: ShowAndTellStore, session_id: str) -> dict[str, Any]:
                     ),
                 }
             )
+        if artifact["kind"] == "marketplace":
+            checks.extend(_marketplace_checks(artifact))
+    plan = store.get_plan(session_id)
+    if plan is not None:
+        checks.append(
+            {
+                "name": "plan-approved",
+                "ok": bool(plan.get("approved")),
+                "detail": (
+                    f"Plan revision {plan.get('revision')} is approved."
+                    if plan.get("approved")
+                    else (
+                        f"Plan revision {plan.get('revision')} is not approved. "
+                        "Anything already exported stays frozen at the revision "
+                        "that was approved."
+                    )
+                ),
+            }
+        )
     return {"ok": all(check["ok"] for check in checks), "checks": checks}
+
+
+def _marketplace_files_on_disk(root: Path) -> list[dict[str, str]]:
+    """The three files an export writes, read back in a stable order."""
+    candidates = [
+        root / ".claude-plugin" / "marketplace.json",
+        *sorted(root.glob("plugins/*/.claude-plugin/plugin.json")),
+        *sorted(root.glob("plugins/*/skills/*/SKILL.md")),
+    ]
+    files: list[dict[str, str]] = []
+    for path in candidates:
+        if path.is_file() and not path.is_symlink():
+            files.append({"path": str(path), "content": path.read_text(encoding="utf-8")})
+    return files
+
+
+def _marketplace_checks(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    """An exported marketplace is frozen: it must still hash to what was written.
+
+    Revising the plan afterwards makes the plan stale, which ``plan-approved``
+    reports. It must not make the export look tampered with, because nothing
+    touched it.
+    """
+    from openrappter.show_and_tell_marketplace import (
+        marketplace_content_hash,
+        validate_marketplace_export,
+    )
+
+    root = Path(artifact["path"]).parent.parent
+    files = _marketplace_files_on_disk(root)
+    recomputed = marketplace_content_hash(files) if files else ""
+    integrity_ok = bool(files) and recomputed == artifact.get("contentHash")
+    validation = validate_marketplace_export(str(root))
+    return [
+        {
+            "name": "marketplace-integrity",
+            "ok": integrity_ok,
+            "detail": (
+                f"{len(files)} exported file(s) still hash to {recomputed[:12]}."
+                if integrity_ok
+                else "The exported marketplace no longer matches the hash recorded "
+                "when it was written."
+            ),
+        },
+        {
+            "name": "marketplace-layout",
+            "ok": validation["ok"],
+            "detail": (
+                "Exported marketplace validates."
+                if validation["ok"]
+                else "Failing checks: "
+                + ", ".join(
+                    check["name"] for check in validation["checks"] if not check["ok"]
+                )
+            ),
+        },
+    ]
 
 
 def replay_plan(analysis: dict[str, Any]) -> dict[str, Any]:
@@ -2028,6 +2498,7 @@ __all__ = [
     "request_interactive_consent",
     "show_and_tell_root",
     "privacy_reduced_url",
+    "privacy_reduced_path",
     "is_private_context",
     "safe_computer_action_data",
     "read_active_context",

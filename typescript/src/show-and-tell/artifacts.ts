@@ -21,15 +21,29 @@ import {
 } from '../flight-recorder/permissions.js';
 import {
   artifactContainsSensitiveText,
+  hasSecretFindings,
   privacyReducedUrl,
   sanitizeShowAndTellText,
+  scanSensitivePayload,
 } from './privacy.js';
+import {
+  marketplaceContentHash,
+  renderMarketplaceExport,
+  renderMarketplaceSkill,
+  renderSkillDescription,
+  validateMarketplaceExport,
+  writeMarketplaceExport,
+  type MarketplaceExport,
+  type MarketplaceExportInput,
+  type MarketplaceFile,
+} from './marketplace.js';
 import type { ShowAndTellStore } from './store.js';
 import {
   SHOW_AND_TELL_AUTOMATION_SCHEMA,
   type ShowAndTellAnalysis,
   type ShowAndTellArtifact,
   type ShowAndTellArtifactKind,
+  type ShowAndTellSkillPlan,
 } from './types.js';
 
 function slugify(value: string): string {
@@ -83,6 +97,11 @@ function writePrivate(file: string, content: string): void {
 
 function toolList(analysis: ShowAndTellAnalysis): string[] {
   return [...new Set(analysis.steps.map((step) => step.tool).filter(Boolean))];
+}
+
+/** The atomic, mode-0600 artifact write, exposed for the marketplace export. */
+export function writePrivateArtifact(file: string, content: string): void {
+  writePrivate(file, content);
 }
 
 export function renderShowAndTellSkill(
@@ -139,20 +158,61 @@ export function renderShowAndTellSkill(
 function skillManifest(
   analysis: ShowAndTellAnalysis,
   name: string,
+  plan?: ShowAndTellSkillPlan | null,
 ): string {
   return `${JSON.stringify({
     id: `show-and-tell/${name}`,
     name,
     version: '1.0.0',
-    description: analysis.intent,
+    description: plan ? renderSkillDescription(plan) : analysis.intent,
     tags: ['show-and-tell', 'recorded-workflow'],
     sourceSessionId: analysis.sessionId,
     sourceAnalysisRevision: analysis.revision,
+    ...(plan
+      ? {
+          sourcePlanRevision: plan.revision,
+          values: plan.values.map((value) => ({
+            id: value.id,
+            kind: value.kind,
+            label: value.label,
+            required: value.required,
+          })),
+          requiresConfirmation: plan.steps.some(
+            (step) => step.requiresConfirmation,
+          ),
+        }
+      : {}),
     generatedBy: 'OpenRappter Show-and-Tell',
   }, null, 2)}\n`;
 }
 
-function renderAutomation(analysis: ShowAndTellAnalysis, name: string): string {
+function renderAutomation(
+  analysis: ShowAndTellAnalysis,
+  name: string,
+  plan?: ShowAndTellSkillPlan | null,
+): string {
+  const steps = plan
+    ? plan.steps.map((step, index) => ({
+        id: step.id || `s${index + 1}`,
+        label: step.title,
+        prompt:
+          `${step.detail}` +
+          `${step.tool ? ` Prefer ${step.tool}.` : ''}` +
+          `${step.url ? ` Use ${step.url}.` : ''}`,
+        values: step.values,
+        requiresConfirmation: step.requiresConfirmation,
+        riskCategories: step.riskCategories,
+      }))
+    : analysis.steps.map((step, index) => ({
+        id: step.id || `s${index + 1}`,
+        label: step.title,
+        prompt:
+          `${step.detail}` +
+          `${step.tool ? ` Prefer ${step.tool}.` : ''}` +
+          `${privacyReducedUrl(step.url)
+            ? ` Use ${privacyReducedUrl(step.url)}.`
+            : ''}`,
+      }));
   return `${JSON.stringify({
     schema: SHOW_AND_TELL_AUTOMATION_SCHEMA,
     name,
@@ -161,16 +221,13 @@ function renderAutomation(analysis: ShowAndTellAnalysis, name: string): string {
     trigger: { type: 'manual' },
     sourceSessionId: analysis.sessionId,
     sourceAnalysisRevision: analysis.revision,
-    steps: analysis.steps.map((step, index) => ({
-      id: step.id || `s${index + 1}`,
-      label: step.title,
-      prompt:
-        `${step.detail}` +
-        `${step.tool ? ` Prefer ${step.tool}.` : ''}` +
-        `${privacyReducedUrl(step.url)
-          ? ` Use ${privacyReducedUrl(step.url)}.`
-          : ''}`,
-    })),
+    ...(plan
+      ? {
+          sourcePlanRevision: plan.revision,
+          values: plan.values,
+        }
+      : {}),
+    steps,
   }, null, 2)}\n`;
 }
 
@@ -223,25 +280,48 @@ export async function buildShowAndTellArtifacts(
   store: ShowAndTellStore,
   analysis: ShowAndTellAnalysis,
   target: 'skill' | 'automation' | 'all',
+  plan: ShowAndTellSkillPlan | null = null,
+  roots: { skills?: string; automations?: string } = {},
 ): Promise<ShowAndTellArtifact[]> {
   if (!analysis.approved) {
     throw new Error('Approve the Show-and-Tell analysis before building artifacts.');
   }
-  const name = slugify(analysis.title || analysis.intent);
+  if (plan) {
+    if (!plan.approved) {
+      throw new Error('Approve the Show-and-Tell plan before building artifacts.');
+    }
+    if (plan.analysisRevision !== analysis.revision) {
+      throw new Error(
+        `The approved plan was reviewed against analysis revision ${plan.analysisRevision}, but the current analysis is revision ${analysis.revision}. Propose the plan again.`,
+      );
+    }
+    if (hasSecretFindings(plan.privacy.findings)) {
+      throw new Error(
+        'The approved plan still carries secret-shaped text. Re-record or edit it before building.',
+      );
+    }
+  }
+  const name = slugify((plan ?? analysis).title || analysis.intent);
   const built: ShowAndTellArtifact[] = [];
   if (target === 'skill' || target === 'all') {
     const root = path.resolve(
-      process.env.OPENRAPPTER_SKILLS_DIR ??
+      roots.skills ??
+        process.env.OPENRAPPTER_SKILLS_DIR ??
         openrappterPath('skills'),
     );
     const directory = destination(root, name, analysis.sessionId, 'skill');
-    const markdown = renderShowAndTellSkill(analysis, path.basename(directory));
-    const manifest = skillManifest(analysis, path.basename(directory));
+    const markdown = plan
+      ? renderMarketplaceSkill(plan, path.basename(directory))
+      : renderShowAndTellSkill(analysis, path.basename(directory));
+    const manifest = skillManifest(analysis, path.basename(directory), plan);
     if (artifactContainsSensitiveText(markdown)) {
       throw new Error('Privacy scan rejected the generated SKILL.md.');
     }
     if (artifactContainsSensitiveText(manifest)) {
       throw new Error('Privacy scan rejected the generated skill manifest.');
+    }
+    if (hasSecretFindings(scanSensitivePayload(markdown, 'SKILL.md'))) {
+      throw new Error('Privacy scan rejected the generated SKILL.md.');
     }
     const skillFile = path.join(directory, 'SKILL.md');
     writePrivate(skillFile, markdown);
@@ -262,11 +342,12 @@ export async function buildShowAndTellArtifacts(
   }
   if (target === 'automation' || target === 'all') {
     const root = path.resolve(
-      process.env.OPENRAPPTER_AUTOMATIONS_DIR ??
+      roots.automations ??
+        process.env.OPENRAPPTER_AUTOMATIONS_DIR ??
         openrappterPath('automations'),
     );
     const directory = destination(root, name, analysis.sessionId, 'automation');
-    const content = renderAutomation(analysis, path.basename(directory));
+    const content = renderAutomation(analysis, path.basename(directory), plan);
     if (artifactContainsSensitiveText(content)) {
       throw new Error('Privacy scan rejected the generated automation.');
     }
@@ -285,6 +366,88 @@ export async function buildShowAndTellArtifacts(
   return built;
 }
 
+/**
+ * Packages an approved plan into a marketplace layout and records it as an
+ * artifact. The RAPPID dimension flow and any publish step read `path` and
+ * `contentHash` from the returned artifact; this function attaches nothing
+ * anywhere itself.
+ */
+export async function exportShowAndTellMarketplace(
+  store: ShowAndTellStore,
+  plan: ShowAndTellSkillPlan,
+  options: Omit<MarketplaceExportInput, 'plan'> = {},
+): Promise<{ artifact: ShowAndTellArtifact; export: MarketplaceExport }> {
+  if (!plan.approved) {
+    throw new Error('Approve the Show-and-Tell plan before exporting it.');
+  }
+  if (hasSecretFindings(plan.privacy.findings)) {
+    throw new Error(
+      'The approved plan still carries secret-shaped text. Re-record or edit it before exporting.',
+    );
+  }
+  const exported = writeMarketplaceExport({ ...options, plan }, writePrivate);
+  const validation = validateMarketplaceExport(exported.root);
+  if (!validation.ok) {
+    const failures = validation.checks
+      .filter((check) => !check.ok)
+      .map((check) => `${check.name}: ${check.detail}`)
+      .join('; ');
+    throw new Error(`The exported marketplace failed validation: ${failures}`);
+  }
+  const artifact = await store.recordArtifact({
+    sessionId: plan.sessionId,
+    kind: 'marketplace',
+    name: exported.pluginName,
+    path: exported.marketplacePath,
+    contentHash: exported.contentHash,
+  });
+  return { artifact, export: exported };
+}
+
+/** Renders the export without writing it, for review before submission. */
+export function previewShowAndTellMarketplace(
+  plan: ShowAndTellSkillPlan,
+  options: Omit<MarketplaceExportInput, 'plan'> = {},
+): { files: string[]; contentHash: string } {
+  const rendered = renderMarketplaceExport({ ...options, plan });
+  return {
+    files: rendered.files.map((file) => file.path),
+    contentHash: marketplaceContentHash(rendered.files),
+  };
+}
+
+function recordedMarketplaceFiles(
+  artifact: ShowAndTellArtifact,
+): MarketplaceFile[] {
+  const marketplaceDirectory = path.dirname(path.dirname(artifact.path));
+  const pluginDirectory = path.join(
+    marketplaceDirectory,
+    'plugins',
+    artifact.name,
+  );
+  const pluginPath = path.join(pluginDirectory, '.claude-plugin', 'plugin.json');
+  const plugin = JSON.parse(readFileSync(pluginPath, 'utf8')) as {
+    skills?: unknown;
+  };
+  if (
+    !Array.isArray(plugin.skills)
+    || plugin.skills.length !== 1
+    || typeof plugin.skills[0] !== 'string'
+    || !/^\.\/skills\/[a-z0-9][a-z0-9-]{0,62}$/.test(plugin.skills[0])
+  ) {
+    throw new Error('Marketplace plugin does not name exactly one safe skill directory.');
+  }
+  const skillPath = path.resolve(pluginDirectory, plugin.skills[0], 'SKILL.md');
+  const relativeSkill = path.relative(pluginDirectory, skillPath);
+  if (relativeSkill.startsWith('..') || path.isAbsolute(relativeSkill)) {
+    throw new Error('Marketplace skill path escapes its plugin directory.');
+  }
+  return [artifact.path, pluginPath, skillPath].map((file) => ({
+    path: file,
+    content: readFileSync(file, 'utf8'),
+  }));
+}
+
 export async function testShowAndTellArtifacts(
   store: ShowAndTellStore,
   sessionId: string,
@@ -293,6 +456,7 @@ export async function testShowAndTellArtifacts(
   checks: Array<{ name: string; ok: boolean; detail: string }>;
 }> {
   const analysis = await store.getAnalysis(sessionId);
+  const plan = await store.getPlan(sessionId);
   const artifacts = await store.artifacts(sessionId);
   const checks: Array<{ name: string; ok: boolean; detail: string }> = [
     {
@@ -306,7 +470,49 @@ export async function testShowAndTellArtifacts(
       detail: `${artifacts.length} artifact(s) recorded.`,
     },
   ];
+  if (plan) {
+    checks.push({
+      name: 'plan-approved',
+      ok: plan.approved,
+      detail: plan.approved
+        ? `Plan revision ${plan.revision} is approved.`
+        : `Plan revision ${plan.revision} is proposed but not approved.`,
+    });
+    checks.push({
+      name: 'plan-privacy',
+      ok: !hasSecretFindings(plan.privacy.findings),
+      detail: hasSecretFindings(plan.privacy.findings)
+        ? 'The plan carries secret-shaped text.'
+        : `Plan privacy scan recorded ${plan.privacy.findings.length} masked finding(s); no raw frames were shared.`,
+    });
+  }
   for (const artifact of artifacts) {
+    if (artifact.kind === 'marketplace') {
+      const marketplaceDirectory = path.dirname(path.dirname(artifact.path));
+      const validation = validateMarketplaceExport(marketplaceDirectory);
+      checks.push(
+        ...validation.checks.map((check) => ({
+          name: `marketplace-${check.name}`,
+          ok: check.ok,
+          detail: check.detail,
+        })),
+      );
+      let digest = '';
+      try {
+        digest = marketplaceContentHash(recordedMarketplaceFiles(artifact));
+      } catch {
+        digest = '';
+      }
+      checks.push({
+        name: 'marketplace-integrity',
+        ok: digest === artifact.contentHash,
+        detail:
+          digest === artifact.contentHash
+            ? 'Marketplace content hash matches.'
+            : 'Marketplace content hash changed or its files are unreadable.',
+      });
+      continue;
+    }
     let content = '';
     try {
       content = readFileSync(artifact.path, 'utf8');
@@ -332,6 +538,7 @@ export async function testShowAndTellArtifacts(
         const parsed = JSON.parse(manifest) as {
           sourceSessionId?: unknown;
           sourceAnalysisRevision?: unknown;
+          sourcePlanRevision?: unknown;
           name?: unknown;
         };
         const manifestOk =
@@ -360,6 +567,16 @@ export async function testShowAndTellArtifacts(
           .update('\0')
           .update(manifest)
           .digest('hex');
+        if (plan) {
+          const planRevisionOk = parsed.sourcePlanRevision === plan.revision;
+          checks.push({
+            name: 'skill-plan-revision',
+            ok: planRevisionOk,
+            detail: planRevisionOk
+              ? 'Skill matches the approved plan revision.'
+              : 'Skill was built from a different plan revision.',
+          });
+        }
       } catch {
         checks.push({
           name: 'skill-manifest',

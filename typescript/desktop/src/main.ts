@@ -72,8 +72,12 @@ const allowedActions = new Set([
   'observe',
   'stop',
   'analyze',
+  'bundle',
+  'propose',
   'review',
+  'revise_plan',
   'build',
+  'export',
   'replay',
   'test',
   'list',
@@ -1012,6 +1016,7 @@ async function handleShowAndTell(
   else if (action === 'capture') purpose = 'capture';
   else if (action === 'delete') purpose = 'delete';
   else if (action === 'review' && input.approve === true) purpose = 'approve';
+  else if (action === 'revise_plan' && input.approve === true) purpose = 'approve';
   if (purpose) {
     if (!smokeBypass && !(await nativeConsent(purpose))) {
       return {

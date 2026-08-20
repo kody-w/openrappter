@@ -50,23 +50,79 @@ function agentFiles(): string[] {
  * An agent whose every import is a Node builtin, `./BasicAgent.js` or a type.
  * `BasicAgent` itself performs no disk or process I/O, so for these files the
  * source is the whole story.
+ *
+ * Dynamic imports count. This used to read static `import ... from` lines only,
+ * which meant `await import('../infra/gateway-lock.js')` was invisible to it —
+ * the very same specifier that disqualifies a file when written statically.
+ * Three of the thirteen agents this asserted against reached deep internals
+ * that way (`CronAgent` into `../cron/service.js`, `TTSAgent` into
+ * `../voice/tts.js`, and `NeighborAgent` into nine modules under `../infra`
+ * and `../twin`), so the file claimed "the source is the whole story" about
+ * files whose story continued somewhere it never looked. No live
+ * mis-declaration was hiding there — each one calls a pure helper — but the
+ * assertions were resting on a premise that was not true, which is the kind of
+ * thing that holds until it suddenly doesn't.
+ *
+ * A dynamic import with a computed specifier is excluded outright: if the
+ * target is only known at runtime, nothing here can say what it reaches. No
+ * agent in this directory does that today, but `morning_brief_agent.js` loads
+ * siblings by `import(path.join(...))`, so the shape is not hypothetical.
  */
 function isSelfContained(source: string): boolean {
-  const imports = [...source.matchAll(/^import\s[^;]*?from\s+['"]([^'"]+)['"]/gm)]
+  const isDeep = (spec: string) =>
+    spec.startsWith('../') || /^\.\/(?!BasicAgent|types)/.test(spec);
+
+  const staticImports = [...source.matchAll(/^import\s[^;]*?from\s+['"]([^'"]+)['"]/gm)]
     .map((m) => m[1]);
-  return imports.every(
-    (spec) => !spec.startsWith('../') && !/^\.\/(?!BasicAgent|types)/.test(spec),
-  );
+  if (!staticImports.every((spec) => !isDeep(spec))) return false;
+
+  const literalDynamic = [...source.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)]
+    .map((m) => m[1]);
+  if (!literalDynamic.every((spec) => !isDeep(spec))) return false;
+
+  const everyDynamic = source.match(/\bimport\s*\(/g)?.length ?? 0;
+  return everyDynamic === literalDynamic.length;
 }
 
 describe('agents do not declare capabilities they cannot reach', () => {
   it('checks a meaningful number of agents', () => {
     // Anti-vacuity: if the self-contained set shrank to nothing, every
-    // assertion below would pass without examining anything.
+    // assertion below would pass without examining anything. The floor sits at
+    // the true current count rather than comfortably below it, because the
+    // failure this guards against is the set eroding one agent at a time —
+    // teaching an agent to reach a deep module through a dynamic import now
+    // drops it out of these assertions, and that should require saying so here
+    // rather than happening quietly.
     const selfContained = agentFiles().filter((f) =>
       isSelfContained(readFileSync(path.join(agentsDir, f), 'utf8')),
     );
-    expect(selfContained.length).toBeGreaterThanOrEqual(8);
+    expect(selfContained.length).toBeGreaterThanOrEqual(10);
+  });
+
+  describe('the self-contained rule sees past static imports', () => {
+    const builtinOnly = "import fs from 'node:fs';\nimport { BasicAgent } from './BasicAgent.js';\n";
+
+    it('accepts builtins and BasicAgent', () => {
+      expect(isSelfContained(builtinOnly)).toBe(true);
+    });
+
+    it('rejects a deep static import', () => {
+      expect(isSelfContained(`${builtinOnly}import { x } from '../infra/roster.js';\n`)).toBe(false);
+    });
+
+    it('rejects a deep dynamic import — the case that was invisible', () => {
+      expect(isSelfContained(`${builtinOnly}const m = await import('../infra/gateway-lock.js');`))
+        .toBe(false);
+    });
+
+    it('rejects a computed dynamic import, whose target it cannot know', () => {
+      expect(isSelfContained(`${builtinOnly}const m = await import(path.join(dir, name));`))
+        .toBe(false);
+    });
+
+    it('still accepts a dynamic import of a builtin', () => {
+      expect(isSelfContained(`${builtinOnly}const m = await import('node:os');`)).toBe(true);
+    });
   });
 
   it('no self-contained agent declares an unreachable capability', async () => {

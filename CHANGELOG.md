@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The TS<->Python parity map (`.claude/skills/ts-python-parity-check/SKILL.md`)
+  told auditors that three shipped subsystems did not exist in Python. It
+  listed `gateway`, `WatchmakerAgent`, and `mcp` as having "no Python
+  counterpart" while Python ships ~2,460 lines across them, including the
+  production `GatewayServer` wired up at `cli.py:1234`. Because the skill's
+  rule is "missing counterpart -> flag as a limitation," a wrong absence claim
+  does not warn -- it instructs the audit to skip real code, so those modules
+  were silently excluded from every parity check that trusted the map. This is
+  the likely reason the missing `StreamManager.delete_session` (previous entry)
+  went unnoticed. The map also cited a TS parity test,
+  `__tests__/parity/multiagent.test.ts`, that does not exist anywhere in the
+  repo, for `broadcast`/`router`/`subagent`.
+
+  Fixed by adding the seven missing pair rows, repointing the three phantom
+  test paths at `__tests__/integration/agents.test.ts` (which actually imports
+  `BroadcastManager`, `AgentRouter`, and `SubAgentManager`), and replacing the
+  two duplicated free-text absence claims with a single machine-checkable list
+  containing only the two genuine cases, `OuroborosAgent` and the UI. Added
+  `python/tests/test_parity_map.py`, which reads the map and fails if any path
+  it names is missing or if any module it declares absent has Python code --
+  so the map can no longer drift from the filesystem unnoticed. Also recorded
+  that `mcp` has no Python parity test, making that coverage gap explicit
+  rather than implied.
+
 - Python's `StreamManager` had no way to free a session. The class mirrors
   TypeScript's `StreamManager` and its module docstring said so explicitly, but
   TypeScript ships a tested `deleteSession()` that removes a session and its

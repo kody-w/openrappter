@@ -477,6 +477,11 @@ export class OpenRappterConfig extends LitElement {
     `;
   }
 
+  // Config values never reach a model-visible desktop snapshot: raw mode keeps
+  // the whole file in a <textarea> and scalars go in an <input>, both of which
+  // the snapshot excludes and reports only as empty/set. The <pre> fallbacks
+  // below print values verbatim, so they carry the same marker -- a channel with
+  // an array field renders its whole object that way, bot token included.
   private renderValue(value: unknown, path: string[]): TemplateResult | typeof nothing {
     if (value === null || value === undefined) {
       return html`<label class="field"><span>${path[path.length - 1]}</span><input type="text" value="" placeholder="(empty)" @change=${(e: Event) => this.patchConfig(path, (e.target as HTMLInputElement).value || null)}></label>`;
@@ -538,14 +543,14 @@ export class OpenRappterConfig extends LitElement {
     }
 
     // Complex array items: show as formatted JSON
-    return html`<div class="field"><span>${path[path.length - 1]}</span><pre>${JSON.stringify(arr, null, 2)}</pre></div>`;
+    return html`<div class="field"><span>${path[path.length - 1]}</span><pre data-desktop-private>${JSON.stringify(arr, null, 2)}</pre></div>`;
   }
 
   private renderObject(obj: Record<string, unknown>, path: string[]) {
     const entries = Object.entries(obj);
     // Check nesting depth: if we're already deep, show as JSON
     if (path.length >= 3) {
-      return html`<div class="field"><span>${path[path.length - 1]}</span><pre>${JSON.stringify(obj, null, 2)}</pre></div>`;
+      return html`<div class="field"><span>${path[path.length - 1]}</span><pre data-desktop-private>${JSON.stringify(obj, null, 2)}</pre></div>`;
     }
 
     // Check if it's a simple flat object (all values are primitives)
@@ -578,7 +583,7 @@ export class OpenRappterConfig extends LitElement {
             </div>
           `;
         }
-        return html`<div class="field"><span>${k}</span><pre>${JSON.stringify(v, null, 2)}</pre></div>`;
+        return html`<div class="field"><span>${k}</span><pre data-desktop-private>${JSON.stringify(v, null, 2)}</pre></div>`;
       }
       return this.renderValue(v, [...path, k]);
     })}`;

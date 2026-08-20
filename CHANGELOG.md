@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python's MCP server diverged from TypeScript on five wire-visible points,
+  none of them covered by a test. The most serious: a tool whose agent
+  *resolved* with a structured `{"status": "error"}` envelope was reported to
+  the client as a **success**. TypeScript classifies that case through the
+  shared `agentResultIsError` helper and sets MCP's `isError` flag, and the
+  helper's own docstring states that every composition layer -- chain, graph,
+  broadcast, MCP, chat -- routes through it "so the two runtimes cannot drift
+  apart". Python ships the same classifier as `result_status.agent_result_is_error`
+  and already used it in chain, graph, subagent, and basic_agent; the MCP
+  server was the single layer that did not, so a declared failure reached the
+  client indistinguishable from success.
+
+  Also fixed, all confirmed by direct request/response capture: `initialize`
+  omitted the spec-required `protocolVersion` (TypeScript returns
+  `2024-11-05`, pinned by its parity test) so the response was not
+  spec-conformant; `tools/list` emitted `required: []` where TypeScript omits
+  the key entirely, which is not equivalent for strict schema validators;
+  `tools/call` returned an unknown-tool message of `Tool not found: X` against
+  TypeScript's `Unknown tool: X`; and JSON results were passed through
+  unformatted where TypeScript re-serialises with a 2-space indent, so
+  identical agent output rendered differently in the two runtimes.
+
+  Added `python/tests/test_mcp_server.py` (21 tests) mirroring
+  `typescript/src/__tests__/parity/mcp-server.test.ts`. The module previously
+  had no behavioral test at all -- `test_module_exports.py` only asserted that
+  it imports. One test pins the `isError` invariant against the shared
+  classifier itself rather than a hard-coded example, so the two cannot drift
+  again.
+
 - The TS<->Python parity map (`.claude/skills/ts-python-parity-check/SKILL.md`)
   told auditors that three shipped subsystems did not exist in Python. It
   listed `gateway`, `WatchmakerAgent`, and `mcp` as having "no Python

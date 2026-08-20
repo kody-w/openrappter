@@ -78,6 +78,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A registry lock file that was an object but not the expected shape crashed
+  `install`. Both registry clients read a lock and immediately evaluate
+  `lock["installed"]`; `read_json_object` guarded the top level, so a lock
+  holding `[]` or `"hello"` was moved aside, but a lock holding `{}` is a
+  perfectly good object and was handed straight back. Measured with nothing
+  actually installed: `{}` and `{"version": 1}` raised `KeyError`,
+  `{"installed": null}` and `{"installed": 7}` raised `TypeError`, and --
+  worse than either -- `{"installed": "alice/tool-and-more"}` and
+  `{"installed": ["alice/tool"]}` reported the agent as *already installed*,
+  because membership against a string is a substring test and against a list
+  an element test. For ClawHub the crash landed after the skill was already on
+  disk, so the install succeeded and only the bookkeeping exploded.
+  `read_json_object` now takes `object_fields` naming the keys a caller will
+  index into: a missing key is filled in from the default, since nothing was
+  ever written there, while a key present with the wrong type is quarantined,
+  since something did write that value and it is evidence. Callers that name
+  no fields are unaffected.
+
 - The command-safety engine's history grew without limit. `ExecSafety` records
   every command it inspects and dropped none of it, in a process-wide singleton
   shared by `ShellAgent` and the gateway, so the history lived as long as the

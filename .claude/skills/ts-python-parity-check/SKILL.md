@@ -47,6 +47,7 @@ Notes:
 - If a filename isn't listed, resolve it by convention: TS `CamelCase.ts` ⇔ Python `snake_case.py`; multi-agent primitives (`broadcast`/`router`/`subagent`/`chain`/`graph`/`tracer`) keep their lowercase names in both languages.
 - If a pair genuinely has no Python counterpart yet, say so explicitly in the report — that's a real divergence to flag, not a silent pass. Resolve absence against the authoritative list in [Modules with no Python counterpart](#modules-with-no-python-counterpart) rather than from memory.
 - The `mcp` pair covers a wire protocol, so parity means the bytes an external client receives — `protocolVersion`, `inputSchema` shape, and the `isError` flag — not just method names. Nothing in either codebase constructs `McpServer`, so an internal-callers search proves nothing about reachability here.
+- The `gateway/dashboard` pair is a **partial port**, so listing it here does not mean the two files have comparable scope. `dashboard.ts` is an HTTP handler -- `handle(req, res)`, `sendJson()` and a `prefix` that routes requests -- and none of that is ported. `dashboard.py` is the trace store and agent executor only. Audit the storage/execution half for parity and report the HTTP surface as an explicit limitation; do not read a green dashboard audit as covering the transport. Pinned by `TestDashboardHttpSurfaceIsNotPorted` in `python/tests/test_showcase_living_dashboard.py`, which fails if the HTTP layer is ever ported so this note cannot go stale silently.
 
 ## Modules with no Python counterpart
 

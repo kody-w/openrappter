@@ -333,3 +333,88 @@ class TestFullSelfMonitoringLoop:
         # The MCP server holds the DashboardQuery tool registration
         assert mcp.tool_count == 1
         assert mcp.has_tool('DashboardQuery')
+
+
+# ---------------------------------------------------------------------------
+# DashboardHandler.execute_agent result shape
+# ---------------------------------------------------------------------------
+
+class _PlainTextAgent:
+    name = 'plain'
+
+    def execute(self, **kwargs):
+        return 'not json at all'
+
+
+class _JsonAgent:
+    name = 'jsonish'
+
+    def execute(self, **kwargs):
+        return '{"status": "success", "answer": 42}'
+
+
+class TestExecuteAgentResultShape:
+    def test_non_json_result_keeps_the_status_key(self):
+        """Mirrors the fallback at typescript/src/gateway/dashboard.ts:398,
+        which is `{ status: 'success', raw: resultStr }`. Python used to drop
+        `status`, so a caller reading result['status'] got a KeyError for a
+        plain-text agent but a value for a JSON one -- the shape depended on
+        whether the agent happened to emit JSON.
+        """
+        dashboard = DashboardHandler()
+        dashboard.register_agent(_PlainTextAgent())
+
+        outcome = dashboard.execute_agent('plain')
+
+        assert outcome['status'] == 'success'
+        assert outcome['result'] == {'status': 'success', 'raw': 'not json at all'}
+
+    def test_json_result_is_passed_through_parsed(self):
+        dashboard = DashboardHandler()
+        dashboard.register_agent(_JsonAgent())
+
+        outcome = dashboard.execute_agent('jsonish')
+
+        assert outcome['result'] == {'status': 'success', 'answer': 42}
+
+    def test_status_key_is_present_for_both_agent_kinds(self):
+        """The invariant the fallback exists to preserve: every successful
+        execute_agent result exposes result['status'], whatever the agent
+        returned."""
+        dashboard = DashboardHandler()
+        dashboard.register_agent(_PlainTextAgent())
+        dashboard.register_agent(_JsonAgent())
+
+        for name in ('plain', 'jsonish'):
+            assert dashboard.execute_agent(name)['result']['status'] == 'success'
+
+
+class TestDashboardHttpSurfaceIsNotPorted:
+    """Tripwire for a recorded parity limitation.
+
+    typescript/src/gateway/dashboard.ts is an HTTP handler: it owns handle(),
+    sendJson() and a `prefix` used to route requests. The Python module ports
+    only the trace store and agent execution -- no HTTP surface at all.
+
+    That limitation is recorded in the parity map. This test exists so the
+    record cannot silently go stale: if someone ports the HTTP layer, this
+    fails and the parity note has to be updated in the same change.
+    """
+
+    def test_python_dashboard_exposes_no_http_entrypoints(self):
+        dashboard = DashboardHandler()
+
+        for attr in ('handle', 'send_json', 'sendJson'):
+            assert not hasattr(dashboard, attr), (
+                f'DashboardHandler grew {attr!r}. The HTTP surface is now '
+                'partly ported -- update the gateway/dashboard note in '
+                '.claude/skills/ts-python-parity-check/SKILL.md.'
+            )
+
+    def test_no_dead_route_prefix_is_stored(self):
+        """A route prefix only means something to a router. Storing one on a
+        class that never routes is dead state that reads as though HTTP
+        handling exists."""
+        dashboard = DashboardHandler({'prefix': '/api'})
+
+        assert not hasattr(dashboard, '_prefix')

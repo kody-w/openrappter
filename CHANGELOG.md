@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `DashboardHandler.execute_agent()` dropped the `status` key when an agent
+  returned something that was not JSON. TypeScript falls back to
+  `{ status: 'success', raw: resultStr }` (`dashboard.ts:398`); Python fell
+  back to `{'raw': ...}`, so `result['status']` raised `KeyError` for a
+  plain-text agent but returned a value for a JSON one -- the result shape
+  depended on what the agent happened to emit.
+
+- `python/openrappter/gateway/dashboard.py` described itself as an "HTTP
+  dashboard handler" that "mirrors TypeScript gateway/dashboard.ts". It
+  handles no HTTP: `handle()`, `sendJson()` and prefix routing are not
+  ported, and the `_prefix` it stored was never read by anything. The
+  docstring now states the actual scope and names the omission, the dead
+  `_prefix` is gone, and the parity map records `gateway/dashboard` as a
+  partial port so a green dashboard audit is not mistaken for transport
+  coverage.
+
 - Python's `StreamManager.push_block()` could not mark a block finished. The
   `done` field was public, mirrored TypeScript, and was named in the module
   docstring as the signal that a block is "marked done" -- but it was

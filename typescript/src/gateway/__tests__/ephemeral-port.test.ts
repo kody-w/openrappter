@@ -69,6 +69,18 @@ describe('the port a gateway reports', () => {
     expect(server.getStatus().port).toBe(server.port);
   });
 
+  it('is what the anatomy view shows, which renders the number directly', async () => {
+    // anatomy.ts renders `port ${live.port ?? 18790}`. Zero is not nullish, so
+    // a server that reported its configured port here would display "port 0".
+    server = startOnEphemeralPort();
+    await server.start();
+
+    const res = await fetch(`http://127.0.0.1:${server.port}/anatomy.json`);
+    const body = await res.text();
+    expect(body).toContain(`port ${server.port}`);
+    expect(body).not.toContain('port 0');
+  });
+
   it('is left alone when a real port was configured', async () => {
     const probe = startOnEphemeralPort();
     await probe.start();

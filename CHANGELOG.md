@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Corrected `fable5/reports/code-review.md`, whose top-ranked finding was
+  fabricated. The report's #1 top priority -- HIGH severity, described as
+  "verified directly in source" -- claimed Python's `AgentChain`/`AgentGraph`
+  enforce a `_RESERVED_RUNTIME_FIELDS` constant that TypeScript lacks, and
+  recommended adding matching machinery to TypeScript. That symbol has never
+  existed: `git log -S'_RESERVED_RUNTIME_FIELDS' --all` returns exactly one
+  commit, the one that added the report itself. The finding is also inverted --
+  `_trusted_context` and `_transport_event_id` appear zero times in all four
+  files it compares, so the runtimes already agree, and implementing the
+  recommendation would have manufactured the very parity gap it claimed to
+  close. Four further findings cite symbols with zero occurrences and zero
+  commits (`MemoryRetrievalSelector`, `is_healthy`, `list_items`,
+  `_memory_retrieval_selector`, `_compat_lock`, `_execute_request`,
+  `_context_snapshot`), two of them at line numbers already out of bounds when
+  written (`basic_agent.py` was 632 lines; the report cites 784-789 and
+  830-835). All original wording is preserved and annotated inline so the record
+  of what was claimed stays auditable. Two neighbouring claims were graded
+  separately and survive: the `chain.py` `daemon=True` thread leak (confirmed,
+  fixed in #403) and `streaming.py` `_sessions` never being evicted (plausible,
+  still open).
 - Python's `AgentGraph` accepted a `node_timeout` and then ignored it. The
   constructor stored `self._node_timeout` and nothing ever read it again -- that
   assignment was the only line in the whole file matching "timeout" -- so a node
@@ -122,6 +142,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `python/tests/test_report_citations.py`, a citation gate that fails CI when a
+  report's `Evidence:` bullet cites a code symbol absent from the source tree.
+  It checks symbol existence rather than line numbers, because code moves and a
+  test that fails on unrelated refactors gets disabled -- the point is to catch
+  invented symbols, not drifted ones. `Fix:` bullets are excluded, since they
+  propose things that should not exist yet. The existence search deliberately
+  excludes `*.md`: without that exclusion a report quoting its own invented
+  symbol proves the symbol exists, which mutation testing confirms blinds the
+  gate completely. Retracted claims stay exempt by keeping their original text,
+  and the retraction count is pinned so one cannot be deleted silently.
 - Parity vector `history-carried-to-model`, the only one that reaches the model
   carrying a valid `conversation_history`. Every other vector arrived with an
   empty transcript -- the one vector that carries history is rejected 400

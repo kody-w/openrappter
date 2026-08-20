@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python's `StreamManager` had no way to free a session. The class mirrors
+  TypeScript's `StreamManager` and its module docstring said so explicitly, but
+  TypeScript ships a tested `deleteSession()` that removes a session and its
+  subscribers, and Python shipped no removal method at all -- the entire public
+  API was `create_session`, `complete`, `error`, `get_session`, `push_block`,
+  `push_delta`, `on_block`, `active_sessions`. `complete()` and `error()` only
+  flip `status` and stamp `completed_at`; they never remove. Because sessions are
+  deliberately retained after completion so the transcript stays readable,
+  nothing was ever reclaimed, and each session holds its full `blocks` content.
+  Measured before the fix: 100 sessions created, pushed to, and completed left
+  `len(_sessions) == 100`, `len(_subscribers) == 100` and 977 KB of block content
+  pinned, growing monotonically, while `active_sessions` reported `0` -- the
+  manager's own health metric said nothing was active while a megabyte was held.
+  After the fix the same churn loop stays flat at 0 sessions, 0 subscribers and
+  0 KB. `delete_session()` clears both `_sessions` and `_subscribers`, is a no-op
+  on an unknown id, and returns `None` to match the TypeScript `void` signature
+  rather than a more useful bool, since the justification for the change is
+  parity. `complete()` deliberately still does not evict, so reading a finished
+  transcript keeps working. This was one of two public-API divergences found by
+  diffing the two classes method-for-method; the other, TypeScript's
+  `setGateway()` WebSocket transport hook, is not ported and is now named as a
+  known exception in the Python module docstring instead of being papered over by
+  a blanket "mirrors the TypeScript API" claim.
 - Corrected `fable5/reports/code-review.md`, whose top-ranked finding was
   fabricated. The report's #1 top priority -- HIGH severity, described as
   "verified directly in source" -- claimed Python's `AgentChain`/`AgentGraph`
@@ -27,8 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   830-835). All original wording is preserved and annotated inline so the record
   of what was claimed stays auditable. Two neighbouring claims were graded
   separately and survive: the `chain.py` `daemon=True` thread leak (confirmed,
-  fixed in #403) and `streaming.py` `_sessions` never being evicted (plausible,
-  still open).
+  fixed in #403) and `streaming.py` `_sessions` never being evicted (plausible
+  when written, since confirmed and fixed by the `delete_session` entry above).
 - Python's `AgentGraph` accepted a `node_timeout` and then ignored it. The
   constructor stored `self._node_timeout` and nothing ever read it again -- that
   assignment was the only line in the whole file matching "timeout" -- so a node

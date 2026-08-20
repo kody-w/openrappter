@@ -6,7 +6,13 @@ StreamBlock is the atomic unit of streamed output. Each block has a type
 accumulate content via deltas before being marked done.
 
 StreamManager maintains sessions keyed by a caller-supplied id, notifies
-subscribers on every mutation, and mirrors the TypeScript StreamManager API.
+subscribers on every mutation, and mirrors the TypeScript StreamManager API
+with one known exception: the TS class also accepts a GatewayBroadcaster
+(constructor arg + setGateway) to push blocks over WebSocket. That transport
+hook is not ported here, so callers must drive delivery via on_block.
+
+Sessions are retained after complete()/error() so the finished transcript
+stays readable; call delete_session() to reclaim them.
 """
 
 from __future__ import annotations
@@ -154,6 +160,23 @@ class StreamManager:
                     del self._subscribers[session_id]
 
         return unsubscribe
+
+    # ── Cleanup ────────────────────────────────────────────────────────────
+
+    def delete_session(self, session_id: str) -> None:
+        """Remove a session and its subscribers from memory.
+
+        Sessions are retained after ``complete()``/``error()`` so callers can
+        still read the finished transcript via ``get_session()``. That means
+        nothing is reclaimed until this is called: without it a long-lived
+        manager grows without bound, because every session holds its full
+        ``blocks`` content.
+
+        Deleting an unknown session id is a no-op, mirroring the TypeScript
+        ``deleteSession``. Returns None (not a bool) to match that signature.
+        """
+        self._sessions.pop(session_id, None)
+        self._subscribers.pop(session_id, None)
 
     # ── Computed properties ────────────────────────────────────────────────
 

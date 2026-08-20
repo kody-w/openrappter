@@ -165,3 +165,90 @@ class TestActiveSessionsCount:
         manager.error("sess_2")
 
         assert manager.active_sessions == 1
+
+
+# ---------------------------------------------------------------------------
+# Session cleanup
+#
+# Mirrors typescript/src/gateway/__tests__/streaming.test.ts
+# "deleteSession removes session and subscribers".
+# ---------------------------------------------------------------------------
+
+class TestDeleteSession:
+    def test_delete_session_removes_session(self):
+        manager = StreamManager()
+        manager.create_session("del_1")
+
+        manager.delete_session("del_1")
+
+        assert manager.get_session("del_1") is None
+
+    def test_delete_session_removes_subscribers(self):
+        """A stale callback must not fire for a later session reusing the id.
+
+        This is the assertion that proves _subscribers was cleared too:
+        checking get_session() alone would still pass if only _sessions
+        were popped.
+        """
+        manager = StreamManager()
+        manager.create_session("del_1")
+        received = []
+        manager.on_block("del_1", lambda block, session: received.append(block))
+
+        manager.delete_session("del_1")
+
+        manager.create_session("del_1")
+        manager.push_block("del_1", "text", "after delete")
+
+        assert received == []
+
+    def test_delete_unknown_session_is_noop(self):
+        manager = StreamManager()
+        manager.create_session("keep")
+
+        manager.delete_session("never_existed")
+
+        assert manager.get_session("keep") is not None
+
+    def test_delete_session_leaves_other_sessions_intact(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+        manager.create_session("sess_2")
+        manager.push_block("sess_2", "text", "kept")
+
+        manager.delete_session("sess_1")
+
+        assert manager.get_session("sess_1") is None
+        survivor = manager.get_session("sess_2")
+        assert survivor is not None
+        assert len(survivor.blocks) == 1
+
+    def test_completed_sessions_are_retained_until_deleted(self):
+        """complete() must NOT evict: callers still read the finished transcript.
+
+        Retention is intentional, which is exactly why an explicit deletion
+        method has to exist -- otherwise nothing is ever reclaimed.
+        """
+        manager = StreamManager()
+        for n in range(10):
+            sid = f"sess_{n}"
+            manager.create_session(sid)
+            manager.push_block(sid, "text", "payload")
+            manager.complete(sid)
+
+        # Every session is finished, yet all are still held.
+        assert manager.active_sessions == 0
+        assert len(manager._sessions) == 10
+        assert manager.get_session("sess_0") is not None
+
+        for n in range(10):
+            manager.delete_session(f"sess_{n}")
+
+        assert len(manager._sessions) == 0
+        assert len(manager._subscribers) == 0
+
+    def test_delete_session_matches_typescript_void_return(self):
+        manager = StreamManager()
+        manager.create_session("sess_1")
+
+        assert manager.delete_session("sess_1") is None

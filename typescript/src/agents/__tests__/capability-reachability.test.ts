@@ -32,13 +32,43 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const agentsDir = path.resolve(here, '..');
 
-/** Evidence that a capability is reachable, mirroring CAPABILITY_EVIDENCE. */
+/**
+ * Evidence that a capability is reachable, mirroring CAPABILITY_EVIDENCE.
+ *
+ * These patterns are the security-critical core of this file, and until now
+ * nothing tested them directly — they were only ever exercised against
+ * whichever agents happened to exist, so a gap could sit here indefinitely
+ * without a single test going red. Fourteen of fifteen realistic
+ * `filesystem-write` forms were invisible, including `fs.rm(dir, {recursive:
+ * true})`, the async twin of the `rmSync` the table already listed. The
+ * `\b...\b` word boundary also meant `rename` did not match `renameSync` and
+ * `copyFile` did not match `copyFileSync`, because the `S` that follows is a
+ * word character. Those forms are used 71 times elsewhere in `typescript/src`;
+ * it was luck, not design, that no self-contained agent had reached for one.
+ *
+ * The list is now built from verb + optional `Sync` so a twin cannot go
+ * missing again, and the classifier has unit tests of its own below.
+ *
+ * `rm` and `cp` are matched only in call position, since two letters are too
+ * little to spend a false positive on. Bare `link` is deliberately absent for
+ * the same reason — it is far more likely to be a markup helper than
+ * `fs.link`, and `symlink` covers the case that matters. A false positive here
+ * would push someone to declare a capability they do not have, which is the
+ * exact disease this file exists to treat.
+ */
+const FS_WRITE_VERBS = [
+  'writeFile', 'appendFile', 'copyFile', 'rename', 'mkdir', 'rmdir', 'unlink',
+  'truncate', 'ftruncate', 'symlink', 'chmod', 'chown', 'mkdtemp', 'writev',
+  'createWriteStream',
+];
+
 const EVIDENCE: Record<string, RegExp> = {
   'process-exec': /from\s+['"](?:node:)?child_process['"]/,
   'network':
-    /from\s+['"](?:node:)?(?:http|https|net|dns|dns\/promises|tls)['"]|from\s+['"](?:axios|node-fetch|undici|ws)['"]|\bfetch\s*\(/,
-  'filesystem-write':
-    /\b(writeFile|writeFileSync|mkdir|mkdirSync|rmSync|unlink|unlinkSync|appendFile|appendFileSync|copyFile|rename|createWriteStream)\b/,
+    /from\s+['"](?:node:)?(?:http|https|http2|net|dgram|dns|dns\/promises|tls)['"]|from\s+['"](?:axios|node-fetch|undici|ws)['"]|\bfetch\s*\(|\bnew\s+WebSocket\s*\(/,
+  'filesystem-write': new RegExp(
+    `\\b(?:${FS_WRITE_VERBS.join('|')})(?:Sync)?\\b|\\b(?:rm|cp)(?:Sync)?\\s*\\(`,
+  ),
 };
 
 function agentFiles(): string[] {
@@ -122,6 +152,53 @@ describe('agents do not declare capabilities they cannot reach', () => {
 
     it('still accepts a dynamic import of a builtin', () => {
       expect(isSelfContained(`${builtinOnly}const m = await import('node:os');`)).toBe(true);
+    });
+  });
+
+  describe('the evidence patterns see the forms this codebase actually uses', () => {
+    // These patterns decide whether an agent is holding an undeclared
+    // capability, and nothing tested them until now — they were only ever run
+    // against whichever agents existed, so a missing form failed silently.
+    // Every case below was measured as invisible to the previous table.
+    const fsWrite = EVIDENCE['filesystem-write'];
+
+    it.each([
+      ['await fs.rm(dir, { recursive: true, force: true });', 'recursive delete'],
+      ['fs.rmSync(dir, { recursive: true });', 'rmSync'],
+      ['await fs.rmdir(dir);', 'rmdir'],
+      ['fs.rmdirSync(dir);', 'rmdirSync'],
+      ['fs.renameSync(a, b);', 'renameSync — the word boundary hid this'],
+      ['fs.copyFileSync(a, b);', 'copyFileSync — likewise'],
+      ['await fs.cp(src, dst, { recursive: true });', 'cp'],
+      ['fs.cpSync(src, dst);', 'cpSync'],
+      ['await fs.truncate(p, 0);', 'truncate erases a file'],
+      ['await fs.symlink(target, linkPath);', 'symlink'],
+      ['await fs.chmod(p, 0o777);', 'chmod'],
+      ['await fs.mkdtemp(prefix);', 'mkdtemp creates a directory'],
+      ['await fsp.writeFile(p, data);', 'writeFile, which always worked'],
+    ])('sees %s (%s)', (source) => {
+      expect(fsWrite.test(source)).toBe(true);
+    });
+
+    it('does not fire on ordinary prose or unrelated calls', () => {
+      // A false positive here would push someone to declare a capability they
+      // do not hold, which is the failure this file exists to prevent.
+      for (const benign of [
+        'const url = link(label, href);',
+        '// remove the item from the array',
+        'const form = new FormData();',
+        'return items.map((i) => i.id);',
+      ]) {
+        expect(fsWrite.test(benign)).toBe(false);
+      }
+    });
+
+    it('sees network transports beyond http', () => {
+      const net = EVIDENCE['network'];
+      expect(net.test("import dgram from 'node:dgram';")).toBe(true);
+      expect(net.test("import http2 from 'node:http2';")).toBe(true);
+      expect(net.test('const s = new WebSocket(url);')).toBe(true);
+      expect(net.test("import path from 'node:path';")).toBe(false);
     });
   });
 

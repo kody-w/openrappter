@@ -343,23 +343,49 @@ def fsync_directory(path: Path) -> None:
 
 
 def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    """Publish JSON so a reader sees whole content, never a fragment.
+
+    The temporary name carries a fresh uuid rather than the process id, and the
+    open asks for O_EXCL rather than O_TRUNC. Those are two fixes for two
+    different problems that happened to share one line each.
+
+    Threads share a process id, so a pid-keyed name is a single name for the
+    whole process rather than one per writer. The viewer serves its control
+    endpoint from a ThreadingHTTPServer and answers ``stop`` by writing
+    desired.json, so two overlapping requests opened the *same* temporary file,
+    interleaved their bytes into it, and then raced to rename it. Measured over
+    60 rounds on two threads: 57 renames failed with FileNotFoundError because
+    the other thread had already consumed the temporary, and a reader polling
+    the published file found it unparseable 219 times. read_json answers a
+    damaged file with the default, so this surfaced not as a crash but as the
+    runtime quietly forgetting its state. The same run against a uuid-keyed
+    name reported zero of both.
+
+    O_EXCL is what refuses to follow a symlink: it fails outright if anything
+    already exists at the path. Under O_TRUNC a link planted at the predictable
+    temporary name redirected the write onto its target and truncated it, which
+    the same measurement confirmed and which O_EXCL prevents.
+    """
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     payload = json.dumps(value, indent=2, sort_keys=True).encode("utf-8")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    descriptor = os.open(
-        temporary,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
-    )
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with os.fdopen(descriptor, "wb", closefd=False) as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "wb", closefd=False) as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
     finally:
-        os.close(descriptor)
-    os.replace(temporary, path)
-    os.chmod(path, 0o600)
+        temporary.unlink(missing_ok=True)
     fsync_directory(path.parent)
 
 

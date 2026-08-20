@@ -549,22 +549,20 @@ async function handleNarration(
   const action = input.action;
   if (action === 'status') return narration().status();
   if (action === 'download') {
-    if (process.env.OPENRAPPTER_DESKTOP_SMOKE !== '1') {
-      const approval = await dialog.showMessageBox(mainWindow!, {
-        type: 'question',
-        title: 'Download local Whisper?',
-        message: 'Download the on-device narration model?',
-        detail:
-          `Whisper Small q8 is ${NARRATION_MODEL_DOWNLOAD_LABEL}. ` +
-          'It is downloaded once, cached locally, and used offline. Audio never leaves this device.',
-        buttons: ['Cancel', 'Download model'],
-        cancelId: 0,
-        defaultId: 0,
-        noLink: true,
-      });
-      if (approval.response !== 1) {
-        throw new Error('Whisper download was cancelled.');
-      }
+    const approval = await dialog.showMessageBox(mainWindow!, {
+      type: 'question',
+      title: 'Download local Whisper?',
+      message: 'Download the on-device narration model?',
+      detail:
+        `Whisper Small q8 is ${NARRATION_MODEL_DOWNLOAD_LABEL}. ` +
+        'It is downloaded once, cached locally, and used offline. Audio never leaves this device.',
+      buttons: ['Cancel', 'Download model'],
+      cancelId: 0,
+      defaultId: 0,
+      noLink: true,
+    });
+    if (approval.response !== 1) {
+      throw new Error('Whisper download was cancelled.');
     }
     return narration().download();
   }
@@ -629,23 +627,21 @@ async function handleVoice(
     return vibeVoice().status();
   }
   if (action === 'enable') {
-    if (process.env.OPENRAPPTER_DESKTOP_SMOKE !== '1') {
-      const approval = await dialog.showMessageBox(mainWindow!, {
-        type: 'warning',
-        title: 'Enable local VibeVoice?',
-        message: 'Install Microsoft VibeVoice Realtime locally?',
-        detail:
-          `The preview downloads about ${VIBEVOICE_MODEL_LABEL} of model weights, ` +
-          'creates an isolated Python 3.11 environment, and runs only on 127.0.0.1. ' +
-          'Do not use it for impersonation, deception, or undisclosed synthetic speech.',
-        buttons: ['Cancel', 'Enable local voice'],
-        cancelId: 0,
-        defaultId: 0,
-        noLink: true,
-      });
-      if (approval.response !== 1) {
-        throw new Error('VibeVoice setup was cancelled.');
-      }
+    const approval = await dialog.showMessageBox(mainWindow!, {
+      type: 'warning',
+      title: 'Enable local VibeVoice?',
+      message: 'Install Microsoft VibeVoice Realtime locally?',
+      detail:
+        `The preview downloads about ${VIBEVOICE_MODEL_LABEL} of model weights, ` +
+        'creates an isolated Python 3.11 environment, and runs only on 127.0.0.1. ' +
+        'Do not use it for impersonation, deception, or undisclosed synthetic speech.',
+      buttons: ['Cancel', 'Enable local voice'],
+      cancelId: 0,
+      defaultId: 0,
+      noLink: true,
+    });
+    if (approval.response !== 1) {
+      throw new Error('VibeVoice setup was cancelled.');
     }
     return vibeVoice().enable();
   }

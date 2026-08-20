@@ -146,3 +146,79 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /OPENRAPPTER_DESKTOP_SMOKE/);
   assert.match(main, /customElements\.whenDefined\('openrappter-show-and-tell'\)/);
 });
+
+// OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release
+// workflow sets it on the packaged, signed binary -- so whatever it switches
+// off is switched off in the shipped app, not just in a dev build.
+//
+// main.ts raises consent dialogs from four functions. Three of them used to be
+// skipped outright when that variable was set. Two of those three were never
+// needed: the embedded smoke script only ever asks narration and voice for
+// their status, never for a download or an enable, so the bypasses bought
+// nothing and waived consent for a multi-gigabyte model download and a local
+// Python environment install.
+//
+// The remaining one is real -- the smoke run does install two agents. It is
+// left as a single-factor bypass on purpose. The obvious tightening, copying
+// the per-request `__smoke` flag that handleShowAndTell uses, does not work
+// here: DesktopControlAgent.perform copies args through a fixed eight-key
+// allowlist (view, ref, value, direction, amount, milliseconds, filename,
+// source), so an extra key is dropped before it ever reaches the queue. Adding
+// the flag without widening that allowlist would fail only in the release
+// smoke run, which is the worst place to find out.
+
+// A Windows checkout can carry CRLF, and these assertions slice on line
+// shapes, so normalise first. Without this the slice lookup fails outright on
+// Windows rather than quietly returning the wrong text.
+const mainSource = main.replace(/\r\n/g, '\n');
+
+function functionBody(source, name) {
+  const start = source.indexOf(`\nasync function ${name}(`);
+  assert.notEqual(start, -1, `main.ts no longer declares ${name}`);
+  const end = source.indexOf('\n}\n', start);
+  assert.notEqual(end, -1, `could not find the end of ${name}`);
+  return source.slice(start, end + 2);
+}
+
+const CONSENT_DIALOG_FUNCTIONS = [
+  'handleNarration',
+  'handleVoice',
+  'nativeConsent',
+  'installAgentFromCommand',
+];
+
+test('only the agent install consent dialog answers to the smoke flag', () => {
+  const gated = [];
+  for (const name of CONSENT_DIALOG_FUNCTIONS) {
+    const body = functionBody(mainSource, name);
+    // Anti-vacuity: if a rename or refactor empties one of these slices the
+    // loop would silently pass, so require the dialog to still be in there.
+    assert.match(
+      body,
+      /dialog\.showMessageBox/,
+      `${name} no longer raises a consent dialog`,
+    );
+    if (body.includes('OPENRAPPTER_DESKTOP_SMOKE')) gated.push(name);
+  }
+  assert.deepEqual(gated, ['installAgentFromCommand']);
+});
+
+test('the smoke run never asks narration or voice to do the gated work', () => {
+  const smokeScript = mainSource.slice(
+    mainSource.indexOf("customElements.whenDefined('openrappter-show-and-tell')"),
+  );
+  assert.ok(smokeScript.length > 1000, 'could not locate the smoke script');
+  assert.match(smokeScript, /\.narration\(\{/);
+  assert.match(smokeScript, /\.voice\(\{/);
+  assert.doesNotMatch(smokeScript, /action: 'download'/);
+  assert.doesNotMatch(smokeScript, /action: 'enable'/);
+});
+
+test('the Show-and-Tell consent bypass needs a second per-request factor', () => {
+  const body = functionBody(mainSource, 'handleShowAndTell');
+  assert.match(
+    body,
+    /OPENRAPPTER_DESKTOP_SMOKE === '1'[\s\S]{0,60}input\.__smoke === true/,
+  );
+  assert.match(body, /!smokeBypass && !\(await nativeConsent\(purpose\)\)/);
+});

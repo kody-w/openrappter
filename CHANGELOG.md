@@ -78,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Two consent dialogs could be switched off by an environment variable that
+  nothing needed switched off. `OPENRAPPTER_DESKTOP_SMOKE=1` skipped the
+  approval prompts for the Whisper model download and the local VibeVoice
+  install, but the desktop smoke script only ever asks those two services for
+  their status -- it never downloads or enables. The release workflow sets that
+  variable on the packaged, signed binary, so the waiver shipped. Both prompts
+  are now unconditional. The agent-install prompt still honours the flag
+  because the smoke run genuinely installs agents, and it is now the only one
+  that does.
+
 - Nothing defended the line between an agent driving the desktop UI and an
   agent asking to install another agent. `BasicAgent.run` pipes every agent's
   result through `dispatchAgentUiCommands`, so the `ui_commands` channel is

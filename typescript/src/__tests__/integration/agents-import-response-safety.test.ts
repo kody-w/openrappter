@@ -22,7 +22,6 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import type { ServerResponse } from 'http';
 import { GatewayServer, writeJsonResponse } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 let server: GatewayServer | undefined;
 
@@ -39,15 +38,15 @@ function cyclic(): Record<string, unknown> {
 }
 
 async function startWithImporter(result: () => unknown): Promise<number> {
-  const port = await reserveTestPort();
   server = new GatewayServer({
-    port,
+    port: 0,
     bind: 'loopback',
     auth: { mode: 'none' },
     dataDir: mkdtempSync(join(tmpdir(), 'import-safety-')),
   });
   server.setAgentImporter(async () => result() as never);
   await server.start();
+  const port = server.port;
   return port;
 }
 

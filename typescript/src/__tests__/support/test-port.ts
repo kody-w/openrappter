@@ -24,10 +24,27 @@
  * So treat this helper as a last resort. If the thing you are starting can
  * report the port it bound, pass it port 0 and ask it afterwards -- there is
  * no window at all in that arrangement, because the socket is never closed.
- * `GatewayServer` does this via its `port` getter, which is why the gateway
- * integration and observability suites no longer appear below.
+ * `GatewayServer` does this via its `port` getter, and every test that binds a
+ * real socket now works that way.
  *
- * The remaining callers here start servers that have no such accessor.
+ * An earlier version of this note predicted the remaining callers would be
+ * servers lacking such an accessor. That turned out to be wrong. Converting
+ * them found something else: the two callers left do not start a server at
+ * all. They need a port *number* for something that will deliberately never be
+ * bound --
+ *
+ *   - `conformance.test.ts` hands `startBurrowBeacon` a list of candidate
+ *     ports and checks which one it picks, so the candidates must be real
+ *     numbers, and one of them must be free.
+ *   - `skills-connections-contract.test.ts` needs an address nothing answers
+ *     on, to prove that pairing with an unreachable peer reports failure.
+ *
+ * Port 0 cannot express either of those. Both still carry the window described
+ * above, and that is not fixable here: you cannot hold a port to guarantee it
+ * stays free, because holding it is exactly what makes it not free. The
+ * exposure is much smaller than it was -- two ports instead of the seventy-six
+ * that collided in CI -- but it is not zero, so if one of these ever flakes,
+ * this comment is the explanation.
  */
 import net from 'net';
 
@@ -36,8 +53,9 @@ const issued = new Set<number>();
 /**
  * Ask the OS for a free TCP port on the loopback interface.
  *
- * Prefer binding port 0 on the real server and reading the port back. Use this
- * only when the server cannot tell you which port it bound.
+ * Do not use this to pick a port for a server you are about to start: pass it
+ * port 0 and read the port back instead. This is for the narrow case where you
+ * need a port number that stays unbound -- see the note at the top of the file.
  */
 export async function reserveTestPort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {

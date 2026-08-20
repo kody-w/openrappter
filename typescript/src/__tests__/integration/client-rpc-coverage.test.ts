@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve, join } from 'path';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * Every RPC method a client calls must exist on the gateway.
@@ -121,8 +120,7 @@ afterEach(async () => {
 
 /** Method names registered by a server with every optional service present. */
 async function registeredMethods(): Promise<Set<string>> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   // surgeon.* and rappter.* register only when their service is set, and only
   // inside start(). A bare server reports them missing and would send someone
   // chasing methods that are fine.

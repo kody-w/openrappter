@@ -21,7 +21,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
 import http from 'http';
-import { reserveTestPort } from '../support/test-port.js';
+import type { AddressInfo } from 'node:net';
 import {
   getIMessageServiceStatus,
   parseLaunchdPid,
@@ -82,9 +82,9 @@ describe('getIMessageServiceStatus ownership', () => {
     lockPid: number | null,
     userPrint: { stdout: string; exitCode: number },
   ) {
-    const port = await reserveTestPort();
     const server = http.createServer((_req, res) => { res.writeHead(200); res.end('{}'); });
-    await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as AddressInfo).port;
     try {
       const home = await homeWithPlist();
       return await getIMessageServiceStatus({
@@ -131,9 +131,9 @@ describe('getIMessageServiceStatus ownership', () => {
   it('names a foreign owner when the port answers from a pid the supervisor does not own', async () => {
     // A real listener, because `live` is only true when something actually
     // answers — which is precisely how the false "healthy" reading arose.
-    const port = await reserveTestPort();
     const server = http.createServer((_req, res) => { res.writeHead(200); res.end('{}'); });
-    await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as AddressInfo).port;
     try {
       const home = await homeWithPlist();
       const status = await getIMessageServiceStatus({

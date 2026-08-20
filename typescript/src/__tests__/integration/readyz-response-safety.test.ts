@@ -20,7 +20,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { GatewayServer } from '../../gateway/server.js';
 import type { GatewayReadiness } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 let server: GatewayServer | undefined;
 
@@ -39,10 +38,10 @@ function unserialisableReport(): GatewayReadiness {
 async function startGateway(
   provider?: () => Promise<GatewayReadiness>,
 ): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   if (provider) server.setReadinessProvider(provider);
   await server.start();
+  const port = server.port;
   return port;
 }
 

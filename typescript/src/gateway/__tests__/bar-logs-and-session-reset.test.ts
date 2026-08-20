@@ -37,7 +37,6 @@ import { WebSocket } from 'ws';
 import path from 'node:path';
 import { GatewayServer } from '../server.js';
 import { MAX_MESSAGE_LENGTH } from '../log-store.js';
-import { reserveTestPort } from '../../__tests__/support/test-port.js';
 import type { AgentRequest, AgentResponse, ChatSession } from '../types.js';
 
 /**
@@ -57,10 +56,8 @@ let agentReply: (request: AgentRequest) => Promise<AgentResponse>;
 beforeAll(async () => {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
   dataDir = fs.mkdtempSync(path.join(TMP_ROOT, 'bar-logs-'));
-  const port = await reserveTestPort();
-  base = `http://127.0.0.1:${port}`;
   server = new GatewayServer({
-    port,
+    port: 0,
     bind: 'loopback',
     auth: { mode: 'none' },
     heartbeatInterval: 60_000,
@@ -68,6 +65,7 @@ beforeAll(async () => {
   });
   server.setAgentHandler((request) => agentReply(request));
   await server.start();
+  base = `http://127.0.0.1:${server.port}`;
 });
 
 afterAll(async () => {
@@ -452,15 +450,15 @@ describe('the Bar transport — WebSocket frames, exactly as RpcClient sends the
 
 describe('both methods are fail-closed when the gateway has credentials', () => {
   it('rejects an unauthenticated HTTP caller', async () => {
-    const port = await reserveTestPort();
     const secured = new GatewayServer({
-      port,
+      port: 0,
       bind: 'loopback',
       auth: { mode: 'token', tokens: [freshSecret('gateway')] },
       heartbeatInterval: 60_000,
       dataDir,
     });
     await secured.start();
+    const port = secured.port;
     try {
       for (const method of ['logs.get', 'sessions.reset']) {
         const response = await fetch(`http://127.0.0.1:${port}/rpc`, {

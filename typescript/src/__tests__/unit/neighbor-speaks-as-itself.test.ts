@@ -24,6 +24,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -35,7 +36,6 @@ import {
 } from '../../infra/current-instance.js';
 import { gatewayEndpointFileFor } from '../../infra/gateway-lock.js';
 import { deviceRappid } from '../../twin/send.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 const servers: Server[] = [];
 const homes: string[] = [];
@@ -50,7 +50,6 @@ afterEach(async () => {
 /** A neighbour that records the envelope it was handed. */
 async function neighbourNamed(name: string): Promise<{ received: Record<string, unknown>[] }> {
   const received: Record<string, unknown>[] = [];
-  const port = await reserveTestPort();
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -70,8 +69,9 @@ async function neighbourNamed(name: string): Promise<{ received: Record<string, 
     });
   });
   servers.push(server);
-  await new Promise<void>((resolve) => { server.listen(port, '127.0.0.1', resolve); });
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
 
+  const port = (server.address() as AddressInfo).port;
   // The roster resolves neighbours by name from a record, so give it one that
   // points at this listener and names the pid actually holding it.
   const file = gatewayEndpointFileFor({ instance: name });
@@ -143,7 +143,6 @@ describe('a rappter names itself to a neighbour', () => {
     // /twin forces it.
     isolatedHome();
     const received: Record<string, unknown>[] = [];
-    const port = await reserveTestPort();
     const server = createServer((req, res) => {
       let body = '';
       req.on('data', (c) => { body += c; });
@@ -164,7 +163,8 @@ describe('a rappter names itself to a neighbour', () => {
       });
     });
     servers.push(server);
-    await new Promise<void>((resolve) => { server.listen(port, '127.0.0.1', resolve); });
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+    const port = (server.address() as AddressInfo).port;
     const file = gatewayEndpointFileFor({ instance: 'chatonly' });
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({

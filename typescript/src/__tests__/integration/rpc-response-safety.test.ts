@@ -15,7 +15,6 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 import { RPC_ERROR } from '../../gateway/types.js';
 
 let server: GatewayServer | undefined;
@@ -33,10 +32,10 @@ function cyclic(): Record<string, unknown> {
 }
 
 async function startWithMethod(result: () => unknown): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   server.registerMethod('plugin.result', async () => result());
   await server.start();
+  const port = server.port;
   return port;
 }
 

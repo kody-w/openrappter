@@ -26,7 +26,6 @@ import WebSocket from 'ws';
 import { GatewayServer } from '../../gateway/server.js';
 import { TuiGatewayClient } from '../../tui/gateway-client.js';
 import { createZenPublisher } from '../../tui/zen-publisher.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 let server: GatewayServer | undefined;
 const clients: TestClient[] = [];
@@ -38,9 +37,9 @@ afterEach(async () => {
 });
 
 async function startServer(): Promise<number> {
-  const port = await reserveTestPort();
-  server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+  server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
   await server.start();
+  const port = server.port;
   return port;
 }
 

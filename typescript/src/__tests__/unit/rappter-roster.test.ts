@@ -24,9 +24,9 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { reserveTestPort } from '../support/test-port.js';
 import {
   listRappters,
   plannedPortFor,
@@ -267,7 +267,6 @@ afterEach(async () => {
  * test say whether the roster can tell one owner from another.
  */
 async function gatewayServing(options: { instance?: string } = {}): Promise<number> {
-  const port = await reserveTestPort();
   const server = createServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -286,7 +285,8 @@ async function gatewayServing(options: { instance?: string } = {}): Promise<numb
     res.end();
   });
   servers.push(server);
-  await new Promise<void>((resolve) => { server.listen(port, '127.0.0.1', resolve); });
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
+  const port = (server.address() as AddressInfo).port;
   return port;
 }
 

@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest';
 import WebSocket from 'ws';
 
 import { GatewayServer } from '../../gateway/server.js';
-import { reserveTestPort } from '../support/test-port.js';
 
 /**
  * A client that stops reading must not be buffered without limit.
@@ -73,9 +72,9 @@ async function advertisedLimit(port: number): Promise<number> {
 
 describe('gateway outbound buffer limit', () => {
   it('enforces the buffer limit it advertises', async () => {
-    const port = await reserveTestPort();
-    server = new GatewayServer({ port, bind: 'loopback', auth: { mode: 'none' } });
+    server = new GatewayServer({ port: 0, bind: 'loopback', auth: { mode: 'none' } });
     await server.start();
+    const port = server.port;
 
     const limit = await advertisedLimit(port);
     expect(typeof limit).toBe('number');

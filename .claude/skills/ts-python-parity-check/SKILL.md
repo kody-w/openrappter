@@ -24,9 +24,9 @@ All paths relative to repo root `/Users/rapptertwo/Documents/GitHub/openrappter`
 | BasicAgent    | `typescript/src/agents/BasicAgent.ts`       | `python/openrappter/agents/basic_agent.py`         | `typescript/src/__tests__/parity/data-sloshing.test.ts` | `python/tests/test_basic_agent.py`         |
 | ShellAgent    | `typescript/src/agents/ShellAgent.ts`       | `python/openrappter/agents/shell_agent.py`         | `typescript/src/agents/ShellAgent.test.ts`            | `python/tests/test_shell_agent.py`          |
 | LearnNewAgent | `typescript/src/agents/LearnNewAgent.ts`    | `python/openrappter/agents/learn_new_agent.py`     | `typescript/src/__tests__/parity/learn-new-agent.test.ts` | `python/tests/test_learn_new_agent.py`  |
-| broadcast     | `typescript/src/agents/broadcast.ts`        | `python/openrappter/agents/broadcast.py`           | `typescript/src/__tests__/parity/multiagent.test.ts`  | `python/tests/test_broadcast.py`            |
-| router        | `typescript/src/agents/router.ts`           | `python/openrappter/agents/router.py`              | `typescript/src/__tests__/parity/multiagent.test.ts`  | `python/tests/test_router.py`               |
-| subagent      | `typescript/src/agents/subagent.ts`         | `python/openrappter/agents/subagent.py`            | `typescript/src/__tests__/parity/multiagent.test.ts`  | `python/tests/test_subagent.py`             |
+| broadcast     | `typescript/src/agents/broadcast.ts`        | `python/openrappter/agents/broadcast.py`           | `typescript/src/__tests__/integration/agents.test.ts` | `python/tests/test_broadcast.py`            |
+| router        | `typescript/src/agents/router.ts`           | `python/openrappter/agents/router.py`              | `typescript/src/__tests__/integration/agents.test.ts` | `python/tests/test_router.py`               |
+| subagent      | `typescript/src/agents/subagent.ts`         | `python/openrappter/agents/subagent.py`            | `typescript/src/__tests__/integration/agents.test.ts` | `python/tests/test_subagent.py`             |
 | chain         | `typescript/src/agents/chain.ts`            | `python/openrappter/agents/chain.py`               | `typescript/src/__tests__/parity/agent-chain.test.ts` | `python/tests/test_agent_chain.py`          |
 | graph         | `typescript/src/agents/graph.ts`            | `python/openrappter/agents/graph.py`               | `typescript/src/__tests__/parity/agent-graph.test.ts` | `python/tests/test_agent_graph.py`          |
 | tracer        | `typescript/src/agents/tracer.ts`           | `python/openrappter/agents/tracer.py`              | `typescript/src/__tests__/parity/agent-tracer.test.ts`| `python/tests/test_agent_tracer.py`         |
@@ -35,11 +35,27 @@ All paths relative to repo root `/Users/rapptertwo/Documents/GitHub/openrappter`
 | code_review   | `typescript/src/agents/CodeReviewAgent.ts`  | `python/openrappter/agents/code_review_agent.py`   | `typescript/src/__tests__/parity/code-review.test.ts` | `python/tests/test_code_review.py`          |
 | web_agent     | `typescript/src/agents/WebAgent.ts`         | `python/openrappter/agents/web_agent.py`           | `typescript/src/__tests__/parity/tool-agents.test.ts` | `python/tests/test_web_agent.py`            |
 | clawhub       | `typescript/src/clawhub.ts`                 | `python/openrappter/clawhub.py`                    | `typescript/src/__tests__/parity/skills.test.ts`      | `python/tests/test_module_exports.py`       |
+| watchmaker    | `typescript/src/agents/WatchmakerAgent.ts`  | `python/openrappter/agents/watchmaker_agent.py`    | `typescript/src/__tests__/parity/watchmaker.test.ts`  | `python/tests/test_showcase_watchmaker.py`  |
+| mcp           | `typescript/src/mcp/server.ts`              | `python/openrappter/mcp/server.py`                 | `typescript/src/__tests__/parity/mcp-server.test.ts`  | none — see note below                       |
+| gateway/server | `typescript/src/gateway/server.ts`         | `python/openrappter/gateway/server.py`             | `typescript/src/__tests__/parity/gateway-rpc-methods.test.ts` | `python/tests/test_gateway_rpc_parity.py` |
+| gateway/streaming | `typescript/src/gateway/streaming.ts`   | `python/openrappter/gateway/streaming.py`          | `typescript/src/gateway/__tests__/streaming.test.ts`  | `python/tests/test_showcase_stream_weaver.py` |
+| gateway/dashboard | `typescript/src/gateway/dashboard.ts`   | `python/openrappter/gateway/dashboard.py`          | `typescript/src/__tests__/parity/showcase-living-dashboard.test.ts` | `python/tests/test_showcase_living_dashboard.py` |
+| gateway/observability | `typescript/src/gateway/observability.ts` | `python/openrappter/gateway/observability.py` | `typescript/src/__tests__/integration/gateway-observability.test.ts` | `python/tests/test_gateway_observability.py` |
 
 Notes:
 - The Memory agent splits in Python: `context_memory_agent.py` + `manage_memory_agent.py` mirror one TS `MemoryAgent.ts`. Treat both Python files as the pair. Python parity test: `python/tests/test_memory_agents.py`.
 - If a filename isn't listed, resolve it by convention: TS `CamelCase.ts` ⇔ Python `snake_case.py`; multi-agent primitives (`broadcast`/`router`/`subagent`/`chain`/`graph`/`tracer`) keep their lowercase names in both languages.
-- If a pair genuinely has no Python counterpart yet (e.g. `OuroborosAgent`, `WatchmakerAgent`, gateway/UI), say so explicitly in the report — that's a real divergence to flag, not a silent pass.
+- If a pair genuinely has no Python counterpart yet, say so explicitly in the report — that's a real divergence to flag, not a silent pass. Resolve absence against the authoritative list in [Modules with no Python counterpart](#modules-with-no-python-counterpart) rather than from memory.
+- The `mcp` pair has no dedicated Python parity test; `python/tests/test_module_exports.py` only asserts the module imports. Treat MCP behavioral parity as unverified on the Python side.
+
+## Modules with no Python counterpart
+
+Authoritative list, pinned by `python/tests/test_parity_map.py`. A module named
+here is skipped by parity audits, so a wrong entry silently removes shipped code
+from every audit — add one only after confirming no Python module exists.
+
+- `OuroborosAgent` -- TS-only self-modification agent; no Python module exists.
+- `UI` -- the web UI is TypeScript/Lit only; Python ships no UI layer.
 
 ## Procedure
 
@@ -154,4 +170,4 @@ PARITY OK ✅  |  DIVERGENCE ❌ — <one-line summary>
 - **A skipped or failing suite is never a pass.** If either suite can't run, the verdict is at best "UNKNOWN — <reason>", never "PARITY OK".
 - **Don't touch the main worktree or other worktrees.** Stay in the current working directory per repo worktree etiquette. Ignore `.claude/worktrees/` and `openclaw/` submodule drift in `git status`.
 - **No new report files.** Return the report as your message; do not create `.md` files.
-- **Missing counterpart ≠ silent pass.** If a module exists in TS but has no Python mirror (e.g. `OuroborosAgent`, `WatchmakerAgent`, gateway/UI/MCP), state that as an explicit divergence/limitation in the report.
+- **Missing counterpart ≠ silent pass.** If a module exists in TS but has no Python mirror, state that as an explicit divergence/limitation in the report — but resolve absence against [Modules with no Python counterpart](#modules-with-no-python-counterpart), never from memory. `gateway`, `WatchmakerAgent`, and `mcp` were each wrongly listed as Python-less here while shipping ~2,460 lines of Python, which removed all three from every audit that trusted this file.

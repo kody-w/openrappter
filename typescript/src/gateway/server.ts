@@ -336,6 +336,8 @@ interface ParsedFrame {
 export class GatewayServer {
   private wss: WebSocketServer | null = null;
   private httpServer: ReturnType<typeof createServer> | null = null;
+  /** The port the kernel actually bound, which differs from config.port when that is 0. */
+  private boundPort: number | null = null;
   private connections = new Map<string, { ws: WebSocket; info: ConnectionInfo }>();
   private methods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private publicHttpMethods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
@@ -827,6 +829,17 @@ export class GatewayServer {
     });
   }
 
+  /**
+   * The port this server is reachable on.
+   *
+   * Before start() this is whatever was configured. After start() it is the
+   * port the kernel actually bound, which is the only useful answer when the
+   * configuration asked for port 0.
+   */
+  get port(): number {
+    return this.boundPort ?? this.config.port;
+  }
+
   async start(): Promise<void> {
     if (this.stopPromise) await this.stopPromise;
     if (this.wss) return;
@@ -861,11 +874,18 @@ export class GatewayServer {
       this.httpServer!.on('error', reject);
     });
 
+    // Port 0 means "any free port", and the kernel picks one during listen().
+    // Until we read it back, the number we were configured with is not the
+    // number we are reachable on, so every later reader -- the startup log,
+    // getStatus(), liveSignals(), /status -- would report 0. Ask the socket.
+    const bound = this.httpServer!.address();
+    this.boundPort = bound !== null && typeof bound === 'object' ? bound.port : this.config.port;
+
     logGatewayLifecycle(
       'gateway',
       'start',
-      `Gateway server started on ${host}:${this.config.port}`,
-      { host, port: this.config.port }
+      `Gateway server started on ${host}:${this.port}`,
+      { host, port: this.port }
     );
   }
 
@@ -914,6 +934,7 @@ export class GatewayServer {
     const httpServer = this.httpServer;
     this.wss = null;
     this.httpServer = null;
+    this.boundPort = null;
 
     const shutdownWaits: Promise<unknown>[] = [...pendingOperations];
     if (wss) {
@@ -968,7 +989,7 @@ export class GatewayServer {
       startedAt: this.startedAt ?? undefined,
       agents: agents.map(a => ({ id: a.id, name: a.id, description: a.description })),
       connections: this.connections.size,
-      port: this.config.port,
+      port: this.port,
       version: VERSION,
       cron: this.cronService?.list().map(j => ({
         name: j.name,
@@ -986,7 +1007,7 @@ export class GatewayServer {
   getStatus(): GatewayStatus {
     return {
       running: !!this.wss,
-      port: this.config.port,
+      port: this.port,
       connections: this.connections.size,
       uptime: this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0,
       version: VERSION,

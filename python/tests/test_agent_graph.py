@@ -357,3 +357,103 @@ class TestParallelExecution:
         thread_ids = {a.thread_id for a in agents}
         # At least 2 different thread IDs (main thread won't be reused by executor)
         assert len(thread_ids) >= 2, f"Expected multiple threads, got {thread_ids}"
+
+
+# ---------------------------------------------------------------------------
+# Tests: node timeout
+#
+# node_timeout was accepted by the constructor and then never read, so Python
+# silently ignored a bound TypeScript has always enforced: a hung node hung the
+# whole graph forever. Measured before the fix -- a 100ms budget against a 3s
+# node returned after 3.03s and reported status "success".
+# ---------------------------------------------------------------------------
+
+class TestNodeTimeout:
+    def test_slow_node_times_out_and_fails(self):
+        graph = create_agent_graph({"node_timeout": 100})
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=5.0))
+
+        started = time.time()
+        result = graph.run()
+        elapsed = time.time() - started
+
+        node = result.nodes["slow"]
+        assert node.status == "error"
+        assert "timeout" in node.result.get("message", "").lower()
+        # Released at the timeout, not at the sleeping node's own pace. Without
+        # this the test passes even when the timeout is ignored entirely.
+        assert elapsed < 1.0, f"run() took {elapsed:.2f}s for a 100ms node_timeout"
+
+    def test_timeout_message_matches_typescript(self):
+        """TS raises `Node timeout after ${nodeTimeout}ms`; Python must match."""
+        graph = create_agent_graph({"node_timeout": 100})
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=5.0))
+
+        node = graph.run().nodes["slow"]
+        assert node.result["message"] == "Node timeout after 100ms"
+
+    def test_timed_out_node_skips_its_dependents(self):
+        """A timed-out node fails like any other, so dependents are skipped."""
+        graph = create_agent_graph({"node_timeout": 100})
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=5.0))
+        graph.add_node(name="after", agent=EchoAgent("After"), depends_on=["slow"])
+
+        result = graph.run()
+
+        assert result.nodes["slow"].status == "error"
+        assert result.nodes["after"].status == "skipped"
+        assert result.status == "partial"
+
+    def test_fast_node_is_unaffected_by_a_generous_timeout(self):
+        """A node well inside its budget must not be failed or delayed."""
+        graph = create_agent_graph({"node_timeout": 10000})
+        graph.add_node(name="quick", agent=EchoAgent("Quick"))
+
+        started = time.time()
+        result = graph.run()
+        elapsed = time.time() - started
+
+        assert result.nodes["quick"].status == "success"
+        assert result.status == "success"
+        # The wait is bounded by the node, never by the timeout budget.
+        assert elapsed < 1.0, f"a fast node took {elapsed:.2f}s under a 10s budget"
+
+    def test_no_timeout_configured_lets_a_slow_node_finish(self):
+        """The timeout is opt-in: unset means unbounded, as before."""
+        graph = create_agent_graph()
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=0.3))
+
+        result = graph.run()
+        assert result.nodes["slow"].status == "success"
+
+    def test_abandoned_worker_is_a_daemon_so_it_cannot_block_exit(self):
+        before = set(threading.enumerate())
+
+        graph = create_agent_graph({"node_timeout": 100})
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=5.0))
+        assert graph.run().nodes["slow"].status == "error"
+
+        survivors = [
+            t for t in threading.enumerate()
+            if t not in before and t.is_alive()
+        ]
+        # Anti-vacuity: `all(...)` over an empty list passes and proves nothing,
+        # so first pin that the abandoned worker really is still running.
+        assert survivors, "expected the abandoned node worker to still be alive"
+        non_daemon = [t.name for t in survivors if not t.daemon]
+        assert not non_daemon, (
+            "these workers outlive the timeout as non-daemon threads and will "
+            f"block interpreter exit until the node finishes: {non_daemon}"
+        )
+
+    def test_timeout_applies_on_the_sequential_path_too(self):
+        """run() has two dispatch branches; parallel=False must be bounded too."""
+        graph = create_agent_graph({"node_timeout": 100, "parallel": False})
+        graph.add_node(name="slow", agent=SlowAgent("Slow", delay=5.0))
+
+        started = time.time()
+        result = graph.run()
+        elapsed = time.time() - started
+
+        assert result.nodes["slow"].status == "error"
+        assert elapsed < 1.0, f"sequential path took {elapsed:.2f}s for a 100ms timeout"

@@ -78,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--port` and `OPENRAPPTER_PORT` read the same string two different ways.
+  `--port 1e3` bound port 1 while `OPENRAPPTER_PORT=1e3` bound 1000; `--port
+  8080.5` and `--port 18790abc` were silently truncated to 8080 and 18790. The
+  flag's validator existed as six byte-identical copies of a `parseInt`, which
+  is how it drifted from the variable in the first place. There is now one rule
+  for both — a whole number from 1 to 65535, written in decimal — so hex,
+  exponents, fractions and trailing garbage are refused rather than quietly
+  becoming some other port.
+- A bad `--port` answered with an uncaught exception and a stack trace pointing
+  into node_modules, because all six copies threw a plain `Error` and Commander
+  only recognises `InvalidArgumentError`. It now prints the same one-line usage
+  error as every other bad argument.
 - OPENRAPPTER_PORT was read by two different parsers that disagreed, so one
   setting could put the gateway on one port and its lock file on another. The
   paths deciding what to bind used parseInt; the paths naming the lock used

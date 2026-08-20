@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Python gateway's `health` response omitted the `channels` check that
+  TypeScript reports. Every shared `channels.*` method guards on
+  `channel_registry`, and `channels.list` answers `[]` when it is absent --
+  which a client cannot tell apart from "no channels are configured". Python
+  now reports `channels` (and TypeScript's `storage` placeholder), so the
+  advertised channel surface can be pre-flighted on both runtimes.
+
+- `contracts/gateway-rpc-parity.json` claimed `health`'s `checks` sub-object
+  agreed between the runtimes, and scoped the only exception to the optional
+  `instance` field. It did not agree: TypeScript reported five checks and
+  Python two. The claim was prose, and prose cannot fail a build, so the
+  disagreement survived. Check names are now data under `health_checks`,
+  asserted by both runtimes. The contract's stated TypeScript method count
+  was also stale (54; the live count is 74).
+
 - `DashboardHandler.execute_agent()` dropped the `status` key when an agent
   returned something that was not JSON. TypeScript falls back to
   `{ status: 'success', raw: resultStr }` (`dashboard.ts:398`); Python fell

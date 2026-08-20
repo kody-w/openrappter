@@ -1,7 +1,7 @@
 {
   "schema": "rapp-gateway-rpc-parity/1.0",
   "why": [
-    "The two gateways drifted without anything noticing. TypeScript registers 54 RPC",
+    "The two gateways drifted without anything noticing. TypeScript registers 74 RPC",
     "methods and Python 10, which is expected \u2014 they have different scopes \u2014 but the",
     "overlap must agree, and a method must not quietly appear in one runtime only.",
     "",
@@ -33,6 +33,27 @@
       "code-execution surface. Tracked as an issue rather than added unilaterally."
     ]
   },
+  "health_checks": {
+    "why": [
+      "`health` is in `shared`, and its `checks` sub-object is the part a monitor",
+      "actually reads. It was described in prose as agreeing; it did not. Python",
+      "reported two of TypeScript's five checks, and prose cannot fail a build,",
+      "so the disagreement survived. These lists are asserted by both runtimes."
+    ],
+    "shared": [
+      "agents",
+      "channels",
+      "gateway",
+      "storage"
+    ],
+    "typescript_only": {
+      "copilot": [
+        "`!!this.onAuthTokenUpdate` \u2014 whether a Copilot auth-token callback is",
+        "wired. The Python gateway has no auth-token-update hook at all, so this",
+        "check has nothing to report and is not expressible there."
+      ]
+    }
+  },
   "typescript_only_note": [
     "TypeScript registers many methods Python does not (cron.*, chat.*, twin.*,",
     "surgeon.*, backup.*, auth.*, and others). That is by design \u2014 the TypeScript",
@@ -53,9 +74,15 @@
     "A client written against one cannot read the other. Only `description`",
     "overlaps; TypeScript's `id` is Python's `name`.",
     "",
-    "`health` does agree \u2014 status, version, uptime, timestamp, checks \u2014 except",
-    "that Python never sends the optional `instance`, which TypeScript documents",
-    "as meaning 'unknown' when absent, so that is compatible by design.",
+    "`health`'s top-level keys agree \u2014 status, version, uptime, timestamp,",
+    "checks, metrics \u2014 except that Python never sends the optional `instance`,",
+    "which TypeScript documents as meaning 'unknown' when absent, so that is",
+    "compatible by design.",
+    "",
+    "Its `checks` sub-object did NOT agree, and this file used to say it did.",
+    "TypeScript reported five checks and Python two. That claim now lives in",
+    "`health_checks` above, where both runtimes assert it, because a sentence",
+    "here cannot fail a build and so cannot notice when it stops being true.",
     "",
     "Tracked as an issue rather than fixed here: choosing a canonical shape",
     "breaks whichever side's clients are not chosen, which is an owner decision."

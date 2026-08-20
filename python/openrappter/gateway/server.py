@@ -346,8 +346,18 @@ class GatewayServer:
             "version": self.version,
             "uptime": int(time.time() - self._started_at) if self._started_at else 0,
             "timestamp": _iso_timestamp(),
+            # Mirrors gateway/server.ts:1935 minus `copilot`, which reports
+            # whether an auth-token callback is wired and has no Python hook to
+            # report on. `storage` is TypeScript's hardcoded placeholder, kept
+            # so the key set a monitor iterates over is the same on both sides.
+            # `channels` is the load-bearing one: every shared `channels.*`
+            # method guards on this registry, and `channels.list` returns []
+            # when it is absent, which is indistinguishable from "no channels
+            # configured" unless health says which it is.
             "checks": {
                 "gateway": self.running,
+                "storage": True,
+                "channels": self.channel_registry is not None,
                 "agents": self.agent_registry is not None,
             },
             "metrics": self.metrics.snapshot(len(self._connections)),

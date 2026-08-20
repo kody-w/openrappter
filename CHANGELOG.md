@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The capability gate's evidence patterns could not see most ways of writing to
+  disk. They are what decides whether an agent is holding an undeclared
+  capability, and nothing tested them directly — they were only ever run against
+  whichever agents happened to exist, so a gap sat there without a single test
+  going red. An agent could call `fs.rm(dir, { recursive: true })` and the gate
+  reported nothing, though it already listed that call's synchronous twin.
+  `renameSync` and `copyFileSync` were missed too, on a word boundary: the `S`
+  that follows `rename` is a word character. Those forms appear 71 times
+  elsewhere in the TypeScript sources, so it was luck rather than design that no
+  agent had reached for one. The patterns are now generated from verb plus
+  optional `Sync`, cover UDP and HTTP/2 alongside HTTP, and have unit tests of
+  their own — including that they stay quiet on ordinary prose, since a false
+  positive here pushes people to declare capabilities they do not hold.
 - The capability-reachability gate asserted about agents whose source it could
   not fully see. It excluded an agent that statically imports deep internals —
   "the source is the whole story" only holds for self-contained files — but read

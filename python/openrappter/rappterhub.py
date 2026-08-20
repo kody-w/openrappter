@@ -157,7 +157,9 @@ class RappterHubClient:
 
     def _load_lock(self) -> dict:
         """Load the lock file tracking installed agents."""
-        return read_json_object(LOCK_FILE, {"installed": {}, "version": 1})
+        return read_json_object(
+            LOCK_FILE, {"installed": {}, "version": 1}, object_fields=("installed",)
+        )
 
     def _save_lock(self, lock: dict):
         """Save the lock file."""

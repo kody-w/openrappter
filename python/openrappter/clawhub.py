@@ -257,7 +257,9 @@ class ClawHubClient:
 
     def _load_lock(self) -> dict:
         """Load the lock file tracking installed skills."""
-        return read_json_object(self._lock_file, {"installed": {}})
+        return read_json_object(
+            self._lock_file, {"installed": {}}, object_fields=("installed",)
+        )
 
     def _save_lock(self, lock: dict):
         """Save the lock file."""

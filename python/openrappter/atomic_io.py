@@ -31,7 +31,7 @@ import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 DEFAULT_NEW_FILE_MODE = 0o600
 
@@ -87,7 +87,12 @@ def write_json_atomic(
     _sync_directory(path.parent)
 
 
-def read_json_object(path: Path, default: dict) -> dict:
+def read_json_object(
+    path: Path,
+    default: dict,
+    *,
+    object_fields: Sequence[str] = (),
+) -> dict:
     """Read a JSON object, moving the file aside if it is not one.
 
     Returns ``default`` when the file is missing, unreadable as JSON, or holds
@@ -99,6 +104,23 @@ def read_json_object(path: Path, default: dict) -> dict:
     evidence of what was there. Renaming keeps the bytes next to the file they
     came from, so the state is recoverable by hand and visible to anyone
     wondering why the tool suddenly forgot something.
+
+    ``object_fields`` names keys the caller is going to index into, and so
+    cannot cope with holding anything but an object. Checking only that the
+    *file* is an object stopped one level short of what every caller needed:
+    both registry clients read a lock and immediately evaluate
+    ``lock["installed"]``, which measured as ``KeyError`` for ``{}``,
+    ``TypeError`` for ``{"installed": null}``, and -- worst of the three --
+    a quiet wrong answer for ``{"installed": "alice/tool-and-then-some"}``,
+    where ``in`` is a substring test that reports an agent as installed that
+    was never installed.
+
+    A missing key and a wrong-typed one are not the same failure and are not
+    treated the same. Missing means nothing was ever written there, so it is
+    filled in from ``default``: no evidence exists to destroy, and quarantining
+    would punish a file that is merely older than the key. Present-but-wrong
+    means something did write a value, so the file is moved aside under the
+    same rule as any other damage rather than being silently reinterpreted.
     """
     path = Path(path)
     if not path.exists():
@@ -113,6 +135,13 @@ def read_json_object(path: Path, default: dict) -> dict:
     if not isinstance(parsed, dict):
         quarantine(path)
         return default
+
+    for field in object_fields:
+        if field not in parsed:
+            parsed[field] = default.get(field, {})
+        elif not isinstance(parsed[field], dict):
+            quarantine(path)
+            return default
 
     return parsed
 

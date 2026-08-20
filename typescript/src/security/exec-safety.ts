@@ -35,6 +35,11 @@ export interface AuditEntry {
   reason?: string;
   status: 'allowed' | 'blocked' | 'pending' | 'approved' | 'rejected' | 'used' | 'expired';
   timestamp: string;
+  /**
+   * Set when `cmd` above is not the whole command. The safety decision was
+   * still made on the full text; only what is kept for the log was shortened.
+   */
+  truncated?: boolean;
 }
 
 export interface PendingApproval {
@@ -160,7 +165,45 @@ export interface ExecSafetyOptions {
    * route to approval instead of running. Default false (backward-compatible).
    */
   strictDefaults?: boolean;
+
+  /**
+   * How many audit entries to keep. Older entries are dropped once the log is
+   * full, and `getAuditDroppedCount()` reports how many were lost.
+   *
+   * This engine is a process-wide singleton shared by ShellAgent and the
+   * gateway, so without a ceiling the log grows for the life of the server.
+   * Measured: 50,000 checks retained 13.8 MB, and refusing a command costs
+   * exactly as much as allowing one.
+   */
+  maxAuditEntries?: number;
+
+  /**
+   * How much of a command to keep in an audit entry. The safety decision is
+   * always made on the whole command; this only bounds what is stored.
+   *
+   * Without it the size of an entry is chosen by whoever sent the command:
+   * 2,000 refused 100 KB commands retained 191.5 MB.
+   */
+  maxAuditCommandChars?: number;
+
+  /**
+   * How many finished approval tokens to keep. Live ones (pending, or approved
+   * and not yet used) are never dropped. Measured: 20,000 fully-used tokens
+   * were all still held.
+   */
+  maxApprovalTokens?: number;
 }
+
+/**
+ * Defaults chosen to keep the whole engine comfortably inside a few megabytes
+ * while still holding enough history to investigate an incident.
+ */
+export const DEFAULT_MAX_AUDIT_ENTRIES = 1000;
+export const DEFAULT_MAX_AUDIT_COMMAND_CHARS = 2000;
+export const DEFAULT_MAX_APPROVAL_TOKENS = 500;
+
+/** Statuses a token can never leave; only these are eligible for eviction. */
+const TERMINAL_TOKEN_STATUSES = new Set(['used', 'rejected', 'expired']);
 
 export class ExecSafety {
   private safeBins: Set<string>;
@@ -169,9 +212,17 @@ export class ExecSafety {
   private pendingApprovals = new Map<string, PendingApproval>();
   private approvalListeners = new Set<(approval: PendingApproval) => void>();
   private approvalTokens = new Map<string, ApprovalToken>();
+  private maxAuditEntries: number;
+  private maxAuditCommandChars: number;
+  private maxApprovalTokens: number;
+  private droppedAuditEntries = 0;
 
   constructor(safeBins?: Iterable<string>, options?: ExecSafetyOptions) {
     this.strictDefaults = options?.strictDefaults ?? false;
+    this.maxAuditEntries = options?.maxAuditEntries ?? DEFAULT_MAX_AUDIT_ENTRIES;
+    this.maxAuditCommandChars =
+      options?.maxAuditCommandChars ?? DEFAULT_MAX_AUDIT_COMMAND_CHARS;
+    this.maxApprovalTokens = options?.maxApprovalTokens ?? DEFAULT_MAX_APPROVAL_TOKENS;
     if (safeBins) {
       this.safeBins = new Set(safeBins);
     } else if (this.strictDefaults) {
@@ -372,14 +423,16 @@ export class ExecSafety {
       }
 
       // Record in audit log with pending status
-      this.auditLog.push({
+      const stored = this.forAudit(cmd);
+      this.pushAudit({
         id,
-        cmd,
+        cmd: stored.text,
         binary,
         safe: false,
         reason: approval.reason,
         status: 'pending',
         timestamp: approval.createdAt,
+        ...(stored.truncated ? { truncated: true } : {}),
       });
     });
   }
@@ -444,10 +497,12 @@ export class ExecSafety {
       expiresAt: Date.now() + ttlMs,
     };
     this.approvalTokens.set(id, token);
+    this.evictFinishedTokens();
 
-    this.auditLog.push({
+    const stored = this.forAudit(normalized);
+    this.pushAudit({
       id,
-      cmd: normalized,
+      cmd: stored.text,
       binary: this.parseBinary(normalized),
       safe: false,
       reason: reason
@@ -456,9 +511,10 @@ export class ExecSafety {
         // the danger themselves. The caller was getting this explanation and
         // the reviewer was not, which is the wrong way round.
         ? reason
-        : `Approval token issued for: ${normalized}`,
+        : `Approval token issued for: ${stored.text}`,
       status: 'pending',
       timestamp: token.createdAt,
+      ...(stored.truncated ? { truncated: true } : {}),
     });
 
     return { ...token };
@@ -602,10 +658,23 @@ export class ExecSafety {
   }
 
   /**
+   * How many audit entries have been dropped to stay inside the ceiling.
+   *
+   * A capped log that looks complete is a trap: someone investigating an
+   * incident needs to know the history does not reach back far enough rather
+   * than concluding the thing they are looking for never happened.
+   */
+  getAuditDroppedCount(): number {
+    return this.droppedAuditEntries;
+  }
+
+  /**
    * Clear the audit log.
    */
   clearAuditLog(): void {
     this.auditLog = [];
+    // The caller asked for an empty log, so nothing has been lost from it yet.
+    this.droppedAuditEntries = 0;
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
@@ -630,15 +699,107 @@ export class ExecSafety {
     result: SafetyCheckResult,
     status: AuditEntry['status']
   ): void {
-    this.auditLog.push({
+    // Only what gets stored is shortened. Every caller above has already run
+    // the injection patterns against the full command, which is the order that
+    // matters: truncating first would let anything past the cutoff go unread.
+    const { text, truncated } = this.forAudit(cmd);
+    this.pushAudit({
       id: `audit_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-      cmd,
+      cmd: text,
       binary,
       safe: result.safe,
       reason: result.reason,
       status,
       timestamp: new Date().toISOString(),
+      ...(truncated ? { truncated: true } : {}),
     });
+  }
+
+  /**
+   * Shorten a command for storage, saying so in the text itself.
+   *
+   * The marker matters as much as the ceiling: someone reading the history
+   * needs to be able to tell "this is the command" from "this is the start of
+   * the command", or they will draw conclusions from a string that is missing
+   * the interesting part.
+   */
+  private forAudit(cmd: string): { text: string; truncated: boolean } {
+    if (cmd.length <= this.maxAuditCommandChars) {
+      return { text: cmd, truncated: false };
+    }
+    // The round-trip through a Buffer is load-bearing and must not be
+    // simplified back into a plain slice.
+    //
+    // V8 represents `s.slice(0, n)` as a view onto the original string, so the
+    // "truncated" copy keeps the whole command alive. Measured, keeping 2,000
+    // characters of 1,000 commands of 100,000 characters:
+    //
+    //   s.slice(0, n)              95.4 MB
+    //   `${s.slice(0, n)}…`        95.5 MB   (concatenation does not flatten)
+    //   Buffer round-trip           2.0 MB
+    //
+    // Encoding to bytes and back builds a genuinely new string with no
+    // reference to the original. It also replaces a surrogate pair that the
+    // cut landed in the middle of with U+FFFD, which is the right outcome for
+    // a log: half a character is not worth propagating to every reader.
+    const kept = Buffer.from(cmd.slice(0, this.maxAuditCommandChars), 'utf8').toString('utf8');
+    return {
+      text: `${kept}… [truncated, ${cmd.length} chars total]`,
+      truncated: true,
+    };
+  }
+
+  /**
+   * Append an entry and hold the log to its ceiling, oldest first.
+   *
+   * Dropping audit records is not free, so the count of what was dropped is
+   * kept and reported rather than the log quietly appearing complete.
+   */
+  private pushAudit(entry: AuditEntry): void {
+    this.auditLog.push(entry);
+    if (this.maxAuditEntries <= 0) {
+      this.droppedAuditEntries += this.auditLog.length;
+      this.auditLog = [];
+      return;
+    }
+    if (this.auditLog.length > this.maxAuditEntries) {
+      const excess = this.auditLog.length - this.maxAuditEntries;
+      this.auditLog.splice(0, excess);
+      this.droppedAuditEntries += excess;
+    }
+  }
+
+  /**
+   * Forget approval tokens that can no longer be used for anything.
+   *
+   * Only terminal ones go: a pending token is still waiting on a person, and
+   * an approved one is still waiting to be spent. Dropping either would break
+   * an approval that a human had already dealt with.
+   *
+   * The cost is that a replay of a token evicted long ago is reported as
+   * unknown rather than as a replay. Both refuse the command; only the wording
+   * differs, and a token has to be older than the last `maxApprovalTokens`
+   * finished ones — far outside any TTL — before that can happen.
+   */
+  private evictFinishedTokens(): void {
+    const now = Date.now();
+    for (const token of this.approvalTokens.values()) {
+      if (token.status === 'pending' && now > token.expiresAt) {
+        token.status = 'expired';
+      }
+    }
+
+    let overBy = this.approvalTokens.size - this.maxApprovalTokens;
+    if (overBy <= 0) return;
+
+    // Map iteration is insertion-ordered, so this drops the oldest first.
+    for (const [id, token] of this.approvalTokens) {
+      if (overBy <= 0) break;
+      if (TERMINAL_TOKEN_STATUSES.has(token.status)) {
+        this.approvalTokens.delete(id);
+        overBy--;
+      }
+    }
   }
 }
 

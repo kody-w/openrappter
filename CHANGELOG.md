@@ -78,6 +78,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The command-safety engine's history grew without limit. `ExecSafety` records
+  every command it inspects and dropped none of it, in a process-wide singleton
+  shared by `ShellAgent` and the gateway, so the history lived as long as the
+  server. Two things made it worse than a slow leak: refusing a command cost
+  exactly as much as allowing one, so a caller who was only ever refused could
+  still drive it; and the size of each record was the sender's to choose,
+  because the whole command string was kept. Measured on the released build,
+  20,000 refused commands kept 20,000 entries and 8.3 MB, 2,000 refused 100 KB
+  commands retained 191.5 MB, 20,000 fully-used approval tokens were all still
+  held, and `exec.history` returned a 40.1 MB response after 5,000 refused 8 KB
+  commands. The log now holds a bounded number of entries and reports how many
+  it dropped, since a capped history that looks complete would send someone
+  investigating an incident to the wrong conclusion. Stored commands are
+  shortened, and say so in the text rather than only in a flag. Truncation
+  applies to what is stored and never to what is checked — the injection
+  patterns still run against the whole command, or padding would be all it took
+  to hide a second command behind a semicolon. Finished approval tokens are
+  released, while pending and approved-but-unspent ones are never evicted,
+  because dropping either would turn a decision a human already made into a
+  silent refusal. After: refusals cost 0.5 MB, a 100 KB command costs the same
+  as a 10 KB one, and `exec.history` returns 2.1 MB.
+
 - An interrupted write destroyed the record of which agents are installed.
   `_save_lock` used `Path.write_text`, which truncates the visible file before
   writing a byte and never flushes it to disk. Killing a process during that

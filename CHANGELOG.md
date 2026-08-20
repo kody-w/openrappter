@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OPENRAPPTER_PORT was read by two different parsers that disagreed, so one
+  setting could put the gateway on one port and its lock file on another. The
+  paths deciding what to bind used parseInt; the paths naming the lock used
+  Number. For `0x1F90` those return 0 and 8080 — the server took an arbitrary
+  ephemeral port while the lock claimed 8080, leaving the lock describing a
+  server that was not there. NaN was quieter still: `gatewayPortFor` screens it
+  with `Number.isFinite` and substitutes the derived port without a word.
+  `OPENRAPPTER_PORT=0` did the same by a shorter route, binding at random while
+  the lock recorded 0, even though `--port 0` is rejected outright. There is now
+  one parser, enforcing the bounds `--port` already used, and an unusable value
+  says so instead of becoming a different port.
 - A failing gateway-realtime CI job would not say why it failed. Its output is
   redirected to a file — rightly, since a green run is ~500 lines of "Gateway
   server started on ..." — but nothing ever printed that file, so the console

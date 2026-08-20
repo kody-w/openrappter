@@ -15,6 +15,7 @@ import { execSync, execFileSync } from 'child_process';
 import fs from 'fs/promises';
 import { appleScriptLiteral } from './applescript.js';
 import { BasicAgent } from './BasicAgent.js';
+import { portFromEnvironment } from '../infra/cli-port.js';
 import type { AgentMetadata } from './types.js';
 
 
@@ -136,7 +137,15 @@ export class DailyTipAgent extends BasicAgent {
   }
 
   private sendNotification(title: string, body: string, command: string): void {
-    const port = process.env.OPENRAPPTER_PORT ?? '18790';
+    // Agents do not throw (#136), and a bad OPENRAPPTER_PORT has already been
+    // reported loudly by whatever tried to bind or lock it. Losing the whole
+    // notification over an unusable link is the worse trade, so fall back.
+    let port = 18790;
+    try {
+      port = portFromEnvironment() ?? 18790;
+    } catch {
+      port = 18790;
+    }
     const webUrl = `http://127.0.0.1:${port}`;
     const barApp = '/Applications/OpenRappter Bar.app';
     const hasBar = (() => { try { return require('fs').existsSync(barApp); } catch { return false; } })();

@@ -45,6 +45,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from openrappter import __version__
+from openrappter.flight_recorder import private_mkdir
 from openrappter.result_status import agent_result_is_error
 
 
@@ -199,7 +200,7 @@ class LocalStorageManager:
 
     @staticmethod
     def _atomic_json(path, data):
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        private_mkdir(path.parent)
         descriptor, temporary = tempfile.mkstemp(
             prefix=f".{path.name}.",
             suffix=".tmp",
@@ -378,7 +379,7 @@ def _token_file():
 def _secure_dir(path):
     """Create `path` private to this account, tightening it if it already exists."""
     path = Path(path)
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(path)
     try:
         os.chmod(path, 0o700)
     except OSError:
@@ -542,7 +543,7 @@ def refresh_github_token():
 
 
 def _atomic_private_json(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(path.parent)
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.",
         suffix=".tmp",

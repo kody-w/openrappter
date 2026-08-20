@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python created private directories world-readable when it had to create their
+  parents. `Path.mkdir(parents=True, mode=0o700)` applies `mode` only to the
+  final directory -- CPython creates missing ancestors with the default
+  permissions and ignores `mode` for them -- while Node's
+  `mkdirSync(dir, { recursive: true, mode: 0o700 })` applies it to every
+  directory it creates. Both runtimes share one on-disk layout, so on a machine
+  where `~/.openrappter` did not exist yet, whichever runtime got there first
+  decided whether it was `0700` or world-readable `0755`. All 15 sites that
+  asked for `0700` now go through a new `private_mkdir()` helper that matches
+  Node, including the Flight Recorder log directory and the iMessage state and
+  config directories. A test fails the build if the old idiom reappears
+  anywhere in the Python product tree.
+- The Show-and-Tell contract's privacy and vocabulary guarantees were never
+  asserted: both runtimes checked only `session.schema`, so the `0700`/`0600`
+  mode promises, the 14-name event vocabulary, and the session-state list could
+  all drift silently. Both runtimes now measure them against
+  `contracts/show-and-tell-v1.json`, and the contract records explicitly that
+  the directory mode covers ancestors the runtime creates.
+
 - The Python gateway's `health` response omitted the `channels` check that
   TypeScript reports. Every shared `channels.*` method guards on
   `channel_registry`, and `channels.list` answers `[]` when it is absent --

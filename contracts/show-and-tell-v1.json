@@ -85,6 +85,7 @@
     "typedTextStored": false,
     "narration": "Optional microphone audio is transcribed on-device with Whisper Small q8; the cached model is approximately 252 MB.",
     "directoryMode": "0700",
+    "directoryModeAppliesToCreatedAncestors": true,
     "fileMode": "0600"
   }
 }

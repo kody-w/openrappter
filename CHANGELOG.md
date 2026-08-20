@@ -78,6 +78,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--evolve` was parsed by passing `parseInt` straight to commander, which calls
+  a parser as `fn(value, previous)` — so the previous value silently became
+  `parseInt`'s **radix**. `--evolve 9 --evolve 9` parsed to `NaN`, and because
+  the caller guards with `if (options.evolve)`, `NaN` and `0` ran no ticks,
+  exited 0 and fell through to an interactive session: asking for evolution and
+  getting silence looked exactly like success. `--evolve 10abc` ran ten ticks,
+  `--evolve 0x10` ran sixteen, and `--evolve -3` announced "Running -3
+  evolution ticks" before running none.
+- A seventh copy of the `--port` validator, in `src/cli/rappters.ts`, outlived
+  the consolidation of the other six and kept both defects they had: silent
+  `parseInt` truncation, and a plain `Error` that escaped as a stack trace.
 - `--port` and `OPENRAPPTER_PORT` read the same string two different ways.
   `--port 1e3` bound port 1 while `OPENRAPPTER_PORT=1e3` bound 1000; `--port
   8080.5` and `--port 18790abc` were silently truncated to 8080 and 18790. The

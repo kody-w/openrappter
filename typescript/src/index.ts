@@ -34,6 +34,7 @@ import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
 import { registerUpdateCommand } from './cli/update.js';
 import { registerHubCommands } from './cli/hubs.js';
+import { tickCountFromFlag } from './infra/cli-args.js';
 import { portFromEnvironment, portFromFlag, portTypedOnCommandLine } from './infra/cli-port.js';
 import { watchOwnerProcess } from './infra/owner-watch.js';
 import {
@@ -1041,7 +1042,7 @@ program
 program
   .argument('[message]', 'Message to send')
   .option('-t, --task <task>', 'Run a single task')
-  .option('-e, --evolve <n>', 'Run N evolution ticks', parseInt)
+  .option('-e, --evolve <n>', 'Run N evolution ticks', tickCountFromFlag)
   .option('-d, --daemon', 'Run as background daemon')
   .option(
     '--instance <id>',

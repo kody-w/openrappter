@@ -30,6 +30,8 @@
 import { InvalidArgumentError } from 'commander';
 import type { Command } from 'commander';
 
+import { wholeNumberOrUndefined } from './cli-args.js';
+
 /**
  * Walk this command and its ancestors for a `--port` that came from the command
  * line, and return it.
@@ -101,10 +103,10 @@ export function portTypedOnCommandLine(command: Command): number | undefined {
 /**
  * The one rule for what counts as a port, wherever the value came from.
  *
- * A port is written in decimal. Insisting on that, rather than handing the
- * string to `Number` or `parseInt` and seeing what falls out, is what makes the
- * answer the same for every caller — see `portFromEnvironment` for what the
- * looser readings cost.
+ * A port is written in decimal, which is just the shared whole-number rule
+ * with the bounds a port has. Keeping it in one place is what makes the answer
+ * the same for every caller — see `portFromEnvironment` for what the looser
+ * readings cost.
  *
  * Returns undefined for anything unusable, including empty input, and leaves
  * the wording of the complaint to the caller that knows where the value came
@@ -112,16 +114,7 @@ export function portTypedOnCommandLine(command: Command): number | undefined {
  * environment variable they never set.
  */
 function portOrUndefined(raw: string): number | undefined {
-  const trimmed = raw.trim();
-  // Digits only. `Number` would take '0x1F90' as 8080 and '1e3' as 1000, and
-  // `parseInt` would take the same two as 0 and 1 — which is exactly how the
-  // flag and the variable came to disagree. No port is ever written that way,
-  // so neither reading is worth keeping.
-  if (!/^\d+$/.test(trimmed)) return undefined;
-
-  const port = Number(trimmed);
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) return undefined;
-  return port;
+  return wholeNumberOrUndefined(raw, 1, 65_535);
 }
 
 /**

@@ -78,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Pokemon runtime corrupted its own state files when two threads wrote at
+  once. `atomic_write_json` named its temporary after the process id, which
+  threads share, so it was one name for the whole process rather than one per
+  writer; the viewer serves its control endpoint from a `ThreadingHTTPServer`
+  and answers `stop` by writing `desired.json`. Two overlapping requests opened
+  the same temporary, interleaved bytes into it, and raced to rename it. Over
+  60 rounds on two threads, 57 renames failed and a reader found the published
+  file unparseable 219 times; because `read_json` answers a damaged file with
+  its default, that surfaced as the runtime quietly forgetting its state rather
+  than as a crash. The open also used `O_TRUNC`, which followed a symlink
+  planted at that guessable path and truncated its target. Both lines now match
+  every other atomic writer here: a uuid-keyed name and `O_EXCL`.
 - A registry lock file that was an object but not the expected shape crashed
   `install`. Both registry clients read a lock and immediately evaluate
   `lock["installed"]`; `read_json_object` guarded the top level, so a lock

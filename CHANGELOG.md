@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The two runtimes disagreed about which file metadata may ride along next to
+  an excluded credential path. When a recorded object carries a locator for an
+  excluded file, every sibling field is replaced with `[excluded-path]` except a
+  short allowlist -- `size`, `length`, `language`, `mime`, `mimetype`,
+  `extension` -- and a text field qualified only if it fit a 256 budget. Python
+  measured that budget with `len()`, which counts code points, and TypeScript
+  with `.length`, which counts UTF-16 code units, so a 200-emoji `mime` value
+  sat on opposite sides of the same number: Python wrote it to the flight log
+  verbatim while TypeScript blanked it. Both now measure it in UTF-8 bytes, the
+  unit every other size cap in the flight recorder already uses, which also
+  closes the case both runtimes got wrong -- a 200-character two-byte string
+  that fits either native length but not the byte budget. Verified by running
+  31 metadata shapes through both sanitizers and diffing: 1 divergence before,
+  0 after.
+- `contracts/excluded-path-corpus.json` said every sibling field is blanked,
+  without mentioning the metadata allowlist that is the one deliberate hole in
+  that sweep. The allowlist and its budget are now recorded in the contract and
+  asserted by both runtimes.
+
 - Python created private directories world-readable when it had to create their
   parents. `Path.mkdir(parents=True, mode=0o700)` applies `mode` only to the
   final directory -- CPython creates missing ancestors with the default

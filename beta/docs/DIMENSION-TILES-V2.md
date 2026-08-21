@@ -86,7 +86,7 @@ at exactly that path.
   "id": "@kody-w/book_factory",
   "seed": 13467203979104256843,
   "name_seed": 3136112411,
-  "seven_word_key": "TWIST MOLD BEQUEST VALOR LEFT ORBIT RUNE",
+  "seven_word_key": "TONIC BRIGAND THROW MOST CHIME FRAY CAST",
   "version": "1.2.0",
   "face": { "…every v1 holo-card field, unchanged: name, title, type_line, colors, hp, stats, abilities, rarity, evolution, avatar_svg…" },
   "manifest": { "schema": "…", "name": "@kody-w/book_factory", "display_name": "BookFactory", "description": "…", "author": "…", "tags": [], "category": "creative", "quality_tier": "community" },

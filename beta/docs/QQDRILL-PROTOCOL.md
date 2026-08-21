@@ -383,6 +383,40 @@ into anyone else's line.
 Read one way it is the private projection, read the other the public one. Same frames, same keys,
 opposite direction of travel.
 
+### Enumerate the addresses; do not generate them
+
+A drill has to decide which coordinates to probe. There are two ways to get a candidate list, and
+measurement settled which one is right for the address spaces here.
+
+**Enumeration wins, and it is not close.** For a space small enough to list — the coordinates a
+device actually holds, the entries in an index that already ships — the complete valid set is
+computable in a single pass. A generating model can only approximate that list, and it approximates
+it worse than reading it.
+
+The measured case: a character model trained on real seven-word chants needed roughly **4 × 10¹⁴
+draws** to hit one held-out chant it had not seen, against a real population of **331 chants that one
+pass over an already-shipping file lists in full**. Past a certain model size it performed *worse*
+than uniform random. Generation lost to `map()`.
+
+Two properties of an address space decide this, and both are worth checking before reaching for a
+model:
+
+- **Is the valid set enumerable?** If the addresses that exist can be listed from something you
+  already have, list them. A model that predicts a list you possess is strictly worse than the list.
+- **Is there a rejection signal?** A word-encoded address whose codec is **total** — where every
+  combination decodes to something well-formed — gives a generator nothing to learn from. Well-formed
+  is not the same as real, and if the space cannot tell a generator it is wrong, the generator cannot
+  improve.
+
+**Where a policy does earn its place** is in the space enumeration cannot reach: ordering. Which of
+the listed coordinates to probe *first*, when there are more than you can afford to try. That is a
+ranking problem over a known set, not a generation problem over an unknown one, and it is where the
+economics of drilling actually live.
+
+**And this is why the chant is for dialing, not for guessing.** A chant addresses a thing precisely;
+it is the door. Guessing at doors is not how you find the room — you get the list of rooms, decide
+which to try first, and then use the door.
+
 ### This specifies the mechanism, not the policy
 
 The protocol fixes what a key *is*, what a pair *is*, what may be assimilated and what must be

@@ -85,7 +85,7 @@ lineage, and no reader may rank tiles by them.
   "id": "@kody-w/book_factory",
   "seed": 13467203979104256843,
   "name_seed": 3136112411,
-  "key": "TWIST MOLD BEQUEST VALOR LEFT ORBIT RUNE",
+  "key": "TONIC BRIGAND THROW MOST CHIME FRAY CAST",
   "version": "1.2.0",
   "face": { "…the rar-card/2.0 face, unchanged…" },
   "manifest": { "…the agent __manifest__…" },
@@ -122,6 +122,17 @@ lineage, and no reader may rank tiles by them.
 
 | Rule | Meaning |
 |---|---|
+> **On the worked example above.** The seed and the seven words in that document are a real pair,
+> checked against the canonical `seed_to_words` in `rapp_sdk.py` and verified to round-trip through
+> `words_to_seed`. They previously did not: the words shown decoded to an entirely different seed.
+> A worked example that does not round-trip is worse than none, because a reader will trust it.
+>
+> Two further cautions for anyone implementing against this. The canonical encoder is
+> **little-endian** base-1024; a competing specification elsewhere in the estate describes a
+> big-endian encoder over a BLAKE2b-64 seed, and the two are **not compatible**. And the codec is
+> **total** — every seven-word combination decodes to some valid seed and renders a plausible card —
+> so a chant being well-formed is no evidence at all that it addresses anything real.
+
 | **The seed is still the identity.** | `seed = forge_seed(manifest)`, `face = resolve_from_seed(seed)`, `key = seed_to_words(seed)` — the same functions, the same numbers, the same seven words as `rar-card/2.0`. A tile migrated from a card keeps its seed, so anyone holding those seven words still gets the same thing. |
 | **Exactly one primary.** | `payload[0].role === "primary"` and the file is named after it. The primary is what the tile *is*; identity is singular even when contents are not. |
 | **Three payload roles.** | `primary` (identity, exactly one), `agent` (a further executable capability — another `agent.py` or `.egg` — **required**), `resource` (inert data, omittable). A second agent is not a resource: dropping it changes what the kit does. |

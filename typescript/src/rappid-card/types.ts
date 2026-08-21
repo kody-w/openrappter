@@ -371,7 +371,7 @@ export interface CardVector {
 }
 
 export interface CardDeck {
-  schema: 'rappid-card-vectors/2';
+  schema: 'rappid-card-vectors/3';
   production_profile: 'rappid-card/1';
   test_profile: 'rappid-card-test/1';
   virtual_suffix: '.rappid-card.json';

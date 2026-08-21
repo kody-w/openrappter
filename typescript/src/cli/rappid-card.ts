@@ -6,7 +6,6 @@ import type { Command } from 'commander';
 import {
   H,
   RAPPID_CARD_FIXTURE_NAMES,
-  SQLiteCardState,
   buildRappidCardFixture,
   parseCardLink,
   readCardResource,
@@ -15,6 +14,7 @@ import {
   simulateRappidCardFixture,
   verifyCardLink,
   loadRappidCardTrustConfig,
+  inspectCardOffline,
   writeRappidCardFixtureDeck,
 } from '../rappid-card/index.js';
 import type { QrArtifactFormat } from '../rappid-card/index.js';
@@ -205,8 +205,7 @@ export function registerRappidCardCommand(program: Command): void {
           'bundle runtime-policy authority is not locally configured',
         );
       }
-      const state = await SQLiteCardState.open(options.state);
-      const verdict = verifyCardLink({
+      const inspection = inspectCardOffline({
         uri: inspected.link,
         frame: inspected.frame,
         trust: local.trust,
@@ -214,7 +213,6 @@ export function registerRappidCardCommand(program: Command): void {
         runtime_policy: bundle.runtime_policy,
         authority_view: bundle.authority_view,
         revocation_view: bundle.revocation_view,
-        state,
         connection_id: bundle.connection_id,
         fetch_trace: bundle.fetch_trace,
         hydrated: Object.fromEntries(
@@ -224,19 +222,10 @@ export function registerRappidCardCommand(program: Command): void {
           ]),
         ),
         continuity: bundle.continuity,
+        supplied_state_path: options.state,
       });
-      print({
-        status: 'offline-only',
-        awake: false,
-        cryptographic_policy_ok: verdict.ok,
-        verdict: {
-          ok: verdict.ok,
-          step: verdict.step,
-          reason: verdict.reason,
-          result: null,
-        },
-      });
-      if (!verdict.ok) process.exitCode = 1;
+      print(inspection);
+      if (!inspection.cryptographic_policy_ok) process.exitCode = 1;
     });
 
   command

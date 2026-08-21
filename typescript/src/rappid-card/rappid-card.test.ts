@@ -36,6 +36,7 @@ import {
   lclabel,
   rappidValid,
   ipIsGlobal,
+  inspectCardOffline,
   physicalVectorBytes,
   readCardResource,
   renderRappidCardQrPng,
@@ -153,6 +154,17 @@ describe('PR9 contract drift', () => {
 
   it('pins every mandatory scenario name and order', () => {
     const deck = loadRappidCardDeck();
+    const provenance = JSON.parse(
+      readFileSync(
+        new URL(
+          '../../../tests/vectors/rapp-1-4751cd8/rappid-card/PROVENANCE.json',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    ) as { deck_schema: string };
+    expect(deck.schema).toBe('rappid-card-vectors/3');
+    expect(provenance.deck_schema).toBe('rappid-card-vectors/3');
     expect(deck.mandatory_scenarios).toEqual(mandatory);
     expect(deck.vectors.map((vector) => vector.name)).toEqual(mandatory);
     expect(RAPPID_CARD_FIXTURE_NAMES).toEqual(mandatory);
@@ -252,6 +264,59 @@ describe('physical payload reproduction', () => {
 });
 
 describe('detached JWS, content roots, and durable state', () => {
+  it('offline inspection never opens or mutates the supplied SQLite state', async () => {
+    const path = statePath('offline-immutable');
+    const state = await SQLiteCardState.open(path);
+    state.seedNonce(
+      'offline-sentinel-nonce',
+      'sentinel-connection',
+      'awake',
+      '2026-08-21T12:30:00.000Z',
+    );
+    const before = readFileSync(path);
+    const parts = cardParts();
+    const inspectVector = (name: string) => {
+      const vector = buildRappidCardFixture(name);
+      return inspectCardOffline({
+        uri: vector.link,
+        frame: vector.frame,
+        trust: cardTrust(vector),
+        now_utc: vector.now_utc,
+        runtime_policy: vector.runtime_policy,
+        authority_view: vector.authority_view,
+        revocation_view: vector.revocation_view,
+        connection_id: vector.connection_id,
+        fetch_trace: vector.fetch_trace,
+        hydrated: Object.fromEntries(
+          vector.hydrated_parts.map((part) => [part, parts[part]]),
+        ),
+        continuity: vector.continuity,
+        supplied_state_path: path,
+      });
+    };
+    const first = inspectVector('valid-production');
+    const repeated = inspectVector('valid-production');
+    const failing = inspectVector('expired');
+    expect(first).toMatchObject({
+      status: 'historical-valid',
+      awake: false,
+      verdict: { reason: 'historical-valid', result: null },
+    });
+    expect(repeated).toEqual(first);
+    expect(failing).toMatchObject({
+      status: 'historical-invalid',
+      awake: false,
+      verdict: { step: 'expiry', result: null },
+    });
+    expect(first.verdict.reason).not.toBe('awake');
+    expect(JSON.stringify(first)).not.toContain('"status":"awake"');
+    expect(readFileSync(path)).toEqual(before);
+    expect(state.nonceState('offline-sentinel-nonce')).toMatchObject({
+      connection_id: 'sentinel-connection',
+      state: 'awake',
+    });
+  });
+
   it('accepts only a mode-0600 independently provisioned trust config', async () => {
     const deck = loadRappidCardDeck();
     const path = join(process.cwd(), `.pr9-trust-${process.pid}.json`);

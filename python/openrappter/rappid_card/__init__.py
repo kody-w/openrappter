@@ -49,7 +49,7 @@ from .fixtures import (
     state_for_vector,
 )
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
-from .simulator import verify_card_link
+from .simulator import inspect_card_offline, verify_card_link
 from .sqlite_state_store import CardStateBackend, SQLiteCardState
 from .trust_config import (
     RAPPID_CARD_TRUST_CONFIG_ENV,
@@ -102,6 +102,7 @@ __all__ = [
     "card_inventory",
     "card_wake_challenge",
     "list_rappid_card_fixtures",
+    "inspect_card_offline",
     "load_rappid_card_trust_config",
     "load_rappid_card_deck",
     "parse_card_link",

@@ -40,6 +40,7 @@ from openrappter.rappid_card import (
     canonical,
     load_rappid_card_deck,
     load_rappid_card_trust_config,
+    inspect_card_offline,
     parse_card_link,
     physical_vector_bytes,
     read_card_resource,
@@ -147,6 +148,9 @@ def test_pr9_tokens_and_key_sets_do_not_drift():
 
 def test_mandatory_scenario_names_and_order_do_not_drift():
     deck = load_rappid_card_deck()
+    provenance = json.loads((VECTOR_ROOT / "PROVENANCE.json").read_text())
+    assert deck["schema"] == "rappid-card-vectors/3"
+    assert provenance["deck_schema"] == "rappid-card-vectors/3"
     assert tuple(deck["mandatory_scenarios"]) == MANDATORY
     assert tuple(vector["name"] for vector in deck["vectors"]) == MANDATORY
     assert RAPPID_CARD_FIXTURE_NAMES == MANDATORY
@@ -287,6 +291,70 @@ def test_local_trust_config_requires_mode_0600():
             load_rappid_card_trust_config(str(path))
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_offline_inspection_never_mutates_supplied_sqlite_state():
+    path = ROOT / f".pr9-offline-immutable-{os.getpid()}.sqlite"
+    _remove_database(path)
+    state = SQLiteCardState(str(path))
+    state.seed_nonce(
+        "offline-sentinel-nonce",
+        "sentinel-connection",
+        "awake",
+        "2026-08-21T12:30:00.000Z",
+    )
+    before = path.read_bytes()
+    deck = load_rappid_card_deck()
+    parts = {
+        name: base64.b64decode(value)
+        for name, value in deck["parts_b64"].items()
+    }
+    keys = {
+        entry["kid"]: base64.b64decode(entry["spki_der_b64"])
+        for entry in deck["trust"]
+    }
+
+    def inspect(name):
+        vector = build_rappid_card_fixture(name).vector
+        return inspect_card_offline(
+            uri=vector["link"],
+            frame=vector["frame"],
+            trust=CardTrustStore(
+                keys, vector["runtime_policy_authority"]
+            ),
+            now_utc=vector["now_utc"],
+            runtime_policy=vector["runtime_policy"],
+            authority_view=vector["authority_view"],
+            revocation_view=vector["revocation_view"],
+            connection_id=vector["connection_id"],
+            fetch_trace=vector["fetch_trace"],
+            hydrated={
+                part: parts[part] for part in vector["hydrated_parts"]
+            },
+            continuity=vector["continuity"],
+            supplied_state_path=str(path),
+        )
+
+    first = inspect("valid-production")
+    repeated = inspect("valid-production")
+    failing = inspect("expired")
+    assert first["status"] == "historical-valid"
+    assert first["awake"] is False
+    assert first["verdict"]["reason"] == "historical-valid"
+    assert first["verdict"]["result"] is None
+    assert repeated == first
+    assert failing["status"] == "historical-invalid"
+    assert failing["verdict"]["step"] == "expiry"
+    assert failing["verdict"]["result"] is None
+    assert path.read_bytes() == before
+    assert SQLiteCardState(str(path)).nonce_state(
+        "offline-sentinel-nonce"
+    ) == {
+        "connection_id": "sentinel-connection",
+        "state": "awake",
+        "updated_utc": "2026-08-21T12:30:00.000Z",
+    }
+    _remove_database(path)
 
 
 def test_prohibited_material_scanner_controls_are_real():
@@ -527,9 +595,11 @@ def test_qr_artifacts_and_fixture_cli():
         )
         assert offline.returncode == 0, offline.stderr
         offline_result = json.loads(offline.stdout)
-        assert offline_result["status"] == "offline-only"
+        assert offline_result["status"] == "historical-valid"
         assert offline_result["awake"] is False
         assert offline_result["cryptographic_policy_ok"] is True
+        assert offline_result["verdict"]["reason"] == "historical-valid"
+        assert offline_result["verdict"]["result"] is None
 
         attacker_bundle = json.loads(bundle_path.read_text())
         attacker_bundle["trust"] = deck["trust"]

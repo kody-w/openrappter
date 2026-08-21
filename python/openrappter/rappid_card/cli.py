@@ -15,8 +15,7 @@ from .fixtures import (
     simulate_rappid_card_fixture,
 )
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
-from .simulator import verify_card_link
-from .sqlite_state_store import SQLiteCardState
+from .simulator import inspect_card_offline, verify_card_link
 from .trust_config import load_rappid_card_trust_config
 
 
@@ -179,38 +178,25 @@ def handle_rappid_card_command(args: Any) -> bool:
             raise ValueError(
                 "bundle runtime-policy authority is not locally configured"
             )
-        state = SQLiteCardState(args.state)
-        verdict = verify_card_link(
-            inspected["link"],
-            inspected["frame"],
-            local["trust"],
-            bundle["now_utc"],
-            bundle["runtime_policy"],
-            bundle["authority_view"],
-            bundle["revocation_view"],
-            state,
-            bundle["connection_id"],
-            bundle["fetch_trace"],
-            {
+        inspection = inspect_card_offline(
+            uri=inspected["link"],
+            frame=inspected["frame"],
+            trust=local["trust"],
+            now_utc=bundle["now_utc"],
+            runtime_policy=bundle["runtime_policy"],
+            authority_view=bundle["authority_view"],
+            revocation_view=bundle["revocation_view"],
+            connection_id=bundle["connection_id"],
+            fetch_trace=bundle["fetch_trace"],
+            hydrated={
                 name: base64.b64decode(value)
                 for name, value in bundle["hydrated_parts_b64"].items()
             },
-            bundle["continuity"],
+            continuity=bundle["continuity"],
+            supplied_state_path=args.state,
         )
-        _print(
-            {
-                "status": "offline-only",
-                "awake": False,
-                "cryptographic_policy_ok": verdict.ok,
-                "verdict": {
-                    "ok": verdict.ok,
-                    "step": verdict.step,
-                    "reason": verdict.reason,
-                    "result": None,
-                },
-            }
-        )
-        return verdict.ok
+        _print(inspection)
+        return inspection["cryptographic_policy_ok"]
     if command == "simulate":
         verdict = simulate_rappid_card_fixture(args.scenario, args.state)
         _print(verdict.to_wire())

@@ -522,3 +522,51 @@ export function verifyCardLinkScannerControlForTest(
 ): CardVerificationResult {
   return withMaterialScannersDisabledForTest(() => verifyCardLink(input));
 }
+
+class OfflineInspectionState extends CardStateBackend {
+  claimNonce(): [boolean, string] {
+    return [true, 'offline'];
+  }
+
+  markAwake(): [boolean, string] {
+    return [true, 'offline'];
+  }
+
+  acceptSequence(): [boolean, string] {
+    return [true, 'offline'];
+  }
+}
+
+export function inspectCardOffline(
+  input: Omit<VerifyCardInput, 'state'> & { supplied_state_path?: string },
+): {
+  status: 'historical-valid' | 'historical-invalid';
+  awake: false;
+  cryptographic_policy_ok: boolean;
+  verdict: CardVerificationResult;
+} {
+  const { supplied_state_path: _ignored, ...verification } = input;
+  const verdict = verifyCardLink({
+    ...verification,
+    state: new OfflineInspectionState(),
+  });
+  if (verdict.ok) {
+    return {
+      status: 'historical-valid',
+      awake: false,
+      cryptographic_policy_ok: true,
+      verdict: {
+        ok: true,
+        step: null,
+        reason: 'historical-valid',
+        result: null,
+      },
+    };
+  }
+  return {
+    status: 'historical-invalid',
+    awake: false,
+    cryptographic_policy_ok: false,
+    verdict: { ...verdict, result: null },
+  };
+}

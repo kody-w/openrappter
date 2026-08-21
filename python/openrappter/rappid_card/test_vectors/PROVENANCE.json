@@ -1,6 +1,7 @@
 {
   "source_repository": "kody-w/rapp-1",
   "source_commit": "4751cd8291d0e4ca935d435fdcc2374a2b2628f9",
+  "deck_schema": "rappid-card-vectors/3",
   "source_paths": {
     "deck.json": "vectors/rappid-card/deck.json",
     "physical.rappid-card.json": "vectors/rappid-card/physical.rappid-card.json",

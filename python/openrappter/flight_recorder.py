@@ -34,6 +34,11 @@ FLIGHT_EXPORT_SCHEMA = "openrappter-flight-export/1.0"
 DEFAULT_RETENTION_EVENTS = 10_000
 DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024
 MAX_SANITIZE_STRING_BYTES = 64 * 1024
+#: Budget for a file-metadata field that rides along next to an excluded path.
+#: Measured in UTF-8 bytes so the two runtimes agree: ``len()`` counts code
+#: points and JavaScript's ``.length`` counts UTF-16 code units, which put an
+#: astral string on opposite sides of the same number.
+MAX_FILE_METADATA_FIELD_BYTES = 256
 MAX_EMBEDDED_JSON_PARSE_CHARS = MAX_SANITIZE_STRING_BYTES * 4
 MAX_EMBEDDED_JSON_DEPTH = 4
 MAX_SANITIZE_NODES = 10_000
@@ -1494,7 +1499,7 @@ def _is_safe_file_metadata_field(
     if normalized in {"language", "mime", "mimetype", "extension"}:
         return (
             isinstance(value, str)
-            and len(value) <= 256
+            and len(value.encode("utf-8")) <= MAX_FILE_METADATA_FIELD_BYTES
             and _sanitize_string(value, privacy) == value
         )
     return False

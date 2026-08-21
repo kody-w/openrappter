@@ -1,7 +1,14 @@
 {
   "_comment": "File paths both runtimes' flight recorders must agree to exclude. Read by python/tests/test_excluded_path_parity.py and typescript/src/flight-recorder/excluded-path-parity.test.ts, so a pattern added to one runtime cannot silently miss the other.",
 
-  "_why_it_matters": "Exclusion is not about hiding the path -- a path is not a secret. When a recorded object carries a file locator for an excluded path, EVERY sibling field in that object is replaced with [excluded-path], including `content`. So a credential file missing from this list means its CONTENTS are written to the flight log. Value-pattern matching rescues contents that happen to look like a known credential shape, but it is unreliable: a .pgpass line and an .npmrc auth token both reached the log verbatim before these entries existed.",
+  "_why_it_matters": "Exclusion is not about hiding the path -- a path is not a secret. When a recorded object carries a file locator for an excluded path, every sibling field in that object is replaced with [excluded-path], including `content`. The only survivors are the short file-metadata allowlist below. So a credential file missing from this list means its CONTENTS are written to the flight log. Value-pattern matching rescues contents that happen to look like a known credential shape, but it is unreliable: a .pgpass line and an .npmrc auth token both reached the log verbatim before these entries existed.",
+
+  "_safe_metadata_comment": "The blanking sweep has one deliberate hole: these fields describe the file rather than reveal it, so they survive next to an excluded locator. Any field NOT named here is blanked. `numeric` fields survive only for a finite, non-negative, non-boolean number; `text` fields only for a string that survives sanitization unchanged and fits maxTextBytes. Measure that budget in UTF-8 BYTES, not in whatever a runtime calls a string's length: Python's len() counts code points and JavaScript's .length counts UTF-16 code units, so a 200-emoji `mime` value is 200 to one runtime and 400 to the other, and the two disagree about whether it rides along next to a credential path. Every other size cap in the flight recorder is already measured in UTF-8 bytes.",
+  "safe_metadata_fields": {
+    "numeric": ["size", "length"],
+    "text": ["language", "mime", "mimetype", "extension"],
+    "maxTextBytes": 256
+  },
 
   "must_exclude": [
     "/Users/k/.env",

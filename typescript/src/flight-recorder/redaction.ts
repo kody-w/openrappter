@@ -7,6 +7,13 @@ const CIRCULAR = "[circular]";
 const UNSERIALIZABLE = "[unserializable]";
 const DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SANITIZE_STRING_BYTES = 64 * 1024;
+/**
+ * Budget for a file-metadata field that rides along next to an excluded path.
+ * Measured in UTF-8 bytes so the two runtimes agree: `.length` counts UTF-16
+ * code units and Python's `len()` counts code points, which put an astral
+ * string on opposite sides of the same number.
+ */
+const MAX_FILE_METADATA_FIELD_BYTES = 256;
 const MAX_EMBEDDED_JSON_PARSE_CHARS = MAX_SANITIZE_STRING_BYTES * 4;
 const MAX_EMBEDDED_JSON_DEPTH = 4;
 const MAX_SANITIZE_NODES = 10_000;
@@ -493,7 +500,7 @@ function isSafeFileMetadataField(
   ) {
     return (
       typeof value === "string" &&
-      value.length <= 256 &&
+      Buffer.byteLength(value, "utf8") <= MAX_FILE_METADATA_FIELD_BYTES &&
       sanitizeString(value, privacy) === value
     );
   }

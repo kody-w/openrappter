@@ -15,6 +15,7 @@ dependencies = [
     # Powers the gateway and bounded provider HTTP client. 3.13 adds an
     # explicit response-header-count cap alongside line/field-size limits.
     "aiohttp>=3.13",
+    "cryptography>=50,<51",
     "qrcode[pil]>=8.2,<9",
 ]
 authors = [

@@ -1,7 +1,12 @@
 export const RAPPID_CARD_SCHEMA = 'rappid-card/1' as const;
+export const RAPPID_CARD_POLICY_SCHEMA = 'rappid-card-policy/1' as const;
+export const RAPPID_CARD_AUTHORIZATION_SCHEMA = 'rappid-card-authorization/1' as const;
+export const RAPPID_CARD_REVOCATIONS_SCHEMA = 'rappid-card-revocations/1' as const;
 export const RAPPID_CARD_TEST_PROFILE = 'rappid-card-test/1' as const;
 export const RAPPID_CARD_PRODUCTION_PROFILE = 'rappid-card-production/1' as const;
 export const RAPPID_CARD_PROTOCOL = 'rappid-link/1' as const;
+export const RAPPID_CARD_RUNTIME_NAME = 'openrappter' as const;
+export const RAPPID_CARD_RUNTIME_VERSION = '1.13.0' as const;
 export const RAPPID_CARD_FILENAME = '.rappid-card.json' as const;
 export const MAX_AUDIT_EVENTS = 64;
 export const MAX_REPLAY_NONCES = 128;
@@ -9,7 +14,6 @@ export const MAX_REPLAY_NONCES = 128;
 export type CardProfile =
   | typeof RAPPID_CARD_TEST_PROFILE
   | typeof RAPPID_CARD_PRODUCTION_PROFILE;
-export type CardMode = 'fixture' | 'production';
 export type CardClassification = 'public' | 'internal' | 'restricted';
 export type CardScope =
   | 'identity:read'
@@ -29,7 +33,7 @@ export type CardMediaType =
   | 'application/vnd.rapp.skill+json'
   | 'application/vnd.rapp.sonic+json'
   | 'application/vnd.rapp.capability+json';
-export type CardAlgorithm = 'hmac-sha256-test' | 'hmac-sha256';
+export type CardAlgorithm = 'ed25519-test' | 'ed25519';
 
 export interface RappidCardPart {
   name: CardPartName;
@@ -53,6 +57,7 @@ export interface RappidCardSignature extends RappidCardAuthenticator {
 export interface RappidCardManifest {
   schema: typeof RAPPID_CARD_SCHEMA;
   profile: CardProfile;
+  policyId: string;
   rappid: string;
   endpoint: string;
   nonce: string;
@@ -71,22 +76,60 @@ export interface RappidCardManifest {
   signature: RappidCardSignature;
 }
 
+export interface RappidCardPolicy {
+  schema: typeof RAPPID_CARD_POLICY_SCHEMA;
+  policyId: string;
+  sequence: number;
+  issuedAt: string;
+  expiresAt: string;
+  allowedProfiles: CardProfile[];
+  protocol: string;
+  runtime: {
+    name: string;
+    minimum: string;
+    maximum: string;
+  };
+  maxClassification: CardClassification;
+  grantedScopes: CardScope[];
+  approvedOrigins: string[];
+  signature: RappidCardSignature;
+}
+
+export interface RappidCardAuthorization {
+  schema: typeof RAPPID_CARD_AUTHORIZATION_SCHEMA;
+  authorizationId: string;
+  policyId: string;
+  sequence: number;
+  subjectRappid: string;
+  signerKeyId: string;
+  signerAlgorithm: CardAlgorithm;
+  signerPublicKey: string;
+  notBefore: string;
+  notAfter: string;
+  maxClassification: CardClassification;
+  grantedScopes: CardScope[];
+  approvedOrigins: string[];
+  signature: RappidCardSignature;
+}
+
+export interface RappidCardRevocations {
+  schema: typeof RAPPID_CARD_REVOCATIONS_SCHEMA;
+  policyId: string;
+  sequence: number;
+  issuedAt: string;
+  expiresAt: string;
+  revokedManifestHashes: string[];
+  revokedSignerKeyIds: string[];
+  revokedAuthorizationIds: string[];
+  signature: RappidCardSignature;
+}
+
 export interface ParsedRappidCardLink {
   rappid: string;
   manifestHash: string;
   endpoint: string;
   nonce: string;
   deepLink: string;
-}
-
-export interface CardPolicy {
-  mode: CardMode;
-  now: string;
-  runtimeName: string;
-  runtimeVersion: string;
-  protocol: string;
-  maxClassification: CardClassification;
-  grantedScopes: CardScope[];
 }
 
 export interface CardManifestProvider {
@@ -96,15 +139,18 @@ export interface CardManifestProvider {
   ): Promise<unknown> | unknown;
 }
 
-export interface CardKeyProvider {
-  getKey(keyId: string, algorithm: CardAlgorithm): Promise<Uint8Array | null> | Uint8Array | null;
-}
-
-export interface CardRevocationProvider {
-  isRevoked(
-    manifestHash: string,
+export interface CardTrustProvider {
+  getPolicyForOrigin(origin: string): Promise<unknown> | unknown;
+  getAuthorization(
+    policyId: string,
+    signerKeyId: string,
+    subjectRappid: string,
+  ): Promise<unknown> | unknown;
+  getRevocations(policyId: string): Promise<unknown> | unknown;
+  getAuthorityKey(
     keyId: string,
-  ): Promise<boolean> | boolean;
+    algorithm: CardAlgorithm,
+  ): Promise<string | null> | string | null;
 }
 
 export interface CardContentProvider {
@@ -127,10 +173,45 @@ export interface CardChallengeProvider {
 
 export interface CardProviders {
   manifests: CardManifestProvider;
-  keys: CardKeyProvider;
-  revocations: CardRevocationProvider;
+  trust: CardTrustProvider;
   content: CardContentProvider;
   challenge: CardChallengeProvider;
+}
+
+export interface CardTrustStateInput {
+  policyId: string;
+  policySequence: number;
+  policyHash: string;
+  authorizationId: string;
+  authorizationSequence: number;
+  authorizationHash: string;
+  revocationSequence: number;
+  revocationHash: string;
+  nonce: string;
+  manifestHash: string;
+}
+
+export abstract class CardStateStore {
+  abstract recordPolicy(
+    policyId: string,
+    sequence: number,
+    documentHash: string,
+  ): Promise<void> | void;
+
+  abstract record(
+    input: CardTrustStateInput,
+    claimNonce: boolean,
+  ): Promise<void> | void;
+}
+
+export abstract class DurableCardStateStore extends CardStateStore {
+  readonly #durableCardStateStore = true;
+
+  protected assertDurableBrand(): void {
+    if (!this.#durableCardStateStore) throw new Error('unreachable');
+  }
+
+  abstract close(): Promise<void> | void;
 }
 
 export type CardState =
@@ -154,10 +235,16 @@ export interface CardAuditEvent {
 export interface CardPreview {
   rappid: string;
   profile: CardProfile;
+  policyId: string;
+  authorizationId: string;
   endpoint: string;
+  origin: string;
   issuerKeyId: string;
   classification: CardClassification;
   scopes: CardScope[];
+  policySequence: number;
+  authorizationSequence: number;
+  revocationSequence: number;
   parts: Array<{
     name: CardPartName;
     hash: string;
@@ -204,16 +291,9 @@ export interface CardSimulationSnapshot {
 
 export interface CardSimulationOptions {
   approve: boolean;
-  policy: CardPolicy;
   providers: CardProviders;
-  replayCache?: ReplayCache;
+  stateStore: DurableCardStateStore;
   maxReconnects?: number;
-}
-
-export interface ReplayCache {
-  has(nonce: string): boolean;
-  add(nonce: string): void;
-  values(): string[];
 }
 
 export class RappidCardError extends Error {

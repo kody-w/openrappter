@@ -1,14 +1,12 @@
-"""Argparse wiring for the developer-facing RAPPID card surface."""
+"""Argparse wiring for the authenticated RAPPID card developer surface."""
 
 from __future__ import annotations
 
 import copy
 import json
-from datetime import datetime, timezone
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
-
-from openrappter import __version__
 
 from .artifacts import write_rappid_card_fixture_deck
 from .contract import make_deep_link, manifest_hash, parse_manifest_json
@@ -16,14 +14,13 @@ from .fixtures import (
     RAPPID_CARD_FIXTURE_NAMES,
     build_rappid_card_fixture,
     simulate_rappid_card_fixture,
+    simulate_rappid_card_fixture_input,
 )
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
-from .replay_cache import BoundedReplayCache
 from .simulator import simulate_rappid_card
+from .sqlite_state_store import SqliteCardStateStore
 from .types import (
-    RAPPID_CARD_PROTOCOL,
     RAPPID_CARD_TEST_PROFILE,
-    CardPolicy,
     CardProviders,
 )
 
@@ -37,7 +34,7 @@ def register_rappid_card_parser(subparsers: Any) -> None:
 
     fixtures = commands.add_parser(
         "fixtures",
-        help="Write the deterministic .rappid-card.json fixture deck and real QR artifacts",
+        help="Write the deterministic signed-trust fixture deck and real QR artifacts",
     )
     fixtures.add_argument("directory")
     fixtures.add_argument(
@@ -52,12 +49,19 @@ def register_rappid_card_parser(subparsers: Any) -> None:
         parser.add_argument("card")
         parser.add_argument("--link", default=None)
         parser.add_argument(
-            "--mode", choices=["fixture", "production"], default="fixture"
+            "--fixture",
+            action="store_true",
+            help="Use only the built-in signed synthetic fixture authority",
         )
         parser.add_argument(
-            "--keys",
+            "--trust",
             default=None,
-            help="Explicit key-id to hex-key JSON; ambient credentials are never read",
+            help="Explicit signed production trust bundle; no ambient credentials",
+        )
+        parser.add_argument(
+            "--state",
+            default=None,
+            help="Durable transactional replay/trust-sequence database",
         )
 
     qr = commands.add_parser(
@@ -69,7 +73,7 @@ def register_rappid_card_parser(subparsers: Any) -> None:
 
     simulate = commands.add_parser(
         "simulate",
-        help="Run one deterministic fixture; --approve is required to hydrate and wake",
+        help="Run one deterministic signed-trust fixture; --approve is required to hydrate",
     )
     simulate.add_argument("fixture", choices=RAPPID_CARD_FIXTURE_NAMES)
     simulate.add_argument("--approve", action="store_true")
@@ -87,27 +91,34 @@ def _read_link(value: Optional[str], manifest: Dict[str, Any]) -> str:
     return Path(value).read_text(encoding="utf-8").strip()
 
 
-def _explicit_keys(path: Optional[str]) -> Dict[str, bytes]:
-    if path is None:
-        return {}
+def _explicit_trust_provider(path: str) -> Dict[str, Any]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or sorted(raw) != [
+        "authorityKeys",
+        "authorization",
+        "policy",
+        "revocations",
+    ]:
         raise ValueError(
-            "key file must be an object mapping key ids to 64 hex characters"
+            "trust file requires exactly policy, authorization, revocations, and authorityKeys"
         )
-    result = {}
-    for key_id, value in raw.items():
+    authority_keys = raw["authorityKeys"]
+    if not isinstance(authority_keys, dict):
+        raise ValueError("trust authorityKeys must be an object")
+    for key_id, public_key in authority_keys.items():
         if (
             not isinstance(key_id, str)
-            or not isinstance(value, str)
-            or len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)
-        ):
-            raise ValueError(
-                f"key file entry {key_id} must be 64 lowercase hex characters"
+            or re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", key_id) is None
+            or not isinstance(public_key, str)
+            or len(public_key) != 43
+            or any(
+                character
+                not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+                for character in public_key
             )
-        result[key_id] = bytes.fromhex(value)
-    return result
+        ):
+            raise ValueError(f"trust authority {key_id} is invalid")
+    return raw
 
 
 def _matching_fixture(manifest: Dict[str, Any]) -> Any:
@@ -124,49 +135,49 @@ def _inspect_card(args: Any) -> bool:
     manifest = parse_manifest_json(card_path.read_text(encoding="utf-8"))
     deep_link = _read_link(args.link, manifest)
     fixture = _matching_fixture(manifest)
-    if args.mode == "fixture" and fixture is not None:
-        providers = CardProviders(
-            get_manifest=lambda _endpoint, _hash: copy.deepcopy(manifest),
-            get_key=fixture.providers.get_key,
-            is_revoked=fixture.providers.is_revoked,
-            get_part=fixture.providers.get_part,
-            challenge_response=fixture.providers.challenge_response,
+    if args.fixture:
+        if fixture is None or manifest["profile"] != RAPPID_CARD_TEST_PROFILE:
+            raise ValueError(
+                "--fixture accepts only a generated test-profile card"
+            )
+        fixture.deep_link = deep_link
+        fixture.providers.get_manifest = (
+            lambda _endpoint, _hash: copy.deepcopy(manifest)
         )
+        snapshot = simulate_rappid_card_fixture_input(fixture, False)
     else:
-        keys = _explicit_keys(args.keys)
+        if args.trust is None or args.state is None:
+            raise ValueError(
+                "production verification requires explicit --trust and --state files"
+            )
+        bundle = _explicit_trust_provider(args.trust)
         providers = CardProviders(
             get_manifest=lambda _endpoint, _hash: copy.deepcopy(manifest),
-            get_key=lambda key_id, _algorithm: keys.get(key_id),
-            is_revoked=lambda _hash, _key_id: False,
+            get_policy_for_origin=lambda _origin: copy.deepcopy(
+                bundle["policy"]
+            ),
+            get_authorization=lambda _policy_id, _key_id, _subject: copy.deepcopy(
+                bundle["authorization"]
+            ),
+            get_revocations=lambda _policy_id: copy.deepcopy(
+                bundle["revocations"]
+            ),
+            get_authority_key=lambda key_id, _algorithm: bundle[
+                "authorityKeys"
+            ].get(key_id),
             get_part=lambda _hash: None,
-            challenge_response=lambda _request: "0" * 64,
+            challenge_response=lambda _request: "0" * 86,
         )
-    now = (
-        fixture.policy.now
-        if args.mode == "fixture" and fixture is not None
-        else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
-    snapshot = simulate_rappid_card(
-        deep_link,
-        approve=False,
-        policy=CardPolicy(
-            mode=args.mode,
-            now=now,
-            runtime_name="openrappter",
-            runtime_version=__version__,
-            protocol=RAPPID_CARD_PROTOCOL,
-            max_classification="restricted",
-            granted_scopes=[
-                "identity:read",
-                "traits:read",
-                "skill:hydrate",
-                "sonic:hydrate",
-                "capability:hydrate",
-            ],
-        ),
-        providers=providers,
-        replay_cache=BoundedReplayCache(),
-    )
+        state_store = SqliteCardStateStore(args.state)
+        try:
+            snapshot = simulate_rappid_card(
+                deep_link,
+                approve=False,
+                providers=providers,
+                state_store=state_store,
+            )
+        finally:
+            state_store.close()
     _print(
         {
             "file": str(card_path),

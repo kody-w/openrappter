@@ -42,12 +42,37 @@ def write_rappid_card_fixture_deck(
         fixture_directory.mkdir(parents=True, exist_ok=True)
         card_path = fixture_directory / RAPPID_CARD_FILENAME
         link_path = fixture_directory / "rappid-card.link.txt"
+        policy_path = fixture_directory / "rappid-card.policy.json"
+        authorization_path = (
+            fixture_directory / "rappid-card.authorization.json"
+        )
+        revocations_path = fixture_directory / "rappid-card.revocations.json"
         card_path.write_text(
             json.dumps(fixture.manifest, indent=2) + "\n",
             encoding="utf-8",
         )
         link_path.write_text(fixture.deep_link + "\n", encoding="utf-8")
-        files.extend([str(card_path), str(link_path)])
+        policy_path.write_text(
+            json.dumps(fixture.policy, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        authorization_path.write_text(
+            json.dumps(fixture.authorization, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        revocations_path.write_text(
+            json.dumps(fixture.revocations, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        files.extend(
+            [
+                str(card_path),
+                str(link_path),
+                str(policy_path),
+                str(authorization_path),
+                str(revocations_path),
+            ]
+        )
         if qr_format in {"svg", "both"}:
             svg_path = fixture_directory / "rappid-card.svg"
             svg_path.write_text(

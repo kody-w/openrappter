@@ -43,13 +43,43 @@ export async function writeRappidCardFixtureDeck(
     await mkdir(fixtureDirectory, { recursive: true });
     const cardPath = join(fixtureDirectory, RAPPID_CARD_FILENAME);
     const linkPath = join(fixtureDirectory, 'rappid-card.link.txt');
+    const policyPath = join(fixtureDirectory, 'rappid-card.policy.json');
+    const authorizationPath = join(
+      fixtureDirectory,
+      'rappid-card.authorization.json',
+    );
+    const revocationsPath = join(
+      fixtureDirectory,
+      'rappid-card.revocations.json',
+    );
     await writeFile(
       cardPath,
       `${JSON.stringify(fixture.manifest, null, 2)}\n`,
       'utf8',
     );
     await writeFile(linkPath, `${fixture.deepLink}\n`, 'utf8');
-    files.push(cardPath, linkPath);
+    await writeFile(
+      policyPath,
+      `${JSON.stringify(fixture.policy, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      authorizationPath,
+      `${JSON.stringify(fixture.authorization, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      revocationsPath,
+      `${JSON.stringify(fixture.revocations, null, 2)}\n`,
+      'utf8',
+    );
+    files.push(
+      cardPath,
+      linkPath,
+      policyPath,
+      authorizationPath,
+      revocationsPath,
+    );
     if (format === 'svg' || format === 'both') {
       const svgPath = join(fixtureDirectory, 'rappid-card.svg');
       await writeFile(

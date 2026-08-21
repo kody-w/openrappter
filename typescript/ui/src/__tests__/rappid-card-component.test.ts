@@ -49,10 +49,16 @@ function run(state: 'preview' | 'awake' | 'failed') {
       preview: {
         rappid: 'rappid:@openrappter/virtual-debug-card:' + 'a'.repeat(64),
         profile: 'rappid-card-test/1',
-        endpoint: 'fixture-habitat',
-        issuerKeyId: 'fixture-signing-1',
+        policyId: 'fixture-policy-1',
+        authorizationId: 'fixture-authorization-1',
+        endpoint: 'https://fixture.openrappter.test/rappid-card',
+        origin: 'https://fixture.openrappter.test',
+        issuerKeyId: 'fixture-signer-1',
         classification: 'public',
         scopes: ['identity:read'],
+        policySequence: 7,
+        authorizationSequence: 3,
+        revocationSequence: 11,
         parts: [
           {
             name: 'identity',

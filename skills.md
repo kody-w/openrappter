@@ -266,8 +266,8 @@ python3 -m openrappter.cli [options]  # Direct
 | `show-and-tell test` | Validate artifact integrity, privacy, and disabled defaults |
 | `rappid-card` | Virtual RAPPID Debug Card fixture, verification, QR, and simulator command group |
 | `rappid-card fixtures <directory> [--format svg\|png\|both]` | Generate the deterministic 13-card deck with `.rappid-card.json`, exact links, and real QR artifacts |
-| `rappid-card inspect <card> [--link <uri-or-file>]` | Strictly parse, canonical-hash, signature-check, and preview a card |
-| `rappid-card verify <card> [--mode fixture\|production]` | Verify the selected profile; production reads only an explicit `--keys` file |
+| `rappid-card inspect <card> [--link <uri-or-file>] [--fixture]` | Strictly parse, canonical-hash, authenticate trust documents, and preview a card |
+| `rappid-card verify <card> [--trust <file> --state <sqlite>]` | Verify production with an explicit signed trust bundle and durable transactional replay state |
 | `rappid-card qr <link> <output> [--format svg\|png]` | Render the exact compact link with an ecosystem QR encoder |
 | `rappid-card simulate <fixture> [--approve]` | Run a deterministic fixture; without `--approve`, stop before hydration |
 

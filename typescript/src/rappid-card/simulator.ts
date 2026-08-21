@@ -1,31 +1,69 @@
 import { sha256Hex } from '../rappids/canonical.js';
 import {
+  canonicalDocumentHash,
   classificationRank,
   compareSemver,
+  endpointOrigin,
   manifestHash,
   parseDeepLink,
   parseManifestJson,
+  validateAuthorization,
   validateManifest,
+  validatePolicy,
+  validateRevocations,
+  verifyAuthorizationSignature,
   verifyChallenge,
-  verifySignature,
+  verifyManifestSignature,
+  verifyPolicySignature,
+  verifyRevocationsSignature,
 } from './contract.js';
-import { BoundedReplayCache } from './replay-cache.js';
 import {
   MAX_AUDIT_EVENTS,
   RAPPID_CARD_PRODUCTION_PROFILE,
+  RAPPID_CARD_PROTOCOL,
+  RAPPID_CARD_RUNTIME_NAME,
+  RAPPID_CARD_RUNTIME_VERSION,
   RAPPID_CARD_TEST_PROFILE,
   RappidCardError,
   RappidCardReconnectError,
 } from './types.js';
 import type {
+  CardAlgorithm,
   CardAuditEvent,
   CardMachineEvent,
   CardPreview,
+  CardProviders,
   CardSimulationOptions,
   CardSimulationSnapshot,
+  CardStateStore,
+  CardTrustStateInput,
   HydratedCardPart,
+  RappidCardAuthorization,
   RappidCardManifest,
+  RappidCardPolicy,
+  RappidCardRevocations,
 } from './types.js';
+
+interface InternalSimulationOptions {
+  approve: boolean;
+  providers: CardProviders;
+  stateStore: CardStateStore;
+  maxReconnects?: number;
+}
+
+interface VerifiedTrust {
+  policy: RappidCardPolicy;
+  authorization: RappidCardAuthorization;
+  revocations: RappidCardRevocations;
+  origin: string;
+  state: CardTrustStateInput;
+}
+
+interface VerifiedPolicy {
+  policy: RappidCardPolicy;
+  authorityKey: string;
+  origin: string;
+}
 
 export function initialCardSnapshot(): CardSimulationSnapshot {
   return {
@@ -40,7 +78,7 @@ export function initialCardSnapshot(): CardSimulationSnapshot {
   };
 }
 
-/** Pure state transition. Provider effects live in `simulateRappidCard`. */
+/** Pure state transition. Provider effects live in the simulation driver. */
 export function reduceCardState(
   snapshot: CardSimulationSnapshot,
   transition: CardMachineEvent,
@@ -102,14 +140,23 @@ function providerError(error: unknown): RappidCardError {
   );
 }
 
-function previewFor(manifest: RappidCardManifest): CardPreview {
+function previewFor(
+  manifest: RappidCardManifest,
+  trust: VerifiedTrust,
+): CardPreview {
   return {
     rappid: manifest.rappid,
     profile: manifest.profile,
+    policyId: trust.policy.policyId,
+    authorizationId: trust.authorization.authorizationId,
     endpoint: manifest.endpoint,
+    origin: trust.origin,
     issuerKeyId: manifest.signature.keyId,
     classification: manifest.classification,
     scopes: [...manifest.scopes],
+    policySequence: trust.policy.sequence,
+    authorizationSequence: trust.authorization.sequence,
+    revocationSequence: trust.revocations.sequence,
     parts: manifest.parts.map((part) => ({
       name: part.name,
       hash: part.hash,
@@ -120,110 +167,335 @@ function previewFor(manifest: RappidCardManifest): CardPreview {
   };
 }
 
-function verifyMode(manifest: RappidCardManifest, mode: CardSimulationOptions['policy']['mode']): void {
-  if (mode === 'production') {
-    if (manifest.profile === RAPPID_CARD_TEST_PROFILE) {
-      throw new RappidCardError(
-        'test_profile_forbidden',
-        'production mode refuses the test profile',
-      );
-    }
-    if (
-      manifest.signature.algorithm === 'hmac-sha256-test'
-      || manifest.challenge.algorithm === 'hmac-sha256-test'
-    ) {
-      throw new RappidCardError(
-        'test_signature_forbidden',
-        'production mode refuses synthetic test authenticators',
-      );
-    }
-    if (manifest.profile !== RAPPID_CARD_PRODUCTION_PROFILE) {
-      throw new RappidCardError(
-        'profile_forbidden',
-        'production mode requires the production profile',
-      );
-    }
-    return;
-  }
-  if (
-    manifest.profile !== RAPPID_CARD_TEST_PROFILE
-    || manifest.signature.algorithm !== 'hmac-sha256-test'
-    || manifest.challenge.algorithm !== 'hmac-sha256-test'
-  ) {
+function assertCurrent(
+  notBefore: string,
+  notAfter: string,
+  now: number,
+  codePrefix: string,
+): void {
+  if (Date.parse(notBefore) > now) {
     throw new RappidCardError(
-      'fixture_profile_required',
-      'fixture mode accepts only the synthetic test profile and authenticators',
+      `${codePrefix}_not_yet_valid`,
+      `${codePrefix.replaceAll('_', ' ')} has not reached its validity window`,
+    );
+  }
+  if (Date.parse(notAfter) <= now) {
+    throw new RappidCardError(
+      `${codePrefix}_expired`,
+      `${codePrefix.replaceAll('_', ' ')} has expired`,
     );
   }
 }
 
-function verifyPolicy(
-  manifest: RappidCardManifest,
-  options: CardSimulationOptions,
+function assertRuntime(
+  runtime: RappidCardManifest['runtime'],
+  code: string,
 ): void {
-  const policy = options.policy;
-  verifyMode(manifest, policy.mode);
-  const now = Date.parse(policy.now);
-  if (Number.isNaN(now)) {
-    throw new RappidCardError('policy_invalid', 'policy.now must be RFC3339');
-  }
-  if (Date.parse(manifest.issuedAt) > now) {
-    throw new RappidCardError('not_yet_valid', 'card has not reached issuedAt');
-  }
-  if (Date.parse(manifest.expiresAt) <= now) {
-    throw new RappidCardError('expired', 'card has expired');
-  }
-  if (manifest.protocol !== policy.protocol) {
-    throw new RappidCardError(
-      'incompatible_protocol',
-      `card requires ${manifest.protocol}; runtime provides ${policy.protocol}`,
-    );
-  }
   if (
-    manifest.runtime.name !== policy.runtimeName
-    || compareSemver(policy.runtimeVersion, manifest.runtime.minimum) < 0
-    || compareSemver(policy.runtimeVersion, manifest.runtime.maximum) > 0
+    runtime.name !== RAPPID_CARD_RUNTIME_NAME
+    || compareSemver(RAPPID_CARD_RUNTIME_VERSION, runtime.minimum) < 0
+    || compareSemver(RAPPID_CARD_RUNTIME_VERSION, runtime.maximum) > 0
   ) {
     throw new RappidCardError(
-      'incompatible_runtime',
-      `card requires ${manifest.runtime.name} ${manifest.runtime.minimum}..${manifest.runtime.maximum}`,
+      code,
+      `requires ${runtime.name} ${runtime.minimum}..${runtime.maximum}`,
+    );
+  }
+}
+
+function expectedAlgorithm(allowTestProfile: boolean): CardAlgorithm {
+  return allowTestProfile ? 'ed25519-test' : 'ed25519';
+}
+
+function assertProfile(
+  manifest: RappidCardManifest,
+  allowTestProfile: boolean,
+): CardAlgorithm {
+  if (!allowTestProfile && manifest.profile === RAPPID_CARD_TEST_PROFILE) {
+    throw new RappidCardError(
+      'test_profile_forbidden',
+      'production mode refuses the test profile',
+    );
+  }
+  const profile = allowTestProfile
+    ? RAPPID_CARD_TEST_PROFILE
+    : RAPPID_CARD_PRODUCTION_PROFILE;
+  const algorithm = expectedAlgorithm(allowTestProfile);
+  if (manifest.profile !== profile) {
+    throw new RappidCardError(
+      allowTestProfile ? 'fixture_profile_required' : 'profile_forbidden',
+      allowTestProfile
+        ? 'fixture mode accepts only the synthetic test profile'
+        : 'production mode requires the production profile',
     );
   }
   if (
+    manifest.signature.algorithm !== algorithm
+    || manifest.challenge.algorithm !== algorithm
+  ) {
+    throw new RappidCardError(
+      allowTestProfile
+        ? 'fixture_signature_required'
+        : 'test_signature_forbidden',
+      allowTestProfile
+        ? 'fixture mode requires Ed25519 test signatures'
+        : 'production mode refuses synthetic test signatures',
+    );
+  }
+  return algorithm;
+}
+
+async function verifiedTrust(
+  manifest: RappidCardManifest,
+  linkHash: string,
+  providers: CardProviders,
+  allowTestProfile: boolean,
+  now: number,
+  preflight: VerifiedPolicy,
+): Promise<VerifiedTrust> {
+  assertProfile(manifest, allowTestProfile);
+  assertCurrent(manifest.issuedAt, manifest.expiresAt, now, 'card');
+  if (manifest.protocol !== RAPPID_CARD_PROTOCOL) {
+    throw new RappidCardError(
+      'incompatible_protocol',
+      `card requires ${manifest.protocol}; runtime provides ${RAPPID_CARD_PROTOCOL}`,
+    );
+  }
+  assertRuntime(manifest.runtime, 'incompatible_runtime');
+  const { policy, authorityKey, origin } = preflight;
+  if (policy.policyId !== manifest.policyId) {
+    throw new RappidCardError('policy_mismatch', 'signed policy id does not match the card');
+  }
+  if (!policy.allowedProfiles.includes(manifest.profile)) {
+    throw new RappidCardError(
+      'profile_forbidden',
+      'signed habitat policy does not allow this card profile',
+    );
+  }
+  if (policy.protocol !== manifest.protocol) {
+    throw new RappidCardError(
+      'policy_protocol_mismatch',
+      'signed habitat policy does not authorize this protocol',
+    );
+  }
+
+  const rawAuthorization = await providers.trust.getAuthorization(
+    manifest.policyId,
+    manifest.signature.keyId,
+    manifest.rappid,
+  );
+  if (rawAuthorization === null || rawAuthorization === undefined) {
+    throw new RappidCardError(
+      'unknown_key',
+      `no signed authorization binds ${manifest.signature.keyId} to ${manifest.rappid}`,
+    );
+  }
+  const authorization = validateAuthorization(rawAuthorization);
+  if (
+    authorization.signature.keyId !== policy.signature.keyId
+    || authorization.signature.algorithm !== policy.signature.algorithm
+    || !verifyAuthorizationSignature(authorization, authorityKey)
+  ) {
+    throw new RappidCardError(
+      'authorization_signature_invalid',
+      'signer authorization verification failed',
+    );
+  }
+  if (
+    authorization.policyId !== policy.policyId
+    || authorization.subjectRappid !== manifest.rappid
+    || authorization.signerKeyId !== manifest.signature.keyId
+    || authorization.signerAlgorithm !== manifest.signature.algorithm
+  ) {
+    throw new RappidCardError(
+      'signer_subject_unauthorized',
+      'signed authorization does not bind this signer to this RAPPID',
+    );
+  }
+  assertCurrent(
+    authorization.notBefore,
+    authorization.notAfter,
+    now,
+    'authorization',
+  );
+  if (!authorization.approvedOrigins.includes(origin)) {
+    throw new RappidCardError(
+      'signer_origin_unauthorized',
+      `signer authorization does not permit endpoint origin ${origin}`,
+    );
+  }
+  if (!verifyManifestSignature(manifest, authorization.signerPublicKey)) {
+    throw new RappidCardError(
+      'signature_invalid',
+      'card signature verification failed',
+    );
+  }
+
+  if (
     classificationRank(manifest.classification)
-    > classificationRank(policy.maxClassification)
+      > classificationRank(policy.maxClassification)
+    || classificationRank(manifest.classification)
+      > classificationRank(authorization.maxClassification)
   ) {
     throw new RappidCardError(
       'classification_violation',
-      `card classification ${manifest.classification} exceeds ${policy.maxClassification}`,
+      `card classification ${manifest.classification} exceeds signed authority`,
     );
   }
-  const granted = new Set(policy.grantedScopes);
+  const policyScopes = new Set(policy.grantedScopes);
+  const authorizationScopes = new Set(authorization.grantedScopes);
   for (const part of manifest.parts) {
     if (
       classificationRank(part.classification)
-      > classificationRank(manifest.classification)
+        > classificationRank(manifest.classification)
       || classificationRank(part.classification)
-      > classificationRank(policy.maxClassification)
+        > classificationRank(policy.maxClassification)
+      || classificationRank(part.classification)
+        > classificationRank(authorization.maxClassification)
     ) {
       throw new RappidCardError(
         'classification_violation',
         `part ${part.name} exceeds the permitted classification`,
       );
     }
-    if (!manifest.scopes.includes(part.scope) || !granted.has(part.scope)) {
+    if (
+      !manifest.scopes.includes(part.scope)
+      || !policyScopes.has(part.scope)
+      || !authorizationScopes.has(part.scope)
+    ) {
       throw new RappidCardError(
         'insufficient_scope',
         `part ${part.name} requires ${part.scope}`,
       );
     }
   }
+
+  const rawRevocations = await providers.trust.getRevocations(policy.policyId);
+  if (rawRevocations === null || rawRevocations === undefined) {
+    throw new RappidCardError(
+      'revocation_view_missing',
+      'signed revocation view is unavailable',
+    );
+  }
+  const revocations = validateRevocations(rawRevocations);
+  if (
+    revocations.policyId !== policy.policyId
+    || revocations.signature.keyId !== policy.signature.keyId
+    || revocations.signature.algorithm !== policy.signature.algorithm
+    || !verifyRevocationsSignature(revocations, authorityKey)
+  ) {
+    throw new RappidCardError(
+      'revocation_signature_invalid',
+      'signed revocation view verification failed',
+    );
+  }
+  assertCurrent(
+    revocations.issuedAt,
+    revocations.expiresAt,
+    now,
+    'revocation_view',
+  );
+  if (
+    revocations.revokedManifestHashes.includes(linkHash)
+    || revocations.revokedSignerKeyIds.includes(manifest.signature.keyId)
+    || revocations.revokedAuthorizationIds.includes(
+      authorization.authorizationId,
+    )
+  ) {
+    throw new RappidCardError(
+      'revoked',
+      'card, signer, or signer authorization is revoked',
+    );
+  }
+  return {
+    policy,
+    authorization,
+    revocations,
+    origin,
+    state: {
+      policyId: policy.policyId,
+      policySequence: policy.sequence,
+      policyHash: canonicalDocumentHash(policy),
+      authorizationId: authorization.authorizationId,
+      authorizationSequence: authorization.sequence,
+      authorizationHash: canonicalDocumentHash(authorization),
+      revocationSequence: revocations.sequence,
+      revocationHash: canonicalDocumentHash(revocations),
+      nonce: manifest.nonce,
+      manifestHash: linkHash,
+    },
+  };
+}
+
+async function verifiedPolicyForEndpoint(
+  endpoint: string,
+  providers: CardProviders,
+  stateStore: CardStateStore,
+  allowTestProfile: boolean,
+  now: number,
+): Promise<VerifiedPolicy> {
+  const algorithm = expectedAlgorithm(allowTestProfile);
+  const origin = endpointOrigin(endpoint);
+  const rawPolicy = await providers.trust.getPolicyForOrigin(origin);
+  if (rawPolicy === null || rawPolicy === undefined) {
+    throw new RappidCardError(
+      'policy_not_found',
+      `no signed habitat policy is configured for endpoint origin ${origin}`,
+    );
+  }
+  const policy = validatePolicy(rawPolicy);
+  if (policy.signature.algorithm !== algorithm) {
+    throw new RappidCardError(
+      !allowTestProfile && policy.signature.algorithm === 'ed25519-test'
+        ? 'test_signature_forbidden'
+        : 'policy_signature_invalid',
+      !allowTestProfile && policy.signature.algorithm === 'ed25519-test'
+        ? 'production mode refuses synthetic test signatures'
+        : 'signed policy uses the wrong trust profile',
+    );
+  }
+  const authorityKey = await providers.trust.getAuthorityKey(
+    policy.signature.keyId,
+    policy.signature.algorithm,
+  );
+  if (authorityKey === null) {
+    throw new RappidCardError(
+      'unknown_authority',
+      `policy authority ${policy.signature.keyId} is unknown`,
+    );
+  }
+  if (!verifyPolicySignature(policy, authorityKey)) {
+    throw new RappidCardError(
+      'policy_signature_invalid',
+      'signed habitat policy verification failed',
+    );
+  }
+  assertCurrent(policy.issuedAt, policy.expiresAt, now, 'policy');
+  if (policy.protocol !== RAPPID_CARD_PROTOCOL) {
+    throw new RappidCardError(
+      'policy_protocol_mismatch',
+      'signed habitat policy does not authorize this protocol',
+    );
+  }
+  assertRuntime(policy.runtime, 'policy_runtime_mismatch');
+  if (!policy.approvedOrigins.includes(origin)) {
+    throw new RappidCardError(
+      'origin_not_approved',
+      `endpoint origin ${origin} is not approved by signed policy`,
+    );
+  }
+  await stateStore.recordPolicy(
+    policy.policyId,
+    policy.sequence,
+    canonicalDocumentHash(policy),
+  );
+  return { policy, authorityKey, origin };
 }
 
 async function hydratePart(
   manifest: RappidCardManifest,
   index: number,
-  options: CardSimulationOptions,
+  options: InternalSimulationOptions,
   onReconnect: () => void,
 ): Promise<HydratedCardPart | null> {
   const part = manifest.parts[index];
@@ -271,12 +543,13 @@ async function hydratePart(
   }
 }
 
-export async function simulateRappidCard(
+async function simulateInternal(
   deepLink: string,
-  options: CardSimulationOptions,
+  options: InternalSimulationOptions,
+  allowTestProfile: boolean,
+  now: number,
 ): Promise<CardSimulationSnapshot> {
   let snapshot = initialCardSnapshot();
-  const replay = options.replayCache ?? new BoundedReplayCache();
   try {
     const link = parseDeepLink(deepLink);
     snapshot = reduceCardState(snapshot, {
@@ -286,7 +559,13 @@ export async function simulateRappidCard(
       manifestHash: link.manifestHash,
       deepLink: link.deepLink,
     });
-
+    const preflight = await verifiedPolicyForEndpoint(
+      link.endpoint,
+      options.providers,
+      options.stateStore,
+      allowTestProfile,
+      now,
+    );
     const raw = await options.providers.manifests.getManifest(
       link.endpoint,
       link.manifestHash,
@@ -317,47 +596,25 @@ export async function simulateRappidCard(
         'manifest identity, endpoint, or nonce does not match deep link',
       );
     }
-    verifyPolicy(manifest, options);
-    if (
-      await options.providers.revocations.isRevoked(
-        link.manifestHash,
-        manifest.signature.keyId,
-      )
-    ) {
-      throw new RappidCardError('revoked', 'card or signing key is revoked');
-    }
-    const signatureKey = await options.providers.keys.getKey(
-      manifest.signature.keyId,
-      manifest.signature.algorithm,
+    const trust = await verifiedTrust(
+      manifest,
+      link.manifestHash,
+      options.providers,
+      allowTestProfile,
+      now,
+      preflight,
     );
-    if (signatureKey === null) {
-      throw new RappidCardError(
-        'unknown_key',
-        `signing key ${manifest.signature.keyId} is unknown`,
-      );
-    }
-    if (!verifySignature(manifest, signatureKey)) {
-      throw new RappidCardError(
-        'signature_invalid',
-        'card signature verification failed',
-      );
-    }
-    if (replay.has(manifest.nonce)) {
-      throw new RappidCardError(
-        'duplicate_nonce',
-        'card nonce has already been accepted',
-      );
-    }
+    await options.stateStore.record(trust.state, false);
     snapshot = reduceCardState(snapshot, {
       state: 'verified',
       event: 'card.verified',
-      detail: manifest.signature.keyId,
+      detail: trust.authorization.authorizationId,
     });
     snapshot = reduceCardState(snapshot, {
       state: 'preview',
       event: 'preview.ready',
       detail: `${manifest.parts.length} content-addressed parts`,
-      preview: previewFor(manifest),
+      preview: previewFor(manifest, trust),
     });
     if (!options.approve) return snapshot;
 
@@ -366,13 +623,7 @@ export async function simulateRappidCard(
       event: 'approval.explicit',
       detail: 'developer approved hydration',
     });
-    if (replay.has(manifest.nonce)) {
-      throw new RappidCardError(
-        'duplicate_nonce',
-        'card nonce has already been accepted',
-      );
-    }
-    replay.add(manifest.nonce);
+    await options.stateStore.record(trust.state, true);
     snapshot = reduceCardState(snapshot, {
       state: 'hydrating',
       event: 'hydration.started',
@@ -400,16 +651,6 @@ export async function simulateRappidCard(
       event: 'challenge.started',
       detail: manifest.challenge.keyId,
     });
-    const challengeKey = await options.providers.keys.getKey(
-      manifest.challenge.keyId,
-      manifest.challenge.algorithm,
-    );
-    if (challengeKey === null) {
-      throw new RappidCardError(
-        'unknown_challenge_key',
-        `challenge key ${manifest.challenge.keyId} is unknown`,
-      );
-    }
     const request = {
       algorithm: manifest.challenge.algorithm,
       keyId: manifest.challenge.keyId,
@@ -418,21 +659,57 @@ export async function simulateRappidCard(
       partHashes: hydrated.map((part) => part.hash),
     };
     const response = await options.providers.challenge.respond(request);
-    if (!verifyChallenge(response, request, challengeKey)) {
+    if (
+      !verifyChallenge(
+        response,
+        request,
+        trust.authorization.signerPublicKey,
+      )
+    ) {
       throw new RappidCardError(
         'challenge_failed',
         'continuity challenge verification failed',
       );
     }
-    snapshot = reduceCardState(snapshot, {
+    return reduceCardState(snapshot, {
       state: 'awake',
       event: 'card.awake',
       detail: `${hydrated.length} verified parts`,
       outcome: 'awake',
       error: null,
     });
-    return snapshot;
   } catch (error) {
     return fail(snapshot, providerError(error));
   }
+}
+
+export async function simulateRappidCard(
+  deepLink: string,
+  options: CardSimulationOptions,
+): Promise<CardSimulationSnapshot> {
+  const { SqliteCardStateStore } = await import('./sqlite-state-store.js');
+  if (!(options.stateStore instanceof SqliteCardStateStore)) {
+    return fail(
+      initialCardSnapshot(),
+      new RappidCardError(
+        'durable_state_required',
+        'production mode requires the transactional SQLite card state store',
+      ),
+    );
+  }
+  return simulateInternal(deepLink, options, false, Date.now());
+}
+
+/** Test-profile entry point. Production callers must use `simulateRappidCard`. */
+export async function simulateRappidCardFixtureMode(
+  deepLink: string,
+  options: InternalSimulationOptions,
+  fixtureNow = '2035-01-01T12:00:00Z',
+): Promise<CardSimulationSnapshot> {
+  return simulateInternal(
+    deepLink,
+    options,
+    true,
+    Date.parse(fixtureNow),
+  );
 }

@@ -5,9 +5,8 @@ import type { Command } from 'commander';
 
 import {
   RAPPID_CARD_FIXTURE_NAMES,
-  RAPPID_CARD_PROTOCOL,
   RAPPID_CARD_TEST_PROFILE,
-  BoundedReplayCache,
+  SqliteCardStateStore,
   buildRappidCardFixture,
   makeDeepLink,
   manifestHash,
@@ -15,19 +14,18 @@ import {
   renderRappidCardQrPng,
   renderRappidCardQrSvg,
   simulateRappidCard,
+  simulateRappidCardFixtureInput,
   simulateRappidCardFixture,
   writeRappidCardFixtureDeck,
 } from '../rappid-card/index.js';
 import type {
   CardAlgorithm,
-  CardKeyProvider,
-  CardMode,
   CardProviders,
+  CardTrustProvider,
   QrArtifactFormat,
   RappidCardFixtureName,
   RappidCardManifest,
 } from '../rappid-card/index.js';
-import { VERSION } from '../version.js';
 
 function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
@@ -49,35 +47,57 @@ function qrFormat(value: string): QrArtifactFormat {
   return value;
 }
 
-function cardMode(value: string): CardMode {
-  if (value !== 'fixture' && value !== 'production') {
-    throw new Error('mode must be fixture or production');
-  }
-  return value;
-}
-
-async function readLink(value: string | undefined, manifest: RappidCardManifest): Promise<string> {
+async function readLink(
+  value: string | undefined,
+  manifest: RappidCardManifest,
+): Promise<string> {
   if (!value) return makeDeepLink(manifest);
   if (value.startsWith('rappid://')) return value;
   return (await readFile(value, 'utf8')).trim();
 }
 
-async function explicitKeyProvider(path: string | undefined): Promise<CardKeyProvider> {
-  if (!path) return { getKey: () => null };
+interface TrustBundle {
+  policy: unknown;
+  authorization: unknown;
+  revocations: unknown;
+  authorityKeys: Record<string, string>;
+}
+
+async function explicitTrustProvider(path: string): Promise<CardTrustProvider> {
   const raw = JSON.parse(await readFile(path, 'utf8')) as unknown;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('key file must be an object mapping key ids to 64 hex characters');
+    throw new Error('trust file must be a closed trust-bundle object');
   }
-  const keys = new Map<string, Uint8Array>();
-  for (const [keyId, value] of Object.entries(raw)) {
-    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
-      throw new Error(`key file entry ${keyId} must be 64 lowercase hex characters`);
+  const bundle = raw as Partial<TrustBundle>;
+  if (
+    bundle.policy === undefined
+    || bundle.authorization === undefined
+    || bundle.revocations === undefined
+    || bundle.authorityKeys === null
+    || typeof bundle.authorityKeys !== 'object'
+    || Array.isArray(bundle.authorityKeys)
+    || Object.keys(bundle).sort().join(',')
+      !== 'authorityKeys,authorization,policy,revocations'
+  ) {
+    throw new Error(
+      'trust file requires exactly policy, authorization, revocations, and authorityKeys',
+    );
+  }
+  for (const [keyId, publicKey] of Object.entries(bundle.authorityKeys)) {
+    if (
+      !/^[a-z][a-z0-9._-]{0,63}$/.test(keyId)
+      || typeof publicKey !== 'string'
+      || !/^[A-Za-z0-9_-]{43}$/.test(publicKey)
+    ) {
+      throw new Error(`trust authority ${keyId} is invalid`);
     }
-    keys.set(keyId, Buffer.from(value, 'hex'));
   }
   return {
-    getKey(keyId: string, _algorithm: CardAlgorithm) {
-      return keys.get(keyId) ?? null;
+    getPolicyForOrigin: () => structuredClone(bundle.policy),
+    getAuthorization: () => structuredClone(bundle.authorization),
+    getRevocations: () => structuredClone(bundle.revocations),
+    getAuthorityKey(keyId: string, _algorithm: CardAlgorithm) {
+      return bundle.authorityKeys![keyId] ?? null;
     },
   };
 }
@@ -93,54 +113,48 @@ async function inspectCard(
   cardPath: string,
   options: {
     link?: string;
-    mode: CardMode;
-    keys?: string;
-    approve?: boolean;
+    fixture?: boolean;
+    trust?: string;
+    state?: string;
   },
 ): Promise<void> {
   const manifest = parseManifestJson(await readFile(cardPath, 'utf8'));
   const link = await readLink(options.link, manifest);
   const fixture = matchingFixture(manifest);
-  let providers: CardProviders;
-  if (options.mode === 'fixture' && fixture) {
-    providers = {
+  let snapshot;
+  if (options.fixture === true) {
+    if (!fixture || manifest.profile !== RAPPID_CARD_TEST_PROFILE) {
+      throw new Error('--fixture accepts only a generated test-profile card');
+    }
+    fixture.deepLink = link;
+    fixture.providers = {
       ...fixture.providers,
-      manifests: {
-        getManifest: () => structuredClone(manifest),
-      },
-    };
-  } else {
-    providers = {
       manifests: { getManifest: () => structuredClone(manifest) },
-      keys: await explicitKeyProvider(options.keys),
-      revocations: { isRevoked: () => false },
-      content: { getPart: () => null },
-      challenge: { respond: () => '0'.repeat(64) },
     };
+    snapshot = await simulateRappidCardFixtureInput(fixture, false);
+  } else {
+    if (!options.trust || !options.state) {
+      throw new Error(
+        'production verification requires explicit --trust and --state files',
+      );
+    }
+    const providers: CardProviders = {
+      manifests: { getManifest: () => structuredClone(manifest) },
+      trust: await explicitTrustProvider(options.trust),
+      content: { getPart: () => null },
+      challenge: { respond: () => '0'.repeat(86) },
+    };
+    const stateStore = await SqliteCardStateStore.open(options.state);
+    try {
+      snapshot = await simulateRappidCard(link, {
+        approve: false,
+        providers,
+        stateStore,
+      });
+    } finally {
+      stateStore.close();
+    }
   }
-  const snapshot = await simulateRappidCard(link, {
-    approve: options.approve === true,
-    policy: {
-      mode: options.mode,
-      now:
-        options.mode === 'fixture' && fixture
-          ? fixture.policy.now
-          : new Date().toISOString().replace('.000Z', 'Z'),
-      runtimeName: 'openrappter',
-      runtimeVersion: VERSION,
-      protocol: RAPPID_CARD_PROTOCOL,
-      maxClassification: 'restricted',
-      grantedScopes: [
-        'identity:read',
-        'traits:read',
-        'skill:hydrate',
-        'sonic:hydrate',
-        'capability:hydrate',
-      ],
-    },
-    providers,
-    replayCache: new BoundedReplayCache(),
-  });
   print({
     file: cardPath,
     profile: manifest.profile,
@@ -159,33 +173,33 @@ export function registerRappidCardCommand(program: Command): void {
 
   command
     .command('fixtures <directory>')
-    .description('Write the deterministic .rappid-card.json fixture deck and real QR artifacts')
+    .description('Write the deterministic signed-trust fixture deck and real QR artifacts')
     .option('--format <format>', 'svg, png, or both', qrFormat, 'svg')
     .action(async (directory: string, options: { format: QrArtifactFormat }) => {
       print(await writeRappidCardFixtureDeck(directory, options.format));
     });
 
-  command
-    .command('inspect <card>')
-    .description('Parse, hash, and preview-verify a closed RAPPID card manifest')
-    .option('--link <uri-or-file>', 'Exact link or a file containing it')
-    .option('--mode <mode>', 'fixture or production', cardMode, 'fixture')
-    .option('--keys <file>', 'Explicit key-id to hex-key JSON; never read ambient credentials')
-    .action(async (
-      card: string,
-      options: { link?: string; mode: CardMode; keys?: string },
-    ) => inspectCard(card, options));
-
-  command
-    .command('verify <card>')
-    .description('Verify a card and report a non-zero exit code on any failed control')
-    .option('--link <uri-or-file>', 'Exact link or a file containing it')
-    .option('--mode <mode>', 'fixture or production', cardMode, 'fixture')
-    .option('--keys <file>', 'Explicit key-id to hex-key JSON; never read ambient credentials')
-    .action(async (
-      card: string,
-      options: { link?: string; mode: CardMode; keys?: string },
-    ) => inspectCard(card, options));
+  for (const [name, description] of [
+    ['inspect', 'Parse, hash, and preview-verify a closed RAPPID card manifest'],
+    ['verify', 'Verify a card and report a non-zero exit code on any failed control'],
+  ] as const) {
+    command
+      .command(`${name} <card>`)
+      .description(description)
+      .option('--link <uri-or-file>', 'Exact link or a file containing it')
+      .option('--fixture', 'Use only the built-in signed synthetic fixture authority')
+      .option('--trust <file>', 'Explicit signed production trust bundle; no ambient credentials')
+      .option('--state <sqlite>', 'Durable transactional replay/trust-sequence database')
+      .action(async (
+        card: string,
+        options: {
+          link?: string;
+          fixture?: boolean;
+          trust?: string;
+          state?: string;
+        },
+      ) => inspectCard(card, options));
+  }
 
   command
     .command('qr <link> <output>')
@@ -210,7 +224,7 @@ export function registerRappidCardCommand(program: Command): void {
 
   command
     .command('simulate <fixture>')
-    .description('Run one deterministic fixture; --approve is required to hydrate and wake')
+    .description('Run one deterministic signed-trust fixture; --approve is required to hydrate')
     .option('--approve', 'Explicitly approve permitted content hydration', false)
     .action(async (value: string, options: { approve: boolean }) => {
       const name = fixtureName(value);

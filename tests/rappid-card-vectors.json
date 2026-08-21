@@ -1,5 +1,5 @@
 {
-  "schema": "rappid-card-vectors/1",
+  "schema": "rappid-card-vectors/2",
   "fixtureNow": "2035-01-01T12:00:00Z",
   "fixtures": [
     {
@@ -7,8 +7,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "8c064be4761fc67401532e02c69ed211",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -44,33 +45,114 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "090a6df320f799cf4d617d1b80a5b307a4fba61308c2dc5719137b4859512360"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "BqaFrS5aXXT-_CaTy5pMP-dzIPKe_Fuzs8t3ExnBvNlA8DFfwvFEuzw62kjPpeCn4L8k2jM__eLLgOtdzIYRAw"
         }
       },
-      "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+      "manifestHash": "92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=8c064be4761fc67401532e02c69ed211",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "preview",
         "outcome": "pending",
         "error": null,
-        "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+        "manifestHash": "92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=8c064be4761fc67401532e02c69ed211",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -94,13 +176,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -114,18 +196,24 @@
         "state": "awake",
         "outcome": "awake",
         "error": null,
-        "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+        "manifestHash": "92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=92bd8b16142cf0f26c7b1ffeebdef01d673bef65419ab8bbce5a4c5decd13f70&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=8c064be4761fc67401532e02c69ed211",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -162,13 +250,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -204,7 +292,7 @@
             "seq": 8,
             "state": "challenging",
             "event": "challenge.started",
-            "detail": "fixture-continuity-1"
+            "detail": "fixture-signer-1"
           },
           {
             "seq": 9,
@@ -220,8 +308,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "3a0fdba7843309f8ba44378dce575ae0",
         "issuedAt": "2034-12-30T00:00:00Z",
         "expiresAt": "2034-12-31T00:00:00Z",
@@ -257,26 +346,101 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "9a14ef0df8d3a41b5a47e35b56cafd339fdf0b5358ffdcbba9f0b22544b60592"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "jZYwmstWeS0XL5QaW6Ami2FyuVcCIajdErcesU51NRQLarr8_b-lHJmC91SARZeUoXt2wAkSA0ss3z318xLbBg"
         }
       },
-      "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+      "manifestHash": "c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=3a0fdba7843309f8ba44378dce575ae0",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
         "error": {
-          "code": "expired",
+          "code": "card_expired",
           "message": "card has expired"
         },
-        "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+        "manifestHash": "c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=3a0fdba7843309f8ba44378dce575ae0",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -284,13 +448,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "failed",
             "event": "card.failed",
-            "detail": "expired"
+            "detail": "card_expired"
           }
         ]
       },
@@ -298,11 +462,11 @@
         "state": "failed",
         "outcome": "failed",
         "error": {
-          "code": "expired",
+          "code": "card_expired",
           "message": "card has expired"
         },
-        "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+        "manifestHash": "c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2983c9403741e2399b02a87c588dad4ae47ebc0231a409e7f02db71d21222a3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=3a0fdba7843309f8ba44378dce575ae0",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -310,13 +474,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "failed",
             "event": "card.failed",
-            "detail": "expired"
+            "detail": "card_expired"
           }
         ]
       }
@@ -326,8 +490,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "ac69a696e2ce082246b088a40682fbd2",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -363,26 +528,103 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "16d3cd4b7501cdd37d0504e0f9e6b7322ce2fc7f42da50a9618bbeb6724700b1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "a1cXv_633r0zVVodCCr9dvTpw8eZcvLi5aieS0hqTnb2kBLtOXhoCznpTWa58H8SSYlkhrQh2DQ-738vn4bQDw"
         }
       },
-      "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+      "manifestHash": "fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ac69a696e2ce082246b088a40682fbd2",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [
+          "fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d"
+        ],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "5qIJ6EKqz2CwdWJGeZ_6NQbof867YeJPH_I8zstkrIyDPlDC_-mlE30BRce2bZqD09hjntSBVdvGdjmBoi6dBQ"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
         "error": {
           "code": "revoked",
-          "message": "card or signing key is revoked"
+          "message": "card, signer, or signer authorization is revoked"
         },
-        "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+        "manifestHash": "fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ac69a696e2ce082246b088a40682fbd2",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -390,7 +632,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -405,10 +647,10 @@
         "outcome": "failed",
         "error": {
           "code": "revoked",
-          "message": "card or signing key is revoked"
+          "message": "card, signer, or signer authorization is revoked"
         },
-        "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+        "manifestHash": "fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=fa897afe672e6ea1fc547c6a3f7af0335dc02d5071d20eeca2cc3caf3c6ec43d&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ac69a696e2ce082246b088a40682fbd2",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -416,7 +658,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -432,8 +674,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "b6e54d8125c77cbbe41f028a769458a3",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -469,17 +712,92 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "d335f38d9ad6d8092df827aae036f97f7f613eb4bf71401bc961c41e13c0935a"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "injG6RnyYnBiCOOw8nbdbqtaH7dwRxQMyKd-UPH5keP3r-SeWiNEOG3uy9NumE40GzZn_vfUn8mgV5zLGLT2CQ"
         }
       },
-      "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+      "manifestHash": "091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b6e54d8125c77cbbe41f028a769458a3",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
@@ -487,8 +805,8 @@
           "code": "manifest_hash_mismatch",
           "message": "manifest hash does not match deep link"
         },
-        "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+        "manifestHash": "091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b6e54d8125c77cbbe41f028a769458a3",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -496,7 +814,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -513,8 +831,8 @@
           "code": "manifest_hash_mismatch",
           "message": "manifest hash does not match deep link"
         },
-        "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+        "manifestHash": "091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=091ae2bc9af70ef2948dc0dbaa0748ed309fedf4517893cd2d87b5879f793ee3&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b6e54d8125c77cbbe41f028a769458a3",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -522,7 +840,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -538,8 +856,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "bb0b52c2495aa24808f495710dae7c69",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -575,26 +894,101 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-unknown-key"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
+          "algorithm": "ed25519-test",
           "keyId": "fixture-unknown-key",
-          "value": "c0b005a016363c5d3963f7127972cfd69350c4568f5f00cf41115be8edde6cf2"
+          "value": "Dw3gJ1XgTEHXsFwA_ZBrZCPgVrzcoUHD2EWmTX6RU256ujWhAOhUrAflB9xbywFpYlj_N_c0PixAXx6BGtaQAg"
         }
       },
-      "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+      "manifestHash": "cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=bb0b52c2495aa24808f495710dae7c69",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
         "error": {
           "code": "unknown_key",
-          "message": "signing key fixture-unknown-key is unknown"
+          "message": "no signed authorization binds fixture-unknown-key to rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168"
         },
-        "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+        "manifestHash": "cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=bb0b52c2495aa24808f495710dae7c69",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -602,7 +996,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -617,10 +1011,10 @@
         "outcome": "failed",
         "error": {
           "code": "unknown_key",
-          "message": "signing key fixture-unknown-key is unknown"
+          "message": "no signed authorization binds fixture-unknown-key to rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168"
         },
-        "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+        "manifestHash": "cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=cc3c7214d86846c2137e45e9f2987e534c9091c497e06772a225d4b9be23cc9f&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=bb0b52c2495aa24808f495710dae7c69",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -628,7 +1022,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -644,8 +1038,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "ffe4db0bfb651eaba9fea7684aba49d4",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -681,17 +1076,92 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "bb51917fe76854fe07410be4fae6649131b491435f6ed6b8750a441c5cf5d248"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "gev4bW3N-nRHiNoVHCbCoyGhhT5p5FGTMNXm_xmJzSuB7NBADyMWK-S0hDSV6yln6FpF77VUWjVWL9jv551cBA"
         }
       },
-      "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+      "manifestHash": "7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ffe4db0bfb651eaba9fea7684aba49d4",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
@@ -699,8 +1169,8 @@
           "code": "incompatible_protocol",
           "message": "card requires rappid-link/99; runtime provides rappid-link/1"
         },
-        "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+        "manifestHash": "7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ffe4db0bfb651eaba9fea7684aba49d4",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -708,7 +1178,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -725,8 +1195,8 @@
           "code": "incompatible_protocol",
           "message": "card requires rappid-link/99; runtime provides rappid-link/1"
         },
-        "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+        "manifestHash": "7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7caeac1baae7f4ac2077da6c6ea5017601c88bcdf6e59387248ee40fb5d8b083&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=ffe4db0bfb651eaba9fea7684aba49d4",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -734,7 +1204,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -750,8 +1220,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "b20ede873edd559f7ef5baba1c3f957b",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -787,26 +1258,101 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "4a462a5d527658e756c66df220d9c525fe6b5239e442627da73d565344ff1dc9"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "YSeS1FhPsc2VuOvBmr4NxKZnkIu2rirp-LrKExtRF6Z-IbSDFlo3SWNL2i7L1bkNCIcglx4AE-JgObTgL7kzDg"
         }
       },
-      "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+      "manifestHash": "23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b20ede873edd559f7ef5baba1c3f957b",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
         "error": {
           "code": "classification_violation",
-          "message": "card classification internal exceeds public"
+          "message": "card classification internal exceeds signed authority"
         },
-        "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+        "manifestHash": "23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b20ede873edd559f7ef5baba1c3f957b",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -814,7 +1360,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -829,10 +1375,10 @@
         "outcome": "failed",
         "error": {
           "code": "classification_violation",
-          "message": "card classification internal exceeds public"
+          "message": "card classification internal exceeds signed authority"
         },
-        "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+        "manifestHash": "23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=23250fc4f46cc522591eaba1a5e8cd26d61c6f15d4c9a0a4728f64c32e9a21f5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=b20ede873edd559f7ef5baba1c3f957b",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -840,7 +1386,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -856,8 +1402,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "2ef030a4bd9efd139db9c42ab7b1dc5e",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -902,17 +1449,92 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "2c0cfbd91451a57078525159d2d1a05824031b593cf4d975f5eb9381f3265f8a"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "EBQTeWeWR4DbNqX2N_fCkavfEEY0qYsX8XIOKW9VahX3tmB3ZtiJ1ztnpcwcBaopIUED1WR266iqtD4_C9tVBA"
         }
       },
-      "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+      "manifestHash": "60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
@@ -920,8 +1542,8 @@
           "code": "insufficient_scope",
           "message": "part skill-manifest requires skill:hydrate"
         },
-        "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+        "manifestHash": "60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -929,7 +1551,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -946,8 +1568,8 @@
           "code": "insufficient_scope",
           "message": "part skill-manifest requires skill:hydrate"
         },
-        "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+        "manifestHash": "60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60bd160e92362810fd533e6fcc210ea81e3658da3420d31ba8838916dc22301b&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -955,7 +1577,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -971,8 +1593,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "c8aa06d92b5a8ffba9e7d5fc6cf94948",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -1018,34 +1641,115 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "91654dd03da0c24f050839ffb6ba67e4eee3163bf7cf7b21df88a794a8b35114"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "JHt2Riw2D0iANdzxsVhNlhOkLNcwiptTl5Ds2I7SsNFgPHAxBd6eoYl1r9qHwQbtf3o5HL0wnFbVxlzhv9MrDQ"
         }
       },
-      "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+      "manifestHash": "dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "preview",
         "outcome": "pending",
         "error": null,
-        "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+        "manifestHash": "dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read",
             "sonic:hydrate"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1076,13 +1780,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1099,19 +1803,25 @@
           "code": "missing_part",
           "message": "required part sonic-profile is unavailable"
         },
-        "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+        "manifestHash": "dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=dfd20580af95af49f7b5396523d677f481648a8f6021e64a1931dfee1e269912&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read",
             "sonic:hydrate"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1155,13 +1865,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1207,8 +1917,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "2246aa621fd99b409cce031af237d334",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -1244,33 +1955,114 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "bd42c67a16b735e7fbc43dfe05f3efbbcd5b5931c498696ad26c367f1a42fe90"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "LEuDkcty03pH_gLWNSqcO8tmI6VP-VLvLRyz0M2uircAmbqoR2dIMiRSrW0YDbgmPVO7SechuJ0GE7ZYZ5bvCw"
         }
       },
-      "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+      "manifestHash": "c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2246aa621fd99b409cce031af237d334",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "preview",
         "outcome": "pending",
         "error": null,
-        "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+        "manifestHash": "c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2246aa621fd99b409cce031af237d334",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1294,13 +2086,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1317,18 +2109,24 @@
           "code": "challenge_failed",
           "message": "continuity challenge verification failed"
         },
-        "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+        "manifestHash": "c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c3cc8d3d96aeefbedeaa002ba7b76d75b4f9695031c1531ce75f54656dd9c6fa&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=2246aa621fd99b409cce031af237d334",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1365,13 +2163,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1407,7 +2205,7 @@
             "seq": 8,
             "state": "challenging",
             "event": "challenge.started",
-            "detail": "fixture-continuity-1"
+            "detail": "fixture-signer-1"
           },
           {
             "seq": 9,
@@ -1423,8 +2221,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "c612b46260cddbd5c90d2be2c29d62f1",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -1460,33 +2259,114 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "f5a555e1467c5de6b331acd29f5c82132187fd71f774332c6542faaaaf580ef5"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "sxDrs21-ThOqa0zwktQPOMSGvl7kAP9gDJHSMgIpNK9g8cXs2mw9duK659bf_7T5Ik5Bb_7LmtuDemmxudVGAw"
         }
       },
-      "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+      "manifestHash": "b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c612b46260cddbd5c90d2be2c29d62f1",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "preview",
         "outcome": "pending",
         "error": null,
-        "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+        "manifestHash": "b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c612b46260cddbd5c90d2be2c29d62f1",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1510,13 +2390,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1530,18 +2410,24 @@
         "state": "awake",
         "outcome": "awake",
         "error": null,
-        "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+        "manifestHash": "b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=b8fbbe8656775b2d48de77514048a3b41f92120731f9a30ec90db0dcf4dba5c5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=c612b46260cddbd5c90d2be2c29d62f1",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1578,13 +2464,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1626,7 +2512,7 @@
             "seq": 9,
             "state": "challenging",
             "event": "challenge.started",
-            "detail": "fixture-continuity-1"
+            "detail": "fixture-signer-1"
           },
           {
             "seq": 10,
@@ -1642,8 +2528,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "46e051e6a79d30b6bf448650f1edde20",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -1679,17 +2566,92 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "6df3d7a5536a1307c19cbc4ed529a2be98d9b65abc9afcf02758f71b69f26e96"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "Ie9ZqdeIf64UwyUqX8ETvSc7nBWKeRXd20Y6qGA4Wr6jSgkNUrSalMiLMny8CpSaOgm3HU8Cq0a1UXsit8kcAA"
         }
       },
-      "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+      "manifestHash": "60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=46e051e6a79d30b6bf448650f1edde20",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "failed",
         "outcome": "failed",
@@ -1697,8 +2659,8 @@
           "code": "duplicate_nonce",
           "message": "card nonce has already been accepted"
         },
-        "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+        "manifestHash": "60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=46e051e6a79d30b6bf448650f1edde20",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -1706,7 +2668,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -1723,8 +2685,8 @@
           "code": "duplicate_nonce",
           "message": "card nonce has already been accepted"
         },
-        "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+        "manifestHash": "60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=60834347bf159430cc8e0287cb9e196e77e7db207f06231d4fecd596b6a373e5&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=46e051e6a79d30b6bf448650f1edde20",
         "preview": null,
         "hydrated": [],
         "audit": [
@@ -1732,7 +2694,7 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
@@ -1748,8 +2710,9 @@
       "manifest": {
         "schema": "rappid-card/1",
         "profile": "rappid-card-test/1",
+        "policyId": "fixture-policy-1",
         "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
-        "endpoint": "fixture-habitat",
+        "endpoint": "https://fixture.openrappter.test/rappid-card",
         "nonce": "713d15aae4b21436a72edfe90ebed409",
         "issuedAt": "2035-01-01T00:00:00Z",
         "expiresAt": "2035-01-02T00:00:00Z",
@@ -1785,33 +2748,114 @@
           }
         ],
         "challenge": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-continuity-1"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1"
         },
         "signature": {
-          "algorithm": "hmac-sha256-test",
-          "keyId": "fixture-signing-1",
-          "value": "2cc780429606956b930aa443e01595b5c556d541f52e44027d44324cff77837a"
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-signer-1",
+          "value": "8kndcpdvTiczILvzFJczQe_g97dfkwXe_LPagrUHRpm4d7PQw11U52ds4KI-TjcUHMIAaoY0lEandzoq-YZCDQ"
         }
       },
-      "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
-      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+      "manifestHash": "6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=713d15aae4b21436a72edfe90ebed409",
+      "policy": {
+        "schema": "rappid-card-policy/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 7,
+        "issuedAt": "2034-12-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "allowedProfiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "-zqey_Ah8rvaBZL3NaZ0zBC1YfpM43Cmmtis9YQquK5sajToDmLVNFiKRhTagZyGarTbeD7JdOygjvr1rfz0Cw"
+        }
+      },
+      "authorization": {
+        "schema": "rappid-card-authorization/1",
+        "authorizationId": "fixture-authorization-1",
+        "policyId": "fixture-policy-1",
+        "sequence": 3,
+        "subjectRappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "signerKeyId": "fixture-signer-1",
+        "signerAlgorithm": "ed25519-test",
+        "signerPublicKey": "AmO0ch995GSZLZSGPSjRKIWl5AYd0BShH8GeaOGBVMs",
+        "notBefore": "2034-12-01T00:00:00Z",
+        "notAfter": "2036-01-01T00:00:00Z",
+        "maxClassification": "public",
+        "grantedScopes": [
+          "identity:read",
+          "traits:read",
+          "skill:hydrate",
+          "sonic:hydrate",
+          "capability:hydrate"
+        ],
+        "approvedOrigins": [
+          "https://fixture.openrappter.test"
+        ],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "pMRnggXY0_HMsPJQGIYLXBkWrDIBNS2GgDZywG19-cWFMNcBy7KAIcbvRahZfdEVnlaQH-_4A1HYmwBSFSQ4Cw"
+        }
+      },
+      "revocations": {
+        "schema": "rappid-card-revocations/1",
+        "policyId": "fixture-policy-1",
+        "sequence": 11,
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2036-01-01T00:00:00Z",
+        "revokedManifestHashes": [],
+        "revokedSignerKeyIds": [],
+        "revokedAuthorizationIds": [],
+        "signature": {
+          "algorithm": "ed25519-test",
+          "keyId": "fixture-authority-1",
+          "value": "Mj0v1wT6BdIAW-zhsB5DUZl5igwAI8uAt8f7V-MK-OmnSQ1mXN0tDfgEGR-7xGng6hHpf1RbqI7lvs-NlTOIAw"
+        }
+      },
       "preview": {
         "state": "preview",
         "outcome": "pending",
         "error": null,
-        "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+        "manifestHash": "6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=713d15aae4b21436a72edfe90ebed409",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1835,13 +2879,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1855,18 +2899,24 @@
         "state": "awake",
         "outcome": "awake",
         "error": null,
-        "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
-        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+        "manifestHash": "6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6ab415fba92baedc860bf773aa848bc41080f8ae5a955da835c604de30bc811e&e=https%3A%2F%2Ffixture.openrappter.test%2Frappid-card&n=713d15aae4b21436a72edfe90ebed409",
         "preview": {
           "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
           "profile": "rappid-card-test/1",
-          "endpoint": "fixture-habitat",
-          "issuerKeyId": "fixture-signing-1",
+          "policyId": "fixture-policy-1",
+          "authorizationId": "fixture-authorization-1",
+          "endpoint": "https://fixture.openrappter.test/rappid-card",
+          "origin": "https://fixture.openrappter.test",
+          "issuerKeyId": "fixture-signer-1",
           "classification": "public",
           "scopes": [
             "identity:read",
             "traits:read"
           ],
+          "policySequence": 7,
+          "authorizationSequence": 3,
+          "revocationSequence": 11,
           "parts": [
             {
               "name": "identity",
@@ -1903,13 +2953,13 @@
             "seq": 1,
             "state": "parsed",
             "event": "link.parsed",
-            "detail": "fixture-habitat"
+            "detail": "https://fixture.openrappter.test/rappid-card"
           },
           {
             "seq": 2,
             "state": "verified",
             "event": "card.verified",
-            "detail": "fixture-signing-1"
+            "detail": "fixture-authorization-1"
           },
           {
             "seq": 3,
@@ -1945,7 +2995,7 @@
             "seq": 8,
             "state": "challenging",
             "event": "challenge.started",
-            "detail": "fixture-continuity-1"
+            "detail": "fixture-signer-1"
           },
           {
             "seq": 9,

@@ -21,7 +21,7 @@ The schema is [`contracts/rappid-card.schema.json`](../contracts/rappid-card.sch
 Every object is closed. A card carries only:
 
 - the canonical RAPPID;
-- a bounded endpoint identifier and nonce;
+- a canonical HTTPS endpoint, signed policy identifier, and nonce;
 - issue/expiry, protocol, and runtime compatibility bounds;
 - classification and explicit hydration scopes;
 - bounded content-addressed part descriptors;
@@ -42,7 +42,10 @@ rappid://link/<rappid>?m=<manifest-hash>&e=<endpoint>&n=<nonce>
 ```
 
 No other query fields, duplicate fields, fragment, alternate ordering, or
-non-canonical spelling is accepted.
+non-canonical spelling is accepted. The endpoint is decoded before policy
+checks. Userinfo, query parameters, fragments, percent-encoded path material,
+non-HTTPS schemes, and non-canonical origins are refused, so an encoded token
+or password cannot hide inside `e=`.
 
 ## Profiles and keys
 
@@ -50,14 +53,31 @@ The profiles are intentionally distinct:
 
 | Profile | Accepted mode | Authenticator |
 |---|---|---|
-| `rappid-card-test/1` | Fixture only | `hmac-sha256-test` with deterministic synthetic fixture keys |
-| `rappid-card-production/1` | Production only | `hmac-sha256` with an explicitly injected key provider |
+| `rappid-card-test/1` | Fixture only | `ed25519-test` with deterministic synthetic fixture keys |
+| `rappid-card-production/1` | Production only | `ed25519` with explicitly injected public trust anchors |
 
-Synthetic fixture identities and keys live only in the fixture module.
-Production mode rejects the test profile before key lookup and also rejects
-test authenticators. The core never reads environment variables, keychains,
-cloud metadata, or ambient credentials. A production host must inject its own
-key, manifest, revocation, content, and challenge providers.
+Synthetic fixture identities and private keys live only in fixture/vector
+generation code. Production mode rejects the test profile and `ed25519-test`
+before trust lookup. The core never reads environment variables, keychains,
+cloud metadata, or ambient credentials.
+
+Production trust is not a signer-key map or a caller-provided scope set:
+
+1. A local public authority anchor verifies a signed
+   `rappid-card-policy/1` document.
+2. That policy authority verifies one signed
+   `rappid-card-authorization/1` binding the signer key to the exact subject
+   RAPPID, scopes, classification ceiling, and endpoint origins.
+3. The same authority verifies a signed
+   `rappid-card-revocations/1` view.
+4. The authorized signer public key verifies the card and the post-hydration
+   continuity challenge.
+
+The closed trust document contract is
+[`contracts/rappid-card-trust.schema.json`](../contracts/rappid-card-trust.schema.json).
+Policy resolution and origin approval happen before the manifest provider is
+called, so an unapproved decoded endpoint cannot reach a network-capable
+provider.
 
 ## State machine
 
@@ -74,8 +94,11 @@ parse
 ```
 
 Any rejected control transitions to `failed` with a stable error code. Preview
-does not hydrate. Approval is a separate action. Nonces are held in a bounded
-replay cache, and audit output is capped at 64 deterministic events.
+does not hydrate. Approval is a separate action. Production requires the
+runtime's SQLite state store; policy, authorization, and revocation sequences
+are checked for rollback in the same transaction that claims a nonce. The
+claim survives process restart. Audit output is capped at 64 deterministic
+events.
 
 The continuity challenge binds the manifest hash, nonce, and sorted hashes of
 the parts that actually hydrated. A reconnect during hydration can retry the
@@ -89,7 +112,7 @@ Both runtimes expose the same 13 fixtures:
 | Fixture | Expected result |
 |---|---|
 | `valid` | Awake |
-| `expired` | `expired` |
+| `expired` | `card_expired` |
 | `revoked` | `revoked` |
 | `wrong-hash` | `manifest_hash_mismatch` |
 | `unknown-key` | `unknown_key` |
@@ -103,9 +126,15 @@ Both runtimes expose the same 13 fixtures:
 | `physical-payload-reproduction` | Awake from the exact QR/deep-link payload |
 
 [`tests/rappid-card-vectors.json`](../tests/rappid-card-vectors.json) contains
-the signed manifests, canonical hashes, exact links, previews, approved runs,
-hydrated part descriptors, and audit events. TypeScript and Python tests each
-regenerate the full document and require structural equality.
+the signed manifests, policies, signer authorizations, revocation views,
+canonical hashes, exact links, previews, approved runs, hydrated part
+descriptors, and audit events. TypeScript and Python each regenerate the full
+fixture document and require structural equality.
+
+[`tests/rappid-card-production-vectors.json`](../tests/rappid-card-production-vectors.json)
+adds positive `ed25519` production vectors: an accepted view, a higher-sequence
+rotation, and a signed lower-sequence rollback probe. Neither runtime has a
+built-in production private key.
 
 ## CLI
 
@@ -118,9 +147,9 @@ npm run build:server
 node dist/index.js rappid-card fixtures ../rappid-card-deck --format both
 node dist/index.js rappid-card simulate valid
 node dist/index.js rappid-card simulate valid --approve
-node dist/index.js rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json
+node dist/index.js rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json --fixture
 node dist/index.js rappid-card verify ../rappid-card-deck/valid/.rappid-card.json \
-  --link ../rappid-card-deck/valid/rappid-card.link.txt
+  --link ../rappid-card-deck/valid/rappid-card.link.txt --fixture
 node dist/index.js rappid-card qr '<exact-rappid-link>' ./rappid-card.svg
 
 # Python
@@ -128,15 +157,16 @@ cd python
 python -m openrappter.cli rappid-card fixtures ../rappid-card-deck --format both
 python -m openrappter.cli rappid-card simulate valid
 python -m openrappter.cli rappid-card simulate valid --approve
-python -m openrappter.cli rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json
+python -m openrappter.cli rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json --fixture
 python -m openrappter.cli rappid-card verify ../rappid-card-deck/valid/.rappid-card.json \
-  --link ../rappid-card-deck/valid/rappid-card.link.txt
+  --link ../rappid-card-deck/valid/rappid-card.link.txt --fixture
 python -m openrappter.cli rappid-card qr '<exact-rappid-link>' ./rappid-card.svg
 ```
 
 `simulate` stops at preview unless `--approve` is supplied. `inspect` and
-`verify` never fetch ambient keys. Production verification accepts only an
-explicit `--keys` JSON file mapping key IDs to 32-byte lowercase hex keys.
+`verify` never fetch ambient keys. Production verification requires both an
+explicit `--trust` JSON bundle (signed policy, authorization, revocation view,
+and public authority keys) and a durable `--state` SQLite path.
 
 Fixture export writes each manifest, the exact link sidecar, and a real QR SVG
 or PNG generated by the `qrcode` ecosystem libraries. The implementation does
@@ -155,15 +185,16 @@ The browser calls only authenticated gateway methods:
 - `rappid.card.preview`
 - `rappid.card.simulate`
 
-Fixture keys and provider authority stay server-side. The gateway simulation
-uses in-memory injected providers; it performs no network request and reads no
-credential store.
+Fixture private keys and provider authority stay server-side. The gateway
+simulation uses signed fixture trust documents and in-memory fixture state; it
+performs no network request and reads no credential store. The production API
+does not accept that state store.
 
 ## Current boundary
 
-The shipped production profile is a provider contract, not a production
-pairing deployment. It accepts an explicitly injected HMAC key provider, but
-OpenRappter does not yet ship a hardware-backed asymmetric key resolver,
-revocation service, remote content transport, or QR camera decoder. The Debug
-Card Habitat deliberately remains fixture-only until those deployment
-decisions have their own reviewed trust model.
+The shipped production profile is a verified provider contract, not a
+production pairing deployment. It verifies Ed25519 trust documents and keeps
+durable replay state, but OpenRappter does not yet ship a hardware-backed
+private signer, trust-distribution service, remote content transport, or QR
+camera decoder. The Debug Card Habitat deliberately remains fixture-only; a
+production host must supply reviewed trust/content/challenge providers.

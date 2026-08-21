@@ -110,7 +110,9 @@ hydration and the continuity challenge passes.
 The card carries hashes and policy metadata, never private memory, credentials,
 commands, executable bytes, or filesystem paths. Every external decision is an
 injected provider; the fixture Habitat uses no real network. Production mode
-refuses test profiles and signatures.
+refuses test profiles and signatures, verifies signed signer-to-subject
+authorization and monotonic revocation views, restricts decoded endpoints to
+signed HTTPS origins, and requires durable transactional replay state.
 
 See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
 

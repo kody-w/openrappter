@@ -88,10 +88,11 @@ See [Quantum RAPPIDs](./docs/quantum-rappids.md).
 The authenticated Habitat includes a deterministic RAPPID handoff simulator
 with 13 signed synthetic fixtures, a strict `.rappid-card.json` manifest, an
 exact compact deep link, real QR SVG/PNG generation, explicit approval before
-content-addressed hydration, bounded replay/audit state, and visible
-failure/awake results. TypeScript and Python regenerate the same shared wire
-vectors. Production mode refuses the synthetic test profile and never reads
-ambient credentials.
+content-addressed hydration, signed signer-to-subject authorization, signed
+monotonic revocation views, approved HTTPS origins, durable transactional
+replay, and visible failure/awake results. TypeScript and Python regenerate
+the same shared wire vectors. Production mode refuses the synthetic test
+profile and never reads ambient credentials.
 
 See [Virtual RAPPID Debug Card](./docs/rappid-debug-card.md).
 

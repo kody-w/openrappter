@@ -1,4 +1,4 @@
-"""Deterministic synthetic fixture deck shared with the TypeScript runtime."""
+"""Deterministic signed-trust fixture deck shared with TypeScript."""
 
 from __future__ import annotations
 
@@ -10,34 +10,48 @@ from openrappter.rappids.canonical import canonical_json, sha256_hex
 
 from .contract import (
     challenge_value,
+    ed25519_public_key,
     make_deep_link,
     manifest_hash,
+    sign_authorization,
     sign_manifest,
+    sign_policy,
+    sign_revocations,
 )
-from .replay_cache import BoundedReplayCache
-from .simulator import simulate_rappid_card
+from .replay_cache import BoundedCardStateStore
+from .simulator import simulate_rappid_card_fixture_mode
 from .types import (
+    RAPPID_CARD_AUTHORIZATION_SCHEMA,
+    RAPPID_CARD_POLICY_SCHEMA,
     RAPPID_CARD_PROTOCOL,
+    RAPPID_CARD_REVOCATIONS_SCHEMA,
     RAPPID_CARD_SCHEMA,
     RAPPID_CARD_TEST_PROFILE,
     CardManifest,
-    CardPolicy,
     CardProviders,
     CardSnapshot,
     RappidCardReconnectError,
 )
 
 RAPPID_CARD_FIXTURE_NOW = "2035-01-01T12:00:00Z"
-FIXTURE_ENDPOINT = "fixture-habitat"
-FIXTURE_SIGNING_KEY_ID = "fixture-signing-1"
-FIXTURE_CHALLENGE_KEY_ID = "fixture-continuity-1"
+FIXTURE_ENDPOINT = "https://fixture.openrappter.test/rappid-card"
+FIXTURE_ORIGIN = "https://fixture.openrappter.test"
+FIXTURE_POLICY_ID = "fixture-policy-1"
+FIXTURE_AUTHORIZATION_ID = "fixture-authorization-1"
+FIXTURE_AUTHORITY_KEY_ID = "fixture-authority-1"
+FIXTURE_SIGNING_KEY_ID = "fixture-signer-1"
+FIXTURE_CHALLENGE_KEY_ID = FIXTURE_SIGNING_KEY_ID
 
-_FIXTURE_SIGNING_KEY = bytes.fromhex(
-    sha256_hex("rappid-card-test/1:synthetic-signing-key")
+_FIXTURE_AUTHORITY_SEED = bytes.fromhex(
+    sha256_hex("rappid-card-test/1:synthetic-authority-seed")
 )
-_FIXTURE_CHALLENGE_KEY = bytes.fromhex(
-    sha256_hex("rappid-card-test/1:synthetic-continuity-key")
+_FIXTURE_SIGNER_SEED = bytes.fromhex(
+    sha256_hex("rappid-card-test/1:synthetic-signer-seed")
 )
+_FIXTURE_AUTHORITY_PUBLIC_KEY = ed25519_public_key(
+    _FIXTURE_AUTHORITY_SEED
+)
+_FIXTURE_SIGNER_PUBLIC_KEY = ed25519_public_key(_FIXTURE_SIGNER_SEED)
 _FIXTURE_RAPPID = (
     "rappid:@openrappter/virtual-debug-card:"
     + sha256_hex("rappid-card-test/1:virtual-debug-card")
@@ -62,19 +76,19 @@ RAPPID_CARD_FIXTURE_NAMES = [
 _DESCRIPTIONS: Dict[str, Dict[str, Optional[str]]] = {
     "valid": {
         "label": "Valid card",
-        "description": "Signed, current, permitted, content-addressed, and challenge-complete.",
+        "description": "Authorized signer, current policy, monotonic revocations, approved origin, and valid challenge.",
         "expectedState": "awake",
         "expectedError": None,
     },
     "expired": {
         "label": "Expired card",
-        "description": "A correctly signed card whose expiry is in the past.",
+        "description": "A correctly signed and authorized card whose expiry is in the past.",
         "expectedState": "failed",
-        "expectedError": "expired",
+        "expectedError": "card_expired",
     },
     "revoked": {
         "label": "Revoked card",
-        "description": "A correctly signed card rejected by the injected revocation provider.",
+        "description": "A signed monotonic revocation view rejects the manifest hash.",
         "expectedState": "failed",
         "expectedError": "revoked",
     },
@@ -86,25 +100,25 @@ _DESCRIPTIONS: Dict[str, Dict[str, Optional[str]]] = {
     },
     "unknown-key": {
         "label": "Unknown signing key",
-        "description": "The manifest names a key the injected key provider does not know.",
+        "description": "No signed authorization binds the named signer to the subject RAPPID.",
         "expectedState": "failed",
         "expectedError": "unknown_key",
     },
     "incompatible-runtime-protocol": {
         "label": "Incompatible runtime / protocol",
-        "description": "A signed card that requires a future link protocol and runtime.",
+        "description": "An authorized card requires a future link protocol and runtime.",
         "expectedState": "failed",
         "expectedError": "incompatible_protocol",
     },
     "classification-violation": {
         "label": "Classification violation",
-        "description": "A signed internal card presented to a public-only simulator.",
+        "description": "The card exceeds signed policy and signer classification authority.",
         "expectedState": "failed",
         "expectedError": "classification_violation",
     },
     "insufficient-scope": {
         "label": "Insufficient scope",
-        "description": "A required part asks for a scope absent from the manifest grant.",
+        "description": "A required part asks for a scope absent from the signed card grant.",
         "expectedState": "failed",
         "expectedError": "insufficient_scope",
     },
@@ -116,25 +130,25 @@ _DESCRIPTIONS: Dict[str, Dict[str, Optional[str]]] = {
     },
     "challenge-failure": {
         "label": "Continuity challenge failure",
-        "description": "All parts hydrate, but the injected challenge response is invalid.",
+        "description": "All parts hydrate, but the authorized signer challenge is invalid.",
         "expectedState": "failed",
         "expectedError": "challenge_failed",
     },
     "reconnect-during-hydration": {
         "label": "Reconnect during hydration",
-        "description": "The provider reconnects once; the verified state resumes without re-authorizing.",
+        "description": "The provider reconnects once; verified authorization resumes without weakening trust.",
         "expectedState": "awake",
         "expectedError": None,
     },
     "duplicate-nonce": {
         "label": "Duplicate nonce",
-        "description": "The bounded replay cache already contains the signed nonce.",
+        "description": "The transactional replay store already contains the signed nonce.",
         "expectedState": "failed",
         "expectedError": "duplicate_nonce",
     },
     "physical-payload-reproduction": {
         "label": "Physical payload reproduction",
-        "description": "The exact compact link is rendered as QR and re-entered without changing bytes.",
+        "description": "The exact approved-origin HTTPS endpoint survives QR/deep-link reproduction.",
         "expectedState": "awake",
         "expectedError": None,
     },
@@ -150,11 +164,13 @@ class RappidCardFixture:
     manifest: CardManifest
     manifest_hash: str
     deep_link: str
+    policy: Dict[str, Any]
+    authorization: Dict[str, Any]
+    revocations: Dict[str, Any]
     expected_state: str
     expected_error: Optional[str]
-    policy: CardPolicy
     providers: CardProviders
-    replay_cache: BoundedReplayCache
+    state_store: BoundedCardStateStore
 
 
 def _content(
@@ -207,6 +223,7 @@ def _unsigned_base(
     return {
         "schema": RAPPID_CARD_SCHEMA,
         "profile": RAPPID_CARD_TEST_PROFILE,
+        "policyId": FIXTURE_POLICY_ID,
         "rappid": _FIXTURE_RAPPID,
         "endpoint": FIXTURE_ENDPOINT,
         "nonce": sha256_hex(f"rappid-card-test/1:nonce:{name}")[:32],
@@ -222,27 +239,122 @@ def _unsigned_base(
         "scopes": ["identity:read", "traits:read"],
         "parts": parts,
         "challenge": {
-            "algorithm": "hmac-sha256-test",
-            "keyId": FIXTURE_CHALLENGE_KEY_ID,
+            "algorithm": "ed25519-test",
+            "keyId": FIXTURE_SIGNING_KEY_ID,
         },
     }
 
 
-def _fixture_policy() -> CardPolicy:
-    return CardPolicy(
-        mode="fixture",
-        now=RAPPID_CARD_FIXTURE_NOW,
-        runtime_name="openrappter",
-        runtime_version="1.13.0",
-        protocol=RAPPID_CARD_PROTOCOL,
-        max_classification="public",
-        granted_scopes=[
-            "identity:read",
-            "traits:read",
-            "skill:hydrate",
-            "sonic:hydrate",
-            "capability:hydrate",
-        ],
+def sign_fixture_manifest(
+    manifest: CardManifest, key_id: str = FIXTURE_SIGNING_KEY_ID
+) -> CardManifest:
+    return sign_manifest(
+        manifest,
+        "ed25519-test",
+        key_id,
+        _FIXTURE_SIGNER_SEED,
+    )
+
+
+def sign_fixture_policy(policy: Dict[str, Any]) -> Dict[str, Any]:
+    return sign_policy(
+        policy,
+        "ed25519-test",
+        FIXTURE_AUTHORITY_KEY_ID,
+        _FIXTURE_AUTHORITY_SEED,
+    )
+
+
+def sign_fixture_authorization(
+    authorization: Dict[str, Any]
+) -> Dict[str, Any]:
+    return sign_authorization(
+        authorization,
+        "ed25519-test",
+        FIXTURE_AUTHORITY_KEY_ID,
+        _FIXTURE_AUTHORITY_SEED,
+    )
+
+
+def sign_fixture_revocations(
+    revocations: Dict[str, Any]
+) -> Dict[str, Any]:
+    return sign_revocations(
+        revocations,
+        "ed25519-test",
+        FIXTURE_AUTHORITY_KEY_ID,
+        _FIXTURE_AUTHORITY_SEED,
+    )
+
+
+def _fixture_policy() -> Dict[str, Any]:
+    return sign_fixture_policy(
+        {
+            "schema": RAPPID_CARD_POLICY_SCHEMA,
+            "policyId": FIXTURE_POLICY_ID,
+            "sequence": 7,
+            "issuedAt": "2034-12-01T00:00:00Z",
+            "expiresAt": "2036-01-01T00:00:00Z",
+            "allowedProfiles": [RAPPID_CARD_TEST_PROFILE],
+            "protocol": RAPPID_CARD_PROTOCOL,
+            "runtime": {
+                "name": "openrappter",
+                "minimum": "1.13.0",
+                "maximum": "1.99.0",
+            },
+            "maxClassification": "public",
+            "grantedScopes": [
+                "identity:read",
+                "traits:read",
+                "skill:hydrate",
+                "sonic:hydrate",
+                "capability:hydrate",
+            ],
+            "approvedOrigins": [FIXTURE_ORIGIN],
+        }
+    )
+
+
+def _fixture_authorization() -> Dict[str, Any]:
+    return sign_fixture_authorization(
+        {
+            "schema": RAPPID_CARD_AUTHORIZATION_SCHEMA,
+            "authorizationId": FIXTURE_AUTHORIZATION_ID,
+            "policyId": FIXTURE_POLICY_ID,
+            "sequence": 3,
+            "subjectRappid": _FIXTURE_RAPPID,
+            "signerKeyId": FIXTURE_SIGNING_KEY_ID,
+            "signerAlgorithm": "ed25519-test",
+            "signerPublicKey": _FIXTURE_SIGNER_PUBLIC_KEY,
+            "notBefore": "2034-12-01T00:00:00Z",
+            "notAfter": "2036-01-01T00:00:00Z",
+            "maxClassification": "public",
+            "grantedScopes": [
+                "identity:read",
+                "traits:read",
+                "skill:hydrate",
+                "sonic:hydrate",
+                "capability:hydrate",
+            ],
+            "approvedOrigins": [FIXTURE_ORIGIN],
+        }
+    )
+
+
+def _fixture_revocations(
+    revoked_manifest_hashes: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return sign_fixture_revocations(
+        {
+            "schema": RAPPID_CARD_REVOCATIONS_SCHEMA,
+            "policyId": FIXTURE_POLICY_ID,
+            "sequence": 11,
+            "issuedAt": "2035-01-01T00:00:00Z",
+            "expiresAt": "2036-01-01T00:00:00Z",
+            "revokedManifestHashes": revoked_manifest_hashes or [],
+            "revokedSignerKeyIds": [],
+            "revokedAuthorizationIds": [],
+        }
     )
 
 
@@ -266,6 +378,7 @@ def build_rappid_card_fixture(name: str) -> RappidCardFixture:
         unsigned["expiresAt"] = "2034-12-31T00:00:00Z"
     elif name == "unknown-key":
         signature_key_id = "fixture-unknown-key"
+        unsigned["challenge"]["keyId"] = signature_key_id
     elif name == "incompatible-runtime-protocol":
         unsigned["protocol"] = "rappid-link/99"
         unsigned["runtime"]["minimum"] = "99.0.0"
@@ -297,24 +410,19 @@ def build_rappid_card_fixture(name: str) -> RappidCardFixture:
     elif name == "reconnect-during-hydration":
         reconnect_hash = contents[0][0]["hash"]
 
-    manifest = sign_manifest(
-        unsigned,
-        "hmac-sha256-test",
-        signature_key_id,
-        _FIXTURE_SIGNING_KEY,
-    )
+    manifest = sign_fixture_manifest(unsigned, signature_key_id)
     actual_hash = manifest_hash(manifest)
     link_hash = _wrong_hash(actual_hash) if name == "wrong-hash" else actual_hash
     deep_link = make_deep_link(manifest, link_hash)
+    policy = _fixture_policy()
+    authorization = _fixture_authorization()
+    revocations = _fixture_revocations(
+        [actual_hash] if name == "revoked" else []
+    )
     content_map: Dict[str, bytes] = {}
     for index, (part, payload) in enumerate(contents):
         if include_all_content or index < len(contents) - 1:
             content_map[part["hash"]] = payload
-    key_map = {
-        FIXTURE_SIGNING_KEY_ID: _FIXTURE_SIGNING_KEY,
-        FIXTURE_CHALLENGE_KEY_ID: _FIXTURE_CHALLENGE_KEY,
-    }
-    revoked = {actual_hash} if name == "revoked" else set()
     reconnected = False
 
     def get_manifest(endpoint: str, requested_hash: str) -> Any:
@@ -322,11 +430,40 @@ def build_rappid_card_fixture(name: str) -> RappidCardFixture:
             return None
         return copy.deepcopy(manifest)
 
-    def get_key(key_id: str, _algorithm: str) -> Optional[bytes]:
-        return key_map.get(key_id)
+    def get_policy_for_origin(origin: str) -> Any:
+        return (
+            copy.deepcopy(policy)
+            if origin == FIXTURE_ORIGIN
+            else None
+        )
 
-    def is_revoked(requested_hash: str, _key_id: str) -> bool:
-        return requested_hash in revoked
+    def get_authorization(
+        policy_id: str, signer_key_id: str, subject_rappid: str
+    ) -> Any:
+        if (
+            policy_id == FIXTURE_POLICY_ID
+            and signer_key_id == FIXTURE_SIGNING_KEY_ID
+            and subject_rappid == _FIXTURE_RAPPID
+        ):
+            return copy.deepcopy(authorization)
+        return None
+
+    def get_revocations(policy_id: str) -> Any:
+        return (
+            copy.deepcopy(revocations)
+            if policy_id == FIXTURE_POLICY_ID
+            else None
+        )
+
+    def get_authority_key(
+        key_id: str, algorithm: str
+    ) -> Optional[str]:
+        if (
+            key_id == FIXTURE_AUTHORITY_KEY_ID
+            and algorithm == "ed25519-test"
+        ):
+            return _FIXTURE_AUTHORITY_PUBLIC_KEY
+        return None
 
     def get_part(hash_value: str) -> Optional[bytes]:
         nonlocal reconnected
@@ -339,18 +476,22 @@ def build_rappid_card_fixture(name: str) -> RappidCardFixture:
 
     def challenge_response(request: Dict[str, Any]) -> str:
         if challenge_fails:
-            return "0" * 64
-        return challenge_value(request, _FIXTURE_CHALLENGE_KEY)
+            return "0" * 86
+        return challenge_value(request, _FIXTURE_SIGNER_SEED)
 
     providers = CardProviders(
         get_manifest=get_manifest,
-        get_key=get_key,
-        is_revoked=is_revoked,
+        get_policy_for_origin=get_policy_for_origin,
+        get_authorization=get_authorization,
+        get_revocations=get_revocations,
+        get_authority_key=get_authority_key,
         get_part=get_part,
         challenge_response=challenge_response,
     )
-    replay_cache = BoundedReplayCache(
-        initial=[manifest["nonce"]] if name == "duplicate-nonce" else []
+    state_store = BoundedCardStateStore(
+        initial_nonces=[manifest["nonce"]]
+        if name == "duplicate-nonce"
+        else []
     )
     return RappidCardFixture(
         name=name,
@@ -364,11 +505,13 @@ def build_rappid_card_fixture(name: str) -> RappidCardFixture:
         manifest=manifest,
         manifest_hash=link_hash,
         deep_link=deep_link,
+        policy=policy,
+        authorization=authorization,
+        revocations=revocations,
         expected_state=str(definition["expectedState"]),
         expected_error=definition["expectedError"],
-        policy=_fixture_policy(),
         providers=providers,
-        replay_cache=replay_cache,
+        state_store=state_store,
     )
 
 
@@ -391,12 +534,24 @@ def list_rappid_card_fixtures() -> List[Dict[str, Any]]:
 
 def simulate_rappid_card_fixture(name: str, approve: bool) -> CardSnapshot:
     fixture = build_rappid_card_fixture(name)
-    return simulate_rappid_card(
+    return simulate_rappid_card_fixture_mode(
         fixture.deep_link,
         approve=approve,
-        policy=fixture.policy,
         providers=fixture.providers,
-        replay_cache=fixture.replay_cache,
+        state_store=fixture.state_store,
+        fixture_now=RAPPID_CARD_FIXTURE_NOW,
+    )
+
+
+def simulate_rappid_card_fixture_input(
+    fixture: RappidCardFixture, approve: bool
+) -> CardSnapshot:
+    return simulate_rappid_card_fixture_mode(
+        fixture.deep_link,
+        approve=approve,
+        providers=fixture.providers,
+        state_store=fixture.state_store,
+        fixture_now=RAPPID_CARD_FIXTURE_NOW,
     )
 
 
@@ -410,12 +565,15 @@ def build_rappid_card_vector_document() -> Dict[str, Any]:
                 "manifest": fixture.manifest,
                 "manifestHash": fixture.manifest_hash,
                 "deepLink": fixture.deep_link,
+                "policy": fixture.policy,
+                "authorization": fixture.authorization,
+                "revocations": fixture.revocations,
                 "preview": simulate_rappid_card_fixture(name, False),
                 "approved": simulate_rappid_card_fixture(name, True),
             }
         )
     return {
-        "schema": "rappid-card-vectors/1",
+        "schema": "rappid-card-vectors/2",
         "fixtureNow": RAPPID_CARD_FIXTURE_NOW,
         "fixtures": fixtures,
     }

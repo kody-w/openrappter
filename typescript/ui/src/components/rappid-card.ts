@@ -27,10 +27,16 @@ interface CardSnapshot {
   preview: {
     rappid: string;
     profile: string;
+    policyId: string;
+    authorizationId: string;
     endpoint: string;
+    origin: string;
     issuerKeyId: string;
     classification: string;
     scopes: string[];
+    policySequence: number;
+    authorizationSequence: number;
+    revocationSequence: number;
     parts: Array<{
       name: string;
       hash: string;
@@ -476,7 +482,20 @@ export class OpenRappterRappidCard extends LitElement {
                       <span>Issuer key</span>
                       <strong>${snapshot.preview.issuerKeyId}</strong>
                     </div>
+                    <div class="fact">
+                      <span>Signed policy</span>
+                      <strong>${snapshot.preview.policyId} · #${snapshot.preview.policySequence}</strong>
+                    </div>
+                    <div class="fact">
+                      <span>Signer authorization</span>
+                      <strong>${snapshot.preview.authorizationId} · #${snapshot.preview.authorizationSequence}</strong>
+                    </div>
+                    <div class="fact">
+                      <span>Revocation view</span>
+                      <strong>#${snapshot.preview.revocationSequence}</strong>
+                    </div>
                   </div>
+                  <p class="link"><code>${snapshot.preview.origin}</code></p>
                   <h4>Permitted content-addressed parts</h4>
                   <div class="parts">
                     ${snapshot.preview.parts.map((part) => html`

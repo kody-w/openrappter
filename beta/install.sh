@@ -8,7 +8,7 @@ set -euo pipefail
 BRAINSTEM_HOME="${BRAINSTEM_HOME:-$HOME/.brainstem}"
 BETA_HOME="${BRAINSTEM_BETA_HOME:-$BRAINSTEM_HOME/beta-launcher}"
 BETA_SOURCE="$BETA_HOME/src"
-REPO_URL="${BRAINSTEM_BETA_REPO_URL:-https://github.com/microsoft/aibast-agents-library.git}"
+REPO_URL="${BRAINSTEM_BETA_REPO_URL:-https://github.com/kody-w/openrappter.git}"
 REPO_REF="${BRAINSTEM_BETA_REF:-main}"
 UPDATE_REF="${BRAINSTEM_BETA_UPDATE_REF:-$REPO_REF}"
 REPO_COMMIT="${BRAINSTEM_BETA_COMMIT:-}"
@@ -162,7 +162,7 @@ setup_global_brainstem() {
         install_args+=(--version "$REPO_COMMIT")
     fi
 
-    local canonical_repo="https://github.com/microsoft/aibast-agents-library.git"
+    local canonical_repo="https://github.com/kody-w/openrappter.git"
     if [ "$REPO_URL" = "$canonical_repo" ]; then
         BRAINSTEM_HOME="$BRAINSTEM_HOME" \
             bash "$BETA_SOURCE/install.sh" "${install_args[@]}"

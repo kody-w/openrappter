@@ -25,9 +25,9 @@ behaviour here.
 
 ---
 
-Portions of this product (the `beta/` Frontier and the `rapp_brainstem/` kernel)
-originate from microsoft/aibast-agents-library, which is licensed under the MIT
-License. That license is reproduced verbatim at
+Portions of this product (`beta/` and `rapp_brainstem/`) were imported from
+microsoft/aibast-agents-library, the Microsoft downstream distribution of the RAPP
+stack, under the MIT License. That license is reproduced verbatim at
 `licenses/aibast-agents-library-MIT.txt` and continues to govern those files.
 
 Imported at source commit 038de085d6841ecdfcdfb3d5fc56b9bbec655f24.

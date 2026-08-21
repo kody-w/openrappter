@@ -5,11 +5,19 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const unix = readFileSync(path.join(root, "install.sh"), "utf8");
-const windows = readFileSync(path.join(root, "install.cmd"), "utf8");
-const installerPage = readFileSync(path.join(root, "index.html"), "utf8");
-const frontierUnix = readFileSync(path.join(root, "frontier.sh"), "utf8");
-const frontierWindows = readFileSync(path.join(root, "frontier.ps1"), "utf8");
+// Read with line endings normalised. A Windows checkout gets CRLF on these files
+// — correctly, since a .cmd wants CRLF — so split("\n") leaves a trailing \r on
+// every line and any assertion anchored with $ fails for a reason that has
+// nothing to do with what it is testing. These tests are about content, so the
+// content is what they read. Normalising here rather than per pattern means a
+// later assertion cannot reintroduce the bug by forgetting.
+const read = (name) => readFileSync(path.join(root, name), "utf8").replace(/\r\n/g, "\n");
+
+const unix = read("install.sh");
+const windows = read("install.cmd");
+const installerPage = read("index.html");
+const frontierUnix = read("frontier.sh");
+const frontierWindows = read("frontier.ps1");
 const packageJson = JSON.parse(
   readFileSync(path.join(root, "package.json"), "utf8"),
 );

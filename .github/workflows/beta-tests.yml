@@ -41,6 +41,25 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Several suites dry-load the Grail, which imports flask. The test helper
+      # prefers a Brainstem venv and falls back to whatever python it can find —
+      # so build the venv the installer would build, and name it explicitly.
+      # Without this CI reports "No module named 'flask'" on Linux and "a Python
+      # interpreter is required" on Windows, neither of which is a product fault.
+      - name: Python environment the product actually runs in
+        shell: bash
+        run: |
+          python -m venv .ci-venv
+          if [ -f .ci-venv/bin/python ]; then
+            PY=$PWD/.ci-venv/bin/python
+          else
+            PY=$PWD/.ci-venv/Scripts/python.exe
+          fi
+          "$PY" -m pip install --quiet --upgrade pip
+          "$PY" -m pip install --quiet -r rapp_brainstem/requirements.txt
+          echo "BRAINSTEM_BETA_PYTHON=$PY" >> "$GITHUB_ENV"
+          "$PY" -c "import flask; print('flask', flask.__version__)"
+
       - name: Install dependencies
         working-directory: beta
         # --ignore-scripts is not belt-and-braces here: beta/.npmrc sets it

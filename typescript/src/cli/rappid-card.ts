@@ -7,7 +7,6 @@ import {
   H,
   RAPPID_CARD_FIXTURE_NAMES,
   SQLiteCardState,
-  CardTrustStore,
   buildRappidCardFixture,
   parseCardLink,
   readCardResource,
@@ -15,6 +14,7 @@ import {
   renderRappidCardQrSvg,
   simulateRappidCardFixture,
   verifyCardLink,
+  loadRappidCardTrustConfig,
   writeRappidCardFixtureDeck,
 } from '../rappid-card/index.js';
 import type { QrArtifactFormat } from '../rappid-card/index.js';
@@ -50,6 +50,44 @@ async function inspect(cardPath: string, linkValue: string) {
   };
 }
 
+interface HistoricalBundle {
+  runtime_policy_authority: string;
+  runtime_policy: Parameters<typeof verifyCardLink>[0]['runtime_policy'];
+  authority_view: Parameters<typeof verifyCardLink>[0]['authority_view'];
+  revocation_view: Parameters<typeof verifyCardLink>[0]['revocation_view'];
+  now_utc: string;
+  connection_id: string;
+  fetch_trace: Parameters<typeof verifyCardLink>[0]['fetch_trace'];
+  hydrated_parts_b64: Record<string, string>;
+  continuity: Parameters<typeof verifyCardLink>[0]['continuity'];
+}
+
+async function loadHistoricalBundle(path: string): Promise<HistoricalBundle> {
+  const raw = JSON.parse(await readFile(path, 'utf8')) as unknown;
+  const keys = [
+    'authority_view',
+    'connection_id',
+    'continuity',
+    'fetch_trace',
+    'hydrated_parts_b64',
+    'now_utc',
+    'revocation_view',
+    'runtime_policy',
+    'runtime_policy_authority',
+  ];
+  if (
+    raw === null
+    || typeof raw !== 'object'
+    || Array.isArray(raw)
+    || JSON.stringify(Object.keys(raw).sort()) !== JSON.stringify(keys)
+  ) {
+    throw new Error(
+      'historical bundle has the wrong closed schema; trust roots are forbidden',
+    );
+  }
+  return raw as HistoricalBundle;
+}
+
 export function registerRappidCardCommand(program: Command): void {
   const command = program
     .command('rappid-card')
@@ -77,6 +115,7 @@ export function registerRappidCardCommand(program: Command): void {
     .requiredOption('--link <uri-or-file>', 'Exact compact URI or link file')
     .option('--scenario <name>', 'PR9 mandatory scenario')
     .option('--bundle <json>', 'Explicit production verification bundle')
+    .option('--trust-config <json>', 'Mode-0600 local production trust roots')
     .requiredOption('--state <sqlite>', 'Durable SQLite nonce/sequence state')
     .action(async (
       card: string,
@@ -84,6 +123,7 @@ export function registerRappidCardCommand(program: Command): void {
         link: string;
         scenario?: string;
         bundle?: string;
+        trustConfig?: string;
         state: string;
       },
     ) => {
@@ -92,7 +132,7 @@ export function registerRappidCardCommand(program: Command): void {
       }
       const inspected = await inspect(card, options.link);
       if (options.scenario) {
-        if (!RAPPID_CARD_FIXTURE_NAMES.includes(options.scenario)) {
+        if (!RAPPID_CARD_FIXTURE_NAMES.some((name) => name === options.scenario)) {
           throw new Error(`unknown PR9 scenario: ${options.scenario}`);
         }
         const fixture = buildRappidCardFixture(options.scenario);
@@ -118,32 +158,58 @@ export function registerRappidCardCommand(program: Command): void {
         return;
       }
       if (!options.bundle) throw new Error('verification bundle is required');
-      const bundle = JSON.parse(await readFile(options.bundle, 'utf8')) as {
-        runtime_policy_authority: string;
-        runtime_policy: Parameters<typeof verifyCardLink>[0]['runtime_policy'];
-        authority_view: Parameters<typeof verifyCardLink>[0]['authority_view'];
-        revocation_view: Parameters<typeof verifyCardLink>[0]['revocation_view'];
-        trust: Array<{ kid: string; spki_der_b64: string }>;
-        now_utc: string;
-        connection_id: string;
-        fetch_trace: Parameters<typeof verifyCardLink>[0]['fetch_trace'];
-        hydrated_parts_b64: Record<string, string>;
-        continuity: Parameters<typeof verifyCardLink>[0]['continuity'];
-      };
+      const bundle = await loadHistoricalBundle(options.bundle);
+      const local = await loadRappidCardTrustConfig(options.trustConfig);
+      if (
+        bundle.runtime_policy_authority
+        !== local.config.runtime_policy_authority
+      ) {
+        throw new Error(
+          'bundle runtime-policy authority is not locally configured',
+        );
+      }
+      print({
+        ok: false,
+        status: 'unavailable',
+        reason: 'live-adapter-required',
+        detail:
+          'production awake verification requires local clock, connection, fetch, hydration, and continuity adapters',
+      });
+      process.exitCode = 1;
+    });
+
+  command
+    .command('inspect-offline <card>')
+    .description('Historical cryptographic/policy inspection; never returns awake')
+    .requiredOption('--link <uri-or-file>', 'Exact compact URI or link file')
+    .requiredOption('--bundle <json>', 'Historical verifier evidence')
+    .requiredOption('--trust-config <json>', 'Mode-0600 local production trust roots')
+    .requiredOption('--state <sqlite>', 'Isolated historical sequence state')
+    .action(async (
+      card: string,
+      options: {
+        link: string;
+        bundle: string;
+        trustConfig: string;
+        state: string;
+      },
+    ) => {
+      const inspected = await inspect(card, options.link);
+      const bundle = await loadHistoricalBundle(options.bundle);
+      const local = await loadRappidCardTrustConfig(options.trustConfig);
+      if (
+        bundle.runtime_policy_authority
+        !== local.config.runtime_policy_authority
+      ) {
+        throw new Error(
+          'bundle runtime-policy authority is not locally configured',
+        );
+      }
       const state = await SQLiteCardState.open(options.state);
-      const trust = new CardTrustStore(
-        Object.fromEntries(
-          bundle.trust.map((entry) => [
-            entry.kid,
-            Buffer.from(entry.spki_der_b64, 'base64'),
-          ]),
-        ),
-        bundle.runtime_policy_authority,
-      );
       const verdict = verifyCardLink({
         uri: inspected.link,
         frame: inspected.frame,
-        trust,
+        trust: local.trust,
         now_utc: bundle.now_utc,
         runtime_policy: bundle.runtime_policy,
         authority_view: bundle.authority_view,
@@ -159,7 +225,17 @@ export function registerRappidCardCommand(program: Command): void {
         ),
         continuity: bundle.continuity,
       });
-      print(verdict);
+      print({
+        status: 'offline-only',
+        awake: false,
+        cryptographic_policy_ok: verdict.ok,
+        verdict: {
+          ok: verdict.ok,
+          step: verdict.step,
+          reason: verdict.reason,
+          result: null,
+        },
+      });
       if (!verdict.ok) process.exitCode = 1;
     });
 
@@ -168,7 +244,7 @@ export function registerRappidCardCommand(program: Command): void {
     .description('Run one vendored mandatory PR9 scenario')
     .requiredOption('--state <sqlite>', 'Durable SQLite nonce/sequence state')
     .action(async (scenario: string, options: { state: string }) => {
-      if (!RAPPID_CARD_FIXTURE_NAMES.includes(scenario)) {
+      if (!RAPPID_CARD_FIXTURE_NAMES.some((name) => name === scenario)) {
         throw new Error(`unknown PR9 scenario: ${scenario}`);
       }
       const fixture = buildRappidCardFixture(scenario);

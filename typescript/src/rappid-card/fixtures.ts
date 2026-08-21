@@ -10,6 +10,7 @@ import type {
   CardVector,
   CardVerificationResult,
 } from './types.js';
+import { MANDATORY_CARD_SCENARIOS } from './types.js';
 
 export const PROVENANCE_COMMIT = '392f850';
 
@@ -32,8 +33,7 @@ export function loadRappidCardDeck(): CardDeck {
   return cachedDeck;
 }
 
-export const RAPPID_CARD_FIXTURE_NAMES =
-  loadRappidCardDeck().mandatory_scenarios as readonly string[];
+export const RAPPID_CARD_FIXTURE_NAMES = MANDATORY_CARD_SCENARIOS;
 
 export function buildRappidCardFixture(name: string): CardVector {
   const vector = loadRappidCardDeck().vectors.find((entry) => entry.name === name);

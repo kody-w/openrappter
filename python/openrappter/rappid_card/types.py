@@ -21,6 +21,28 @@ RAPPID_CARD_AUTHORITY_KEYS = frozenset(R.CARD_AUTHORITY_VIEW_KEYS)
 RAPPID_CARD_REVOCATION_KEYS = frozenset(R.CARD_REVOCATION_VIEW_KEYS)
 RAPPID_CARD_CLASSIFICATIONS = R.CARD_CLASSIFICATIONS
 RAPPID_CARD_REQUIRED_PARTS = R.CARD_REQUIRED_PARTS
+MANDATORY_CARD_SCENARIOS = (
+    "valid-test", "valid-production", "expired", "manifest-revoked",
+    "key-revoked", "subject-revoked", "wrong-manifest-hash",
+    "unknown-signing-key", "attacker-key-impersonation",
+    "delegation-expired", "delegation-revoked", "forged-revocation-view",
+    "stale-revocation-view", "unavailable-revocation-view",
+    "rollback-revocation-view", "protocol-incompatible",
+    "runtime-incompatible", "unsupported-feature", "feature-superset",
+    "classification-violation", "insufficient-scope",
+    "missing-engram-part", "continuity-challenge-failure",
+    "reconnect-during-hydration", "duplicate-replayed-nonce",
+    "physical-payload-reproduction", "test-profile-production",
+    "synthetic-key-production", "auto-execute", "endpoint-userinfo",
+    "endpoint-empty-query", "endpoint-empty-fragment", "endpoint-space",
+    "endpoint-backslash", "endpoint-bad-percent", "endpoint-double-encoding",
+    "endpoint-loopback-literal", "endpoint-private-literal",
+    "endpoint-link-local-literal", "endpoint-reserved-literal",
+    "endpoint-unapproved-origin", "endpoint-redirect-origin",
+    "endpoint-private-dns", "secret-endpoint-password", "secret-password",
+    "secret-api-key", "secret-cookie", "secret-bearer",
+    "secret-private-memory",
+)
 
 
 @dataclass(frozen=True)

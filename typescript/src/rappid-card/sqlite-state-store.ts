@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import { CONNECTION, NONCE, hex64, lclabel, rappidValid, uint53, validUtc } from './contract.js';
+import { CONNECTION, NONCE, fullMatch, hex64, lclabel, rappidValid, uint53, validUtc } from './contract.js';
 import { CardStateBackend } from './types.js';
 
 interface Statement {
@@ -234,8 +234,8 @@ export class SQLiteCardState extends CardStateBackend {
   }
 
   private validateNonce(nonce: string, connectionId: string, utc: string): void {
-    if (!NONCE.test(nonce)) throw new Error('invalid card nonce');
-    if (!CONNECTION.test(connectionId)) throw new Error('invalid card connection_id');
+    if (!fullMatch(NONCE, nonce)) throw new Error('invalid card nonce');
+    if (!fullMatch(CONNECTION, connectionId)) throw new Error('invalid card connection_id');
     if (validUtc(utc) === null) throw new Error('invalid card nonce timestamp');
   }
 }

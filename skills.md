@@ -267,7 +267,9 @@ python3 -m openrappter.cli [options]  # Direct
 | `rappid-card` | Virtual RAPPID Debug Card fixture, verification, QR, and simulator command group |
 | `rappid-card fixtures <directory> [--format svg\|png\|both]` | Export the exact 49-scenario PR9 deck with canonical eleven-key frames, links, trust docs, and QR artifacts |
 | `rappid-card inspect <card> --link <uri-or-file>` | Parse canonical frame bytes and the exact `m,e,n` compact URI |
-| `rappid-card verify <card> --link <uri-or-file> (--scenario <name>\|--bundle <json>) --state <sqlite>` | Run the exact eleven-step PR9 verifier with durable state |
+| `rappid-card verify <card> --link <uri-or-file> --scenario <name> --state <sqlite>` | Run the exact test-vector verifier with durable state |
+| `rappid-card verify <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file> --state <sqlite>` | Fail closed as live-adapter-required; bundle data never supplies production roots/live evidence |
+| `rappid-card inspect-offline <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file> --state <sqlite>` | Historical cryptographic/policy inspection that always reports `awake:false` |
 | `rappid-card qr <link> <output> [--format svg\|png]` | Render the exact compact link with an ecosystem QR encoder |
 | `rappid-card simulate <scenario> --state <sqlite>` | Run one mandatory PR9 positive or negative vector at its declared step |
 

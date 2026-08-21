@@ -36,10 +36,23 @@ describe('PR9 RAPPID card gateway methods', () => {
     const { methods, auth } = registrar();
     expect([...methods.keys()].sort()).toEqual([
       'rappid.card.preview',
+      'rappid.card.production-status',
       'rappid.card.scenarios',
       'rappid.card.verify',
     ]);
-    expect([...auth.values()]).toEqual([true, true, true]);
+    expect([...auth.values()]).toEqual([true, true, true, true]);
+  });
+
+  it('reports production unavailable without accepting caller evidence', async () => {
+    const { methods } = registrar();
+    await expect(methods.get('rappid.card.production-status')!({
+      trust: 'attacker',
+      now_utc: 'attacker',
+    })).resolves.toMatchObject({
+      available: false,
+      status: 'unavailable',
+      reason: 'live-adapter-required',
+    });
   });
 
   it('lists all 49 scenarios and previews exact frame/link/QR wire names', async () => {

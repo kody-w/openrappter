@@ -57,11 +57,6 @@ Issues = "https://github.com/kody-w/openrappter/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["openrappter"]
 
-[tool.hatch.build.targets.sdist.force-include]
-"../tests/vectors/rapp-1-392f850/rappid-card/deck.json" = "openrappter/rappid_card/test_vectors/deck.json"
-"../tests/vectors/rapp-1-392f850/rappid-card/physical.rappid-card.json" = "openrappter/rappid_card/test_vectors/physical.rappid-card.json"
-"../tests/vectors/rapp-1-392f850/rappid-card/physical-payload.txt" = "openrappter/rappid_card/test_vectors/physical-payload.txt"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

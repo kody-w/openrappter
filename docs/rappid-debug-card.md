@@ -197,6 +197,15 @@ Both TypeScript and Python consume this deck. The 49 scenario verdicts plus the
 separate physical byte/link reproduction assertion are the 50 mandatory card
 checks. Drift tests pin all schema tokens, key sets, scenario names, and order.
 
+### Interim protocol-copy patch
+
+`python/openrappter/rappid_card/pr9_reference.py` remains byte-identical to
+commit `392f850`. `pr9_interim.py` separately applies deterministic depth-64 /
+1 MiB failures, numeric-host-alias refusal, full-string token matching, and
+ASCII decoded-secret boundaries. This isolation is temporary: before
+publication, re-vendor from the forthcoming RAPP/1 follow-up commit containing
+those fixes and delete the interim module.
+
 ## CLI
 
 ```bash
@@ -215,24 +224,50 @@ openrappter rappid-card verify \
   --scenario physical-payload-reproduction \
   --state ./rappid-card-state.sqlite
 
-# Verify a non-vendored production frame with explicit PR9 inputs
+# Production awake verification fails closed until live adapters ship
 openrappter rappid-card verify ./production.rappid-card.json \
   --link ./production-link.txt \
   --bundle ./production-verification-bundle.json \
+  --trust-config ./local-trust.json \
   --state ./production-card-state.sqlite
+
+# Historical evidence can be inspected, but never returns awake
+openrappter rappid-card inspect-offline ./production.rappid-card.json \
+  --link ./production-link.txt \
+  --bundle ./production-verification-bundle.json \
+  --trust-config ./local-trust.json \
+  --state ./offline-inspection.sqlite
 
 # Run any mandatory negative or positive vector
 openrappter rappid-card simulate expired --state ./expired-state.sqlite
 ```
 
-The explicit production bundle carries only verifier inputs:
+Production trust roots are independently provisioned in a regular,
+non-symlink mode-0600 local file selected by `--trust-config` or
+`OPENRAPPTER_RAPPID_CARD_TRUST_CONFIG`:
+
+```json
+{
+  "schema": "openrappter-rappid-card-trust/1",
+  "runtime_policy_authority": "<rappid>",
+  "keys": [{"kid":"<rappid>","spki_der_b64":"<base64>"}]
+}
+```
+
+Verifier bundles may reference the configured authority but cannot add trust
+roots. Their closed historical shape carries only:
 `runtime_policy_authority`, `runtime_policy`, `authority_view`,
-`revocation_view`, `trust` (`kid` + `spki_der_b64`), `now_utc`,
-`connection_id`, `fetch_trace`, `hydrated_parts_b64`, and `continuity`.
-Every contained document remains untrusted and is verified in the normative
-order.
+`revocation_view`, `now_utc`, `connection_id`, `fetch_trace`,
+`hydrated_parts_b64`, and `continuity`.
+
+No live production transport is currently shipped. `verify --bundle` returns
+`unavailable / live-adapter-required`; it never accepts bundle clock,
+connection, fetch, hydration, or continuity as live authority. The separate
+`inspect-offline` command may report a historical cryptographic/policy verdict
+but always emits `awake:false`.
 
 The Habitat remains test-vector-only and requires an explicit button before
-running hydration. It exposes exact frame/link wire names and the declared
-verification step. No production trust or auto-execution authority is added
-to the browser.
+running hydration. It visibly reports production verification unavailable
+until live trusted-clock, connection, fetch, hydration, and continuity
+adapters exist. No production trust or auto-execution authority is added to
+the browser.

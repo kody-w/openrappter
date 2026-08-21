@@ -39,6 +39,7 @@ from openrappter.rappid_card import (
     build_rappid_card_fixture,
     canonical,
     load_rappid_card_deck,
+    load_rappid_card_trust_config,
     parse_card_link,
     physical_vector_bytes,
     read_card_resource,
@@ -47,7 +48,7 @@ from openrappter.rappid_card import (
     simulate_rappid_card_fixture,
     write_rappid_card_fixture_deck,
 )
-from openrappter.rappid_card import pr9_reference as R
+from openrappter.rappid_card.pr9_interim import R
 
 ROOT = Path(__file__).resolve().parents[2]
 VECTOR_ROOT = ROOT / "tests" / "vectors" / "rapp-1-392f850" / "rappid-card"
@@ -181,6 +182,16 @@ def test_vendored_vector_checksums_match_provenance():
     assert provenance["source_commit"] == "392f850"
     for name, expected in provenance["sha256"].items():
         assert hashlib.sha256((VECTOR_ROOT / name).read_bytes()).hexdigest() == expected
+    package_root = (
+        ROOT / "python" / "openrappter" / "rappid_card" / "test_vectors"
+    )
+    for name in (
+        "deck.json",
+        "physical.rappid-card.json",
+        "physical-payload.txt",
+        "PROVENANCE.json",
+    ):
+        assert (VECTOR_ROOT / name).read_bytes() == (package_root / name).read_bytes()
 
 
 def test_rfc8032_and_signature_mutation_controls():
@@ -199,6 +210,23 @@ def test_rfc8032_and_signature_mutation_controls():
     assert R.ed25519_verify(public, b"", signature)
     mutated = bytes([signature[0] ^ 1]) + signature[1:]
     assert not R.ed25519_verify(public, b"", mutated)
+
+
+def test_interim_depth_size_host_token_and_ascii_scanner_fixes():
+    nested = None
+    for _ in range(65):
+        nested = [nested]
+    with pytest.raises(ValueError, match="depth 64"):
+        R.canonical(nested)
+    with pytest.raises(ValueError, match="1 MiB"):
+        R.canonical("x" * (1024 * 1024 + 1))
+    with pytest.raises(ValueError, match="numeric IP host aliases"):
+        R._card_url_info("https://127.1/x.rappid-card.json")
+    assert not R._lclabel("memory-read\n")
+    assert not R.rappid_valid(
+        "rappid:@synthetic/x:" + "a" * 64 + "\n"
+    )
+    assert R._forbidden_card_material("épasswordé")
 
 
 def test_trust_spki_binding_and_core_egg_roots():
@@ -227,6 +255,31 @@ def test_trust_spki_binding_and_core_egg_roots():
     for entry in frame["payload"]["inventory"]:
         assert entry["space"] == "rapp/1:egg"
         assert entry["hash"] == Hb("rapp/1:egg", parts[entry["part"]])
+
+
+def test_local_trust_config_requires_mode_0600():
+    deck = load_rappid_card_deck()
+    path = ROOT / f".pr9-trust-config-{os.getpid()}.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "openrappter-rappid-card-trust/1",
+                "runtime_policy_authority": deck["vectors"][0][
+                    "runtime_policy_authority"
+                ],
+                "keys": deck["trust"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        path.chmod(0o600)
+        assert load_rappid_card_trust_config(str(path))["trust"]
+        path.chmod(0o644)
+        with pytest.raises(ValueError, match="0600"):
+            load_rappid_card_trust_config(str(path))
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def test_prohibited_material_scanner_controls_are_real():
@@ -351,6 +404,7 @@ def test_qr_artifacts_and_fixture_cli():
     directory = ROOT / f".pr9-python-export-{os.getpid()}"
     state = ROOT / f".pr9-python-cli-{os.getpid()}.sqlite"
     bundle_path = ROOT / f".pr9-python-bundle-{os.getpid()}.json"
+    trust_path = ROOT / f".pr9-python-trust-{os.getpid()}.json"
     shutil.rmtree(directory, ignore_errors=True)
     _remove_database(state)
     try:
@@ -392,7 +446,6 @@ def test_qr_artifacts_and_fixture_cli():
                     "runtime_policy": vector["runtime_policy"],
                     "authority_view": vector["authority_view"],
                     "revocation_view": vector["revocation_view"],
-                    "trust": deck["trust"],
                     "now_utc": vector["now_utc"],
                     "connection_id": "fixture-bundle-connection",
                     "fetch_trace": vector["fetch_trace"],
@@ -405,6 +458,19 @@ def test_qr_artifacts_and_fixture_cli():
             ),
             encoding="utf-8",
         )
+        trust_path.write_text(
+            json.dumps(
+                {
+                    "schema": "openrappter-rappid-card-trust/1",
+                    "runtime_policy_authority": vector[
+                        "runtime_policy_authority"
+                    ],
+                    "keys": deck["trust"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        trust_path.chmod(0o600)
         _remove_database(state)
         generic = subprocess.run(
             [
@@ -418,6 +484,8 @@ def test_qr_artifacts_and_fixture_cli():
                 str(physical / "rappid-card.link.txt"),
                 "--bundle",
                 str(bundle_path),
+                "--trust-config",
+                str(trust_path),
                 "--state",
                 str(state),
             ],
@@ -426,9 +494,65 @@ def test_qr_artifacts_and_fixture_cli():
             capture_output=True,
             check=False,
         )
-        assert generic.returncode == 0, generic.stderr
-        assert json.loads(generic.stdout)["ok"] is True
+        assert generic.returncode == 1, generic.stderr
+        assert json.loads(generic.stdout)["reason"] == "live-adapter-required"
+        offline = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "openrappter.cli",
+                "rappid-card",
+                "inspect-offline",
+                str(physical / ".rappid-card.json"),
+                "--link",
+                str(physical / "rappid-card.link.txt"),
+                "--bundle",
+                str(bundle_path),
+                "--trust-config",
+                str(trust_path),
+                "--state",
+                str(state),
+            ],
+            cwd=ROOT / "python",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert offline.returncode == 0, offline.stderr
+        offline_result = json.loads(offline.stdout)
+        assert offline_result["status"] == "offline-only"
+        assert offline_result["awake"] is False
+        assert offline_result["cryptographic_policy_ok"] is True
+
+        attacker_bundle = json.loads(bundle_path.read_text())
+        attacker_bundle["trust"] = deck["trust"]
+        bundle_path.write_text(json.dumps(attacker_bundle), encoding="utf-8")
+        refused = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "openrappter.cli",
+                "rappid-card",
+                "verify",
+                str(physical / ".rappid-card.json"),
+                "--link",
+                str(physical / "rappid-card.link.txt"),
+                "--bundle",
+                str(bundle_path),
+                "--trust-config",
+                str(trust_path),
+                "--state",
+                str(state),
+            ],
+            cwd=ROOT / "python",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert refused.returncode == 1
+        assert "trust roots are forbidden" in refused.stdout
     finally:
         shutil.rmtree(directory, ignore_errors=True)
         _remove_database(state)
         bundle_path.unlink(missing_ok=True)
+        trust_path.unlink(missing_ok=True)

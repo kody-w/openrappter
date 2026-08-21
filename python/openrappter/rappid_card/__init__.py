@@ -51,6 +51,11 @@ from .fixtures import (
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
 from .simulator import verify_card_link
 from .sqlite_state_store import CardStateBackend, SQLiteCardState
+from .trust_config import (
+    RAPPID_CARD_TRUST_CONFIG_ENV,
+    RAPPID_CARD_TRUST_CONFIG_SCHEMA,
+    load_rappid_card_trust_config,
+)
 from .types import CardVectorResult, RappidCardError
 
 __all__ = [
@@ -83,6 +88,8 @@ __all__ = [
     "H",
     "Hb",
     "RAPPID_CARD_FIXTURE_NAMES",
+    "RAPPID_CARD_TRUST_CONFIG_ENV",
+    "RAPPID_CARD_TRUST_CONFIG_SCHEMA",
     "RappidCardError",
     "RappidCardFixture",
     "SQLiteCardState",
@@ -95,6 +102,7 @@ __all__ = [
     "card_inventory",
     "card_wake_challenge",
     "list_rappid_card_fixtures",
+    "load_rappid_card_trust_config",
     "load_rappid_card_deck",
     "parse_card_link",
     "physical_vector_bytes",

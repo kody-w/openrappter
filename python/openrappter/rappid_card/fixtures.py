@@ -9,9 +9,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import pr9_reference as R
+from .pr9_interim import R
 from .simulator import verify_card_link
 from .types import CardVectorResult
+from .types import MANDATORY_CARD_SCENARIOS
 
 PROVENANCE_COMMIT = "392f850"
 
@@ -37,9 +38,7 @@ def load_rappid_card_deck() -> Dict[str, Any]:
     return json.loads((_vector_root() / "deck.json").read_text(encoding="utf-8"))
 
 
-RAPPID_CARD_FIXTURE_NAMES = tuple(
-    load_rappid_card_deck()["mandatory_scenarios"]
-)
+RAPPID_CARD_FIXTURE_NAMES = MANDATORY_CARD_SCENARIOS
 
 
 @dataclass(frozen=True)

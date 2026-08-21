@@ -19,7 +19,7 @@ interface MethodRegistrar {
 function scenarioName(value: unknown): string {
   if (
     typeof value !== 'string'
-    || !RAPPID_CARD_FIXTURE_NAMES.includes(value)
+    || !RAPPID_CARD_FIXTURE_NAMES.some((name) => name === value)
   ) {
     throw new Error(
       `scenario must be one of: ${RAPPID_CARD_FIXTURE_NAMES.join(', ')}`,
@@ -42,6 +42,23 @@ export function registerRappidCardMethods(
   server.registerMethod(
     'rappid.card.scenarios',
     async () => listRappidCardFixtures(),
+    auth,
+  );
+
+  server.registerMethod(
+    'rappid.card.production-status',
+    async () => ({
+      available: false,
+      status: 'unavailable',
+      reason: 'live-adapter-required',
+      required_adapters: [
+        'trusted-clock',
+        'local-connection-id',
+        'live-fetch-evidence',
+        'live-hydration',
+        'live-continuity',
+      ],
+    }),
     auth,
   );
 

@@ -58,6 +58,13 @@ interface CardRun {
   provenance: string;
 }
 
+interface ProductionStatus {
+  available: false;
+  status: 'unavailable';
+  reason: 'live-adapter-required';
+  required_adapters: string[];
+}
+
 @customElement('openrappter-rappid-card')
 export class OpenRappterRappidCard extends LitElement {
   static styles = css`
@@ -160,6 +167,7 @@ export class OpenRappterRappidCard extends LitElement {
   @state() private loading = true;
   @state() private verifying = false;
   @state() private error: string | null = null;
+  @state() private productionStatus: ProductionStatus | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -168,6 +176,9 @@ export class OpenRappterRappidCard extends LitElement {
 
   private async load(): Promise<void> {
     try {
+      this.productionStatus = await gateway.call<ProductionStatus>(
+        'rappid.card.production-status',
+      );
       this.scenarios = await gateway.call<ScenarioInfo[]>('rappid.card.scenarios');
       await this.preview();
     } catch (error) {
@@ -235,6 +246,13 @@ export class OpenRappterRappidCard extends LitElement {
             </p>
           </div>
         </section>
+        ${this.productionStatus
+          ? html`<div class="error">
+              <strong>Production verification unavailable</strong><br />
+              Live trusted-clock, connection, fetch, hydration, and continuity
+              adapters are required. This Habitat runs fixtures only.
+            </div>`
+          : nothing}
         ${this.error ? html`<div class="error">${this.error}</div>` : nothing}
         <div class="grid">
           <section class="panel">

@@ -17,7 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy, authority delegation, typed revocation, strict endpoint/fetch
   evidence, durable `hydrating`/`awake` replay, `rapp/1:egg` inventory, particle
   continuity, all 49 named scenarios, and physical byte/link reproduction are
-  enforced in the exact normative order. No auto-discovered agent was added.
+  enforced in the exact normative order. Production trust roots come only
+  from a closed mode-0600 local configuration; verifier bundles cannot add
+  roots or supply live clock/connection/fetch/hydration/continuity authority.
+  Since live production adapters are not shipped, production awake
+  verification fails closed as `live-adapter-required`, while offline
+  inspection can never return awake. Four pending protocol fixes are isolated
+  in `pr9_interim.py`; publication requires re-vendoring from the forthcoming
+  RAPP/1 follow-up SHA and deleting that patch. No auto-discovered agent was
+  added.
 
 ### Fixed
 

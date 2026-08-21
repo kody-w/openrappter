@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .pr9_reference import verify_card_link as _verify_card_link
+from .pr9_interim import verify_card_link as _verify_card_link
 from .types import CardVectorResult
 
 

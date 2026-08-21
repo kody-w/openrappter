@@ -76,6 +76,9 @@ describe('openrappter-rappid-card PR9 surface', () => {
 
   it('loads scenario/frame/exact-link preview without verification', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
+      if (method === 'rappid.card.production-status') {
+        return { available: false, status: 'unavailable', reason: 'live-adapter-required', required_adapters: [] };
+      }
       if (method === 'rappid.card.scenarios') return [scenario];
       if (method === 'rappid.card.preview') return response();
       throw new Error(`unexpected ${method}`);
@@ -88,11 +91,15 @@ describe('openrappter-rappid-card PR9 surface', () => {
     expect(text).toContain('body.debug-card');
     expect(text).toContain('rappid-card-test/1');
     expect(text).toContain('preview');
+    expect(text).toContain('Production verification unavailable');
     expect(gateway.call).not.toHaveBeenCalledWith('rappid.card.verify', expect.anything());
   });
 
   it('requires a separate explicit verify action and renders awake', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
+      if (method === 'rappid.card.production-status') {
+        return { available: false, status: 'unavailable', reason: 'live-adapter-required', required_adapters: [] };
+      }
       if (method === 'rappid.card.scenarios') return [scenario];
       if (method === 'rappid.card.preview') return response();
       if (method === 'rappid.card.verify') {
@@ -127,6 +134,9 @@ describe('openrappter-rappid-card PR9 surface', () => {
 
   it('renders the declared refusal step', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
+      if (method === 'rappid.card.production-status') {
+        return { available: false, status: 'unavailable', reason: 'live-adapter-required', required_adapters: [] };
+      }
       if (method === 'rappid.card.scenarios') return [scenario];
       if (method === 'rappid.card.preview') return response();
       if (method === 'rappid.card.verify') {

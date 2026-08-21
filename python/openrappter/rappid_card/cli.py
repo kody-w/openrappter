@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import write_rappid_card_fixture_deck
-from .contract import CardTrustStore, H, parse_card_link, read_card_resource
+from .contract import H, parse_card_link, read_card_resource
 from .fixtures import (
     RAPPID_CARD_FIXTURE_NAMES,
     build_rappid_card_fixture,
@@ -17,6 +17,7 @@ from .fixtures import (
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
 from .simulator import verify_card_link
 from .sqlite_state_store import SQLiteCardState
+from .trust_config import load_rappid_card_trust_config
 
 
 def register_rappid_card_parser(subparsers: Any) -> None:
@@ -45,7 +46,18 @@ def register_rappid_card_parser(subparsers: Any) -> None:
     verify.add_argument("--link", required=True)
     verify.add_argument("--scenario", choices=RAPPID_CARD_FIXTURE_NAMES)
     verify.add_argument("--bundle")
+    verify.add_argument("--trust-config")
     verify.add_argument("--state", required=True)
+
+    offline = commands.add_parser(
+        "inspect-offline",
+        help="Historical cryptographic/policy inspection; never returns awake",
+    )
+    offline.add_argument("card")
+    offline.add_argument("--link", required=True)
+    offline.add_argument("--bundle", required=True)
+    offline.add_argument("--trust-config", required=True)
+    offline.add_argument("--state", required=True)
 
     simulate = commands.add_parser(
         "simulate", help="Run one vendored mandatory PR9 scenario"
@@ -83,6 +95,26 @@ def _inspect(card_path: str, link_value: str) -> dict:
     }
 
 
+def _load_historical_bundle(path: str) -> dict:
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    expected = [
+        "authority_view",
+        "connection_id",
+        "continuity",
+        "fetch_trace",
+        "hydrated_parts_b64",
+        "now_utc",
+        "revocation_view",
+        "runtime_policy",
+        "runtime_policy_authority",
+    ]
+    if not isinstance(raw, dict) or sorted(raw) != expected:
+        raise ValueError(
+            "historical bundle has the wrong closed schema; trust roots are forbidden"
+        )
+    return raw
+
+
 def handle_rappid_card_command(args: Any) -> bool:
     command = args.rappid_card_command
     if command == "fixtures":
@@ -115,19 +147,43 @@ def handle_rappid_card_command(args: Any) -> bool:
             verdict = simulate_rappid_card_fixture(args.scenario, args.state)
             _print(verdict.to_wire())
             return verdict.ok == fixture.expected["ok"]
-        bundle = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
-        state = SQLiteCardState(args.state)
-        trust = CardTrustStore(
+        bundle = _load_historical_bundle(args.bundle)
+        local = load_rappid_card_trust_config(args.trust_config)
+        if (
+            bundle["runtime_policy_authority"]
+            != local["config"]["runtime_policy_authority"]
+        ):
+            raise ValueError(
+                "bundle runtime-policy authority is not locally configured"
+            )
+        _print(
             {
-                entry["kid"]: base64.b64decode(entry["spki_der_b64"])
-                for entry in bundle["trust"]
-            },
-            bundle["runtime_policy_authority"],
+                "ok": False,
+                "status": "unavailable",
+                "reason": "live-adapter-required",
+                "detail": (
+                    "production awake verification requires local clock, "
+                    "connection, fetch, hydration, and continuity adapters"
+                ),
+            }
         )
+        return False
+    if command == "inspect-offline":
+        inspected = _inspect(args.card, args.link)
+        bundle = _load_historical_bundle(args.bundle)
+        local = load_rappid_card_trust_config(args.trust_config)
+        if (
+            bundle["runtime_policy_authority"]
+            != local["config"]["runtime_policy_authority"]
+        ):
+            raise ValueError(
+                "bundle runtime-policy authority is not locally configured"
+            )
+        state = SQLiteCardState(args.state)
         verdict = verify_card_link(
             inspected["link"],
             inspected["frame"],
-            trust,
+            local["trust"],
             bundle["now_utc"],
             bundle["runtime_policy"],
             bundle["authority_view"],
@@ -141,7 +197,19 @@ def handle_rappid_card_command(args: Any) -> bool:
             },
             bundle["continuity"],
         )
-        _print(verdict.to_wire())
+        _print(
+            {
+                "status": "offline-only",
+                "awake": False,
+                "cryptographic_policy_ok": verdict.ok,
+                "verdict": {
+                    "ok": verdict.ok,
+                    "step": verdict.step,
+                    "reason": verdict.reason,
+                    "result": None,
+                },
+            }
+        )
         return verdict.ok
     if command == "simulate":
         verdict = simulate_rappid_card_fixture(args.scenario, args.state)

@@ -47,7 +47,7 @@ const JWS_HEADER_KEYS = ['alg', 'b64', 'crit', 'kid'];
 const PARENT_KEYS = ['particle', 'rappid'];
 
 const FORBIDDEN_TEXT =
-  /(?:\bpassword\b|\bpasswd\b|\bapi[-_ ]?key\b|\bcookie\b|\bauthorization\b|\bbearer(?:\s|[-_:])|\bprivate[-_ ]?memory\b|\bplaintext[-_ ]?memory\b|\bauto[-_ ]?execute\b)/i;
+  /(?:(?<![A-Za-z0-9_])(?:password|passwd|api[-_ ]?key|cookie|authorization|private[-_ ]?memory|plaintext[-_ ]?memory|auto[-_ ]?execute)(?![A-Za-z0-9_])|(?<![A-Za-z0-9_])bearer(?:\s|[-_:]))/i;
 const FORBIDDEN_KEYS = new Set([
   'password',
   'passwd',
@@ -81,7 +81,7 @@ export function Hb(space: string, value: Uint8Array): string {
 }
 
 export function rappidValid(value: unknown): value is string {
-  return typeof value === 'string' && RAPPID.test(value);
+  return typeof value === 'string' && fullMatch(RAPPID, value);
 }
 
 export function uint53(value: unknown): value is number {
@@ -89,15 +89,20 @@ export function uint53(value: unknown): value is number {
 }
 
 export function hex64(value: unknown): value is string {
-  return typeof value === 'string' && HEX64.test(value);
+  return typeof value === 'string' && fullMatch(HEX64, value);
 }
 
 export function lclabel(value: unknown): value is string {
-  return typeof value === 'string' && LCLABEL.test(value);
+  return typeof value === 'string' && fullMatch(LCLABEL, value);
+}
+
+export function fullMatch(pattern: RegExp, value: string): boolean {
+  const match = pattern.exec(value);
+  return match !== null && match[0] === value;
 }
 
 export function validUtc(value: unknown): Date | null {
-  if (typeof value !== 'string' || !UTC.test(value)) return null;
+  if (typeof value !== 'string' || !fullMatch(UTC, value)) return null;
   const timestamp = Date.parse(value);
   if (
     Number.isNaN(timestamp)
@@ -420,6 +425,19 @@ export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
   if (value.includes('?')) throw new Error('HTTPS URL query marker is forbidden, including an empty query');
   if (value.includes('#')) throw new Error('HTTPS URL fragment marker is forbidden, including an empty fragment');
   if (!wellFormedPercent(value)) throw new Error('HTTPS URL contains bad percent encoding');
+  const rawAuthority = value.startsWith('https://')
+    ? value.slice('https://'.length).split('/')[0]
+    : '';
+  const rawNumericAlias =
+    /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(rawAuthority)
+    || (
+      rawAuthority.includes('.')
+      && rawAuthority.split('.').every((label) =>
+        /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(label))
+    );
+  if (rawNumericAlias && isIP(rawAuthority) === 0) {
+    throw new Error('legacy numeric IP host aliases are forbidden');
+  }
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -438,13 +456,26 @@ export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
     parsedHost.startsWith('[') && parsedHost.endsWith(']')
       ? parsedHost.slice(1, -1)
       : parsedHost;
+  const numericAlias =
+    /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(host)
+    || (
+      host.includes('.')
+      && host.split('.').every((label) =>
+        /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(label))
+    );
+  if (numericAlias && isIP(host) === 0) {
+    throw new Error('legacy numeric IP host aliases are forbidden');
+  }
   if (host !== host.toLowerCase()) throw new Error('HTTPS host must be lowercase');
   const ipVersion = isIP(host);
   let expectedNetloc: string;
   let literal: string | null = null;
   if (ipVersion === 0) {
     const labels = host.split('.');
-    if (labels.length < 2 || labels.some((label) => !HOST_LABEL.test(label))) {
+    if (
+      labels.length < 2
+      || labels.some((label) => !fullMatch(HOST_LABEL, label))
+    ) {
       throw new Error('HTTPS host is not a canonical DNS name');
     }
     expectedNetloc = host;
@@ -580,7 +611,7 @@ export function parseCardLink(uri: string): ParsedCardLink {
   if (!hex64(manifestHash)) throw new Error('card URI m is not lowercase 64hex');
   const endpointInfo = cardUrlInfo(endpoint, CARD_VIRTUAL_SUFFIX);
   if (forbiddenUrlMaterial(endpoint)) throw new Error('card URI endpoint contains prohibited material');
-  if (!NONCE.test(nonce)) throw new Error('card URI n must be 16-64 base64url characters');
+  if (!fullMatch(NONCE, nonce)) throw new Error('card URI n must be 16-64 base64url characters');
   const canonicalUri =
     `rappid://link/${canonicalPercentEncode(rappid)}`
     + `?m=${manifestHash}&e=${canonicalPercentEncode(endpoint)}&n=${nonce}`;
@@ -701,7 +732,7 @@ export function sortedUniqueStrings(
 ): values is string[] {
   return (
     Array.isArray(values)
-    && values.every((value) => typeof value === 'string' && grammar.test(value))
+    && values.every((value) => typeof value === 'string' && fullMatch(grammar, value))
     && JSON.stringify(values) === JSON.stringify([...new Set(values)].sort())
   );
 }
@@ -762,7 +793,10 @@ export function cardPayloadError(
   if (!exactKeys(value.compatibility, CARD_COMPATIBILITY_KEYS)) {
     return 'compatibility must be exactly {protocol, runtime, features}';
   }
-  if (!PROFILE_TOKEN.test(value.compatibility.protocol) || !PROFILE_TOKEN.test(value.compatibility.runtime)) {
+  if (
+    !fullMatch(PROFILE_TOKEN, value.compatibility.protocol)
+    || !fullMatch(PROFILE_TOKEN, value.compatibility.runtime)
+  ) {
     return 'compatibility protocol/runtime is not a versioned token';
   }
   if (!sortedUniqueStrings(value.compatibility.features, PROFILE_TOKEN)) {

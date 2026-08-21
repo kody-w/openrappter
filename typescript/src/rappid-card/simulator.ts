@@ -39,6 +39,7 @@ import {
   cardUrlInfo,
   canonicalCardOrigin,
   exactKeys,
+  fullMatch,
   forbiddenUrlMaterial,
   hex64,
   ipIsGlobal,
@@ -469,7 +470,7 @@ export function verifyCardLink(input: VerifyCardInput): CardVerificationResult {
   const missingScope = input.frame.payload.requested_scope.filter((scope) => !input.runtime_policy.granted_scope.includes(scope)).sort();
   if (classification > maximum) return { ok: false, step: 'classification-scope', reason: 'classification exceeds local policy', result: null };
   if (missingScope.length) return { ok: false, step: 'classification-scope', reason: `requested scope not granted: ${missingScope[0]}`, result: null };
-  if (!CONNECTION.test(input.connection_id)) return { ok: false, step: 'replay-nonce', reason: 'connection_id is invalid', result: null };
+  if (!fullMatch(CONNECTION, input.connection_id)) return { ok: false, step: 'replay-nonce', reason: 'connection_id is invalid', result: null };
   try {
     verdict = input.state.claimNonce(link.nonce, input.connection_id, input.now_utc);
   } catch (error) {

@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -26,10 +26,15 @@ import {
   CardTrustStore,
   buildRappidCardFixture,
   canonical,
+  cardUrlInfo,
+  forbiddenCardMaterial,
   cardParts,
   cardTrust,
   loadRappidCardDeck,
+  loadRappidCardTrustConfig,
   parseCardLink,
+  lclabel,
+  rappidValid,
   ipIsGlobal,
   physicalVectorBytes,
   readCardResource,
@@ -157,6 +162,21 @@ describe('PR9 contract drift', () => {
     expect(ipIsGlobal('::ffff:10.0.0.1')).toBe(false);
     expect(ipIsGlobal('::ffff:8.8.8.8')).toBe(true);
   });
+
+  it('matches the isolated interim depth, size, host, token, and scanner fixes', () => {
+    let nested: unknown = null;
+    for (let index = 0; index < 65; index += 1) nested = [nested];
+    expect(() => canonical(nested)).toThrow(/depth 64/);
+    expect(() => canonical('x'.repeat(1024 * 1024 + 1))).toThrow(/1 MiB/);
+    expect(() =>
+      cardUrlInfo('https://127.1/x.rappid-card.json'),
+    ).toThrow(/numeric IP host aliases/);
+    expect(lclabel('memory-read\n')).toBe(false);
+    expect(
+      rappidValid(`rappid:@synthetic/x:${'a'.repeat(64)}\n`),
+    ).toBe(false);
+    expect(forbiddenCardMaterial('épasswordé')).toBe(true);
+  });
 });
 
 describe('PR9 mandatory deck', () => {
@@ -226,6 +246,25 @@ describe('physical payload reproduction', () => {
 });
 
 describe('detached JWS, content roots, and durable state', () => {
+  it('accepts only a mode-0600 independently provisioned trust config', async () => {
+    const deck = loadRappidCardDeck();
+    const path = join(process.cwd(), `.pr9-trust-${process.pid}.json`);
+    generated.push(path);
+    writeFileSync(path, JSON.stringify({
+      schema: 'openrappter-rappid-card-trust/1',
+      runtime_policy_authority: deck.vectors[0].runtime_policy_authority,
+      keys: deck.trust,
+    }));
+    chmodSync(path, 0o600);
+    await expect(loadRappidCardTrustConfig(path)).resolves.toMatchObject({
+      config: {
+        runtime_policy_authority: deck.vectors[0].runtime_policy_authority,
+      },
+    });
+    chmodSync(path, 0o644);
+    await expect(loadRappidCardTrustConfig(path)).rejects.toThrow(/0600/);
+  });
+
   it('binds every trust SPKI to its keyed RAPPID tail', () => {
     const deck = loadRappidCardDeck();
     const keys = Object.fromEntries(

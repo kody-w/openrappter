@@ -40,3 +40,33 @@ cd beta && npm test             # expect 0 failing
 **Verify before pushing.** The first sync silently wiped the fixture annotations and took
 conformance from clean to eleven findings; it was caught by running the check rather than by
 reading the diff.
+
+## Known gap: v3 is not self-hosting yet
+
+`beta/install.cmd` and `beta/install.sh` do two different jobs with **one** URL:
+
+1. bootstrap the shared global Brainstem kernel, by downloading the **root `install.ps1` / `install.sh`**
+   from `REPO_URL` and running it with `--no-launch`;
+2. fetch the Frontier itself (`beta/`) from that same `REPO_URL`.
+
+Upstream those coincide, because that repository hosts both. Here they do not: this repository's
+root `install.ps1` is openrappter's own installer, an unrelated program that has no `--no-launch`
+parameter. Repointing `REPO_URL` at this repository therefore fetches the right Frontier and the
+wrong kernel bootstrap, and the install fails at step one with:
+
+```
+A parameter cannot be found that matches parameter name '-no-launch'.
+```
+
+Found by running the real installer on a real Windows machine against this repository. Cloning and
+running `npm ci` never reaches this code path, which is why it survived every earlier check.
+
+**The fix is a decision, not a patch.** One URL is doing two jobs and they have come apart:
+
+- **Split them.** A `KERNEL_REPO_URL` for the Brainstem bootstrap and a `REPO_URL` for the Frontier.
+  This is the architecturally honest option — the kernel and the Frontier are separate artifacts with
+  separate homes, and conflating them is what broke.
+- **Or make this repository's root installer honour the same contract**, so one URL keeps working.
+
+Until one is chosen, installing v3 through `beta/install.*` requires pointing `REPO_URL` at a
+repository whose root installer accepts `--no-launch`.

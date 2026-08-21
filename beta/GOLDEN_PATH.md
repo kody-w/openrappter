@@ -87,6 +87,38 @@ brainstem-walkthrough
 These commands do not bypass the UI. They visibly type into the same chats the
 person sees.
 
+## The reference machine is a factory Mac mini
+
+Capability claims need a machine to be true *on*. The reference is a **stock Mac mini, as it comes
+out of the box** — nothing pre-installed, nothing configured, no developer toolchain. If it works
+there it works in the wild; if it needs a prepared machine, the claim is about the preparation.
+
+**The install path already meets that bar, and it is worth knowing why.** `beta/install.sh` and
+`beta/install.cmd` download a *pinned portable Node* — 24.19.0, the same version the package's
+engines floor requires — into the beta home and run everything through it. System Node is never
+consulted. A factory Mac mini therefore needs no Homebrew, no toolchain and no prior knowledge.
+
+**And a test today nearly convinced me otherwise, which is the lesson.** Installing v3 onto three
+machines over Tailscale showed one on Node 26.5 passing 510 of 518 while two on Node 20 failed
+identically on twelve tests. That looked like a product gap. It was not: I had installed by cloning
+the repository and running `npm ci`, which uses whatever Node is on `PATH` and **bypasses the
+installer entirely**. I tested a path that is not the golden path and briefly mistook one for the
+other.
+
+What the test did legitimately find is that the *developer* path had no floor enforcement — `npm ci`
+installed happily on an unsupported runtime and paid for it twelve tests later. That is now enforced,
+and it is worth having, because contributors take exactly that path.
+
+The bar, stated so it can be tested rather than argued:
+
+1. **From factory state**, one documented command reaches a working Frontier — with the runtime it
+   needs brought by that command, not assumed.
+2. **Every remaining prerequisite is named before the install starts**, with versions, never
+   discovered by a stack trace.
+3. **Refusal beats partial success** on any path, including the developer one.
+4. **It is verified on a machine that is not the one that built it**, using **the install command a
+   person would actually run** — because a shortcut that skips the installer tests something else.
+
 ## Rapplications are podcasts, not apps in a store
 
 The distribution model is the podcast one, and saying so explains it faster than any description of

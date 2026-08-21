@@ -46,6 +46,9 @@ import {
   verifyCardLinkScannerControlForTest,
   writeRappidCardFixtureDeck,
 } from './index.js';
+import { fixtureEnvelope } from '../cli/rappid-card.js';
+import { rappCanonicalJson } from '../rappids/canonical.js';
+import type { JsonValue as RappidJsonValue } from '../rappids/types.js';
 
 const generated: string[] = [];
 
@@ -195,9 +198,58 @@ describe('PR9 contract drift', () => {
     ).toBe(false);
     expect(forbiddenCardMaterial('épasswordé')).toBe(true);
   });
+
+  it('matches PR9 container-only depth at 63, 64, and 65 arrays and objects', () => {
+    const nestedArray = (count: number): unknown => {
+      let value: unknown = null;
+      for (let index = 0; index < count; index += 1) value = [value];
+      return value;
+    };
+    const nestedObject = (count: number): unknown => {
+      let value: unknown = null;
+      for (let index = 0; index < count; index += 1) value = { k: value };
+      return value;
+    };
+    for (const count of [63, 64]) {
+      expect(() =>
+        rappCanonicalJson(nestedArray(count) as RappidJsonValue),
+      ).not.toThrow();
+      expect(() =>
+        rappCanonicalJson(nestedObject(count) as RappidJsonValue),
+      ).not.toThrow();
+      expect(canonical(nestedArray(count))).toBe(
+        rappCanonicalJson(nestedArray(count) as RappidJsonValue),
+      );
+    }
+    expect(() =>
+      rappCanonicalJson(nestedArray(65) as RappidJsonValue),
+    ).toThrow(/depth 64/);
+    expect(() =>
+      rappCanonicalJson(nestedObject(65) as RappidJsonValue),
+    ).toThrow(/depth 64/);
+  });
 });
 
 describe('PR9 mandatory deck', () => {
+  it('wraps production-profile fixture verdicts as synthetic and non-live', () => {
+    const vector = buildRappidCardFixture('valid-production');
+    const envelope = fixtureEnvelope(
+      vector.name,
+      vector.expected,
+      { ok: true, result: { profile: 'rappid-card/1', status: 'awake' } },
+    );
+    expect(envelope).toMatchObject({
+      mode: 'synthetic-conformance-fixture',
+      live: false,
+      scenario: 'valid-production',
+      protocol_source_commit: '4751cd8',
+      declared_expected: { ok: true, step: null, reason: null },
+      verdict: { ok: true, result: { profile: 'rappid-card/1' } },
+    });
+    expect(envelope).not.toHaveProperty('ok');
+    expect(envelope).not.toHaveProperty('status');
+  });
+
   it.each(mandatory)('%s fails or succeeds at the declared step', async (name) => {
     const vector = buildRappidCardFixture(name);
     const { verdict } = await simulateRappidCardFixture(name, statePath(name));

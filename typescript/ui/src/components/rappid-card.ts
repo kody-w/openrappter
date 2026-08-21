@@ -49,12 +49,19 @@ interface Verification {
 }
 
 interface CardRun {
+  mode: 'synthetic-conformance-fixture';
+  live: false;
   scenario: string;
+  protocol_source_commit: '4751cd8';
   exact_link: string;
   qr_svg: string;
   frame: CardFrame;
-  expected: ScenarioInfo['expected'];
-  verification?: Verification;
+  declared_expected: {
+    ok: boolean;
+    step: string | null;
+    reason: string | null;
+  };
+  verdict?: Verification;
   provenance: string;
 }
 
@@ -220,7 +227,7 @@ export class OpenRappterRappidCard extends LitElement {
   }
 
   render() {
-    const verification = this.run?.verification;
+    const verification = this.run?.verdict;
     const state = verification ? (verification.ok ? 'awake' : 'failed') : 'preview';
     return html`
       <div class="shell">
@@ -242,7 +249,10 @@ export class OpenRappterRappidCard extends LitElement {
               `)}
             </select>
             <p>
-              Expected: ${this.run?.expected.ok ? 'awake' : `refuse at ${this.run?.expected.step}`}
+              Synthetic fixture · live=false · expected:
+              ${this.run?.declared_expected.ok
+                ? 'awake'
+                : `refuse at ${this.run?.declared_expected.step}`}
             </p>
           </div>
         </section>

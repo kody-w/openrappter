@@ -235,6 +235,22 @@ openrappter rappid-card inspect-offline ./production.rappid-card.json \
 openrappter rappid-card simulate expired --state ./expired-state.sqlite
 ```
 
+Every `--scenario` verification and `simulate` response is wrapped as:
+
+```json
+{
+  "mode": "synthetic-conformance-fixture",
+  "live": false,
+  "scenario": "valid-production",
+  "protocol_source_commit": "4751cd8",
+  "declared_expected": {"ok":true,"step":null,"reason":null},
+  "verdict": {"ok":true}
+}
+```
+
+Even the production-profile conformance vector remains explicitly synthetic;
+no fixture command emits top-level `ok:true` or `status:"awake"`.
+
 Production trust roots are independently provisioned in a regular,
 non-symlink mode-0600 local file selected by `--trust-config` or
 `OPENRAPPTER_RAPPID_CARD_TRUST_CONFIG`:

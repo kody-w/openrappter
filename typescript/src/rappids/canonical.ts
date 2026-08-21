@@ -90,32 +90,34 @@ export function sha256Hex(data: Uint8Array | string): string {
   return createHash('sha256').update(data).digest('hex');
 }
 
-function validateRappValue(value: JsonValue, depth = 1): void {
-  if (depth > 64) throw new TypeError('RAPP/1 value exceeds depth 64');
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    if (typeof value === 'string') {
-      for (let index = 0; index < value.length; index += 1) {
-        const unit = value.charCodeAt(index);
-        if (
-          unit >= 0xd800
-          && unit <= 0xdfff
-          && !(
-            unit <= 0xdbff
-            && index + 1 < value.length
-            && value.charCodeAt(index + 1) >= 0xdc00
-            && value.charCodeAt(index + 1) <= 0xdfff
-          )
-          && !(
-            unit >= 0xdc00
-            && index > 0
-            && value.charCodeAt(index - 1) >= 0xd800
-            && value.charCodeAt(index - 1) <= 0xdbff
-          )
-        ) {
-          throw new TypeError('RAPP/1 string contains an unpaired surrogate');
-        }
-      }
+function validateRappString(value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (
+      unit >= 0xd800
+      && unit <= 0xdfff
+      && !(
+        unit <= 0xdbff
+        && index + 1 < value.length
+        && value.charCodeAt(index + 1) >= 0xdc00
+        && value.charCodeAt(index + 1) <= 0xdfff
+      )
+      && !(
+        unit >= 0xdc00
+        && index > 0
+        && value.charCodeAt(index - 1) >= 0xd800
+        && value.charCodeAt(index - 1) <= 0xdbff
+      )
+    ) {
+      throw new TypeError('RAPP/1 string contains an unpaired surrogate');
     }
+  }
+}
+
+function validateRappValue(value: JsonValue, depth = 1): void {
+  if (value === null || typeof value === 'boolean') return;
+  if (typeof value === 'string') {
+    validateRappString(value);
     return;
   }
   if (typeof value === 'number') {
@@ -125,14 +127,16 @@ function validateRappValue(value: JsonValue, depth = 1): void {
     return;
   }
   if (Array.isArray(value)) {
+    if (depth > 64) throw new TypeError('RAPP/1 value exceeds depth 64');
     for (const item of value) validateRappValue(item, depth + 1);
     return;
   }
+  if (depth > 64) throw new TypeError('RAPP/1 value exceeds depth 64');
   for (const [key, item] of Object.entries(value)) {
+    validateRappString(key);
     if ([...key].some((character) => character.codePointAt(0)! > 0xffff)) {
       throw new TypeError('RAPP/1 exact profile refuses supplementary-plane object keys');
     }
-    validateRappValue(key, depth + 1);
     validateRappValue(item, depth + 1);
   }
 }

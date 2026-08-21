@@ -73,6 +73,21 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2))
 
 
+def _fixture_envelope(scenario, declared, verdict):
+    return {
+        "mode": "synthetic-conformance-fixture",
+        "live": False,
+        "scenario": scenario,
+        "protocol_source_commit": "4751cd8",
+        "declared_expected": {
+            "ok": declared["ok"],
+            "step": declared["step"],
+            "reason": declared["reason_contains"],
+        },
+        "verdict": verdict.to_wire(),
+    }
+
+
 def _read_link(value: str) -> str:
     return value if value.startswith("rappid://") else Path(value).read_text(
         encoding="utf-8"
@@ -143,7 +158,7 @@ def handle_rappid_card_command(args: Any) -> bool:
                 )
                 return False
             verdict = simulate_rappid_card_fixture(args.scenario, args.state)
-            _print(verdict.to_wire())
+            _print(_fixture_envelope(args.scenario, fixture.expected, verdict))
             return verdict.ok == fixture.expected["ok"]
         bundle = _load_historical_bundle(args.bundle)
         local = load_rappid_card_trust_config(args.trust_config)
@@ -197,7 +212,13 @@ def handle_rappid_card_command(args: Any) -> bool:
         return inspection["cryptographic_policy_ok"]
     if command == "simulate":
         verdict = simulate_rappid_card_fixture(args.scenario, args.state)
-        _print(verdict.to_wire())
+        _print(
+            _fixture_envelope(
+                args.scenario,
+                build_rappid_card_fixture(args.scenario).expected,
+                verdict,
+            )
+        )
         expected = build_rappid_card_fixture(args.scenario).expected
         return (
             verdict.ok is expected["ok"]

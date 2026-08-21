@@ -240,6 +240,27 @@ def test_authoritative_depth_size_host_token_and_ascii_scanner_fixes():
     assert R._forbidden_card_material("épasswordé")
 
 
+def test_pr9_container_only_depth_at_63_64_and_65_arrays_and_objects():
+    def nested_array(count):
+        value = None
+        for _ in range(count):
+            value = [value]
+        return value
+
+    def nested_object(count):
+        value = None
+        for _ in range(count):
+            value = {"k": value}
+        return value
+
+    for count in (63, 64):
+        assert R.canonical(nested_array(count))
+        assert R.canonical(nested_object(count))
+    for value in (nested_array(65), nested_object(65)):
+        with pytest.raises(ValueError, match="depth"):
+            R.canonical(value)
+
+
 def test_trust_spki_binding_and_core_egg_roots():
     deck = load_rappid_card_deck()
     keys = {
@@ -519,7 +540,36 @@ def test_qr_artifacts_and_fixture_cli():
             check=False,
         )
         assert result.returncode == 0, result.stderr
-        assert json.loads(result.stdout)["ok"] is True
+        fixture_result = json.loads(result.stdout)
+        assert fixture_result["mode"] == "synthetic-conformance-fixture"
+        assert fixture_result["live"] is False
+        assert fixture_result["scenario"] == "physical-payload-reproduction"
+        assert fixture_result["protocol_source_commit"] == "4751cd8"
+        assert fixture_result["verdict"]["ok"] is True
+        _remove_database(state)
+        production_fixture = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "openrappter.cli",
+                "rappid-card",
+                "simulate",
+                "valid-production",
+                "--state",
+                str(state),
+            ],
+            cwd=ROOT / "python",
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert production_fixture.returncode == 0
+        production_result = json.loads(production_fixture.stdout)
+        assert production_result["mode"] == "synthetic-conformance-fixture"
+        assert production_result["live"] is False
+        assert production_result["scenario"] == "valid-production"
+        assert production_result["protocol_source_commit"] == "4751cd8"
+        assert production_result["verdict"]["result"]["profile"] == "rappid-card/1"
         deck = load_rappid_card_deck()
         vector = build_rappid_card_fixture("physical-payload-reproduction").vector
         bundle_path.write_text(

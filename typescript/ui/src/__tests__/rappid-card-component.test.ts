@@ -48,15 +48,22 @@ function response(verification?: {
   result: { status: string; runtime_policy_seq: number; authority_seq: number; revocation_seq: number } | null;
 }) {
   return {
+    mode: 'synthetic-conformance-fixture',
+    live: false,
     scenario: 'valid-test',
+    protocol_source_commit: '4751cd8',
     exact_link:
       `rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A${'a'.repeat(64)}`
       + `?m=${'b'.repeat(64)}&e=https%3A%2F%2Fcards.example%2Fx.rappid-card.json`
       + '&n=valid-test-card-0001',
     qr_svg: '<svg viewBox="0 0 21 21"><path d="M0 0h1v1H0z"/></svg>',
     frame,
-    expected: scenario.expected,
-    verification,
+    declared_expected: {
+      ok: scenario.expected.ok,
+      step: scenario.expected.step,
+      reason: scenario.expected.reason_contains,
+    },
+    verdict: verification,
     provenance: 'rapp-1 commit 4751cd8291d0e4ca935d435fdcc2374a2b2628f9',
   };
 }

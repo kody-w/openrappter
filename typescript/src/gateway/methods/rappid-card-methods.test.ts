@@ -63,9 +63,12 @@ describe('PR9 RAPPID card gateway methods', () => {
       scenario: 'physical-payload-reproduction',
     }) as Record<string, unknown>;
     expect(preview).toMatchObject({
+      mode: 'synthetic-conformance-fixture',
+      live: false,
       scenario: 'physical-payload-reproduction',
+      protocol_source_commit: '4751cd8',
       provenance: 'rapp-1 commit 4751cd8291d0e4ca935d435fdcc2374a2b2628f9',
-      expected: { ok: true, step: null },
+      declared_expected: { ok: true, step: null },
       frame: { kind: 'body.debug-card', spec: 'rapp/1' },
     });
     expect(String(preview.exact_link)).toMatch(/^rappid:\/\/link\//);
@@ -80,12 +83,21 @@ describe('PR9 RAPPID card gateway methods', () => {
     const valid = await methods.get('rappid.card.verify')!({
       scenario: 'valid-test',
       approve: true,
-    }) as { verification: { ok: boolean; step: string | null } };
+    }) as { verdict: { ok: boolean; step: string | null } };
     const expired = await methods.get('rappid.card.verify')!({
       scenario: 'expired',
       approve: true,
-    }) as { verification: { ok: boolean; step: string | null } };
-    expect(valid.verification).toMatchObject({ ok: true, step: null });
-    expect(expired.verification).toMatchObject({ ok: false, step: 'expiry' });
+    }) as { verdict: { ok: boolean; step: string | null } };
+    expect(valid.verdict).toMatchObject({ ok: true, step: null });
+    expect(expired.verdict).toMatchObject({ ok: false, step: 'expiry' });
+    const productionFixture = await methods.get('rappid.card.preview')!({
+      scenario: 'valid-production',
+    }) as Record<string, unknown>;
+    expect(productionFixture).toMatchObject({
+      mode: 'synthetic-conformance-fixture',
+      live: false,
+      scenario: 'valid-production',
+      protocol_source_commit: '4751cd8',
+    });
   });
 });

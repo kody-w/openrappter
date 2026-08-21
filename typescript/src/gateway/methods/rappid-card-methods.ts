@@ -69,11 +69,18 @@ export function registerRappidCardMethods(
       const name = scenarioName(params?.scenario);
       const vector = buildRappidCardFixture(name);
       return {
+        mode: 'synthetic-conformance-fixture',
+        live: false,
         scenario: name,
+        protocol_source_commit: '4751cd8',
         exact_link: vector.link,
         qr_svg: await renderQr(vector.link),
         frame: vector.frame,
-        expected: vector.expected,
+        declared_expected: {
+          ok: vector.expected.ok,
+          step: vector.expected.step,
+          reason: vector.expected.reason_contains,
+        },
         provenance: `rapp-1 commit ${PROVENANCE_COMMIT}`,
       };
     },
@@ -96,12 +103,19 @@ export function registerRappidCardMethods(
       try {
         const { verdict } = await simulateRappidCardFixture(name, path);
         return {
+          mode: 'synthetic-conformance-fixture',
+          live: false,
           scenario: name,
+          protocol_source_commit: '4751cd8',
           exact_link: vector.link,
           qr_svg: await renderQr(vector.link),
           frame: vector.frame,
-          expected: vector.expected,
-          verification: verdict,
+          declared_expected: {
+            ok: vector.expected.ok,
+            step: vector.expected.step,
+            reason: vector.expected.reason_contains,
+          },
+          verdict,
           provenance: `rapp-1 commit ${PROVENANCE_COMMIT}`,
         };
       } finally {

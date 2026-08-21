@@ -23,6 +23,25 @@ function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+export function fixtureEnvelope(
+  scenario: string,
+  declared: ReturnType<typeof buildRappidCardFixture>['expected'],
+  verdict: unknown,
+) {
+  return {
+    mode: 'synthetic-conformance-fixture',
+    live: false,
+    scenario,
+    protocol_source_commit: '4751cd8',
+    declared_expected: {
+      ok: declared.ok,
+      step: declared.step,
+      reason: declared.reason_contains,
+    },
+    verdict,
+  };
+}
+
 function qrFormat(value: string): QrArtifactFormat {
   if (value !== 'svg' && value !== 'png' && value !== 'both') {
     throw new Error('format must be svg, png, or both');
@@ -153,7 +172,7 @@ export function registerRappidCardCommand(program: Command): void {
           options.scenario,
           options.state,
         );
-        print(verdict);
+        print(fixtureEnvelope(options.scenario, fixture.expected, verdict));
         if (verdict.ok !== fixture.expected.ok) process.exitCode = 1;
         return;
       }
@@ -235,7 +254,7 @@ export function registerRappidCardCommand(program: Command): void {
       }
       const fixture = buildRappidCardFixture(scenario);
       const { verdict } = await simulateRappidCardFixture(scenario, options.state);
-      print(verdict);
+      print(fixtureEnvelope(scenario, fixture.expected, verdict));
       const expected = fixture.expected;
       if (
         verdict.ok !== expected.ok

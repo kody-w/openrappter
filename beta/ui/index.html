@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
+  >
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RAPP Brainstem Frontier</title>
+  <!-- Brandmark: the exact Brainstem brain glyph the Grail app serves (do not
+       alter — this is the "swoosh"). App/dock icon lives in build/icon.* . -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%2358a6ff'%3E%3Cpath d='M184 0c-30.9 0-56.5 22.7-61.1 52.3C54.5 67 0 130 0 206.8c0 41.6 17.4 79.2 45.3 105.9-2 9.2-3.3 18.8-3.3 28.7 0 55.3 35.8 102.2 85.5 119C142.2 493 172.6 512 208 512h16c35.3 0 64-28.7 64-64V86c0-8.8-7.2-16-16-16h-16c-8.8 0-16 7.2-16 16v16c0 8.8-7.2 16-16 16s-16-7.2-16-16V64c0-35.3-28.7-64-64-64h40zm144 0c30.9 0 56.5 22.7 61.1 52.3C457.5 67 512 130 512 206.8c0 41.6-17.4 79.2-45.3 105.9 2 9.2 3.3 18.8 3.3 28.7 0 55.3-35.8 102.2-85.5 119C369.8 493 339.4 512 304 512h-16c-35.3 0-64-28.7-64-64V86c0-8.8 7.2-16 16-16h16c8.8 0 16 7.2 16 16v16c0 8.8 7.2 16 16 16s16-7.2 16-16V64c0-35.3 28.7-64 64-64h-40z'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#2563eb">
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    :root {
+      --explorer-width: min(400px, 100vw);
+      --surgeon-width: min(460px, 100vw);
+      --surgeon-herd-width: min(1080px, 74vw);
+    }
+    button {
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 7px 11px;
+      background: #21262d;
+      color: #e6edf3;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+    button:hover { border-color: #58a6ff; background: #30363d; }
+    main {
+      position: relative; width: 100%; height: 100%; background: #0d1117;
+      margin-left: 0;
+      transition: width .28s cubic-bezier(.22,.9,.3,1),
+                  margin-left .28s cubic-bezier(.22,.9,.3,1);
+    }
+    @media (min-width: 820px) {
+      body.surgeon-open main { width: calc(100vw - var(--surgeon-width)); }
+      body.explorer-open main {
+        width: calc(100vw - var(--explorer-width));
+        margin-left: var(--explorer-width);
+      }
+      body.explorer-open.surgeon-open main {
+        width: calc(100vw - var(--explorer-width) - var(--surgeon-width));
+      }
+      /* Herd view just widens the Copilot lane; it never covers the Brainstem. */
+      body.surgeon-herd-open main { width: calc(100vw - var(--surgeon-herd-width)); }
+      body.explorer-open.surgeon-herd-open main {
+        width: calc(100vw - var(--explorer-width) - var(--surgeon-herd-width));
+      }
+    }
+    iframe { width: 100%; height: 100%; border: 0; display: none; background: #0d1117; }
+    iframe.ready { display: block; }
+    #splash {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      text-align: center;
+    }
+    #splash.hidden { display: none; }
+    .tile {
+      width: min(620px, 90vw);
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 28px;
+      background: #161b22;
+      box-shadow: 0 20px 70px rgba(0,0,0,.35);
+    }
+    .tile h1 { margin: 0 0 10px; font-size: 24px; }
+    .tile p { margin: 7px 0; color: #8c959f; line-height: 1.55; }
+    #error { color: #ff7b72; white-space: pre-wrap; }
+    #intro {
+      position: fixed;
+      z-index: 20;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: rgba(1, 4, 9, .88);
+      backdrop-filter: blur(12px);
+    }
+    #intro.hidden { display: none; }
+    .intro-panel {
+      width: min(1080px, 96vw);
+      max-height: 92vh;
+      overflow: auto;
+      border: 1px solid #30363d;
+      border-radius: 16px;
+      background: #0d1117;
+      box-shadow: 0 28px 100px rgba(0,0,0,.55);
+    }
+    .intro-hero {
+      padding: 30px 32px 24px;
+      border-bottom: 1px solid #30363d;
+      background:
+        radial-gradient(circle at 85% 15%, rgba(31,111,235,.22), transparent 34%),
+        linear-gradient(135deg, #161b22, #0d1117);
+    }
+    .eyebrow {
+      color: #58a6ff;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .intro-hero h1 { margin: 8px 0 10px; font-size: clamp(28px, 4vw, 44px); line-height: 1.08; }
+    .intro-hero p { max-width: 850px; margin: 0; color: #b1bac4; font-size: 16px; line-height: 1.6; }
+    .intro-body { padding: 24px 32px 30px; }
+    .intro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .intro-tile {
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 18px;
+      background: #161b22;
+    }
+    .intro-tile.wide { grid-column: 1 / -1; }
+    .intro-tile h2 { margin: 0 0 8px; font-size: 16px; color: #f0f6fc; }
+    .intro-tile p, .intro-tile li { color: #b1bac4; font-size: 14px; line-height: 1.55; }
+    .intro-tile p { margin: 6px 0; }
+    .intro-tile ul, .intro-tile ol { margin: 8px 0 0; padding-left: 20px; }
+    .tool-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+    .tool {
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 12px;
+      background: #0d1117;
+    }
+    .tool strong { display: block; margin-bottom: 6px; color: #58a6ff; }
+    .tool span { color: #8c959f; font-size: 12px; line-height: 1.45; }
+    .prompt {
+      margin-top: 10px;
+      border: 1px solid #1f6feb;
+      border-radius: 8px;
+      padding: 14px;
+      background: #071d36;
+      color: #dbeafe;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .intro-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-top: 20px;
+    }
+    .intro-footer small { color: #8c959f; line-height: 1.45; }
+    .primary { border-color: #238636; background: #238636; font-weight: 700; }
+    .primary:hover { border-color: #2ea043; background: #2ea043; }
+    #explorer {
+      position: fixed; z-index: 15; top: 0; left: 0;
+      display: flex; flex-direction: column;
+      width: var(--explorer-width); height: 100dvh;
+      transform: translateX(-100%);
+      border-right: 1px solid #2a2c31; background: #18191c;
+      box-shadow: 24px 0 60px rgba(0,0,0,.5);
+      transition: transform .28s cubic-bezier(.22,.9,.3,1);
+    }
+    #explorer.open { transform: translateX(0); }
+    #explorer header {
+      display: flex; align-items: center; gap: 9px; padding: 13px 14px;
+      border-bottom: 1px solid #26282d;
+      background: linear-gradient(180deg,#1c1e22,#17181b);
+    }
+    .explorer-title { display: flex; flex-direction: column; line-height: 1.15; }
+    .explorer-title strong { font-size: 14px; }
+    .explorer-title span { color: #8b8f98; font-size: 10.5px; }
+    .explorer-head-actions { display: flex; gap: 5px; margin-left: auto; }
+    .explorer-head-actions button {
+      width: 28px; height: 28px; padding: 0; border-color: #2c2f35;
+      background: #1e2025; color: #9aa0a9; font-size: 15px;
+    }
+    #agent-tree {
+      max-height: 42%; overflow-y: auto; padding: 8px 0;
+      border-bottom: 1px solid #26282d; background: #202124;
+    }
+    .agent-tree-root,
+    .agent-tree-folder,
+    .agent-tree-file {
+      display: flex; align-items: center; gap: 7px; min-width: 0;
+      padding: 4px 10px; color: #c8c9cc; font-size: 12px;
+    }
+    .agent-tree-root {
+      color: #f0f1f3; font-size: 11px; font-weight: 800;
+      letter-spacing: .06em;
+    }
+    .agent-tree-folder { padding-left: 20px; color: #d7d9dd; font-weight: 700; }
+    .agent-tree-identity,
+    .agent-tree-stack {
+      display: flex; align-items: center; gap: 7px; min-width: 0;
+      padding: 3px 10px 3px 20px; color: #9aa0a9; font-size: 10.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .agent-tree-stack {
+      color: #c8c9cc; font-family: inherit; font-size: 11.5px;
+    }
+    .agent-tree-stack.active { color: #7ee787; font-weight: 800; }
+    .agent-tree-stack.overlay { color: #79c0ff; }
+    .agent-tree-file {
+      width: 100%; border: 0; border-radius: 0; padding-left: 38px;
+      background: transparent; text-align: left;
+    }
+    .agent-tree-file:hover,
+    .agent-tree-file.active { background: #2a2c31; color: #fff; }
+    .agent-tree-file .name {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .agent-tree-file .count {
+      margin-left: auto; color: #6f747d; font-size: 10px; white-space: nowrap;
+    }
+    #agent-viewer { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    #agent-viewer-tab {
+      min-height: 34px; padding: 8px 12px; border-bottom: 1px solid #26282d;
+      background: #222327; color: #c8c9cc;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    #agent-source {
+      flex: 1; margin: 0; overflow: auto; padding: 13px;
+      background: #111214; color: #d4d4d4;
+      font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      tab-size: 4; white-space: pre;
+    }
+    .agent-viewer-empty {
+      margin: auto; max-width: 280px; padding: 24px; color: #7f848d;
+      text-align: center; font-size: 12px; line-height: 1.6;
+    }
+    #explorer-status {
+      padding: 5px 10px; border-top: 1px solid #26282d;
+      background: #18191c; color: #6f747d; font-size: 10px;
+    }
+    #surgeon-tab {
+      position: fixed; z-index: 14; top: 50%; right: 0;
+      display: flex; align-items: center; gap: 7px;
+      transform: translateY(-50%); padding: 14px 9px;
+      border: 1px solid #30363d; border-right: 0;
+      border-radius: 12px 0 0 12px; background: #1c1e22;
+      box-shadow: -4px 0 20px rgba(0,0,0,.45);
+      writing-mode: vertical-rl; letter-spacing: .06em; font-weight: 700;
+      transition: padding .15s, background .15s;
+    }
+    #surgeon-tab:hover { padding-right: 13px; background: #23262c; }
+    body.surgeon-open #surgeon-tab { display: none; }
+    #surgeon {
+      position: fixed; z-index: 15; top: 0; right: 0;
+      display: flex; flex-direction: column;
+      width: var(--surgeon-width); height: 100dvh;
+      transform: translateX(100%);
+      border-left: 1px solid #2a2c31; background: #141518;
+      box-shadow: -24px 0 60px rgba(0,0,0,.5);
+      transition: transform .28s cubic-bezier(.22,.9,.3,1);
+    }
+    #surgeon.open { transform: translateX(0); }
+    #surgeon header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 15px; border-bottom: 1px solid #26282d;
+      background: linear-gradient(180deg,#1c1e22,#17181b);
+    }
+    .surgeon-badge {
+      display: grid; place-items: center; flex: none;
+      width: 30px; height: 30px; border: 1px solid #2f3238;
+      border-radius: 8px; background: #22252b;
+    }
+    .surgeon-title { display: flex; flex-direction: column; line-height: 1.15; }
+    .surgeon-title strong { font-size: 14px; }
+    .surgeon-title span { color: #8b8f98; font-size: 10.5px; }
+    #surgeon-model {
+      margin-left: auto; max-width: 150px; overflow: hidden;
+      padding: 3px 9px; border: 1px solid #2c2f35; border-radius: 20px;
+      background: #1e2025; color: #9aa0a9;
+      font: 10px ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .surgeon-head-btn {
+      width: 28px; height: 28px; padding: 0; border-color: #2c2f35;
+      background: #1e2025; color: #9aa0a9; font-size: 17px;
+    }
+    #surgeon-log {
+      flex: 1; overflow-y: auto; position: relative;
+      scrollbar-width: thin; scrollbar-color: #33363c transparent;
+    }
+    /* One transcript per Copilot chat. Scoped to .surgeon-session so it renders
+       identically whether docked in the panel or moved into a herd tile. */
+    .surgeon-session {
+      display: flex; flex-direction: column; gap: 11px; padding: 16px 15px;
+    }
+    #surgeon-log > .surgeon-session { min-height: 100%; }
+    /* Tab strip — one tab per independent Copilot chat over the same Brainstem. */
+    #surgeon-tabs {
+      display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+      border-bottom: 1px solid #26282d; background: #181a1e;
+      overflow-x: auto; scrollbar-width: none;
+    }
+    #surgeon-tabs::-webkit-scrollbar { display: none; }
+    #surgeon-tabs .surgeon-tab {
+      display: flex; align-items: center; gap: 7px; padding: 5px 9px;
+      border: 1px solid transparent; border-radius: 8px; background: none;
+      color: #9aa0a9; font-size: 12px; cursor: pointer; white-space: nowrap; flex: none;
+    }
+    #surgeon-tabs .surgeon-tab:hover { background: #1e2126; }
+    #surgeon-tabs .surgeon-tab.active { background: #22252b; border-color: #2f3238; color: #e7e8ea; }
+    #surgeon-tabs .surgeon-tab .tt { overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+    #surgeon-tabs .surgeon-tab .cl { color: #6c7079; font-size: 14px; line-height: 1; padding: 0 1px; }
+    #surgeon-tabs .surgeon-tab .cl:hover { color: #fff; }
+    #surgeon-tabs .surgeon-tab .sp,
+    .herd-tile .hh .sp {
+      width: 10px; height: 10px; flex: none; border: 2px solid #33363c;
+      border-top-color: #3d7cf0; border-radius: 50%; animation: surgeon-spin .8s linear infinite;
+    }
+    #surgeon-tabs .surgeon-new {
+      flex: none; width: 26px; height: 26px; padding: 0; border-color: #2a2d33;
+      background: #1a1c21; color: #9aa0a9; font-size: 16px; line-height: 1;
+    }
+    #surgeon-tabs .surgeon-new:hover { border-color: #3d7cf0; color: #e7e8ea; }
+    @keyframes surgeon-spin { to { transform: rotate(360deg); } }
+    /* Herd view — a grid of independent Copilot chats, all on one Brainstem. */
+    #surgeon-herd {
+      position: fixed; z-index: 16; inset: 0 0 0 auto;
+      width: var(--surgeon-herd-width); display: none; flex-direction: column;
+      background: #0f1013; border-left: 1px solid #2a2c31;
+      box-shadow: -24px 0 60px rgba(0,0,0,.5);
+    }
+    #surgeon-herd.open { display: flex; }
+    #surgeon-herd .hbar {
+      display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+      border-bottom: 1px solid #26282d; background: linear-gradient(180deg,#1c1e22,#17181b);
+    }
+    #surgeon-herd .hbar .t { font-weight: 650; font-size: 14px; }
+    #surgeon-herd .hbar .sub { font-size: 11px; color: #8b8f98; }
+    #surgeon-herd .hbar .hstore {
+      margin-left: auto; background: #241d3d; border: 1px solid #3a2f5a; color: #cdbcff;
+      border-radius: 8px; padding: 6px 10px; font-size: 12.5px; cursor: pointer;
+    }
+    #surgeon-herd .hbar .hstore:hover { border-color: #6b5bb0; }
+    #surgeon-herd .store-picker {
+      position: absolute; top: 52px; right: 14px; z-index: 5; width: min(340px, 90%);
+      max-height: 60vh; overflow: auto; padding: 6px; border: 1px solid #3a2f5a; border-radius: 10px;
+      background: #16121f; box-shadow: 0 12px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 3px;
+    }
+    #surgeon-herd .store-row {
+      text-align: left; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px;
+      background: none; color: #d7cff0; font-size: 12.5px; cursor: pointer;
+    }
+    #surgeon-herd .store-row:hover { background: #241d3d; border-color: #3a2f5a; }
+    #surgeon-herd .store-row:disabled { opacity: .5; cursor: default; }
+    #surgeon-herd .store-row { display: flex; align-items: center; gap: 6px; padding: 0; }
+    #surgeon-herd .store-hatch {
+      flex: 1; text-align: left; padding: 8px 10px; border: none; border-radius: 7px;
+      background: none; color: #d7cff0; font-size: 12.5px; cursor: pointer; min-width: 0;
+    }
+    #surgeon-herd .store-hatch:disabled { opacity: .5; cursor: default; }
+    #surgeon-herd .store-install {
+      flex: none; margin-right: 6px; padding: 4px 8px; border: 1px solid #2f4a2f; border-radius: 6px;
+      background: #10190f; color: #5cc271; font-size: 11px; cursor: pointer; white-space: nowrap;
+    }
+    #surgeon-herd .store-install:hover { border-color: #3fb950; }
+    #surgeon-herd .store-install:disabled { opacity: .6; cursor: default; }
+    #surgeon-herd .store-sources {
+      display: flex; gap: 4px; padding: 2px 2px 6px; border-bottom: 1px solid #2a2340; margin-bottom: 4px;
+    }
+    #surgeon-herd .store-source-tab {
+      flex: 1; padding: 5px 8px; border: 1px solid #3a2f5a; border-radius: 999px;
+      background: none; color: #9a8fc0; font-size: 11px; cursor: pointer; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    #surgeon-herd .store-source-tab:hover { border-color: #6b5bb0; }
+    #surgeon-herd .store-source-tab.active { background: #241d3d; color: #d7cff0; border-color: #6b5bb0; }
+    #surgeon-herd .store-custom-row { display: flex; gap: 4px; padding: 2px 2px 6px; }
+    #surgeon-herd .store-custom-row input {
+      flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid #3a2f5a; border-radius: 7px;
+      background: #100c1a; color: #d7cff0; font-size: 11.5px;
+    }
+    #surgeon-herd .store-custom-row button {
+      flex: none; padding: 6px 12px; border: 1px solid #2b4a7a; border-radius: 7px;
+      background: #0f1a2b; color: #7cc4ff; font-size: 11.5px; cursor: pointer;
+    }
+    #surgeon-herd .store-custom-row button:hover { border-color: #58a6ff; }
+    #surgeon-herd .hbar .hnew {
+      background: #1a1c21; border: 1px solid #2a2d33;
+      color: #d7dae0; border-radius: 8px; padding: 6px 12px; font-size: 12.5px;
+    }
+    #surgeon-herd .hbar .hnew:hover { border-color: #3d7cf0; }
+    #surgeon-herd .hbar .hclose {
+      background: linear-gradient(180deg,#3d7cf0,#2f66d8); border: none; color: #fff;
+      border-radius: 8px; padding: 6px 12px; font-size: 12.5px;
+    }
+    /* Herd is a GRID: tiles wrap into rows and the herd scrolls vertically,
+       so every chat stays on screen at once ("several agents, one Brainstem"). */
+    #surgeon-herd .herd-grid {
+      flex: 1; overflow: auto; display: grid; align-content: start; gap: 12px;
+      padding: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
+    .herd-tile {
+      display: flex; flex-direction: column; height: min(78vh, 640px);
+      background: #141518; border: 1px solid #2a2c31; border-radius: 12px; overflow: hidden;
+    }
+    .herd-tile .hh {
+      display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+      border-bottom: 1px solid #26282d; background: #181a1e; font-size: 12.5px;
+    }
+    .herd-tile .hh .tt { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .herd-tile .hh .hst {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+      padding: 2px 7px; border-radius: 20px; border: 1px solid #2a2d33; color: #8b8f98;
+    }
+    .herd-tile .hh .hst.working { color: #8fc4ff; border-color: #284a73; }
+    .herd-tile .hh .hst.done { color: #5cc271; border-color: #2c5a38; }
+    .herd-tile .hh .cl { margin-left: 0; color: #6c7079; font-size: 16px; line-height: 1; cursor: pointer; }
+    .herd-tile .hh .cl:hover { color: #fff; }
+    .herd-tile .htrans { flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: #33363c transparent; }
+    .herd-tile .htrans .surgeon-session { min-height: 100%; }
+    .herd-tile .hcomp {
+      display: flex; gap: 7px; padding: 9px; border-top: 1px solid #26282d; background: #17181b;
+    }
+    .herd-tile .hcomp textarea {
+      flex: 1; resize: none; max-height: 90px; padding: 8px 10px;
+      border: 1px solid #2c2f35; border-radius: 9px; background: #1c1e23; color: #e7e8ea;
+      font: 13px inherit;
+    }
+    .herd-tile .hcomp textarea:focus { outline: none; border-color: #3d7cf0; }
+    .herd-tile .hcomp button {
+      flex: none; width: 40px; border: none; border-radius: 9px; color: #fff; font-size: 15px;
+      background: linear-gradient(180deg,#3d7cf0,#2f66d8);
+    }
+    .herd-tile .hcomp button:disabled { opacity: .5; }
+    #surgeon .herd-header-btn.on { border-color: #3d7cf0; color: #e7e8ea; }
+    /* RAPPlication twin tiles — a real worker's own steerable UI + loop log. */
+    .herd-tile.twin { border-color: #3a2f5a; }
+    .herd-tile.twin .hh { background: #1b1730; border-bottom-color: #2f2650; }
+    .herd-tile.twin .twin-badge {
+      display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center;
+      border-radius: 6px; background: #241d3d; border: 1px solid #3a2f5a; color: #b79cff; font-size: 12px; flex: none;
+    }
+    .herd-tile.twin .twin-meta {
+      padding: 5px 11px; font: 10.5px ui-monospace, Menlo, monospace; color: #8b8f98;
+      border-bottom: 1px solid #26282d; background: #141221; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .herd-tile.twin .tw-pop {
+      padding: 2px 8px; font-size: 11px; border: 1px solid #2f2650; border-radius: 6px;
+      background: #1b1730; color: #b79cff; line-height: 1.4; margin-left: 4px; cursor: pointer;
+    }
+    .herd-tile.twin .tw-pop:hover { border-color: #6b5bb0; }
+    /* Small view: a Brain-Surgeon-style work log over the twin's /chat. */
+    .herd-tile.twin .twin-chat {
+      flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      scrollbar-width: thin; scrollbar-color: #33363c transparent; background: #0f1013;
+    }
+    .herd-tile.twin .tw-empty { margin: auto; color: #6e7681; font-size: 12px; }
+    .herd-tile.twin .tw-msg {
+      max-width: 92%; padding: 7px 11px; border-radius: 11px; font-size: 12.5px;
+      line-height: 1.5; word-break: break-word; white-space: pre-wrap;
+    }
+    .herd-tile.twin .tw-msg.activity {
+      align-self: flex-start; background: none; color: #8b8fce; padding: 1px 2px;
+      font: 11px/1.5 ui-monospace, Menlo, monospace; max-width: 100%;
+    }
+    .herd-tile.twin .tw-turn { display: flex; flex-direction: column; gap: 2px; max-width: 92%; }
+    .herd-tile.twin .tw-turn.self { align-self: flex-end; align-items: flex-end; }
+    .herd-tile.twin .tw-who { font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase; color: #8b8f98; padding: 0 3px; }
+    .herd-tile.twin .tw-turn.self .tw-who { color: #7ea6ff; }
+    .herd-tile.twin .tw-msg.user { background: linear-gradient(180deg,#3d7cf0,#356fe0); color: #fff; border-bottom-right-radius: 4px; }
+    .herd-tile.twin .tw-msg.assistant { align-self: flex-start; background: #1c1e23; border: 1px solid #2a2d33; border-left: 2px solid #7c6bd0; color: #d7dae0; border-bottom-left-radius: 4px; }
+    /* A driver turn (the Brainstem / Brain Surgeon steering the twin) — distinct
+       blue, left-aligned, so it never reads as the human's own message. */
+    .herd-tile.twin .tw-msg.driver { align-self: flex-start; background: #152238; border: 1px solid #24406a; border-left: 2px solid #3d7cf0; color: #cfe0ff; border-bottom-left-radius: 4px; }
+    .herd-tile.twin .tw-turn.driver .tw-who { color: #7ea6ff; }
+    .herd-error { margin: 6px 10px; padding: 8px 11px; border-radius: 8px; background: #2a1618; border: 1px solid #5a2626; color: #ff9a9a; font-size: 12px; cursor: pointer; }
+    .herd-tile.twin .tw-msg.error { align-self: flex-start; background: #2a1618; border: 1px solid #5a2626; color: #ff9a9a; }
+    .herd-tile.twin .twin-comp {
+      display: flex; gap: 7px; padding: 9px; border-top: 1px solid #26282d; background: #17181b;
+    }
+    .herd-tile.twin .twin-comp textarea {
+      flex: 1; resize: none; max-height: 80px; padding: 8px 10px;
+      border: 1px solid #2c2f35; border-radius: 9px; background: #1c1e23; color: #e7e8ea; font: 13px inherit;
+    }
+    .herd-tile.twin .twin-comp textarea:focus { outline: none; border-color: #7c6bd0; }
+    .herd-tile.twin .twin-comp .tw-send {
+      flex: none; width: 40px; border: none; border-radius: 9px; color: #fff; font-size: 15px;
+      background: linear-gradient(180deg,#7c6bd0,#5f4fb0); cursor: pointer;
+    }
+    .herd-tile.twin .hh .hst.auth { color: #e3b341; border-color: #6b5216; }
+    .herd-tile.twin .hh .tw-loop {
+      padding: 2px 7px; font-size: 10.5px; border: 1px solid #2f2650; border-radius: 6px;
+      background: #1b1730; color: #9a8fce; line-height: 1.3; margin-left: 4px; cursor: pointer;
+    }
+    .herd-tile.twin .hh .tw-loop:hover { border-color: #6b5bb0; color: #cbb8ff; }
+    .herd-tile.twin.looping .hh .tw-loop { background: #2a2250; border-color: #6b5bb0; color: #e7deff; }
+    .herd-tile.twin .hh .tw-pop {
+      padding: 2px 6px; font-size: 12px; border: 1px solid #2f2650; border-radius: 6px;
+      background: #1b1730; color: #b79cff; line-height: 1; margin-left: 4px;
+    }
+    .herd-tile.twin .hh .tw-pop:hover { border-color: #6b5bb0; }
+    .herd-tile.twin .twin-signin {
+      display: block; margin: 0; padding: 8px 11px; border: 0; border-top: 1px solid #6b5216;
+      background: linear-gradient(180deg,#3a2e0f,#2a2109); color: #ffd479; font-weight: 700; font-size: 12px; cursor: pointer;
+    }
+    .herd-tile.twin .twin-signin[hidden] { display: none; }
+    /* mobile-first: at the small tile size the embedded UI shows its own mobile
+       layout (it carries viewport + @media); keep the frame the dominant area. */
+    @media (max-width: 640px) {
+      #surgeon-herd .herd-grid { grid-template-columns: 1fr; }
+      .herd-tile { height: min(88vh, 720px); }
+    }
+    .surgeon-empty {
+      margin: auto 0; padding: 8px 6px; color: #9a9ea7;
+      text-align: center; font-size: 13px; line-height: 1.7;
+    }
+    .surgeon-empty svg { width: 38px; height: 38px; color: #e7e8ea; }
+    .surgeon-empty h2 { margin: 8px 0 5px; color: #e7e8ea; font-size: 16px; }
+    .surgeon-caps {
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
+      margin: 14px 0;
+    }
+    .surgeon-caps span {
+      padding: 3px 9px; border: 1px solid #2a2d33; border-radius: 20px;
+      background: #1b1d22; color: #aeb2ba; font-size: 10px;
+    }
+    .surgeon-starters { display: flex; flex-direction: column; gap: 7px; }
+    .surgeon-starters button {
+      padding: 9px 12px; border-color: #2a2d33; border-radius: 10px;
+      background: #1a1c21; color: #d7dae0; text-align: left;
+    }
+    .surgeon-starters button.deploy-copilot-studio {
+      margin-top: 5px; border-color: #8957e5;
+      background: linear-gradient(135deg,#25163f,#10263f);
+      color: #f0e7ff; font-weight: 800;
+      box-shadow: inset 3px 0 #a371f7;
+    }
+    .surgeon-starters button.deploy-copilot-studio::before {
+      content: "🚀"; margin-right: 8px;
+    }
+    .surgeon-starters button.show-mode-preview {
+      border-color: #d0463a;
+      background: linear-gradient(135deg,#3a1614,#26191f);
+      color: #ffe9e6; font-weight: 800;
+      box-shadow: inset 3px 0 #ff6a5c;
+    }
+    .surgeon-starters button.show-mode-preview::before {
+      content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #ff5f52; margin-right: 9px; vertical-align: 1px;
+      box-shadow: 0 0 0 3px rgba(255,95,82,.25);
+    }
+    .intro-tile .intro-show-mode {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      margin-top: 12px; padding: 12px 14px; border: 1px solid #5a2320; border-radius: 8px;
+      background: linear-gradient(135deg,#2a1210,#1a1519);
+    }
+    .intro-tile .intro-show-mode span { color: #f0c9c4; font-size: 13px; line-height: 1.5; }
+    .intro-tile .intro-show-mode button {
+      flex: none; border-color: #d0463a; background: #3a1614; color: #ffe9e6; font-weight: 800;
+    }
+    .intro-tile .intro-show-mode button::before {
+      content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #ff5f52; margin-right: 8px; vertical-align: 1px; box-shadow: 0 0 0 3px rgba(255,95,82,.25);
+    }
+    .surgeon-message {
+      max-width: 92%; padding: 10px 13px; border-radius: 12px;
+      font-size: 13px; line-height: 1.55; white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .surgeon-message.user {
+      align-self: flex-end; border-bottom-right-radius: 5px;
+      background: linear-gradient(180deg,#3d7cf0,#356fe0); color: #fff;
+    }
+    .surgeon-message.assistant {
+      align-self: flex-start; border: 1px solid #2a2d33;
+      border-left: 2px solid #3d7cf0; border-bottom-left-radius: 5px;
+      background: #1c1e23;
+    }
+    .surgeon-message.assistant.typing {
+      display: flex; align-items: center; min-width: 54px; min-height: 22px;
+      border: 1px solid #3a3d44; border-bottom-left-radius: 5px;
+      background: #303238;
+    }
+    .surgeon-message.typing .surgeon-dots { display: flex; align-items: center; }
+    .surgeon-message.typing .surgeon-dots span {
+      width: 6px; height: 6px; margin: 0 2px; background: #aeb2ba;
+    }
+    .surgeon-message.error {
+      align-self: flex-start; border: 1px solid #5a2626;
+      background: #2a1618; color: #ff9a9a;
+    }
+    html[data-rapp-stream="smooth"] .surgeon-message {
+      transition: max-width 240ms ease;
+    }
+    html[data-rapp-stream="smooth"] #surgeon-log {
+      padding-bottom: var(--rapp-surgeon-composer-clearance, 0px);
+      scroll-padding-bottom: var(--rapp-surgeon-composer-clearance, 0px);
+    }
+    html[data-rapp-stream="smooth"] .surgeon-message.assistant.stream-arriving {
+      position: relative;
+      animation: surgeon-smooth-arrive 160ms ease-out both;
+    }
+    html[data-rapp-stream="smooth"] .surgeon-message.assistant.stream-arriving::after {
+      display: inline-block; width: 2px; height: 1em; margin-left: 3px;
+      background: currentColor; content: ""; vertical-align: -.14em;
+      animation: surgeon-stream-caret 1s steps(1) infinite;
+    }
+    html[data-rapp-stream="smooth"] .surgeon-thinking .surgeon-dots span {
+      width: 8px; height: 8px; opacity: .25; transform: none !important;
+      animation: surgeon-smooth-pulse 1.4s ease-in-out infinite;
+      animation-delay: 0s;
+    }
+    html[data-rapp-stream="smooth"] .surgeon-thinking .surgeon-dots span:nth-child(2) {
+      animation-delay: .2s;
+    }
+    html[data-rapp-stream="smooth"] .surgeon-thinking .surgeon-dots span:nth-child(3) {
+      animation-delay: .4s;
+    }
+    @keyframes surgeon-smooth-arrive {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes surgeon-stream-caret {
+      0%,49% { opacity: .72; }
+      50%,100% { opacity: 0; }
+    }
+    @keyframes surgeon-smooth-pulse {
+      0%,100% { opacity: .25; }
+      50% { opacity: 1; }
+    }
+    .surgeon-thinking {
+      align-self: flex-start; display: flex; align-items: center; gap: 8px;
+      color: #8b8f98; font-size: 12px;
+    }
+    .surgeon-dots span {
+      display: inline-block; width: 5px; height: 5px; margin: 0 1px;
+      border-radius: 50%; background: #3d7cf0;
+      animation: surgeon-bounce 1.2s infinite;
+    }
+    .surgeon-dots span:nth-child(2) { animation-delay: .18s; }
+    .surgeon-dots span:nth-child(3) { animation-delay: .36s; }
+    @keyframes surgeon-bounce {
+      0%,60%,100% { opacity: .3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-3px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .surgeon-dots span {
+        animation: none; opacity: .65; transform: none;
+      }
+      html[data-rapp-stream="smooth"] .surgeon-message.assistant.stream-arriving,
+      html[data-rapp-stream="smooth"] .surgeon-message.assistant.stream-arriving::after,
+      html[data-rapp-stream="smooth"] .surgeon-thinking .surgeon-dots span {
+        animation: none !important; transform: none !important;
+      }
+      html[data-rapp-stream="smooth"] .surgeon-thinking .surgeon-dots span {
+        opacity: .6;
+      }
+    }
+    .surgeon-tool {
+      align-self: flex-start; width: min(92%, 390px);
+      overflow: hidden; border: 1px solid #282b31; border-radius: 10px;
+      background: #16181c;
+    }
+    .surgeon-tool-head {
+      display: flex; align-items: center; gap: 8px; padding: 8px 11px;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .surgeon-tool-head strong {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .surgeon-tool-status { margin-left: auto; color: #8b8f98; }
+    .surgeon-artifact {
+      align-self: flex-start; width: min(92%, 390px); overflow: hidden;
+      border: 1px solid #2a2d33; border-radius: 10px; background: #0f1013;
+    }
+    .surgeon-artifact img,
+    .surgeon-artifact video { display: block; width: 100%; max-height: 300px; object-fit: contain; }
+    .surgeon-artifact a {
+      display: block; padding: 7px 9px; color: #8fc4ff; font-size: 11px;
+      text-decoration: none;
+    }
+    .surgeon-artifact.link {
+      border-color: #8957e5;
+      background: linear-gradient(135deg,#25163f,#10263f);
+    }
+    .surgeon-artifact.link a {
+      padding: 16px; color: #f0e7ff;
+      font-size: 14px; font-weight: 800;
+    }
+    .surgeon-artifact.link a::before { content: "🚀 "; }
+    .surgeon-composer {
+      padding: 12px 13px calc(12px + env(safe-area-inset-bottom));
+      border-top: 1px solid #26282d; background: #17181b;
+    }
+    .surgeon-box {
+      padding: 4px; border: 1px solid #2c2f35; border-radius: 14px;
+      background: #1c1e23;
+    }
+    .surgeon-box:focus-within { border-color: #3d7cf0; }
+    #surgeon-input {
+      width: 100%; max-height: 150px; resize: none; padding: 9px 11px 4px;
+      border: 0; outline: 0; background: none; color: #e7e8ea;
+      font: 13.5px/1.5 inherit;
+    }
+    .surgeon-bar { display: flex; align-items: center; gap: 8px; padding: 2px 6px 4px; }
+    #surgeon-mode { color: #8b8f98; font-size: 10px; }
+    #surgeon-send {
+      margin-left: auto; padding: 8px 18px; border: 0; border-radius: 9px;
+      background: linear-gradient(180deg,#3d7cf0,#2f66d8); color: #fff;
+      font-weight: 700;
+    }
+    #surgeon-send:disabled { opacity: .55; cursor: default; }
+    .surgeon-hint { margin-top: 7px; color: #5f636b; font-size: 10px; text-align: center; }
+    #ambient-settings {
+      width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+      overflow: auto; padding: 0; border: 1px solid #30363d; border-radius: 14px;
+      background: #161b22; color: #e6edf3; box-shadow: 0 24px 80px rgba(0,0,0,.6);
+    }
+    #ambient-settings::backdrop { background: rgba(1,4,9,.8); backdrop-filter: blur(7px); }
+    .ambient-settings-head {
+      display: flex; align-items: center; gap: 12px; padding: 16px 18px;
+      border-bottom: 1px solid #30363d;
+    }
+    .ambient-settings-head strong { font-size: 15px; }
+    .ambient-settings-head button { margin-left: auto; width: 30px; height: 30px; padding: 0; }
+    .ambient-settings-body { display: grid; gap: 14px; padding: 18px; }
+    .ambient-settings-copy { margin: 0; color: #9da7b3; font-size: 12px; line-height: 1.5; }
+    .ambient-field { display: grid; gap: 6px; color: #c9d1d9; font-size: 12px; font-weight: 700; }
+    .ambient-field input, .ambient-field select {
+      width: 100%; padding: 9px 10px; border: 1px solid #30363d; border-radius: 7px;
+      outline: 0; background: #0d1117; color: #e6edf3; font: 13px inherit;
+    }
+    .ambient-field input:focus, .ambient-field select:focus { border-color: #58a6ff; }
+    .ambient-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .ambient-check {
+      display: flex; align-items: flex-start; gap: 9px; color: #b1bac4;
+      font-size: 12px; line-height: 1.45;
+    }
+    .ambient-check input { margin-top: 2px; }
+    #ambient-settings-status {
+      min-height: 40px; padding: 9px 10px; border: 1px solid #30363d;
+      border-radius: 7px; background: #0d1117; color: #8fc4ff;
+      font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .ambient-settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .ambient-settings-actions .primary { margin-left: auto; }
+    @media (max-width: 850px) {
+      .intro-grid, .tool-grid { grid-template-columns: 1fr; }
+      .intro-tile.wide { grid-column: auto; }
+      .intro-body, .intro-hero { padding-left: 20px; padding-right: 20px; }
+      #explorer { width: 100vw; }
+      #surgeon { width: 100vw; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="splash" data-drive="shell.splash">
+      <div class="tile">
+        <h1>Starting your global Brainstem</h1>
+        <p>This launcher uses the same agents, memories, authentication, and port 7071 as the regular installer.</p>
+        <p id="error" data-drive="shell.error"></p>
+      </div>
+    </div>
+    <iframe
+      id="brainstem"
+      data-drive="shell.brainstem"
+      title="RAPP Brainstem chat"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups"
+    ></iframe>
+  </main>
+  <aside id="explorer" data-drive="shell.explorer" aria-label="Live Brainstem agents Explorer">
+    <header>
+      <span aria-hidden="true">🗂️</span>
+      <span class="explorer-title">
+        <strong>Explorer</strong>
+        <span>live Brainstem workspace</span>
+      </span>
+      <span class="explorer-head-actions">
+        <button id="explorer-refresh" data-drive="shell.explorerRefresh" type="button" title="Refresh agents">↻</button>
+        <button id="explorer-close" data-drive="shell.explorerClose" type="button" title="Hide Explorer">×</button>
+      </span>
+    </header>
+    <div id="agent-tree" data-drive="shell.agentTree" role="tree"></div>
+    <div id="agent-viewer" data-drive="shell.agentViewer">
+      <div id="agent-viewer-tab" data-drive="shell.agentViewerTab">No agent selected</div>
+      <div class="agent-viewer-empty" id="agent-viewer-empty" data-drive="shell.agentViewerEmpty">
+        Select an <code>agent.py</code> file to inspect the exact source the
+        live Brainstem discovers on every chat request.
+      </div>
+      <pre id="agent-source" data-drive="shell.agentSource" hidden></pre>
+    </div>
+    <div id="explorer-status" data-drive="shell.explorerStatus">Waiting for the live agents folder…</div>
+  </aside>
+  <button id="surgeon-tab" data-drive="shell.surgeonOpen" type="button" title="Open GitHub Copilot Agent mode">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+      <path d="M12 2c-2.3 0-3.6.9-4.3 2.1-.5-.1-1-.1-1.5-.1C3.4 4 2 5.6 2 8.2v.3C1 9 .5 9.9.5 11.2v2.1c0 2 1 3.4 2.8 4.2C5.1 18.9 8.2 20 12 20s6.9-1.1 8.7-2.5c1.8-.8 2.8-2.2 2.8-4.2v-2.1c0-1.3-.5-2.2-1.5-2.7v-.3C22 5.6 20.6 4 17.8 4c-.5 0-1 0-1.5.1C15.6 2.9 14.3 2 12 2Z"/>
+    </svg>
+    GitHub Copilot
+  </button>
+  <aside id="surgeon" data-drive="shell.surgeon" aria-label="GitHub Copilot Brain Surgeon">
+    <header>
+      <span class="surgeon-badge">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M12 2c-2.3 0-3.6.9-4.3 2.1-.5-.1-1-.1-1.5-.1C3.4 4 2 5.6 2 8.2v.3C1 9 .5 9.9.5 11.2v2.1c0 2 1 3.4 2.8 4.2C5.1 18.9 8.2 20 12 20s6.9-1.1 8.7-2.5c1.8-.8 2.8-2.2 2.8-4.2v-2.1c0-1.3-.5-2.2-1.5-2.7v-.3C22 5.6 20.6 4 17.8 4c-.5 0-1 0-1.5.1C15.6 2.9 14.3 2 12 2Z"/>
+        </svg>
+      </span>
+      <span class="surgeon-title">
+        <strong>GitHub Copilot</strong>
+        <span>Brain Surgeon · agent mode</span>
+      </span>
+      <span id="surgeon-model" data-drive="shell.surgeonModel">Agent</span>
+      <button class="surgeon-head-btn herd-header-btn" id="surgeon-herd-btn" data-drive="shell.surgeonHerd" type="button"
+        title="Herd view — chat with several Copilots at once">⊞</button>
+      <button class="surgeon-head-btn" id="surgeon-new" data-drive="shell.surgeonReset" type="button"
+        title="Clear and reset Brain Surgeon chat"
+        aria-label="Clear and reset Brain Surgeon chat">↺</button>
+      <button class="surgeon-head-btn" id="surgeon-close" data-drive="shell.surgeonClose" type="button" title="Hide Copilot">×</button>
+    </header>
+    <div id="surgeon-tabs" data-drive="shell.surgeonTabs"></div>
+    <div id="surgeon-log" data-drive="shell.surgeonLog" role="log" aria-live="polite"></div>
+    <div class="surgeon-composer">
+      <div class="surgeon-box">
+        <textarea id="surgeon-input" data-drive="shell.surgeonComposer" rows="2" placeholder="Describe what to build or do…"></textarea>
+        <div class="surgeon-bar">
+          <span id="surgeon-mode" data-drive="shell.surgeonMode">Agent · files, shell, tests, Brainstem</span>
+          <button id="surgeon-send" data-drive="shell.surgeonSend" type="button">Build</button>
+        </div>
+      </div>
+      <div class="surgeon-hint">runs on your GitHub Copilot account · ⌘↵ to send</div>
+    </div>
+  </aside>
+  <dialog id="ambient-settings" aria-labelledby="ambient-settings-title">
+    <div class="ambient-settings-head">
+      <strong id="ambient-settings-title">My location and ambient context</strong>
+      <button id="ambient-settings-close" data-drive="shell.ambientClose" type="button" aria-label="Close settings">×</button>
+    </div>
+    <div class="ambient-settings-body">
+      <p class="ambient-settings-copy">
+        Frontier keeps this context on this device and refreshes it for every completed turn.
+        A user-set location wins; device location is next. Approximate IP location is city-level,
+        opt-in, and off by default. City-level coarsens coordinates to an approximately 50 km cell.
+        Labels and addresses are never sent to a geocoder, so a saved location also needs latitude
+        and longitude.
+      </p>
+      <label class="ambient-field">
+        Location detail
+        <select id="ambient-granularity" data-drive="shell.ambientGranularity">
+          <option value="precise">Precise</option>
+          <option value="city">City-level</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label class="ambient-field">
+        My location label
+        <input id="ambient-location-label" data-drive="shell.ambientLabel" type="text" maxlength="160"
+          placeholder="home or Seattle (coordinates required)">
+      </label>
+      <div class="ambient-coordinates">
+        <label class="ambient-field">
+          Latitude
+          <input id="ambient-location-lat" data-drive="shell.ambientLatitude" type="number" min="-90" max="90" step="any"
+            placeholder="47.6062">
+        </label>
+        <label class="ambient-field">
+          Longitude
+          <input id="ambient-location-lon" data-drive="shell.ambientLongitude" type="number" min="-180" max="180" step="any"
+            placeholder="-122.3321">
+        </label>
+      </div>
+      <label class="ambient-check">
+        <input id="ambient-approximate" data-drive="shell.ambientApproximate" type="checkbox">
+        <span>When device location is unavailable, allow a network lookup of my public IP
+          for a clearly labelled city-level estimate.</span>
+      </label>
+      <div id="ambient-settings-status" role="status" aria-live="polite"></div>
+      <div class="ambient-settings-actions">
+        <button id="ambient-use-device" data-drive="shell.ambientUseDevice" type="button">Use device location</button>
+        <button id="ambient-clear-location" data-drive="shell.ambientClear" type="button">Clear saved location</button>
+        <button class="primary" id="ambient-settings-save" data-drive="shell.ambientSave" type="button">Save</button>
+      </div>
+    </div>
+  </dialog>
+  <section id="intro" data-drive="shell.intro" aria-labelledby="intro-title">
+    <div class="intro-panel">
+      <div class="intro-hero">
+        <div class="eyebrow">Learn AI · teach AI · keep the skill</div>
+        <h1 id="intro-title" data-drive="shell.introTitle">Learn it, teach it back, and take it with you.</h1>
+        <p>Chat is the control surface. GitHub Copilot teaches by doing: it can build and hotload an agent, drive the visible Brainstem, test the result, and explain the loop while you watch. The new skill becomes a portable RAPP capability that can follow you into the right Microsoft platform downstream.</p>
+      </div>
+      <div class="intro-body">
+        <div class="intro-grid">
+          <article class="intro-tile">
+            <h2>What is this for?</h2>
+            <p>Tell Copilot the outcome you need. It helps you learn the pattern, turns that learning into a single-file capability, hotloads it beside the global agents, and proves it through the real Brainstem chat.</p>
+            <p><strong>It is the fastest path from an idea to evidence.</strong> It is not the final production host.</p>
+          </article>
+          <article class="intro-tile">
+            <h2>Who should use it?</h2>
+            <p>Technical sellers, architects, specialists, engineers, partners, and customer builders who can steer a prototype and judge whether it solves the business problem.</p>
+            <p>It is not the default interface for account executives or end users. They consume the validated outcome in the right production experience.</p>
+          </article>
+          <article class="intro-tile">
+            <h2>When should I reach for it?</h2>
+            <ul>
+              <li>A customer asks, "Can AI do this process?"</li>
+              <li>The requirements are still conversational or ambiguous.</li>
+              <li>You need a demo, feasibility proof, or process specification quickly.</li>
+              <li>You want failures to become concrete evidence Copilot can fix.</li>
+              <li>You need portable agent files that teammates can hot-load and improve.</li>
+            </ul>
+          </article>
+          <article class="intro-tile">
+            <h2>When should I not use it?</h2>
+            <ul>
+              <li>Simple employee knowledge or Work IQ tasks already fit Scout.</li>
+              <li>The production design, integrations, governance, and target are already known.</li>
+              <li>You need to put real customer data into an unapproved local prototype.</li>
+              <li>You are treating a local proof as a production-ready solution.</li>
+            </ul>
+          </article>
+          <article class="intro-tile wide">
+            <h2>How the tools fit together</h2>
+            <div class="tool-grid">
+              <div class="tool"><strong>Scout</strong><span>Use for accessible employee workflows, Work IQ, knowledge, and shareable skills when the experience already fits.</span></div>
+              <div class="tool"><strong>GitHub Copilot</strong><span>Use the built-in Brain Surgeon panel as the full builder: create, test, diagnose, repair, and operate agents without leaving this window. VS Code remains optional.</span></div>
+              <div class="tool"><strong>RAPP Brainstem</strong><span>Use as the local proving ground: hot-load capabilities, interview the agent, inspect tool calls, and lock in intent.</span></div>
+              <div class="tool"><strong>Copilot Studio / Foundry</strong><span>Use for governed production delivery, enterprise identity, connectors, telemetry, scale, and customer handoff.</span></div>
+            </div>
+          </article>
+          <article class="intro-tile">
+            <h2>The rapid customer loop</h2>
+            <ol>
+              <li><strong>Frame:</strong> capture the problem, users, inputs, outputs, constraints, and success proof.</li>
+              <li><strong>Delegate:</strong> chat with the Brainstem; let the AI load the smallest useful agent set.</li>
+              <li><strong>Watch:</strong> let the agent operate the real interface with visible cursor, click, and typing feedback.</li>
+              <li><strong>Correct:</strong> tell the built-in Brain Surgeon to inspect the failure, fix it, and retest while you watch.</li>
+              <li><strong>Package:</strong> share the agents, demo, evidence, requirements, and recommended production route.</li>
+            </ol>
+          </article>
+          <article class="intro-tile">
+            <h2>What should come out?</h2>
+            <ul>
+              <li>A working, evidence-backed local prototype.</li>
+              <li>Portable single-file agents that document the process deterministically.</li>
+              <li>Known gaps for data, authentication, connectors, security, and governance.</li>
+              <li>A demo story plus design/SOW-ready requirements.</li>
+              <li>A clear route to Scout, Copilot Studio, Foundry, custom code, or "do not proceed."</li>
+            </ul>
+          </article>
+          <article class="intro-tile wide">
+            <h2>Start with this prompt — or show it instead</h2>
+            <div class="prompt" id="show-mode-interview-prompt" data-drive="shell.showModePrompt">I am working on a rapid customer proof. Interview me until you understand the business problem, users, inputs, expected outputs, constraints, and what would prove success. Then propose the smallest single-file RAPP agent set that can test the idea locally with synthetic or approved data. Build it, run it through Brainstem, show me the evidence, identify production gaps, and recommend whether the final experience belongs in Scout, Copilot Studio, Foundry, or custom code. Do not call the prototype production-ready.</div>
+            <div class="intro-show-mode">
+              <span><strong>Can't describe it? Show it.</strong> Show Mode turns a live recording, a video, screenshots, or a transcript into an agent you test here first, then promote. Preview the click-through — nothing runs live.</span>
+              <button type="button" data-drive="shell.showModeTour" data-show-mode-tour="true">Show Mode click-through</button>
+            </div>
+          </article>
+        </div>
+        <div class="intro-footer">
+          <small>Default posture: builder-operated, local-first, synthetic or approved data, human validation, then governed promotion.</small>
+          <button id="enter" data-drive="shell.enter" class="primary" type="button">Enter Brainstem</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <script src="stream-follow.js"></script>
+  <script src="stream-pacing.js"></script>
+  <script src="chat-look.js"></script>
+  <script src="typing-delivery.js"></script>
+  <script src="renderer.js"></script>
+  <script src="show-mode-tour.js"></script>
+</body>
+</html>

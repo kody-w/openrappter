@@ -1,0 +1,18 @@
+# GitGuardian configuration.
+#
+# Four files carry credential-shaped strings on purpose: they are synthetic
+# fixtures whose entire job is proving that credentials get redacted before they
+# reach a log, an export, or a tool result. Removing them would delete the tests
+# that keep real credentials out of those places.
+#
+# They are scoped here by exact path rather than by pattern, so a real credential
+# appearing anywhere else in the repository is still caught. The same values are
+# annotated in-line for `rapp-keyring` with the reason on every line.
+version: 2
+
+secret:
+  ignored-paths:
+    - beta/tests/log-redaction.test.mjs
+    - beta/tests/update-runner.test.mjs
+    - beta/scripts/data-sloshing-proof.mjs
+    - rapp_brainstem/tests/test_security_hardening.py

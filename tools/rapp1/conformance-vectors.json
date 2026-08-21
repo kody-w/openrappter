@@ -1,0 +1,57 @@
+{
+  "source_commit": "d2cd5abed48d3f52b86bbb975ac3558286d1db41",
+  "canonical": [
+    {
+      "value": {
+        "b": 1,
+        "a": [3, 2],
+        "c": {
+          "y": 1,
+          "x": 2
+        }
+      },
+      "bytes_utf8": "{\"a\":[3,2],\"b\":1,\"c\":{\"x\":2,\"y\":1}}",
+      "particle": "85c13ca5c247067bc4493341d4fd3fc0811ea0cdfc2bd609b10e005a490daa28",
+      "wave": "e67d630bdacad031f11bde4d1db9cce25b9dabc0a39dc2ec17ffe8f9c337eddb",
+      "egg_manifest": "71c605e6538e1fe3933f31c219c8f42577326100f2049af1162c8af926cf57d9"
+    },
+    {
+      "value": {
+        "hello": "world"
+      },
+      "bytes_utf8": "{\"hello\":\"world\"}",
+      "particle": "dccd124a460d7f7a6ab23b15df476f1f65fa19b8979f0ab70c656e55c67beb05",
+      "wave": "a49dfeb9c339550170efbed748af67d9526f01ee97c2811d8ac1821cc46fdcc7",
+      "egg_manifest": "529e21e23b556e7866d9234913dd560cb4c9951583bfc85099bf66283a0f9974"
+    }
+  ],
+  "identity": {
+    "owner": "aibast",
+    "slug": "test-organism",
+    "uuid_anchor": "00000000-0000-4000-8000-000000000001",
+    "rappid": "rappid:@aibast/test-organism:c395d99b32ff1289fcfb0a24f5574849eaa336acc58b9ed05c837ae1d398487d"
+  },
+  "frame": {
+    "kind": "body.pulse",
+    "stream_id": "rappid:@aibast/test-organism:c395d99b32ff1289fcfb0a24f5574849eaa336acc58b9ed05c837ae1d398487d",
+    "seq": 0,
+    "utc": "2026-08-11T00:00:00.000Z",
+    "payload": {
+      "hello": "world"
+    },
+    "prev": null,
+    "prev_wave": null,
+    "sig": null,
+    "payload_hash": "dccd124a460d7f7a6ab23b15df476f1f65fa19b8979f0ab70c656e55c67beb05",
+    "frame_hash": "6b5ddaa1cc0f7ca28d5607a0d758669950fe170cbd978826f12127beeecb04ac"
+  },
+  "rapplication_egg": {
+    "created_utc": "2026-08-11T00:00:00.000Z",
+    "files": {
+      "demo_agent.py": "print('hello')\n",
+      "rappid.json": "{\"rappid\":\"rappid:@aibast/test-organism:c395d99b32ff1289fcfb0a24f5574849eaa336acc58b9ed05c837ae1d398487d\"}"
+    },
+    "sha256": "3de31584ee4ab5894d9517298de6f9bb51fb557a65724580e1c6c8a5e19a9a4a",
+    "size": 872
+  }
+}

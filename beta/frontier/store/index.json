@@ -1,0 +1,123 @@
+{
+  "schema": "rapp-store/1.0",
+  "store": "AIBAST Frontier RAPP Store",
+  "note": "Frontier rapplications \u2014 isolated use-case twins for the Frontier Brainstem. Independent of the industry agent catalog (registry.json).",
+  "schema_version": "1.0",
+  "rapplications": [
+    {
+      "id": "molter",
+      "name": "Molter \u2014 self-growing capabilities",
+      "version": "1.0.0",
+      "summary": "When the Brainstem lacks a capability, it searches the AIBAST catalog for a kindred agent, takes its shape, and molts it through verified generations until it fits \u2014 shedding failed skins with rollback and carrying each lesson forward. On device, headless.",
+      "category": "frontier \u00b7 self-improving",
+      "tags": [
+        "frontier",
+        "capability",
+        "evolution",
+        "self-improving"
+      ],
+      "manifest_name": "@frontier/molter",
+      "singleton_filename": "molter_agent.py",
+      "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/molter/agents/molter_agent.py",
+      "singleton_sha256": "02f92ab5bd3e8ecfc7cf13ca2b7abe376c2acad7cd7ff1c7ba89aec1874ecd81",
+      "singleton_bytes": 43496,
+      "publisher": "AIBAST Frontier",
+      "quality_tier": "frontier",
+      "license": "MIT"
+    },
+    {
+      "id": "toaster",
+      "name": "Toaster \u2014 skill.md \u21c4 agent.py",
+      "version": "1.0.0",
+      "summary": "Losslessly convert between a runnable agent.py and a tradeable, any-AI-readable <name>_skill.md that embeds the agent verbatim. Drop a skill.md on the Frontier to toast + hot-load it; export any agent as a skill; round-trip without losing the deterministic layer.",
+      "category": "frontier \u00b7 interop",
+      "tags": [
+        "frontier",
+        "skill",
+        "agent",
+        "interop",
+        "portable"
+      ],
+      "manifest_name": "@frontier/toaster",
+      "singleton_filename": "toaster_agent.py",
+      "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/toaster/agents/toaster_agent.py",
+      "singleton_sha256": "5d56f5d0359f9c2dba2eda63058119446d28e266752802ebac517c5dfef15f08",
+      "singleton_bytes": 26607,
+      "publisher": "AIBAST Frontier",
+      "quality_tier": "frontier",
+      "license": "MIT"
+    },
+    {
+      "id": "ui-smith",
+      "name": "UI Smith \u2014 UIs on the fly",
+      "version": "1.0.0",
+      "summary": "Derive a fit-for-purpose UI from any agent.py's own schema (no pre-built UI needed), then molt it through verified generations for an isolated twin. Agents stay headless; a UI is summoned on demand.",
+      "category": "frontier \u00b7 ui",
+      "tags": [
+        "frontier",
+        "ui",
+        "generate",
+        "molt"
+      ],
+      "manifest_name": "@frontier/ui-smith",
+      "singleton_filename": "ui_smith_agent.py",
+      "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/ui-smith/agents/ui_smith_agent.py",
+      "singleton_sha256": "438f4d20293ef08539e4a4196a15fdf04b612676797f41bba9e0ca07e17fe13b",
+      "singleton_bytes": 21366,
+      "publisher": "AIBAST Frontier",
+      "quality_tier": "frontier",
+      "license": "MIT"
+    },
+    {
+      "id": "agentic-app-studio",
+      "name": "Agentic App Studio",
+      "version": "1.0.0",
+      "summary": "Build & Manage Agentic Apps workshop, end to end: compose agents from the local Brainstem and public RARs into a Power Apps code app \u2014 test on a local server, then pac-deploy to a connected Power Platform environment.",
+      "category": "frontier \u00b7 power apps",
+      "tags": [
+        "frontier",
+        "power-apps",
+        "code-apps",
+        "workshop"
+      ],
+      "manifest_name": "@frontier/agentic-app-studio",
+      "singleton_filename": "agentic_app_studio_agent.py",
+      "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/agentic-app-studio/agents/agentic_app_studio_agent.py",
+      "singleton_sha256": "8b4c46f4fb364e410e34582a1832f0610e63316586a795eaf10cc0b440cdbe2f",
+      "singleton_bytes": 38761,
+      "publisher": "AIBAST Frontier",
+      "quality_tier": "frontier",
+      "license": "MIT",
+      "preferred_view": "full",
+      "ui_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/agentic-app-studio/index.html",
+      "ui_filename": "index.html",
+      "ui_sha256": "c925a54d099f01d6afdbf2f87a1b460f20b0a18e059369ee9ff444d30b68241a"
+    },
+    {
+      "id": "agent-migration",
+      "name": "Agent Migration Assistant",
+      "version": "1.0.0",
+      "summary": "Move a client's Anthropic/OpenAI agents to RAPP/1 and Copilot Studio \u2014 analyzed and converted entirely on-device.",
+      "category": "frontier \u00b7 migration",
+      "tags": [
+        "frontier",
+        "migration",
+        "copilot-studio",
+        "anthropic",
+        "openai"
+      ],
+      "manifest_name": "@frontier/agent-migration",
+      "singleton_filename": "agent_migration_agent.py",
+      "singleton_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/agent-migration/agents/agent_migration_agent.py",
+      "singleton_sha256": "d8b1ea8b66735a5573553e7a93a9ff7a834cd66014b28aaf100fb9692e43e5e6",
+      "singleton_bytes": 14749,
+      "publisher": "AIBAST Frontier",
+      "quality_tier": "frontier",
+      "license": "MIT",
+      "preferred_view": "full",
+      "ui_url": "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/beta/frontier/rapplications/agent-migration/index.html",
+      "ui_filename": "index.html",
+      "ui_sha256": "cb4416e653b3d0c5cec8866ce8b1373998699de939abdd11d0c376f892286d34"
+    }
+  ]
+}

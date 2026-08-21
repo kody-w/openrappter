@@ -1,0 +1,92 @@
+[
+  {
+    "h": "@shell.explorerRefresh",
+    "name": "Refresh agents",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.explorerClose",
+    "name": "Hide Explorer",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.surgeonHerd",
+    "name": "Herd view — chat with several Copilots at once",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.surgeonReset",
+    "name": "Clear and reset Brain Surgeon chat",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.surgeonClose",
+    "name": "Hide Copilot",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@surgeon[1].tab",
+    "name": "New chat",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.surgeonNewTab",
+    "name": "New Copilot chat (same Brainstem)",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(1)",
+    "name": "Build and test an agent for this customer use case",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(2)",
+    "name": "Inspect this Brainstem and tell me what it can do",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(3)",
+    "name": "Check for beta updates while I watch",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(4)",
+    "name": "Record a short autopilot demo of the current workflow",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(5)",
+    "name": "Show Mode: click-through preview",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(6)",
+    "name": "Deploy loaded agents to Copilot Studio",
+    "role": "button",
+    "state": "enabled"
+  },
+  {
+    "h": "@shell.surgeonComposer",
+    "name": "",
+    "role": "textbox",
+    "state": "empty"
+  },
+  {
+    "h": "@shell.surgeonSend",
+    "name": "Build",
+    "role": "button",
+    "state": "enabled"
+  }
+]

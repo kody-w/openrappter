@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Migration Assistant</title>
+<style>
+  :root{--ground:#0d1117;--panel:#161b22;--raised:#1c1e23;--border:#26282d;--t1:#e6edf3;--t2:#c8c9cc;--t3:#8b8f98;
+    --purple:#b79cff;--purple-bd:#2f2650;--green:#5cc271;--blue:#58a6ff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--ground);color:var(--t1);font:13px Inter,ui-sans-serif,system-ui,sans-serif;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:100vh}
+  h1{font-size:15px;display:flex;align-items:center;gap:8px}
+  h1 .badge{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--purple);border:1px solid var(--purple-bd);background:#1b1730;border-radius:6px;padding:2px 7px}
+  p.lede{color:var(--t3);font-size:12px}
+  textarea{width:100%;min-height:150px;background:var(--raised);border:1px solid #30363d;border-radius:9px;color:var(--t1);
+    font:11.5px ui-monospace,Menlo,monospace;padding:10px;resize:vertical}
+  .row{display:flex;gap:8px}
+  button{font:600 12px Inter,system-ui,sans-serif;padding:8px 14px;border-radius:8px;border:1px solid #2b4a7a;background:#0f1a2b;color:var(--blue);cursor:pointer}
+  button:hover{border-color:var(--blue)}
+  button.go{border-color:#274a30;background:#0f1f14;color:var(--green)}
+  #status{font-size:12px;color:var(--t3);min-height:16px}
+  #out{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:12px;flex:1;overflow:auto;font-size:12px;white-space:pre-wrap;color:var(--t2)}
+  .law{font-size:10.5px;color:var(--t3);border-top:1px dashed var(--border);padding-top:8px}
+</style>
+</head>
+<body>
+  <h1>Agent Migration Assistant <span class="badge">Frontier rapplication</span></h1>
+  <p class="lede">Paste the client's Anthropic or OpenAI agent definitions (tool schemas, system prompts, assistants export). They are analyzed and converted <b>on this device</b> into RAPP/1 agent.py scaffolds plus a Copilot Studio handoff pack. Nothing is uploaded.</p>
+  <textarea id="payload" placeholder='{"system":"You are the returns agent...","tools":[{"name":"lookup_order","description":"...","input_schema":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"]}}]}'></textarea>
+  <div class="row">
+    <button id="analyze">Analyze</button>
+    <button id="convert" class="go">Convert → RAPP/1 + Copilot Studio</button>
+  </div>
+  <div id="status"></div>
+  <div id="out">Results appear here. Files land in ~/.rapp/agent-migration/out/ on this machine.</div>
+  <div class="law">On-device only · client IP never leaves this machine · backend wiring is named for a human, never guessed.</div>
+<script>
+const $=id=>document.getElementById(id);
+async function run(action){
+  const payload=$("payload").value.trim();
+  $("status").textContent="Working (local twin /chat)…";
+  try{
+    const r=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({user_input:"Call the AgentMigration tool with action="+action+
+        (payload?" and payload_json set EXACTLY to the JSON between <payload> tags. <payload>"+payload+"</payload>":"")+
+        " Repeat the tool's answer verbatim.",user_guid:"agent-migration-ui"})});
+    const d=await r.json();
+    $("out").textContent=d.response||d.error||JSON.stringify(d);
+    $("status").textContent=r.ok?"Done.":"The twin Brainstem needs a sign-in for chat-driven runs.";
+  }catch(e){ $("status").textContent="Chat unavailable ("+e.message+") — showing last on-device state."; }
+  poll();
+}
+async function poll(){
+  try{
+    const t=await fetch("/agents/export/migration_live_state.py",{cache:"no-store"}).then(r=>r.ok?r.text():null);
+    if(!t)return; const nl=t.indexOf("\n"); const s=JSON.parse(nl>=0?t.slice(nl+1):t);
+    if(s.phase==="converted"&&s.written) $("out").textContent="Last conversion ("+s.at+", "+s.kind+"):\n"+
+      s.written.map(w=>"• "+w.agent+" → "+w.rapp.split("/").pop()+" + "+w.copilot_studio.split("/").pop()+
+        (w.needs_human&&w.needs_human.length?"\n   needs a human: "+w.needs_human.join("; "):"")).join("\n");
+    else if(s.phase==="analyzed"&&s.agents) $("out").textContent="Last analysis ("+s.at+", "+s.kind+"):\n"+
+      s.agents.map(a=>"• "+a.name+(a.notes&&a.notes.length?" — "+a.notes.join("; "):"")).join("\n");
+  }catch(e){}
+}
+$("analyze").addEventListener("click",()=>run("analyze"));
+$("convert").addEventListener("click",()=>run("convert"));
+setInterval(poll,3000); poll();
+</script>
+</body>
+</html>

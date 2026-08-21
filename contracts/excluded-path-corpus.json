@@ -10,6 +10,11 @@
     "maxTextBytes": 256
   },
 
+  "_depth_guard_comment": "Deciding whether a value hides an excluded file locator means walking it. The walk stops at maxTraversalDepth and then fails closed, treating anything deeper as if it did hide one. That guard is only meaningful for containers: a value that is not a mapping or a sequence has no keys, so whether it hides a locator is answerable exactly, at any depth, without walking anything. Deciding non-containers before the depth guard rather than after is what keeps the answer from depending on the type of the leaf -- otherwise two structures of identical shape are classified differently because one ends in a string and the other in a number.",
+  "depth_guard": {
+    "maxTraversalDepth": 16,
+    "nonContainerIsNeverAContainerOfLocators": true
+  },
   "must_exclude": [
     "/Users/k/.env",
     "/Users/k/.env.production",

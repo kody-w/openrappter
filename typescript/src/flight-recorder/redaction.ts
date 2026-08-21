@@ -418,14 +418,13 @@ function containsExcludedFileLocator(
   ancestors = new WeakSet<object>(),
   depth = 0,
 ): boolean {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    depth > 16 ||
-    ancestors.has(value)
-  ) {
-    return depth > 16;
-  }
+  // The depth guard fails closed, so it must only be reached by values that
+  // actually need walking. A leaf has no keys: whether it hides a locator is
+  // answerable exactly, at any depth, and answering it here is what keeps the
+  // verdict from depending on the type of the leaf.
+  if (value === null || typeof value !== "object") return false;
+  if (depth > 16) return true;
+  if (ancestors.has(value)) return false;
 
   ancestors.add(value);
   try {

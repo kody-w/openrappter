@@ -128,3 +128,113 @@ def test_the_allowlist_itself_is_what_both_runtimes_implement():
     assert set(SAFE["numeric"]) == {"size", "length"}
     assert set(SAFE["text"]) == {"language", "mime", "mimetype", "extension"}
     assert SAFE["maxTextBytes"] == MAX_FILE_METADATA_FIELD_BYTES
+
+
+# ---------------------------------------------------------------------------
+# Deeply nested data that holds no excluded path anywhere.
+#
+# Classifying a value as "hides an excluded file locator" requires walking it,
+# and the walk gives up past a depth budget and fails closed. That guard is
+# only meaningful for containers. A leaf has no keys, so the answer is exact
+# at any depth -- and if the guard is consulted before that is noticed, two
+# structures of identical shape get classified differently purely because one
+# ends in a string and the other ends in a number.
+# ---------------------------------------------------------------------------
+
+DEPTH = _CASES["depth_guard"]
+LEAVES = {"string": "leaf", "number": 42, "boolean": True, "null": None}
+
+
+def _chain(depth, leaf):
+    node = leaf
+    for _ in range(depth):
+        node = {"n": node}
+    return node
+
+
+def _nest(node):
+    """How many levels survive, and what sits at the bottom."""
+    levels = 0
+    while isinstance(node, dict) and list(node.keys()) == ["n"]:
+        node = node["n"]
+        levels += 1
+    while isinstance(node, list) and len(node) == 1:
+        node = node[0]
+        levels += 1
+    return levels, node
+
+
+def test_the_depth_guard_is_only_consulted_for_containers():
+    assert DEPTH["maxTraversalDepth"] == 16
+    assert DEPTH["nonContainerIsNeverAContainerOfLocators"] is True
+
+
+@pytest.mark.parametrize("name,leaf", sorted(LEAVES.items()))
+def test_the_leaf_type_does_not_decide_whether_deep_data_survives(name, leaf):
+    """Same shape, same depth, different leaf -- must be treated the same."""
+    depth = DEPTH["maxTraversalDepth"] + 1
+    reference = sanitize_flight_metadata({"deep": _chain(depth, "leaf")})
+    recorded = sanitize_flight_metadata({"deep": _chain(depth, leaf)})
+    assert _nest(recorded["deep"])[0] == _nest(reference["deep"])[0]
+
+
+@pytest.mark.parametrize("name,leaf", sorted(LEAVES.items()))
+def test_a_chain_within_the_depth_budget_survives_whatever_it_ends_in(
+    name, leaf
+):
+    depth = DEPTH["maxTraversalDepth"]
+    recorded = sanitize_flight_metadata({"deep": _chain(depth, leaf)})
+    levels, bottom = _nest(recorded["deep"])
+    assert levels == depth
+    assert bottom == leaf
+
+
+@pytest.mark.parametrize("name,leaf", sorted(LEAVES.items()))
+def test_a_nested_array_within_the_budget_is_not_mistaken_for_a_path(
+    name, leaf
+):
+    node = leaf
+    for _ in range(DEPTH["maxTraversalDepth"]):
+        node = [node]
+    recorded = sanitize_flight_metadata({"top": node})
+    assert recorded["top"] != EXCLUDED_PATH
+    levels, bottom = _nest(recorded["top"])
+    assert levels == DEPTH["maxTraversalDepth"]
+    assert bottom == leaf
+
+
+@pytest.mark.parametrize("name,leaf", sorted(LEAVES.items()))
+def test_shallow_ordinary_data_never_grows_an_excluded_path_marker(name, leaf):
+    recorded = sanitize_flight_metadata({"deep": _chain(8, leaf)})
+    assert EXCLUDED_PATH not in json.dumps(recorded)
+
+
+@pytest.mark.parametrize("depth", [1, 5, 16, 17, 20])
+def test_a_real_excluded_path_is_still_caught_at_any_depth(depth):
+    """The guard must keep working -- this is what the depth budget protects."""
+    node = {"path": EXCLUDED_FILE, "content": "TOPSECRET"}
+    for _ in range(depth):
+        node = {"n": node}
+    recorded = sanitize_flight_metadata({"wrap": node, "sib": OPAQUE_VALUE})
+    assert "TOPSECRET" not in json.dumps(recorded)
+    assert recorded["sib"] == EXCLUDED_PATH
+
+
+@pytest.mark.parametrize("name,leaf", sorted(LEAVES.items()))
+def test_one_level_past_the_budget_the_walk_gives_up(name, leaf):
+    """Pins the far edge of the budget, which is what makes the number real.
+
+    Beyond it the recorder cannot prove the data is clean, so it fails closed
+    and replaces it -- the deliberate cost of a bounded walk.
+    """
+    depth = DEPTH["maxTraversalDepth"] + 1
+    recorded = sanitize_flight_metadata({"deep": _chain(depth, leaf)})
+    assert recorded["deep"] == EXCLUDED_PATH
+
+
+def test_a_cycle_is_not_mistaken_for_a_hidden_path():
+    """A value already being walked cannot introduce a locator it did not have."""
+    node = {"x": 1}
+    node["self"] = node
+    recorded = sanitize_flight_metadata({"top": node})
+    assert recorded["top"]["x"] == 1

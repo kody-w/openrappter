@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Deciding whether a recorded value hides a locator for an excluded file means
+  walking it, and the walk gives up past 16 levels and fails closed. Both
+  runtimes consulted that guard for values that never needed walking, so the
+  verdict on a leaf depended on its type and on how deep it sat. Two structures
+  of identical shape were classified differently because one ended in a string
+  and the other in a number: a 16-deep chain ending in `42` was replaced with
+  `[excluded-path]` while the same chain ending in `"leaf"` survived intact.
+  The runtimes disagreed about which, because Python short-circuited `None` and
+  `str` before the depth check while TypeScript short-circuited nothing --
+  TypeScript discarded an entire 16-deep array that Python kept, and at 17
+  levels they swapped. Both now answer for non-containers before consulting the
+  guard, which is exact: a leaf has no keys, so it can never hide a locator at
+  any depth. Detection of real excluded paths is unchanged, and the change can
+  only remove data from the log, never add it. Measured by running 231 nested
+  shapes through both sanitizers and diffing: 20 divergences before, 0 after.
+  A separate 252-shape sweep of the whole redaction surface -- secret-shaped
+  keys and values, unicode, truncation boundaries, embedded JSON, payload
+  limits and error summaries -- found no other divergence.
+
 - The two runtimes disagreed about which file metadata may ride along next to
   an excluded credential path. When a recorded object carries a locator for an
   excluded file, every sibling field is replaced with `[excluded-path]` except a

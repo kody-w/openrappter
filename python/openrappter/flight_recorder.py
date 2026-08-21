@@ -1436,10 +1436,11 @@ def _contains_excluded_file_locator(
     ancestors: Optional[set[int]] = None,
     depth: int = 0,
 ) -> bool:
-    if (
-        value is None
-        or isinstance(value, (str, bytes, bytearray, memoryview))
-    ):
+    # The depth guard fails closed, so it must only be reached by values that
+    # actually need walking. A leaf has no keys: whether it hides a locator is
+    # answerable exactly, at any depth, and answering it here is what keeps the
+    # verdict from depending on the type of the leaf.
+    if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
         return False
     if depth > 16:
         return True

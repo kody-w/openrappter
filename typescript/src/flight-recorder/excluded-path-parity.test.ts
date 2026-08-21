@@ -30,6 +30,10 @@ const cases = JSON.parse(readFileSync(CORPUS, 'utf8')) as {
     text: string[];
     maxTextBytes: number;
   };
+  depth_guard: {
+    maxTraversalDepth: number;
+    nonContainerIsNeverAContainerOfLocators: boolean;
+  };
 };
 
 /**
@@ -135,5 +139,131 @@ describe('the allowlist itself', () => {
       'mimetype',
     ]);
     expect(SAFE.maxTextBytes).toBe(256);
+  });
+});
+
+/**
+ * Deeply nested data that holds no excluded path anywhere.
+ *
+ * Classifying a value as "hides an excluded file locator" requires walking it,
+ * and the walk gives up past a depth budget and fails closed. That guard is
+ * only meaningful for containers: a leaf has no keys, so the answer is exact
+ * at any depth. If the guard is consulted before that is noticed, two
+ * structures of identical shape are classified differently purely because one
+ * ends in a string and the other ends in a number.
+ */
+describe('deep nesting with no excluded path in it', () => {
+  const DEPTH = cases.depth_guard;
+  const LEAVES: Array<[string, unknown]> = [
+    ['boolean', true],
+    ['null', null],
+    ['number', 42],
+    ['string', 'leaf'],
+  ];
+
+  const chain = (depth: number, leaf: unknown): unknown => {
+    let node: unknown = leaf;
+    for (let i = 0; i < depth; i += 1) node = { n: node };
+    return node;
+  };
+
+  /** How many levels survive, and what sits at the bottom. */
+  const nest = (node: unknown): [number, unknown] => {
+    let levels = 0;
+    for (;;) {
+      if (
+        node !== null &&
+        typeof node === 'object' &&
+        !Array.isArray(node) &&
+        Object.keys(node as object).length === 1 &&
+        Object.keys(node as object)[0] === 'n'
+      ) {
+        node = (node as { n: unknown }).n;
+      } else if (Array.isArray(node) && node.length === 1) {
+        node = node[0];
+      } else {
+        return [levels, node];
+      }
+      levels += 1;
+    }
+  };
+
+  it('consults the depth guard only for containers', () => {
+    expect(DEPTH.maxTraversalDepth).toBe(16);
+    expect(DEPTH.nonContainerIsNeverAContainerOfLocators).toBe(true);
+  });
+
+  describe.each(LEAVES)('ending in a %s', (_name, leaf) => {
+    it('is not decided by the leaf type', () => {
+      const depth = DEPTH.maxTraversalDepth + 1;
+      const reference = sanitizeFlightMetadata({ deep: chain(depth, 'leaf') });
+      const recorded = sanitizeFlightMetadata({ deep: chain(depth, leaf) });
+      expect(nest(recorded.deep)[0]).toBe(nest(reference.deep)[0]);
+    });
+
+    it('survives within the depth budget', () => {
+      const depth = DEPTH.maxTraversalDepth;
+      const recorded = sanitizeFlightMetadata({ deep: chain(depth, leaf) });
+      expect(nest(recorded.deep)).toEqual([depth, leaf]);
+    });
+
+    it('is not mistaken for a path when nested in arrays', () => {
+      let node: unknown = leaf;
+      for (let i = 0; i < DEPTH.maxTraversalDepth; i += 1) node = [node];
+      const recorded = sanitizeFlightMetadata({ top: node });
+      expect(recorded.top).not.toBe(EXCLUDED);
+      expect(nest(recorded.top)).toEqual([DEPTH.maxTraversalDepth, leaf]);
+    });
+
+    it('never grows an excluded-path marker when shallow', () => {
+      const recorded = sanitizeFlightMetadata({ deep: chain(8, leaf) });
+      expect(JSON.stringify(recorded)).not.toContain(EXCLUDED);
+    });
+  });
+
+  // The guard must keep working: this is what the depth budget protects.
+  it.each([1, 5, 16, 17, 20])(
+    'still catches a real excluded path nested %i deep',
+    (depth) => {
+      let node: unknown = {
+        path: cases.must_exclude[0],
+        content: 'TOPSECRET',
+      };
+      for (let i = 0; i < depth; i += 1) node = { n: node };
+      const recorded = sanitizeFlightMetadata({
+        wrap: node,
+        sib: OPAQUE_VALUE,
+      });
+      expect(JSON.stringify(recorded)).not.toContain('TOPSECRET');
+      expect(recorded.sib).toBe(EXCLUDED);
+    },
+  );
+});
+
+describe('the edges of the depth budget', () => {
+  const DEPTH = cases.depth_guard;
+
+  /**
+   * Pins the far edge of the budget, which is what makes the number real.
+   * Beyond it the recorder cannot prove the data is clean, so it fails closed
+   * and replaces it -- the deliberate cost of a bounded walk.
+   */
+  it.each([
+    ['boolean', true],
+    ['null', null],
+    ['number', 42],
+    ['string', 'leaf'],
+  ])('gives up one level past the budget ending in a %s', (_name, leaf) => {
+    let node: unknown = leaf;
+    for (let i = 0; i < DEPTH.maxTraversalDepth + 1; i += 1) node = { n: node };
+    expect(sanitizeFlightMetadata({ deep: node }).deep).toBe(EXCLUDED);
+  });
+
+  // A value already being walked cannot introduce a locator it did not have.
+  it('does not mistake a cycle for a hidden path', () => {
+    const node: Record<string, unknown> = { x: 1 };
+    node.self = node;
+    const recorded = sanitizeFlightMetadata({ top: node });
+    expect((recorded.top as Record<string, unknown>).x).toBe(1);
   });
 });

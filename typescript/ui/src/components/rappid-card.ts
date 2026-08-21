@@ -231,7 +231,7 @@ export class OpenRappterRappidCard extends LitElement {
             <p>
               Exact eleven-key <code>body.debug-card</code> /
               <code>body.calling-card</code> verification against the vendored
-              <code>rapp-1</code> commit <code>392f850</code> deck.
+              <code>rapp-1</code> commit <code>4751cd8</code> deck.
             </p>
           </div>
           <div>

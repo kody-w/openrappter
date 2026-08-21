@@ -1,4 +1,5 @@
 import {
+  createHash,
   createPublicKey,
   verify as cryptoVerify,
 } from 'node:crypto';
@@ -6,7 +7,6 @@ import { isIP } from 'node:net';
 
 import {
   rappCanonicalJson,
-  rappH,
   rappHb,
 } from '../rappids/canonical.js';
 import {
@@ -69,11 +69,24 @@ const FORBIDDEN_KEYS = new Set([
 let materialScannersEnabled = true;
 
 export function canonical(value: unknown): string {
-  return rappCanonicalJson(value as JsonValue);
+  try {
+    return rappCanonicalJson(value as JsonValue);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('depth 64')) {
+      throw new TypeError('canonical nesting depth exceeds 64');
+    }
+    if (message.includes('1 MiB')) {
+      throw new TypeError('canonical form exceeds 1048576 bytes');
+    }
+    throw error;
+  }
 }
 
 export function H(space: string, value: unknown): string {
-  return rappH(space, value as JsonValue);
+  return createHash('sha256')
+    .update(`${space}\n${canonical(value)}`, 'utf8')
+    .digest('hex');
 }
 
 export function Hb(space: string, value: Uint8Array): string {
@@ -436,7 +449,7 @@ export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
         /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(label))
     );
   if (rawNumericAlias && isIP(rawAuthority) === 0) {
-    throw new Error('legacy numeric IP host aliases are forbidden');
+    throw new Error('noncanonical numeric-looking HTTPS host is forbidden');
   }
   let parsed: URL;
   try {
@@ -464,7 +477,7 @@ export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
         /^(?:0x[0-9a-f]+|[0-9]+)$/i.test(label))
     );
   if (numericAlias && isIP(host) === 0) {
-    throw new Error('legacy numeric IP host aliases are forbidden');
+    throw new Error('noncanonical numeric-looking HTTPS host is forbidden');
   }
   if (host !== host.toLowerCase()) throw new Error('HTTPS host must be lowercase');
   const ipVersion = isIP(host);

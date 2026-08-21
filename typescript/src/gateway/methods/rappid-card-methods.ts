@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import {
   RAPPID_CARD_FIXTURE_NAMES,
+  PROVENANCE_COMMIT,
   buildRappidCardFixture,
   listRappidCardFixtures,
   simulateRappidCardFixture,
@@ -73,7 +74,7 @@ export function registerRappidCardMethods(
         qr_svg: await renderQr(vector.link),
         frame: vector.frame,
         expected: vector.expected,
-        provenance: 'rapp-1 commit 392f850',
+        provenance: `rapp-1 commit ${PROVENANCE_COMMIT}`,
       };
     },
     auth,
@@ -101,7 +102,7 @@ export function registerRappidCardMethods(
           frame: vector.frame,
           expected: vector.expected,
           verification: verdict,
-          provenance: 'rapp-1 commit 392f850',
+          provenance: `rapp-1 commit ${PROVENANCE_COMMIT}`,
         };
       } finally {
         await Promise.all(

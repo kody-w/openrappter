@@ -24,18 +24,22 @@ import uuid
 import zipfile
 
 SPEC = "rapp/1"
-_HEX64 = re.compile(r"^[0-9a-f]{64}$")
-_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
-_LCLABEL = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_RAPPID = re.compile(r"^rappid:@([a-z0-9]+(?:-[a-z0-9]+)*)/([a-z0-9]+(?:-[a-z0-9]+)*):([0-9a-f]{64})$")
+CANONICAL_MAX_DEPTH = 64
+CANONICAL_MAX_BYTES = 1 << 20
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
+_LCLABEL = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_RAPPID = re.compile(
+    r"rappid:@([a-z0-9]+(?:-[a-z0-9]+)*)/"
+    r"([a-z0-9]+(?:-[a-z0-9]+)*):([0-9a-f]{64})")
+_KIND = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*")
 
 FRAME_KEYS = {"spec", "kind", "stream_id", "seq", "utc", "payload",
               "payload_hash", "frame_hash", "prev", "prev_wave", "sig"}
 
 
 # ---------- §4 canonicalization ----------
-def canonical(v):
-    """RFC 8785 JCS over the exact-value domain (no floats). Returns UTF-8 str."""
+def _canonical(v, depth):
     if v is None or isinstance(v, bool):
         return json.dumps(v)
     if isinstance(v, int):
@@ -45,13 +49,40 @@ def canonical(v):
     if isinstance(v, str):
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, list):
-        return "[" + ",".join(canonical(x) for x in v) + "]"
+        if depth > CANONICAL_MAX_DEPTH:
+            raise ValueError(f"canonical nesting depth exceeds {CANONICAL_MAX_DEPTH}")
+        return "[" + ",".join(_canonical(x, depth + 1) for x in v) + "]"
     if isinstance(v, dict):
+        if depth > CANONICAL_MAX_DEPTH:
+            raise ValueError(f"canonical nesting depth exceeds {CANONICAL_MAX_DEPTH}")
+        if not all(isinstance(key, str) for key in v):
+            raise ValueError("I-JSON object keys must be strings")
         keys = sorted(v.keys())
-        if len(keys) != len(set(keys)):
-            raise ValueError("duplicate keys")
-        return "{" + ",".join(json.dumps(k, ensure_ascii=False) + ":" + canonical(v[k]) for k in keys) + "}"
+        return (
+            "{"
+            + ",".join(
+                json.dumps(key, ensure_ascii=False) + ":" + _canonical(v[key], depth + 1)
+                for key in keys
+            )
+            + "}"
+        )
     raise ValueError(f"non-I-JSON value: {type(v)}")
+
+
+def canonical(v):
+    """RFC 8785 JCS over the exact-value domain, bounded by RAPP §4."""
+    try:
+        rendered = _canonical(v, 1)
+        encoded = rendered.encode("utf-8")
+    except RecursionError as ex:
+        raise ValueError(
+            f"canonical nesting depth exceeds {CANONICAL_MAX_DEPTH}") from ex
+    except UnicodeEncodeError as ex:
+        raise ValueError("canonical value contains an unpaired surrogate") from ex
+    if len(encoded) > CANONICAL_MAX_BYTES:
+        raise ValueError(
+            f"canonical form exceeds {CANONICAL_MAX_BYTES} bytes")
+    return rendered
 
 
 # ---------- §5 domain-separated content addressing ----------
@@ -72,7 +103,7 @@ def mint_rappid(owner, slug, spki_der=None):
     return f"rappid:@{owner}/{slug}:{tail}"
 
 def rappid_valid(s):
-    return isinstance(s, str) and bool(_RAPPID.match(s))
+    return isinstance(s, str) and bool(_RAPPID.fullmatch(s))
 
 
 # ---------- §7 the frame ----------
@@ -98,31 +129,40 @@ def verify_frame(frame, head=None, stream_id_of_record=None):
         return False, "1", f"key set != 11 ({sorted(frame.keys())})"
     if frame["spec"] != SPEC:
         return False, "1", "spec != rapp/1"
-    if not (isinstance(frame["kind"], str) and re.match(r"^[a-z0-9]+(-[a-z0-9]+)*\.[a-z0-9]+(-[a-z0-9]+)*$", frame["kind"])):
+    if not (isinstance(frame["kind"], str) and _KIND.fullmatch(frame["kind"])):
         return False, "1", "kind grammar"
     if not isinstance(frame["stream_id"], str):
         return False, "1", "stream_id type"
     if not (isinstance(frame["seq"], int) and not isinstance(frame["seq"], bool) and 0 <= frame["seq"] <= 2**53 - 1):
         return False, "1", "seq not uint53"
-    if not (isinstance(frame["utc"], str) and _UTC.match(frame["utc"])):
+    if not (isinstance(frame["utc"], str) and _UTC.fullmatch(frame["utc"])):
         return False, "1", "utc not fixed form"
     if not isinstance(frame["payload"], dict):
         return False, "1", "payload not object"
     for k in ("payload_hash", "frame_hash"):
-        if not (isinstance(frame[k], str) and _HEX64.match(frame[k])):
+        if not (isinstance(frame[k], str) and _HEX64.fullmatch(frame[k])):
             return False, "1", f"{k} not 64hex"
     for k in ("prev", "prev_wave"):
-        if not (frame[k] is None or (isinstance(frame[k], str) and _HEX64.match(frame[k]))):
+        if not (frame[k] is None or (
+                isinstance(frame[k], str) and _HEX64.fullmatch(frame[k]))):
             return False, "1", f"{k} not null|64hex"
     # 1a stream binding
     if stream_id_of_record is not None and frame["stream_id"] != stream_id_of_record:
         return False, "1a", "stream_id mismatch (cross-stream replay)"
     # 2 particle
-    if frame["payload_hash"] != H("rapp/1:particle", frame["payload"]):
+    try:
+        particle = H("rapp/1:particle", frame["payload"])
+    except (TypeError, ValueError, RecursionError) as ex:
+        return False, "2", f"payload canonicalization failed: {ex}"
+    if frame["payload_hash"] != particle:
         return False, "2", "payload_hash mismatch"
     # 3 wave
     pre = {k: frame[k] for k in frame if k not in ("frame_hash", "sig")}
-    if frame["frame_hash"] != H("rapp/1:wave", pre):
+    try:
+        wave = H("rapp/1:wave", pre)
+    except (TypeError, ValueError, RecursionError) as ex:
+        return False, "3", f"frame canonicalization failed: {ex}"
+    if frame["frame_hash"] != wave:
         return False, "3", "frame_hash mismatch"
     # 4 chain
     if head is None:
@@ -178,10 +218,13 @@ MEDIA_SPACE = "rapp/1:egg"
 #: whose parent stream is not in hand. Unresolved is never "clean" (§13.1 staleness rule).
 UNRESOLVED_PARENT = "parent lineage unresolved"
 
-_MEDIA_TYPE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$")
-_MEMORY_STREAM = re.compile(r"^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*"
-                            r":[0-9a-f]{64}:[a-z0-9]+(?:-[a-z0-9]+)*$")
-_SWARM_STREAM = re.compile(r"^net:[a-z0-9]+(?:-[a-z0-9]+)*$")
+_MEDIA_TYPE = re.compile(
+    r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/"
+    r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}")
+_MEMORY_STREAM = re.compile(
+    r"rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*"
+    r":[0-9a-f]{64}:[a-z0-9]+(?:-[a-z0-9]+)*")
+_SWARM_STREAM = re.compile(r"net:[a-z0-9]+(?:-[a-z0-9]+)*")
 
 _MEDIA_REF_KEYS = {"space", "hash", "media_type", "bytes"}
 _STAGE_KEYS = {"name", "ordinal"}
@@ -214,11 +257,11 @@ def _uint53(v):
 
 
 def _hex64(v):
-    return isinstance(v, str) and bool(_HEX64.match(v))
+    return isinstance(v, str) and bool(_HEX64.fullmatch(v))
 
 
 def _lclabel(v):
-    return isinstance(v, str) and bool(_LCLABEL.match(v))
+    return isinstance(v, str) and bool(_LCLABEL.fullmatch(v))
 
 
 def stream_family(stream_id):
@@ -227,9 +270,9 @@ def stream_family(stream_id):
         return None
     if rappid_valid(stream_id):
         return "body"
-    if _MEMORY_STREAM.match(stream_id):
+    if _MEMORY_STREAM.fullmatch(stream_id):
         return "memory"
-    if _SWARM_STREAM.match(stream_id):
+    if _SWARM_STREAM.fullmatch(stream_id):
         return "swarm"
     return None
 
@@ -241,7 +284,7 @@ def media_ref(octets, media_type):
     dimension's media resolves out of any store keyed by (`rapp/1:egg`, hash)."""
     if not isinstance(octets, (bytes, bytearray)):
         raise ValueError("media octets must be bytes — media never rides in frame JSON")
-    if not (isinstance(media_type, str) and _MEDIA_TYPE.match(media_type)):
+    if not (isinstance(media_type, str) and _MEDIA_TYPE.fullmatch(media_type)):
         raise ValueError(f"media_type not a lowercase type/subtype: {media_type!r}")
     return {"space": MEDIA_SPACE, "hash": Hb(MEDIA_SPACE, bytes(octets)),
             "media_type": media_type, "bytes": len(octets)}
@@ -523,7 +566,8 @@ def _bad_media(media):
             return f"media[{role}].space must be {MEDIA_SPACE!r} (§5: no cross-space deref)"
         if not _hex64(ref["hash"]):
             return f"media[{role}].hash not 64hex"
-        if not (isinstance(ref["media_type"], str) and _MEDIA_TYPE.match(ref["media_type"])):
+        if not (isinstance(ref["media_type"], str)
+                and _MEDIA_TYPE.fullmatch(ref["media_type"])):
             return f"media[{role}].media_type not a lowercase type/subtype"
         if not _uint53(ref["bytes"]):
             return f"media[{role}].bytes not uint53"
@@ -916,10 +960,11 @@ CARD_VERIFY_STEPS = (
     "continuity",
 )
 
-_CARD_PROFILE_TOKEN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*/[1-9][0-9]*$")
-_CARD_NONCE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
-_CARD_CONNECTION = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
-_CARD_HOST_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_CARD_PROFILE_TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/[1-9][0-9]*")
+_CARD_NONCE = re.compile(r"[A-Za-z0-9_-]{16,64}")
+_CARD_CONNECTION = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_CARD_HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_CARD_NUMERIC_HOST_LABEL = re.compile(r"(?:0[xX][0-9A-Fa-f]+|[0-9]+)")
 _CARD_PERCENT = re.compile(r"%[0-9A-Fa-f]{2}")
 _CARD_URL_MAX = 2048
 _CARD_MAX_REDIRECTS = 8
@@ -1101,6 +1146,9 @@ def _json_object_no_duplicates(octets):
 
     try:
         return json.loads(octets.decode("utf-8"), object_pairs_hook=pairs)
+    except RecursionError as ex:
+        raise ValueError(
+            f"JSON nesting depth exceeds {CANONICAL_MAX_DEPTH}") from ex
     except (UnicodeDecodeError, json.JSONDecodeError) as ex:
         raise ValueError("invalid UTF-8 JSON") from ex
 
@@ -1131,7 +1179,7 @@ class CardTrustStore:
 
 def _signing_kid(seed, kid):
     public_key = ed25519_public_key(seed)
-    match = _RAPPID.match(kid) if rappid_valid(kid) else None
+    match = _RAPPID.fullmatch(kid) if rappid_valid(kid) else None
     expected = (
         ed25519_rappid(match.group(1), match.group(2), public_key)
         if match is not None else None
@@ -1246,7 +1294,7 @@ def card_continuity(payload, nonce):
 
 def card_wake_challenge(payload, nonce):
     """Bind the one-time URI nonce to the identity and every hydrated root."""
-    if not isinstance(nonce, str) or not _CARD_NONCE.match(nonce):
+    if not isinstance(nonce, str) or not _CARD_NONCE.fullmatch(nonce):
         raise ValueError("card nonce must be 16-64 base64url characters")
     return H("rapp/1:particle", card_continuity(payload, nonce))
 
@@ -1307,8 +1355,8 @@ def _well_formed_percent(value):
         index = value.find("%", index)
         if index < 0:
             return True
-        if index + 2 >= len(value) or not re.match(
-                r"^[0-9A-Fa-f]{2}$", value[index + 1:index + 3]):
+        if index + 2 >= len(value) or not re.fullmatch(
+                r"[0-9A-Fa-f]{2}", value[index + 1:index + 3]):
             return False
         index += 3
 
@@ -1365,7 +1413,11 @@ def _card_url_info(value, suffix=None):
         literal = ipaddress.ip_address(host)
     except ValueError:
         labels = host.split(".")
-        if len(labels) < 2 or any(not _CARD_HOST_LABEL.match(label) for label in labels):
+        if labels and all(
+                _CARD_NUMERIC_HOST_LABEL.fullmatch(label) for label in labels):
+            raise ValueError("noncanonical numeric-looking HTTPS host is forbidden")
+        if len(labels) < 2 or any(
+                not _CARD_HOST_LABEL.fullmatch(label) for label in labels):
             raise ValueError("HTTPS host is not a canonical DNS name")
         expected_netloc = host
         literal = None
@@ -1427,7 +1479,7 @@ def build_card_link(frame, endpoint, nonce):
     endpoint_info = _card_url_info(endpoint, CARD_VIRTUAL_SUFFIX)
     if _forbidden_url_material(endpoint):
         raise ValueError("card endpoint contains prohibited material")
-    if not isinstance(nonce, str) or not _CARD_NONCE.match(nonce):
+    if not isinstance(nonce, str) or not _CARD_NONCE.fullmatch(nonce):
         raise ValueError("card nonce must be 16-64 base64url characters")
     rappid = frame["payload"].get("rappid")
     if not rappid_valid(rappid):
@@ -1472,7 +1524,7 @@ def parse_card_link(uri):
     endpoint_info = _card_url_info(endpoint, CARD_VIRTUAL_SUFFIX)
     if _forbidden_url_material(endpoint):
         raise ValueError("card URI endpoint contains prohibited material")
-    if not _CARD_NONCE.match(nonce):
+    if not _CARD_NONCE.fullmatch(nonce):
         raise ValueError("card URI n must be 16-64 base64url characters")
     canonical_uri = (
         "rappid://link/" + urllib.parse.quote(rappid, safe="")
@@ -1492,6 +1544,9 @@ def read_card_resource(blob):
     """Parse canonical `.rappid-card.json` octets without duplicate-member ambiguity."""
     if not isinstance(blob, bytes):
         raise ValueError("card resource must be bytes")
+    if len(blob) > CANONICAL_MAX_BYTES:
+        raise ValueError(
+            f"card resource exceeds {CANONICAL_MAX_BYTES} bytes")
     resource = _json_object_no_duplicates(blob)
     if not isinstance(resource, dict):
         raise ValueError("card resource must be a JSON object")
@@ -1501,7 +1556,7 @@ def read_card_resource(blob):
 
 
 def _valid_utc(value):
-    if not isinstance(value, str) or not _UTC.match(value):
+    if not isinstance(value, str) or not _UTC.fullmatch(value):
         return None
     try:
         return datetime.datetime.strptime(
@@ -1511,9 +1566,11 @@ def _valid_utc(value):
 
 
 _FORBIDDEN_CARD_TEXT = re.compile(
-    r"(?i)(?:\bpassword\b|\bpasswd\b|\bapi[-_ ]?key\b|\bcookie\b|"
+    r"(?:\bpassword\b|\bpasswd\b|\bapi[-_ ]?key\b|\bcookie\b|"
     r"\bauthorization\b|\bbearer(?:\s|[-_:])|\bprivate[-_ ]?memory\b|"
-    r"\bplaintext[-_ ]?memory\b|\bauto[-_ ]?execute\b)")
+    r"\bplaintext[-_ ]?memory\b|\bauto[-_ ]?execute\b)",
+    re.IGNORECASE | re.ASCII,
+)
 _FORBIDDEN_CARD_KEYS = {
     "password", "passwd", "api-key", "api_key", "apikey", "cookie",
     "set-cookie", "authorization", "bearer", "private-memory",
@@ -1549,7 +1606,10 @@ def _forbidden_card_material(value):
 def _sorted_unique_strings(values, grammar):
     return (
         isinstance(values, list)
-        and all(isinstance(value, str) and grammar.match(value) for value in values)
+        and all(
+            isinstance(value, str) and grammar.fullmatch(value)
+            for value in values
+        )
         and values == sorted(set(values))
     )
 
@@ -1598,7 +1658,7 @@ def _card_payload_error(payload, frame, link):
     if not isinstance(compatibility, dict) or set(compatibility.keys()) != CARD_COMPATIBILITY_KEYS:
         return "compatibility must be exactly {protocol, runtime, features}"
     if not all(isinstance(compatibility[key], str)
-               and _CARD_PROFILE_TOKEN.match(compatibility[key])
+               and _CARD_PROFILE_TOKEN.fullmatch(compatibility[key])
                for key in ("protocol", "runtime")):
         return "compatibility protocol/runtime is not a versioned token"
     if not _sorted_unique_strings(compatibility["features"], _CARD_PROFILE_TOKEN):
@@ -1693,9 +1753,11 @@ class SQLiteCardState(CardStateBackend):
         return connection
 
     def claim_nonce(self, nonce, connection_id, utc):
-        if not (isinstance(nonce, str) and _CARD_NONCE.match(nonce)):
+        if not (isinstance(nonce, str) and _CARD_NONCE.fullmatch(nonce)):
             raise ValueError("invalid card nonce")
-        if not (isinstance(connection_id, str) and _CARD_CONNECTION.match(connection_id)):
+        if not (
+                isinstance(connection_id, str)
+                and _CARD_CONNECTION.fullmatch(connection_id)):
             raise ValueError("invalid card connection_id")
         if _valid_utc(utc) is None:
             raise ValueError("invalid card nonce timestamp")
@@ -1728,9 +1790,11 @@ class SQLiteCardState(CardStateBackend):
             connection.close()
 
     def mark_awake(self, nonce, connection_id, utc):
-        if not (isinstance(nonce, str) and _CARD_NONCE.match(nonce)):
+        if not (isinstance(nonce, str) and _CARD_NONCE.fullmatch(nonce)):
             raise ValueError("invalid card nonce")
-        if not (isinstance(connection_id, str) and _CARD_CONNECTION.match(connection_id)):
+        if not (
+                isinstance(connection_id, str)
+                and _CARD_CONNECTION.fullmatch(connection_id)):
             raise ValueError("invalid card connection_id")
         if _valid_utc(utc) is None:
             raise ValueError("invalid card nonce timestamp")
@@ -1793,9 +1857,11 @@ class SQLiteCardState(CardStateBackend):
             connection.close()
 
     def seed_nonce(self, nonce, connection_id, state, utc):
-        if not (isinstance(nonce, str) and _CARD_NONCE.match(nonce)):
+        if not (isinstance(nonce, str) and _CARD_NONCE.fullmatch(nonce)):
             raise ValueError("invalid card nonce")
-        if not (isinstance(connection_id, str) and _CARD_CONNECTION.match(connection_id)):
+        if not (
+                isinstance(connection_id, str)
+                and _CARD_CONNECTION.fullmatch(connection_id)):
             raise ValueError("invalid card connection_id")
         if state not in ("hydrating", "awake"):
             raise ValueError("nonce seed state must be hydrating or awake")
@@ -1892,7 +1958,9 @@ def _verify_runtime_policy(policy, trust, now, state):
         return False, "runtime policy_seq is not uint53"
     if not rappid_valid(policy["card_authority"]) or trust.spki(policy["card_authority"]) is None:
         return False, "runtime policy card_authority is not a trust anchor"
-    if not all(isinstance(policy[key], str) and _CARD_PROFILE_TOKEN.match(policy[key])
+    if not all(
+            isinstance(policy[key], str)
+            and _CARD_PROFILE_TOKEN.fullmatch(policy[key])
                for key in ("protocol", "runtime")):
         return False, "runtime policy protocol/runtime token is invalid"
     if not _sorted_unique_strings(policy["features"], _CARD_PROFILE_TOKEN):
@@ -2161,7 +2229,7 @@ def verify_card_link(uri, frame, trust, now_utc, runtime_policy, authority_view,
         return False, "content-address", "endpoint did not return a frame payload", None
     try:
         computed_manifest_hash = H("rapp/1:particle", frame["payload"])
-    except (TypeError, ValueError) as ex:
+    except (TypeError, ValueError, RecursionError) as ex:
         return False, "content-address", str(ex), None
     if (computed_manifest_hash != link["manifest_hash"]
             or frame.get("payload_hash") != link["manifest_hash"]):
@@ -2231,7 +2299,8 @@ def verify_card_link(uri, frame, trust, now_utc, runtime_policy, authority_view,
     if missing_scope:
         return False, "classification-scope", f"requested scope not granted: {missing_scope[0]}", None
 
-    if not isinstance(connection_id, str) or not _CARD_CONNECTION.match(connection_id):
+    if not isinstance(connection_id, str) or not _CARD_CONNECTION.fullmatch(
+            connection_id):
         return False, "replay-nonce", "connection_id is invalid", None
     try:
         ok, reason = state.claim_nonce(link["nonce"], connection_id, now_utc)
@@ -2250,7 +2319,7 @@ def verify_card_link(uri, frame, trust, now_utc, runtime_policy, authority_view,
     try:
         expected_challenge = H("rapp/1:particle", expected_value)
         actual_challenge = H("rapp/1:particle", continuity)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return False, "continuity", "continuity response is not a canonical value", None
     if (frame["payload"]["wake_challenge"] != expected_challenge
             or actual_challenge != frame["payload"]["wake_challenge"]):
@@ -2380,7 +2449,8 @@ def verify_egg(blob):
         return (False, "§9.2", f"unknown variant {v}")
     if not rappid_valid(manifest["rappid"]):
         return (False, "§6.1", f"bad rappid {manifest['rappid']}")
-    if not (isinstance(manifest["created_utc"], str) and _UTC.match(manifest["created_utc"])):
+    if not (isinstance(manifest["created_utc"], str)
+            and _UTC.fullmatch(manifest["created_utc"])):
         return (False, "§7.4", "created_utc not the fixed millisecond form")
     contents = manifest["contents"]
     if not isinstance(contents, list):

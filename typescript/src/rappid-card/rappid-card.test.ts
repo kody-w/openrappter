@@ -64,7 +64,9 @@ function statePath(name: string): string {
 
 const mandatory = [
   'valid-test', 'valid-production', 'expired', 'manifest-revoked', 'key-revoked',
-  'subject-revoked', 'wrong-manifest-hash', 'unknown-signing-key',
+  'subject-revoked', 'wrong-manifest-hash', 'deep-payload', 'oversized-payload',
+  'newline-rappid', 'newline-manifest-hash', 'newline-lclabel',
+  'newline-profile-token', 'newline-connection-id', 'unknown-signing-key',
   'attacker-key-impersonation', 'delegation-expired', 'delegation-revoked',
   'forged-revocation-view', 'stale-revocation-view', 'unavailable-revocation-view',
   'rollback-revocation-view', 'protocol-incompatible', 'runtime-incompatible',
@@ -75,11 +77,15 @@ const mandatory = [
   'synthetic-key-production', 'auto-execute', 'endpoint-userinfo',
   'endpoint-empty-query', 'endpoint-empty-fragment', 'endpoint-space',
   'endpoint-backslash', 'endpoint-bad-percent', 'endpoint-double-encoding',
+  'endpoint-numeric-127-1', 'endpoint-numeric-octal', 'endpoint-numeric-hex',
+  'endpoint-numeric-short-private',
   'endpoint-loopback-literal', 'endpoint-private-literal',
   'endpoint-link-local-literal', 'endpoint-reserved-literal',
   'endpoint-unapproved-origin', 'endpoint-redirect-origin', 'endpoint-private-dns',
+  'fetch-numeric-alias',
   'secret-endpoint-password', 'secret-password', 'secret-api-key', 'secret-cookie',
-  'secret-bearer', 'secret-private-memory',
+  'secret-bearer', 'secret-private-memory', 'secret-unicode-latin-adjacency',
+  'secret-unicode-cjk-adjacency',
 ] as const;
 
 describe('PR9 contract drift', () => {
@@ -163,14 +169,14 @@ describe('PR9 contract drift', () => {
     expect(ipIsGlobal('::ffff:8.8.8.8')).toBe(true);
   });
 
-  it('matches the isolated interim depth, size, host, token, and scanner fixes', () => {
+  it('matches the authoritative depth, size, host, token, and scanner fixes', () => {
     let nested: unknown = null;
     for (let index = 0; index < 65; index += 1) nested = [nested];
-    expect(() => canonical(nested)).toThrow(/depth 64/);
-    expect(() => canonical('x'.repeat(1024 * 1024 + 1))).toThrow(/1 MiB/);
+    expect(() => canonical(nested)).toThrow(/depth/);
+    expect(() => canonical('x'.repeat(1024 * 1024 + 1))).toThrow(/1048576/);
     expect(() =>
       cardUrlInfo('https://127.1/x.rappid-card.json'),
-    ).toThrow(/numeric IP host aliases/);
+    ).toThrow(/numeric-looking/);
     expect(lclabel('memory-read\n')).toBe(false);
     expect(
       rappidValid(`rappid:@synthetic/x:${'a'.repeat(64)}\n`),
@@ -296,7 +302,7 @@ describe('detached JWS, content roots, and durable state', () => {
     const controls = loadRappidCardDeck().vectors.filter(
       (vector) => vector.scanner_control,
     );
-    expect(controls).toHaveLength(7);
+    expect(controls).toHaveLength(9);
     for (const vector of controls) {
       const state = await stateForVector(
         vector,
@@ -353,14 +359,14 @@ describe('detached JWS, content roots, and durable state', () => {
 });
 
 describe('artifact export', () => {
-  it('exports all 49 canonical frame/link/trust fixtures with provenance', async () => {
+  it('exports all 63 canonical frame/link/trust fixtures with provenance', async () => {
     const directory = join(process.cwd(), `.pr9-card-export-${process.pid}`);
     generated.push(directory);
     const result = await writeRappidCardFixtureDeck(directory, 'svg');
-    expect(result.fixtures).toBe(49);
-    expect(result.provenance).toBe('rapp-1 commit 392f850');
+    expect(result.fixtures).toBe(63);
+    expect(result.provenance).toContain('4751cd8291d0e4ca935d435fdcc2374a2b2628f9');
     expect(result.files.filter((file) => file.endsWith('/.rappid-card.json')))
-      .toHaveLength(49);
+      .toHaveLength(63);
     const physical = readFileSync(
       join(directory, 'physical-payload-reproduction', '.rappid-card.json'),
     );

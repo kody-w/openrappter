@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from . import pr9_reference as R
-from .fixtures import load_rappid_card_deck
+from .fixtures import PROVENANCE_COMMIT, load_rappid_card_deck
 from .qr import render_rappid_card_qr_png, render_rappid_card_qr_svg
 
 
@@ -49,5 +49,5 @@ def write_rappid_card_fixture_deck(
         "directory": str(root),
         "fixtures": len(deck["vectors"]),
         "files": files,
-        "provenance": "rapp-1 commit 392f850",
+        "provenance": f"rapp-1 commit {PROVENANCE_COMMIT}",
     }

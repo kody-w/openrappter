@@ -24,7 +24,9 @@ RAPPID_CARD_REQUIRED_PARTS = R.CARD_REQUIRED_PARTS
 MANDATORY_CARD_SCENARIOS = (
     "valid-test", "valid-production", "expired", "manifest-revoked",
     "key-revoked", "subject-revoked", "wrong-manifest-hash",
-    "unknown-signing-key", "attacker-key-impersonation",
+    "deep-payload", "oversized-payload", "newline-rappid",
+    "newline-manifest-hash", "newline-lclabel", "newline-profile-token",
+    "newline-connection-id", "unknown-signing-key", "attacker-key-impersonation",
     "delegation-expired", "delegation-revoked", "forged-revocation-view",
     "stale-revocation-view", "unavailable-revocation-view",
     "rollback-revocation-view", "protocol-incompatible",
@@ -36,12 +38,15 @@ MANDATORY_CARD_SCENARIOS = (
     "synthetic-key-production", "auto-execute", "endpoint-userinfo",
     "endpoint-empty-query", "endpoint-empty-fragment", "endpoint-space",
     "endpoint-backslash", "endpoint-bad-percent", "endpoint-double-encoding",
+    "endpoint-numeric-127-1", "endpoint-numeric-octal",
+    "endpoint-numeric-hex", "endpoint-numeric-short-private",
     "endpoint-loopback-literal", "endpoint-private-literal",
     "endpoint-link-local-literal", "endpoint-reserved-literal",
     "endpoint-unapproved-origin", "endpoint-redirect-origin",
-    "endpoint-private-dns", "secret-endpoint-password", "secret-password",
+    "endpoint-private-dns", "fetch-numeric-alias", "secret-endpoint-password", "secret-password",
     "secret-api-key", "secret-cookie", "secret-bearer",
-    "secret-private-memory",
+    "secret-private-memory", "secret-unicode-latin-adjacency",
+    "secret-unicode-cjk-adjacency",
 )
 
 

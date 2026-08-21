@@ -6,7 +6,7 @@ mkdirSync('dist/voice', { recursive: true });
 copyFileSync('src/voice/local-speech.js', 'dist/voice/local-speech.js');
 mkdirSync('dist/rappid-card/test-vectors', { recursive: true });
 cpSync(
-  '../tests/vectors/rapp-1-392f850/rappid-card',
+  '../tests/vectors/rapp-1-4751cd8/rappid-card',
   'dist/rappid-card/test-vectors',
   { recursive: true },
 );

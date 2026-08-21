@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { canonical } from './contract.js';
-import { loadRappidCardDeck } from './fixtures.js';
+import { loadRappidCardDeck, PROVENANCE_COMMIT } from './fixtures.js';
 import { renderRappidCardQrPng, renderRappidCardQrSvg } from './qr.js';
 
 export type QrArtifactFormat = 'svg' | 'png' | 'both';
@@ -51,6 +51,6 @@ export async function writeRappidCardFixtureDeck(
     directory: root,
     fixtures: deck.vectors.length,
     files,
-    provenance: 'rapp-1 commit 392f850',
+    provenance: `rapp-1 commit ${PROVENANCE_COMMIT}`,
   };
 }

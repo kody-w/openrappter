@@ -89,7 +89,7 @@ The authenticated Habitat includes an exact RAPP/1 §7.10 Calling Card / Debug
 Card verifier. `.rappid-card.json` is canonical JSON for the ordinary
 eleven-key frame; production is `body.calling-card` + `rappid-card/1`, while
 test-only debug is `body.debug-card` + `rappid-card-test/1`. Both runtimes
-consume the byte-identical PR9 commit `392f850` deck, enforce detached
+consume the byte-identical PR9 commit `4751cd8` deck, enforce detached
 unencoded EdDSA JWS with SPKI→RAPPID binding, signed runtime/authority/revocation
 views, strict endpoint/fetch evidence, durable `hydrating`/`awake` replay state,
 and the exact eleven-step verification order.

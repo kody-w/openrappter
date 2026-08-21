@@ -12,11 +12,12 @@ import type {
 } from './types.js';
 import { MANDATORY_CARD_SCENARIOS } from './types.js';
 
-export const PROVENANCE_COMMIT = '392f850';
+export const PROVENANCE_COMMIT =
+  '4751cd8291d0e4ca935d435fdcc2374a2b2628f9';
 
 function vectorRoot(): string {
   const source = fileURLToPath(
-    new URL('../../../tests/vectors/rapp-1-392f850/rappid-card/', import.meta.url),
+    new URL('../../../tests/vectors/rapp-1-4751cd8/rappid-card/', import.meta.url),
   );
   if (existsSync(source)) return source;
   const packaged = fileURLToPath(new URL('./test-vectors/', import.meta.url));
@@ -88,9 +89,23 @@ export async function simulateRappidCardFixture(
   const state = await stateForVector(vector, statePath);
   const parts = cardParts();
   const selected = hydratedParts ?? vector.hydrated_parts;
+  let frame = vector.frame;
+  if (vector.runtime_mutation !== null) {
+    const payload: Record<string, unknown> = { ...frame.payload };
+    if (vector.runtime_mutation.type === 'deep-payload') {
+      let nested: unknown = null;
+      for (let depth = 0; depth < vector.runtime_mutation.depth; depth += 1) {
+        nested = [nested];
+      }
+      payload['runtime-mutation'] = nested;
+    } else {
+      payload['runtime-mutation'] = 'x'.repeat(vector.runtime_mutation.bytes);
+    }
+    frame = { ...frame, payload } as unknown as CardVector['frame'];
+  }
   const verdict = verifyCardLink({
     uri: vector.link,
-    frame: vector.frame,
+    frame,
     trust: cardTrust(vector),
     now_utc: vector.now_utc,
     runtime_policy: vector.runtime_policy,

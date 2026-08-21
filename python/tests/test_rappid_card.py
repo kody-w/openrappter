@@ -48,14 +48,17 @@ from openrappter.rappid_card import (
     simulate_rappid_card_fixture,
     write_rappid_card_fixture_deck,
 )
-from openrappter.rappid_card.pr9_interim import R
+from openrappter.rappid_card import pr9_reference as R
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTOR_ROOT = ROOT / "tests" / "vectors" / "rapp-1-392f850" / "rappid-card"
+VECTOR_ROOT = ROOT / "tests" / "vectors" / "rapp-1-4751cd8" / "rappid-card"
 
 MANDATORY = (
     "valid-test", "valid-production", "expired", "manifest-revoked", "key-revoked",
-    "subject-revoked", "wrong-manifest-hash", "unknown-signing-key",
+    "subject-revoked", "wrong-manifest-hash", "deep-payload",
+    "oversized-payload", "newline-rappid", "newline-manifest-hash",
+    "newline-lclabel", "newline-profile-token", "newline-connection-id",
+    "unknown-signing-key",
     "attacker-key-impersonation", "delegation-expired", "delegation-revoked",
     "forged-revocation-view", "stale-revocation-view", "unavailable-revocation-view",
     "rollback-revocation-view", "protocol-incompatible", "runtime-incompatible",
@@ -66,11 +69,15 @@ MANDATORY = (
     "synthetic-key-production", "auto-execute", "endpoint-userinfo",
     "endpoint-empty-query", "endpoint-empty-fragment", "endpoint-space",
     "endpoint-backslash", "endpoint-bad-percent", "endpoint-double-encoding",
+    "endpoint-numeric-127-1", "endpoint-numeric-octal",
+    "endpoint-numeric-hex", "endpoint-numeric-short-private",
     "endpoint-loopback-literal", "endpoint-private-literal",
     "endpoint-link-local-literal", "endpoint-reserved-literal",
-    "endpoint-unapproved-origin", "endpoint-redirect-origin", "endpoint-private-dns",
+    "endpoint-unapproved-origin", "endpoint-redirect-origin",
+    "endpoint-private-dns", "fetch-numeric-alias",
     "secret-endpoint-password", "secret-password", "secret-api-key", "secret-cookie",
     "secret-bearer", "secret-private-memory",
+    "secret-unicode-latin-adjacency", "secret-unicode-cjk-adjacency",
 )
 
 
@@ -179,7 +186,7 @@ def test_vendored_vector_checksums_match_provenance():
     import hashlib
 
     provenance = json.loads((VECTOR_ROOT / "PROVENANCE.json").read_text())
-    assert provenance["source_commit"] == "392f850"
+    assert provenance["source_commit"] == "4751cd8291d0e4ca935d435fdcc2374a2b2628f9"
     for name, expected in provenance["sha256"].items():
         assert hashlib.sha256((VECTOR_ROOT / name).read_bytes()).hexdigest() == expected
     package_root = (
@@ -212,15 +219,15 @@ def test_rfc8032_and_signature_mutation_controls():
     assert not R.ed25519_verify(public, b"", mutated)
 
 
-def test_interim_depth_size_host_token_and_ascii_scanner_fixes():
+def test_authoritative_depth_size_host_token_and_ascii_scanner_fixes():
     nested = None
     for _ in range(65):
         nested = [nested]
-    with pytest.raises(ValueError, match="depth 64"):
+    with pytest.raises(ValueError, match="depth"):
         R.canonical(nested)
-    with pytest.raises(ValueError, match="1 MiB"):
+    with pytest.raises(ValueError, match="1048576"):
         R.canonical("x" * (1024 * 1024 + 1))
-    with pytest.raises(ValueError, match="numeric IP host aliases"):
+    with pytest.raises(ValueError, match="numeric-looking"):
         R._card_url_info("https://127.1/x.rappid-card.json")
     assert not R._lclabel("memory-read\n")
     assert not R.rappid_valid(
@@ -285,7 +292,7 @@ def test_local_trust_config_requires_mode_0600():
 def test_prohibited_material_scanner_controls_are_real():
     deck = load_rappid_card_deck()
     controls = [vector for vector in deck["vectors"] if vector["scanner_control"]]
-    assert len(controls) == 7
+    assert len(controls) == 9
     original_card = R._forbidden_card_material
     original_url = R._forbidden_url_material
     try:
@@ -409,8 +416,8 @@ def test_qr_artifacts_and_fixture_cli():
     _remove_database(state)
     try:
         export = write_rappid_card_fixture_deck(str(directory), "svg")
-        assert export["fixtures"] == 49
-        assert export["provenance"] == "rapp-1 commit 392f850"
+        assert export["fixtures"] == 63
+        assert "4751cd8291d0e4ca935d435fdcc2374a2b2628f9" in export["provenance"]
         physical = directory / "physical-payload-reproduction"
         assert (physical / ".rappid-card.json").read_bytes() == physical_vector_bytes()[0]
         result = subprocess.run(

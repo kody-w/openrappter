@@ -1,7 +1,7 @@
 # RAPPID Calling Card and Debug Card
 
 OpenRappter implements RAPP/1 SPEC §7.10 exactly as finalized in
-`kody-w/rapp-1` commit `392f850`.
+`kody-w/rapp-1` commit `4751cd8291d0e4ca935d435fdcc2374a2b2628f9`.
 
 There is no private card envelope. A `.rappid-card.json` resource is canonical
 JSON for one ordinary eleven-key RAPP/1 frame:
@@ -185,26 +185,20 @@ Both the signed `wake_challenge` and hydrated response must equal
 OpenRappter vendors byte-identical PR9 artifacts under:
 
 ```text
-tests/vectors/rapp-1-392f850/rappid-card/
+tests/vectors/rapp-1-4751cd8/rappid-card/
 ```
 
-- `deck.json`: 49 mandatory named scenarios in exact order.
+- `deck.json`: 63 mandatory named scenarios in exact order.
 - `physical.rappid-card.json`: canonical eleven-key debug frame bytes.
 - `physical-payload.txt`: exact compact physical URI.
 - `PROVENANCE.json`: source commit and SHA-256 attestations.
 
-Both TypeScript and Python consume this deck. The 49 scenario verdicts plus the
-separate physical byte/link reproduction assertion are the 50 mandatory card
-checks. Drift tests pin all schema tokens, key sets, scenario names, and order.
-
-### Interim protocol-copy patch
-
-`python/openrappter/rappid_card/pr9_reference.py` remains byte-identical to
-commit `392f850`. `pr9_interim.py` separately applies deterministic depth-64 /
-1 MiB failures, numeric-host-alias refusal, full-string token matching, and
-ASCII decoded-secret boundaries. This isolation is temporary: before
-publication, re-vendor from the forthcoming RAPP/1 follow-up commit containing
-those fixes and delete the interim module.
+Both TypeScript and Python consume this deck. All 63 scenario verdicts plus the
+separate physical byte/link reproduction assertion are checked. Drift tests
+pin all schema tokens, key sets, scenario names, and order. The authoritative
+follow-up includes deterministic depth-64 / 1 MiB failures, numeric-host-alias
+refusal, full-string token matching, and Unicode-adjacent secret boundaries;
+no local interim patch remains.
 
 ## CLI
 

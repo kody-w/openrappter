@@ -57,7 +57,7 @@ function response(verification?: {
     frame,
     expected: scenario.expected,
     verification,
-    provenance: 'rapp-1 commit 392f850',
+    provenance: 'rapp-1 commit 4751cd8291d0e4ca935d435fdcc2374a2b2628f9',
   };
 }
 

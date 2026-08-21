@@ -55,16 +55,16 @@ describe('PR9 RAPPID card gateway methods', () => {
     });
   });
 
-  it('lists all 49 scenarios and previews exact frame/link/QR wire names', async () => {
+  it('lists all 63 scenarios and previews exact frame/link/QR wire names', async () => {
     const { methods } = registrar();
     const scenarios = await methods.get('rappid.card.scenarios')!({}) as unknown[];
-    expect(scenarios).toHaveLength(49);
+    expect(scenarios).toHaveLength(63);
     const preview = await methods.get('rappid.card.preview')!({
       scenario: 'physical-payload-reproduction',
     }) as Record<string, unknown>;
     expect(preview).toMatchObject({
       scenario: 'physical-payload-reproduction',
-      provenance: 'rapp-1 commit 392f850',
+      provenance: 'rapp-1 commit 4751cd8291d0e4ca935d435fdcc2374a2b2628f9',
       expected: { ok: true, step: null },
       frame: { kind: 'body.debug-card', spec: 'rapp/1' },
     });

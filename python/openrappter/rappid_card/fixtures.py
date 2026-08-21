@@ -9,12 +9,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .pr9_interim import R
+from . import pr9_reference as R
 from .simulator import verify_card_link
 from .types import CardVectorResult
 from .types import MANDATORY_CARD_SCENARIOS
 
-PROVENANCE_COMMIT = "392f850"
+PROVENANCE_COMMIT = "4751cd8291d0e4ca935d435fdcc2374a2b2628f9"
 
 
 def _vector_root() -> Path:
@@ -22,7 +22,7 @@ def _vector_root() -> Path:
         Path(__file__).resolve().parents[3]
         / "tests"
         / "vectors"
-        / "rapp-1-392f850"
+        / "rapp-1-4751cd8"
         / "rappid-card"
     )
     if source.is_dir():
@@ -116,9 +116,23 @@ def simulate_rappid_card_fixture(
     state = state_for_vector(vector, state_path)
     selected = vector["hydrated_parts"] if hydrated_parts is None else hydrated_parts
     parts = _parts()
+    frame = vector["frame"]
+    mutation = vector.get("runtime_mutation")
+    if mutation is not None:
+        frame = dict(frame)
+        frame["payload"] = dict(frame["payload"])
+        if mutation["type"] == "deep-payload":
+            nested = None
+            for _ in range(mutation["depth"]):
+                nested = [nested]
+            frame["payload"]["runtime-mutation"] = nested
+        elif mutation["type"] == "oversized-payload":
+            frame["payload"]["runtime-mutation"] = "x" * mutation["bytes"]
+        else:
+            raise AssertionError(f"unknown runtime mutation: {mutation}")
     return verify_card_link(
         vector["link"],
-        vector["frame"],
+        frame,
         _trust(vector),
         vector["now_utc"],
         vector["runtime_policy"],

@@ -1,6 +1,6 @@
 """Exact PR9 card/frame/link/JWS helpers from the vendored RAPP reference."""
 
-from .pr9_interim import (
+from .pr9_reference import (
     CARD_AUTHORITY_SCHEMA,
     CARD_AUTHORITY_VIEW_KEYS,
     CARD_CALLING,

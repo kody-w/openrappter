@@ -1,5 +1,5 @@
 """
-Capability Forge — a Frontier RAPPlication.
+Capability Forge — a Frontier rapplication.
 
 Gives the Brainstem autonomous, headless capability acquisition + agent
 evolution. When the Brainstem lacks a capability, it can:

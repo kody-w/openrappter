@@ -1,5 +1,5 @@
 """
-Toaster — a Frontier RAPPlication. The skill.md <-> agent.py bridge.
+Toaster — a Frontier rapplication. The skill.md <-> agent.py bridge.
 
 Two shapes of the same portable capability, losslessly interconvertible:
 

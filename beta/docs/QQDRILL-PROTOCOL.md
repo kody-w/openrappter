@@ -18,6 +18,41 @@ then collapse to one on measurement. It is a metaphor and nothing more — there
 computation here, and the protocol makes no claim of one. What is real is ordinary parallelism with
 strict isolation.
 
+## What a drill is really doing: probing for a dimension that already exists
+
+Reading a drill as "generate many candidates, keep the best" undersells it and gets the economics
+wrong.
+
+A drill **probes the space of reachable dimensions**. Most probes miss, which is cheap and expected.
+A hit is not "we produced a good answer" — it is **finding a dimension that already solved this**,
+whose frames can be merged in ([CRYSTALS](CRYSTALS.md)). And because merging is folding rather than
+transferring, the capability arrives complete and already worn: instant transmission for that
+situation.
+
+That makes the economics asymmetric in the useful direction:
+
+- **A miss costs compute** and leaves a trace of something that does not work.
+- **A hit yields an entire pre-worn dimension** — not a candidate that must now be trained, but one
+  that has already been used, in contexts this machine never saw.
+
+### The space the drill searches is populated by publishing
+
+This is where the public, permissive posture stops being ideology and becomes mechanism. Every
+dimension anyone publishes is another place a drill can hit. A tile someone else wore into exactly
+the shape you need is a hit waiting to happen — and the more of them exist, the more often drilling
+returns a worn capability instead of an untrained candidate.
+
+So the loop closes on itself: publishing populates the space, a populated space makes drills hit,
+and hits are how a capability arrives already good. A private corpus makes drilling expensive; a
+public one makes it lucky, and luck compounds with the size of the commons.
+
+### It does not loosen the flag
+
+A hit is still checked. A dimension that already exists is not thereby correct for *this* task — it
+is a candidate that arrives pre-worn, and it captures the flag or it does not, evaluated by the same
+checker as everything else. Finding something is not the same as it being right, and the drill's
+discipline is precisely that it never confuses the two.
+
 ## The contract
 
 ### 1. Isolation is mandatory, not an optimisation

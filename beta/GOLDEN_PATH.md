@@ -87,6 +87,49 @@ brainstem-walkthrough
 These commands do not bypass the UI. They visibly type into the same chats the
 person sees.
 
+## Rapplications are podcasts, not apps in a store
+
+The distribution model is the podcast one, and saying so explains it faster than any description of
+the mechanism.
+
+A podcast needs no store approval, no platform, and no gatekeeper. You publish a file and a feed;
+anyone subscribes with any client; it downloads and plays offline; nobody can remove it from the
+people who already have it. That is exactly what a **rapplication** is — published to a public
+repository, listed in a channel anyone may subscribe to, summoned by any host, verified locally,
+and working with no network once it is here.
+
+The comparison also sets the right expectations about *quality and range*: podcasts include
+professional productions and things somebody made in a kitchen, and the ecosystem is healthier for
+carrying both. A catalog nobody has to be admitted to will look like that, and should.
+
+**Short form, in two registers.** Application shortens to app; rapplication shortens the same way —
+the contraction English already makes, so nobody has to be taught it.
+
+- **`(r)app` — the display form.** Written with the parenthesis, it shows its own derivation: an app
+  with the r in front. Use it in prose, in the interface, and anywhere it is read rather than typed.
+- **`rapp` — the identifier form.** Parentheses cannot appear in a filename, a protocol id, a URL,
+  a package name or a shell argument, so anything a machine handles uses `rapp`, which is already
+  the root of `rapp-tile`, `rapp-summon` and the rest.
+
+The split is the ordinary one between a wordmark and a package name, and keeping it means the
+typography works where it is read without breaking anything where it is executed. Podcasts became
+casts; these are (r)apps.
+
+## It is a learning tool, and saying so does the onboarding
+
+Classify this as a **learning tool** and most of the onboarding explains itself. People already
+know what a learning tool asks of them — that you start not knowing, that early output is rough,
+that the point is to get better at something rather than to receive a finished result. None of
+that has to be taught; it arrives with the category.
+
+Call it an agent platform instead and the expectations invert: a platform is supposed to work
+immediately, and every rough edge reads as a defect rather than as a stage. The same product,
+under the wrong noun, disappoints people who would have been delighted.
+
+It is also simply true. The path here is learn AI, teach it back as a working capability, and keep
+that capability — and the [crystal](docs/CRYSTALS.md) makes the learning visible on the object
+itself.
+
 ## Agent-first control: the interface is drivable without the model
 
 Chat is the control surface for **intelligence**. It is not the control surface for **navigation**,
@@ -263,6 +306,39 @@ Every useful demonstration follows the same observable loop:
 8. **Capture** — attach a screenshot or recorded WebM demo.
 9. **Explain** — summarize what worked and what the user just learned.
 10. **Promote** — package the proven organism for the right downstream target.
+
+## Checkpoint — a tile is a frame, and that is what makes it all one system
+
+**Locked in 2026-08-21.** The pieces below were built separately and turn out to be one mechanism.
+This is the chain, and it is a product-lifetime invariant: change any link and the rest stops
+composing.
+
+1. **A tile is the unit of a working situation** — a transcript, the agents hot-loaded for it, and
+   the footprint it needs. Not a unit of code; a unit of *work*.
+2. **A tile is a RAPP frame.** It carries a frame tick and a UTC timestamp, which are its position
+   in a stream rather than metadata about it.
+3. **Therefore a tile is a delta**, and the [Dream Catcher](docs/CRYSTALS.md) rule applies natively:
+   parallel streams produce deltas, deltas merge deterministically on that key, and nothing is ever
+   overwritten — only appended.
+4. **Docking is merging.** Dropping a tile onto the Brainstem appends a frame. Parking one emits a
+   frame. Editing one emits a new frame. They are the same operation seen from different ends,
+   which is why there is no separate merge protocol to design.
+5. **So a tile can be worn in parallel**, on as many devices as a person has, each emitting frames
+   from a context none of the others can see.
+6. **Merging dimensions is folding frames in key order.** Two devices acting at the same moment
+   produce two frames, not a conflict.
+7. **Wear is derived from the fold, never summed** — the crystal measures what the tile still needs,
+   which is a property of the merged whole.
+8. **The adapter is re-derived from the merged stream**, not blended from two adapters. Model
+   merging becoming good is an optimisation, not a dependency — if it never arrives, nothing here
+   breaks.
+9. **The fold is the singleton** every device re-summons, better than any one of them contributed.
+10. **And it stays a file** — summonable by seven words, verifiable, assembling on a machine with no
+    network, and the person's to keep.
+
+The reason to lock this as a checkpoint: each link was arrived at separately, and any one of them
+looks like a design preference in isolation. Together they are the mechanism, and the value is in
+the composition rather than in any single choice.
 
 ## RAPP/1 constitutional boundary
 

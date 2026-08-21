@@ -156,6 +156,30 @@ offered for readers pinned to the old schema. `tile verify` reports what a downg
 `tiles/v1/@publisher/<filename>.tile` beside them and the index gains a `tiles` section; the card
 index is frozen, never deleted, once every client reads tiles.
 
+## A tile is a RAPP frame
+
+This is the identity that makes everything else compose: **a tile is a frame in a Dream Catcher
+stream**, not merely a container that happens to be movable.
+
+[Dream Catcher](CRYSTALS.md) keys deltas by `(frame_tick, utc_timestamp)`, merges them
+deterministically, and never overwrites — only appends. A tile carrying those two fields is
+therefore already a mergeable delta, with no separate merge protocol required:
+
+| Operation | What it is, in frame terms |
+|---|---|
+| Parking a chat as a tile | **emitting a frame** |
+| Dropping a tile onto the Brainstem | **docking a frame** — which is why docking and merging are the same operation |
+| Two devices producing tiles at once | two frames, ordered by the key — **not a conflict** |
+| "Editing" a tile | a **new frame**, never a mutation of the old one |
+| The current singleton | the **fold of every frame** in key order |
+
+So the fields are load-bearing rather than metadata: a tile record carries its `frame` tick and its
+`utc`, and those two are its position in the stream. Without them a tile is an object that must be
+reconciled; with them it is a delta that merges by arithmetic.
+
+It also explains why wear cannot be added up. Wear is a property of the **folded** stream, so it is
+recomputed from the merged frames rather than summed across the dimensions that contributed them.
+
 ## A tile is a kit: many agents in one
 
 Assembly is plural by nature, and that is the point of it. **A tile may carry many `agent.py`

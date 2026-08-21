@@ -1,48 +1,53 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 
-// Driver actions are not conversation. The step feed used to be appended inside
-// #chat, which wrote machine steps into the record of an exchange with the model —
-// and under deterministic driving most of those steps never reach the model at
-// all. It now lives on its own activity strip, off unless someone asked to watch.
-// See beta/CONSTITUTION.md Article VI and beta/docs/AUTOPILOT-CLI.md.
+import { createActivityViewInstallationSource } from "../electron/activity-view.mjs";
+import { createFakeWindow, FakeDocument } from "./helpers/fake-dom.mjs";
 
 const main = readFileSync(new URL("../electron/main.mjs", import.meta.url), "utf8");
 
-test("the driver step feed is never mounted inside the chat transcript", () => {
-  const body = main.slice(main.indexOf("function driveFeed()"));
-  const fn = body.slice(0, body.indexOf("\n  }") + 4);
-  assert.doesNotMatch(
-    fn,
-    /getElementById\("chat"\)/,
-    "driveFeed must not reach for the transcript container",
+function installActivityView() {
+  const document = new FakeDocument();
+  const chat = document.createElement("div");
+  chat.id = "chat";
+  document.body.appendChild(chat);
+  const window = createFakeWindow(document);
+  window.window = window;
+  vm.runInContext(
+    createActivityViewInstallationSource(),
+    vm.createContext(window),
   );
-  assert.doesNotMatch(
-    fn,
-    /chat\.appendChild/,
-    "driver steps must never be appended to the chat transcript",
+  return { chat, document, window };
+}
+
+test("the driver step feed mounts on the body, never in the transcript", () => {
+  const { chat, document, window } = installActivityView();
+  assert.equal(window.__rappBetaSetActivityView(true), true);
+  assert.equal(window.__rappBetaRenderDriveStep("driver step"), true);
+  const feed = document.getElementById("beta-drive-feed");
+  assert.equal(feed.parentElement, document.body);
+  assert.equal(
+    chat.querySelectorAll("#beta-drive-feed,[data-drive-step-tile]").length,
+    0,
+    "no driver step may land inside #chat",
   );
-  assert.match(fn, /const host = document\.body/);
 });
 
-test("the activity view is off unless it was turned on", () => {
-  assert.match(
-    main,
-    /window\.__rappBetaActivityView = window\.__rappBetaActivityView === true/,
-    "the flag must default to off rather than to on",
-  );
-  assert.match(
-    main,
-    /function driveFeed\(\) \{\s*if \(!window\.__rappBetaActivityView\) return null;/,
-    "no feed element may be created while the activity view is off",
-  );
-  assert.match(main, /__rappBetaSetActivityView/);
+test("the activity view is off by default and disabling it removes its surface", () => {
+  const { document, window } = installActivityView();
+  assert.equal(window.__rappBetaRenderDriveStep("hidden step"), false);
+  assert.equal(document.getElementById("beta-drive-feed"), null);
+
+  window.__rappBetaSetActivityView(true);
+  assert.equal(window.__rappBetaRenderDriveStep("visible step"), true);
+  assert.ok(document.getElementById("beta-drive-feed"));
+  assert.equal(window.__rappBetaSetActivityView(false), false);
+  assert.equal(document.getElementById("beta-drive-feed"), null);
 });
 
 test("the activity strip cannot intercept the person's clicks", () => {
-  // It floats over the window; a strip that swallowed clicks would break the
-  // two-player rule that nothing captures the person's input.
   assert.match(
     main,
     /\.beta-drive-feed\{position:fixed[^}]*/,

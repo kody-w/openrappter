@@ -56,6 +56,13 @@ Build downward; each depends on the one above it.
 11. **The flock surface and exportable presets.**
 12. **Recap export** and the local model player.
 
+## 2b. Checkpoint — the chain that makes it one system
+
+Locked 2026-08-21 in [`GOLDEN_PATH.md`](GOLDEN_PATH.md): tile → frame → delta → Dream Catcher merge
+→ parallel wear → fold → singleton → portable file. Each link was reached separately and looks like
+a preference alone; together they are the mechanism. Changing one link stops the rest composing, so
+treat a proposed change to any of them as a change to all of them.
+
 ## 3. Decisions — do not re-litigate these
 
 Each was argued and settled. The reason is recorded so it does not have to be rediscovered.
@@ -71,6 +78,7 @@ Each was argued and settled. The reason is recorded so it does not have to be re
 | **A driver's action never toasts; attribution rides on the object** | Two hands on one window must stay legible without writing into the conversation. |
 | **Winning a drill confers promotion, not experience; training confers wear** | The crystal measures what the tile still needs. Training is real wherever it happened; a flag captured is not. Lineage records used-versus-drilled so neither can pretend to be the other. |
 | **The client is the extension point; the kernel gains nothing** | Adding a command must never require a commit to `rapp_brainstem/`. |
+| **Merge deltas, not weights** | A tile is a frame, so tiles are already the delta stream. The adapter is re-derived from the fold, which means model-merging never becoming good costs a shortcut rather than the system. |
 | **Only `chat.send` costs a model call** | The invariant the whole command surface exists to provide. (Under repair: `ui.click`/`ui.press` can reach the model and must report when they did.) |
 
 ## 4. Known live inconsistencies

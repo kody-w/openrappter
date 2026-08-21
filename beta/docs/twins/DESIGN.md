@@ -1,4 +1,4 @@
-# RAPPlication twins in the herd — design
+# rapplication twins in the herd — design
 
 > Status: agreed direction (2026-08-18). P0 (store client), P1 (twin runtime +
 > herd tile + hatch tool), and P2 (the Copilot Studio deploy twin) landed and
@@ -18,12 +18,12 @@ The Brain Surgeon (GitHub Copilot) is the **builder** — it builds and tests
 capabilities *on* the Brainstem, and it should stay lean. Long-running
 **specialized** jobs (deploy this proven agent to Copilot Studio; push it to the
 on-device Scout endpoint; wrap it as a Microsoft Cowork agent) are **not** handed
-to the Surgeon — they are handed to a **RAPPlication twin**: a self-contained
-RAPPlication that **hatches as its own Brainstem worker on its own loopback
+to the Surgeon — they are handed to a **rapplication twin**: a self-contained
+rapplication that **hatches as its own Brainstem worker on its own loopback
 port**, runs its specialized loop **autonomously, driven by the Brainstem** (not
 the Surgeon), and appears as its own **tile in the herd** beside the Brainstem
 chat. The user never has to know this happened — the Brainstem + Brain Surgeon
-loop decides what's needed, pulls the right RAPPlication **from the RAPP Store**,
+loop decides what's needed, pulls the right rapplication **from the RAPP Store**,
 and hatches it. The user just watches it happen.
 
 ```
@@ -53,7 +53,7 @@ Surgeon chat is not "no chat" — it is *who drives by default*: a twin drives
 itself on its loop and only takes messages when someone chooses to steer, whereas
 a Surgeon chat only moves when a person prompts it.
 
-## What a RAPPlication is (grounded in the RAPP Store)
+## What a rapplication is (grounded in the RAPP Store)
 
 Source of truth: `https://kody-w.github.io/RAPP_Store/index.json`
 (schema, `install_protocol`, `rapplications[]`, `senses[]`,
@@ -67,7 +67,7 @@ license, spec_post, shipped_in_commit, publisher, ui_url, ui_filename,
 quality_tier
 ```
 
-So a RAPPlication is, in the user's words, **a twin running independently with a
+So a rapplication is, in the user's words, **a twin running independently with a
 specialized set of agents *and* a specialized UI for its use case**. Concretely:
 
 - **specialized agent(s)** — a **sha256-pinned single-file `*_agent.py`**
@@ -88,7 +88,7 @@ back to a plain chat over the worker's `/chat`.
 | Vision word | Existing beta mechanism |
 |---|---|
 | "own port / twin / brainstem loop" | `BetaRouteManager.startWorker(descriptor)` already allocates a loopback port and spawns a `BrainstemProcess` with a composed `AGENTS_PATH` (`route-manager.mjs:806`) |
-| "hatch a RAPPlication" | insert its **`rapp-cart/1.0`** cartridge (the store's `singleton_url` `agent.py` + optional `egg_url` `.egg`): fetch → verify `singleton_sha256` → `packageAgent` (RAPPID + egg, `:486`) → start a **dedicated, non-retired** worker. Ports/twins stay under the hood, per the cartridge contract |
+| "hatch a rapplication" | insert its **`rapp-cart/1.0`** cartridge (the store's `singleton_url` `agent.py` + optional `egg_url` `.egg`): fetch → verify `singleton_sha256` → `packageAgent` (RAPPID + egg, `:486`) → start a **dedicated, non-retired** worker. Ports/twins stay under the hood, per the cartridge contract |
 | "driven by the Brainstem, not the Surgeon" | the twin worker's own `/chat` loop drives the job; the Brainstem coordinates the fleet via **`rapp-fleet-chat/1.0`** (signed twin-chat over `/chat`) — never an injected `/api/agent` route (the known RCE); the Surgeon only calls `hatch_rapplication(store_id)` and hands off |
 | "clone, diverge, reassimilate" twin story | already described in `GOLDEN_PATH.md` — a twin is a minted child RAPPID + its own snapshot |
 | "pull from the store autonomously" | the RAPP Store client (this PR's foundation) + a `hatch_rapplication` Surgeon tool |

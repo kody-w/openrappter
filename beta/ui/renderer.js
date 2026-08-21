@@ -18,7 +18,7 @@ const ambientApproximate = document.getElementById("ambient-approximate");
 const ambientStatus = document.getElementById("ambient-settings-status");
 let surgeonHerdEl = null;
 let surgeonGridEl = null;
-// RAPPlication twins hatched into the herd (id -> {descriptor, tileEl}).
+// rapplication twins hatched into the herd (id -> {descriptor, tileEl}).
 const twins = new Map();
 const surgeonHistoryKey = "rapp-brainstem-beta-surgeon-sessions-v1";
 const surgeonOpenKey = "rapp-brainstem-beta-surgeon-open-v1";
@@ -1395,7 +1395,7 @@ function ensureSurgeonHerdDom() {
       </span>
       <span class="t">GitHub Copilot · Herd</span>
       <span class="sub">several agents, one Brainstem</span>
-      <button class="hstore" type="button" title="Hatch a RAPPlication from the RAPP Store">◈ Hatch a RAPPlication…</button>
+      <button class="hstore" type="button" title="Hatch a rapplication from the RAPP Store">◈ Hatch a rapplication…</button>
       <button class="hnew" type="button">+ New chat</button>
       <button class="hclose" type="button">Dock ▸</button>
     </div>
@@ -1414,7 +1414,7 @@ function ensureSurgeonHerdDom() {
   store.addEventListener("click", () => toggleStorePicker(herd));
 }
 
-// A clickable (AI-drivable) list of RAPPlications from the store, so hatching
+// A clickable (AI-drivable) list of rapplications from the store, so hatching
 // can be done by the user OR autonomously by the AI clicking an entry.
 let storePickerEl = null;
 async function toggleStorePicker(herd) {
@@ -1654,7 +1654,7 @@ function toggleSurgeonHerd() {
   else enterSurgeonHerd();
 }
 
-// ── RAPPlication twin tiles in the herd ─────────────────────────────────
+// ── rapplication twin tiles in the herd ─────────────────────────────────
 // A twin is a real Brainstem worker on its own port; its tile renders that
 // worker's own steerable chat (iframe of its loopback UI) plus a live loop log.
 // Per-twin UI mode: "app" = the rapplication's own UI (via its proxy),
@@ -1667,7 +1667,7 @@ function twinTileFor(twin) {
   tile.dataset.drive = `twin[${driveKey(twin.id)}].tile`;
   tile.innerHTML = `
     <div class="hh">
-      <span class="twin-badge" title="RAPPlication twin — its own port &amp; loop">◈</span>
+      <span class="twin-badge" title="rapplication twin — its own port &amp; loop">◈</span>
       <span class="tt"></span>
       <span class="hst">ready</span>
       <button class="tw-loop" type="button" title="Have the Brainstem loop with this twin toward a goal">⟳ Loop</button>
@@ -2309,7 +2309,7 @@ setInterval(() => void maintainAmbientContext(), 240000);
     veil.style.cssText = "position:fixed;inset:0;z-index:9999;display:grid;place-items:center;"
       + "background:rgba(13,17,23,.82);border:2px dashed #58a6ff;pointer-events:none;"
       + "color:#e6edf3;font:600 15px Inter,system-ui,sans-serif;letter-spacing:.02em";
-    veil.textContent = "Drop the .egg to hatch a RAPPlication twin";
+    veil.textContent = "Drop the .egg to hatch a rapplication twin";
     document.body.appendChild(veil);
   };
   let veilTimer = null;

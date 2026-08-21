@@ -78,7 +78,7 @@ Dark-first, GitHub-dark lineage. Use the tokens below; don't introduce new greys
 |------|-----|-------|
 | **Brand blue** | `#58a6ff` | the brandmark, logo, primary highlight |
 | Action blue | `#3d7cf0` → `#356fe0` | the *user's own* chat bubble (gradient), send |
-| **Twin purple** | `#7c6bd0` / `#b79cff` | everything RAPPlication-twin: badge `◈`, tile chrome (`#1b1730` bg, `#2f2650` border), assistant bubble left-rule |
+| **Twin purple** | `#7c6bd0` / `#b79cff` | everything rapplication-twin: badge `◈`, tile chrome (`#1b1730` bg, `#2f2650` border), assistant bubble left-rule |
 | Success green | `#3fb950` / `#5cc271` | "done"/ready status, second signal dot |
 | Warning amber | `#e3b341` | "sign in"/needs-auth status |
 | Error red | `#ff9a9a` on `#2a1618` | error bubbles |
@@ -139,7 +139,7 @@ are **semantic status only**, never brand accents. One accent per surface.
 ## 6. Voice
 
 Confident host, never defensive. Active voice; a control says exactly what
-happens ("Hatch a RAPPlication", "Message this twin to steer it"). Name things by
+happens ("Hatch a rapplication", "Message this twin to steer it"). Name things by
 what the user recognizes (a *twin*, a *rapplication*, the *herd*), not by
 internals. No emoji as section markers in product chrome (the `◈` twin badge and
 the brandmark are identity, not decoration). Errors say what happened and the one

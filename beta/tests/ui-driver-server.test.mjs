@@ -500,6 +500,13 @@ function makeChatHarness() {
     context,
     input,
     notifyObservers,
+    removeSlot(id, notify = true) {
+      const index = slots.findIndex(
+        (slot) => slot.dataset.requestId === String(id),
+      );
+      if (index >= 0) slots.splice(index, 1);
+      if (notify) notifyObservers();
+    },
     send,
     sendClicks: () => sendClicks,
     setInputValue(value) {
@@ -1553,7 +1560,7 @@ test("chat yields if the person acts during the send animation", async () => {
 
 test("chat never adopts a request slot the person created", async (t) => {
   const prompt = "driver prompt";
-  await t.test("re-baselines request slots after typing", async () => {
+  await t.test("does not adopt a slot the person created mid-typing", async () => {
     const duringTyping = makeChatHarness();
     let personSlotAdded = false;
     duringTyping.setOnInputValue((_element, value) => {
@@ -1624,6 +1631,64 @@ test("chat never adopts a request slot the person created", async (t) => {
     assert.equal(ownBubble.dataset.rappActor, "ai");
     assert.equal(ownBubble.title, "Sent by the Brain Surgeon");
   });
+});
+
+test("chat never adopts a pre-existing slot before its own renders", async () => {
+  const harness = makeChatHarness();
+  harness.appendSlot({
+    id: 3,
+    response: "stranger reply",
+    user: "stranger question",
+  }, false);
+  const prompt = "driver prompt";
+  harness.setOnSend(() => {
+    harness.setInputValue("");
+    harness.notifyObservers();
+    harness.appendSlot({
+      id: 4,
+      response: "driver reply",
+      user: prompt,
+    });
+  });
+
+  const result = await harness.command({
+    action: "chat",
+    typingDelayMs: 0,
+    value: prompt,
+  });
+  assert.equal(result.requestId, 4);
+  assert.equal(result.response, "driver reply");
+});
+
+test("chat fails fast when its owned response slot is cleared", async () => {
+  const harness = makeChatHarness();
+  const prompt = "driver prompt";
+  let removed = false;
+  harness.setOnSend(() => {
+    harness.setInputValue("");
+    harness.appendSlot({
+      id: 1,
+      response: "",
+      user: prompt,
+    });
+  });
+  harness.setOnTimer(({ ms }) => {
+    if (removed || ms !== 150) return;
+    removed = true;
+    harness.removeSlot(1, false);
+  });
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    harness.command({
+      action: "chat",
+      timeoutMs: 1000,
+      typingDelayMs: 0,
+      value: prompt,
+    }),
+    /chat was cleared or reset before the reply arrived.*request was cancelled/,
+  );
+  assert.ok(Date.now() - startedAt < 500, "a dead request must not hold the queue");
 });
 
 test("chat refuses to clobber text the person already typed", async () => {

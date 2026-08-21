@@ -1,5 +1,5 @@
 """
-Agent Migration Assistant — a Frontier RAPPlication.
+Agent Migration Assistant — a Frontier rapplication.
 
 Answers the field question "a client built agents on Anthropic or OpenAI and
 wants them in Copilot Studio — is there a migration path?" with a working,

@@ -1,5 +1,5 @@
 """
-Agentic App Studio — a Frontier RAPPlication.
+Agentic App Studio — a Frontier rapplication.
 
 The connective tissue for the "Build and Manage Agentic Apps" tech workshop:
 pick agent.py files (from the LOCAL Brainstem, from a public RAR catalog, or

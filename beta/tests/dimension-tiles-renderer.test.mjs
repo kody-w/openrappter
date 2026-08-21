@@ -156,3 +156,30 @@ test("arena arrangements never apply off the arena surface", () => {
     "the container must not receive an arrangement class unconditionally",
   );
 });
+
+// The wake handshake had exactly two chances to land — the frame's ready message
+// and the end of wakeTile's route transition — and both can legitimately miss: the
+// ready message arrives while routeTransition is still true, and a second
+// navigation then nulls frameReadyGeneration while frameChanged returns early
+// because a wake is pending. With no retry the tile was dropped silently and the
+// chat showed a fresh Brainstem instead of the restored conversation, which is the
+// cross-platform e2e failure in "tile drag semantics".
+test("a wake that cannot be delivered yet is retried, then fails loudly", () => {
+  assert.match(
+    tilesSource,
+    /function deliverPendingWake\(\)[\s\S]*?\) \{\s*scheduleWakeRetry\(\);\s*return false;/,
+    "a wake that cannot land now must arm a retry instead of being dropped",
+  );
+  assert.match(
+    tilesSource,
+    /Date\.now\(\) > SCRIPT_STATE\.pendingWakeDeadline[\s\S]{0,320}showError\(/,
+    "the retry must be bounded and surface a failure rather than looping forever",
+  );
+  // Delivering, or discovering there is nothing to deliver, must disarm the retry.
+  const fn = tilesSource.slice(tilesSource.indexOf("function deliverPendingWake()"));
+  assert.equal(
+    (fn.slice(0, fn.indexOf("\n  }")).match(/clearWakeRetry\(\)/g) || []).length,
+    2,
+    "both exits from deliverPendingWake must clear the retry timer",
+  );
+});

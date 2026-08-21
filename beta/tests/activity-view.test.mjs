@@ -6,7 +6,13 @@ import vm from "node:vm";
 import { createActivityViewInstallationSource } from "../electron/activity-view.mjs";
 import { createFakeWindow, FakeDocument } from "./helpers/fake-dom.mjs";
 
-const main = readFileSync(new URL("../electron/main.mjs", import.meta.url), "utf8");
+// Normalised to LF at read. These tests locate regions of the source with
+// searches like indexOf("\n}\n\nfunction ..."), which find nothing on a Windows
+// checkout where the file is CRLF — the region comes back empty and the test
+// fails claiming the code is missing. Normalising once fixes every search in
+// this file rather than each pattern being hardened separately.
+const main = readFileSync(new URL("../electron/main.mjs", import.meta.url), "utf8")
+  .replace(/\r\n/g, "\n");
 
 function installActivityView() {
   const document = new FakeDocument();

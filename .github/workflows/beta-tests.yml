@@ -1,0 +1,57 @@
+# The beta suite had no workflow. 593 tests existed and ran only when a person
+# typed `npm test` — which is how thirty-two defects lived in the tree long
+# enough to need an adversarial review to find. A test nobody runs is a comment.
+name: Beta tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['beta/**', '.github/workflows/beta-tests.yml']
+  pull_request:
+    paths: ['beta/**', '.github/workflows/beta-tests.yml']
+
+concurrency:
+  group: beta-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: beta (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both platforms the product installs on. They skip different tests, so
+        # a suite that is green on one is not evidence about the other.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the engines floor in beta/package.json. engine-strict=true
+          # means an older Node fails at install with a message naming the
+          # versions, rather than a dozen unrelated test errors much later.
+          node-version: '24.19.0'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: beta
+        # --ignore-scripts is not belt-and-braces here: beta/.npmrc sets it
+        # because a transitive postinstall downloads and chmods an unchecked
+        # native binary. Passing it explicitly keeps that true if the file moves.
+        run: npm ci --ignore-scripts
+
+      - name: Syntax check
+        working-directory: beta
+        run: npm run check
+
+      - name: Run the suite
+        working-directory: beta
+        run: npm test

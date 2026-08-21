@@ -231,13 +231,35 @@ function deepFreeze(value, seen = new Set()) {
 }
 
 /**
+ * A frozen copy of a frame — never the caller's own object.
+ *
+ * Freezing in place looked like enforcing inertness and was itself a mutation:
+ * it changed an object the caller owns, so their later writes began failing
+ * silently, or throwing under strict mode, in code that never called this
+ * module. A dimension owns its copy; the caller keeps theirs.
+ *
+ * RAPP/1 frames are I-JSON by construction — rapp-protocol validates exactly
+ * that — so a JSON round trip is a faithful copy. Anything that will not round
+ * trip is not a frame this module can work with, and is passed through
+ * untouched rather than silently altered.
+ */
+function frozenCopy(frame) {
+  if (!frame || typeof frame !== "object") return frame;
+  try {
+    return deepFreeze(JSON.parse(JSON.stringify(frame)));
+  } catch {
+    return frame;
+  }
+}
+
+/**
  * A dimension is a manifest (which carries the clock key) plus its frames.
  * The frames are frozen through: a dimension that says it is inert must be.
  */
 export function dimension(manifest, frames) {
   return Object.freeze({
     manifest: Object.freeze({ ...manifest }),
-    frames: deepFreeze([...frames].map((frame) => deepFreeze(frame))),
+    frames: Object.freeze([...frames].map(frozenCopy)),
   });
 }
 
@@ -398,7 +420,7 @@ export function drill(local, remote, {
 export function pull(source, address) {
   const found = source.frames.find((frame) => frame.frame_hash === address.frame_hash);
   if (!found) throw new Error(`no frame at ${address.frame_hash} in this dimension`);
-  return deepFreeze(found);
+  return found;
 }
 
 /**
@@ -716,9 +738,9 @@ export function placeThere(align, hereSeq) {
 
 /** A line is an ordered chain of frames plus its HEAD. */
 export function makeLine(frames) {
-  const ordered = [...frames];
+  const ordered = [...frames].map(frozenCopy);
   return Object.freeze({
-    frames: deepFreeze(ordered),
+    frames: Object.freeze(ordered),
     head: ordered.length ? ordered[ordered.length - 1].frame_hash : null,
   });
 }
@@ -923,12 +945,12 @@ export function assimilate(line, incoming, {
     });
   }
 
-  const frames = deepFreeze([...line.frames, joined]);
+  const frames = Object.freeze([...line.frames, deepFreeze(joined)]);
   return Object.freeze({
-    joined: deepFreeze(joined),
+    joined,
     head: joined.frame_hash,
     line: Object.freeze({ frames, head: joined.frame_hash }),
-    merged: Object.freeze(merged.map((frame) => deepFreeze(frame))),
+    merged: Object.freeze([...merged]),
     refused: Object.freeze(refused),
   });
 }
@@ -1014,7 +1036,7 @@ export function zoom(span, finer, align, line) {
       refused.push(Object.freeze({ frame: frame.frame_hash, at, contradicts: Object.freeze(contradicts) }));
     } else {
       refined.push(Object.freeze({
-        frame: deepFreeze(frame),
+        frame,
         // The exact position, and a float rendering for display. The float can
         // read 192156999999.99997 where the exact value is 192157000000, so a
         // caller that compares `at` against the frame named in `refines` must

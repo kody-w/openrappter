@@ -304,9 +304,42 @@ test("11. after a join, nothing returns HEAD to the pre-join frame", async () =>
   }
   assert.notEqual(after.head, before);
 
+  // CORRECTED 2026-08-21. This previously grepped the module's export NAMES for
+  // /unmerge|rollback|revert/, which proves only that nothing is CALLED that. A
+  // proof obligation about behaviour has to be tested by behaviour, so: call
+  // every exported function against the post-join state and assert that none of
+  // them hands back a line whose head is the pre-join head.
   const module = await import("../electron/qqdrill.mjs");
-  const undoish = Object.keys(module).filter((name) => /unmerge|unjoin|rollback|revert|reset/i.test(name));
-  assert.deepEqual(undoish, [], "an append-only lineage has no un-merge operation");
+  const attempts = [
+    [after.line],
+    [after.line, []],
+    [after.line, [incoming]],
+    [after.line, line],
+    [after.line, { start: 0, end: 1 }],
+    [line, after.line],
+    [after.joined, after.line],
+  ];
+  const restored = [];
+  for (const [name, exported] of Object.entries(module)) {
+    if (typeof exported !== "function") continue;
+    for (const args of attempts) {
+      let result;
+      try {
+        result = exported(...args);
+      } catch {
+        continue; // refusing is fine; producing the old head is not
+      }
+      const heads = [result?.head, result?.line?.head].filter(Boolean);
+      if (heads.includes(before)) restored.push(`${name}(${args.length} args)`);
+    }
+  }
+  assert.deepEqual(
+    restored,
+    [],
+    "an append-only lineage has no operation that returns HEAD to the pre-join frame; "
+      + "restoring an earlier generation is the lineage store's job, is recorded, and "
+      + "is not an un-merge",
+  );
 });
 
 test("12. zoom refines an interval; zoom without a fixed point in the span is refused", () => {
@@ -499,4 +532,28 @@ test("17. how far a drill goes is how long the person waits, and more is always 
   const line = makeLine(local.frames);
   const result = assimilate(line, impatient.pairs.map((pair) => pull(remote, pair.there)));
   assert.ok(result.merged.length > 0, "a partial drill is still a usable drill");
+});
+
+// Added 2026-08-21 after a review found dimension() and makeLine() freezing the
+// CALLER'S own frame objects in place. That looked like enforcing inertness and
+// was itself a mutation of someone else's data: their later writes began failing
+// silently, or throwing under strict mode, in code that never called this module.
+// A dimension owns a copy; the caller keeps theirs.
+test("a dimension copies the caller's frames instead of seizing them", () => {
+  const mine = chain([{ asserts: { sky: "clear" } }, { asserts: { wind: 5 } }]);
+  const held = dimension({ dimension_id: "held", clock_key: 1 }, mine);
+
+  assert.equal(Object.isFrozen(mine[0]), false, "the caller's frame stays theirs to change");
+  assert.equal(Object.isFrozen(mine[0].payload), false, "including everything inside it");
+  assert.equal(Object.isFrozen(held.frames[0]), true, "the dimension's copy is inert");
+  assert.equal(Object.isFrozen(held.frames[0].payload), true, "all the way down");
+  assert.equal(
+    held.frames[0].frame_hash,
+    mine[0].frame_hash,
+    "and the copy is faithful, or it is not the same frame",
+  );
+
+  const line = makeLine(mine);
+  assert.equal(Object.isFrozen(mine[1]), false, "makeLine must not seize them either");
+  assert.equal(Object.isFrozen(line.frames[1]), true);
 });

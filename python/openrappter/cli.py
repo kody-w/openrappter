@@ -1209,6 +1209,9 @@ Environment:
     )
 
     show_sub.add_parser('list', help='List recorded demonstrations')
+
+    from openrappter.rappid_card.cli import register_rappid_card_parser
+    register_rappid_card_parser(subparsers)
     
     args = parser.parse_args()
 
@@ -1306,6 +1309,23 @@ Environment:
             if not _handle_show_and_tell_command(args):
                 raise SystemExit(1)
         except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            print(json.dumps({"status": "error", "message": str(exc)}, indent=2))
+            raise SystemExit(1)
+        return
+
+    if args.command == 'rappid-card':
+        from openrappter.rappid_card.cli import handle_rappid_card_command
+        from openrappter.rappid_card import RappidCardError
+        try:
+            if not handle_rappid_card_command(args):
+                raise SystemExit(1)
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            json.JSONDecodeError,
+            RappidCardError,
+        ) as exc:
             print(json.dumps({"status": "error", "message": str(exc)}, indent=2))
             raise SystemExit(1)
         return

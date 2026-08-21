@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "dompurify": "^3.3.1",
+    "dompurify": "^3.4.13",
     "lit": "^3.1.0",
     "marked": "^17.0.1",
     "yaml": "^2.8.2"

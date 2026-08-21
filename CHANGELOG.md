@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the dual-runtime RAPP/1 §7.10 Calling Card / Debug Card verifier,
+  reconciled byte-for-byte with `rapp-1` commit `4751cd8`. The virtual resource
+  is the canonical eleven-key frame; production is `body.calling-card` +
+  `rappid-card/1`, debug is `body.debug-card` + `rappid-card-test/1`; signatures
+  are detached unencoded EdDSA JWS with SPKI→RAPPID binding. Signed runtime
+  policy, authority delegation, typed revocation, strict endpoint/fetch
+  evidence, durable `hydrating`/`awake` replay, `rapp/1:egg` inventory, particle
+  continuity, all 63 named scenarios, and physical byte/link reproduction are
+  enforced in the exact normative order. Production trust roots come only
+  from a closed mode-0600 local configuration; verifier bundles cannot add
+  roots or supply live clock/connection/fetch/hydration/continuity authority.
+  Since live production adapters are not shipped, production awake
+  verification fails closed as `live-adapter-required`, while offline
+  inspection is explicitly `historical-unproven`, never opens replay state,
+  and reports rollback/replay unchecked rather than erasing that evidence.
+  The authoritative follow-up now includes
+  bounded canonicalization, numeric-host, fullmatch-token, and Unicode-secret
+  fixes directly; no interim runtime patch remains. No auto-discovered agent
+  was added.
+
 ### Fixed
 
 - The TS<->Python parity map (`.claude/skills/ts-python-parity-check/SKILL.md`)

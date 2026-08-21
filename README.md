@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Debug Card](./docs/rappid-debug-card.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -82,6 +82,19 @@ the same reducer as human controls through strict command/receipt handshakes;
 it is compiled out of Release builds.
 
 See [Quantum RAPPIDs](./docs/quantum-rappids.md).
+
+### Virtual RAPPID Debug Card
+
+The authenticated Habitat includes an exact RAPP/1 §7.10 Calling Card / Debug
+Card verifier. `.rappid-card.json` is canonical JSON for the ordinary
+eleven-key frame; production is `body.calling-card` + `rappid-card/1`, while
+test-only debug is `body.debug-card` + `rappid-card-test/1`. Both runtimes
+consume the byte-identical PR9 commit `4751cd8` deck, enforce detached
+unencoded EdDSA JWS with SPKI→RAPPID binding, signed runtime/authority/revocation
+views, strict endpoint/fetch evidence, durable `hydrating`/`awake` replay state,
+and the exact eleven-step verification order.
+
+See [Virtual RAPPID Debug Card](./docs/rappid-debug-card.md).
 
 
 ## Get Started — Let Your AI Agent Do It

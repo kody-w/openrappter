@@ -98,6 +98,22 @@ The Quantum RAPPID Habitat shows:
 There is no hidden full-autonomy mode. A proposal becomes organism state only
 after the selected approval policy and RAPP/1 verification pass.
 
+## Virtual Debug Card
+
+The Habitat's **RAPPID Debug Card** page exercises the exact RAPP/1 §7.10
+profile without mutating a Quantum RAPPID. `.rappid-card.json` is the canonical
+eleven-key frame, never a private envelope. The test-only UI consumes the
+vendored PR9 `rappid-card-test/1` deck, shows exact frame/link fields, and runs
+the ordered verifier only after explicit approval.
+
+Production calling cards use `body.calling-card` + `rappid-card/1`; debug cards
+use `body.debug-card` + `rappid-card-test/1`. Detached EdDSA JWS, keyed
+SPKI→RAPPID binding, signed runtime policy/authority/revocation views, observed
+endpoint redirect/DNS evidence, durable replay state, `rapp/1:egg` inventory,
+and particle continuity all follow SPEC §7.10 exactly.
+
+See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
+
 ## Show-and-Tell Skill Recorder
 
 Show-and-Tell can promote an approved generated `SKILL.md` into a skill

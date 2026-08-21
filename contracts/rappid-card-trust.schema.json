@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openrappter.dev/contracts/rappid-card-trust.schema.json",
+  "title": "PR9 signed RAPPID card trust documents",
+  "oneOf": [
+    { "$ref": "#/$defs/runtime_policy" },
+    { "$ref": "#/$defs/authority_view" },
+    { "$ref": "#/$defs/revocation_view" }
+  ],
+  "$defs": {
+    "uint53": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "lclabel": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "versioned": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/[1-9][0-9]*$"
+    },
+    "rappid": {
+      "type": "string",
+      "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$"
+    },
+    "jws": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "channel"],
+      "properties": {
+        "source": { "type": "string" },
+        "channel": { "$ref": "#/$defs/lclabel" }
+      }
+    },
+    "runtime_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "policy_seq", "generated_utc", "effective_utc",
+        "expires_utc", "authority_rappid", "signer_key_id", "provenance",
+        "card_authority", "protocol", "runtime", "features", "profiles",
+        "max_classification", "granted_scope", "max_registry_age_seconds", "sig"
+      ],
+      "properties": {
+        "schema": { "const": "rappid-card-runtime-policy/1" },
+        "policy_seq": { "$ref": "#/$defs/uint53" },
+        "generated_utc": { "$ref": "#/$defs/utc" },
+        "effective_utc": { "$ref": "#/$defs/utc" },
+        "expires_utc": { "$ref": "#/$defs/utc" },
+        "authority_rappid": { "$ref": "#/$defs/rappid" },
+        "signer_key_id": { "$ref": "#/$defs/rappid" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "card_authority": { "$ref": "#/$defs/rappid" },
+        "protocol": { "$ref": "#/$defs/versioned" },
+        "runtime": { "$ref": "#/$defs/versioned" },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/versioned" }
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["rappid-card/1", "rappid-card-test/1"]
+          }
+        },
+        "max_classification": {
+          "enum": ["public", "internal", "confidential", "restricted"]
+        },
+        "granted_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/lclabel" }
+        },
+        "max_registry_age_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sig": { "$ref": "#/$defs/jws" }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer_key_id", "subject_rappid", "role", "not_before_utc",
+        "not_after_utc", "revoked_utc"
+      ],
+      "properties": {
+        "issuer_key_id": { "$ref": "#/$defs/rappid" },
+        "subject_rappid": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/rappid" }
+          ]
+        },
+        "role": { "enum": ["subject", "card-issuer"] },
+        "not_before_utc": { "$ref": "#/$defs/utc" },
+        "not_after_utc": { "$ref": "#/$defs/utc" },
+        "revoked_utc": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/utc" }
+          ]
+        }
+      }
+    },
+    "authority_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "registry_seq", "generated_utc", "effective_utc",
+        "expires_utc", "authority_rappid", "signer_key_id", "provenance",
+        "approved_origins", "authorizations", "sig"
+      ],
+      "properties": {
+        "schema": { "const": "rappid-card-authority/1" },
+        "registry_seq": { "$ref": "#/$defs/uint53" },
+        "generated_utc": { "$ref": "#/$defs/utc" },
+        "effective_utc": { "$ref": "#/$defs/utc" },
+        "expires_utc": { "$ref": "#/$defs/utc" },
+        "authority_rappid": { "$ref": "#/$defs/rappid" },
+        "signer_key_id": { "$ref": "#/$defs/rappid" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "approved_origins": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "authorizations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/authorization" }
+        },
+        "sig": { "$ref": "#/$defs/jws" }
+      }
+    },
+    "revocation_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_type", "target", "effective_utc", "reason"],
+      "properties": {
+        "target_type": {
+          "enum": ["manifest-hash", "key-id", "subject-rappid"]
+        },
+        "target": { "type": "string" },
+        "effective_utc": { "$ref": "#/$defs/utc" },
+        "reason": { "$ref": "#/$defs/lclabel" }
+      }
+    },
+    "revocation_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "registry_seq", "generated_utc", "effective_utc",
+        "expires_utc", "authority_rappid", "signer_key_id", "provenance",
+        "entries", "sig"
+      ],
+      "properties": {
+        "schema": { "const": "rappid-card-revocations/1" },
+        "registry_seq": { "$ref": "#/$defs/uint53" },
+        "generated_utc": { "$ref": "#/$defs/utc" },
+        "effective_utc": { "$ref": "#/$defs/utc" },
+        "expires_utc": { "$ref": "#/$defs/utc" },
+        "authority_rappid": { "$ref": "#/$defs/rappid" },
+        "signer_key_id": { "$ref": "#/$defs/rappid" },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "entries": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/revocation_entry" }
+        },
+        "sig": { "$ref": "#/$defs/jws" }
+      }
+    }
+  }
+}

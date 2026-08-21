@@ -207,6 +207,15 @@ if errorlevel 1 goto :fail
 
 echo.
 echo [..] Installing Electron and the bundled GitHub Copilot CLI...
+REM Put the portable runtime first on PATH. npm.cmd runs the package's own
+REM scripts, and `npm test` is `node --test` — where `node` resolves from PATH,
+REM not from the npm that invoked it. Without this, a machine with an older
+REM system Node installs with the portable runtime and then verifies with the
+REM wrong one: node:sqlite is absent before 22.5, so eleven test files fail to
+REM load and the install reports failure while the correct runtime sits unused
+REM beside it. install.sh has done this since line 247; this is its counterpart.
+set "PATH=%NODE_DIR%;%PATH%"
+
 set "npm_config_cache=%BETA_HOME%\npm-cache"
 pushd "%BETA_SOURCE%\beta"
 REM --ignore-scripts: a package postinstall must not fetch and execute a native

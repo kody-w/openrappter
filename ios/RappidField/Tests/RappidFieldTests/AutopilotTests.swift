@@ -150,6 +150,14 @@ final class AutopilotTests: XCTestCase {
             (commandJSON("navigate", target: "keychain"), "bad-target"),
             (commandJSON("navigate"), "bad-target"),
             (commandJSON("fillChatInput", value: String(repeating: "a", count: 513)), "value-rejected"),
+            (
+                commandJSON(
+                    "snapshot",
+                    id: "oversized-command",
+                    value: String(repeating: "a", count: 5_000)
+                ),
+                "malformed-payload"
+            ),
             (commandJSON("fillChatInput"), "value-missing"),
             (commandJSON("navigate", target: "growth", omitSeq: true), "missing-sequence"),
             (commandJSON("navigate", target: "growth", seq: 0), "missing-sequence"),
@@ -212,6 +220,31 @@ final class AutopilotTests: XCTestCase {
             await expectIgnored(harness, payload, "the operator's own clipboard must not produce a receipt")
         }
         XCTAssertTrue(harness.mailbox.writes.isEmpty)
+    }
+
+    func testOversizedCommandUsesOnlyRootFieldsRegardlessOfOrder() async throws {
+        let harness = await makeHarness()
+        let rootID = "root-command-id"
+        let reordered =
+            #"{"value":""#
+            + String(repeating: "x", count: 5_000)
+            + #"","nested":{"id":"fake-id","type":"command"},"action":"snapshot","seq":9,"version":1,"type":"command","id":""#
+            + rootID
+            + #""}"#
+        let receipt = try await send(harness, reordered)
+        XCTAssertEqual(receipt.id, rootID)
+        XCTAssertEqual(receipt.status, .refused)
+        XCTAssertTrue(try XCTUnwrap(receipt.error).hasPrefix("malformed-payload"))
+
+        let prose =
+            #"{"example":{"type":"command","id":"not-root"},"padding":""#
+            + String(repeating: "x", count: 5_000)
+            + #""}"#
+        await expectIgnored(
+            harness,
+            prose,
+            "a nested command example does not claim the root command envelope",
+        )
     }
 
     func testReplayedCommandIdIsRefusedAndNotExecutedTwice() async throws {
@@ -504,6 +537,57 @@ final class AutopilotTests: XCTestCase {
         XCTAssertEqual(pasteboard.writes.count, writes)
     }
 
+    func testCommandDeliveredDuringExecutionIsNotSilentlyDropped() async throws {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("autopilot-race-\(UUID().uuidString)", isDirectory: true)
+        let mailbox = try ContainerFileMailbox(directory: base)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let suiteName = "autopilot-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(defaults: defaults, credentialStore: InMemoryCredentialStore())
+        model.choose(path: .canopy)
+        model.completeOnboarding()
+        await model.bootstrap()
+        let navigator = FieldNavigator(chat: ChatViewModel(service: StallingChat()))
+        navigator.chat.input = "hello"
+        let player = WakeCallPlayer()
+        let driver = AutopilotDriver(
+            model: model,
+            navigator: navigator,
+            player: player,
+            engine: GameEngine(model: model, navigator: navigator, player: player),
+            inboxes: [mailbox],
+            publishers: [mailbox],
+            isEnabled: true
+        )
+        driver.settleTimeout = .milliseconds(250)
+        driver.animationSettle = .zero
+
+        try Data(commandJSON("sendChat", id: "slow-file-1", seq: 100).utf8)
+            .write(to: mailbox.inboxURL, options: .atomic)
+        let firstPoll = Task { await driver.pollOnce() }
+        try await Task.sleep(for: .milliseconds(80))
+        try Data(commandJSON("snapshot", id: "queued-file-2", seq: 101).utf8)
+            .write(to: mailbox.inboxURL, options: .atomic)
+        await firstPoll.value
+        let first = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: mailbox.receiptURL)
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(first["id"] as? String, "slow-file-1")
+        await driver.pollOnce()
+
+        let root = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: mailbox.receiptURL)
+            ) as? [String: Any]
+        )
+        XCTAssertEqual(root["id"] as? String, "queued-file-2")
+        XCTAssertEqual(root["status"] as? String, "ok")
+    }
+
     // MARK: Semantic state
 
     func testSnapshotStateIsSemanticAndBounded() async throws {
@@ -590,13 +674,53 @@ final class AutopilotTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(unacknowledged.error).hasPrefix("requires-operator-confirmation"))
 
         // Acknowledged — and still refused, by the same leash policy a finger hits.
-        let acknowledged = try await send(harness, commandJSON("acknowledgeConfirmation"))
+        let proposalID = try XCTUnwrap(harness.navigator.proposal?.id)
+        let acknowledged = try await send(
+            harness,
+            commandJSON("acknowledgeConfirmation", target: proposalID)
+        )
         XCTAssertEqual(acknowledged.status, .ok)
         let approved = try await send(harness, commandJSON("approveAppend"))
         XCTAssertEqual(approved.status, .refused)
         XCTAssertEqual(approved.error, AppendRefusal.syntheticFixture.errorDescription)
         XCTAssertNil(harness.navigator.appendReceipt, "nothing was appended")
         XCTAssertFalse(harness.navigator.confirmationVisible)
+    }
+
+    func testAcknowledgementIsBoundToTheExactProposalShown() async throws {
+        let harness = await makeHarness()
+        try await send(harness, commandJSON("setLeash", value: "runApproved"))
+        try await send(harness, commandJSON("requestProposal"))
+        let originalID = try XCTUnwrap(harness.navigator.proposal?.id)
+        try await send(harness, commandJSON("openConfirmation"))
+        try await send(
+            harness,
+            commandJSON("acknowledgeConfirmation", target: originalID)
+        )
+        XCTAssertTrue(harness.navigator.confirmationAcknowledged)
+
+        let swapped = try await send(harness, commandJSON("openCard", target: "forge"))
+        XCTAssertNotEqual(harness.navigator.proposal?.id, originalID)
+        XCTAssertTrue(harness.navigator.confirmationVisible)
+        XCTAssertFalse(harness.navigator.confirmationAcknowledged)
+        XCTAssertEqual(
+            try stateDictionary(swapped)["confirmationAcknowledged"] as? Bool,
+            false
+        )
+
+        let stale = try await send(
+            harness,
+            commandJSON("acknowledgeConfirmation", target: originalID)
+        )
+        XCTAssertEqual(stale.status, .refused)
+        XCTAssertTrue(try XCTUnwrap(stale.error).contains("proposal changed"))
+
+        let refused = try await send(harness, commandJSON("approveAppend"))
+        XCTAssertEqual(refused.status, .refused)
+        XCTAssertTrue(
+            try XCTUnwrap(refused.error).hasPrefix("requires-operator-confirmation")
+        )
+        XCTAssertNil(harness.navigator.appendReceipt)
     }
 
     func testObserveLeashRefusesToProduceAProposal() async throws {
@@ -667,7 +791,12 @@ final class AutopilotTests: XCTestCase {
 
     func testPairingValuesAreValidatedNotFetched() async throws {
         let harness = await makeHarness()
-        for value in ["http://evil.example.com/steal", "file:///etc/passwd", "not a url at all"] {
+        for value in [
+            "http://evil.example.com/steal",
+            "http://evil.local",
+            "file:///etc/passwd",
+            "not a url at all",
+        ] {
             let receipt = try await send(harness, commandJSON("fillPairingHost", value: value))
             XCTAssertEqual(receipt.status, .refused, value)
             XCTAssertTrue(try XCTUnwrap(receipt.error).hasPrefix("value-rejected"), value)

@@ -40,6 +40,14 @@ def test_canonical_json_matches_the_other_runtime():
     assert R.canonical_digest(EXPECT["canonical"]["value"]) == EXPECT["canonical"]["digest"]
 
 
+def test_canonical_numbers_match_the_other_runtime():
+    numbers = EXPECT["canonicalNumbers"]
+    assert R.canonical_json(numbers["value"]) == numbers["text"]
+    assert R.canonical_digest(numbers["value"]) == numbers["digest"]
+    with pytest.raises(ValueError, match="unsafe integer"):
+        R.canonical_json(numbers["unsafeInteger"])
+
+
 def test_canonical_json_escapes_non_ascii_and_sorts_keys():
     assert R.canonical_json({"k": "caf\u00e9"}) == '{"k":"caf\\u00e9"}'
     assert R.canonical_json({"b": {"d": 1, "c": 2}, "a": 3}) == '{"a":3,"b":{"c":2,"d":1}}'

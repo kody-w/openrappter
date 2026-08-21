@@ -769,6 +769,19 @@ class ShowAndTellAgent(BasicAgent):
         if not analysis:
             raise RuntimeError("Analyze and approve the session before building.")
         plan = self.store.get_plan(session["id"])
+        if plan is None and any(
+            event["type"] == "plan.proposal.requested"
+            for event in self.store.events(session["id"])
+        ):
+            return {
+                "status": "error",
+                "action": "build",
+                "code": "plan_missing",
+                "message": (
+                    "A plan proposal was requested but its review record is missing. "
+                    "Propose it again before building."
+                ),
+            }
         if plan is not None:
             # A proposed plan is the thing that gets approved. Falling back to
             # the analysis here would build text nobody reviewed as a plan.
@@ -863,6 +876,12 @@ class ShowAndTellAgent(BasicAgent):
             raise RuntimeError(
                 "Analyze the Show-and-Tell session before proposing a plan."
             )
+        self.store.append_event(
+            session["id"],
+            "plan.proposal.requested",
+            "show-and-tell",
+            {},
+        )
         bundle = build_session_bundle(session, self.store.events(session["id"]))
         plan = build_skill_plan(
             analysis,

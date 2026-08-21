@@ -109,7 +109,7 @@ struct RappidLink: Equatable {
     /// never leaves the device. Everything else must be HTTPS.
     static func isLoopback(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local")
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     init(parsing text: String) throws {

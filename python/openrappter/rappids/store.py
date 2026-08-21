@@ -205,6 +205,11 @@ def _parse_external_episode(raw: Any, cursor: Optional[str]) -> Optional[Externa
 
 
 def _parse_dimension(name: str, raw: Any) -> DimensionRecord:
+    if _LABEL.fullmatch(name) is None:
+        raise QuantumRappidError(
+            "invalid-dimension",
+            f"quantum dimension name is not an lclabel: {name!r}",
+        )
     """A dimension record, with its refs and playback types pulled out.
 
     Dimension bodies are open by design -- the whole premise is that new
@@ -319,7 +324,7 @@ def _parse_asset(raw: Any, where: str) -> AssetRecord:
             "invalid-field", f"{where}.duration_seconds must be a number or null"
         )
     sha256 = _require_string(value.get("sha256"), f"{where}.sha256")
-    if not _HEX64.match(sha256):
+    if not _HEX64.fullmatch(sha256):
         raise QuantumRappidError("invalid-field", f"{where}.sha256 is not a sha-256 digest")
     return AssetRecord(
         path=_require_string(value.get("path"), f"{where}.path"),
@@ -482,7 +487,7 @@ def asset_to_json(asset: AssetRecord) -> Dict[str, Any]:
 
 def media_ref(payload: bytes, media_type: str) -> Dict[str, Any]:
     """A RAPP/1 egg reference: the space, the address, the type and the size."""
-    if not _MEDIA_TYPE.match(media_type):
+    if not _MEDIA_TYPE.fullmatch(media_type):
         raise QuantumRappidError("media-type", f"invalid RAPP/1 media type: {media_type}")
     return {
         "space": RAPP_EGG_DOMAIN,
@@ -565,7 +570,7 @@ def parse_body_frame(raw: Dict[str, Any], source: str) -> BodyFrame:
             "frame-shape", f"{source} is not the exact eleven-key RAPP/1 envelope"
         )
     utc = _require_string(raw.get("utc"), f"{source}.utc")
-    if not FRAME_TIME_PATTERN.match(utc):
+    if not FRAME_TIME_PATTERN.fullmatch(utc):
         raise QuantumRappidError(
             "invalid-field", f"{source}.utc must be YYYY-MM-DDTHH:MM:SS.mmmZ"
         )
@@ -605,7 +610,7 @@ def _is_uint(value: Any) -> bool:
 
 
 def _is_fixed_width_utc(value: str) -> bool:
-    if not FRAME_TIME_PATTERN.match(value):
+    if not FRAME_TIME_PATTERN.fullmatch(value):
         return False
     try:
         moment = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(
@@ -633,16 +638,16 @@ def body_frame_problems(
         problems.append("seq is not a uint53")
     if not _is_fixed_width_utc(frame.utc):
         problems.append("utc is not a valid fixed-width RFC 3339 timestamp")
-    if not _HEX64.match(frame.payload_hash):
+    if not _HEX64.fullmatch(frame.payload_hash):
         problems.append("payload_hash is not 64hex")
-    if not _HEX64.match(frame.frame_hash):
+    if not _HEX64.fullmatch(frame.frame_hash):
         problems.append("frame_hash is not 64hex")
-    if frame.prev is not None and not _HEX64.match(frame.prev):
+    if frame.prev is not None and not _HEX64.fullmatch(frame.prev):
         problems.append("prev is not null or 64hex")
     if sorted(frame.payload) != sorted(DIMENSION_PAYLOAD_KEYS):
         problems.append("body.dimension payload does not have its exact key set")
     dimension = frame.payload.get("dimension")
-    if not isinstance(dimension, str) or not _LABEL.match(dimension):
+    if not isinstance(dimension, str) or not _LABEL.fullmatch(dimension):
         problems.append("dimension is not an lclabel")
     version = frame.payload.get("version")
     if not _is_uint(version) or version < 1:
@@ -652,7 +657,7 @@ def body_frame_problems(
         not isinstance(stage, dict)
         or sorted(stage) != ["name", "ordinal"]
         or not isinstance(stage.get("name"), str)
-        or not _LABEL.match(str(stage.get("name")))
+        or not _LABEL.fullmatch(str(stage.get("name")))
         or not _is_uint(stage.get("ordinal"))
     ):
         problems.append("stage is not exactly {name:lclabel, ordinal:uint53}")
@@ -663,7 +668,7 @@ def body_frame_problems(
         problems.append("media is not an object")
     else:
         for role, value in media.items():
-            if not _LABEL.match(role):
+            if not _LABEL.fullmatch(role):
                 problems.append(f"media role {role} is not an lclabel")
                 continue
             if not isinstance(value, dict):
@@ -674,10 +679,10 @@ def body_frame_problems(
             if value.get("space") != RAPP_EGG_DOMAIN:
                 problems.append(f"media.{role}.space is not {RAPP_EGG_DOMAIN}")
             reference = value.get("hash")
-            if not isinstance(reference, str) or not _HEX64.match(reference):
+            if not isinstance(reference, str) or not _HEX64.fullmatch(reference):
                 problems.append(f"media.{role}.hash is not 64hex")
             media_type = value.get("media_type")
-            if not isinstance(media_type, str) or not _MEDIA_TYPE.match(media_type):
+            if not isinstance(media_type, str) or not _MEDIA_TYPE.fullmatch(media_type):
                 problems.append(f"media.{role}.media_type is invalid")
             if not _is_uint(value.get("bytes")):
                 problems.append(f"media.{role}.bytes is not a uint53")
@@ -695,13 +700,13 @@ def body_frame_problems(
             source_stream = value.get("stream_id")
             valid_stream = isinstance(source_stream, str) and (
                 is_rappid(source_stream)
-                or _MEMORY_STREAM.match(source_stream) is not None
-                or _SWARM_STREAM.match(source_stream) is not None
+                or _MEMORY_STREAM.fullmatch(source_stream) is not None
+                or _SWARM_STREAM.fullmatch(source_stream) is not None
             )
             if not valid_stream:
                 problems.append(f"sources[{index}].stream_id is invalid")
             particle = value.get("particle")
-            if not isinstance(particle, str) or not _HEX64.match(particle):
+            if not isinstance(particle, str) or not _HEX64.fullmatch(particle):
                 problems.append(f"sources[{index}].particle is not 64hex")
             if isinstance(source_stream, str) and isinstance(particle, str):
                 source_order.append(f"{source_stream}\0{particle}")
@@ -765,7 +770,7 @@ def read_sidecar_digest(path: str) -> Optional[str]:
         return None
     first = target.read_text(encoding="utf-8").split("\n")[0].strip()
     digest = first.split()[0] if first else ""
-    if not _HEX64.match(digest):
+    if not _HEX64.fullmatch(digest):
         raise QuantumRappidError(
             "invalid-sidecar", f"{target.name} does not start with a sha-256 digest"
         )
@@ -857,7 +862,7 @@ def asset_exists(organism: LoadedOrganism, dimension: str, path: str) -> bool:
 
 
 def object_path(organism: LoadedOrganism, hash_hex: str) -> str:
-    if not _HEX64.match(hash_hex):
+    if not _HEX64.fullmatch(hash_hex):
         raise QuantumRappidError("object-hash", f"invalid RAPP/1 object hash: {hash_hex}")
     return resolve_within(organism.directory, f"{OBJECTS_DIRECTORY}/{hash_hex}")
 
@@ -933,7 +938,7 @@ def append_body_frame(organism: LoadedOrganism, frame: BodyFrame) -> str:
     frame whose sequence already exists means two writers raced or history is
     being rewritten, and both deserve an error rather than a silent overwrite.
     """
-    if not FRAME_TIME_PATTERN.match(frame.utc):
+    if not FRAME_TIME_PATTERN.fullmatch(frame.utc):
         raise QuantumRappidError(
             "frame-time", f"frame utc {frame.utc} is not YYYY-MM-DDTHH:MM:SS.mmmZ"
         )

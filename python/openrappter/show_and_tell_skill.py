@@ -51,6 +51,7 @@ LIFECYCLE_TYPES = frozenset(
         "collector.heartbeat",
         "collector.stopped",
         "collector.error",
+        "plan.proposal.requested",
     }
 )
 NARRATION_TYPES = frozenset({"session.note", "narration.transcribed"})
@@ -149,6 +150,10 @@ def build_session_bundle(
 ) -> dict[str, Any]:
     """Deterministic segmentation of a recorded session."""
     ordered = sorted(events, key=lambda event: event.get("sequence", 0))
+    evidence_events = [
+        event for event in ordered
+        if event.get("type") != "plan.proposal.requested"
+    ]
     segments: list[dict[str, Any]] = []
     current: Optional[dict[str, Any]] = None
     previous_elapsed: Optional[int] = None
@@ -157,7 +162,7 @@ def build_session_bundle(
     longest_gap_ms = 0
     duration_ms = 0
 
-    for event in ordered:
+    for event in evidence_events:
         elapsed_ms, estimated = _event_elapsed(event, session)
         if estimated:
             estimated_elapsed_events += 1
@@ -263,7 +268,7 @@ def build_session_bundle(
         )
 
     stats = {
-        "eventCount": len(ordered),
+        "eventCount": len(evidence_events),
         "meaningfulEventCount": meaningful_event_count,
         "segmentCount": len(rendered),
         "narratedSegments": narrated_segments,
@@ -410,6 +415,63 @@ VALUE_LABELS = {
 MAX_VALUES = 40
 
 _PLACEHOLDER = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
+_PLAN_STEP_ID = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+
+
+def _mask_plan_content(
+    plan: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Mask user-authored plan text without rewriting structural identifiers."""
+    masked, findings = mask_sensitive_payload(
+        {
+            "title": plan["title"],
+            "intent": plan["intent"],
+            "useWhen": plan["useWhen"],
+            "useFor": plan["useFor"],
+            "doNotUseWhen": plan["doNotUseWhen"],
+            "steps": [
+                {
+                    "title": step["title"],
+                    "detail": step["detail"],
+                    "tool": step["tool"],
+                    "app": step["app"],
+                    "url": step["url"],
+                }
+                for step in plan["steps"]
+            ],
+            "values": [
+                {"label": value["label"], "example": value["example"]}
+                for value in plan["values"]
+            ],
+            "openQuestions": plan["openQuestions"],
+            "feedbackLog": [
+                {"feedback": entry["feedback"]}
+                for entry in plan["feedbackLog"]
+            ],
+        }
+    )
+    value = {
+        **plan,
+        "title": masked["title"],
+        "intent": masked["intent"],
+        "useWhen": masked["useWhen"],
+        "useFor": masked["useFor"],
+        "doNotUseWhen": masked["doNotUseWhen"],
+        "steps": [
+            {**step, **masked["steps"][index]}
+            for index, step in enumerate(plan["steps"])
+        ],
+        "values": [
+            {**item, **masked["values"][index]}
+            for index, item in enumerate(plan["values"])
+        ],
+        "openQuestions": masked["openQuestions"],
+        "feedbackLog": [
+            {**entry, "feedback": masked["feedbackLog"][index]["feedback"]}
+            for index, entry in enumerate(plan["feedbackLog"])
+        ],
+    }
+    return value, findings
 
 
 def _merge_findings(
@@ -425,6 +487,14 @@ def _merge_findings(
         else:
             merged[key] = dict(finding)
     return [merged[key] for key in sorted(merged)]
+
+
+def _finding_under(path: str, prefix: str) -> bool:
+    return (
+        path == prefix
+        or path.startswith(f"{prefix}.")
+        or path.startswith(f"{prefix}[")
+    )
 
 
 class _ValueTable:
@@ -496,8 +566,21 @@ def _lower_first(value: str) -> str:
 
 def _plan_steps(steps: Sequence[dict[str, Any]], table: _ValueTable) -> list[dict[str, Any]]:
     planned: list[dict[str, Any]] = []
+    assigned: set[str] = set()
     for index, step in enumerate(steps):
-        identifier = step.get("id") or f"s{index + 1}"
+        raw_id = re.sub(
+            r"[^a-z0-9_-]+",
+            "-",
+            _safe_text(step.get("id"), 32).lower(),
+        ).strip("-")
+        base = raw_id if _PLAN_STEP_ID.fullmatch(raw_id) else f"s{index + 1}"
+        identifier = base
+        suffix = 2
+        while identifier in assigned:
+            tail = f"-{suffix}"
+            identifier = f"{base[:32 - len(tail)]}{tail}"
+            suffix += 1
+        assigned.add(identifier)
         used: set[str] = set()
         # Masking runs before extraction on purpose. Extracting first would
         # slice a card number into four editable "number" values and leave
@@ -616,7 +699,19 @@ def build_skill_plan(
     # What the recording carried, recorded as paths and kinds before any of it
     # is masked away, so the plan can say what it removed and from where.
     input_findings = _merge_findings(
-        scan_sensitive_payload(list(considered), "$.steps"),
+        scan_sensitive_payload(
+            [
+                {
+                    "title": step.get("title"),
+                    "detail": step.get("detail"),
+                    "tool": step.get("tool"),
+                    "app": step.get("app"),
+                    "url": step.get("url"),
+                }
+                for step in considered
+            ],
+            "$.steps",
+        ),
         scan_sensitive_payload(
             {"title": analysis.get("title"), "intent": analysis.get("intent")}, "$"
         ),
@@ -660,22 +755,31 @@ def build_skill_plan(
         "values": values,
         "evidenceStats": bundle.get("stats", {}),
         "openQuestions": open_questions,
+        "privacy": {
+            "findings": [],
+            "masked": False,
+            "rawFramesShared": False,
+        },
+        "feedbackLog": [
+            dict(entry) for entry in ((previous or {}).get("feedbackLog") or [])
+        ],
+        "approved": False,
+        "approvedAt": None,
+        "createdAt": (previous or {}).get("createdAt") or now,
+        "updatedAt": now,
     }
-    masked, scanned_findings = mask_sensitive_payload(
-        {
-            "title": draft["title"],
-            "intent": draft["intent"],
-            "useWhen": draft["useWhen"],
-            "useFor": draft["useFor"],
-            "doNotUseWhen": draft["doNotUseWhen"],
-            "steps": draft["steps"],
-            "values": draft["values"],
-            "openQuestions": draft["openQuestions"],
-        }
+    masked, scanned_findings = _mask_plan_content(draft)
+    retained_feedback_findings = [
+        finding
+        for finding in (previous or {}).get("privacy", {}).get("findings", [])
+        if _finding_under(finding["path"], "$.feedbackLog")
+        or _finding_under(finding["path"], "$.edit.feedback")
+    ]
+    findings = _merge_findings(
+        retained_feedback_findings,
+        _merge_findings(input_findings, scanned_findings),
     )
-    findings = _merge_findings(input_findings, scanned_findings)
     return {
-        **draft,
         **masked,
         "privacy": {
             "findings": findings,
@@ -683,11 +787,6 @@ def build_skill_plan(
             # OpenRappter never sends raw frames to a model. This records that.
             "rawFramesShared": False,
         },
-        "feedbackLog": list((previous or {}).get("feedbackLog") or []),
-        "approved": False,
-        "approvedAt": None,
-        "createdAt": (previous or {}).get("createdAt") or now,
-        "updatedAt": now,
     }
 
 
@@ -721,6 +820,7 @@ def revise_plan(
         if len(raw_steps) > 60:
             raise ValueError("steps_json may not contain more than 60 steps.")
         edited_steps = []
+        assigned: set[str] = set()
         for index, entry in enumerate(raw_steps):
             if not isinstance(entry, dict):
                 raise ValueError("Every edited step must be a JSON object.")
@@ -729,12 +829,24 @@ def revise_plan(
             if not step_title or not step_detail:
                 raise ValueError("Every edited step requires a title and a detail.")
             previous_step = current["steps"][index] if index < len(current["steps"]) else {}
+            requested_id = _safe_text(entry.get("id"), 32)
+            if requested_id and not _PLAN_STEP_ID.fullmatch(requested_id):
+                raise ValueError(
+                    f"Invalid Show-and-Tell step id: {requested_id}. "
+                    "Use a lowercase semantic id."
+                )
+            identifier = (
+                requested_id
+                or previous_step.get("id")
+                or f"s{index + 1}"
+            )
+            if identifier in assigned:
+                raise ValueError(f"Duplicate Show-and-Tell step id: {identifier}")
+            assigned.add(identifier)
             categories = risk_categories(f"{step_title} {step_detail}")
             edited_steps.append(
                 {
-                    "id": _safe_text(entry.get("id"), 32)
-                    or previous_step.get("id")
-                    or f"s{index + 1}",
+                    "id": identifier,
                     "title": step_title,
                     "detail": step_detail,
                     "kind": "calculation"
@@ -806,12 +918,18 @@ def revise_plan(
             "edits, re-read the plan, then approve it."
         )
 
+    feedback_log = (
+        [*current["feedbackLog"], {"at": now, "feedback": feedback_text}]
+        if feedback_text
+        else [dict(entry) for entry in current["feedbackLog"]]
+    )
     draft = {
         **current,
         "title": mask_sensitive_text(_safe_text(title, 160)) or current["title"],
         "intent": mask_sensitive_text(_safe_text(intent, 1200)) or current["intent"],
         "steps": steps,
         "values": values,
+        "feedbackLog": feedback_log,
     }
     # What the reviewer's own edit carried, before masking removed it, stays on
     # the record next to what the recording carried.
@@ -821,24 +939,38 @@ def revise_plan(
             "values": raw_values,
             "title": title,
             "intent": intent,
+            "feedback": feedback,
         },
         "$.edit",
     )
-    masked, scanned_findings = mask_sensitive_payload(
-        {
-            "title": draft["title"],
-            "intent": draft["intent"],
-            "useWhen": draft["useWhen"],
-            "useFor": draft["useFor"],
-            "doNotUseWhen": draft["doNotUseWhen"],
-            "steps": draft["steps"],
-            "values": draft["values"],
-            "openQuestions": draft["openQuestions"],
-        }
+    masked, scanned_findings = _mask_plan_content(draft)
+    replaced_prefixes = [
+        *(["$.steps", "$.edit.steps"] if raw_steps else []),
+        *(["$.values", "$.edit.values"] if raw_values else []),
+        *(
+            ["$.title", "$.edit.title"]
+            if isinstance(title, str) and title.strip()
+            else []
+        ),
+        *(
+            ["$.intent", "$.edit.intent"]
+            if isinstance(intent, str) and intent.strip()
+            else []
+        ),
+    ]
+    retained_findings = [
+        finding
+        for finding in current.get("privacy", {}).get("findings", [])
+        if not any(
+            _finding_under(finding["path"], prefix)
+            for prefix in replaced_prefixes
+        )
+    ]
+    findings = _merge_findings(
+        retained_findings,
+        _merge_findings(edit_findings, scanned_findings),
     )
-    findings = _merge_findings(edit_findings, scanned_findings)
     return {
-        **draft,
         **masked,
         "revision": current["revision"] + 1,
         "privacy": {
@@ -846,11 +978,6 @@ def revise_plan(
             "masked": bool(findings),
             "rawFramesShared": False,
         },
-        "feedbackLog": (
-            [*current["feedbackLog"], {"at": now, "feedback": feedback_text}]
-            if feedback_text
-            else list(current["feedbackLog"])
-        ),
         "approved": approve is True,
         "approvedAt": now if approve is True else None,
         "updatedAt": now,

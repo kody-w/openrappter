@@ -793,6 +793,12 @@ export class ShowAndTellAgent extends BasicAgent {
     if (!analysis) {
       throw new Error('Analyze the Show-and-Tell session before proposing a plan.');
     }
+    await this.store.appendEvent(
+      session.id,
+      'plan.proposal.requested',
+      'show-and-tell',
+      {},
+    );
     const bundle = buildSessionBundle(session, await this.store.events(session.id));
     const plan = buildSkillPlan(analysis, bundle, {
       previous: await this.store.getPlan(session.id),
@@ -881,6 +887,21 @@ export class ShowAndTellAgent extends BasicAgent {
         : 'skill';
     const target = requested === 'rappid' ? 'skill' : requested;
     const plan = await this.store.getPlan(session.id);
+    if (
+      !plan
+      && (await this.store.events(session.id)).some(
+        (event) => event.type === 'plan.proposal.requested',
+      )
+    ) {
+      return {
+        status: 'error',
+        action: 'build',
+        code: 'plan_missing',
+        session_id: session.id,
+        message:
+          'A plan proposal was requested but its review record is missing. Propose it again before building.',
+      };
+    }
     if (plan && !plan.approved) {
       return {
         status: 'error',

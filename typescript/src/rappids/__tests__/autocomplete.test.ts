@@ -55,6 +55,12 @@ const vector = JSON.parse(
     continuationSeed: string;
     stream: { uint32: number[]; below1000: number[]; weightedIndex136: number[] };
     canonical: { value: JsonValue; text: string; digest: string };
+    canonicalNumbers: {
+      value: JsonValue;
+      text: string;
+      digest: string;
+      unsafeInteger: number;
+    };
     selectedCandidate: number;
     scoresMicro: Record<string, number>;
     continuation: Array<Record<string, number>>;
@@ -148,6 +154,15 @@ describe('canonical bytes', () => {
     expect(() => rappCanonicalJson('x'.repeat(1024 * 1024 + 1))).toThrow(
       /exceeds 1 MiB/,
     );
+  });
+
+  it('normalises binary64 JSON numbers identically across runtimes', () => {
+    expect(canonicalJson(vector.expect.canonicalNumbers.value))
+      .toBe(vector.expect.canonicalNumbers.text);
+    expect(canonicalDigest(vector.expect.canonicalNumbers.value))
+      .toBe(vector.expect.canonicalNumbers.digest);
+    expect(() => canonicalJson(vector.expect.canonicalNumbers.unsafeInteger))
+      .toThrow(/unsafe integer/);
   });
 });
 

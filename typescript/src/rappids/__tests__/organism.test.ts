@@ -30,6 +30,7 @@ import {
   deriveStats,
   dimensionStates,
   growOrganism,
+  isRappid,
   listOrganismSummaries,
   loadOrganism,
   loadOrganismByRappid,
@@ -40,6 +41,7 @@ import {
   summarize,
   sonicContext,
   verifyOrganism,
+  directoryHex,
 } from '../index.js';
 import type { LoadedOrganism } from '../index.js';
 import { buildOrganism, makeHabitat, removeHabitat } from './fixture.js';
@@ -64,6 +66,20 @@ function check(organism: LoadedOrganism, name: string): { status: string; detail
 }
 
 describe('a verified organism', () => {
+  it('rejects declared dimension names outside the shared lowercase label grammar', () => {
+    const fixture = buildOrganism({
+      habitat: habitat('invalid-dimension-name'),
+      extraDimensions: [{ name: 'Skill', status: 'active' }],
+    });
+    expect(() => loadOrganism(fixture.directory)).toThrow(/not an lclabel/);
+  });
+
+  it('rejects identities and directory claims with trailing newlines', () => {
+    const rappid = `rappid:@openrappter/example:${'a'.repeat(64)}`;
+    expect(isRappid(`${rappid}\n`)).toBe(false);
+    expect(directoryHex(`${'a'.repeat(64)}\n`)).toBeNull();
+  });
+
   it('verifies every claim it makes about itself', () => {
     const fixture = buildOrganism({ habitat: habitat('verified') });
     const organism = loadOrganism(fixture.directory);

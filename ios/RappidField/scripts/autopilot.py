@@ -66,23 +66,56 @@ def run(args: list[str], *, stdin: bytes | None = None, check: bool = True) -> s
     return result.stdout.decode(errors="replace")
 
 
-def simctl(device: str, *args: str, **kwargs) -> str:
-    return run(["xcrun", "simctl", *args[:1], device, *args[1:]], **kwargs)
-
-
 # ---------------------------------------------------------------- device setup
+
+
+def device_record(listing: str, requested: str) -> dict:
+    try:
+        root = json.loads(listing)
+        runtime_devices = root["devices"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise AutopilotError(f"simctl returned an invalid device inventory: {error}") from error
+
+    devices = [
+        item
+        for runtime, entries in runtime_devices.items()
+        if "SimRuntime.iOS-" in runtime
+        for item in entries
+        if item.get("isAvailable", True)
+    ]
+    by_identifier = [
+        item for item in devices
+        if str(item.get("udid", "")).casefold() == requested.casefold()
+    ]
+    if by_identifier:
+        return by_identifier[0]
+
+    by_name = [item for item in devices if item.get("name") == requested]
+    if len(by_name) == 1:
+        return by_name[0]
+    if len(by_name) > 1:
+        choices = ", ".join(str(item.get("udid", "?")) for item in by_name)
+        raise AutopilotError(
+            f"{requested!r} names more than one iOS simulator; use one UDID: {choices}"
+        )
+    raise AutopilotError(f"no available iOS simulator exactly matches {requested!r}")
+
+
+def resolve_device(device: str) -> str:
+    listing = run(["xcrun", "simctl", "list", "devices", "-j"], check=False)
+    return str(device_record(listing, device)["udid"])
 
 
 def boot(device: str) -> None:
     def is_booted(listing: str) -> bool:
-        return any(device in line and "Booted" in line for line in listing.splitlines())
+        return device_record(listing, device).get("state") == "Booted"
 
-    state = run(["xcrun", "simctl", "list", "devices"], check=False)
+    state = run(["xcrun", "simctl", "list", "devices", "-j"], check=False)
     if is_booted(state):
         return
     run(["xcrun", "simctl", "boot", device], check=False)
     for _ in range(60):
-        listing = run(["xcrun", "simctl", "list", "devices"], check=False)
+        listing = run(["xcrun", "simctl", "list", "devices", "-j"], check=False)
         if is_booted(listing):
             return
         time.sleep(1)
@@ -316,7 +349,7 @@ class Journey:
         *,
         target: str | None = None,
         value: str | None = None,
-        expect_status: str = "ok",
+        expect_status: str | tuple[str, ...] = "ok",
         expect_state: dict | None = None,
         expect_error_prefix: str | None = None,
         command_id: str | None = None,
@@ -341,8 +374,14 @@ class Journey:
             raise
         self.cursors.append(receipt.get("cursor", -1))
         problems = []
-        if receipt.get("status") != expect_status:
-            problems.append(f"status {receipt.get('status')!r} != {expect_status!r} ({receipt.get('error')})")
+        expected_statuses = (
+            (expect_status,) if isinstance(expect_status, str) else expect_status
+        )
+        if receipt.get("status") not in expected_statuses:
+            problems.append(
+                f"status {receipt.get('status')!r} not in {expected_statuses!r} "
+                f"({receipt.get('error')})"
+            )
         if expect_error_prefix and not str(receipt.get("error", "")).startswith(expect_error_prefix):
             problems.append(f"error {receipt.get('error')!r} does not start with {expect_error_prefix!r}")
         state = receipt.get("state", {})
@@ -442,7 +481,12 @@ def smoke(device: str, transport: str, timeout: float, fresh: bool) -> int:
                  expect_state={"companion": "Mossline", "stage": "Strider", "origin": "synthetic"})
     journey.step("reports an exact weight", "snapshot", expect_state={"weightComplete": True})
     journey.step("plays the wake call on request", "playWakeCall", expect_state={"wakeCall": "playing"})
-    journey.step("stops it on request", "stopWakeCall", expect_state={"wakeCall": "idle"})
+    journey.step(
+        "stops it or confirms it already ended",
+        "stopWakeCall",
+        expect_status=("ok", "refused"),
+        expect_state={"wakeCall": "idle"},
+    )
     journey.step("opens the Forge card", "openCard", target="forge",
                  expect_state={"companion": "Emberline", "stage": "Aetherwing"})
     journey.step("refuses to invent an incomplete weight", "snapshot",
@@ -461,11 +505,33 @@ def smoke(device: str, transport: str, timeout: float, fresh: bool) -> int:
     print("\nThe confirmation stays binding")
     journey.step("refuses to append with no sheet open", "approveAppend",
                  expect_status="refused", expect_error_prefix="requires-operator-confirmation")
-    journey.step("opens the confirmation sheet", "openConfirmation",
-                 expect_state={"confirmationVisible": True, "confirmationAcknowledged": False})
+    opened = journey.step("opens the confirmation sheet", "openConfirmation",
+                          expect_state={"confirmationVisible": True, "confirmationAcknowledged": False})
     journey.step("refuses to append unacknowledged", "approveAppend",
                  expect_status="refused", expect_error_prefix="requires-operator-confirmation")
     journey.step("acknowledges the sheet", "acknowledgeConfirmation",
+                 target=dotted(opened.get("state", {}), "proposal.id"),
+                 expect_state={"confirmationAcknowledged": True})
+    swapped = journey.step(
+        "swaps the proposal through the ordinary card path",
+        "openCard",
+        target="canopy",
+        expect_state={
+            "companion": "Mossline",
+            "confirmationVisible": True,
+            "confirmationAcknowledged": False,
+        },
+    )
+    journey.step(
+        "refuses the old acknowledgement against the new proposal",
+        "approveAppend",
+        expect_status="refused",
+        expect_error_prefix="requires-operator-confirmation",
+    )
+    journey.step("returns to Growth", "navigate", target="growth",
+                 expect_state={"screen": "growth"})
+    journey.step("acknowledges the replacement proposal", "acknowledgeConfirmation",
+                 target=dotted(swapped.get("state", {}), "proposal.id"),
                  expect_state={"confirmationAcknowledged": True})
     journey.step("is still refused by the append policy", "approveAppend", expect_status="refused")
     journey.step("cancel closes a reopened sheet", "openConfirmation", expect_state={"confirmationVisible": True})
@@ -474,6 +540,8 @@ def smoke(device: str, transport: str, timeout: float, fresh: bool) -> int:
     print("\nPairing")
     journey.step("moves to the Host screen", "navigate", target="pairing", expect_state={"screen": "host"})
     journey.step("refuses a foreign host address", "fillPairingHost", value="http://evil.example.com",
+                 expect_status="refused", expect_error_prefix="value-rejected")
+    journey.step("refuses a cleartext Bonjour host", "fillPairingHost", value="http://evil.local",
                  expect_status="refused", expect_error_prefix="value-rejected")
     journey.step("accepts a loopback host", "fillPairingHost", value="http://localhost:8787",
                  expect_state={"pairingHostFilled": True})
@@ -554,6 +622,26 @@ def smoke(device: str, transport: str, timeout: float, fresh: bool) -> int:
             sort_keys=True, separators=(",", ":"),
         ),
         expect_status="refused", expect_error_prefix="malformed-payload",
+    )
+    oversized_id = str(uuid.uuid4())
+    journey.step(
+        "refuses an oversized command with a matching receipt",
+        "snapshot",
+        command_id=oversized_id,
+        raw_payload=json.dumps(
+            {
+                "type": "command",
+                "version": 1,
+                "seq": session.seq + 1,
+                "id": oversized_id,
+                "action": "snapshot",
+                "value": "x" * 5_000,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        expect_status="refused",
+        expect_error_prefix="malformed-payload",
     )
 
     print("\nReset")
@@ -692,16 +780,29 @@ def play_demo(device: str, transport: str, timeout: float, fresh: bool) -> int:
         cold_proposal is not None and warm_proposal is not None and cold_proposal != warm_proposal,
         f"cold={cold_proposal} warm={warm_proposal}",
     )
-    journey.step("opens the confirmation", "openConfirmation",
-                 expect_state={"confirmationVisible": True, "confirmationAcknowledged": False})
+    opened = journey.step("opens the confirmation", "openConfirmation",
+                          expect_state={"confirmationVisible": True, "confirmationAcknowledged": False})
     journey.step("acknowledges it", "acknowledgeConfirmation",
+                 target=dotted(opened.get("state", {}), "proposal.id"),
                  expect_state={"confirmationAcknowledged": True})
     journey.step("is refused by the append policy", "approveAppend", expect_status="refused")
     journey.step("reopens the sheet", "openConfirmation", expect_state={"confirmationVisible": True})
     final = journey.step("cancels instead", "cancelAppend", expect_state={"confirmationVisible": False})
 
     print("\nFinal state")
-    print_summary(state_of(final))
+    final_state = state_of(final)
+    print_summary(final_state)
+    journey.check(
+        "the whole session stayed with the chosen companion",
+        final_state.get("starter") == "canopy"
+        and final_state.get("companion") == "Mossline"
+        and final_state.get("stage") == "Strider"
+        and final_state.get("frameHeight") == 9,
+        str({
+            key: final_state.get(key)
+            for key in ("starter", "companion", "stage", "frameHeight")
+        }),
+    )
 
     return report(journey, session)
 
@@ -735,6 +836,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        args.device = resolve_device(args.device)
         if args.command == "up":
             boot(args.device)
             install(args.device, pathlib.Path(args.app))

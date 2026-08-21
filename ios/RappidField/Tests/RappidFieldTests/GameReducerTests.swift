@@ -25,6 +25,7 @@ final class GameReducerTests: XCTestCase {
             rosterPaths: StarterPath.allCases,
             leash: leash,
             hasProposal: hasProposal,
+            proposalID: hasProposal ? "proposal-test" : nil,
             confirmationVisible: confirmationVisible,
             confirmationAcknowledged: acknowledged,
             isPlayingSonic: playing
@@ -241,7 +242,7 @@ final class GameReducerTests: XCTestCase {
 
         for (state, context) in states {
             let available = Set(GameReducer.availableCommands(state: state, context: context))
-            for command in GameCommand.representatives {
+            for command in GameCommand.representatives(proposalID: context.proposalID) {
                 let accepted = (try? GameReducer.reduce(state: state, command: command, context: context)) != nil
                 if accepted {
                     XCTAssertTrue(available.contains(command.name), "\(command.name) was accepted but not advertised")

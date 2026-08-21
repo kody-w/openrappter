@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import os from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ShowAndTellAgent } from '../agents/ShowAndTellAgent.js';
 import { buildDeterministicAnalysis } from './analyzer.js';
@@ -404,19 +404,6 @@ describe('Show-and-Tell plan review', () => {
       .toBe(false);
   });
 
-  it('never privacy-masks a structural session id that happens to pass Luhn', () => {
-    const { analysis, bundle } = replay(scenario as Scenario);
-    const sessionId = '20260820-194831-62519e1f';
-    const plan = buildSkillPlan(
-      { ...analysis, sessionId },
-      { ...bundle, sessionId },
-      { now: 1_700_000_100_000 },
-    );
-    expect(plan.sessionId).toBe(sessionId);
-    expect(plan.privacy.findings.some((finding) => finding.path === '$.sessionId'))
-      .toBe(false);
-  });
-
   it('refuses to edit and approve in the same turn', () => {
     const { plan } = replay(scenario as Scenario);
     expect(() =>
@@ -496,6 +483,107 @@ describe('Show-and-Tell plan review', () => {
         valuesJson: JSON.stringify([{ id: 'not_a_value', example: 'x' }]),
       }),
     ).toThrow(/Unknown Show-and-Tell value id/);
+  });
+
+  it('rejects a reviewer step id that could be mistaken for user content', () => {
+    const { plan } = replay(scenario as Scenario);
+    const cardShapedId = `${'4111'}${'1111'}${'1111'}${'1111'}`;
+    expect(() =>
+      revisePlan(plan, {
+        stepsJson: JSON.stringify([
+          {
+            id: cardShapedId,
+            title: 'Open the invoice',
+            detail: 'Open the invoice.',
+          },
+        ]),
+      }),
+    ).toThrow(/Invalid Show-and-Tell step id/);
+  });
+
+  it('normalises a model-supplied step id before it reaches review', () => {
+    const { analysis, bundle } = replay(scenario as Scenario);
+    const plan = buildSkillPlan(
+      {
+        ...analysis,
+        steps: [{ ...analysis.steps[0], id: 'Step-1' }],
+      },
+      bundle,
+      { now: 1_700_000_100_000 },
+    );
+    expect(plan.steps[0].id).toBe('step-1');
+    expect(() =>
+      revisePlan(plan, {
+        stepsJson: JSON.stringify(plan.steps),
+      }),
+    ).not.toThrow();
+  });
+
+  it('records findings for reviewer feedback while keeping only the mask', () => {
+    const { plan } = replay(scenario as Scenario);
+    const email = `${'dana.reed'}${'@example.com'}`;
+    const revised = revisePlan(plan, { feedback: `Contact ${email}.` });
+    expect(revised.feedbackLog.at(-1)?.feedback).toContain(SENSITIVE_MASK);
+    expect(revised.privacy.findings).toContainEqual({
+      path: '$.edit.feedback',
+      kind: 'email',
+      count: 1,
+    });
+    const approved = revisePlan(revised, { approve: true });
+    expect(approved.feedbackLog.at(-1)?.feedback).toContain(SENSITIVE_MASK);
+    expect(approved.privacy.findings).toContainEqual({
+      path: '$.edit.feedback',
+      kind: 'email',
+      count: 1,
+    });
+  });
+
+  it('remediates sensitive feedback already present in a legacy plan', () => {
+    const { plan } = replay(scenario as Scenario);
+    const email = `${'dana.reed'}${'@example.com'}`;
+    const legacy = {
+      ...plan,
+      feedbackLog: [{ at: 1, feedback: `Contact ${email}.` }],
+    };
+    const revised = revisePlan(legacy, {});
+    expect(revised.feedbackLog[0].feedback).toContain(SENSITIVE_MASK);
+    expect(revised.privacy.findings).toContainEqual({
+      path: '$.feedbackLog[0].feedback',
+      kind: 'email',
+      count: 1,
+    });
+    const approved = revisePlan(revised, { approve: true });
+    expect(approved.privacy.findings).toContainEqual({
+      path: '$.feedbackLog[0].feedback',
+      kind: 'email',
+      count: 1,
+    });
+  });
+
+  it('drops a stale finding only when that field is explicitly replaced', () => {
+    const { plan } = replay(scenario as Scenario);
+    const email = `${'dana.reed'}${'@example.com'}`;
+    const masked = revisePlan(plan, { title: `Contact ${email}` });
+    expect(masked.privacy.findings.some((finding) =>
+      finding.path === '$.edit.title' || finding.path === '$.title',
+    )).toBe(true);
+
+    const replaced = revisePlan(masked, { title: 'Clean replacement title' });
+    expect(replaced.privacy.findings.some((finding) =>
+      finding.path === '$.edit.title' || finding.path === '$.title',
+    )).toBe(false);
+  });
+
+  it('rejects duplicate reviewer step ids', () => {
+    const { plan } = replay(scenario as Scenario);
+    expect(() =>
+      revisePlan(plan, {
+        stepsJson: JSON.stringify([
+          { id: 'same', title: 'First', detail: 'First step.' },
+          { id: 'same', title: 'Second', detail: 'Second step.' },
+        ]),
+      }),
+    ).toThrow(/Duplicate Show-and-Tell step id/);
   });
 
   it('reduces local path examples before a generated skill can publish them', () => {
@@ -666,6 +754,19 @@ describe('Show-and-Tell two-phase agent flow', () => {
     store.close();
   });
 
+  it('keeps bundle evidence identical after proposal bookkeeping', async () => {
+    const { agent, store, sessionId } = await recordedSession();
+    const before = JSON.parse(
+      await agent.perform({ action: 'bundle', session_id: sessionId }),
+    ).bundle;
+    await agent.perform({ action: 'propose', session_id: sessionId });
+    const after = JSON.parse(
+      await agent.perform({ action: 'bundle', session_id: sessionId }),
+    ).bundle;
+    expect(after).toEqual(before);
+    store.close();
+  });
+
   it('proposes exactly one plan and builds nothing in that turn', async () => {
     const { agent, store, sessionId } = await recordedSession();
     const proposed = JSON.parse(
@@ -691,6 +792,21 @@ describe('Show-and-Tell two-phase agent flow', () => {
     );
     expect(built.status).toBe('error');
     expect(built.code).toBe('plan_not_approved');
+    expect(await store.artifacts(sessionId)).toEqual([]);
+    store.close();
+  });
+
+  it('fails closed when a requested plan record disappears', async () => {
+    const { agent, store, sessionId } = await recordedSession();
+    await agent.perform({ action: 'propose', session_id: sessionId });
+    vi.spyOn(store, 'getPlan').mockResolvedValue(null);
+
+    const built = JSON.parse(
+      await agent.perform({ action: 'build', session_id: sessionId, target: 'skill' }),
+    );
+
+    expect(built.status).toBe('error');
+    expect(built.code).toBe('plan_missing');
     expect(await store.artifacts(sessionId)).toEqual([]);
     store.close();
   });

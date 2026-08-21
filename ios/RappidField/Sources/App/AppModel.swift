@@ -166,9 +166,9 @@ final class AppModel {
         await refresh()
     }
 
-    /// Puts the app back where a fresh install starts: no credential, no
-    /// selection, deterministic fixtures. Errors propagate rather than leaving
-    /// a half-reset device looking clean.
+    /// Returns a configured prototype to its unpaired synthetic field. The
+    /// operator's onboarding choice and privacy preferences remain intact.
+    /// Errors propagate rather than leaving a half-reset device looking clean.
     func resetToSyntheticField() async throws {
         try await credentialStore.clear()
         pairing = .unpaired

@@ -273,6 +273,112 @@ def test_rejects_an_edited_value_that_names_an_id_the_plan_never_had():
         revise_plan(plan, values_json=json.dumps([{"id": "not_a_value", "example": "x"}]))
 
 
+def test_rejects_a_reviewer_step_id_that_could_be_mistaken_for_user_content():
+    _analysis, _bundle, plan = replay(SCENARIOS["hardcoded-values"])
+    card_shaped_id = "4111" + "1111" + "1111" + "1111"
+    with pytest.raises(ValueError, match="Invalid Show-and-Tell step id"):
+        revise_plan(
+            plan,
+            steps_json=json.dumps(
+                [
+                    {
+                        "id": card_shaped_id,
+                        "title": "Open the invoice",
+                        "detail": "Open the invoice.",
+                    }
+                ]
+            ),
+        )
+
+
+def test_normalises_a_model_supplied_step_id_before_it_reaches_review():
+    analysis, bundle, _plan = replay(SCENARIOS["hardcoded-values"])
+    plan = build_skill_plan(
+        {
+            **analysis,
+            "steps": [{**analysis["steps"][0], "id": "Step-1"}],
+        },
+        bundle,
+        now=1_700_000_100_000,
+    )
+
+    assert plan["steps"][0]["id"] == "step-1"
+    revise_plan(plan, steps_json=json.dumps(plan["steps"]))
+
+
+def test_records_findings_for_reviewer_feedback_while_keeping_only_the_mask():
+    _analysis, _bundle, plan = replay(SCENARIOS["hardcoded-values"])
+    email = "dana.reed" + "@example.com"
+    revised = revise_plan(plan, feedback=f"Contact {email}.")
+
+    assert SENSITIVE_MASK in revised["feedbackLog"][-1]["feedback"]
+    assert {
+        "path": "$.edit.feedback",
+        "kind": "email",
+        "count": 1,
+    } in revised["privacy"]["findings"]
+    approved = revise_plan(revised, approve=True)
+    assert SENSITIVE_MASK in approved["feedbackLog"][-1]["feedback"]
+    assert {
+        "path": "$.edit.feedback",
+        "kind": "email",
+        "count": 1,
+    } in approved["privacy"]["findings"]
+
+
+def test_remediates_sensitive_feedback_already_present_in_a_legacy_plan():
+    _analysis, _bundle, plan = replay(SCENARIOS["hardcoded-values"])
+    email = "dana.reed" + "@example.com"
+    legacy = {
+        **plan,
+        "feedbackLog": [{"at": 1, "feedback": f"Contact {email}."}],
+    }
+    revised = revise_plan(legacy)
+
+    assert SENSITIVE_MASK in revised["feedbackLog"][0]["feedback"]
+    assert {
+        "path": "$.feedbackLog[0].feedback",
+        "kind": "email",
+        "count": 1,
+    } in revised["privacy"]["findings"]
+    approved = revise_plan(revised, approve=True)
+    assert {
+        "path": "$.feedbackLog[0].feedback",
+        "kind": "email",
+        "count": 1,
+    } in approved["privacy"]["findings"]
+
+
+def test_drops_a_stale_finding_only_when_that_field_is_explicitly_replaced():
+    _analysis, _bundle, plan = replay(SCENARIOS["hardcoded-values"])
+    email = "dana.reed" + "@example.com"
+    masked = revise_plan(plan, title=f"Contact {email}")
+    assert any(
+        finding["path"] in {"$.edit.title", "$.title"}
+        for finding in masked["privacy"]["findings"]
+    )
+
+    replaced = revise_plan(masked, title="Clean replacement title")
+    assert not any(
+        finding["path"] in {"$.edit.title", "$.title"}
+        for finding in replaced["privacy"]["findings"]
+    )
+
+
+def test_rejects_duplicate_reviewer_step_ids():
+    _analysis, _bundle, plan = replay(SCENARIOS["hardcoded-values"])
+    with pytest.raises(ValueError, match="Duplicate Show-and-Tell step id"):
+        revise_plan(
+            plan,
+            steps_json=json.dumps(
+                [
+                    {"id": "same", "title": "First", "detail": "First step."},
+                    {"id": "same", "title": "Second", "detail": "Second step."},
+                ]
+            ),
+        )
+
+
 def test_reduces_local_path_examples_before_a_generated_skill_publishes_them():
     assert privacy_reduced_path(str(Path.home() / "Private" / "invoice.pdf")) == (
         "~/Private/invoice.pdf"
@@ -437,6 +543,18 @@ def test_bundle_returns_the_session_with_its_honesty_stats(recorded):
     assert len(result["bundle"]["segments"]) > 0
 
 
+def test_bundle_evidence_is_identical_after_proposal_bookkeeping(recorded):
+    agent, _store, session_id = recorded
+    before = json.loads(agent.perform(action="bundle", session_id=session_id))[
+        "bundle"
+    ]
+    agent.perform(action="propose", session_id=session_id)
+    after = json.loads(agent.perform(action="bundle", session_id=session_id))[
+        "bundle"
+    ]
+    assert after == before
+
+
 def test_propose_proposes_exactly_one_plan_and_builds_nothing(recorded):
     agent, store, session_id = recorded
 
@@ -461,6 +579,22 @@ def test_build_refuses_while_the_proposed_plan_is_unapproved(recorded):
 
     assert built["status"] == "error"
     assert built["code"] == "plan_not_approved"
+    assert store.artifacts(session_id) == []
+
+
+def test_build_fails_closed_when_a_requested_plan_record_disappears(
+    recorded, monkeypatch
+):
+    agent, store, session_id = recorded
+    agent.perform(action="propose", session_id=session_id)
+    monkeypatch.setattr(agent.store, "get_plan", lambda _session_id: None)
+
+    built = json.loads(
+        agent.perform(action="build", session_id=session_id, target="skill")
+    )
+
+    assert built["status"] == "error"
+    assert built["code"] == "plan_missing"
     assert store.artifacts(session_id) == []
 
 

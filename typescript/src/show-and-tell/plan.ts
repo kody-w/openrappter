@@ -114,6 +114,54 @@ const VALUE_LABELS: Record<ShowAndTellValueKind, string> = {
 };
 
 const MAX_VALUES = 40;
+const PLAN_STEP_ID = /^[a-z][a-z0-9_-]{0,31}$/;
+
+function maskPlanContent(plan: ShowAndTellSkillPlan): {
+  value: ShowAndTellSkillPlan;
+  findings: SensitiveFinding[];
+} {
+  const scanned = maskSensitivePayload({
+    title: plan.title,
+    intent: plan.intent,
+    useWhen: plan.useWhen,
+    useFor: plan.useFor,
+    doNotUseWhen: plan.doNotUseWhen,
+    steps: plan.steps.map(({ title, detail, tool, app, url }) => ({
+      title,
+      detail,
+      tool,
+      app,
+      url,
+    })),
+    values: plan.values.map(({ label, example }) => ({ label, example })),
+    openQuestions: plan.openQuestions,
+    feedbackLog: plan.feedbackLog.map(({ feedback }) => ({ feedback })),
+  });
+  return {
+    value: {
+      ...plan,
+      title: scanned.value.title,
+      intent: scanned.value.intent,
+      useWhen: scanned.value.useWhen,
+      useFor: scanned.value.useFor,
+      doNotUseWhen: scanned.value.doNotUseWhen,
+      steps: plan.steps.map((step, index) => ({
+        ...step,
+        ...scanned.value.steps[index],
+      })),
+      values: plan.values.map((value, index) => ({
+        ...value,
+        ...scanned.value.values[index],
+      })),
+      openQuestions: scanned.value.openQuestions,
+      feedbackLog: plan.feedbackLog.map((entry, index) => ({
+        ...entry,
+        feedback: scanned.value.feedbackLog[index].feedback,
+      })),
+    },
+    findings: scanned.findings,
+  };
+}
 
 /** Union of two finding lists, summed per path and kind, deterministically. */
 function mergeFindings(
@@ -132,6 +180,12 @@ function mergeFindings(
       compareStrings(first.path, second.path) ||
       compareStrings(first.kind, second.kind),
   );
+}
+
+function findingUnder(path: string, prefix: string): boolean {
+  return path === prefix
+    || path.startsWith(`${prefix}.`)
+    || path.startsWith(`${prefix}[`);
 }
 
 class ValueTable {
@@ -222,8 +276,21 @@ function planSteps(
   steps: readonly ShowAndTellStep[],
   table: ValueTable,
 ): ShowAndTellPlanStep[] {
+  const assigned = new Set<string>();
   return steps.map((step, index) => {
-    const id = step.id || `s${index + 1}`;
+    const rawId = sanitizeShowAndTellText(step.id, 32)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const base = PLAN_STEP_ID.test(rawId) ? rawId : `s${index + 1}`;
+    let id = base;
+    let suffix = 2;
+    while (assigned.has(id)) {
+      const tail = `-${suffix}`;
+      id = `${base.slice(0, 32 - tail.length)}${tail}`;
+      suffix += 1;
+    }
+    assigned.add(id);
     const used = new Set<string>();
     // Masking runs before extraction on purpose. Extracting first would slice
     // a card number into four editable "number" values and leave nothing for
@@ -337,7 +404,16 @@ export function buildSkillPlan(
   // What the recording carried, recorded as paths and kinds before any of it
   // is masked away, so the plan can say what it removed and from where.
   const inputFindings = mergeFindings(
-    scanSensitivePayload(considered, '$.steps'),
+    scanSensitivePayload(
+      considered.map(({ title, detail, tool, app, url }) => ({
+        title,
+        detail,
+        tool,
+        app,
+        url,
+      })),
+      '$.steps',
+    ),
     scanSensitivePayload(
       { title: analysis.title, intent: analysis.intent },
       '$',
@@ -369,7 +445,7 @@ export function buildSkillPlan(
     );
   }
 
-  const draft = {
+  const draft: ShowAndTellSkillPlan = {
     schema: SHOW_AND_TELL_PLAN_SCHEMA,
     sessionId: analysis.sessionId,
     analysisRevision: analysis.revision,
@@ -383,31 +459,34 @@ export function buildSkillPlan(
     values,
     evidenceStats: bundle.stats,
     openQuestions,
+    privacy: {
+      findings: [],
+      masked: false,
+      rawFramesShared: false,
+    },
+    feedbackLog: previous?.feedbackLog.map((entry) => ({ ...entry })) ?? [],
+    approved: false,
+    approvedAt: null,
+    createdAt: previous?.createdAt ?? now,
+    updatedAt: now,
   };
-  const scanned = maskSensitivePayload({
-    title: draft.title,
-    intent: draft.intent,
-    useWhen: draft.useWhen,
-    useFor: draft.useFor,
-    doNotUseWhen: draft.doNotUseWhen,
-    steps: draft.steps,
-    values: draft.values,
-    openQuestions: draft.openQuestions,
-  });
-  const findings = mergeFindings(inputFindings, scanned.findings);
+  const scanned = maskPlanContent(draft);
+  const retainedFeedbackFindings = previous?.privacy.findings.filter(
+    (finding) =>
+      findingUnder(finding.path, '$.feedbackLog')
+      || findingUnder(finding.path, '$.edit.feedback'),
+  ) ?? [];
+  const findings = mergeFindings(
+    retainedFeedbackFindings,
+    mergeFindings(inputFindings, scanned.findings),
+  );
   return {
-    ...draft,
     ...scanned.value,
     privacy: {
       findings,
       masked: findings.length > 0,
       rawFramesShared: false,
     },
-    feedbackLog: previous?.feedbackLog ?? [],
-    approved: false,
-    approvedAt: null,
-    createdAt: previous?.createdAt ?? now,
-    updatedAt: now,
   };
 }
 
@@ -444,6 +523,7 @@ export function revisePlan(
     if (rawSteps.length > 60) {
       throw new Error('steps_json may not contain more than 60 steps.');
     }
+    const assigned = new Set<string>();
     steps = rawSteps.map((entry, index) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
         throw new Error('Every edited step must be a JSON object.');
@@ -457,9 +537,20 @@ export function revisePlan(
         throw new Error('Every edited step requires a title and a detail.');
       }
       const previous = current.steps[index];
+      const requestedId = sanitizeShowAndTellText(record.id, 32);
+      if (requestedId && !PLAN_STEP_ID.test(requestedId)) {
+        throw new Error(
+          `Invalid Show-and-Tell step id: ${requestedId}. Use a lowercase semantic id.`,
+        );
+      }
+      const id = requestedId || previous?.id || `s${index + 1}`;
+      if (assigned.has(id)) {
+        throw new Error(`Duplicate Show-and-Tell step id: ${id}`);
+      }
+      assigned.add(id);
       const categories = riskCategories(`${title} ${detail}`);
       return {
-        id: sanitizeShowAndTellText(record.id, 32) || previous?.id || `s${index + 1}`,
+        id,
         title,
         detail,
         kind: record.kind === 'calculation' ? 'calculation' : 'action',
@@ -523,6 +614,9 @@ export function revisePlan(
       'Show-and-Tell edits and approval must be separate turns. Apply the edits, re-read the plan, then approve it.',
     );
   }
+  const feedbackLog = feedback
+    ? [...current.feedbackLog, { at: now, feedback }]
+    : current.feedbackLog.map((entry) => ({ ...entry }));
   const draft = {
     ...current,
     title:
@@ -533,6 +627,7 @@ export function revisePlan(
       current.intent,
     steps,
     values,
+    feedbackLog,
   };
   // What the reviewer's own edit carried, before masking removed it, stays on
   // the record next to what the recording carried.
@@ -542,22 +637,30 @@ export function revisePlan(
       values: rawValues,
       title: input.title,
       intent: input.intent,
+      feedback: input.feedback,
     },
     '$.edit',
   );
-  const scanned = maskSensitivePayload({
-    title: draft.title,
-    intent: draft.intent,
-    useWhen: draft.useWhen,
-    useFor: draft.useFor,
-    doNotUseWhen: draft.doNotUseWhen,
-    steps: draft.steps,
-    values: draft.values,
-    openQuestions: draft.openQuestions,
-  });
-  const findings = mergeFindings(editFindings, scanned.findings);
+  const scanned = maskPlanContent(draft);
+  const replacedPrefixes = [
+    ...(rawSteps.length > 0 ? ['$.steps', '$.edit.steps'] : []),
+    ...(rawValues.length > 0 ? ['$.values', '$.edit.values'] : []),
+    ...(typeof input.title === 'string' && input.title.trim()
+      ? ['$.title', '$.edit.title']
+      : []),
+    ...(typeof input.intent === 'string' && input.intent.trim()
+      ? ['$.intent', '$.edit.intent']
+      : []),
+  ];
+  const retainedFindings = current.privacy.findings.filter(
+    (finding) =>
+      !replacedPrefixes.some((prefix) => findingUnder(finding.path, prefix)),
+  );
+  const findings = mergeFindings(
+    retainedFindings,
+    mergeFindings(editFindings, scanned.findings),
+  );
   return {
-    ...draft,
     ...scanned.value,
     revision: current.revision + 1,
     privacy: {
@@ -565,9 +668,6 @@ export function revisePlan(
       masked: findings.length > 0,
       rawFramesShared: false,
     },
-    feedbackLog: feedback
-      ? [...current.feedbackLog, { at: now, feedback }]
-      : current.feedbackLog,
     approved: input.approve === true,
     approvedAt: input.approve === true ? now : null,
     updatedAt: now,

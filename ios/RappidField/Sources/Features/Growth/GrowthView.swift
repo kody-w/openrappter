@@ -58,9 +58,12 @@ struct GrowthView: View {
                 AppendConfirmationSheet(
                     proposal: proposal,
                     companion: companion,
-                    acknowledged: $navigator.confirmationAcknowledged,
+                    acknowledged: navigator.confirmationAcknowledged,
                     appending: appending,
-                    onAcknowledge: { engine.dispatch(.acknowledgeConfirmation) },
+                    onAcknowledge: {
+                        engine.dispatch(.acknowledgeConfirmation(proposal.id))
+                    },
+                    onRevoke: { engine.dispatch(.openConfirmation) },
                     onCancel: { engine.dispatch(.cancelAppend) },
                     onConfirm: { await confirmAppend() }
                 )
@@ -259,9 +262,10 @@ struct GrowthView: View {
 struct AppendConfirmationSheet: View {
     let proposal: GrowthProposal
     let companion: Companion
-    @Binding var acknowledged: Bool
+    let acknowledged: Bool
     var appending: Bool
     var onAcknowledge: () -> Void
+    var onRevoke: () -> Void
     var onCancel: () -> Void
     var onConfirm: () async -> Void
 
@@ -297,7 +301,7 @@ struct AppendConfirmationSheet: View {
                         Toggle(isOn: Binding(
                             get: { acknowledged },
                             set: { newValue in
-                                if newValue { onAcknowledge() } else { acknowledged = false }
+                                if newValue { onAcknowledge() } else { onRevoke() }
                             }
                         )) {
                             Text("I have read this proposal and I am approving this exact append.")

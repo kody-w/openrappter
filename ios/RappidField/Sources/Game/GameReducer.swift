@@ -10,6 +10,7 @@ struct GameContext: Equatable {
     var rosterPaths: [StarterPath] = []
     var leash: SelfSteerLeash = .propose
     var hasProposal = false
+    var proposalID: String?
     var confirmationVisible = false
     var confirmationAcknowledged = false
     var isPlayingSonic = false
@@ -26,7 +27,7 @@ enum GameEffect: Equatable {
     case setLeash(SelfSteerLeash)
     case refreshProposal
     case openConfirmation
-    case acknowledgeConfirmation
+    case acknowledgeConfirmation(String)
     case dismissConfirmation
     case performAppend
     case resetField
@@ -161,9 +162,10 @@ enum GameReducer {
             guard context.hasProposal else { throw GameRefusal.noProposal }
             effects.append(.openConfirmation)
 
-        case .acknowledgeConfirmation:
+        case let .acknowledgeConfirmation(proposalID):
             guard context.confirmationVisible else { throw GameRefusal.confirmationNotOpen }
-            effects.append(.acknowledgeConfirmation)
+            guard context.proposalID == proposalID else { throw GameRefusal.proposalChanged }
+            effects.append(.acknowledgeConfirmation(proposalID))
 
         case .approveAppend:
             // The same two gates a finger meets. Whatever happens after this,
@@ -190,7 +192,7 @@ enum GameReducer {
     /// them. Derived by asking `reduce`, never by a second list of rules.
     static func availableCommands(state: GameState, context: GameContext) -> [String] {
         var names: [String] = []
-        for command in GameCommand.representatives {
+        for command in GameCommand.representatives(proposalID: context.proposalID) {
             guard (try? reduce(state: state, command: command, context: context)) != nil else { continue }
             if !names.contains(command.name) { names.append(command.name) }
         }

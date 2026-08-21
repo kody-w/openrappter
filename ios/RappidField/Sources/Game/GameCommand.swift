@@ -53,7 +53,7 @@ enum GameCommand: Equatable {
     case setLeash(SelfSteerLeash)
     case requestProposal
     case openConfirmation
-    case acknowledgeConfirmation
+    case acknowledgeConfirmation(String)
     case approveAppend
     case cancelAppend
     case resetField
@@ -86,7 +86,7 @@ enum GameCommand: Equatable {
 
     /// One representative of every command, used to compute what is currently
     /// available by asking the reducer rather than by writing the rules twice.
-    static var representatives: [GameCommand] {
+    static func representatives(proposalID: String?) -> [GameCommand] {
         [
             .selectStarter(.canopy),
             .confirmStarter,
@@ -103,7 +103,7 @@ enum GameCommand: Equatable {
             .setLeash(.propose),
             .requestProposal,
             .openConfirmation,
-            .acknowledgeConfirmation,
+            .acknowledgeConfirmation(proposalID ?? ""),
             .approveAppend,
             .cancelAppend,
             .resetField,
@@ -124,6 +124,7 @@ enum GameRefusal: LocalizedError, Equatable {
     case noProposal
     case confirmationNotOpen
     case confirmationNotAcknowledged
+    case proposalChanged
     case nothingIsPlaying
     case alreadyPlaying
 
@@ -141,6 +142,7 @@ enum GameRefusal: LocalizedError, Equatable {
         case .noProposal: return "no-proposal"
         case .confirmationNotOpen: return "confirmation-not-open"
         case .confirmationNotAcknowledged: return "confirmation-not-acknowledged"
+        case .proposalChanged: return "proposal-changed"
         case .nothingIsPlaying: return "nothing-is-playing"
         case .alreadyPlaying: return "already-playing"
         }
@@ -160,6 +162,7 @@ enum GameRefusal: LocalizedError, Equatable {
         case .noProposal: return "There is no proposal to act on."
         case .confirmationNotOpen: return "The confirmation sheet is not open."
         case .confirmationNotAcknowledged: return "The confirmation has not been acknowledged."
+        case .proposalChanged: return "The proposal changed before it could be acknowledged."
         case .nothingIsPlaying: return "Nothing is playing."
         case .alreadyPlaying: return "The wake call is already playing."
         }

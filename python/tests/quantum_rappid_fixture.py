@@ -35,9 +35,9 @@ TEST_TRAITS: Dict[str, float] = {
     "curiosity": 0.84,
     "dimensionality": 0.92,
     "evidence_bound": 0.98,
-    # Written as an integer, which is what the other runtime puts in the file
-    # for the same value: JavaScript has one number type, so a manifest hash
-    # taken over `1.0` there is a hash nothing else can reproduce.
+    # Written as an integer to keep the fixture file itself byte-identical to
+    # the TypeScript fixture. Canonical hashing also normalises parsed `1.0`
+    # to this same JSON number spelling.
     "local_first": 1,
     "playfulness": 0.72,
     "resilience": 0.94,

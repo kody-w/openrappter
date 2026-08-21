@@ -100,8 +100,9 @@ final class PairingTests: XCTestCase {
 
         // Loopback over plain HTTP is fine; it never leaves the device.
         XCTAssertNoThrow(try RappidLink(host: URL(string: "http://localhost:8787")!, code: code, hostFingerprint: "aa"))
-        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://studio.local")!, code: code, hostFingerprint: "aa"))
-        // Plain HTTP to somewhere else is not.
+        // Bonjour names resolve to other LAN machines, not loopback.
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "http://studio.local")!, code: code, hostFingerprint: "aa"))
+        // Plain HTTP to anywhere else is not.
         XCTAssertThrowsError(try RappidLink(host: URL(string: "http://example.com")!, code: code, hostFingerprint: "aa"))
         XCTAssertThrowsError(try RappidLink(parsing: "https://example.com/pair"))
         XCTAssertThrowsError(try RappidLink(parsing: "rappid-link://pair?host=https://a.b"))

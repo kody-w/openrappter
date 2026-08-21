@@ -2,9 +2,9 @@
 
 Mirrors ``typescript/src/rappids/canonical.ts``. Two runtimes only agree about
 a hash if they agree about the bytes, so the canonical form is pinned in
-exactly one place per runtime: keys sorted, no whitespace, ASCII-escaped. That
-is the form the live organism's ``manifest_sha256`` was taken over, so this
-reads existing content addresses instead of inventing a second scheme.
+exactly one place per runtime: keys sorted, no whitespace, ASCII-escaped.
+Numbers use JavaScript's JSON binary64 spelling in both implementations;
+exact-file sidecars remain the compatibility path for older live profiles.
 
 The PRNG is a SHA-256 counter stream rather than ``random.Random``. The
 generator that seeded the first sonic dimension used the Mersenne Twister,
@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from decimal import Decimal
 from typing import Any, Sequence, TypeVar
 
 #: Domain separation in the shape RAPP/1 5 established and
@@ -36,8 +37,53 @@ T = TypeVar("T")
 
 
 def canonical_json(value: Any) -> str:
-    """JSON with sorted keys, no spaces and ASCII escapes."""
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    """JSON with sorted keys, no spaces, ASCII escapes, and JS number form."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        if abs(value) > 2**53 - 1:
+            raise ValueError(f"cannot canonicalise unsafe integer: {value}")
+        return str(value)
+    if isinstance(value, float):
+        return _canonical_number(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=True)
+    if isinstance(value, list):
+        return "[" + ",".join(canonical_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError("canonical JSON object keys must be strings")
+        return (
+            "{"
+            + ",".join(
+                f"{json.dumps(key, ensure_ascii=True)}:{canonical_json(value[key])}"
+                for key in sorted(value)
+            )
+            + "}"
+        )
+    raise ValueError(f"cannot canonicalise non-JSON value: {type(value).__name__}")
+
+
+def _canonical_number(value: float) -> str:
+    if not math.isfinite(value):
+        raise ValueError(f"cannot canonicalise non-finite number: {value}")
+    if value == 0:
+        return "0"
+    magnitude = abs(value)
+    text = repr(value).lower()
+    if value.is_integer():
+        integer = int(value)
+        if abs(integer) > 2**53 - 1:
+            raise ValueError(f"cannot canonicalise unsafe integer: {value}")
+        return str(integer)
+    if 1e-6 <= magnitude < 1e21:
+        fixed = format(Decimal(text), "f")
+        return fixed.rstrip("0").rstrip(".") if "." in fixed else fixed
+    coefficient, exponent = text.split("e")
+    coefficient = coefficient.rstrip("0").rstrip(".") if "." in coefficient else coefficient
+    return f"{coefficient}e{int(exponent):+d}"
 
 
 def sha256_hex(data: bytes | str) -> str:

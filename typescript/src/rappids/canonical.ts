@@ -3,10 +3,9 @@
  *
  * Two runtimes only agree about a hash if they agree about the bytes, so the
  * canonical form is pinned here and nowhere else: keys sorted, no whitespace,
- * ASCII-escaped. That is byte-identical to Python's
- * `json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)`,
- * which is what already produced the manifest hash inside a live organism —
- * so this reads existing content addresses rather than inventing a new one.
+ * ASCII-escaped. Numbers use JavaScript's JSON number form; the Python mirror
+ * implements that same binary64 rendering explicitly so parsed `1.0`, tiny
+ * exponents, and large integral floats cannot fork a content address.
  *
  * The PRNG is a SHA-256 counter stream rather than a language RNG on purpose.
  * The generator that seeded the live sonic dimension used Python's Mersenne
@@ -48,8 +47,7 @@ export function canonicalJson(value: JsonValue): string {
 }
 
 /**
- * Integers print as integers, which is what Python's `json` emits and what the
- * hashes on disk were taken over. A non-finite number has no JSON form, and
+ * Integers print as integers. A non-finite number has no JSON form, and
  * quietly writing `null` for one would change a content address without
  * changing the value that produced it.
  */
@@ -57,7 +55,10 @@ function canonicalNumber(value: number): string {
   if (!Number.isFinite(value)) {
     throw new TypeError(`cannot canonicalise non-finite number: ${String(value)}`);
   }
-  return Number.isInteger(value) ? value.toFixed(0) : String(value);
+  if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+    throw new TypeError(`cannot canonicalise unsafe integer: ${String(value)}`);
+  }
+  return JSON.stringify(value);
 }
 
 const JSON_ESCAPES: Record<string, string> = {

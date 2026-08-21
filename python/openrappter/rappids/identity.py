@@ -37,11 +37,11 @@ def rappid_hex(tail: str) -> str:
 
 
 def is_rappid(value: object) -> bool:
-    return isinstance(value, str) and RAPPID_PATTERN.match(value) is not None
+    return isinstance(value, str) and RAPPID_PATTERN.fullmatch(value) is not None
 
 
 def parse_rappid(value: str) -> RappidParts:
-    match = RAPPID_PATTERN.match(value) if isinstance(value, str) else None
+    match = RAPPID_PATTERN.fullmatch(value) if isinstance(value, str) else None
     if match is None:
         raise QuantumRappidError(
             "invalid-rappid",
@@ -64,7 +64,7 @@ def directory_hex(directory_name: str) -> Optional[str]:
     A directory is a filing decision, not an identity, so anything that is not
     a bare 64-hex name returns None instead of a guess.
     """
-    return directory_name if _HEX64.match(directory_name) else None
+    return directory_name if _HEX64.fullmatch(directory_name) else None
 
 
 def identity_drift(

@@ -156,7 +156,9 @@ export function dimensionStates(
     });
   }
 
-  return [...states.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return [...states.values()].sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
 }
 
 export function deriveStats(

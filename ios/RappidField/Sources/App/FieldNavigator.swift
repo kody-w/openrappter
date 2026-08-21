@@ -49,7 +49,11 @@ final class FieldNavigator {
 
     var proposal: GrowthProposal?
     var confirmationVisible = false
-    var confirmationAcknowledged = false
+    private(set) var acknowledgedProposalID: String?
+    var confirmationAcknowledged: Bool {
+        guard let proposal else { return false }
+        return acknowledgedProposalID == proposal.id
+    }
     var appendRefusal: String?
     var appendReceipt: AppendReceipt?
 
@@ -62,22 +66,33 @@ final class FieldNavigator {
     // MARK: Growth
 
     func refreshProposal(model: AppModel, progress: GameProgress = .initial) {
+        let priorProposalID = proposal?.id
         guard let companion = model.selectedCompanion else {
             proposal = nil
+            acknowledgedProposalID = nil
             return
         }
         proposal = model.proposal(for: companion, progress: progress)
+        if proposal?.id != priorProposalID {
+            acknowledgedProposalID = nil
+        }
     }
 
     func openConfirmation() {
-        confirmationAcknowledged = false
+        acknowledgedProposalID = nil
         appendRefusal = nil
         confirmationVisible = true
     }
 
+    func acknowledgeProposal(id: String) throws {
+        guard confirmationVisible else { throw GameRefusal.confirmationNotOpen }
+        guard proposal?.id == id else { throw GameRefusal.proposalChanged }
+        acknowledgedProposalID = id
+    }
+
     func dismissConfirmation() {
         confirmationVisible = false
-        confirmationAcknowledged = false
+        acknowledgedProposalID = nil
     }
 
     /// The one append path. The acknowledgement is checked here, and the leash,
@@ -88,7 +103,7 @@ final class FieldNavigator {
         guard let proposal else {
             throw AppendRefusal.approvalMissing
         }
-        guard confirmationAcknowledged else {
+        guard acknowledgedProposalID == proposal.id else {
             throw AppendRefusal.approvalMissing
         }
         do {
@@ -137,7 +152,7 @@ final class FieldNavigator {
         pairingProblem = nil
         proposal = nil
         confirmationVisible = false
-        confirmationAcknowledged = false
+        acknowledgedProposalID = nil
         appendRefusal = nil
         appendReceipt = nil
         chat.reset()

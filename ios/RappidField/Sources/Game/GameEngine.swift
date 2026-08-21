@@ -39,6 +39,7 @@ final class GameEngine {
             rosterPaths: model.roster.map(\.path),
             leash: model.leash,
             hasProposal: navigator.proposal != nil,
+            proposalID: navigator.proposal?.id,
             confirmationVisible: navigator.confirmationVisible,
             confirmationAcknowledged: navigator.confirmationAcknowledged,
             isPlayingSonic: player.isPlaying
@@ -95,11 +96,6 @@ final class GameEngine {
         navigator.refreshProposal(model: model, progress: progress)
     }
 
-    func resetGameState() {
-        state = GameState()
-        lastRefusal = nil
-    }
-
     private func perform(_ effect: GameEffect) async throws {
         switch effect {
         case let .selectStarter(path):
@@ -135,8 +131,8 @@ final class GameEngine {
         case .openConfirmation:
             navigator.openConfirmation()
 
-        case .acknowledgeConfirmation:
-            navigator.confirmationAcknowledged = true
+        case let .acknowledgeConfirmation(proposalID):
+            try navigator.acknowledgeProposal(id: proposalID)
 
         case .dismissConfirmation:
             navigator.dismissConfirmation()

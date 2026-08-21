@@ -31,6 +31,7 @@ const LIFECYCLE_TYPES = new Set([
   'collector.heartbeat',
   'collector.stopped',
   'collector.error',
+  'plan.proposal.requested',
 ]);
 
 const NARRATION_TYPES = new Set(['session.note', 'narration.transcribed']);
@@ -153,6 +154,9 @@ export function buildSessionBundle(
   events: readonly ShowAndTellEvent[],
 ): ShowAndTellSessionBundle {
   const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
+  const evidenceEvents = ordered.filter(
+    (event) => event.type !== 'plan.proposal.requested',
+  );
   const segments: WorkingSegment[] = [];
   let current: WorkingSegment | null = null;
   let previousElapsed: number | null = null;
@@ -161,7 +165,7 @@ export function buildSessionBundle(
   let longestGapMs = 0;
   let durationMs = 0;
 
-  for (const event of ordered) {
+  for (const event of evidenceEvents) {
     const { elapsedMs, estimated } = eventElapsed(event, session);
     if (estimated) estimatedElapsedEvents += 1;
     durationMs = Math.max(durationMs, elapsedMs);
@@ -261,7 +265,7 @@ export function buildSessionBundle(
   );
 
   const stats: ShowAndTellBundleStats = {
-    eventCount: ordered.length,
+    eventCount: evidenceEvents.length,
     meaningfulEventCount,
     segmentCount: rendered.length,
     narratedSegments,

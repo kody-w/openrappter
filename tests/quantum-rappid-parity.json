@@ -198,6 +198,19 @@
       "text": "{\"a\":\"caf\\u00e9\",\"b\":[1,2.5,null,true],\"n\":10}",
       "digest": "4c6610d3bf770f41d269a6fdad45d0e8ea1001fba21d1f82a65518f1818c5478"
     },
+    "canonicalNumbers": {
+      "value": [
+        1.0,
+        0.0,
+        0.00001,
+        1e-7,
+        -0.0,
+        2.5
+      ],
+      "text": "[1,0,0.00001,1e-7,0,2.5]",
+      "digest": "97fa302fa89913eac67f6ac951dc6ad25371f92607c20f5766c045d2d79367f4",
+      "unsafeInteger": 10000000000000000
+    },
     "selectedCandidate": 8,
     "scoresMicro": {
       "continuation": 917847,

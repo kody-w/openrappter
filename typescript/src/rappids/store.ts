@@ -68,6 +68,7 @@ export const BODY_FRAME_SCHEMA = 'rapp/1';
  */
 export const FRAME_TIME_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const LABEL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function formatFrameTime(instant: Date): string {
   return instant.toISOString();
@@ -184,6 +185,12 @@ function parseExternalEpisode(raw: JsonValue | undefined, cursor: string | null)
  * three families that happen to exist today.
  */
 function parseDimension(name: string, raw: JsonValue): DimensionRecord {
+  if (!LABEL.test(name)) {
+    throw new QuantumRappidError(
+      'invalid-dimension',
+      `quantum dimension name is not an lclabel: ${JSON.stringify(name)}`,
+    );
+  }
   const value = requireObject(raw, `quantum.dimensions.${name}`);
   const refs: Record<string, string> = {};
   const mediaTypes: string[] = [];
@@ -489,7 +496,6 @@ const DIMENSION_PAYLOAD_KEYS = [
   'media',
   'sources',
 ] as const;
-const LABEL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const MEDIA_TYPE =
   /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;

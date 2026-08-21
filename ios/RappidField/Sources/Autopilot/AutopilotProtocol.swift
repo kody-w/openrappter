@@ -44,8 +44,8 @@ enum AutopilotAction: String, Codable, CaseIterable {
 struct AutopilotCommand: Equatable {
     static let payloadType = "command"
     static let version = 1
-    /// Nothing this app accepts needs to be large. Anything bigger is refused
-    /// rather than parsed.
+    /// Nothing this app accepts needs to be large. Once a root JSON object
+    /// claims the command type, anything bigger receives a refusal receipt.
     static let maximumPayloadBytes = 4_096
     static let maximumValueLength = 512
 
@@ -117,9 +117,6 @@ enum AutopilotParser {
     private static let allowedKeys: Set<String> = ["type", "version", "seq", "id", "action", "target", "value"]
 
     static func parse(_ payload: String) -> AutopilotIntake {
-        guard payload.utf8.count <= AutopilotCommand.maximumPayloadBytes else {
-            return .ignored("payload-too-large")
-        }
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else {
             return .ignored("not-json")
@@ -133,6 +130,14 @@ enum AutopilotParser {
         // From here the payload claims to be ours, so problems are refusals
         // with a receipt rather than silence.
         let id = (object["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard payload.utf8.count <= AutopilotCommand.maximumPayloadBytes else {
+            return .refused(
+                id: id.count <= 128 ? id : "",
+                refusal: .malformedPayload(
+                    "payload longer than \(AutopilotCommand.maximumPayloadBytes) bytes"
+                )
+            )
+        }
         guard !id.isEmpty, id.count <= 128 else {
             return .refused(id: "", refusal: .missingIdentifier)
         }

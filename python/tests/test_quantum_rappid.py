@@ -65,6 +65,23 @@ def check(organism, name):
     return found
 
 
+def test_rejects_declared_dimension_names_outside_the_shared_label_grammar(
+    habitat,
+):
+    fixture = build_organism(
+        habitat("invalid-dimension-name"),
+        extra_dimensions=[ExtraDimension(name="Skill", status="active")],
+    )
+    with pytest.raises(QuantumRappidError, match="not an lclabel"):
+        R.load_organism(fixture.directory)
+
+
+def test_rejects_identities_and_directory_claims_with_trailing_newlines():
+    rappid = "rappid:@openrappter/example:" + "a" * 64
+    assert R.is_rappid(rappid + "\n") is False
+    assert R.directory_hex("a" * 64 + "\n") is None
+
+
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 

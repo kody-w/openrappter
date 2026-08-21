@@ -122,11 +122,17 @@ final class AutopilotDriver {
     private func publish(_ receipt: AutopilotReceipt) {
         let encoded = receipt.encoded()
         for publisher in publishers {
+            let before = publisher.changeCount
             publisher.write(encoded)
-        }
-        // Never react to the receipt just written.
-        for inbox in inboxes {
-            lastChangeCounts[ObjectIdentifier(inbox)] = inbox.changeCount
+            // A pasteboard-style mailbox changes its own inbox generation when
+            // a receipt is written, so mark that receipt seen. The container
+            // mailbox writes receipt.json without changing inbox.json; if a
+            // new command arrived during execution its generation must remain
+            // unread so the next poll can answer it.
+            guard publisher.changeCount != before else { continue }
+            for inbox in inboxes where inbox === publisher {
+                lastChangeCounts[ObjectIdentifier(inbox)] = inbox.changeCount
+            }
         }
     }
 
@@ -352,7 +358,7 @@ final class AutopilotDriver {
             return .openConfirmation
 
         case .acknowledgeConfirmation:
-            return .acknowledgeConfirmation
+            return .acknowledgeConfirmation(try requireTarget(command))
 
         case .approveAppend:
             return .approveAppend

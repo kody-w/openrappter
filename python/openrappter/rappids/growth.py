@@ -396,7 +396,7 @@ def grow_organism(
             "dimension data first",
         )
     stamp = created_at if created_at is not None else format_frame_time(datetime.now(timezone.utc))
-    if not FRAME_TIME_PATTERN.match(stamp):
+    if not FRAME_TIME_PATTERN.fullmatch(stamp):
         raise QuantumRappidError(
             "frame-time",
             f"created_at {stamp} is not YYYY-MM-DDTHH:MM:SS.mmmZ",

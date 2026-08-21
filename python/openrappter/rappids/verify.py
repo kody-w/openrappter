@@ -138,7 +138,7 @@ def _verify_frame_media(organism: LoadedOrganism) -> List[AssetVerification]:
                 media_type if isinstance(media_type, str) else "application/octet-stream"
             )
             payload = (
-                read_rapp_object(organism, address) if _HEX64.match(address) else None
+                read_rapp_object(organism, address) if _HEX64.fullmatch(address) else None
             )
             actual_hash = None if payload is None else rapp_hb(RAPP_EGG_DOMAIN, payload)
             if payload is None:

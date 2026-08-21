@@ -249,7 +249,7 @@ test asserts that agreement in seven different game states.
 | **Train** | `beginTraining`, then `trainingAnswer` with `echo`, `invert` or `extend` |
 | **Inspect** | `inspectCompanion` — traits in exact thousandths, frame height, weight, dimensions |
 | **Read** | `setLeash`, then `requestProposal` — always non-authoritative |
-| **Decide** | `openConfirmation` → `acknowledgeConfirmation` → `approveAppend` or `cancelAppend` |
+| **Decide** | `openConfirmation` → `acknowledgeConfirmation --target <proposal id>` → `approveAppend` or `cancelAppend` |
 
 **Discovery encounters** are local to the *companion*, not to a place: the
 signal is derived from its own motif and an encounter counter, and no location
@@ -279,6 +279,18 @@ identity, no frame height, and no weight — a test asserts exactly that.
 
 When it is live, an unobtrusive **AUTOPILOT** badge sits in the top corner, so a
 build that can be driven never looks like one that cannot.
+
+The Release check names executable surfaces rather than grepping the broad word
+`Autopilot` (the inert gate/session shells deliberately remain):
+
+```bash
+nm -a .build/Build/Products/Release-iphonesimulator/RappidField.app/RappidField \
+  | grep -E "AutopilotDriver|AutopilotParser|AutopilotCommand|AutopilotReceipt|AutopilotAction|Mailbox|AutopilotBadge"
+strings -a .build/Build/Products/Release-iphonesimulator/RappidField.app/RappidField \
+  | grep RAPPID_AUTOPILOT
+```
+
+Both commands must print nothing.
 
 ### The protocol
 
@@ -452,7 +464,7 @@ Polling is foreground-only: the driver is suspended whenever the scene leaves
 
 # the specified clipboard carrier (needs someone to allow each paste)
 ./scripts/autopilot.py up --autopilot --clipboard
-./scripts/autopilot.py send snapshot --transport clipboard
+./scripts/autopilot.py --transport clipboard send snapshot
 ```
 
 The smoke journey walks onboarding, both weight cases, wake-call play/stop, the
@@ -467,8 +479,8 @@ Both end with the handshake proof, and fail if fewer than ten sequential
 handshakes were made or the cursor ever failed to move forward:
 
 ```
-40 sequential handshakes · cursor 0 -> 72 · monotonic=True · unanswered=0
-PASSED all 44 checks
+46 sequential handshakes · cursor 0 -> 46 · monotonic=True · unanswered=0
+PASSED all 50 checks
 ```
 
 ---

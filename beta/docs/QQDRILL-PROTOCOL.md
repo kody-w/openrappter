@@ -417,6 +417,48 @@ economics of drilling actually live.
 it is the door. Guessing at doors is not how you find the room — you get the list of rooms, decide
 which to try first, and then use the door.
 
+### There is no un-merge, and there is a fast way back
+
+Those two statements look contradictory and are not. They are true at different
+layers, and keeping them apart is what makes both safe.
+
+**Inside the protocol there is no un-merge, and there must not be.** A join is
+append-only. Nothing rescinds it, nothing edits it, and the compatibility rule is
+what makes that acceptable: a frame that could invalidate a descendant is refused
+before it lands, so a merge never needs taking back. An un-merge operation would
+make every downstream conclusion provisional — the reader of a line could no
+longer trust that what it descends from is still there.
+
+**Outside the protocol, the line is stored, and the store already time-travels.**
+The lineage store keeps generations and offers `restore` to elect a previously
+verified one and `revert` to return to baseline ([`GIT-FOR-AGENTS.md`](GIT-FOR-AGENTS.md)).
+That is version control for a line, and a fold is exactly the kind of event it
+exists to make recoverable.
+
+**Restoring is not un-merging.** The distinction is the whole point:
+
+- The assimilated frames still exist. The join that named them still exists.
+  Nothing is deleted and no history is rewritten.
+- What changes is **which generation is live**. An earlier HEAD is elected, and
+  the line continues from there.
+- **The election is itself recorded.** A restore is an event in the record, not a
+  quiet return to an earlier state — a person reading the line afterwards can see
+  that a fold happened, and that it was rolled back, and when.
+
+This is precisely how version control behaves, and for the same reason: reverting
+a change does not unwrite it, it writes something new that supersedes it.
+
+**Why it matters here.** A review of this implementation found a fold that could
+poison a line — a frame that, once assimilated, blocked every later legitimate
+update to the same key. The defect is fixed, but the shape of the problem is
+permanent: **a fold is the one operation that can put something on a line that
+you would want back.** Append-only is the right guarantee and it is not a
+recovery story on its own.
+
+So a conforming runtime **checkpoints the line before a fold** and can restore
+that checkpoint on demand. The fold stays irreversible; the *decision to have
+folded* does not have to be.
+
 ### This specifies the mechanism, not the policy
 
 The protocol fixes what a key *is*, what a pair *is*, what may be assimilated and what must be
@@ -697,4 +739,15 @@ it there is nothing to collapse on, and rule 2 cannot be satisfied. Related mach
 the single-contender race in `../electron/dimension-tiles.mjs` (`tiles-race`), and the
 worktree-isolated worker pattern used by twins.
 
-Also unbuilt: fetching a real commons over the network, and the UI surface for either half.
+Also unbuilt, and named here because these documents describe them confidently enough to read as
+though they exist:
+
+- **Fetching a real commons over the network.** Everything runs against local data.
+- **Any user interface.** Both halves are headless.
+- **Sentinels that drill on a schedule.** The sentinel system exists and drills are not wired into it.
+- **A probe policy of any kind.** Which coordinates to try first is left open on purpose, and nothing
+  here chooses.
+- **The on-device model** described in the compounding discussion. It is not part of this
+  distribution.
+- **Checkpoint-before-fold**, described immediately above. The lineage store can restore a generation;
+  qqdrill does not yet ask it to.

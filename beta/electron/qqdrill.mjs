@@ -29,8 +29,20 @@ import { H, buildFrame, verifyFrame, canonical } from "./qqdrill-deps.mjs";
 
 export const PROTOCOL = "rapp-qqdrill/1.0";
 
-/** The coordinate components this protocol knows how to address. */
+/**
+ * The coordinate components this protocol knows how to address. A dimension may
+ * declare further ones in its manifest under `coordinates` — the specification
+ * says "whatever else a dimension declares as a coordinate it shares", and this
+ * list being closed made that sentence false.
+ */
 export const COMPONENTS = Object.freeze(["rappid", "clock", "tick", "digest"]);
+
+/** Extra components a dimension declares, in canonical order. */
+function declaredComponents(manifest) {
+  const extra = manifest?.coordinates;
+  if (!extra || typeof extra !== "object" || Array.isArray(extra)) return [];
+  return Object.keys(extra).filter((name) => !COMPONENTS.includes(name)).sort();
+}
 
 /**
  * The lookups a drill probes, as component tuples. Position pairs frames of the
@@ -161,7 +173,10 @@ export function quantumKey(frame, manifest = {}) {
   if (!frame || typeof frame !== "object") {
     throw new Error("quantumKey needs a RAPP/1 frame");
   }
+  const declared = Object.create(null);
+  for (const name of declaredComponents(manifest)) declared[name] = manifest.coordinates[name];
   return Object.freeze({
+    ...declared,
     rappid: frame.stream_id ?? null,
     // The canonical rational text, so 1 and "1" are one cadence everywhere.
     // A declared-but-unreadable cadence renders as itself rather than as null,
@@ -185,9 +200,13 @@ export function keyString(key, components = COMPONENTS) {
   const chosen = [...components].sort();
   const picked = {};
   for (const component of chosen) {
-    if (!COMPONENTS.includes(component)) {
-      throw new Error(`unknown key component: ${component}`);
+    if (typeof component !== "string" || !component) {
+      throw new Error(`a key component must be a non-empty name, got ${String(component)}`);
     }
+    // A component outside the built-in set is allowed: a dimension may declare
+    // its own, and refusing them here contradicted the specification. An
+    // undeclared component simply reads as null, which is what a coordinate
+    // nobody stated should be.
     picked[component] = key?.[component] ?? null;
   }
   return `${PROTOCOL}\n${canonical({ components: chosen, at: picked })}`;
@@ -399,6 +418,11 @@ export function fixedPoints(pairs) {
  * The exact lane a point sits on. Two points share a diagonal when
  * there.seq*d - n*here.seq is equal, in integers, with no division anywhere.
  */
+/** The numeric diagonal inside a composite lane key. */
+function laneValue(lane) {
+  return BigInt(String(lane).split("\u0000").pop());
+}
+
 function placeable(point) {
   return Number.isSafeInteger(point?.here?.seq) && Number.isSafeInteger(point?.there?.seq);
 }
@@ -435,7 +459,10 @@ export function runsFrom(points, local, remote) {
   const byLane = new Map();
   for (const point of points) {
     if (!placeable(point)) continue;
-    const lane = laneOf(point, ratio).toString();
+    // The lane is the diagonal AND the capability. Grouping on tick arithmetic
+    // alone let two unrelated streams whose ticks happened to line up be
+    // reported as one run — a fidelity claim about a coincidence.
+    const lane = `${point.here.stream_id}\u0000${point.there.stream_id}\u0000${laneOf(point, ratio)}`;
     const bucket = byLane.get(lane);
     if (bucket) bucket.push(point);
     else byLane.set(lane, [point]);
@@ -451,9 +478,10 @@ export function runsFrom(points, local, remote) {
 
     const close = (boundary) => {
       if (!current) return;
+      if (!boundary) throw new Error("a run must record why it ended");
       runs.push(Object.freeze({
         lane,
-        offset: Number(BigInt(lane)) / Number(ratio.d),
+        offset: Number(laneValue(lane)) / Number(ratio.d),
         startHere: current.startHere,
         startThere: current.startThere,
         endHere: current.endHere,
@@ -464,6 +492,10 @@ export function runsFrom(points, local, remote) {
         // values, because "three frames asserted something" is not a record of
         // what they asserted.
         asserted: Object.freeze({ ...current.asserted }),
+        // And per tick, in order. The flat merge above is last-write-wins, so a
+        // run of five frames each asserting the same key presented as one fact
+        // and looked identical to a run of one.
+        assertedByTick: Object.freeze([...current.assertedByTick]),
         points: Object.freeze(current.points),
         boundary: boundary ? Object.freeze(boundary) : null,
       }));
@@ -475,7 +507,11 @@ export function runsFrom(points, local, remote) {
       current.endHere = point.here.seq;
       current.endThere = point.there.seq;
       if (substantive.has(point.here.frame_hash)) current.substance += 1;
-      Object.assign(current.asserted, assertedBy.get(point.here.frame_hash) || {});
+      const said = assertedBy.get(point.here.frame_hash) || {};
+      Object.assign(current.asserted, said);
+      current.assertedByTick.push(Object.freeze({
+        here: point.here.seq, asserts: Object.freeze({ ...said }),
+      }));
     };
 
     // A local tick can have more than one partner on the same lane — two remote
@@ -509,6 +545,7 @@ export function runsFrom(points, local, remote) {
           points: [],
           substance: 0,
           asserted: Object.create(null),
+          assertedByTick: [],
         };
         take(point);
         continue;
@@ -517,12 +554,14 @@ export function runsFrom(points, local, remote) {
     }
     // A run that simply reached the end of the frames still names where it
     // stopped; recording null there loses the length it earned.
-    close(current ? null : null);
+    close(current
+      ? { at: current.endHere + stepHere, reason: "no further matching frame", resumedAt: null }
+      : null);
 
     for (const point of alternates) {
       runs.push(Object.freeze({
         lane,
-        offset: Number(BigInt(lane)) / Number(ratio.d),
+        offset: Number(laneValue(lane)) / Number(ratio.d),
         startHere: point.here.seq,
         startThere: point.there.seq,
         endHere: point.here.seq,
@@ -530,6 +569,13 @@ export function runsFrom(points, local, remote) {
         length: 1,
         substance: substantive.has(point.here.frame_hash) ? 1 : 0,
         asserted: Object.freeze({ ...(assertedBy.get(point.here.frame_hash) || {}) }),
+        // What each matching frame asserted, in order — a flat merge presented a
+        // long meaningful run as a single fact, losing exactly the substance the
+        // record exists to show.
+        assertedByTick: Object.freeze([Object.freeze({
+          here: point.here.seq,
+          asserts: Object.freeze({ ...(assertedBy.get(point.here.frame_hash) || {}) }),
+        })]),
         points: Object.freeze([point]),
         boundary: Object.freeze({
           at: point.here.seq,
@@ -538,17 +584,6 @@ export function runsFrom(points, local, remote) {
         }),
       }));
     }
-    if (runs.length && runs[runs.length - 1].boundary === null) {
-      const last = runs[runs.length - 1];
-      runs[runs.length - 1] = Object.freeze({
-        ...last,
-        boundary: Object.freeze({
-          at: last.endHere + stepHere,
-          reason: "no further matching frame",
-          resumedAt: null,
-        }),
-      });
-    }
     void stepThere;
   }
 
@@ -556,8 +591,8 @@ export function runsFrom(points, local, remote) {
     if (b.length !== a.length) return b.length - a.length;
     if (b.substance !== a.substance) return b.substance - a.substance;
     // Exact lane, not the float offset — see the note in alignment().
-    const la = BigInt(a.lane);
-    const lb = BigInt(b.lane);
+    const la = laneValue(a.lane);
+    const lb = laneValue(b.lane);
     const absA = la < 0n ? -la : la;
     const absB = lb < 0n ? -lb : lb;
     if (absA !== absB) return absA < absB ? -1 : 1;
@@ -590,11 +625,11 @@ export function alignment(points, local, remote) {
   const unplaceable = points.filter((point) => !placeable(point));
   for (const point of points) {
     if (!placeable(point)) continue;
-    const lane = laneOf(point, ratio).toString();
+    const lane = `${point.here.stream_id}\u0000${point.there.stream_id}\u0000${laneOf(point, ratio)}`;
     const pin = Object.freeze({
       here: point.here.seq,
       there: point.there.seq,
-      offset: Number(BigInt(lane)) / Number(ratio.d),
+      offset: Number(laneValue(lane)) / Number(ratio.d),
     });
     const bucket = lanes.get(lane);
     if (bucket) bucket.push(pin);
@@ -617,8 +652,8 @@ export function alignment(points, local, remote) {
     // merge, which is the exact thing this module claims it never does.
     .sort((a, b) => {
       if (b.pins.length !== a.pins.length) return b.pins.length - a.pins.length;
-      const la = BigInt(a.lane);
-      const lb = BigInt(b.lane);
+      const la = laneValue(a.lane);
+      const lb = laneValue(b.lane);
       const absA = la < 0n ? -la : la;
       const absB = lb < 0n ? -lb : lb;
       if (absA !== absB) return absA < absB ? -1 : 1;
@@ -645,6 +680,12 @@ export function alignment(points, local, remote) {
     offset: primary.offset,
     pins: primary.pins,
     paths: Object.freeze(ordered),
+    // Pins on a path other than the primary one. Named `alternatePins` because
+    // that is what they are: two dimensions can genuinely line up more than one
+    // way, and calling every such pin a disagreement reported divergence
+    // between dimensions that never diverged. Kept under the old name too, so a
+    // caller reading it does not silently get undefined.
+    alternatePins: Object.freeze(ordered.slice(1).flatMap((path) => path.pins)),
     disagreeing: Object.freeze(ordered.slice(1).flatMap((path) => path.pins)),
   });
 }
@@ -657,7 +698,7 @@ export function alignment(points, local, remote) {
 export function placeThereExact(align, hereSeq) {
   if (!align?.ok) throw new Error(`cannot place without an alignment: ${align?.reason}`);
   const { n, d } = align.exactRatio;
-  const lane = BigInt(align.lane);
+  const lane = laneValue(align.lane);
   return Object.freeze({ n: n * BigInt(hereSeq) + lane, d });
 }
 
@@ -913,7 +954,7 @@ export function zoom(span, finer, align, line) {
     return Object.freeze({ ok: false, reason: "no fixed point inside the span: placement would be guesswork" });
   }
 
-  const lane = BigInt(align.lane);
+  const lane = laneValue(align.lane);
   const coarse = line.frames.filter((frame) => frame.seq >= span.start && frame.seq <= span.end);
   const refined = [];
   const refused = [];

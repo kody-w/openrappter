@@ -76,9 +76,9 @@ const brainstemUi = readFileSync(
   "utf8",
 );
 
-test("beta installers use AIBAST as the canonical source", () => {
+test("beta installers use this distribution as the canonical source", () => {
   for (const installer of [unix, windows]) {
-    assert.match(installer, /microsoft\/aibast-agents-library/);
+    assert.match(installer, /kody-w\/openrappter/);
     assert.doesNotMatch(installer, /kody-w\/rapp-installer/);
   }
 });

@@ -14,6 +14,7 @@ These differ here **on purpose** and are excluded from any sync:
 | `.gitguardian.yaml` | scoped to this repository's scanner configuration |
 | `NOTICE`, `licenses/` | attribution for the import |
 | `.gitignore` | carries the `beta/build/` negation this repository needs |
+| `beta/tests/installer-contract.test.mjs` | asserts the installers point at **this** distribution, so it moves with them |
 
 ## Local patches — reapply after a sync
 

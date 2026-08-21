@@ -136,11 +136,26 @@ export function indexDimension(source, { lookups = DEFAULT_LOOKUPS } = {}) {
  * a search that cannot change anything can run constantly and be wrong every
  * time without costing more than the search.
  */
-export function drill(local, remote, { lookups = DEFAULT_LOOKUPS } = {}) {
+export function drill(local, remote, {
+  lookups = DEFAULT_LOOKUPS,
+  budget = null,
+} = {}) {
+  // How far a drill goes is how long the person is willing to wait. The search
+  // is enumerated in a fixed order, so a bigger budget returns a superset of a
+  // smaller one: waiting longer only ever adds paths, and never invalidates a
+  // pair already found. Whatever came back is usable immediately.
+  const limit = Number.isFinite(budget?.pairs) ? budget.pairs : Infinity;
+  const deadline = Number.isFinite(budget?.deadlineMs) ? budget.deadlineMs : null;
+  const startedAt = deadline === null ? 0 : Date.now();
+  const skip = Number.isFinite(budget?.resumeAfter) ? budget.resumeAfter : 0;
+
   const remoteIndex = indexDimension(remote, { lookups });
   const found = new Map();
   let searched = 0;
+  let enumerated = 0;
+  let exhausted = true;
 
+  outer:
   for (const components of lookups) {
     const lane = remoteIndex.tables.get(keyString({}, components));
     for (const here of local.frames) {
@@ -155,6 +170,13 @@ export function drill(local, remote, { lookups = DEFAULT_LOOKUPS } = {}) {
           existing.via.push([...components]);
           existing.keys.push(at);
           continue;
+        }
+        enumerated += 1;
+        if (enumerated <= skip) continue;
+        if (found.size >= limit
+          || (deadline !== null && Date.now() - startedAt > deadline)) {
+          exhausted = false;
+          break outer;
         }
         found.set(identity, {
           key: at,
@@ -182,6 +204,10 @@ export function drill(local, remote, { lookups = DEFAULT_LOOKUPS } = {}) {
     searched,
     hits: pairs.length,
     pairs: Object.freeze(pairs),
+    // Whether the search ran out of space to look, or out of the patience it
+    // was given. `resumeAfter` continues exactly where this one stopped.
+    exhausted,
+    resumeAfter: skip + found.size,
   });
 }
 
@@ -209,74 +235,84 @@ export function fixedPoints(pairs) {
  * and the boundary is kept rather than discarded.
  */
 export function runsFrom(points, local, remote) {
-  // A repeated payload matches on the content lookup against every one of its
-  // twins, so one local tick can arrive with several candidate partners. A run
-  // is a diagonal through that: at each tick, take the partner that continues
-  // the run, and only start a new one when nothing does.
-  const byTick = new Map();
-  for (const point of points) {
-    const bucket = byTick.get(point.here.seq);
-    if (bucket) bucket.push(point);
-    else byTick.set(point.here.seq, [point]);
-  }
-  for (const bucket of byTick.values()) bucket.sort((a, b) => a.there.seq - b.there.seq);
-  const ticks = [...byTick.keys()].sort((a, b) => a - b);
+  // A local tick can arrive with several candidate partners — a repeated
+  // payload matches every one of its twins, and two dimensions can line up
+  // along more than one path at once. Every one of those paths is a real
+  // diagonal and a real chance to merge, so all of them are returned rather
+  // than one being chosen and the rest discarded. A frame joined three ways is
+  // one frame with three ancestries.
+  const hereClock = Number(local.manifest?.clock_key) || 1;
+  const thereClock = Number(remote.manifest?.clock_key) || 1;
+  const ratio = thereClock / hereClock;
 
   const substantive = new Set(
     local.frames.filter((frame) => isSubstantive(frame)).map((frame) => frame.frame_hash),
   );
 
-  const runs = [];
-  let current = null;
-
-  const close = (boundary) => {
-    if (!current) return;
-    runs.push(Object.freeze({
-      startHere: current.startHere,
-      startThere: current.startThere,
-      endHere: current.endHere,
-      endThere: current.endThere,
-      length: current.points.length,
-      substance: current.substance,
-      points: Object.freeze(current.points),
-      boundary: boundary ? Object.freeze(boundary) : null,
-    }));
-    current = null;
-  };
-
-  const open = (point) => {
-    current = {
-      startHere: point.here.seq,
-      startThere: point.there.seq,
-      endHere: point.here.seq,
-      endThere: point.there.seq,
-      points: [point],
-      substance: substantive.has(point.here.frame_hash) ? 1 : 0,
-    };
-  };
-
-  for (const tick of ticks) {
-    const candidates = byTick.get(tick);
-    if (current && tick !== current.endHere + 1) {
-      close({ at: tick, reason: "the frames stopped matching" });
-    }
-    const continues = current
-      ? candidates.find((point) => point.there.seq === current.endThere + 1)
-      : null;
-    if (current && !continues) {
-      close({ at: tick, reason: "the other dimension skipped a tick" });
-    }
-    if (current) {
-      current.points.push(continues);
-      current.endHere = continues.here.seq;
-      current.endThere = continues.there.seq;
-      if (substantive.has(continues.here.frame_hash)) current.substance += 1;
-    } else {
-      open(candidates[0]);
-    }
+  // A diagonal is a constant offset: their tick advances by the clock ratio for
+  // each of ours. Grouping by that offset separates the paths exactly.
+  const byOffset = new Map();
+  for (const point of points) {
+    const offset = point.there.seq - ratio * point.here.seq;
+    const lane = offset.toFixed(9);
+    const bucket = byOffset.get(lane);
+    if (bucket) bucket.points.push(point);
+    else byOffset.set(lane, { offset, points: [point] });
   }
-  close(null);
-  return Object.freeze(runs);
+
+  const runs = [];
+  for (const { offset, points: lane } of byOffset.values()) {
+    const ordered = [...lane].sort((a, b) => (a.here.seq - b.here.seq)
+      || (a.here.frame_hash < b.here.frame_hash ? -1 : 1));
+    let current = null;
+
+    const close = (boundary) => {
+      if (!current) return;
+      runs.push(Object.freeze({
+        offset,
+        startHere: current.startHere,
+        startThere: current.startThere,
+        endHere: current.endHere,
+        endThere: current.endThere,
+        length: current.points.length,
+        substance: current.substance,
+        points: Object.freeze(current.points),
+        boundary: boundary ? Object.freeze(boundary) : null,
+      }));
+      current = null;
+    };
+
+    for (const point of ordered) {
+      if (current && point.here.seq === current.endHere) continue;
+      if (current && point.here.seq !== current.endHere + 1) {
+        close({ at: point.here.seq, reason: "the frames stopped matching" });
+      }
+      if (!current) {
+        current = {
+          startHere: point.here.seq,
+          startThere: point.there.seq,
+          endHere: point.here.seq,
+          endThere: point.there.seq,
+          points: [point],
+          substance: substantive.has(point.here.frame_hash) ? 1 : 0,
+        };
+        continue;
+      }
+      current.points.push(point);
+      current.endHere = point.here.seq;
+      current.endThere = point.there.seq;
+      if (substantive.has(point.here.frame_hash)) current.substance += 1;
+    }
+    close(null);
+  }
+
+  // Longest first — a long run is the strongest evidence — then nearest
+  // alignment, then position, so the order is the same on every machine.
+  return Object.freeze([...runs].sort((a, b) => (b.length - a.length)
+    || (b.substance - a.substance)
+    || (Math.abs(a.offset) - Math.abs(b.offset))
+    || (a.offset - b.offset)
+    || (a.startHere - b.startHere)));
 }
 
 /**
@@ -294,21 +330,39 @@ export function alignment(points, local, remote) {
     return Object.freeze({ ok: false, reason: "no fixed point: nothing pins the phase" });
   }
   const ratio = there / here;
-  const pins = [...points]
-    .sort((a, b) => a.here.seq - b.here.seq)
-    .map((point) => Object.freeze({
-      here: point.here.seq,
-      there: point.there.seq,
-      offset: point.there.seq - ratio * point.here.seq,
-    }));
-  const offset = pins[0].offset;
-  const disagreeing = pins.filter((pin) => Math.abs(pin.offset - offset) > 1e-9);
+
+  const lanes = new Map();
+  for (const point of points) {
+    const offset = point.there.seq - ratio * point.here.seq;
+    const lane = offset.toFixed(9);
+    const pin = Object.freeze({ here: point.here.seq, there: point.there.seq, offset });
+    const bucket = lanes.get(lane);
+    if (bucket) bucket.push(pin);
+    else lanes.set(lane, [pin]);
+  }
+
+  // Every lane is a path the two dimensions genuinely line up along. The one
+  // with the most pins leads; the rest are alternates and can be merged along
+  // too. More paths is more to assimilate, not ambiguity to resolve.
+  const ordered = [...lanes.values()]
+    .map((pins) => Object.freeze({
+      offset: pins[0].offset,
+      pins: Object.freeze([...pins].sort((a, b) => a.here - b.here)),
+    }))
+    .sort((a, b) => (b.pins.length - a.pins.length)
+      || (Math.abs(a.offset) - Math.abs(b.offset))
+      || (a.offset - b.offset));
+
+  const primary = ordered[0];
   return Object.freeze({
     ok: true,
     ratio,
-    offset,
-    pins: Object.freeze(pins),
-    disagreeing: Object.freeze(disagreeing),
+    offset: primary.offset,
+    pins: primary.pins,
+    paths: Object.freeze(ordered),
+    // Pins that sit on another path. Kept under the old name because a caller
+    // that wanted one alignment still wants to know these exist.
+    disagreeing: Object.freeze(ordered.slice(1).flatMap((path) => path.pins)),
   });
 }
 

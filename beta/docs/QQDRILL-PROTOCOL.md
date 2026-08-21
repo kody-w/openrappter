@@ -164,6 +164,39 @@ So fidelity is a property of a **span**, not of the join:
 This is why publishing frames that contain nothing novel is still worth doing. They lengthen runs,
 and run length is the currency that turns a merge from plausible into determined.
 
+### Every path is returned, because more merges is better
+
+A local tick can arrive with several partners — a repeated payload matches every one of its twins,
+and two dimensions can genuinely line up along more than one path at once. Those are not an ambiguity
+to resolve. **Each path is a real diagonal and a real chance to merge, so all of them are returned.**
+
+A diagonal is a constant offset: the other dimension's tick advances by the clock ratio for each of
+yours. Grouping the fixed points by that offset separates the paths exactly, and each group yields
+its own run with its own length and substance. The longest leads, because a long run is the strongest
+evidence — but the others are alternates to merge along, not noise to discard.
+
+This is the same statement as "a frame joined three ways is one frame with three ancestries", seen
+from the search side. Choosing one path and dropping the rest would throw away merges that were
+found and were valid.
+
+### How far a drill goes is how long the person waits
+
+There is no natural stopping point in a search over a commons, so the bound is the one that actually
+matters: **patience.** A drill takes a budget — a number of pairs, a deadline — and returns what it
+had when the budget ran out, saying plainly whether it finished or stopped.
+
+Two properties make that safe to lean on:
+
+- **Monotone.** The search is enumerated in a fixed order, so a bigger budget returns a *superset* of
+  a smaller one. Waiting longer only ever adds paths. It never invalidates a pair already found and
+  never reorders one out of the result.
+- **Usable at any point.** Whatever came back merges immediately under the ordinary rules. A drill
+  stopped after two pairs is a smaller drill, not a broken one, and resuming continues from exactly
+  where it stopped rather than starting again.
+
+So the honest thing to show a person is a search that keeps going and keeps handing back results,
+with the choice to stop being theirs at every moment.
+
 ### The digest is the global lookup handle
 
 A frame's bytes give it a handle that **anyone can compute and nobody has to assign**. Two machines

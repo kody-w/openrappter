@@ -431,3 +431,64 @@ test("the coordinate is computed about frames, never stored in them", () => {
   assert.equal(key.tick, frame.seq);
   assert.equal(key.digest, frame.payload_hash);
 });
+
+test("16. two dimensions can line up along several paths, and every one is returned", () => {
+  // The same three payloads run twice in the other dimension: once at its ticks
+  // 0-2 and again at 4-6. Both are real alignments, and picking one and
+  // discarding the other would throw away a merge.
+  const shared = [
+    { asserts: { sky: "clear" } },
+    { asserts: { wind: 5 } },
+    { asserts: { temp: 20 } },
+  ];
+  const local = dimension({ dimension_id: "local", clock_key: 1 }, chain(shared));
+  const remote = dimension(
+    { dimension_id: "remote", clock_key: 1 },
+    chain([...shared, { asserts: { gap: true } }, ...shared], { ran: 30 }),
+  );
+
+  const points = fixedPoints(drill(local, remote).pairs);
+  const runs = runsFrom(points, local, remote);
+  const offsets = [...new Set(runs.map((run) => run.offset))].sort((a, b) => a - b);
+  assert.deepEqual(offsets, [0, 4], "both diagonals are found");
+  assert.equal(runs[0].length, 3, "longest first");
+  assert.equal(runs.filter((run) => run.length === 3).length, 2, "both paths are full length");
+
+  const align = alignment(points, local, remote);
+  assert.equal(align.ok, true);
+  assert.equal(align.paths.length, 2, "both paths are reported, not one chosen");
+  assert.equal(align.paths[0].pins.length, 3);
+  assert.equal(align.paths[1].pins.length, 3);
+});
+
+test("17. how far a drill goes is how long the person waits, and more is always a superset", () => {
+  const shared = [
+    { asserts: { sky: "clear" } },
+    { asserts: { wind: 5 } },
+    { asserts: { temp: 20 } },
+    { asserts: { pressure: 1014 } },
+  ];
+  const local = dimension({ dimension_id: "local", clock_key: 1 }, chain(shared));
+  const remote = dimension({ dimension_id: "remote", clock_key: 1 }, chain(shared, { ran: 30 }));
+
+  const impatient = drill(local, remote, { budget: { pairs: 2 } });
+  const patient = drill(local, remote);
+
+  assert.equal(impatient.hits, 2, "it stopped where it was told to");
+  assert.equal(impatient.exhausted, false, "and says it stopped early rather than finished");
+  assert.equal(patient.exhausted, true, "the unbudgeted search ran out of places to look");
+  assert.ok(patient.hits > impatient.hits, "waiting longer found more");
+
+  const seen = new Set(patient.pairs.map((pair) => `${pair.here.frame_hash}|${pair.there.frame_hash}`));
+  for (const pair of impatient.pairs) {
+    assert.ok(
+      seen.has(`${pair.here.frame_hash}|${pair.there.frame_hash}`),
+      "waiting longer never invalidates a pair already found",
+    );
+  }
+
+  // And the short search is usable on its own: it merges what it found.
+  const line = makeLine(local.frames);
+  const result = assimilate(line, impatient.pairs.map((pair) => pull(remote, pair.there)));
+  assert.ok(result.merged.length > 0, "a partial drill is still a usable drill");
+});

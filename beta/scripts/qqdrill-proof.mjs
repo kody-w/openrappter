@@ -109,7 +109,10 @@ const align = alignment(points, here, there);
 if (!align.ok) {
   console.log(`   ${red("refused")} ${align.reason}`);
 } else {
-  console.log(`   ratio ${align.ratio}, offset ${align.offset}, ${align.pins.length} pins, ${align.disagreeing.length} disagreeing`);
+  console.log(`   ratio ${align.ratio}, ${align.paths.length} path${align.paths.length === 1 ? "" : "s"} the two dimensions line up along`);
+  for (const [index, path] of align.paths.entries()) {
+    console.log(`   ${index === 0 ? "primary " : "alternate"} offset ${path.offset}, ${path.pins.length} pin${path.pins.length === 1 ? "" : "s"}${index === 0 ? "" : dim("  — another chance to merge, not noise")}`);
+  }
   console.log(`   ${dim(`our tick 3 places at their tick ${placeThere(align, 3)} — by arithmetic, not judgement`)}`);
 }
 
@@ -170,5 +173,14 @@ if (!zoomed.ok) {
 
 const unpinned = zoom({ start: 40, end: 50 }, fine.frames, fineAlign, line);
 console.log(`   ${red("refused")} a span with no pin in it: ${unpinned.reason}`);
+
+step(9, "Patience — the drill is anytime, and more is always a superset");
+const impatient = drill(here, there, { budget: { pairs: 2 } });
+const patient = drill(here, there);
+console.log(`   waited briefly: ${impatient.hits} pairs, ${impatient.exhausted ? "finished" : red("stopped early")}  ${dim(`resume after ${impatient.resumeAfter}`)}`);
+console.log(`   waited fully:   ${patient.hits} pairs, ${patient.exhausted ? green("finished") : "stopped early"}`);
+const superset = impatient.pairs.every((pair) => patient.pairs
+  .some((full) => full.here.frame_hash === pair.here.frame_hash && full.there.frame_hash === pair.there.frame_hash));
+console.log(`   ${superset ? green("superset holds") : red("SUPERSET VIOLATED")} ${dim("— waiting longer only ever adds paths")}`);
 
 console.log(`\n${dim("The drill found. The fold decided. Nothing the commons sent could invalidate anything this device already established.")}\n`);

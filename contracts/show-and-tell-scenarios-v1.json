@@ -1,0 +1,525 @@
+{
+  "schema": "openrappter-show-and-tell-scenarios/1.0",
+  "purpose": "Deterministic Show-and-Tell evaluation scenarios. Both runtimes replay these synthetic events through the same pure functions - deterministic analysis, session bundling, and plan proposal - and must produce identical results. A scenario fails when a runtime drifts, not when a clock or a model changes.",
+  "session": {
+    "id": "scenario-session",
+    "startedAt": 1700000000000,
+    "maxDurationMs": 3600000,
+    "pollIntervalMs": 2000
+  },
+  "scenarios": [
+    {
+      "id": "detour",
+      "title": "A detour is segmented out instead of becoming a step",
+      "intentHint": "Reconcile the quarterly expense sheet",
+      "events": [
+        {
+          "type": "session.started",
+          "source": "show-and-tell",
+          "elapsedMs": 0,
+          "data": {
+            "captureMode": "context"
+          }
+        },
+        {
+          "type": "app.activate",
+          "source": "context-collector",
+          "elapsedMs": 1000,
+          "data": {
+            "app": "Numbers",
+            "window": "Q3 expenses"
+          }
+        },
+        {
+          "type": "session.note",
+          "source": "user-narration",
+          "elapsedMs": 2000,
+          "data": {
+            "note": "I open the quarterly expense sheet and check the totals."
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 5000,
+          "data": {
+            "title": "Check the sheet total",
+            "detail": "Confirmed the sheet total matches 1,240.50 USD.",
+            "app": "Numbers"
+          }
+        },
+        {
+          "type": "app.activate",
+          "source": "context-collector",
+          "elapsedMs": 9000,
+          "data": {
+            "app": "Music",
+            "window": "Now playing"
+          }
+        },
+        {
+          "type": "app.activate",
+          "source": "context-collector",
+          "elapsedMs": 12000,
+          "data": {
+            "app": "Numbers",
+            "window": "Q3 expenses"
+          }
+        },
+        {
+          "type": "session.note",
+          "source": "user-narration",
+          "elapsedMs": 13000,
+          "data": {
+            "note": "Back in the sheet, I export the summary."
+          }
+        },
+        {
+          "type": "session.stopped",
+          "source": "show-and-tell",
+          "elapsedMs": 14000,
+          "data": {}
+        }
+      ],
+      "expect": {
+        "analysisStepIds": [
+          "s1",
+          "s2",
+          "s3",
+          "s4"
+        ],
+        "bundle": {
+          "meaningfulEventCount": 6,
+          "segmentCount": 3,
+          "narratedSegments": 2,
+          "silentSegments": 1,
+          "detourSegments": 1,
+          "silentEvents": 1,
+          "unexplainedFrames": 0,
+          "longestGapMs": 4000,
+          "explainedRatioMilli": 833,
+          "segmentKinds": [
+            "work",
+            "detour",
+            "work"
+          ]
+        },
+        "plan": {
+          "stepIds": [
+            "s1",
+            "s2",
+            "s4"
+          ],
+          "valueIds": [
+            "text_1",
+            "amount_1"
+          ],
+          "stepDetails": {
+            "s2": "Confirmed the sheet total matches {{amount_1}}."
+          },
+          "confirmationStepIds": [],
+          "privacyKinds": [],
+          "openQuestionSubstrings": [
+            "were dropped because their only evidence was in a detour"
+          ]
+        }
+      }
+    },
+    {
+      "id": "hardcoded-values",
+      "title": "One demonstration's literals become editable inputs",
+      "intentHint": "File the monthly invoice",
+      "events": [
+        {
+          "type": "session.started",
+          "source": "show-and-tell",
+          "elapsedMs": 0,
+          "data": {
+            "captureMode": "context"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 2000,
+          "data": {
+            "title": "Open the invoice",
+            "detail": "Opened invoice INV-10428 for 4,820.00 USD dated 2026-03-14.",
+            "app": "Finance",
+            "url": "https://billing.example.com/invoices/10428"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 6000,
+          "data": {
+            "title": "Save the receipt",
+            "detail": "Saved the receipt to /Users/demo/Documents/receipts and renamed it.",
+            "app": "Finder"
+          }
+        },
+        {
+          "type": "session.stopped",
+          "source": "show-and-tell",
+          "elapsedMs": 8000,
+          "data": {}
+        }
+      ],
+      "expect": {
+        "analysisStepIds": [
+          "s1",
+          "s2"
+        ],
+        "bundle": {
+          "meaningfulEventCount": 2,
+          "segmentCount": 1,
+          "narratedSegments": 1,
+          "silentSegments": 0,
+          "detourSegments": 0,
+          "silentEvents": 0,
+          "unexplainedFrames": 0,
+          "longestGapMs": 4000,
+          "explainedRatioMilli": 1000,
+          "segmentKinds": [
+            "work"
+          ]
+        },
+        "plan": {
+          "stepIds": [
+            "s1",
+            "s2"
+          ],
+          "valueIds": [
+            "date_1",
+            "amount_1",
+            "identifier_1",
+            "url_1",
+            "path_1"
+          ],
+          "stepDetails": {
+            "s1": "Opened invoice {{identifier_1}} for {{amount_1}} dated {{date_1}}.",
+            "s2": "Saved the receipt to {{path_1}} and renamed it."
+          },
+          "stepUrls": {
+            "s1": "{{url_1}}"
+          },
+          "valueExamples": {
+            "identifier_1": "INV-10428",
+            "amount_1": "4,820.00 USD",
+            "date_1": "2026-03-14",
+            "url_1": "https://billing.example.com/invoices/10428",
+            "path_1": "<absolute>/receipts"
+          },
+          "confirmationStepIds": [
+            "s1"
+          ],
+          "privacyKinds": [],
+          "openQuestionSubstrings": [
+            "confirm each is an input and not a constant"
+          ]
+        }
+      }
+    },
+    {
+      "id": "risky-side-effects",
+      "title": "Side-effecting steps stop for confirmation",
+      "intentHint": "Close out a customer refund",
+      "events": [
+        {
+          "type": "session.started",
+          "source": "show-and-tell",
+          "elapsedMs": 0,
+          "data": {
+            "captureMode": "context"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 1000,
+          "data": {
+            "title": "Review the request",
+            "detail": "Read the refund request and checked the order history.",
+            "app": "Support"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 4000,
+          "data": {
+            "title": "Issue the refund",
+            "detail": "Issued the refund payment to the customer.",
+            "app": "Billing"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 7000,
+          "data": {
+            "title": "Notify the customer",
+            "detail": "Sent the customer an email confirming the outcome.",
+            "app": "Mail"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 9000,
+          "data": {
+            "title": "Tidy the queue",
+            "detail": "Deleted the duplicate ticket from the queue.",
+            "app": "Support"
+          }
+        },
+        {
+          "type": "session.stopped",
+          "source": "show-and-tell",
+          "elapsedMs": 11000,
+          "data": {}
+        }
+      ],
+      "expect": {
+        "analysisStepIds": [
+          "s1",
+          "s2",
+          "s3",
+          "s4"
+        ],
+        "bundle": {
+          "meaningfulEventCount": 4,
+          "segmentCount": 1,
+          "narratedSegments": 1,
+          "silentSegments": 0,
+          "detourSegments": 0,
+          "silentEvents": 0,
+          "unexplainedFrames": 0,
+          "longestGapMs": 3000,
+          "explainedRatioMilli": 1000,
+          "segmentKinds": [
+            "work"
+          ]
+        },
+        "plan": {
+          "stepIds": [
+            "s1",
+            "s2",
+            "s3",
+            "s4"
+          ],
+          "valueIds": [],
+          "confirmationStepIds": [
+            "s1",
+            "s2",
+            "s3",
+            "s4"
+          ],
+          "stepRiskCategories": {
+            "s2": [
+              "financial"
+            ],
+            "s3": [
+              "messaging"
+            ],
+            "s4": [
+              "destructive"
+            ]
+          },
+          "privacyKinds": [],
+          "doNotUseWhenSubstrings": [
+            "destructive, financial, messaging steps stop for confirmation"
+          ]
+        }
+      }
+    },
+    {
+      "id": "privacy",
+      "title": "Personal data is masked at fixed width and reported by path",
+      "intentHint": "Confirm a member refund",
+      "events": [
+        {
+          "type": "session.started",
+          "source": "show-and-tell",
+          "elapsedMs": 0,
+          "data": {
+            "captureMode": "context"
+          }
+        },
+        {
+          "type": "manual.observation",
+          "source": "user-observation",
+          "elapsedMs": 2000,
+          "data": {
+            "title": "Check the member record",
+            "detail": "Confirmed the refund on card 4111 1111 1111 1111 for member 123-45-6789 and mailed dana.reed@example.com.",
+            "app": "Support"
+          }
+        },
+        {
+          "type": "session.stopped",
+          "source": "show-and-tell",
+          "elapsedMs": 5000,
+          "data": {}
+        }
+      ],
+      "expect": {
+        "analysisStepIds": [
+          "s1"
+        ],
+        "bundle": {
+          "meaningfulEventCount": 1,
+          "segmentCount": 1,
+          "narratedSegments": 1,
+          "silentSegments": 0,
+          "detourSegments": 0,
+          "silentEvents": 0,
+          "unexplainedFrames": 0,
+          "longestGapMs": 0,
+          "explainedRatioMilli": 1000,
+          "segmentKinds": [
+            "work"
+          ]
+        },
+        "plan": {
+          "stepIds": [
+            "s1"
+          ],
+          "valueIds": [],
+          "stepDetails": {
+            "s1": "Confirmed the refund on card [redacted] for member [redacted] and mailed [redacted]."
+          },
+          "confirmationStepIds": [
+            "s1"
+          ],
+          "privacyKinds": [
+            "email",
+            "government-id",
+            "payment-card"
+          ],
+          "privacyMasked": true,
+          "forbiddenSubstrings": [
+            "4111",
+            "123-45-6789",
+            "dana.reed@example.com"
+          ]
+        }
+      }
+    },
+    {
+      "id": "unexplained-capture",
+      "title": "An unlabelled frame in a silent stretch is counted, not hidden",
+      "intentHint": "Prepare the release checklist",
+      "events": [
+        {
+          "type": "session.started",
+          "source": "show-and-tell",
+          "elapsedMs": 0,
+          "data": {
+            "captureMode": "context"
+          }
+        },
+        {
+          "type": "app.activate",
+          "source": "context-collector",
+          "elapsedMs": 1000,
+          "data": {
+            "app": "Terminal",
+            "window": "release"
+          }
+        },
+        {
+          "type": "frame.captured",
+          "source": "explicit-capture",
+          "elapsedMs": 3000,
+          "data": {
+            "file": "frames/frame-1.png",
+            "app": "Terminal",
+            "window": "release"
+          }
+        },
+        {
+          "type": "app.activate",
+          "source": "context-collector",
+          "elapsedMs": 90000,
+          "data": {
+            "app": "Terminal",
+            "window": "release"
+          }
+        },
+        {
+          "type": "session.note",
+          "source": "user-narration",
+          "elapsedMs": 91000,
+          "data": {
+            "note": "After the wait I confirm every required check is green."
+          }
+        },
+        {
+          "type": "session.stopped",
+          "source": "show-and-tell",
+          "elapsedMs": 92000,
+          "data": {}
+        }
+      ],
+      "expect": {
+        "analysisStepIds": [
+          "s1"
+        ],
+        "bundle": {
+          "meaningfulEventCount": 4,
+          "segmentCount": 2,
+          "narratedSegments": 1,
+          "silentSegments": 1,
+          "detourSegments": 0,
+          "silentEvents": 2,
+          "unexplainedFrames": 1,
+          "longestGapMs": 87000,
+          "explainedRatioMilli": 500,
+          "segmentKinds": [
+            "work",
+            "work"
+          ],
+          "warningSubstrings": [
+            "explicit frame(s) carry no label",
+            "longest unrecorded pause"
+          ]
+        },
+        "plan": {
+          "stepIds": [
+            "s1"
+          ],
+          "valueIds": [
+            "text_1"
+          ],
+          "confirmationStepIds": [
+            "s1"
+          ],
+          "privacyKinds": [],
+          "openQuestionSubstrings": [
+            "explicit frame(s) carry no label"
+          ]
+        }
+      }
+    }
+  ],
+  "marketplace": {
+    "note": "Exporting an approved plan writes exactly this layout, relative to the marketplace directory.",
+    "files": [
+      ".claude-plugin/marketplace.json",
+      "plugins/{plugin}/.claude-plugin/plugin.json",
+      "plugins/{plugin}/skills/{skill}/SKILL.md"
+    ],
+    "descriptionMarkers": [
+      "USE WHEN:",
+      "USE FOR:",
+      "DO NOT USE WHEN:"
+    ],
+    "forbiddenClaims": [
+      "endorsed by Microsoft",
+      "official Microsoft",
+      "Microsoft Corporation"
+    ]
+  }
+}

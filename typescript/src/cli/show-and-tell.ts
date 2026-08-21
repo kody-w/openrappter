@@ -234,6 +234,22 @@ export function registerShowAndTellCommand(program: Command): void {
     });
 
   show
+    .command('bundle')
+    .description('Show the deterministic evidence bundle and its honesty statistics')
+    .argument('[session]', 'Session id')
+    .action(async (session?: string) => {
+      printResult(await getAgent().execute({ action: 'bundle', session_id: session }));
+    });
+
+  show
+    .command('propose')
+    .description('Create one reviewable skill plan without building anything')
+    .argument('[session]', 'Session id')
+    .action(async (session?: string) => {
+      printResult(await getAgent().execute({ action: 'propose', session_id: session }));
+    });
+
+  show
     .command('approve')
     .description('Approve the reviewed analysis in a local interactive terminal')
     .argument('[session]', 'Session id')
@@ -273,10 +289,85 @@ export function registerShowAndTellCommand(program: Command): void {
     });
 
   show
-    .command('build')
-    .description('Build from an approved analysis')
+    .command('revise-plan')
+    .description('Edit a proposed skill plan, or approve it in a separate turn')
     .argument('[session]', 'Session id')
-    .option('--target <target>', 'skill, automation, or all', 'skill')
+    .option('--title <title>', 'Edited plan title')
+    .option('--intent <intent>', 'Edited plan intent and trigger contract')
+    .option('--feedback <feedback>', 'Plan review notes')
+    .option('--steps <path>', 'JSON file containing the edited plan step array')
+    .option('--values <path>', 'JSON file containing the edited value array')
+    .option('--approve', 'Approve the unchanged plan in this local interactive turn')
+    .action(async (
+      session: string | undefined,
+      options: {
+        title?: string;
+        intent?: string;
+        feedback?: string;
+        steps?: string;
+        values?: string;
+        approve?: boolean;
+      },
+    ) => {
+      const stepsJson = options.steps
+        ? await readFile(options.steps, 'utf8')
+        : undefined;
+      const valuesJson = options.values
+        ? await readFile(options.values, 'utf8')
+        : undefined;
+      const consentToken = options.approve
+        ? await requestInteractiveShowAndTellConsent(
+            getStore(),
+            'approve',
+            'Approve this unchanged plan as the exact source for generated artifacts?',
+          )
+        : undefined;
+      printResult(
+        await getAgent().execute({
+          action: 'revise_plan',
+          session_id: session,
+          title: options.title,
+          intent: options.intent,
+          feedback: options.feedback,
+          steps_json: stepsJson,
+          values_json: valuesJson,
+          approve: options.approve === true,
+          consent_token: consentToken,
+        }),
+      );
+    });
+
+  show
+    .command('export')
+    .description('Export an approved plan as a private marketplace package')
+    .argument('[session]', 'Session id')
+    .option('--marketplace-name <name>', 'Marketplace directory name')
+    .option('--plugin-name <name>', 'Plugin directory name')
+    .option('--skill-name <name>', 'Skill directory name')
+    .action(async (
+      session: string | undefined,
+      options: {
+        marketplaceName?: string;
+        pluginName?: string;
+        skillName?: string;
+      },
+    ) => {
+      printResult(
+        await getAgent().execute({
+          action: 'export',
+          session_id: session,
+          marketplace_name: options.marketplaceName,
+          plugin_name: options.pluginName,
+          skill_name: options.skillName,
+        }),
+      );
+    });
+
+  show
+    .command('build')
+    .description('Build from the approved plan when present, otherwise the approved analysis')
+    .argument('[session]', 'Session id')
+    .option('--target <target>', 'skill, automation, all, or rappid', 'skill')
     .action(async (session: string | undefined, options: { target: string }) => {
       printResult(
         await getAgent().execute({

@@ -17,6 +17,10 @@ const preload = readFileSync(
   resolve(root, '../../desktop/src/preload.cts'),
   'utf8',
 );
+const desktopMain = readFileSync(
+  resolve(root, '../../desktop/src/main.ts'),
+  'utf8',
+);
 
 describe('Electron Show-and-Tell surface', () => {
   it('routes the desktop recorder through the existing UI shell', () => {
@@ -55,13 +59,35 @@ describe('Electron Show-and-Tell surface', () => {
       'capture',
       'stop',
       'analyze',
+      'bundle',
+      'propose',
       'review',
+      'revise_plan',
       'build',
+      'export',
       'replay',
       'test',
     ]) {
       expect(component).toContain(`action: '${action}'`);
+      expect(desktopMain).toContain(`'${action}'`);
     }
+    expect(desktopMain).toContain(
+      "action === 'revise_plan' && input.approve === true",
+    );
+  });
+
+  it('promotes only an approved generated skill into a RAPPID dimension', () => {
+    expect(component).toContain('Approve unchanged plan');
+    expect(component).toContain('this.plan?.approved');
+    expect(component).toContain("value=\"rappid\"");
+    expect(component).toContain("'rappid.attach-skill'");
+    expect(component).toContain("const target = this.buildTarget === 'rappid'");
+    expect(component).toContain("? 'skill'");
+    expect(component).toContain('contentHash: skill.contentHash');
+    expect(component).toContain(
+      'Raw captures and',
+    );
+    expect(component).not.toContain("action: 'capture',\n            rappid:");
   });
 
   it('binds narration to the recording session instead of the selected row', () => {

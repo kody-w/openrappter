@@ -24,6 +24,7 @@ interface Message {
   content: string;
   timestamp: number;
   streaming?: boolean;
+  commitState?: 'pending' | 'committed' | 'cancelled' | 'error';
 }
 
 interface MessageGroup {
@@ -374,27 +375,69 @@ export class OpenRappterChat extends LitElement {
       font-weight: 600;
     }
 
-    .streaming-indicator {
-      display: inline-flex;
-      gap: 4px;
-      margin-left: 4px;
-      vertical-align: middle;
+    .message.assistant.pending {
+      min-width: 13rem;
+      min-height: 3.25rem;
+      display: flex;
+      align-items: center;
     }
 
-    .streaming-indicator span {
+    .typing-presence {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+      font-weight: 600;
+    }
+
+    .typing-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .typing-dots span {
       width: 6px;
       height: 6px;
       background: var(--accent);
       border-radius: 50%;
-      animation: bounce 1.2s infinite ease-in-out;
+      animation: typing-presence 1.05s infinite ease-in-out;
     }
 
-    .streaming-indicator span:nth-child(2) { animation-delay: 0.15s; }
-    .streaming-indicator span:nth-child(3) { animation-delay: 0.3s; }
+    .typing-dots span:nth-child(2) { animation-delay: 0.14s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.28s; }
 
-    @keyframes bounce {
-      0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
-      40% { transform: scale(1); opacity: 1; }
+    .message.assistant.committed .message-content {
+      animation: committed-message-reveal 0.2s cubic-bezier(.2, .8, .2, 1)
+        both;
+      transform-origin: 1rem 100%;
+    }
+
+    .message-state {
+      color: var(--text-secondary);
+      font-size: 0.8125rem;
+    }
+
+    @keyframes typing-presence {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.28; }
+      30% { transform: translateY(-3px); opacity: 1; }
+    }
+
+    @keyframes committed-message-reveal {
+      from { opacity: 0; transform: translateY(4px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .typing-dots span {
+        animation: none;
+        opacity: 0.7;
+      }
+
+      .message.assistant.committed .message-content {
+        animation: none;
+      }
     }
 
     /* ── Tool Sidebar ── */
@@ -925,6 +968,8 @@ export class OpenRappterChat extends LitElement {
   private resizing = false;
   private runDeadline: ReturnType<typeof setTimeout> | null = null;
   private closedRunIds = new Set<string>();
+  /** CMR/1: transport deltas live here until one final event commits them. */
+  private responseBuffers = new Map<string, string>();
 
   @query('textarea') private textarea!: HTMLTextAreaElement;
   @query('.messages') private messagesContainer!: HTMLDivElement;
@@ -1261,21 +1306,29 @@ export class OpenRappterChat extends LitElement {
       return;
     }
 
-    if (data.state === 'delta' || data.state === 'final') {
-      const text = data.message?.content
-        ?.filter((c) => c.type === 'text')
-        .map((c) => c.text ?? '')
-        .join('') ?? '';
+    const text = data.message?.content
+      ?.filter((c) => c.type === 'text')
+      .map((c) => c.text ?? '')
+      .join('') ?? '';
 
-      if (data.state === 'final') {
-        if (text) {
-          this.updateStreamingMessage(data.runId, text);
-        }
-        this.finishStreaming(data.runId);
-        // The gateway has always sent `voiceText`; nothing consumed it, so the
-        // spoken half of every reply was discarded on arrival.
-        void this.speakReply(data);
+    if (data.state === 'delta') {
+      // Keep partial language out of the DOM. Deltas remain useful for
+      // transport liveness and reconnects, but the reader sees only presence.
+      if (text) {
+        this.responseBuffers.set(
+          data.runId,
+          (this.responseBuffers.get(data.runId) ?? '') + text,
+        );
       }
+    }
+
+    if (data.state === 'final') {
+      const committed = text || this.responseBuffers.get(data.runId) || '';
+      this.commitStreamingMessage(data.runId, committed);
+      this.finishStreaming(data.runId, true, 'committed');
+      // The gateway has always sent `voiceText`; nothing consumed it, so the
+      // spoken half of every reply was discarded on arrival.
+      void this.speakReply(data);
     }
 
     if (data.state === 'error') {
@@ -1283,7 +1336,8 @@ export class OpenRappterChat extends LitElement {
     }
 
     if (data.state === 'aborted') {
-      this.finishStreaming(data.runId);
+      this.responseBuffers.delete(data.runId);
+      this.finishStreaming(data.runId, true, 'cancelled');
     }
   };
 
@@ -1338,7 +1392,8 @@ export class OpenRappterChat extends LitElement {
   private async handleAbort() {
     if (!this.activeRunId) return;
     const runId = this.activeRunId;
-    this.finishStreaming(runId);
+    this.responseBuffers.delete(runId);
+    this.finishStreaming(runId, true, 'cancelled');
     try {
       await gateway.request('chat.abort', { runId }, {
         timeoutMs: RUN_ABORT_TIMEOUT_MS,
@@ -1350,7 +1405,8 @@ export class OpenRappterChat extends LitElement {
     if (!this.activeRunId) return;
     const runId = this.activeRunId;
     this.rememberClosedRun(runId);
-    this.finishStreaming(runId, false);
+    this.responseBuffers.delete(runId);
+    this.finishStreaming(runId, false, 'cancelled');
     this.speechGeneration += 1;
     this.activeAudio?.pause();
     try {
@@ -1517,6 +1573,7 @@ export class OpenRappterChat extends LitElement {
         content: '',
         timestamp: Date.now(),
         streaming: true,
+        commitState: 'pending',
       };
       this.messages = [...this.messages, assistantMessage];
       this.scrollToBottom();
@@ -1527,22 +1584,36 @@ export class OpenRappterChat extends LitElement {
     }
   }
 
-  private updateStreamingMessage(runId: string, text: string) {
+  private commitStreamingMessage(runId: string, text: string) {
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx < 0) return;
 
     const messages = [...this.messages];
-    messages[idx] = { ...messages[idx], content: text };
+    messages[idx] = {
+      ...messages[idx],
+      content: text,
+      streaming: false,
+      commitState: 'committed',
+    };
     this.messages = messages;
+    this.responseBuffers.delete(runId);
     this.scrollToBottom();
   }
 
-  private finishStreaming(runId: string, flushQueued = true) {
+  private finishStreaming(
+    runId: string,
+    flushQueued = true,
+    commitState: Message['commitState'] = 'committed',
+  ) {
     this.rememberClosedRun(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx >= 0) {
       const messages = [...this.messages];
-      messages[idx] = { ...messages[idx], streaming: false };
+      messages[idx] = {
+        ...messages[idx],
+        streaming: false,
+        commitState,
+      };
       this.messages = messages;
     }
     if (this.activeRunId !== runId) return;
@@ -1558,6 +1629,7 @@ export class OpenRappterChat extends LitElement {
 
   private handleStreamError(runId: string, errorMessage: string) {
     this.rememberClosedRun(runId);
+    this.responseBuffers.delete(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx >= 0) {
       const messages = [...this.messages];
@@ -1565,6 +1637,7 @@ export class OpenRappterChat extends LitElement {
         ...messages[idx],
         content: `⚠️ ${errorMessage}`,
         streaming: false,
+        commitState: 'error',
       };
       this.messages = messages;
     }
@@ -1594,7 +1667,8 @@ export class OpenRappterChat extends LitElement {
     this.runDeadline = setTimeout(() => {
       if (this.activeRunId !== runId || this.closedRunIds.has(runId)) return;
       this.error = 'Agent run exceeded the 30 minute limit and was cancelled.';
-      this.finishStreaming(runId);
+      this.responseBuffers.delete(runId);
+      this.finishStreaming(runId, true, 'cancelled');
       void gateway.request('chat.abort', { runId }, {
         timeoutMs: RUN_ABORT_TIMEOUT_MS,
       }).catch(() => {});
@@ -1816,15 +1890,30 @@ export class OpenRappterChat extends LitElement {
 
   private renderMessageContent(msg: Message) {
     const isAssistant = msg.role === 'assistant';
+    const pending = isAssistant && (
+      msg.streaming || msg.commitState === 'pending'
+    );
+    const committed = isAssistant && msg.commitState === 'committed';
     return html`
-      <div class="message ${msg.role}">
+      <div
+        class="message ${msg.role} ${pending ? 'pending' : ''} ${committed ? 'committed' : ''}"
+        aria-busy=${pending ? 'true' : 'false'}
+      >
         <div class="message-content">
-          ${isAssistant && msg.content
-            ? unsafeHTML(renderMarkdown(msg.content))
-            : msg.content}
-          ${msg.streaming
-            ? html`<span class="streaming-indicator"><span></span><span></span><span></span></span>`
-            : nothing}
+          ${pending
+            ? html`
+                <span class="typing-presence" role="status" aria-live="polite">
+                  <span>RAPPID is responding</span>
+                  <span class="typing-dots" aria-hidden="true">
+                    <span></span><span></span><span></span>
+                  </span>
+                </span>
+              `
+            : msg.commitState === 'cancelled'
+              ? html`<span class="message-state">Response stopped.</span>`
+              : isAssistant && msg.content && msg.commitState !== 'error'
+                ? html`<div aria-live="polite">${unsafeHTML(renderMarkdown(msg.content))}</div>`
+                : msg.content}
         </div>
       </div>
     `;

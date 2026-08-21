@@ -406,6 +406,105 @@ decides *what is true*.
 An implementation is therefore expected to make its policy replaceable, and to ship a plain default
 that a reader can follow. This document is the mechanism; the default is an example, not the ceiling.
 
+### Two things compound, and they multiply
+
+The hit rate of a drill is the product of two quantities that both grow over time, and neither one
+alone is enough.
+
+**The commons gets denser.** Every frame anyone publishes is another coordinate that resolves. A
+published frame costs its author nothing to leave in place and is a hit waiting to happen for
+someone who never met them. Because the handle is computable rather than assigned, publishing is
+just putting bytes at an address anyone can derive — `raw.githubusercontent.com` is enough, with no
+registry, no service in the middle, and no account needed to reserve a namespace.
+
+**The global lookup is the summon, not a second door.** A drill reaching outward performs exactly
+the resolution described in [`SUMMON-PROTOCOL.md`](SUMMON-PROTOCOL.md) — the same deterministic
+address, the same public transport, the same offline-capable cache. There is no separate drill
+network, no drill index service, and no second thing to secure or operate. A drill is a caller of
+the summon that happens to be asking on its own initiative rather than a person's, so everything
+that already holds about summoning holds here: the resolution is deterministic, what comes back is
+declared data that is checked before it is used, and the single door outward stays single.
+
+**The probe policy gets better.** A drill that records which of its probes resolved has, for free, a
+labelled dataset of what is worth looking for — no annotation, no supervision, just its own catch.
+Whatever a runtime does with that is policy and is out of scope here.
+
+They multiply rather than add:
+
+- A good policy over an empty commons hits nothing. There is nothing there to find.
+- A dense commons with no policy is unsearchable. This is not a hypothetical: measured against a
+  structured commons, a policy-free drill emitting coordinates at random produced **300 probes, 0
+  hits, and 273 syntactically malformed coordinates**. A commons you cannot address is the same as
+  no commons.
+- Both together is the case worth building for, and each makes the other more valuable: a denser
+  commons rewards a better policy with more of its guesses resolving, and a better policy is what
+  makes a large commons reachable at all.
+
+This is the honest reason the public, permissive posture is an engineering decision rather than a
+sentiment. **Publishing is the half you cannot do alone.** A policy is something one machine can
+improve by itself; a commons is not, and every machine that publishes improves the odds for every
+machine that drills — including its own, later.
+
+### Sentinels: the drill without a person waiting
+
+Everything above bounds a drill by **patience** — how long someone is willing to wait. That framing
+has a hole in it, and the measurements expose it: the compounding only shows up across *generations*.
+Probe diversity and reach grow when a drill trains on its own catch and runs again, and a person
+sitting in front of a progress bar never supplies more than one generation.
+
+A **sentinel** supplies them. This is not a new concept: sentinels already exist in this ecosystem as
+standing per-machine watchers with a declared purpose, explicit boundaries, a daily escalation
+budget, and a delivery model that queues locally rather than interrupting. A drill sentinel is one
+more kind of that same thing, and it inherits the parts that were expensive to get right:
+
+| Sentinel machinery | What the drill uses it for |
+|---|---|
+| `instance_purpose` | which line this sentinel drills for |
+| `cares_about` | the coordinates and dimensions it watches |
+| `boundaries` | never merge without the compatibility check; never leave its workspace; never claim a hit it has not pulled and verified |
+| daily budget | patience made ambient — bounded spend per day rather than per wait |
+| notify, don't grab | a hit is surfaced when it matters, never by seizing the screen |
+| queue locally, relay | a finding it cannot deliver itself is still delivered |
+
+The one boundary that must be written into every drill sentinel: **it may find and it may propose,
+and what it merges is decided by the same rule as everything else.** A sentinel that assimilated on
+its own authority would be a background process quietly rewriting a person's line — the exact thing
+backward fidelity exists to make impossible. It runs the compatibility check, it refuses what
+contradicts downstream, and a refusal is recorded rather than retried.
+
+So the honest statement of what a sentinel changes: **nothing about what is true, only about how
+often the question gets asked.** Which is precisely the seam this protocol is built on.
+
+### The mini model was the signal, not the ceiling
+
+The on-device model is a 4192-parameter character model in 201 lines of dependency-free Python. It
+was chosen to prove the loop closes at all, on a machine with no toolchain — and it does: a
+policy-free drill produced 300 probes, 0 hits and 273 malformed coordinates, while the trained one
+produced 60 probes, 60 hits and 0 malformed, and improved every generation without anyone tuning it.
+
+Nothing about the architecture depends on the model being small. **Whatever probes, the merge rule is
+unchanged**, because policy never changes the outcome of a merge. That is what makes the probe layer
+swappable end to end: a tiny char model on a laptop, a mid-size local model, or a frontier model
+reasoning over the whole commons are the same component in different sizes, and none of them can
+alter what any machine concludes about what merged.
+
+The consequence worth stating plainly: **this system gets better as models get better, for free, with
+no change to anything that is provable.** The deterministic layer is where correctness lives and it
+never needs to move. The probe layer is where intelligence lives and it can be replaced on any
+Tuesday.
+
+### What the drill actually does, said in one line
+
+It does not create capability. It **stops capability that already exists from being lost.**
+
+A hit is not a good answer produced; it is a dimension that already solved this, found and folded
+back in, arriving already worn. The frames were made once, somewhere, by someone — and without a way
+to address and reabsorb them they simply fall out of circulation. The drill is a reuptake mechanism:
+what was already produced stays available and keeps doing work, instead of being made again from
+nothing by every machine that needs it.
+
+That is why publishing is the half you cannot do alone, and why the commons compounds.
+
 ### What this is, named honestly
 
 Content-addressed lookup, plus an op-based merge of append-only event streams, plus a lineage whose
@@ -520,24 +619,43 @@ captured by nobody reports that honestly instead of promoting the best-looking l
 
 **Split.** The two halves of this protocol are at different stages, and saying so is the point.
 
-**Local instant transmission is implemented and proven headlessly.** `../electron/qqdrill.mjs`
+**Local instant transmission is implemented, reviewed and proven headlessly.** `../electron/qqdrill.mjs`
 carries the mechanism — coordinate keys, fixed points, run-length fidelity, alignment, the
-compatibility rule, assimilation and retroactive zoom — and `../tests/qqdrill.test.mjs` has one test
-per proof obligation above, all passing. Nothing in RAPP/1 changed to make it fit: the frame spec is
-untouched, and the coordinate is computed about frames rather than stored in them.
+compatibility rule, assimilation and retroactive zoom. Nothing in RAPP/1 changed to make it fit: the
+frame spec is untouched, and the coordinate is computed about frames rather than stored in them.
 
 Run it and watch it work: `node beta/scripts/qqdrill-proof.mjs`. It builds two real dimensions,
 drills them, folds what may be folded, prints what it refused and what that frame contradicted, and
 zooms a span with a finer clock.
 
-Two facts the implementation established that inspection had not:
+**It has been through an adversarial review and the findings are fixed.** 100 independent agents
+attacking along four lines, every finding re-examined by three sceptics instructed to disprove it,
+produced 32 confirmed defects in nine underlying causes — all fixed in one coherent rewrite rather
+than nine patches. 48 tests now pass, 29 of them written by agents that had not written the code and
+each failing until a real defect was fixed.
 
-- **RAPP/1 binds `prev` to the head's `payload_hash`, not its `frame_hash`**, so identical payloads
-  in two lines converge to identical frames after one tick. What distinguishes two dimensions running
-  the same content is *when* they ran it, and the fixed point is about exactly that.
+Four things that review established, which the first implementation had wrong:
+
+- **Every decision that must agree across machines is exact integer arithmetic.** Bucketing an offset
+  on a formatted float split one true diagonal in two when a ratio of 3 was written as 2.1/0.7, and
+  invented a disagreement between dimensions that never diverged.
+- **Run length is symmetric.** Adjacency assumed the local tick advanced by one, so the same
+  five-frame match reported fidelity 5 from the coarse side and 1 from the fine side. On a reduced
+  ratio n/d the next point is d local ticks and n of theirs away.
+- **A fold's verdict cannot depend on when it is called** — but the rule binds only what a *fold*
+  settled, read back from its join frames. An ordinary frame asserting `phase: morning` followed by
+  one asserting `phase: noon` is time passing, not a contradiction.
+- **Zoom applies backward fidelity.** It previously checked a finer frame against its covering frame
+  alone and admitted frames the fold refuses outright.
+
+Two facts about RAPP/1 that only running the code established:
+
+- **`prev` binds to the head's `payload_hash`, not its `frame_hash`**, so identical payloads in two
+  lines converge to identical frames after one tick. What distinguishes two dimensions running the
+  same content is *when* they ran it, and the fixed point is about exactly that.
 - **`prev_wave` is reserved for swarm streams** and is not a general second-parent field, so a join
-  names the frames it assimilated in its payload. The payload is hashed into `frame_hash`, so that
-  claim is bound just as tightly and the local chain stays single-parent and valid.
+  names the frames it assimilated in its payload — and refuses outright on a swarm stream rather than
+  minting a frame the spec rejects.
 
 **The race is still specified only.** Nothing here runs N candidate dimensions against a flag. The
 flag checker in [DIMENSION-MINING.md](DIMENSION-MINING.md) remains the piece to build first — without

@@ -43,6 +43,7 @@ them, they win.
 | [DIMENSION-MINING.md](DIMENSION-MINING.md) | Racing many possible versions at a goal the machine can check. |
 | [QQDRILL-PROTOCOL.md](QQDRILL-PROTOCOL.md) | `rapp-qqdrill/1.0` — the parallel execution engine underneath: how many drills run at once, isolated, and under what budget. |
 | [LOCAL-MODEL-PLAYER.md](LOCAL-MODEL-PLAYER.md) | Making the last paid command local too. |
+| [CARTRIDGE-PWA.md](CARTRIDGE-PWA.md) | Exporting a rapp as a cartridge that runs in a browser, offline, and merges back when it comes home. |
 | [DIMENSION-TILES.md](DIMENSION-TILES.md) | The shipped herd/arena toggle and the on-disk tile record. |
 | [DIMENSION-TILES-V2.md](DIMENSION-TILES-V2.md) | **Superseded** by `rapp-tile/1.0`; kept as the reference for the `.card` format the registry still serves. |
 

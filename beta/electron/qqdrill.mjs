@@ -840,6 +840,21 @@ export function assimilate(line, incoming, {
   let working = line;
 
   for (const frame of candidates) {
+    // A frame carrying a value RAPP/1 cannot encode is refused HERE, named, and
+    // alone. Discovering it later while minting the join meant one bad frame
+    // took the whole batch down and filed its reason against frames that had
+    // nothing wrong with them — an accurate refusal of one is worth more than a
+    // false accusation of five.
+    const encodable = equalValues(assertsOf(frame), assertsOf(frame));
+    if (!encodable.ok) {
+      refused.push(Object.freeze({
+        frame: frame.frame_hash,
+        contradicts: Object.freeze([Object.freeze({
+          key: "payload", reason: `this frame cannot be encoded: ${encodable.reason}`,
+        })]),
+      }));
+      continue;
+    }
     const verdict = compatibility(frame, working, { from });
     if (!verdict.ok) {
       refused.push(Object.freeze({ frame: frame.frame_hash, contradicts: verdict.contradicts }));

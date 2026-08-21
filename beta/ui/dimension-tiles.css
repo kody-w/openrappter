@@ -1,0 +1,578 @@
+/* Opening tiles must not repaint the herd. The shell's herd is a dark column of
+   chat panels (#surgeon-herd is #0f1013 with a #1c1e22 bar); the felt, the cream
+   cards and the ring are the ARENA's look and are scoped to it. A tile parked in
+   the herd is a panel like every other chat there — not a card on a table. */
+#surgeon-herd.dimension-tile-view {
+  --tile-width: 190px;
+  --tile-height: 260px;
+}
+
+#surgeon-herd.dimension-tile-view.tile-surface-arena {
+  --arena-surface: #124b34;
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(255,255,255,.08), transparent 46%),
+    #092d20;
+}
+
+#surgeon-herd.dimension-tile-view.tile-surface-arena .hbar {
+  border-bottom-color: rgba(255,255,255,.12);
+  background: linear-gradient(180deg, #173a2b, #10271e);
+}
+
+.dimension-tile-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #26282d;
+  background: #17181b;
+}
+
+.tile-surface-arena .dimension-tile-controls {
+  border-bottom-color: rgba(255,255,255,.1);
+  background: rgba(4, 16, 11, .45);
+}
+
+.dimension-tile-controls strong {
+  margin-right: auto;
+  color: #e6e9ef;
+  font: 700 12px/1.2 system-ui, sans-serif;
+}
+
+.tile-surface-arena .dimension-tile-controls strong { color: #f5ead1; }
+
+.dimension-tile-controls select,
+.dimension-tile-controls button {
+  min-height: 31px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px;
+  background: rgba(5,12,9,.72);
+  color: #edf4ef;
+  font: 600 11px/1.2 system-ui, sans-serif;
+}
+
+.dimension-tile-controls [hidden] { display: none; }
+
+.dimension-tile-surface-control {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.dimension-tile-surface-control button[aria-pressed="true"] {
+  border-color: rgba(246, 211, 101, .72);
+}
+
+.dimension-tile-drop-overlay {
+  position: absolute;
+  z-index: 200;
+  inset: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 6px dashed rgba(255,255,255,.5);
+  border-radius: 16px;
+  background: rgba(35,134,54,.9);
+  color: #fff;
+  font: 600 24px/1.2 system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.dimension-tile-surface {
+  position: relative;
+  flex: 0 1 52vh;
+  min-height: 360px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--tile-width), 1fr));
+  align-content: start;
+  justify-items: center;
+  gap: 16px;
+  padding: 34px 34px 48px;
+  border-bottom: 1px solid rgba(255,255,255,.12);
+}
+
+/* The herd is a grid of parked tiles and nothing else: no felt, no ring, no
+   arena arrangement. It is a separate surface from the arena, not a rendering
+   of it, so the arena's chrome below is scoped and never reaches here. */
+.tile-surface-herd .dimension-tile-surface {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The arena's own look — the felt it competes on. */
+.tile-surface-arena .dimension-tile-surface {
+  background:
+    radial-gradient(ellipse at center, rgba(255,255,255,.06), transparent 62%),
+    var(--arena-surface);
+  box-shadow: inset 0 0 70px rgba(0,0,0,.36);
+}
+
+.dimension-tile-bunch,
+.dimension-tile-binder-page {
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: repeat(auto-fit, minmax(var(--tile-width), 1fr));
+  justify-items: center;
+  gap: 16px;
+  padding: 12px;
+  border: 1px dashed rgba(238, 220, 172, .28);
+  border-radius: 14px;
+}
+
+.tile-surface-binder .dimension-tile-surface {
+  display: block;
+}
+
+.dimension-tile-binder-page + .dimension-tile-binder-page {
+  margin-top: 18px;
+}
+
+.tile-surface-arena .dimension-tile-surface::before {
+  position: absolute;
+  inset: 18px;
+  border: 1px solid rgba(238, 220, 172, .28);
+  border-radius: 42%;
+  content: "";
+  pointer-events: none;
+}
+
+.dimension-tile {
+  --swipe-x: 0px;
+  --swipe-tilt: 0deg;
+  position: relative;
+  z-index: 1;
+  width: min(100%, var(--tile-width));
+  height: var(--tile-height);
+  overflow: hidden;
+  border: 1px solid rgba(30, 23, 14, .68);
+  border-radius: 14px;
+  background: #f4eddd;
+  box-shadow: 0 10px 25px rgba(0,0,0,.34);
+  color: #1b1915;
+  cursor: grab;
+  font: 12px/1.35 system-ui, sans-serif;
+  transform: translateX(var(--swipe-x)) rotate(var(--swipe-tilt));
+  transition: transform .18s ease, box-shadow .18s ease;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.dimension-tile.swiping { transition: none; cursor: grabbing; }
+.dimension-tile.dragging { opacity: .48; }
+.dimension-tile:focus-visible {
+  outline: 3px solid #f6d365;
+  outline-offset: 3px;
+}
+
+.dimension-tile-corner {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  left: 8px;
+  min-width: 20px;
+  color: #29251c;
+  font: 900 16px/1 ui-serif, Georgia, serif;
+  text-align: center;
+}
+
+.dimension-tile-drag {
+  position: absolute;
+  z-index: 3;
+  top: 5px;
+  right: 7px;
+  padding: 2px 4px;
+  color: #625a4b;
+  cursor: grab;
+  font-size: 17px;
+  line-height: 1;
+}
+.dimension-tile-drag:active { cursor: grabbing; }
+
+.dimension-tile-face {
+  box-sizing: border-box;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  gap: 8px;
+  padding: 28px 12px 11px;
+}
+
+.dimension-tile-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid rgba(0,0,0,.14);
+  border-radius: 6px;
+  background: rgba(255,255,255,.5);
+}
+
+.dimension-tile-banner strong {
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dimension-tile-banner span {
+  color: #746a57;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.dimension-tile-art {
+  position: relative;
+  display: flex;
+  min-height: 70px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,.22);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.42), transparent 46%),
+    repeating-linear-gradient(45deg, #547d6a 0 9px, #416655 9px 18px);
+}
+
+.dimension-tile-art i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,.65);
+  border-radius: 50%;
+  background: rgba(8,30,19,.35);
+}
+
+.dimension-tile p {
+  min-height: 48px;
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  color: #3a352c;
+  font-size: 10px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.dimension-tile-meta {
+  color: #6d6455;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.dimension-tile-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.dimension-tile-actions button {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px;
+  border: 1px solid rgba(0,0,0,.22);
+  border-radius: 6px;
+  background: rgba(255,255,255,.56);
+  color: #29251d;
+  font: 750 9px/1 system-ui, sans-serif;
+}
+
+.dimension-tile-actions button:hover { background: #fff; }
+.dimension-tile-actions button:disabled { opacity: .42; }
+
+.tile-layout-row .dimension-tile {
+  border: 7px solid #806044;
+  border-radius: 4px;
+  background: #d7bd83;
+}
+.tile-layout-row .dimension-tile-art {
+  background:
+    radial-gradient(circle at center, #7e5060, #343040 68%),
+    #343040;
+}
+.tile-layout-row .dimension-tile-meta::before { content: "TURNS / TOOLS · "; }
+
+.tile-layout-focus .dimension-tile {
+  border: 7px solid #e5bd42;
+  border-radius: 18px;
+  background: #f7eab2;
+}
+.tile-layout-focus .dimension-tile-art {
+  border-radius: 10px;
+  background: linear-gradient(145deg, #55a99b, #305b7a);
+}
+
+.tile-layout-grid .dimension-tile {
+  border: 8px solid #352e29;
+  border-radius: 10px;
+  background: #b9aa8b;
+}
+.tile-layout-grid .dimension-tile-art {
+  background:
+    linear-gradient(25deg, rgba(19,23,35,.25), transparent),
+    repeating-linear-gradient(120deg, #5d7269 0 15px, #3e514b 15px 30px);
+}
+.tile-layout-grid .dimension-tile[data-status="folded"] { transform: rotate(90deg); }
+
+.tile-layout-stack .dimension-tile {
+  border: 7px solid #fff;
+  border-radius: 20px;
+  background: #bd3434;
+  color: #fff;
+}
+.tile-layout-stack .dimension-tile:nth-of-type(4n+2) { background: #2d6fbd; }
+.tile-layout-stack .dimension-tile:nth-of-type(4n+3) { background: #d2a62c; }
+.tile-layout-stack .dimension-tile:nth-of-type(4n+4) { background: #328653; }
+.tile-layout-stack .dimension-tile-art {
+  border: 6px solid rgba(255,255,255,.84);
+  border-radius: 50%;
+  background: rgba(255,255,255,.12);
+}
+.tile-layout-stack .dimension-tile-corner,
+.tile-layout-stack .dimension-tile p,
+.tile-layout-stack .dimension-tile-meta { color: #fff; }
+
+.tile-layout-custom .dimension-tile-surface {
+  display: block;
+  min-height: 520px;
+}
+.tile-layout-custom .dimension-tile {
+  position: absolute;
+  top: var(--custom-y);
+  left: var(--custom-x);
+  transform:
+    translate(-50%, -50%)
+    translateX(var(--swipe-x))
+    rotate(calc(var(--custom-rotation) + var(--swipe-tilt)));
+}
+.tile-layout-custom .dimension-tile.face-down {
+  background:
+    repeating-linear-gradient(45deg, #202a31 0 10px, #34424c 10px 20px);
+}
+.tile-layout-custom .dimension-tile.face-down
+  .dimension-tile-face > :not(.dimension-tile-actions),
+.tile-layout-custom .dimension-tile.face-down .dimension-tile-corner {
+  visibility: hidden;
+}
+.tile-layout-custom .dimension-tile.face-down .dimension-tile-actions {
+  margin-top: auto;
+}
+
+.dimension-tile-discard {
+  position: absolute;
+  z-index: 4;
+  right: 20px;
+  bottom: 14px;
+}
+.dimension-tile-discard > button {
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 8px;
+  background: rgba(4,10,7,.78);
+  color: #e5ddc9;
+  font: 700 10px/1 system-ui, sans-serif;
+}
+.dimension-tile-discard .dimension-tile {
+  position: absolute;
+  right: 0;
+  bottom: 38px;
+  display: none;
+  width: 120px;
+  height: 168px;
+  transform-origin: 90% 100%;
+}
+.dimension-tile-discard.open .dimension-tile { display: block; }
+.dimension-tile-discard.open .dimension-tile {
+  transform:
+    translateX(var(--pile-offset))
+    rotate(var(--pile-angle));
+}
+.dimension-tile-discard .dimension-tile p,
+.dimension-tile-discard .dimension-tile-art,
+.dimension-tile-discard .dimension-tile-meta { display: none; }
+
+.dimension-tile-overflow {
+  position: absolute;
+  z-index: 2;
+  bottom: 14px;
+  left: 20px;
+}
+.dimension-tile-overflow > button {
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 8px;
+  background: rgba(3,10,7,.7);
+  color: #e7dfcc;
+  font: 700 10px/1 system-ui, sans-serif;
+}
+.dimension-tile-overflow .dimension-tile {
+  position: absolute;
+  bottom: 38px;
+  left: 0;
+  display: none;
+  width: 120px;
+  height: 168px;
+  transform-origin: 10% 100%;
+}
+.dimension-tile-overflow.open .dimension-tile {
+  display: block;
+  transform:
+    translateX(var(--pile-offset))
+    rotate(var(--pile-angle));
+}
+.dimension-tile-overflow .dimension-tile p,
+.dimension-tile-overflow .dimension-tile-art,
+.dimension-tile-overflow .dimension-tile-meta { display: none; }
+
+.dimension-tile-toast {
+  position: fixed;
+  z-index: 10002;
+  bottom: 24px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 13px;
+  border: 1px solid #5d765f;
+  border-radius: 10px;
+  background: #152219;
+  box-shadow: 0 12px 42px rgba(0,0,0,.5);
+  color: #edf5ee;
+  font: 600 12px/1.35 system-ui, sans-serif;
+  transform: translateX(-50%);
+}
+.dimension-tile-toast button {
+  border-color: #799d7d;
+  background: #28422d;
+  color: #fff;
+}
+
+.dimension-tile-surface.arrange-reorder .dimension-tile {
+  animation: dimension-tile-reorder .62s ease both;
+}
+.dimension-tile-surface.arrange-spread .dimension-tile {
+  margin-right: calc(var(--tile-width) * -.55);
+  transform: rotate(var(--spread-angle));
+}
+.dimension-tile-surface.arrange-distribute .dimension-tile {
+  animation: dimension-tile-seat .52s cubic-bezier(.2,.8,.2,1) both;
+}
+.dimension-tile-surface.arrange-open-one .dimension-tile {
+  animation: dimension-tile-open .34s ease both;
+}
+
+@keyframes dimension-tile-reorder {
+  0% { transform: translateX(calc((var(--seat, 1) % 2) * 160px - 80px)); }
+  62% { transform: translateX(0) scale(.96); }
+  100% { transform: translateX(0) scale(1); }
+}
+@keyframes dimension-tile-seat {
+  from { opacity: .4; transform: translateY(-70px) rotate(-5deg); }
+  to { opacity: 1; transform: translateY(0) rotate(0); }
+}
+@keyframes dimension-tile-open {
+  50% { transform: translateY(-20px) scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dimension-tile,
+  .dimension-tile-surface .dimension-tile {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .dimension-tile-controls { flex-wrap: wrap; }
+  .dimension-tile-controls strong { width: 100%; }
+  .dimension-tile-surface {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    padding: 28px 18px 44px;
+    --tile-width: 160px;
+    --tile-height: 228px;
+  }
+}
+
+
+/* ── The herd's tiles are panels ───────────────────────────────────────────────
+   The card look — cream stock, a serif corner index, fixed playing-card
+   proportions, the face-down art — is the arena's, because competing tiles are
+   what a card-table metaphor is for. In the herd a tile is a parked conversation
+   sitting beside the live ones, so it wears the shell's panel language. */
+
+.tile-surface-herd .dimension-tile-surface {
+  grid-template-columns: repeat(auto-fill, minmax(276px, 1fr));
+  padding: 18px 18px 26px;
+}
+
+.tile-surface-herd .dimension-tile {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border: 1px solid #2a2c31;
+  border-radius: 12px;
+  background: #15171b;
+  box-shadow: none;
+  color: #e6e9ef;
+  font: 12.5px/1.45 system-ui, sans-serif;
+}
+
+.tile-surface-herd .dimension-tile:focus-visible {
+  outline: 3px solid #58a6ff;
+  outline-offset: 3px;
+}
+
+/* Card furniture has no meaning on a panel. */
+.tile-surface-herd .dimension-tile-corner,
+.tile-surface-herd .dimension-tile-art {
+  display: none;
+}
+
+.tile-surface-herd .dimension-tile-banner {
+  border-bottom: 1px solid #26282d;
+  background: linear-gradient(180deg, #1c1e22, #17181b);
+  color: #e6e9ef;
+}
+
+.tile-surface-herd .dimension-tile-meta {
+  color: #8b8f98;
+}
+
+.tile-surface-herd .dimension-tile-actions button {
+  border: 1px solid #2f3237;
+  background: #1c1e22;
+  color: #d5d9e0;
+}
+
+.tile-surface-herd .dimension-tile-actions button:hover {
+  border-color: #3a3d44;
+  background: #23262b;
+}
+
+.tile-surface-herd .dimension-tile-bunch,
+.tile-surface-herd .dimension-tile-binder-page {
+  border-color: #2a2c31;
+}
+
+/* Attribution is carried on the object. When the driver moves a tile the tile
+   itself says so, briefly — never a toast, never a message in the chat. */
+.dimension-tile.actor-marked::after {
+  position: absolute;
+  z-index: 4;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, .92);
+  color: #06131f;
+  content: "AI";
+  font: 700 9px/1.35 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .06em;
+  pointer-events: none;
+}

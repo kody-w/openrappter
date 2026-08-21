@@ -1,0 +1,9 @@
+# Frontier rapplication files are sha256-pinned in the store index and
+# re-verified against GitHub raw bytes — EOL conversion would break the pin
+# on a Windows checkout (autocrlf). Keep them byte-identical everywhere.
+frontier/rapplications/** -text
+frontier/store/index.json -text
+
+# Frontier ring sources are matched and hashed byte-for-byte (lineage-store
+# canonicalizes CRLF, but the ring must still mean the same bytes everywhere).
+electron/rings/** -text

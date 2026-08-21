@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <!-- Brand tile: rounded blue square. -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#tile)"/>
+  <!-- The canonical Brainstem brain glyph, exactly as the Grail app serves it
+       (favicon path, viewBox 0 0 512 512), in white, centered on the tile. -->
+  <g fill="#ffffff" transform="translate(232,232) scale(1.094)">
+    <path d="M184 0c-30.9 0-56.5 22.7-61.1 52.3C54.5 67 0 130 0 206.8c0 41.6 17.4 79.2 45.3 105.9-2 9.2-3.3 18.8-3.3 28.7 0 55.3 35.8 102.2 85.5 119C142.2 493 172.6 512 208 512h16c35.3 0 64-28.7 64-64V86c0-8.8-7.2-16-16-16h-16c-8.8 0-16 7.2-16 16v16c0 8.8-7.2 16-16 16s-16-7.2-16-16V64c0-35.3-28.7-64-64-64h40zm144 0c30.9 0 56.5 22.7 61.1 52.3C457.5 67 512 130 512 206.8c0 41.6-17.4 79.2-45.3 105.9 2 9.2 3.3 18.8 3.3 28.7 0 55.3-35.8 102.2-85.5 119C369.8 493 339.4 512 304 512h-16c-35.3 0-64-28.7-64-64V86c0-8.8 7.2-16 16-16h16c8.8 0 16 7.2 16 16v16c0 8.8 7.2 16 16 16s16-7.2 16-16V64c0-35.3 28.7-64 64-64h-40z"/>
+  </g>
+</svg>

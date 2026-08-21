@@ -1,0 +1,46 @@
+{
+  "schema": "rapp-copilot-studio-matrix/1.0",
+  "purpose": "Prove the beta one-click loop works generically across agent.py archetypes.",
+  "cases": [
+    {
+      "id": "network-readonly",
+      "agents": ["HackerNews", "Weatheragent"],
+      "expected": ["live external I/O", "bounded inputs", "read-only parity"]
+    },
+    {
+      "id": "deterministic-content",
+      "agents": ["WordOfTheDay"],
+      "expected": ["deterministic formatting", "no infrastructure"]
+    },
+    {
+      "id": "workflow-orchestration",
+      "agents": ["BuildingPermitProcessingAgent"],
+      "expected": ["multi-step workflow", "explicit state transitions"]
+    },
+    {
+      "id": "business-scoring",
+      "agents": ["SalesQualificationAgent"],
+      "expected": ["structured business rules", "input validation"]
+    },
+    {
+      "id": "stateful-operations",
+      "agents": ["TimeEntryBillingAgent"],
+      "expected": ["durable state", "side-effect receipts", "error parity"]
+    },
+    {
+      "id": "memory",
+      "agents": ["ContextMemory", "ManageMemory"],
+      "expected": ["cross-conversation storage", "scope isolation", "recall parity"]
+    },
+    {
+      "id": "complex-reporting",
+      "agents": ["NBCUFinanceReportingCopilot"],
+      "expected": ["complex contract extraction", "enterprise finance workflow", "dependency discovery"]
+    }
+  ],
+  "gates": {
+    "all_cases": ["doctor", "plan", "dry-run build"],
+    "live_draft_minimum": "At least one representative per archetype must complete push, parity, and finalize.",
+    "publish": "Never publish without exact PUBLISH:<AgentId> confirmation."
+  }
+}

@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta
+    name="description"
+    content="Install the source-only RAPP Brainstem Frontier Electron launcher from an immutable GitHub release commit."
+  >
+  <title>RAPP Brainstem Frontier Installer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 320px;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: var(--cp-bg);
+      color: var(--cp-text);
+      font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    a {
+      color: var(--cp-link);
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 64px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 52px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--cp-text);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: 0.625rem;
+    }
+
+    .toplinks {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 14px;
+    }
+
+    .toplinks a {
+      color: var(--cp-text-muted);
+      text-decoration: none;
+    }
+
+    .toplinks a:hover {
+      color: var(--cp-text);
+      text-decoration: underline;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+      gap: 40px;
+      align-items: center;
+      margin-bottom: 32px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 6px 10px;
+      border: 1px solid var(--cp-border);
+      border-radius: 999px;
+      background: var(--cp-accent-soft);
+      color: var(--cp-accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .eyebrow-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--cp-accent);
+    }
+
+    h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(40px, 7vw, 72px);
+      line-height: 0.98;
+      letter-spacing: -0.045em;
+    }
+
+    .hero-copy {
+      max-width: 700px;
+      margin: 24px 0 0;
+      color: var(--cp-text-muted);
+      font-size: clamp(17px, 2vw, 21px);
+    }
+
+    .hero-note {
+      padding: 24px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-surface);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .hero-note strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+
+    .hero-note p {
+      margin: 0;
+      color: var(--cp-text-muted);
+      font-size: 14px;
+    }
+
+    .release-panel {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      margin-bottom: 28px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-border);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .release-stat {
+      min-height: 102px;
+      padding: 20px;
+      background: var(--cp-surface);
+    }
+
+    .release-label {
+      display: block;
+      margin-bottom: 9px;
+      color: var(--cp-text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .release-value {
+      display: block;
+      overflow: hidden;
+      color: var(--cp-text);
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 14px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .release-value.status-loading {
+      color: var(--cp-warning);
+    }
+
+    .release-value.status-ready {
+      color: var(--cp-success);
+    }
+
+    .release-value.status-error {
+      color: var(--cp-danger);
+    }
+
+    .install-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+
+    .install-tile {
+      position: relative;
+      overflow: hidden;
+      padding: 28px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-surface);
+      box-shadow: 0 0 2px var(--cp-border), 0 1px 2px var(--cp-border);
+    }
+
+    .install-tile.recommended {
+      border-color: var(--cp-accent);
+    }
+
+    .recommended-badge {
+      display: none;
+      position: absolute;
+      top: 0;
+      right: 0;
+      padding: 6px 10px;
+      border-bottom-left-radius: 0.625rem;
+      background: var(--cp-accent);
+      color: var(--cp-accent-fg);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .install-tile.recommended .recommended-badge {
+      display: block;
+    }
+
+    .platform-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    .platform-icon {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: var(--cp-surface-soft);
+      color: var(--cp-accent);
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .platform-copy {
+      min-height: 48px;
+      margin: 0 0 20px;
+      color: var(--cp-text-muted);
+      font-size: 14px;
+    }
+
+    .command {
+      min-height: 76px;
+      margin: 0 0 16px;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid var(--cp-border);
+      border-radius: 0.625rem;
+      background: var(--cp-bg-elevated);
+      color: var(--cp-text);
+      font-family: Consolas, "Courier New", Courier, monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre;
+      word-break: normal;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .button {
+      display: inline-flex;
+      min-height: 42px;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 15px;
+      border: 1px solid var(--cp-border-strong);
+      border-radius: 0.625rem;
+      background: var(--cp-surface);
+      color: var(--cp-text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .button:hover {
+      border-color: var(--cp-accent);
+      color: var(--cp-accent);
+    }
+
+    .button.primary {
+      border-color: var(--cp-accent);
+      background: var(--cp-accent);
+      color: var(--cp-accent-fg);
+    }
+
+    .button.primary:hover {
+      border-color: var(--cp-accent-hover);
+      background: var(--cp-accent-hover);
+      color: var(--cp-accent-fg);
+    }
+
+    .button:disabled {
+      border-color: var(--cp-border);
+      background: var(--cp-surface-soft);
+      color: var(--cp-text-muted);
+      cursor: wait;
+    }
+
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .detail-tile {
+      padding: 20px;
+      border: 1px solid var(--cp-border);
+      border-radius: 16px;
+      background: var(--cp-surface);
+    }
+
+    .detail-number {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 14px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--cp-accent-soft);
+      color: var(--cp-accent);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .detail-tile h3 {
+      margin: 0 0 7px;
+      font-size: 16px;
+    }
+
+    .detail-tile p {
+      margin: 0;
+      color: var(--cp-text-muted);
+      font-size: 14px;
+    }
+
+    .boundary {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 20px;
+      border: 1px solid var(--cp-border);
+      border-left: 4px solid var(--cp-success);
+      border-radius: 0.625rem;
+      background: var(--cp-surface);
+    }
+
+    .boundary-mark {
+      color: var(--cp-success);
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .boundary strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .boundary p {
+      margin: 0;
+      color: var(--cp-text-muted);
+      font-size: 14px;
+    }
+
+    .error-box {
+      display: none;
+      margin-bottom: 24px;
+      padding: 18px;
+      border: 1px solid var(--cp-danger);
+      border-radius: 0.625rem;
+      background: var(--cp-surface);
+      color: var(--cp-danger);
+      font-size: 14px;
+    }
+
+    .error-box.visible {
+      display: block;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid var(--cp-border);
+      color: var(--cp-text-muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .release-panel {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .install-grid,
+      .details-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .shell {
+        width: min(100% - 20px, 1120px);
+        padding-top: 14px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        margin-bottom: 36px;
+      }
+
+      .toplinks {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+
+      .release-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .install-tile {
+        padding: 22px;
+      }
+
+      footer {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" id="library-link" href="../">
+        <img src="build/icon.svg" alt="">
+        <span>AIBAST Agents Library</span>
+      </a>
+      <nav class="toplinks" aria-label="Frontier installer links">
+        <a id="source-link" href="#" target="_blank" rel="noreferrer">Source</a>
+        <a id="release-link-top" href="#" target="_blank" rel="noreferrer">Release notes</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">
+          <span class="eyebrow-dot" aria-hidden="true"></span>
+          Source-only Frontier desktop
+        </div>
+        <h1>Launch Brainstem like a desktop app.</h1>
+        <p class="hero-copy">
+          Install the RAPP Brainstem Frontier launcher from one immutable GitHub
+          release commit. It bundles Electron and the GitHub Copilot CLI while
+          reusing your local Brainstem, agents, soul, and memories.
+        </p>
+      </div>
+      <aside class="hero-note">
+        <strong>Builder preview, not production.</strong>
+        <p>
+          Use synthetic or approved data. Validate the proof with a human, then
+          move production identity, connectors, governance, telemetry, and scale
+          into the selected platform.
+        </p>
+      </aside>
+    </section>
+
+    <div id="load-error" class="error-box" role="alert"></div>
+
+    <section class="release-panel" aria-label="Resolved Frontier release">
+      <div class="release-stat">
+        <span class="release-label">Status</span>
+        <span id="release-status" class="release-value status-loading">Loading</span>
+      </div>
+      <div class="release-stat">
+        <span class="release-label">Version</span>
+        <span id="release-version" class="release-value">Resolving</span>
+      </div>
+      <div class="release-stat">
+        <span class="release-label">Commit</span>
+        <span id="release-commit" class="release-value">Resolving</span>
+      </div>
+      <div class="release-stat">
+        <span class="release-label">Repository</span>
+        <span id="release-repo" class="release-value">Resolving</span>
+      </div>
+    </section>
+
+    <section class="install-grid" aria-label="Install commands">
+      <article class="install-tile" id="unix-tile">
+        <span class="recommended-badge">Your platform</span>
+        <h2 class="platform-title">
+          <span class="platform-icon" aria-hidden="true">&gt;_</span>
+          macOS or Linux
+        </h2>
+        <p class="platform-copy">
+          Use this same command anytime to install, update or repair, and launch
+          Frontier automatically.
+        </p>
+        <pre class="command"><code id="unix-command">Waiting for release metadata...</code></pre>
+        <div class="button-row">
+          <button class="button primary" id="copy-unix" type="button" disabled>
+            Copy command
+          </button>
+          <a class="button" id="unix-script" href="#" target="_blank" rel="noreferrer">
+            Inspect script
+          </a>
+        </div>
+      </article>
+
+      <article class="install-tile" id="windows-tile">
+        <span class="recommended-badge">Your platform</span>
+        <h2 class="platform-title">
+          <span class="platform-icon" aria-hidden="true">PS</span>
+          Windows 11
+        </h2>
+        <p class="platform-copy">
+          Use this same command anytime to install, update or repair, and launch
+          Frontier with its Desktop and Start Menu shortcuts.
+        </p>
+        <pre class="command"><code id="windows-command">Waiting for release metadata...</code></pre>
+        <div class="button-row">
+          <button class="button primary" id="copy-windows" type="button" disabled>
+            Copy command
+          </button>
+          <a class="button" id="windows-script" href="#" target="_blank" rel="noreferrer">
+            Inspect script
+          </a>
+        </div>
+      </article>
+    </section>
+
+    <section class="details-grid" aria-label="Installation boundaries">
+      <article class="detail-tile">
+        <span class="detail-number">1</span>
+        <h3>Exact source revision</h3>
+        <p>
+          The page resolves an annotated Frontier release tag to its full commit and pins
+          both downloaded scripts and checked-out source to that SHA.
+        </p>
+      </article>
+      <article class="detail-tile">
+        <span class="detail-number">2</span>
+        <h3>Shared Brainstem</h3>
+        <p>
+          Frontier reuses <code>~/.brainstem</code>, so your agents, soul,
+          authentication, memories, and local storage remain in one place.
+        </p>
+      </article>
+      <article class="detail-tile">
+        <span class="detail-number">3</span>
+        <h3>Isolated launcher</h3>
+        <p>
+          Electron, its portable Node runtime, and launcher source live under
+          <code>~/.brainstem/beta-launcher</code> and can be removed separately.
+        </p>
+      </article>
+    </section>
+
+    <section class="boundary">
+      <span class="boundary-mark" aria-hidden="true">✓</span>
+      <div>
+        <strong>The production installer is unchanged.</strong>
+        <p>
+          This page only exposes files under <code>beta/</code>. It does not
+          replace the main installer page, its one-liners, or the production
+          release channel.
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      <span id="resolved-date">Release metadata is loading.</span>
+      <a id="release-link-bottom" href="#" target="_blank" rel="noreferrer">
+        View the source-only GitHub release
+      </a>
+    </footer>
+  </main>
+
+  <script>
+    (() => {
+      const TAG_PREFIX = "brainstem-beta-v";
+      const params = new URLSearchParams(window.location.search);
+      const elements = {
+        error: document.getElementById("load-error"),
+        status: document.getElementById("release-status"),
+        version: document.getElementById("release-version"),
+        commit: document.getElementById("release-commit"),
+        repo: document.getElementById("release-repo"),
+        unixCommand: document.getElementById("unix-command"),
+        windowsCommand: document.getElementById("windows-command"),
+        copyUnix: document.getElementById("copy-unix"),
+        copyWindows: document.getElementById("copy-windows"),
+        unixScript: document.getElementById("unix-script"),
+        windowsScript: document.getElementById("windows-script"),
+        sourceLink: document.getElementById("source-link"),
+        releaseLinkTop: document.getElementById("release-link-top"),
+        releaseLinkBottom: document.getElementById("release-link-bottom"),
+        resolvedDate: document.getElementById("resolved-date"),
+      };
+
+      function validRepo(value) {
+        return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value || "");
+      }
+
+      function resolveRepository() {
+        const override = params.get("repo");
+        if (validRepo(override)) return override;
+
+        if (window.location.hostname.endsWith(".github.io")) {
+          const owner = window.location.hostname.slice(0, -".github.io".length);
+          const repository = window.location.pathname.split("/").filter(Boolean)[0];
+          const derived = `${owner}/${repository || ""}`;
+          if (validRepo(derived)) return derived;
+        }
+
+        return "microsoft/aibast-agents-library";
+      }
+
+      async function fetchJson(url) {
+        const response = await fetch(url, {
+          headers: { Accept: "application/vnd.github+json" },
+        });
+        if (!response.ok) {
+          throw new Error(`GitHub returned ${response.status} for ${url}`);
+        }
+        return response.json();
+      }
+
+      function bootstrapUrl(filename) {
+        return new URL(filename, window.location.href).href;
+      }
+
+      function unixInstallCommand(repo) {
+        return `curl -fsSL "${bootstrapUrl("frontier.sh")}" | RAPP_FRONTIER_REPO="${repo}" bash`;
+      }
+
+      function windowsInstallCommand(repo) {
+        return `$env:RAPP_FRONTIER_REPO="${repo}";irm "${bootstrapUrl("frontier.ps1")}" | iex`;
+      }
+
+      async function copyText(button, value) {
+        const original = button.textContent;
+        try {
+          await navigator.clipboard.writeText(value);
+        } catch {
+          const textarea = document.createElement("textarea");
+          textarea.value = value;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          textarea.remove();
+        }
+        button.textContent = "Copied";
+        window.setTimeout(() => {
+          button.textContent = original;
+        }, 1600);
+      }
+
+      function setReleaseLinks(url) {
+        for (const link of [elements.releaseLinkTop, elements.releaseLinkBottom]) {
+          link.href = url;
+        }
+      }
+
+      function markRecommendedPlatform() {
+        const platform = navigator.userAgentData?.platform || navigator.platform || "";
+        const windows = /win/i.test(platform);
+        document.getElementById(windows ? "windows-tile" : "unix-tile")
+          .classList.add("recommended");
+      }
+
+      async function loadRelease() {
+        const repo = resolveRepository();
+        const requestedTag = params.get("tag");
+        elements.repo.textContent = repo;
+        elements.sourceLink.href = `https://github.com/${repo}/tree/main/beta`;
+
+        const releases = await fetchJson(
+          `https://api.github.com/repos/${repo}/releases?per_page=30`,
+        );
+        const release = releases.find((candidate) => {
+          if (candidate.draft) return false;
+          if (requestedTag) return candidate.tag_name === requestedTag;
+          return candidate.tag_name.startsWith(TAG_PREFIX);
+        });
+        if (!release) {
+          throw new Error(
+            requestedTag
+              ? `Release ${requestedTag} was not found in ${repo}.`
+              : `No published ${TAG_PREFIX} release was found in ${repo}.`,
+          );
+        }
+
+        const commitData = await fetchJson(
+          `https://api.github.com/repos/${repo}/commits/${encodeURIComponent(release.tag_name)}`,
+        );
+        const commit = commitData.sha;
+        const version = release.tag_name.startsWith(TAG_PREFIX)
+          ? release.tag_name.slice(TAG_PREFIX.length)
+          : release.tag_name;
+        const rawRoot = `https://raw.githubusercontent.com/${repo}/${commit}`;
+        const unixCommand = unixInstallCommand(repo);
+        const windowsCommand = windowsInstallCommand(repo);
+
+        elements.sourceLink.href =
+          `https://github.com/${repo}/tree/${encodeURIComponent(release.tag_name)}/beta`;
+        elements.status.textContent = release.prerelease ? "Prerelease ready" : "Release ready";
+        elements.status.className = "release-value status-ready";
+        elements.version.textContent = version;
+        elements.commit.textContent = commit.slice(0, 12);
+        elements.commit.title = commit;
+        elements.unixCommand.textContent = unixCommand;
+        elements.windowsCommand.textContent = windowsCommand;
+        elements.unixScript.href = bootstrapUrl("frontier.sh");
+        elements.windowsScript.href = bootstrapUrl("frontier.ps1");
+        elements.copyUnix.disabled = false;
+        elements.copyWindows.disabled = false;
+        elements.copyUnix.addEventListener("click", () => copyText(elements.copyUnix, unixCommand));
+        elements.copyWindows.addEventListener(
+          "click",
+          () => copyText(elements.copyWindows, windowsCommand),
+        );
+        setReleaseLinks(release.html_url);
+
+        const published = new Date(release.published_at);
+        elements.resolvedDate.textContent =
+          `Published ${new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(published)} from ${commit.slice(0, 12)}.`;
+      }
+
+      markRecommendedPlatform();
+      loadRelease().catch((error) => {
+        elements.status.textContent = "Unavailable";
+        elements.status.className = "release-value status-error";
+        elements.error.textContent =
+          `${error.message} Publish the Frontier tag and GitHub prerelease, then reload this page.`;
+        elements.error.classList.add("visible");
+      });
+    })();
+  </script>
+</body>
+</html>

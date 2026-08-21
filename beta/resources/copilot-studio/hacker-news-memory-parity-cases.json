@@ -1,0 +1,89 @@
+{
+  "schema": "rapp-copilot-studio-parity-cases/1.0",
+  "cases": [
+    {
+      "id": "hacker-news-live-top-3",
+      "agent": "HackerNews",
+      "arguments": {
+        "count": 3
+      },
+      "prompt": "What are the top 3 stories on Hacker News right now?\n<!-- parity-challenge:{{PARITY_NONCE}} -->",
+      "studio_driver": "edge-preview",
+      "local_extract": "$json.summary",
+      "studio_extract": "text",
+      "comparison": "exact",
+      "normalizers": [
+        {
+          "kind": "unicode_punctuation",
+          "from": "\u2019",
+          "to": "'"
+        },
+        {
+          "kind": "collapse_blank_lines"
+        },
+        {
+          "kind": "drop_exact_line",
+          "value": "When presenting these to the user, render the titles as clickable markdown links exactly as written above."
+        },
+        {
+          "kind": "redact_integer",
+          "prefix": "\u2014 ",
+          "suffix": " points",
+          "token": "<points>"
+        },
+        {
+          "kind": "redact_integer",
+          "prefix": "[",
+          "suffix": " comments]",
+          "token": "<comments>"
+        }
+      ]
+    },
+    {
+      "id": "memory-shared-write",
+      "agent": "ManageMemory",
+      "challenge_group": "memory-roundtrip",
+      "arguments": {
+        "memory_type": "preference",
+        "content": "parity-live-{{PARITY_DATA_NONCE}}",
+        "importance": 3,
+        "tags": [
+          "parity"
+        ]
+      },
+      "prompt": "Remember this preference exactly: parity-live-{{PARITY_DATA_NONCE}}\n<!-- parity-challenge:{{PARITY_NONCE}} -->",
+      "studio_driver": "edge-preview",
+      "local_extract": "$raw",
+      "studio_extract": "text",
+      "comparison": "exact",
+      "normalizers": []
+    },
+    {
+      "id": "memory-keyword-recall",
+      "agent": "ContextMemory",
+      "challenge_group": "memory-roundtrip",
+      "arguments": {
+        "max_messages": 10,
+        "keywords": [
+          "parity-live-{{PARITY_DATA_NONCE}}"
+        ],
+        "full_recall": false
+      },
+      "prompt": "What do you remember that matches parity-live-{{PARITY_DATA_NONCE}}?\n<!-- parity-challenge:{{PARITY_NONCE}} -->",
+      "studio_driver": "edge-preview",
+      "local_extract": "$raw",
+      "studio_extract": "text",
+      "comparison": "exact",
+      "normalizers": [
+        {
+          "kind": "redact_timestamp",
+          "prefix": "Recorded: ",
+          "token": "<timestamp>"
+        },
+        {
+          "kind": "collapse_blank_lines"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,621 @@
+#!/usr/bin/env bash
+#
+# git-molt — version control for autonomous agents.
+#
+# A porcelain over Git plumbing implementing gitprotocol-molt(5). It adds no
+# object store, no hash chain, and no transport: rings are commits, loci are
+# refs, frames are bundles, and tamper-evidence is Git's own.
+#
+# Copyright (c) Kody Wildfeuer. MIT licensed.
+
+set -euo pipefail
+
+MOLT_VERSION="0.1.0"
+MOLT_SPEC="gitprotocol-molt/1.0"
+
+# Baseline commits must be reproducible on every instance, so their identity
+# fields are constants rather than the local environment (see DETERMINISM).
+BASE_NAME="${GIT_MOLT_BASELINE_NAME:-molt baseline}"
+BASE_EMAIL="${GIT_MOLT_BASELINE_EMAIL:-baseline@molt.invalid}"
+BASE_DATE="${GIT_MOLT_BASELINE_DATE:-1970-01-01T00:00:00Z}"
+
+die() { printf 'fatal: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+
+usage() {
+  cat <<'EOF'
+usage: git molt <command> [<args>]
+
+Recording history
+   init                          initialize a molt repository
+   baseline <name> <file>        record ring 0 for a locus from a file
+   record <locus> <file>         record a new generation (unverified)
+
+Gating
+   verify <locus> <ring>         run the gate; record the verdict
+   activate <locus> <ring>       make a verified generation live
+   policy <locus> [pinned|mutable]   show or set locus policy
+
+Time travel
+   revert [<locus>]              return to baseline (all loci if omitted)
+   restore [<locus>]             re-activate the newest verified generation
+   log <locus>                   show a locus's generations
+   show <locus> [<ring>]         print the source of a generation
+
+Composition
+   compose <directory>           materialize the live set for a runtime
+   status                        show every locus, its policy and live ring
+
+Interchange
+   frame export <locus> <file>   write a portable frame (git bundle)
+   frame import <file>           ingest a frame (verdicts are NOT trusted)
+
+   version                       print version and spec
+
+A molt repository is an ordinary Git repository; every command is git plumbing.
+EOF
+}
+
+# ---------------------------------------------------------------- repository
+
+molt_dir() {
+  if [ -n "${GIT_MOLT_DIR:-}" ]; then printf '%s' "$GIT_MOLT_DIR"; return; fi
+  printf '%s' "${HOME}/.molt/lineage.git"
+}
+
+git_molt() { git --git-dir="$(molt_dir)" "$@"; }
+
+require_repo() {
+  [ -d "$(molt_dir)" ] || die "no molt repository at $(molt_dir); run 'git molt init'"
+}
+
+cmd_init() {
+  local dir; dir="$(molt_dir)"
+  if [ -d "$dir" ]; then printf 'Reinitialized molt repository in %s\n' "$dir"; return 0; fi
+  mkdir -p "$dir"
+  # SHA-256 by default: implementations must not assume SHA-1.
+  if ! git init --bare --object-format=sha256 -q "$dir" 2>/dev/null; then
+    git init --bare -q "$dir"
+    warn "this git does not support --object-format=sha256; using the default"
+  fi
+  printf 'Initialized molt repository in %s\n' "$dir"
+}
+
+# ------------------------------------------------------------------ identity
+
+# A locus id must be stable for the same agent across every instance: derive it
+# from the agent's stable name and its baseline content, never assign it.
+locus_id() {
+  # Locus identity is the identity of the AGENT, not of one version of it.
+  # Folding the baseline's content digest in here would mean that updating a
+  # baseline mints a brand new locus -- silently orphaning every generation the
+  # user had grown. A lineage must survive its baseline being updated; that is
+  # what having a baseline is for. The baseline's content is still committed to
+  # by the root commit itself, so provenance is not lost.
+  local name="$1"
+  printf '%s' "$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '-')"
+}
+
+ref_base() { printf 'refs/molt/base/%s' "$1"; }
+ref_loci() { printf 'refs/molt/loci/%s' "$1"; }
+ref_live() { printf 'refs/molt/live/%s' "$1"; }
+ref_policy() { printf 'refs/molt/policy/%s' "$1"; }
+ref_meta() { printf 'refs/molt/meta/%s' "$1"; }
+ref_verified() { printf 'refs/molt/verified/%s' "$1"; }
+
+resolve_ref() { git_molt rev-parse --verify --quiet "$1" 2>/dev/null || true; }
+
+locus_exists() { [ -n "$(resolve_ref "$(ref_base "$1")")" ]; }
+
+require_locus() { locus_exists "$1" || die "unknown locus: $1"; }
+
+all_loci() {
+  git_molt for-each-ref --format='%(refname)' 'refs/molt/base/*' 2>/dev/null \
+    | sed 's|refs/molt/base/||'
+}
+
+# The agent source path inside a ring's tree.
+agent_path() {
+  local locus="$1" p
+  p="$(git_molt config --get "molt.locus.${locus}.path" 2>/dev/null || true)"
+  [ -n "$p" ] && {
+    valid_agent_path "$p" || die "unsafe agent path for $locus: $p"
+    printf '%s' "$p"
+    return
+  }
+  printf 'agent.py'
+}
+
+valid_agent_path() {
+  local p="${1:-}"
+  [ -n "$p" ] || return 1
+  [[ "$p" != *$'\n'* && "$p" != *$'\r'* ]] || return 1
+  case "$p" in
+    /*|*\\*) return 1 ;;
+  esac
+  case "/$p/" in
+    */../*|*/./*|*//*) return 1 ;;
+  esac
+  return 0
+}
+
+# ------------------------------------------------------------------ plumbing
+
+# Write a single-file tree containing the (LF-canonicalized) source.
+write_tree() {
+  local file="$1" path="$2" blob
+  blob="$(LC_ALL=C tr -d '\r' < "$file" | git_molt hash-object -w --stdin)"
+  printf '100644 blob %s\t%s\n' "$blob" "$path" | git_molt mktree
+}
+
+record_path_metadata() {
+  local locus="$1" path="$2" blob tree commit
+  valid_agent_path "$path" || die "unsafe agent path for $locus: $path"
+  blob="$(printf '%s\n' "$path" | git_molt hash-object -w --stdin)"
+  tree="$(printf '100644 blob %s\tpath\n' "$blob" | git_molt mktree)"
+  commit="$(
+    GIT_AUTHOR_NAME="$BASE_NAME" GIT_AUTHOR_EMAIL="$BASE_EMAIL" GIT_AUTHOR_DATE="$BASE_DATE" \
+    GIT_COMMITTER_NAME="$BASE_NAME" GIT_COMMITTER_EMAIL="$BASE_EMAIL" GIT_COMMITTER_DATE="$BASE_DATE" \
+    git_molt commit-tree "$tree" -m "molt: path metadata for $locus"
+  )"
+  git_molt update-ref "$(ref_meta "$locus")" "$commit"
+}
+
+trailers() {
+  # $1 locus  $2 baseline  $3 verified  $4 verifier  $5 fertile  $6 kind
+  printf 'Molt-Locus: %s\n' "$1"
+  printf 'Molt-Baseline: %s\n' "$2"
+  printf 'Molt-Verified: %s\n' "$3"
+  [ "$3" = "yes" ] && printf 'Molt-Verifier: %s\n' "$4"
+  [ "$3" = "yes" ] && printf 'Molt-Fertile: %s\n' "$5"
+  printf 'Molt-Author-Kind: %s\n' "$6"
+  return 0
+}
+
+# A fresh machine may have no git identity configured. Recording a generation
+# must not require the user to set one first: fall back to a tool identity only
+# when git genuinely cannot determine one.
+ensure_identity() {
+  if ! git_molt var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+    export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-git-molt}"
+    export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-git-molt@localhost}"
+  fi
+  if ! git_molt var GIT_COMMITTER_IDENT >/dev/null 2>&1; then
+    export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-git-molt}"
+    export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-git-molt@localhost}"
+  fi
+}
+
+trailer_of() {
+  git_molt show -s --format=%B "$1" | sed -n "s/^$2: //p" | tail -1
+}
+
+has_verified_trailer() { [ "$(trailer_of "$1" 'Molt-Verified')" = "yes" ]; }
+
+record_local_verdict() {
+  local ring="$1"
+  git_molt update-ref "$(ref_verified "$ring")" "$ring"
+}
+
+is_verified() {
+  local ring
+  ring="$(git_molt rev-parse --verify --quiet "$1^{commit}" 2>/dev/null)" || return 1
+  has_verified_trailer "$ring" \
+    && [ "$(resolve_ref "$(ref_verified "$ring")")" = "$ring" ]
+}
+
+# ------------------------------------------------------------------ baseline
+
+cmd_baseline() {
+  require_repo
+  local name="${1:-}" file="${2:-}"
+  [ -n "$name" ] && [ -n "$file" ] || die "usage: git molt baseline <name> <file>"
+  [ -f "$file" ] || die "no such file: $file"
+  local locus tree commit path
+  locus="$(locus_id "$name")"
+  path="$name"; case "$path" in *.py|*.js|*.ts|*.md) ;; *) path="$name.py";; esac
+  if locus_exists "$locus"; then
+    # The locus already exists. If the factory bytes are unchanged this is a
+    # no-op; if they changed, the distribution shipped a NEW baseline and it must
+    # be recorded — otherwise reverting would hand the user a stale factory
+    # version forever. The baseline advances as its own linear history, so every
+    # prior baseline stays reachable and existing generations are untouched.
+    local base_ref cur_base cur_tree new_tree
+    base_ref="$(ref_base "$locus")"
+    cur_base="$(resolve_ref "$base_ref")"
+    path="$(agent_path "$locus")"
+    record_path_metadata "$locus" "$path"
+    new_tree="$(write_tree "$file" "$path")"
+    cur_tree="$(git_molt rev-parse "${cur_base}^{tree}")"
+    if [ "$new_tree" = "$cur_tree" ]; then
+      record_local_verdict "$cur_base"
+      printf '%s\n' "$locus"; return 0
+    fi
+    ensure_identity
+    local advanced
+    advanced="$(git_molt commit-tree "$new_tree" -p "$cur_base" -m "$(
+      printf 'molt: baseline update for %s\n\n' "$name"
+      trailers "$locus" "$cur_base" "yes" "baseline" "yes" "human"
+    )")"
+    git_molt update-ref "$base_ref" "$advanced"
+    # A locus still sitting on the old baseline follows it forward.
+    [ "$(resolve_ref "$(ref_loci "$locus")")" = "$cur_base" ] \
+      && git_molt update-ref "$(ref_loci "$locus")" "$advanced"
+    [ "$(resolve_ref "$(ref_live "$locus")")" = "$cur_base" ] \
+      && git_molt update-ref "$(ref_live "$locus")" "$advanced"
+    record_local_verdict "$advanced"
+    printf '%s\n' "$locus"; return 0
+  fi
+  tree="$(write_tree "$file" "$path")"
+  commit="$(
+    GIT_AUTHOR_NAME="$BASE_NAME" GIT_AUTHOR_EMAIL="$BASE_EMAIL" GIT_AUTHOR_DATE="$BASE_DATE" \
+    GIT_COMMITTER_NAME="$BASE_NAME" GIT_COMMITTER_EMAIL="$BASE_EMAIL" GIT_COMMITTER_DATE="$BASE_DATE" \
+    git_molt commit-tree "$tree" -m "$(
+      printf 'molt: baseline %s\n\n' "$name"
+      trailers "$locus" "" "yes" "baseline" "yes" "human"
+    )"
+  )"
+  git_molt update-ref "$(ref_base "$locus")" "$commit"
+  git_molt update-ref "$(ref_loci "$locus")" "$commit"
+  git_molt update-ref "$(ref_live "$locus")" "$commit"
+  record_local_verdict "$commit"
+  git_molt config "molt.locus.${locus}.path" "$path"
+  git_molt config "molt.locus.${locus}.name" "$name"
+  record_path_metadata "$locus" "$path"
+  printf '%s\n' "$locus"
+}
+
+# -------------------------------------------------------------------- record
+
+cmd_record() {
+  require_repo
+  local locus="${1:-}" file="${2:-}"
+  [ -n "$locus" ] && [ -n "$file" ] || die "usage: git molt record <locus> <file>"
+  require_locus "$locus"
+  [ -f "$file" ] || die "no such file: $file"
+  ensure_identity
+  local base tip tree commit path
+  base="$(resolve_ref "$(ref_base "$locus")")"
+  tip="$(resolve_ref "$(ref_loci "$locus")")"
+  path="$(agent_path "$locus")"
+  tree="$(write_tree "$file" "$path")"
+  if [ "$tree" = "$(git_molt rev-parse "$tip^{tree}")" ]; then
+    printf '%s\n' "$tip"; return 0    # identical content is the same generation
+  fi
+  commit="$(git_molt commit-tree "$tree" -p "$tip" -m "$(
+    printf 'molt: generation for %s\n\n' "$locus"
+    trailers "$locus" "$base" "no" "" "" "${GIT_MOLT_AUTHOR_KIND:-model}"
+  )")"
+  git_molt update-ref "$(ref_loci "$locus")" "$commit"
+  printf '%s\n' "$commit"
+}
+
+# -------------------------------------------------------------------- verify
+
+# The verdict belongs to the verifier (V1). The candidate never emits it.
+# GIT_MOLT_VERIFIER names an external gate: it receives the candidate source on
+# stdin and must exit 0 to pass. Absent a gate we apply a conservative default.
+run_gate() {
+  local src="$1"
+  if [ -n "${GIT_MOLT_VERIFIER:-}" ]; then
+    "$GIT_MOLT_VERIFIER" < "$src" >/dev/null 2>&1 && return 0 || return 1
+  fi
+  [ -s "$src" ] || return 1
+  return 0
+}
+
+cmd_verify() {
+  require_repo
+  local locus="${1:-}" ring="${2:-}"
+  [ -n "$locus" ] && [ -n "$ring" ] || die "usage: git molt verify <locus> <ring>"
+  require_locus "$locus"
+  ensure_identity
+  local resolved base tmp tree parent commit fertile
+  resolved="$(git_molt rev-parse --verify --quiet "$ring^{commit}")" \
+    || die "unknown generation: $ring"
+  base="$(resolve_ref "$(ref_base "$locus")")"
+  if [ "$resolved" = "$base" ]; then
+    record_local_verdict "$resolved"
+    printf 'baseline is verified by definition\n'
+    return 0
+  fi
+  git_molt merge-base --is-ancestor "$base" "$resolved" \
+    || die "generation is not descended from the baseline of $locus"
+
+  local tmp=""
+  trap 'rm -f "${tmp:-}"' RETURN
+  tmp="$(mktemp)"
+  git_molt show "${resolved}:$(agent_path "$locus")" > "$tmp"
+
+  if ! run_gate "$tmp"; then
+    printf 'not verified: the gate refused this generation\n' >&2
+    return 1
+  fi
+  fertile="yes"
+  [ -n "${GIT_MOLT_FERTILITY:-}" ] && { "$GIT_MOLT_FERTILITY" < "$tmp" >/dev/null 2>&1 || fertile="no"; }
+  [ "$fertile" = "yes" ] || { printf 'not verified: sterile generation (V3)\n' >&2; return 1; }
+
+  # A portable pass trailer is provenance. Once this host's gate independently
+  # agrees, the local ref gives that same ring authority here.
+  if has_verified_trailer "$resolved"; then
+    record_local_verdict "$resolved"
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  # Re-commit the same tree with portable verdict provenance in the message.
+  # Editing that provenance changes the ring id; local authority lives in a ref.
+  tree="$(git_molt rev-parse "${resolved}^{tree}")"
+  parent="$(git_molt rev-parse "${resolved}^" 2>/dev/null || true)"
+  local -a parents=(); [ -n "$parent" ] && parents=(-p "$parent")
+  commit="$(git_molt commit-tree "$tree" "${parents[@]}" -m "$(
+    printf 'molt: verified generation for %s\n\n' "$locus"
+    trailers "$locus" "$base" "yes" "git-molt/${MOLT_VERSION}" "$fertile" \
+      "$(trailer_of "$resolved" 'Molt-Author-Kind')"
+  )")"
+  record_local_verdict "$commit"
+  # Advance the lineage tip only if we verified the tip itself.
+  [ "$(resolve_ref "$(ref_loci "$locus")")" = "$resolved" ] \
+    && git_molt update-ref "$(ref_loci "$locus")" "$commit"
+  printf '%s\n' "$commit"
+}
+
+# ------------------------------------------------------------------ activate
+
+cmd_policy() {
+  require_repo
+  local locus="${1:-}" value="${2:-}"
+  [ -n "$locus" ] || die "usage: git molt policy <locus> [pinned|mutable]"
+  require_locus "$locus"
+  if [ -z "$value" ]; then
+    printf '%s\n' "$(git_molt config --get "molt.locus.${locus}.policy" 2>/dev/null || printf 'mutable')"
+    return 0
+  fi
+  case "$value" in pinned|mutable) ;; *) die "policy must be 'pinned' or 'mutable'";; esac
+  git_molt config "molt.locus.${locus}.policy" "$value"
+  # Pinning takes effect now, not at the next molt.
+  [ "$value" = "pinned" ] && git_molt update-ref "$(ref_live "$locus")" "$(resolve_ref "$(ref_base "$locus")")"
+  printf '%s\n' "$value"
+}
+
+policy_of() {
+  git_molt config --get "molt.locus.${1}.policy" 2>/dev/null || printf 'mutable'
+}
+
+cmd_activate() {
+  require_repo
+  local locus="${1:-}" ring="${2:-}"
+  [ -n "$locus" ] && [ -n "$ring" ] || die "usage: git molt activate <locus> <ring>"
+  require_locus "$locus"
+  local resolved base
+  resolved="$(git_molt rev-parse --verify --quiet "$ring^{commit}")" \
+    || die "unknown generation: $ring"
+  base="$(resolve_ref "$(ref_base "$locus")")"
+  if [ "$(policy_of "$locus")" = "pinned" ] && [ "$resolved" != "$base" ]; then
+    die "locus $locus is pinned to its baseline"
+  fi
+  if [ "$resolved" != "$base" ]; then
+    git_molt merge-base --is-ancestor "$base" "$resolved" \
+      || die "generation is not descended from the baseline of $locus"
+    is_verified "$resolved" || die "refusing to activate an unverified generation"
+  fi
+  git_molt update-ref "$(ref_live "$locus")" "$resolved"
+  printf '%s\n' "$resolved"
+}
+
+# ---------------------------------------------------------------- revert etc.
+
+cmd_revert() {
+  require_repo
+  local target="${1:-}" failed=0 changed=0
+  local list; list="$([ -n "$target" ] && printf '%s' "$target" || all_loci)"
+  [ -n "$list" ] || { printf 'no loci\n'; return 0; }
+  # Per-locus isolation: one failure must never abort the fleet.
+  while read -r locus; do
+    [ -n "$locus" ] || continue
+    if git_molt update-ref "$(ref_live "$locus")" "$(resolve_ref "$(ref_base "$locus")")" 2>/dev/null; then
+      changed=$((changed+1))
+    else
+      failed=$((failed+1)); warn "could not revert $locus"
+    fi
+  done <<< "$list"
+  printf 'reverted %d locus(es) to baseline' "$changed"
+  [ "$failed" -gt 0 ] && printf ', %d failed' "$failed"
+  printf '\n'
+  return 0
+}
+
+cmd_restore() {
+  require_repo
+  local target="${1:-}" changed=0 pinned=0
+  local list; list="$([ -n "$target" ] && printf '%s' "$target" || all_loci)"
+  while read -r locus; do
+    [ -n "$locus" ] || continue
+    if [ "$(policy_of "$locus")" = "pinned" ]; then pinned=$((pinned+1)); continue; fi
+    local tip base pick=""
+    tip="$(resolve_ref "$(ref_loci "$locus")")"
+    base="$(resolve_ref "$(ref_base "$locus")")"
+    # Newest verified generation reachable from the tip.
+    while read -r c; do
+      [ -n "$c" ] || continue
+      if is_verified "$c"; then pick="$c"; break; fi
+    done < <(git_molt rev-list "$tip")
+    [ -n "$pick" ] || pick="$base"
+    git_molt update-ref "$(ref_live "$locus")" "$pick" && changed=$((changed+1))
+  done <<< "$list"
+  printf 'restored %d locus(es)' "$changed"
+  [ "$pinned" -gt 0 ] && printf ', %d pinned (unchanged)' "$pinned"
+  printf '\n'
+  return 0
+}
+
+cmd_log() {
+  require_repo
+  local locus="${1:-}"; [ -n "$locus" ] || die "usage: git molt log <locus>"
+  require_locus "$locus"
+  local live; live="$(resolve_ref "$(ref_live "$locus")")"
+  git_molt log --format='%H%x09%s' "$(ref_loci "$locus")" | while IFS=$'\t' read -r c s; do
+    local mark=" " v="  "
+    [ "$c" = "$live" ] && mark="*"
+    if is_verified "$c"; then
+      v="ok"
+    elif has_verified_trailer "$c"; then
+      v="foreign"
+    else
+      v="--"
+    fi
+    printf '%s %s [%s] %s\n' "$mark" "${c:0:12}" "$v" "$s"
+  done
+}
+
+cmd_show() {
+  require_repo
+  local locus="${1:-}" ring="${2:-}"
+  [ -n "$locus" ] || die "usage: git molt show <locus> [<ring>]"
+  require_locus "$locus"
+  [ -n "$ring" ] || ring="$(resolve_ref "$(ref_live "$locus")")"
+  git_molt show "$(git_molt rev-parse "$ring"):$(agent_path "$locus")"
+}
+
+cmd_status() {
+  require_repo
+  local loci; loci="$(all_loci)"
+  [ -n "$loci" ] || { printf 'no loci\n'; return 0; }
+  printf '%-34s %-9s %-14s %s\n' "LOCUS" "POLICY" "LIVE" "STATE"
+  while read -r locus; do
+    [ -n "$locus" ] || continue
+    local live base state
+    live="$(resolve_ref "$(ref_live "$locus")")"
+    base="$(resolve_ref "$(ref_base "$locus")")"
+    if [ "$live" = "$base" ]; then state="baseline"; else state="molted"; fi
+    printf '%-34s %-9s %-14s %s\n' "$locus" "$(policy_of "$locus")" "${live:0:12}" "$state"
+  done <<< "$loci"
+}
+
+# ------------------------------------------------------------------- compose
+
+cmd_compose() {
+  require_repo
+  local out="${1:-}"; [ -n "$out" ] || die "usage: git molt compose <directory>"
+  local staging; staging="${out}.molt-staging.$$"
+  rm -rf "$staging"; mkdir -p "$staging"
+  local loci; loci="$(all_loci)"
+  local n=0
+  while read -r locus; do
+    [ -n "$locus" ] || continue
+    local live base pick path
+    base="$(resolve_ref "$(ref_base "$locus")")"
+    live="$(resolve_ref "$(ref_live "$locus")")"
+    pick="$live"
+    # Fail-safe: anything unresolvable, unverified, or pinned falls back.
+    [ -n "$pick" ] || pick="$base"
+    [ "$(policy_of "$locus")" = "pinned" ] && pick="$base"
+    if [ "$pick" != "$base" ] && ! is_verified "$pick"; then pick="$base"; fi
+    path="$(agent_path "$locus")"
+    valid_agent_path "$path" || die "unsafe agent path for $locus: $path"
+    mkdir -p "$(dirname "${staging}/${path}")"
+    if ! git_molt show "${pick}:${path}" > "${staging}/${path}" 2>/dev/null; then
+      git_molt show "${base}:${path}" > "${staging}/${path}" 2>/dev/null || {
+        warn "could not compose $locus"; continue; }
+    fi
+    n=$((n+1))
+  done <<< "$loci"
+  # Atomic activation: stage, then swap.
+  if [ -d "$out" ]; then rm -rf "${out}.molt-previous.$$"; mv "$out" "${out}.molt-previous.$$"; fi
+  mv "$staging" "$out"
+  rm -rf "${out}.molt-previous.$$" 2>/dev/null || true
+  printf 'composed %d agent(s) into %s\n' "$n" "$out"
+}
+
+# --------------------------------------------------------------------- frame
+
+cmd_frame() {
+  require_repo
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    export)
+      local locus="${1:-}" out="${2:-}"
+      [ -n "$locus" ] && [ -n "$out" ] || die "usage: git molt frame export <locus> <file>"
+      require_locus "$locus"
+      [ -n "$(resolve_ref "$(ref_meta "$locus")")" ] \
+        || record_path_metadata "$locus" "$(agent_path "$locus")"
+      git_molt bundle create "$out" "$(ref_loci "$locus")" \
+        "$(ref_base "$locus")" "$(ref_meta "$locus")" >/dev/null 2>&1
+      printf 'wrote frame %s\n' "$out"
+      ;;
+    import)
+      local in="${1:-}"; [ -n "$in" ] || die "usage: git molt frame import <file>"
+      [ -f "$in" ] || die "no such frame: $in"
+      git_molt bundle verify "$in" >/dev/null 2>&1 || die "frame failed git bundle verification"
+      local verified_before
+      verified_before="$(git_molt for-each-ref --format='%(refname) %(objectname)' \
+        'refs/molt/verified/*' 2>/dev/null || true)"
+      git_molt fetch "$in" \
+        'refs/molt/base/*:refs/molt/base/*' \
+        'refs/molt/loci/*:refs/molt/loci/*' \
+        'refs/molt/live/*:refs/molt/live/*' \
+        'refs/molt/policy/*:refs/molt/policy/*' \
+        'refs/molt/meta/*:refs/molt/meta/*' >/dev/null 2>&1 \
+        || die "could not ingest frame"
+      # The allowlist above excludes verdict refs. Also remove any such ref that
+      # appeared during this import while preserving verdicts already issued here.
+      local verdict_ref verdict_object
+      while read -r verdict_ref verdict_object; do
+        [ -n "$verdict_ref" ] || continue
+        if ! printf '%s\n' "$verified_before" \
+          | grep -Fqx -- "$verdict_ref $verdict_object"; then
+          git_molt update-ref -d "$verdict_ref" "$verdict_object"
+        fi
+      done < <(git_molt for-each-ref --format='%(refname) %(objectname)' \
+        'refs/molt/verified/*' 2>/dev/null)
+      # Trust does not transfer with the object (I1): imported verdicts are
+      # provenance only. Nothing is activated by an import — every imported
+      # locus is explicitly parked at its baseline.
+      local l
+      while read -r l; do
+        [ -n "$l" ] || continue
+        if [ -z "$(git_molt config --get "molt.locus.${l}.path" 2>/dev/null || true)" ]; then
+          local meta path
+          meta="$(resolve_ref "$(ref_meta "$l")")"
+          path="$([ -n "$meta" ] && git_molt show "${meta}:path" 2>/dev/null || true)"
+          if [ -n "$path" ]; then
+            valid_agent_path "$path" \
+              || die "frame carries unsafe agent path for $l: $path"
+            git_molt config "molt.locus.${l}.path" "$path"
+          fi
+        fi
+        if [ -z "$(resolve_ref "$(ref_live "$l")")" ]; then
+          git_molt update-ref "$(ref_live "$l")" "$(resolve_ref "$(ref_base "$l")")"
+        fi
+      done <<< "$(all_loci)"
+      printf 'ingested %s — imported generations are NOT active; verify before activating\n' "$in"
+      ;;
+    *) die "usage: git molt frame <export|import> ..." ;;
+  esac
+}
+
+# ----------------------------------------------------------------------- main
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    init) cmd_init "$@" ;;
+    baseline) cmd_baseline "$@" ;;
+    record) cmd_record "$@" ;;
+    verify) cmd_verify "$@" ;;
+    activate) cmd_activate "$@" ;;
+    policy) cmd_policy "$@" ;;
+    revert) cmd_revert "$@" ;;
+    restore) cmd_restore "$@" ;;
+    log) cmd_log "$@" ;;
+    show) cmd_show "$@" ;;
+    status) cmd_status "$@" ;;
+    compose) cmd_compose "$@" ;;
+    frame) cmd_frame "$@" ;;
+    version) printf 'git-molt %s (%s)\n' "$MOLT_VERSION" "$MOLT_SPEC" ;;
+    ""|-h|--help|help) usage ;;
+    *) die "unknown command: $cmd (try 'git molt help')" ;;
+  esac
+}
+
+main "$@"

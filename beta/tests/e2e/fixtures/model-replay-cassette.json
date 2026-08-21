@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "entries": {
+    "4845a3cac958fd23aae869f917ea94875c0456be00486a54ddb22f8ac7544936": {
+      "request": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ],
+        "model": "frontier-e2e-model"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        },
+        "body": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "fixture reply",
+                "role": "assistant"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

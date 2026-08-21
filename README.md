@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Debug Card](./docs/rappid-debug-card.md) | [RAPPID Field iOS](./ios/RappidField/README.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -82,6 +82,18 @@ the same reducer as human controls through strict command/receipt handshakes;
 it is compiled out of Release builds.
 
 See [Quantum RAPPIDs](./docs/quantum-rappids.md).
+
+### Virtual RAPPID Debug Card
+
+The authenticated Habitat includes a deterministic RAPPID handoff simulator
+with 13 signed synthetic fixtures, a strict `.rappid-card.json` manifest, an
+exact compact deep link, real QR SVG/PNG generation, explicit approval before
+content-addressed hydration, bounded replay/audit state, and visible
+failure/awake results. TypeScript and Python regenerate the same shared wire
+vectors. Production mode refuses the synthetic test profile and never reads
+ambient credentials.
+
+See [Virtual RAPPID Debug Card](./docs/rappid-debug-card.md).
 
 
 ## Get Started — Let Your AI Agent Do It

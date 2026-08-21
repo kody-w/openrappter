@@ -6,6 +6,7 @@ import './components/app.js';
 import './components/sidebar.js';
 import './components/surgeon.js';
 import './components/rappids.js';
+import './components/rappid-card.js';
 import './components/chat.js';
 import './components/show-and-tell.js';
 import './components/channels.js';

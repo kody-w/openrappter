@@ -1,0 +1,1960 @@
+{
+  "schema": "rappid-card-vectors/1",
+  "fixtureNow": "2035-01-01T12:00:00Z",
+  "fixtures": [
+    {
+      "name": "valid",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "8c064be4761fc67401532e02c69ed211",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "090a6df320f799cf4d617d1b80a5b307a4fba61308c2dc5719137b4859512360"
+        }
+      },
+      "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+      "preview": {
+        "state": "preview",
+        "outcome": "pending",
+        "error": null,
+        "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          }
+        ]
+      },
+      "approved": {
+        "state": "awake",
+        "outcome": "awake",
+        "error": null,
+        "manifestHash": "c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c2ae9cf957c7eb7fedfe61944276f453a577e0e07c0e07f0a6c6445424d99efb&e=fixture-habitat&n=8c064be4761fc67401532e02c69ed211",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json"
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json"
+          }
+        ],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          },
+          {
+            "seq": 4,
+            "state": "approved",
+            "event": "approval.explicit",
+            "detail": "developer approved hydration"
+          },
+          {
+            "seq": 5,
+            "state": "hydrating",
+            "event": "hydration.started",
+            "detail": "2 permitted parts"
+          },
+          {
+            "seq": 6,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "identity"
+          },
+          {
+            "seq": 7,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "traits"
+          },
+          {
+            "seq": 8,
+            "state": "challenging",
+            "event": "challenge.started",
+            "detail": "fixture-continuity-1"
+          },
+          {
+            "seq": 9,
+            "state": "awake",
+            "event": "card.awake",
+            "detail": "2 verified parts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "expired",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "3a0fdba7843309f8ba44378dce575ae0",
+        "issuedAt": "2034-12-30T00:00:00Z",
+        "expiresAt": "2034-12-31T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "9a14ef0df8d3a41b5a47e35b56cafd339fdf0b5358ffdcbba9f0b22544b60592"
+        }
+      },
+      "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "expired",
+          "message": "card has expired"
+        },
+        "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "expired"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "expired",
+          "message": "card has expired"
+        },
+        "manifestHash": "6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=6acaae4fef411fe57026bc8f635a632de5eb1c639bf6190a099a818fd0fda0ff&e=fixture-habitat&n=3a0fdba7843309f8ba44378dce575ae0",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "expired"
+          }
+        ]
+      }
+    },
+    {
+      "name": "revoked",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "ac69a696e2ce082246b088a40682fbd2",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "16d3cd4b7501cdd37d0504e0f9e6b7322ce2fc7f42da50a9618bbeb6724700b1"
+        }
+      },
+      "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "revoked",
+          "message": "card or signing key is revoked"
+        },
+        "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "revoked"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "revoked",
+          "message": "card or signing key is revoked"
+        },
+        "manifestHash": "3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=3bd59301c7bacaa4f42e1582fa2e55e4905ef3632cbf796f94bb77e70ced1578&e=fixture-habitat&n=ac69a696e2ce082246b088a40682fbd2",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "revoked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "wrong-hash",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "b6e54d8125c77cbbe41f028a769458a3",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "d335f38d9ad6d8092df827aae036f97f7f613eb4bf71401bc961c41e13c0935a"
+        }
+      },
+      "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "manifest_hash_mismatch",
+          "message": "manifest hash does not match deep link"
+        },
+        "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "manifest_hash_mismatch"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "manifest_hash_mismatch",
+          "message": "manifest hash does not match deep link"
+        },
+        "manifestHash": "14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=14411b5e3c471afd6de8724ac628cc5f27adc13cc7a613677f68a98ca75d506d&e=fixture-habitat&n=b6e54d8125c77cbbe41f028a769458a3",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "manifest_hash_mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown-key",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "bb0b52c2495aa24808f495710dae7c69",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-unknown-key",
+          "value": "c0b005a016363c5d3963f7127972cfd69350c4568f5f00cf41115be8edde6cf2"
+        }
+      },
+      "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "unknown_key",
+          "message": "signing key fixture-unknown-key is unknown"
+        },
+        "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "unknown_key"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "unknown_key",
+          "message": "signing key fixture-unknown-key is unknown"
+        },
+        "manifestHash": "75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=75dbf2df19e632cdc97cd8104a3ff0a2c5f8a1088b0fdcfb559e11b73448b135&e=fixture-habitat&n=bb0b52c2495aa24808f495710dae7c69",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "unknown_key"
+          }
+        ]
+      }
+    },
+    {
+      "name": "incompatible-runtime-protocol",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "ffe4db0bfb651eaba9fea7684aba49d4",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/99",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "99.0.0",
+          "maximum": "99.9.9"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "bb51917fe76854fe07410be4fae6649131b491435f6ed6b8750a441c5cf5d248"
+        }
+      },
+      "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "incompatible_protocol",
+          "message": "card requires rappid-link/99; runtime provides rappid-link/1"
+        },
+        "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "incompatible_protocol"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "incompatible_protocol",
+          "message": "card requires rappid-link/99; runtime provides rappid-link/1"
+        },
+        "manifestHash": "10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=10105a76707010d09c7107b2a60fe59b9ad57bdb4c26d682669359702ea53910&e=fixture-habitat&n=ffe4db0bfb651eaba9fea7684aba49d4",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "incompatible_protocol"
+          }
+        ]
+      }
+    },
+    {
+      "name": "classification-violation",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "b20ede873edd559f7ef5baba1c3f957b",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "internal",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "4a462a5d527658e756c66df220d9c525fe6b5239e442627da73d565344ff1dc9"
+        }
+      },
+      "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "classification_violation",
+          "message": "card classification internal exceeds public"
+        },
+        "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "classification_violation"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "classification_violation",
+          "message": "card classification internal exceeds public"
+        },
+        "manifestHash": "9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=9466e462eb26821e0d1bf0aa279ddc89821dc21d2c5a485f4180ea9647b7e6ee&e=fixture-habitat&n=b20ede873edd559f7ef5baba1c3f957b",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "classification_violation"
+          }
+        ]
+      }
+    },
+    {
+      "name": "insufficient-scope",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "2ef030a4bd9efd139db9c42ab7b1dc5e",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          },
+          {
+            "name": "skill-manifest",
+            "hash": "40ea3c13420e3d0acc65159aac084bc902c85ca2dd2870a489b9aa9845f7a7ba",
+            "bytes": 48,
+            "mediaType": "application/vnd.rapp.skill+json",
+            "classification": "public",
+            "scope": "skill:hydrate",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "2c0cfbd91451a57078525159d2d1a05824031b593cf4d975f5eb9381f3265f8a"
+        }
+      },
+      "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "insufficient_scope",
+          "message": "part skill-manifest requires skill:hydrate"
+        },
+        "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "insufficient_scope"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "insufficient_scope",
+          "message": "part skill-manifest requires skill:hydrate"
+        },
+        "manifestHash": "2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=2efbf928a3cfc93eaf03ac9c2c8231e77c6cd8e5c9d9fb8094e3b8d8995d9bf3&e=fixture-habitat&n=2ef030a4bd9efd139db9c42ab7b1dc5e",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "insufficient_scope"
+          }
+        ]
+      }
+    },
+    {
+      "name": "missing-part",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "c8aa06d92b5a8ffba9e7d5fc6cf94948",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read",
+          "sonic:hydrate"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          },
+          {
+            "name": "sonic-profile",
+            "hash": "f83cf3e605af51f554797c271807d1a6716cbb054208414f61ba850023cd2fb3",
+            "bytes": 34,
+            "mediaType": "application/vnd.rapp.sonic+json",
+            "classification": "public",
+            "scope": "sonic:hydrate",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "91654dd03da0c24f050839ffb6ba67e4eee3163bf7cf7b21df88a794a8b35114"
+        }
+      },
+      "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+      "preview": {
+        "state": "preview",
+        "outcome": "pending",
+        "error": null,
+        "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read",
+            "sonic:hydrate"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "sonic-profile",
+              "hash": "f83cf3e605af51f554797c271807d1a6716cbb054208414f61ba850023cd2fb3",
+              "bytes": 34,
+              "mediaType": "application/vnd.rapp.sonic+json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "3 content-addressed parts"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "missing_part",
+          "message": "required part sonic-profile is unavailable"
+        },
+        "manifestHash": "62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=62ecb2573cb1f0e694f496ddaf132c2f1d19a014113cc47cd507ca0658d1322d&e=fixture-habitat&n=c8aa06d92b5a8ffba9e7d5fc6cf94948",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read",
+            "sonic:hydrate"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "sonic-profile",
+              "hash": "f83cf3e605af51f554797c271807d1a6716cbb054208414f61ba850023cd2fb3",
+              "bytes": 34,
+              "mediaType": "application/vnd.rapp.sonic+json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json"
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json"
+          }
+        ],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "3 content-addressed parts"
+          },
+          {
+            "seq": 4,
+            "state": "approved",
+            "event": "approval.explicit",
+            "detail": "developer approved hydration"
+          },
+          {
+            "seq": 5,
+            "state": "hydrating",
+            "event": "hydration.started",
+            "detail": "3 permitted parts"
+          },
+          {
+            "seq": 6,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "identity"
+          },
+          {
+            "seq": 7,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "traits"
+          },
+          {
+            "seq": 8,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "missing_part"
+          }
+        ]
+      }
+    },
+    {
+      "name": "challenge-failure",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "2246aa621fd99b409cce031af237d334",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "bd42c67a16b735e7fbc43dfe05f3efbbcd5b5931c498696ad26c367f1a42fe90"
+        }
+      },
+      "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+      "preview": {
+        "state": "preview",
+        "outcome": "pending",
+        "error": null,
+        "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "challenge_failed",
+          "message": "continuity challenge verification failed"
+        },
+        "manifestHash": "1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=1edf21ae1be4ec33cafc0aba57fc755f3acabb6e4e5de14af1d94b10475bde46&e=fixture-habitat&n=2246aa621fd99b409cce031af237d334",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json"
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json"
+          }
+        ],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          },
+          {
+            "seq": 4,
+            "state": "approved",
+            "event": "approval.explicit",
+            "detail": "developer approved hydration"
+          },
+          {
+            "seq": 5,
+            "state": "hydrating",
+            "event": "hydration.started",
+            "detail": "2 permitted parts"
+          },
+          {
+            "seq": 6,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "identity"
+          },
+          {
+            "seq": 7,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "traits"
+          },
+          {
+            "seq": 8,
+            "state": "challenging",
+            "event": "challenge.started",
+            "detail": "fixture-continuity-1"
+          },
+          {
+            "seq": 9,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "challenge_failed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "reconnect-during-hydration",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "c612b46260cddbd5c90d2be2c29d62f1",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "f5a555e1467c5de6b331acd29f5c82132187fd71f774332c6542faaaaf580ef5"
+        }
+      },
+      "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+      "preview": {
+        "state": "preview",
+        "outcome": "pending",
+        "error": null,
+        "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          }
+        ]
+      },
+      "approved": {
+        "state": "awake",
+        "outcome": "awake",
+        "error": null,
+        "manifestHash": "7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=7484129443431334e4f9181439d4730a97540056e20723747c5c440aaf0981e0&e=fixture-habitat&n=c612b46260cddbd5c90d2be2c29d62f1",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json"
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json"
+          }
+        ],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          },
+          {
+            "seq": 4,
+            "state": "approved",
+            "event": "approval.explicit",
+            "detail": "developer approved hydration"
+          },
+          {
+            "seq": 5,
+            "state": "hydrating",
+            "event": "hydration.started",
+            "detail": "2 permitted parts"
+          },
+          {
+            "seq": 6,
+            "state": "hydrating",
+            "event": "hydration.reconnected",
+            "detail": "identity"
+          },
+          {
+            "seq": 7,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "identity"
+          },
+          {
+            "seq": 8,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "traits"
+          },
+          {
+            "seq": 9,
+            "state": "challenging",
+            "event": "challenge.started",
+            "detail": "fixture-continuity-1"
+          },
+          {
+            "seq": 10,
+            "state": "awake",
+            "event": "card.awake",
+            "detail": "2 verified parts"
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate-nonce",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "46e051e6a79d30b6bf448650f1edde20",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "6df3d7a5536a1307c19cbc4ed529a2be98d9b65abc9afcf02758f71b69f26e96"
+        }
+      },
+      "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+      "preview": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "duplicate_nonce",
+          "message": "card nonce has already been accepted"
+        },
+        "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "duplicate_nonce"
+          }
+        ]
+      },
+      "approved": {
+        "state": "failed",
+        "outcome": "failed",
+        "error": {
+          "code": "duplicate_nonce",
+          "message": "card nonce has already been accepted"
+        },
+        "manifestHash": "afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=afa7554dc3fb95cdfb9847cd0588cccce71398ecb23b3b69aa8d72613f816454&e=fixture-habitat&n=46e051e6a79d30b6bf448650f1edde20",
+        "preview": null,
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "failed",
+            "event": "card.failed",
+            "detail": "duplicate_nonce"
+          }
+        ]
+      }
+    },
+    {
+      "name": "physical-payload-reproduction",
+      "manifest": {
+        "schema": "rappid-card/1",
+        "profile": "rappid-card-test/1",
+        "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+        "endpoint": "fixture-habitat",
+        "nonce": "713d15aae4b21436a72edfe90ebed409",
+        "issuedAt": "2035-01-01T00:00:00Z",
+        "expiresAt": "2035-01-02T00:00:00Z",
+        "protocol": "rappid-link/1",
+        "runtime": {
+          "name": "openrappter",
+          "minimum": "1.13.0",
+          "maximum": "1.99.0"
+        },
+        "classification": "public",
+        "scopes": [
+          "identity:read",
+          "traits:read"
+        ],
+        "parts": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "identity:read",
+            "required": true
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json",
+            "classification": "public",
+            "scope": "traits:read",
+            "required": true
+          }
+        ],
+        "challenge": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-continuity-1"
+        },
+        "signature": {
+          "algorithm": "hmac-sha256-test",
+          "keyId": "fixture-signing-1",
+          "value": "2cc780429606956b930aa443e01595b5c556d541f52e44027d44324cff77837a"
+        }
+      },
+      "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
+      "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+      "preview": {
+        "state": "preview",
+        "outcome": "pending",
+        "error": null,
+        "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          }
+        ]
+      },
+      "approved": {
+        "state": "awake",
+        "outcome": "awake",
+        "error": null,
+        "manifestHash": "c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37",
+        "deepLink": "rappid://link/rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168?m=c79cfddb5f2858faacd4e4278a870a74106d174a986799aff239387b8db00a37&e=fixture-habitat&n=713d15aae4b21436a72edfe90ebed409",
+        "preview": {
+          "rappid": "rappid:@openrappter/virtual-debug-card:6320e67f090b46a138fde19154652693221bb7cd90f32d5a50fa827baad7f168",
+          "profile": "rappid-card-test/1",
+          "endpoint": "fixture-habitat",
+          "issuerKeyId": "fixture-signing-1",
+          "classification": "public",
+          "scopes": [
+            "identity:read",
+            "traits:read"
+          ],
+          "parts": [
+            {
+              "name": "identity",
+              "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+              "bytes": 177,
+              "mediaType": "application/json",
+              "required": true
+            },
+            {
+              "name": "traits",
+              "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+              "bytes": 58,
+              "mediaType": "application/json",
+              "required": true
+            }
+          ]
+        },
+        "hydrated": [
+          {
+            "name": "identity",
+            "hash": "7f12c61521264428a1a9d7dacbcfadbe100dc833c327aed49774da2db2d9987d",
+            "bytes": 177,
+            "mediaType": "application/json"
+          },
+          {
+            "name": "traits",
+            "hash": "ef4f4a1d915153181a196ca1603cce680c1cdb890f87849dc5ece15956f865b4",
+            "bytes": 58,
+            "mediaType": "application/json"
+          }
+        ],
+        "audit": [
+          {
+            "seq": 1,
+            "state": "parsed",
+            "event": "link.parsed",
+            "detail": "fixture-habitat"
+          },
+          {
+            "seq": 2,
+            "state": "verified",
+            "event": "card.verified",
+            "detail": "fixture-signing-1"
+          },
+          {
+            "seq": 3,
+            "state": "preview",
+            "event": "preview.ready",
+            "detail": "2 content-addressed parts"
+          },
+          {
+            "seq": 4,
+            "state": "approved",
+            "event": "approval.explicit",
+            "detail": "developer approved hydration"
+          },
+          {
+            "seq": 5,
+            "state": "hydrating",
+            "event": "hydration.started",
+            "detail": "2 permitted parts"
+          },
+          {
+            "seq": 6,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "identity"
+          },
+          {
+            "seq": 7,
+            "state": "hydrating",
+            "event": "part.hydrated",
+            "detail": "traits"
+          },
+          {
+            "seq": 8,
+            "state": "challenging",
+            "event": "challenge.started",
+            "detail": "fixture-continuity-1"
+          },
+          {
+            "seq": 9,
+            "state": "awake",
+            "event": "card.awake",
+            "detail": "2 verified parts"
+          }
+        ]
+      }
+    }
+  ]
+}

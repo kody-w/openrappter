@@ -98,6 +98,22 @@ The Quantum RAPPID Habitat shows:
 There is no hidden full-autonomy mode. A proposal becomes organism state only
 after the selected approval policy and RAPP/1 verification pass.
 
+## Virtual Debug Card
+
+The Habitat's **RAPPID Debug Card** page exercises transport and hydration
+without mutating a Quantum RAPPID. It uses the closed `.rappid-card.json`
+manifest, deterministic synthetic `rappid-card-test/1` fixtures, an exact
+non-secret `rappid://link/...` URI, and real QR artifacts. The flow stops at a
+verified preview until the developer explicitly approves content-addressed
+hydration and the continuity challenge passes.
+
+The card carries hashes and policy metadata, never private memory, credentials,
+commands, executable bytes, or filesystem paths. Every external decision is an
+injected provider; the fixture Habitat uses no real network. Production mode
+refuses test profiles and signatures.
+
+See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
+
 ## Show-and-Tell Skill Recorder
 
 Show-and-Tell can promote an approved generated `SKILL.md` into a skill

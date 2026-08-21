@@ -184,14 +184,12 @@ export function registerRappidCardCommand(program: Command): void {
     .requiredOption('--link <uri-or-file>', 'Exact compact URI or link file')
     .requiredOption('--bundle <json>', 'Historical verifier evidence')
     .requiredOption('--trust-config <json>', 'Mode-0600 local production trust roots')
-    .requiredOption('--state <sqlite>', 'Isolated historical sequence state')
     .action(async (
       card: string,
       options: {
         link: string;
         bundle: string;
         trustConfig: string;
-        state: string;
       },
     ) => {
       const inspected = await inspect(card, options.link);
@@ -222,7 +220,6 @@ export function registerRappidCardCommand(program: Command): void {
           ]),
         ),
         continuity: bundle.continuity,
-        supplied_state_path: options.state,
       });
       print(inspection);
       if (!inspection.cryptographic_policy_ok) process.exitCode = 1;

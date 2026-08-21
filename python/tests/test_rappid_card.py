@@ -332,20 +332,30 @@ def test_offline_inspection_never_mutates_supplied_sqlite_state():
                 part: parts[part] for part in vector["hydrated_parts"]
             },
             continuity=vector["continuity"],
-            supplied_state_path=str(path),
         )
 
     first = inspect("valid-production")
     repeated = inspect("valid-production")
     failing = inspect("expired")
-    assert first["status"] == "historical-valid"
+    rollback = inspect("rollback-revocation-view")
+    replay = inspect("duplicate-replayed-nonce")
+    assert first["status"] == "historical-unproven"
     assert first["awake"] is False
-    assert first["verdict"]["reason"] == "historical-valid"
+    assert first["cryptographic_policy_ok"] is True
+    assert first["anti_rollback_checked"] is False
+    assert first["replay_checked"] is False
+    assert first["verdict"]["reason"] == "historical-unproven"
     assert first["verdict"]["result"] is None
     assert repeated == first
-    assert failing["status"] == "historical-invalid"
+    assert failing["status"] == "historical-unproven"
     assert failing["verdict"]["step"] == "expiry"
     assert failing["verdict"]["result"] is None
+    assert rollback["status"] == "historical-unproven"
+    assert rollback["anti_rollback_checked"] is False
+    assert rollback["verdict"]["reason"] == "historical-unproven"
+    assert replay["status"] == "historical-unproven"
+    assert replay["replay_checked"] is False
+    assert replay["verdict"]["reason"] == "historical-unproven"
     assert path.read_bytes() == before
     assert SQLiteCardState(str(path)).nonce_state(
         "offline-sentinel-nonce"
@@ -585,8 +595,6 @@ def test_qr_artifacts_and_fixture_cli():
                 str(bundle_path),
                 "--trust-config",
                 str(trust_path),
-                "--state",
-                str(state),
             ],
             cwd=ROOT / "python",
             text=True,
@@ -595,10 +603,12 @@ def test_qr_artifacts_and_fixture_cli():
         )
         assert offline.returncode == 0, offline.stderr
         offline_result = json.loads(offline.stdout)
-        assert offline_result["status"] == "historical-valid"
+        assert offline_result["status"] == "historical-unproven"
         assert offline_result["awake"] is False
         assert offline_result["cryptographic_policy_ok"] is True
-        assert offline_result["verdict"]["reason"] == "historical-valid"
+        assert offline_result["anti_rollback_checked"] is False
+        assert offline_result["replay_checked"] is False
+        assert offline_result["verdict"]["reason"] == "historical-unproven"
         assert offline_result["verdict"]["result"] is None
 
         attacker_bundle = json.loads(bundle_path.read_text())

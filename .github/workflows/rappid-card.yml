@@ -1,0 +1,95 @@
+name: rappid-card
+
+on:
+  pull_request:
+    branches: [main, feat/quantum-rappids]
+    paths:
+      - ".github/workflows/rappid-card.yml"
+      - "contracts/rappid-card*.json"
+      - "tests/vectors/rapp-1-4751cd8/rappid-card/**"
+      - "python/openrappter/rappid_card/**"
+      - "python/scripts/rappid_card_wheel_smoke.py"
+      - "python/tests/test_rappid_card.py"
+      - "python/pyproject.toml"
+      - "typescript/src/rappid-card/**"
+      - "typescript/src/cli/rappid-card.ts"
+      - "typescript/src/gateway/methods/rappid-card-methods*"
+      - "typescript/scripts/*rappid-card*"
+      - "typescript/scripts/package-smoke.mjs"
+      - "typescript/package*.json"
+      - "typescript/ui/src/components/rappid-card.ts"
+      - "typescript/ui/src/__tests__/rappid-card-component.test.ts"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rappid-card.yml"
+      - "contracts/rappid-card*.json"
+      - "tests/vectors/rapp-1-4751cd8/rappid-card/**"
+      - "python/openrappter/rappid_card/**"
+      - "python/scripts/rappid_card_wheel_smoke.py"
+      - "python/tests/test_rappid_card.py"
+      - "python/pyproject.toml"
+      - "typescript/src/rappid-card/**"
+      - "typescript/src/cli/rappid-card.ts"
+      - "typescript/src/gateway/methods/rappid-card-methods*"
+      - "typescript/scripts/*rappid-card*"
+      - "typescript/scripts/package-smoke.mjs"
+      - "typescript/package*.json"
+      - "typescript/ui/src/components/rappid-card.ts"
+      - "typescript/ui/src/__tests__/rappid-card-component.test.ts"
+  workflow_dispatch:
+
+jobs:
+  exact-head:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            typescript/package-lock.json
+            typescript/ui/package-lock.json
+
+      - name: Python tests and direct/sdist wheels
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet build pytest
+          python -m pytest python/tests/test_rappid_card.py -q
+          rm -rf python/direct-dist python/dist .wheel-direct .wheel-sdist
+          python -m build --wheel --outdir python/direct-dist python
+          python -m build python
+          python python/scripts/rappid_card_wheel_smoke.py \
+            --wheel "$(find python/direct-dist -name '*.whl' -print -quit)" \
+            --work-dir .wheel-direct
+          python python/scripts/rappid_card_wheel_smoke.py \
+            --wheel "$(find python/dist -name '*.whl' -print -quit)" \
+            --work-dir .wheel-sdist
+
+      - name: TypeScript build, tests, lint, and npm package smoke
+        working-directory: typescript
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npx vitest run src/rappid-card/rappid-card.test.ts \
+            src/gateway/methods/rappid-card-methods.test.ts
+          npm run lint
+          npm run test:package
+
+      - name: Decode the physical QR independently
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zbar-tools
+          node typescript/dist/index.js rappid-card qr \
+            tests/vectors/rapp-1-4751cd8/rappid-card/physical-payload.txt \
+            .rappid-card-physical.png --format png
+          zbarimg --quiet --raw .rappid-card-physical.png > .decoded-link.txt
+          diff -u \
+            tests/vectors/rapp-1-4751cd8/rappid-card/physical-payload.txt \
+            .decoded-link.txt

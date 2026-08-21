@@ -12,6 +12,7 @@ import {
   CARD_RUNTIME_POLICY_KEYS,
   CARD_RUNTIME_POLICY_SCHEMA,
   CARD_TEST_PROFILE,
+  CARD_VERIFY_STEPS,
   CardStateBackend,
   FRAME_KEYS,
 } from './types.js';
@@ -538,35 +539,36 @@ class OfflineInspectionState extends CardStateBackend {
 }
 
 export function inspectCardOffline(
-  input: Omit<VerifyCardInput, 'state'> & { supplied_state_path?: string },
+  input: Omit<VerifyCardInput, 'state'>,
 ): {
-  status: 'historical-valid' | 'historical-invalid';
+  status: 'historical-unproven';
   awake: false;
   cryptographic_policy_ok: boolean;
+  anti_rollback_checked: false;
+  replay_checked: false;
   verdict: CardVerificationResult;
 } {
-  const { supplied_state_path: _ignored, ...verification } = input;
   const verdict = verifyCardLink({
-    ...verification,
+    ...input,
     state: new OfflineInspectionState(),
   });
-  if (verdict.ok) {
-    return {
-      status: 'historical-valid',
-      awake: false,
-      cryptographic_policy_ok: true,
-      verdict: {
-        ok: true,
-        step: null,
-        reason: 'historical-valid',
-        result: null,
-      },
-    };
-  }
+  const signatureIndex = CARD_VERIFY_STEPS.indexOf('signature');
+  const failureIndex =
+    verdict.step === null ? CARD_VERIFY_STEPS.length : CARD_VERIFY_STEPS.indexOf(verdict.step);
+  const cryptographicPolicyOk = verdict.ok || failureIndex > signatureIndex;
   return {
-    status: 'historical-invalid',
+    status: 'historical-unproven',
     awake: false,
-    cryptographic_policy_ok: false,
-    verdict: { ...verdict, result: null },
+    cryptographic_policy_ok: cryptographicPolicyOk,
+    anti_rollback_checked: false,
+    replay_checked: false,
+    verdict: verdict.ok
+      ? {
+          ok: false,
+          step: null,
+          reason: 'historical-unproven',
+          result: null,
+        }
+      : { ...verdict, result: null },
   };
 }

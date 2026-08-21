@@ -229,8 +229,7 @@ openrappter rappid-card verify ./production.rappid-card.json \
 openrappter rappid-card inspect-offline ./production.rappid-card.json \
   --link ./production-link.txt \
   --bundle ./production-verification-bundle.json \
-  --trust-config ./local-trust.json \
-  --state ./offline-inspection.sqlite
+  --trust-config ./local-trust.json
 
 # Run any mandatory negative or positive vector
 openrappter rappid-card simulate expired --state ./expired-state.sqlite
@@ -257,8 +256,11 @@ roots. Their closed historical shape carries only:
 No live production transport is currently shipped. `verify --bundle` returns
 `unavailable / live-adapter-required`; it never accepts bundle clock,
 connection, fetch, hydration, or continuity as live authority. The separate
-`inspect-offline` command may report a historical cryptographic/policy verdict
-but always emits `awake:false`.
+`inspect-offline` never accepts a state path. Without a read-only trusted state
+view it reports `historical-unproven`, `awake:false`,
+`anti_rollback_checked:false`, and `replay_checked:false`. It may report only
+the cryptographic/policy checks actually reached and never emits a nested
+`awake` result.
 
 The Habitat remains test-vector-only and requires an explicit button before
 running hydration. It visibly reports production verification unavailable

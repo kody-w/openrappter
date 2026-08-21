@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from .pr9_reference import verify_card_link as _verify_card_link
 from .types import CardVectorResult
-from .pr9_reference import CardStateBackend
+from .pr9_reference import CARD_VERIFY_STEPS, CardStateBackend
 
 
 def verify_card_link(
@@ -69,9 +69,7 @@ def inspect_card_offline(
     fetch_trace,
     hydrated,
     continuity,
-    supplied_state_path=None,
 ):
-    _ = supplied_state_path
     verdict = verify_card_link(
         uri,
         frame,
@@ -86,28 +84,34 @@ def inspect_card_offline(
         hydrated,
         continuity,
     )
-    if verdict.ok:
-        return {
-            "status": "historical-valid",
-            "awake": False,
-            "cryptographic_policy_ok": True,
-            "verdict": {
-                "ok": True,
-                "step": None,
-                "reason": "historical-valid",
-                "result": None,
-            },
-        }
+    signature_index = CARD_VERIFY_STEPS.index("signature")
+    failure_index = (
+        len(CARD_VERIFY_STEPS)
+        if verdict.step is None
+        else CARD_VERIFY_STEPS.index(verdict.step)
+    )
+    cryptographic_policy_ok = verdict.ok or failure_index > signature_index
     return {
-        "status": "historical-invalid",
+        "status": "historical-unproven",
         "awake": False,
-        "cryptographic_policy_ok": False,
-        "verdict": {
-            "ok": verdict.ok,
-            "step": verdict.step,
-            "reason": verdict.reason,
-            "result": None,
-        },
+        "cryptographic_policy_ok": cryptographic_policy_ok,
+        "anti_rollback_checked": False,
+        "replay_checked": False,
+        "verdict": (
+            {
+                "ok": False,
+                "step": None,
+                "reason": "historical-unproven",
+                "result": None,
+            }
+            if verdict.ok
+            else {
+                "ok": verdict.ok,
+                "step": verdict.step,
+                "reason": verdict.reason,
+                "result": None,
+            }
+        ),
     }
 
 

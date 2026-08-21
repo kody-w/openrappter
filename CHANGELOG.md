@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   roots or supply live clock/connection/fetch/hydration/continuity authority.
   Since live production adapters are not shipped, production awake
   verification fails closed as `live-adapter-required`, while offline
-  inspection can never return awake. The authoritative follow-up now includes
+  inspection is explicitly `historical-unproven`, never opens replay state,
+  and reports rollback/replay unchecked rather than erasing that evidence.
+  The authoritative follow-up now includes
   bounded canonicalization, numeric-host, fullmatch-token, and Unicode-secret
   fixes directly; no interim runtime patch remains. No auto-discovered agent
   was added.

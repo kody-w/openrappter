@@ -56,7 +56,6 @@ def register_rappid_card_parser(subparsers: Any) -> None:
     offline.add_argument("--link", required=True)
     offline.add_argument("--bundle", required=True)
     offline.add_argument("--trust-config", required=True)
-    offline.add_argument("--state", required=True)
 
     simulate = commands.add_parser(
         "simulate", help="Run one vendored mandatory PR9 scenario"
@@ -193,7 +192,6 @@ def handle_rappid_card_command(args: Any) -> bool:
                 for name, value in bundle["hydrated_parts_b64"].items()
             },
             continuity=bundle["continuity"],
-            supplied_state_path=args.state,
         )
         _print(inspection)
         return inspection["cryptographic_policy_ok"]

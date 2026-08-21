@@ -291,22 +291,36 @@ describe('detached JWS, content roots, and durable state', () => {
           vector.hydrated_parts.map((part) => [part, parts[part]]),
         ),
         continuity: vector.continuity,
-        supplied_state_path: path,
       });
     };
     const first = inspectVector('valid-production');
     const repeated = inspectVector('valid-production');
     const failing = inspectVector('expired');
+    const rollback = inspectVector('rollback-revocation-view');
+    const replay = inspectVector('duplicate-replayed-nonce');
     expect(first).toMatchObject({
-      status: 'historical-valid',
+      status: 'historical-unproven',
       awake: false,
-      verdict: { reason: 'historical-valid', result: null },
+      cryptographic_policy_ok: true,
+      anti_rollback_checked: false,
+      replay_checked: false,
+      verdict: { reason: 'historical-unproven', result: null },
     });
     expect(repeated).toEqual(first);
     expect(failing).toMatchObject({
-      status: 'historical-invalid',
+      status: 'historical-unproven',
       awake: false,
       verdict: { step: 'expiry', result: null },
+    });
+    expect(rollback).toMatchObject({
+      status: 'historical-unproven',
+      anti_rollback_checked: false,
+      verdict: { reason: 'historical-unproven', result: null },
+    });
+    expect(replay).toMatchObject({
+      status: 'historical-unproven',
+      replay_checked: false,
+      verdict: { reason: 'historical-unproven', result: null },
     });
     expect(first.verdict.reason).not.toBe('awake');
     expect(JSON.stringify(first)).not.toContain('"status":"awake"');

@@ -269,7 +269,7 @@ python3 -m openrappter.cli [options]  # Direct
 | `rappid-card inspect <card> --link <uri-or-file>` | Parse canonical frame bytes and the exact `m,e,n` compact URI |
 | `rappid-card verify <card> --link <uri-or-file> --scenario <name> --state <sqlite>` | Run the exact test-vector verifier with durable state |
 | `rappid-card verify <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file> --state <sqlite>` | Fail closed as live-adapter-required; bundle data never supplies production roots/live evidence |
-| `rappid-card inspect-offline <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file> --state <sqlite>` | Historical cryptographic/policy inspection that always reports `awake:false` |
+| `rappid-card inspect-offline <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file>` | Historical inspection reports `historical-unproven`, never opens replay state, and always reports `awake:false` |
 | `rappid-card qr <link> <output> [--format svg\|png]` | Render the exact compact link with an ecosystem QR encoder |
 | `rappid-card simulate <scenario> --state <sqlite>` | Run one mandatory PR9 positive or negative vector at its declared step |
 

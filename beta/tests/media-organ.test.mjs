@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
+import { uiDriverInternals } from "../electron/ui-driver-server.mjs";
 import { MEDIA_ORGAN, probeMediaOrgan } from "../electron/video-tools.mjs";
 
 // Article II: an organ is installed only on first enable, after a prompt naming
@@ -47,17 +50,20 @@ test("a throwing runner does not escape the probe", () => {
   assert.equal(thrown.reason, "EPERM");
 });
 
-test("recording refuses before spawning when the organ is absent", () => {
-  const driver = readFileSync(
-    new URL("../electron/ui-driver-server.mjs", import.meta.url),
-    "utf8",
+test("recording refuses before spawning when the organ is absent", async (t) => {
+  const recordingDir = mkdtempSync(path.join(tmpdir(), "brainstem-rec-"));
+  t.after(() => rmSync(recordingDir, { force: true, recursive: true }));
+  await assert.rejects(
+    uiDriverInternals.startCapturedWindowRecording({}, {}, {
+      env: { BRAINSTEM_BETA_FFMPEG: path.join(recordingDir, "missing-ffmpeg") },
+      publishArtifact() {},
+      recordingDir,
+    }),
+    (error) => {
+      assert.equal(error.name, "MediaOrganUnavailableError");
+      assert.equal(error.organ.reason, "ENOENT");
+      assert.match(error.message, /Enable Showtime to install them/);
+      return true;
+    },
   );
-  const probeAt = driver.indexOf("probeMediaOrgan(env)");
-  const spawnAt = driver.indexOf("const child = spawn(");
-  assert.ok(probeAt > 0 && spawnAt > 0, "both the probe and the spawn must exist");
-  assert.ok(
-    probeAt < spawnAt,
-    "the probe must run before the spawn, or the failure is a spawn error again",
-  );
-  assert.match(driver, /MediaOrganUnavailableError/);
 });

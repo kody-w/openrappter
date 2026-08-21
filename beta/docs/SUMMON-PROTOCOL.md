@@ -115,6 +115,120 @@ participant.
 A summoned tile arrives at full height: its [crystal](CRYSTALS.md) is untouched, because whatever
 its publisher wore down was theirs. It is new *to you*, and the wearing is yours to do.
 
+## The quantum-link: nothing is transmitted
+
+The reason a summon feels instantaneous is that **nothing travels**. The chant is not a request that
+carries a tile from somewhere to here — it is a computation whose answer is where the tile already
+is. The tile exists at that address in every dimension that can compute it, so arriving is
+*resolution*, not transfer.
+
+That is also the honest explanation of the properties that otherwise look like tricks:
+
+- It works with **no network**, because resolving an address is arithmetic and the bytes may already
+  be cached.
+- It behaves **identically on any machine**, because the address is a pure function of content, not
+  of who is asking or where they are.
+- It cannot be **revoked or rate-limited**, because there is no serving decision in the path to
+  make.
+
+### There is no original, so it really is in both places
+
+This is not a manner of speaking. Under ordinary location-addressing — a URL pointing at a server —
+one copy is authoritative and every other is a replica of it. Content-addressing removes that:
+**identity is the content**, so every instance that computes to the same address is equally the
+tile. There is no original for the others to be copies of.
+
+Two devices resolving the same chant at the same moment therefore hold **one tile in two places**,
+not two copies of one tile. Which changes what divergence is:
+
+- It is **not drift.** Nothing wandered away from an authority, because there is no authority to
+  wander from.
+- It is **one object having two experiences.** The tile was in a living room and in an office at the
+  same time, and both of those actually happened to it.
+- So a merge is not reconciliation. It is **folding two futures of the same object**, which is why
+  keeping both sides where they do not contradict is the correct default rather than a compromise.
+
+Three engineering consequences follow directly, and they are the reason this shape is worth the
+trouble:
+
+1. **No primary replica.** No device is the master, so none has to be reachable for another to work.
+2. **No last-writer-wins.** There is no writer whose lateness makes them right; there is an order,
+   and the order is in the key.
+3. **No sync protocol.** Devices never negotiate. They emit frames and fold them, and two machines
+   that never once communicate still converge the moment their streams meet.
+
+### Tagging local signal onto the link
+
+A summon is not a copy — it is a resolution **plus a new frame emitted locally**. That local frame
+is where a device's own context attaches: what the person was doing, what the machine could see, the
+ambient context the host already gathers ([`AMBIENT-CONTEXT-PROTOCOL.md`](AMBIENT-CONTEXT-PROTOCOL.md)).
+The signal rides the frame, and when dimensions merge back the fold contains every device's signal
+in key order.
+
+**The constraint that makes this work: local signal never touches identity.**
+
+The seed, the face and the seven words are a pure function of the tile's canonical manifest. If
+local context were folded into identity, two devices summoning "the same" tile would compute
+different addresses, the chant would stop resolving, and the whole model collapses. So:
+
+| | Global and fixed | Local and additive |
+|---|---|---|
+| What | seed, face, seven-word key, payload digests | frames: signal, transcript, wear, ambient context |
+| Changes when | the tile's content changes — a new tile | anything happens on a device |
+| Merges by | never merging; identity is equality | folding in `(tick, utc)` order |
+
+So each dimension may carry as much local signal as it likes without ever moving the address it
+resolves from. The link stays the same link; what accumulates on it is the record of everywhere it
+has been.
+
+### Addressing is not search, and the difference matters
+
+Because the key is computed from content, retrieving something is *resolution* rather than lookup —
+there is no index to query and no server to ask. That is what makes a chant work offline and behave
+identically everywhere, and it is tempting to describe it as querying unstructured data without a
+database.
+
+**It is not that, and the distinction is the honest part.** You can compute the address of something
+that exists. You cannot compute the address of an answer nobody has published — resolution finds
+what is there, it does not produce what is not. So:
+
+- **Addressing solves retrieval.** Given the key, the bytes, with no infrastructure in the path.
+- **It does not solve discovery.** Knowing *which* key to say is a separate problem, and it is what
+  channels, registries and the seven-word key being memorable are for.
+
+Conflating the two would promise a search engine and deliver a hash table. What is genuinely
+unusual is narrower and still valuable: once you know what you want, getting it costs nothing, works
+offline, and cannot be revoked.
+
+### What the signal is actually good for
+
+The link carries more than tiles, and the frames it accumulates are worth something on their own.
+
+**1. Shape on arrival.** Published bytes are canonical; the *shape* is computed at the destination.
+One published dataset can materialise locally as a table, a graph, a card, a chart or an index,
+because the projection happens here rather than being served. Publish once, and every consumer
+builds the form it needs — which is the [static API](LOCAL-MODEL-PLAYER.md) pattern generalised past
+models to any data at all.
+
+**2. A compatibility matrix nobody maintains.** Frames record assembly outcomes, including refusals:
+*this tile would not assemble on that runtime, because that requirement was unmet.* Fold those
+publicly and a compatibility table emerges from actual attempts rather than from anyone's claims.
+Nobody writes it, nobody keeps it current, and it is derived from what really happened.
+
+**3. A catalog that describes itself.** What gets summoned, what assembles, what is abandoned — all
+of it is already in the stream. Popularity, reliability and failure modes are computable from public
+frames with no analytics service, no telemetry endpoint, and nothing reporting home, because the
+record was already being kept for a different reason.
+
+**The boundary, which is not optional.** Frames contain transcripts, local context and ambient
+data. **Public signal is a deliberate, stripped publication — never a side effect of using the
+thing.** The same rule that governs tiles governs this: what leaves is the capability and the
+outcome, never the material it was learned from. A system whose usefulness depended on quietly
+publishing what people did with it would be exactly the thing this design exists to avoid.
+
+And it does not weaken verification: a shape computed locally from canonical bytes is still checked
+against those bytes' digests before it is trusted.
+
 ## The same pattern serves a model
 
 A static API — `rapp-static-api/1.0`, a manifest plus generated JSON endpoints served from raw
@@ -207,6 +321,29 @@ answer.** Offline is not a degraded mode; it is the same mechanism with one fewe
   confidently to old bytes. Staleness must be visible, and refreshing must be a normal action.
 - **No service also means no revocation.** Nothing can be recalled centrally, so verification on
   arrival is not optional — it is the only check there is.
+
+## Why public, and why MIT
+
+Both are engineering decisions rather than preferences, and the reasoning is worth stating because
+it is not the usual one.
+
+**Public, because every copy is another dimension of the work.** A tile published to a public
+repository is not just distributed — it is exercised. Someone summons it on a machine we will never
+see, assembles it against a runtime we did not test, diverges it, and sometimes publishes the
+divergence back. That is the same loop [dimension mining](DIMENSION-MINING.md) runs deliberately,
+except the parallelism is other people and the cost is zero. A capability that only ever ran here
+has been tested in one dimension.
+
+**MIT, because the work becomes training data.** Permissively licensed public code is what models
+learn from. Publishing this loop — the protocols, the tile format, the assembly contract, the
+command surface — means the models that will later be asked to work inside it have already read it.
+The loop improves itself on infrastructure nobody here pays for, which is a strange and real
+advantage, and it only exists if the licence permits the reading.
+
+**The trade, stated plainly.** MIT means no control over downstream use: anyone may take this,
+build on it, and never say where it came from beyond keeping the notice. Attribution is the only
+lever, and it is a weak one. That is the price of the two advantages above, and it is being paid
+deliberately rather than by default — a restrictive licence would buy control and forfeit both.
 
 ## Status
 

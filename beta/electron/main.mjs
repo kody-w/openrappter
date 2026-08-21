@@ -24,6 +24,7 @@ import {
   lookupApproximateLocation,
   openAmbient,
 } from "./ambient.mjs";
+import { createActivityViewInstallationSource } from "./activity-view.mjs";
 import {
   resolveChatStreamMode,
 } from "./chat-stream-mode.mjs";
@@ -66,6 +67,12 @@ import {
   allowsUiDriverMediaPermission,
   startUiDriverServer,
 } from "./ui-driver-server.mjs";
+import {
+  createAutopilotInstallationSource,
+  createFrameBridgeInstallationSource,
+  createViewToggle,
+  instrumentRappUi as createInstrumentedRappUi,
+} from "./injection-sources.mjs";
 import {
   checkForUpdates,
   consumeUpdateResult,
@@ -114,6 +121,7 @@ const autopilotClassicSource = autopilotSource.replace(
   "function createAutopilot",
 );
 const autopilotCapability = randomUUID();
+const activityViewInstallationSource = createActivityViewInstallationSource();
 const config = resolveBrainstemConfig();
 const chatStreamMode = resolveChatStreamMode(process.env);
 const smoothStreamCss = `
@@ -588,77 +596,9 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
     });
     stampChatMessageHandles();
   }
-  // Driver steps are not conversation. They used to be appended INSIDE #chat, which
-  // put machine steps into the record of an exchange with the model — and with
-  // deterministic driving most of those steps never reach the model at all. The feed
-  // is now its own activity strip on the body, off unless someone asked to watch;
-  // the console and the driver trace remain the record either way.
-  window.__rappBetaActivityView = window.__rappBetaActivityView === true;
-  window.__rappBetaSetActivityView = (on) => {
-    window.__rappBetaActivityView = on === true;
-    if (!window.__rappBetaActivityView) {
-      document.getElementById("beta-drive-feed")?.remove();
-    }
-    return window.__rappBetaActivityView;
-  };
-  function driveFeed() {
-    if (!window.__rappBetaActivityView) return null;
-    const host = document.body;
-    if (!host) return null;
-    let feed = document.getElementById("beta-drive-feed");
-    if (!feed) {
-      feed = document.createElement("div");
-      feed.id = "beta-drive-feed";
-      feed.className = "beta-drive-feed";
-      feed.dataset.brainstemAiDriver = "true";
-      host.appendChild(feed);
-    }
-    return feed;
-  }
-  window.__rappBetaRenderDriveStep = (summary) => {
-    const feed = driveFeed();
-    const line = String(summary || "").replace(/\s+/g, " ").trim().slice(0, 220);
-    if (!feed || !line) return false;
-    const tile = document.createElement("div");
-    tile.className = "beta-drive-step-tile";
-    tile.dataset.driveStepTile = "true";
-    tile.setAttribute("role", "status");
-    tile.textContent = line;
-    feed.appendChild(tile);
-    while (feed.querySelectorAll(".beta-drive-step-tile").length > 20) {
-      feed.querySelector(".beta-drive-step-tile")?.remove();
-    }
-    feed.parentElement.scrollTop = feed.parentElement.scrollHeight;
-    return true;
-  };
-  window.__rappBetaRenderDriveMedia = (artifact) => {
-    const feed = driveFeed();
-    if (!feed || !artifact?.url) return false;
-    const tile = document.createElement("div");
-    tile.className = "beta-drive-media-tile";
-    const media = artifact.kind === "video"
-      ? document.createElement("video")
-      : document.createElement("img");
-    media.src = String(artifact.url);
-    if (artifact.kind === "video") {
-      media.controls = true;
-      media.preload = "metadata";
-    } else {
-      media.alt = String(artifact.alt || "Frontier capture");
-    }
-    const link = document.createElement("a");
-    link.href = String(artifact.url);
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = String(artifact.alt || "Open artifact");
-    tile.append(media, link);
-    feed.appendChild(tile);
-    while (feed.querySelectorAll(".beta-drive-media-tile").length > 8) {
-      feed.querySelector(".beta-drive-media-tile")?.remove();
-    }
-    feed.parentElement.scrollTop = feed.parentElement.scrollHeight;
-    return true;
-  };
+  // Driver steps are not conversation. The activity view is delivered as one
+  // independently executable payload so its real mounting behavior is testable.
+  ${activityViewInstallationSource}
   decorateAgentRows();
   const agentList = document.getElementById("agent-list-ul");
   if (agentList) {
@@ -1649,7 +1589,10 @@ function frameBridgeInstallationSource() {
     chatTypingEnabled,
   })};\n${BETA_FRAME_BRIDGE_SOURCE}`;
   const bridgeSource = composeDimensionTilesFrameBridgeSource(checkpointSource, viewMode);
-  return `${bridgeSource}\n${autopilotInstallationSource()}`;
+  return createFrameBridgeInstallationSource({
+    autopilotSource: autopilotInstallationSource(),
+    bridgeSource,
+  });
 }
 const copilot = new CopilotRuntime({
   tokenFile: path.join(config.brainstemDir, ".copilot_token"),
@@ -1993,7 +1936,7 @@ function emitSurgeonEvent(event) {
   }
 }
 
-// RAPPlication twins — specialized rapplications hatched from the RAPP Store as
+// rapplication twins — specialized rapplications hatched from the RAPP Store as
 // concurrent long-lived workers on their own loopback ports, beside the
 // Brainstem chats in the herd. Kernel unchanged; driven only over /chat.
 // RAR library source selection: AIBAST (default) / public RAR / a custom
@@ -2106,7 +2049,7 @@ function openExternalUrl(url) {
 
 function notifyTwinNeedsAuth(event) {
   const twin = twinManager.list().find((t) => t.id === event.id);
-  const name = twin?.name || event.id || "A RAPPlication twin";
+  const name = twin?.name || event.id || "A rapplication twin";
   const { url, code } = parseAuthPrompt(event.message);
   twinAuthPrompts.set(event.id, { url, code, note: event.message });
   if (!Notification.isSupported()) return;
@@ -2127,7 +2070,7 @@ function notifyTwinNeedsAuth(event) {
 }
 
 // Pop a twin's own UI out into a phone-sized window — "mobile-first" literally —
-// so a RAPPlication is comfortable to use at a real small-screen size.
+// so a rapplication is comfortable to use at a real small-screen size.
 // Walk the main window's frame tree to find the iframe hosting a twin's UI
 // (loaded from the twin's own loopback origin).
 function findTwinFrame(twinUrl) {
@@ -2148,33 +2091,17 @@ function findTwinFrame(twinUrl) {
 // Wipe the Grail chat in a twin's iframe and inject the rapplication's own
 // static UI in its place. The iframe is loaded from the twin's own origin, so
 // the injected UI's relative /chat hits the twin directly — no server, no proxy.
-// A tiny force-mode marker woven into every injected rapplication UI. Because
-// WE write the HTML into the frame, we can make any rapplication UI drivable /
-// "force-mode capable" — the AI drives it in-frame with the ui-driver's cursor,
-// and this flag lets the UI (or us) know it is under AI control. A rapplication
-// may also ship its own force-mode affordances; this never overrides them.
-const FORCE_MODE_BOOTSTRAP = "<!-- Added by the RAPP Brainstem Frontier host: a force-mode"
-  + " capability marker, so the driver can tell a real responsive layout from one"
-  + " the host is simulating. Nothing else is changed. -->"
-  + "<script>window.__rappForceModeCapable=true;"
-  + "try{document.documentElement.setAttribute('data-rapp-force-mode','ready');}catch(e){}</script>";
-
 function autopilotInstallationSource() {
-  return `;(() => {
-window.__rappAutopilotCapability = ${JSON.stringify(autopilotCapability)};
-${autopilotClassicSource}
-})();`;
+  return createAutopilotInstallationSource({
+    capability: autopilotCapability,
+    classicSource: autopilotClassicSource,
+  });
 }
 
 function instrumentRappUi(html) {
-  const classicSource = autopilotInstallationSource()
-    .replace(/<\/script/gi, "<\\/script");
-  const marker = FORCE_MODE_BOOTSTRAP
-    + `<script>${classicSource}</script>`;
-  // Inject right after <head> when present, else prepend.
-  return /<head[^>]*>/i.test(html)
-    ? html.replace(/<head[^>]*>/i, (m) => m + marker)
-    : marker + html;
+  return createInstrumentedRappUi(html, {
+    autopilotSource: autopilotInstallationSource(),
+  });
 }
 
 const injectedFrames = new WeakSet();   // avoid re-injecting the same frame
@@ -2204,38 +2131,9 @@ async function injectTwinUi(twinId) {
   return injectFrameUi(frame, twinId);
 }
 
-// A small host-injected view toggle (declared): the pop-out opens with the full
-// desktop real estate by default (a rapplication with a lot of UI shouldn't be
-// mashed into a phone column), and the user can flip it to a centered mobile
-// column any time. A rapplication may declare preferred_view:"mobile" to start
-// narrow. The host also adds the instrumentation from instrumentRappUi() and, for
-// a twin, the ledger bridge; each declares itself in its own delivered bytes, as
-// docs/UI-AUTOSTEER-PROTOCOL.md stage 3 requires.
-const VIEW_TOGGLE = (startMobile) => `
-<!-- Added by the RAPP Brainstem Frontier host: a viewport toggle so a person can
-     see the page as it looks on a narrow screen. It changes presentation only. -->
-<style id="__rappViewStyle">
-  html[data-rapp-view="mobile"] body { max-width: 480px !important; margin: 0 auto !important;
-    box-shadow: 0 0 0 100vmax rgba(0,0,0,.25); }
-  #__rappViewToggle { position: fixed; top: 8px; right: 8px; z-index: 2147483647;
-    font: 600 11px Inter,system-ui,sans-serif; background: rgba(22,27,34,.9); color: #c8c9cc;
-    border: 1px solid #30363d; border-radius: 7px; padding: 4px 9px; cursor: pointer; }
-  #__rappViewToggle:hover { color: #e6edf3; border-color: #58a6ff; }
-</style>
-<script>
-  (function(){
-    document.documentElement.dataset.rappView = ${startMobile ? '"mobile"' : '"full"'};
-    var b = document.createElement("button");
-    b.id = "__rappViewToggle";
-    function label(){ b.textContent = document.documentElement.dataset.rappView === "mobile" ? "⤢ Full width" : "▭ Mobile view"; }
-    b.addEventListener("click", function(){
-      document.documentElement.dataset.rappView = document.documentElement.dataset.rappView === "mobile" ? "full" : "mobile";
-      label();
-    });
-    label();
-    (document.body || document.documentElement).appendChild(b);
-  })();
-</script>`;
+// The pop-out opens with full desktop space by default and can be switched to a
+// narrow view. The builder carries its own declaration in the delivered bytes.
+const VIEW_TOGGLE = createViewToggle;
 
 function popOutTwin(id) {
   const twin = twinManager.list().find((t) => t.id === id);
@@ -2247,9 +2145,13 @@ function popOutTwin(id) {
     height: 860,
     minWidth: 380,
     minHeight: 480,
-    title: twin.name || "RAPPlication",
+    title: twin.name || "rapplication",
     backgroundColor: "#0d1117",
-    parent: mainWindow || undefined,
+    // Deliberately NOT a child of mainWindow. A parented window shares the
+    // parent's fullscreen space on macOS, so taking the pop-out fullscreen took
+    // over the Brainstem window and left it blank. A popped-out rapplication is
+    // meant to be worked with on its own screen while the Frontier chat carries
+    // on beside it, which requires a top-level window.
     webPreferences: {
       additionalArguments: [`--rapp-twin-id=${encodeURIComponent(id)}`],
       contextIsolation: true,
@@ -2588,8 +2490,9 @@ function assertTrustedIpc(event) {
 }
 
 function createWindow() {
+  const headless = process.env.BRAINSTEM_BETA_HEADLESS === "1";
   const win = new BrowserWindow({
-    show: process.env.BRAINSTEM_BETA_HEADLESS !== "1",
+    show: false,
     width: 1280,
     height: 860,
     minWidth: 900,
@@ -2632,6 +2535,7 @@ function createWindow() {
     mainWindow = null;
   });
   void win.loadFile(uiFile);
+  if (!headless) presentWindow(win);
   return win;
 }
 

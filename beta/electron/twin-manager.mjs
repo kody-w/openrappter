@@ -1,4 +1,4 @@
-// Twin manager — hatches RAPPlications from the RAPP Store as concurrent,
+// Twin manager — hatches rapplications from the RAPP Store as concurrent,
 // long-lived Brainstem workers ("twins"), each on its own loopback port.
 //
 // Canon (crawled kody-w/rapp-spine — see docs/twins/COMPLIANCE.md):
@@ -349,7 +349,7 @@ export class TwinManager {
     this.emit({ type: "twin-status", id: twin.id, status, twin: this.descriptor(twin) });
   }
 
-  // Hatch a RAPPlication FROM THE STORE into its own long-lived worker.
+  // Hatch a rapplication FROM THE STORE into its own long-lived worker.
   async hatch(storeId, { instruction = null } = {}) {
     const cartridge = await this.store.download(storeId);   // sha256-verified
     const filename = cartridge.filename && /_agent\.py$/.test(cartridge.filename)

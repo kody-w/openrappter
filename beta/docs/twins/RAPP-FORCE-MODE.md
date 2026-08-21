@@ -1,4 +1,4 @@
-# rapp-force-mode/1.0 — an iframe API for AI-drivable RAPPlication UIs
+# rapp-force-mode/1.0 — an iframe API for AI-drivable rapplication UIs
 
 > Status: **proposed** (draft to contribute to the RAPP Store). Home for now:
 > this repo; intended to be published alongside `rapp-store/1.0` so rapplication
@@ -6,7 +6,7 @@
 
 ## Why
 
-A RAPPlication is a twin: a specialized agent set **plus its own UI**, both
+A rapplication is a twin: a specialized agent set **plus its own UI**, both
 speaking the twin's `/chat`. In RAPP Brainstem Frontier, that UI is shown in a
 herd tile (or popped out) and an AI can drive it **just like the user** — clicks,
 typing, an animated cursor — so a person can be fully hands-off and simply chat

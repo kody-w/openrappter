@@ -54,7 +54,7 @@ test("loads the catalog and flags gated entries", async () => {
   assert.equal(list.length, 2);
   assert.equal(list.find((e) => e.id === "demo").gated, false);
   assert.equal(list.find((e) => e.id === "locked").gated, true);
-  // a RAPPlication carries its own UI (agents + specialized UI)
+  // a rapplication carries its own UI (agents + specialized UI)
   assert.equal(list.find((e) => e.id === "demo").uiUrl, "https://example/demo/index.html");
   assert.equal(list.find((e) => e.id === "demo").license, "MIT");
 });

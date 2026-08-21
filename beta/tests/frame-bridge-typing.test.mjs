@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 
+import { createActivityViewInstallationSource } from "../electron/activity-view.mjs";
 import { composeDimensionTilesFrameBridgeSource } from "../electron/dimension-tiles.mjs";
 
 await import("../ui/stream-follow.js");
@@ -52,6 +53,7 @@ const bridgeExpression = extractExpression(
   "const BETA_FRAME_BRIDGE_SOURCE =",
   ";\n\nfunction frameBridgeInstallationSource",
 );
+const activityViewInstallationSource = createActivityViewInstallationSource();
 
 function materializeBridgeSource(
   chatStreamMode,
@@ -60,6 +62,7 @@ function materializeBridgeSource(
 ) {
   return vm.runInNewContext(expression, {
     applyLookStyles,
+    activityViewInstallationSource,
     chatStreamMode,
     createStreamPacer,
     createAdaptiveRenderPacer,

@@ -596,7 +596,7 @@ export class BrainSurgeon {
       },
       {
         name: "drive_twin",
-        description: "Operate a RAPPlication twin's OWN UI in its herd tile — click, type, press, read, announce — with the animated cursor, exactly like the user would. This lets you manipulate the rapplication hands-off for the user (they just chat with you). The twin must be visible in the herd. For the twin's data itself you can also just POST to its /chat; use this to drive its visible interface.",
+        description: "Operate a rapplication twin's OWN UI in its herd tile — click, type, press, read, announce — with the animated cursor, exactly like the user would. This lets you manipulate the rapplication hands-off for the user (they just chat with you). The twin must be visible in the herd. For the twin's data itself you can also just POST to its /chat; use this to drive its visible interface.",
         defer: "never",
         skipPermission: true,
         parameters: {
@@ -685,12 +685,12 @@ export class BrainSurgeon {
       },
       {
         name: "list_rapplications",
-        description: "List RAPPlications available in the RAPP Store (specialized twins you can hatch to offload deploy/other long-running jobs). Returns id, name, summary, category, license, gated.",
+        description: "List rapplications available in the RAPP Store (specialized twins you can hatch to offload deploy/other long-running jobs). Returns id, name, summary, category, license, gated.",
         defer: "never",
         skipPermission: true,
         parameters: { type: "object", properties: {} },
         handler: async () => {
-          if (!this.twins) throw new Error("RAPPlication twins are unavailable.");
+          if (!this.twins) throw new Error("rapplication twins are unavailable.");
           const list = await this.twins.list_store();
           return JSON.stringify(
             list.map((e) => ({
@@ -704,7 +704,7 @@ export class BrainSurgeon {
       },
       {
         name: "hatch_rapplication",
-        description: "Hatch a RAPPlication from the RAPP Store as its own twin — a separate Brainstem worker on its own port that runs the specialized job autonomously in the herd. Optionally pass an instruction to start its loop. Use for specialized long-running work (e.g. Copilot Studio auto-deploy) instead of running it in this chat.",
+        description: "Hatch a rapplication from the RAPP Store as its own twin — a separate Brainstem worker on its own port that runs the specialized job autonomously in the herd. Optionally pass an instruction to start its loop. Use for specialized long-running work (e.g. Copilot Studio auto-deploy) instead of running it in this chat.",
         defer: "never",
         skipPermission: true,
         parameters: {
@@ -716,7 +716,7 @@ export class BrainSurgeon {
           required: ["store_id"],
         },
         handler: async ({ store_id: storeId, instruction = null }) => {
-          if (!this.twins) throw new Error("RAPPlication twins are unavailable.");
+          if (!this.twins) throw new Error("rapplication twins are unavailable.");
           const twin = await this.twins.hatch(storeId, instruction);
           return JSON.stringify({
             hatched: twin.id, name: twin.name, port: twin.port, url: twin.url,

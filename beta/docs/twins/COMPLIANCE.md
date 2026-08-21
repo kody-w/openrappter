@@ -2,7 +2,7 @@
 
 > Source of truth: the RAPP **spine** (`kody-w/rapp-spine`, `rapp-spine/1.1`) —
 > the situational router over the ~33 load-bearing protocols. Crawled
-> 2026-08-18 to keep the twin/herd/RAPPlication work on-canon and catch drift
+> 2026-08-18 to keep the twin/herd/rapplication work on-canon and catch drift
 > before P1. Re-crawl before each twin PR: `python crawl.py --collisions` and
 > `python crawl.py --plan "<situation>"`.
 
@@ -25,7 +25,7 @@ topology A.
 | 1 | **Chat is the only wire** — `POST /chat` is the *only* sanctioned channel for capability (`CONSTITUTION` Art. XXV; `rapp-kernel-boundary/1.0` §2). | A twin is driven **only** over its worker's `/chat`. We never invent a route. |
 | 2 | **Canonical fleet wire = `rapp-fleet-chat/1.0`** — one coordinator → many workers via **signed twin-chat events over `/chat`**. The legacy injected `POST /api/agent/<name>` is a **known unauthenticated fleet-wide RCE** and is deprecated. | When the Brainstem drives a twin fleet, it uses signed twin-chat over each twin's `/chat`. We **never** add an `/api/agent`-style route. |
 | 3 | **No new privileged route** — a *new capability* MUST NOT introduce a new privileged route; privileged routes are **loopback-only or local-token** (`rapp-kernel-boundary/1.0` §3–§5). | Twins are ordinary Brainstem workers bound to **127.0.0.1** on their own port; the kernel is unchanged; no new route is added anywhere. |
-| 4 | **The single shippable unit is the cartridge `rapp-cart/1.0`** — "if it's an `agent.py` or an `.egg`: insert → boot → run → eject; everything else (ports, twins, registry) stays under the hood." | Hatching a RAPPlication = inserting its cartridge (the store's `singleton_url` `agent.py` + optional `egg_url` `.egg`). Ports/twins stay under the hood — exactly the user-invisible model we agreed. |
+| 4 | **The single shippable unit is the cartridge `rapp-cart/1.0`** — "if it's an `agent.py` or an `.egg`: insert → boot → run → eject; everything else (ports, twins, registry) stays under the hood." | Hatching a rapplication = inserting its cartridge (the store's `singleton_url` `agent.py` + optional `egg_url` `.egg`). Ports/twins stay under the hood — exactly the user-invisible model we agreed. |
 | 5 | **Static-API discovery = `rapp-static-api/1.0`** (MIT); the RAPP Store is a static API. `RAPP_Hub` is **archived** — the live path is **RAR + RAPP_Store**. | The store client does read-only GETs against `RAPP_Store/index.json`. We use the store, never the archived hub. |
 | 6 | **RAPPID = `rapp/1` §6**: mint-once (§6.2), tail **not** derived from owner/slug/name; **read every legacy form, emit only canonical `rappid:@owner/slug:64hex`, join on the hash, never rewrite identity in place.** | `BetaRouteManager.packageAgent` mints via a UUID anchor (`Hb("rapp/1:rappid", uuidBytes)`) — mint-once, not name-derived → §6.2-compliant. Twins inherit this unchanged. |
 | 7 | **Per-repo license, never assume MIT** — the cluster mixes MIT, Apache-2.0, BSD-style, source-available ARR (`kody-w/RAPP`, `rappterbox`), and PolyForm-NC + trademarked marks (`rapp-moment`). | The store client now surfaces each entry's `license`. Live proof: the 22 rapplications span MIT (9), Apache-2.0 (6), BSD-style (5), none (2). A twin/consumer honors the entry's own terms. |

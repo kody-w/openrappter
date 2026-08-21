@@ -1,6 +1,7 @@
 (function registerDimensionTiles(root) {
   const STYLE_ID = "__rappDimensionTilesStyle";
   const SCRIPT_STATE = {
+    actorStamps: new Map(),
     tiles: [],
     captureWaiters: new Map(),
     chatDragArmed: false,
@@ -13,6 +14,8 @@
     keyboardTileId: null,
     openedHerd: false,
     pendingWake: null,
+    pendingWakeDeadline: 0,
+    pendingWakeTimer: null,
     primaryFrameGeneration: null,
     primaryId: null,
     primaryRouteKey: null,
@@ -69,18 +72,78 @@
     }
   }
 
+  function actorFromFrame(value) {
+    return ["ai", "driver"].includes(String(value || "user"))
+      ? "driver"
+      : "person";
+  }
+
+  function clearActorMarker(element) {
+    if (!element) return;
+    delete element.dataset.actor;
+    element.classList.remove("actor-marked");
+  }
+
+  function applyActorMarker(element, actor, duration = 2600, onExpire) {
+    if (!element || actor === "person") return null;
+    element.dataset.actor = actor;
+    element.classList.add("actor-marked");
+    return addTimer(() => {
+      clearActorMarker(element);
+      onExpire?.();
+    }, duration);
+  }
+
+  function applyStoredActorStamp(element, tileId) {
+    const stamp = SCRIPT_STATE.actorStamps.get(tileId);
+    if (!stamp) return;
+    const remaining = stamp.until - Date.now();
+    if (remaining <= 0) {
+      SCRIPT_STATE.actorStamps.delete(tileId);
+      return;
+    }
+    applyActorMarker(element, stamp.actor, remaining, () => {
+      if (SCRIPT_STATE.actorStamps.get(tileId) === stamp) {
+        SCRIPT_STATE.actorStamps.delete(tileId);
+      }
+    });
+  }
+
   // A change made by the driver is announced on the tile itself, briefly, so two
   // hands on one window stay legible without narrating into the chat.
   function stampActor(tileId, actor) {
-    if (!tileId || actor === "person") return;
+    if (!tileId) return;
     // Tiles are identified in the DOM by their drive handle, not by a data-tile-id.
     const element = document.querySelector(
       `.dimension-tile[data-drive="${CSS.escape(driveTile(tileId))}"]`,
     );
-    if (!element) return;
-    element.dataset.actor = actor;
-    element.classList.add("actor-marked");
-    addTimer(() => element.classList.remove("actor-marked"), 2600);
+    if (actor === "person") {
+      SCRIPT_STATE.actorStamps.delete(tileId);
+      clearActorMarker(element);
+      return;
+    }
+    const stamp = { actor, until: Date.now() + 2600 };
+    SCRIPT_STATE.actorStamps.set(tileId, stamp);
+    applyStoredActorStamp(element, tileId);
+  }
+
+  function stampSurfaceActor(surface, actor) {
+    const control = document.querySelector(
+      `[data-tile-surface-target="${CSS.escape(surface)}"]`,
+    );
+    applyActorMarker(control, actor);
+  }
+
+  function stampPrimaryActor(actor) {
+    const host = SCRIPT_STATE.context?.frame?.parentElement;
+    host?.querySelector(".dimension-tile-primary-actor-mark")?.remove();
+    if (!host || actor === "person") return;
+    const marker = document.createElement("span");
+    marker.className = "dimension-tile-primary-actor-mark";
+    marker.dataset.actor = actor;
+    marker.textContent = "AI";
+    host.appendChild(marker);
+    addTimer(() => marker.remove(), 2600);
   }
 
   function announceChange(actor, tileId, message, options) {
@@ -236,8 +299,10 @@
     return tile;
   }
 
-  async function parkCurrent(surface = SCRIPT_STATE.context?.viewMode?.surface || "herd") {
-    const actor = actingActor;
+  async function parkCurrent(
+    surface = SCRIPT_STATE.context?.viewMode?.surface || "herd",
+    { actor = actingActor } = {},
+  ) {
     const capture = await requestCapture();
     if (isPrimaryBlank(capture)) {
       throw new Error("There is no Brainstem conversation to park.");
@@ -254,13 +319,61 @@
     return tile;
   }
 
+  const WAKE_RETRY_MS = 120;
+  const WAKE_DEADLINE_MS = 15000;
+
+  // The wake handshake had exactly two chances to land: once when the frame
+  // reports ready, and once when wakeTile's route transition finishes. Both can
+  // legitimately miss — the ready message arrives while routeTransition is still
+  // true, and a second navigation then nulls frameReadyGeneration while
+  // frameChanged returns early because a wake is pending. Nothing retried, so the
+  // tile was dropped silently and the chat showed a fresh Brainstem instead of the
+  // restored conversation. Retry until the generations agree, then give up loudly.
+  function clearWakeRetry() {
+    if (SCRIPT_STATE.pendingWakeTimer === null) return;
+    clearTimeout(SCRIPT_STATE.pendingWakeTimer);
+    SCRIPT_STATE.timers.delete(SCRIPT_STATE.pendingWakeTimer);
+    SCRIPT_STATE.pendingWakeTimer = null;
+  }
+
+  function scheduleWakeRetry() {
+    if (SCRIPT_STATE.pendingWakeTimer !== null) return;
+    if (!SCRIPT_STATE.pendingWakeDeadline) {
+      SCRIPT_STATE.pendingWakeDeadline = Date.now() + WAKE_DEADLINE_MS;
+    }
+    SCRIPT_STATE.pendingWakeTimer = addTimer(() => {
+      SCRIPT_STATE.pendingWakeTimer = null;
+      if (!SCRIPT_STATE.pendingWake) return;
+      if (Date.now() > SCRIPT_STATE.pendingWakeDeadline) {
+        const title = SCRIPT_STATE.pendingWake?.title || "that tile";
+        SCRIPT_STATE.pendingWake = null;
+        SCRIPT_STATE.pendingWakeDeadline = 0;
+        showError(new Error(
+          `"${title}" could not be restored into the Brainstem — the chat never `
+          + "became ready. Its conversation is still parked; try again.",
+        ));
+        return;
+      }
+      deliverPendingWake();
+    }, WAKE_RETRY_MS);
+  }
+
   function deliverPendingWake() {
+    if (!SCRIPT_STATE.pendingWake) {
+      clearWakeRetry();
+      SCRIPT_STATE.pendingWakeDeadline = 0;
+      return false;
+    }
     if (
-      !SCRIPT_STATE.pendingWake
-      || SCRIPT_STATE.routeTransition
+      SCRIPT_STATE.routeTransition
       || SCRIPT_STATE.frameReadyGeneration
         !== SCRIPT_STATE.context?.frameGeneration
-    ) return false;
+    ) {
+      scheduleWakeRetry();
+      return false;
+    }
+    clearWakeRetry();
+    SCRIPT_STATE.pendingWakeDeadline = 0;
     postToFrame({
       type: "rapp-beta:tile-wake",
       tile: SCRIPT_STATE.pendingWake,
@@ -270,8 +383,7 @@
     return true;
   }
 
-  async function wakeTile(id) {
-    const actor = actingActor;
+  async function wakeTile(id, { actor = actingActor } = {}) {
     const requested = SCRIPT_STATE.tiles.find((tile) => tile.id === id);
     if (requested?.restorable === false) {
       throw new Error(requested.restoreError || "This tile cannot be restored.");
@@ -313,12 +425,12 @@
     }
     deliverPendingWake();
     await refreshTiles();
+    stampPrimaryActor(actor);
     announceChange(actor, tile.id, `Made "${tile.title}" primary.`);
     return tile;
   }
 
-  async function foldTile(id) {
-    const actor = actingActor;
+  async function foldTile(id, { actor = actingActor } = {}) {
     if (SCRIPT_STATE.primaryId === id) {
       const current = await requestCapture();
       if (hasConversation(current)) await persistCapture(current);
@@ -343,17 +455,16 @@
     return result.tile;
   }
 
-  async function moveTile(id, surface) {
-    const actor = actingActor;
+  async function moveTile(id, surface, { actor = actingActor } = {}) {
     const tile = await SCRIPT_STATE.context.api.tilesMove(id, surface);
     SCRIPT_STATE.keyboardTileId = null;
     await refreshTiles();
     announceChange(actor, id, `Moved "${tile.title}" to the ${surface}.`);
+    stampSurfaceActor(surface, actor);
     return tile;
   }
 
-  async function bunchTiles(sourceId, targetId) {
-    const actor = actingActor;
+  async function bunchTiles(sourceId, targetId, { actor = actingActor } = {}) {
     const result = await SCRIPT_STATE.context.api.tilesBunch(sourceId, targetId);
     SCRIPT_STATE.keyboardTileId = null;
     await refreshTiles();
@@ -363,15 +474,18 @@
   }
 
   function toggleKeyboardPickup(tile) {
+    const actor = actingActor;
+    if (actor !== "person") return;
     if (!SCRIPT_STATE.keyboardTileId) {
       SCRIPT_STATE.keyboardTileId = tile.id;
-      showToast(`Picked up "${tile.title}". Focus another tile and press Space.`);
+      announceChange(actor, tile.id,
+        `Picked up "${tile.title}". Focus another tile and press Space.`);
       renderTiles();
       return;
     }
     if (SCRIPT_STATE.keyboardTileId === tile.id) {
       SCRIPT_STATE.keyboardTileId = null;
-      showToast(`Put down "${tile.title}".`);
+      announceChange(actor, tile.id, `Put down "${tile.title}".`);
       renderTiles();
       return;
     }
@@ -380,6 +494,7 @@
   }
 
   async function raceTile(id) {
+    const actor = actingActor;
     const source = SCRIPT_STATE.tiles.find((tile) => tile.id === id);
     assertTileRoute(source);
     const current = await requestCapture();
@@ -411,7 +526,7 @@
       SCRIPT_STATE.primaryFrameGeneration = null;
       SCRIPT_STATE.primaryRouteKey = null;
       await refreshTiles();
-      showToast(`Twin ${twinId} answered the race.`);
+      announceChange(actor, race.contender.id, `Twin ${twinId} answered the race.`);
       return race;
     }
     SCRIPT_STATE.primaryId = race.contender.id;
@@ -423,7 +538,10 @@
       question: race.question,
     });
     await refreshTiles();
-    showToast(
+    stampPrimaryActor(actor);
+    announceChange(
+      actor,
+      race.contender.id,
       "Race staged. Pick a model or companion, then send the question.",
       { duration: 10000 },
     );
@@ -510,14 +628,16 @@
     });
     element.addEventListener("pointerup", (event) => {
       if (pointerId !== event.pointerId) return;
+      const actor = event.isTrusted ? "person" : "driver";
       const movement = deltaX;
       reset();
-      if (movement >= 72) void wakeTile(tile.id).catch(showError);
-      else if (movement <= -72) void foldTile(tile.id).catch(showError);
+      if (movement >= 72) void wakeTile(tile.id, { actor }).catch(showError);
+      else if (movement <= -72) void foldTile(tile.id, { actor }).catch(showError);
     });
     element.addEventListener("pointercancel", reset);
     element.addEventListener("wheel", (event) => {
       if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+      const actor = event.isTrusted ? "person" : "driver";
       event.preventDefault();
       wheelDelta += event.deltaX;
       clearTimeout(wheelTimer);
@@ -526,8 +646,8 @@
       const movement = wheelDelta;
       wheelDelta = 0;
       clearTimeout(wheelTimer);
-      if (movement > 0) void wakeTile(tile.id).catch(showError);
-      else void foldTile(tile.id).catch(showError);
+      if (movement > 0) void wakeTile(tile.id, { actor }).catch(showError);
+      else void foldTile(tile.id, { actor }).catch(showError);
     }, { passive: false });
   }
 
@@ -580,6 +700,7 @@
     element.dataset.status = tile.status;
     element.dataset.surface = tile.surface;
     element.dataset.bunch = tile.bunch || "";
+    applyStoredActorStamp(element, tile.id);
     const seat = Number(tile.arena?.seat) || 1;
     element.style.setProperty("--spread-angle", `${(seat - 6) * 2}deg`);
     element.tabIndex = 0;
@@ -649,6 +770,19 @@
         () => void foldTile(tile.id).catch(showError),
       );
       actions.append(race, fold);
+    } else {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.dataset.drive = "tiles.undo";
+      undo.textContent = "Undo";
+      undo.addEventListener("click", () => {
+        const actor = actingActor;
+        void SCRIPT_STATE.context.api.tilesUndo(tile.id)
+          .then(refreshTiles)
+          .then(() => announceChange(actor, tile.id, `Restored "${tile.title}".`))
+          .catch(showError);
+      });
+      actions.appendChild(undo);
     }
     face.append(banner, art, excerpt, meta, actions);
     element.append(corner, drag, face);
@@ -670,7 +804,9 @@
       event.preventDefault();
       event.stopPropagation();
       hideDropOverlay();
-      void bunchTiles(sourceId, tile.id).then((result) => {
+      void bunchTiles(sourceId, tile.id, {
+        actor: actorFromFrame(actor),
+      }).then((result) => {
         emitHandledChange("rapp-beta:tile-bunch-complete", {
           actor,
           bunch: result.bunch,
@@ -960,7 +1096,7 @@
     return values[0] % length;
   }
 
-  async function runArrange(action) {
+  async function runArrange(action, { actor = actingActor } = {}) {
     const surface = document.querySelector(".dimension-tile-surface");
     if (!surface || !action) return;
     surface.classList.remove(
@@ -978,7 +1114,7 @@
       const index = randomIndex(candidates.length);
       if (index < 0) throw new Error("There is no parked tile to open.");
       await new Promise((resolve) => addTimer(resolve, 320));
-      await wakeTile(candidates[index].id);
+      await wakeTile(candidates[index].id, { actor });
     }
   }
 
@@ -1058,10 +1194,11 @@
       option.textContent = text;
       arrange.appendChild(option);
     }
-    arrange.addEventListener("change", () => {
+    arrange.addEventListener("change", (event) => {
       const action = arrange.value;
       arrange.value = "";
-      void runArrange(action).catch(showError);
+      const actor = event.isTrusted ? "person" : "driver";
+      void runArrange(action, { actor }).catch(showError);
     });
     controls.append(
       label,
@@ -1160,8 +1297,9 @@
         ? surfaceForEvent()
         : surfaceForEvent;
       hideDropOverlay();
+      const mutationActor = actorFromFrame(actor);
       if (chatDrag) {
-        void parkCurrent(surface).then((tile) => {
+        void parkCurrent(surface, { actor: mutationActor }).then((tile) => {
           emitHandledChange("rapp-beta:tile-park-complete", {
             actor,
             id: tile.id,
@@ -1169,7 +1307,7 @@
           });
         }).catch(showError);
       } else {
-        void moveTile(id, surface).then((tile) => {
+        void moveTile(id, surface, { actor: mutationActor }).then((tile) => {
           emitHandledChange("rapp-beta:tile-move-complete", {
             actor,
             id: tile.id,
@@ -1204,10 +1342,10 @@
     if (event.data?.type === "rapp-beta:tile-drop-primary") {
       const id = String(event.data.id || SCRIPT_STATE.draggedTileId || "");
       if (id) {
-        const actor = String(event.data.actor || "user");
-        void wakeTile(id).then((tile) => {
+        const actor = actorFromFrame(event.data.actor);
+        void wakeTile(id, { actor }).then((tile) => {
           emitHandledChange("rapp-beta:tile-primary-complete", {
-            actor,
+            actor: actor === "driver" ? "ai" : "user",
             id: tile.id,
           });
         }).catch(showError);
@@ -1215,7 +1353,9 @@
       return;
     }
     if (event.data?.type === "rapp-beta:tile-keyboard-park") {
-      void parkCurrent(event.data.surface).catch(showError);
+      void parkCurrent(event.data.surface, {
+        actor: actorFromFrame(event.data.actor),
+      }).catch(showError);
       return;
     }
     if (event.data?.type === "rapp-beta:tile-frame-ready") {
@@ -1391,6 +1531,8 @@
       SCRIPT_STATE.context?.exitHerd();
     }
     SCRIPT_STATE.tiles = [];
+    SCRIPT_STATE.actorStamps.clear();
+    document.querySelector(".dimension-tile-primary-actor-mark")?.remove();
     SCRIPT_STATE.createdHerd = false;
     SCRIPT_STATE.context = null;
     SCRIPT_STATE.primaryId = null;

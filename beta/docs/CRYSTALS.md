@@ -5,6 +5,21 @@ the inversion is the whole idea.
 
 **The newest tile has the largest crystal. Use wears it down. A master's crystal is a nub.**
 
+## Wear is disclosure, not loss
+
+The crystal does not shrink because something was taken. It shrinks because what the tile actually
+is has been uncovered — the scaffolding it no longer needs falls away, and what is left is the
+thing itself.
+
+Pindar's line is the exact shape of it: *become such as you are, having learned what that is*. Not
+become something else, and not acquire something new — **become what you already were**, by
+learning. That is what a worn tile is: the same tile, with the parts that were only ever
+compensation ground off.
+
+Which is why the direction has to be downward. A model where mastery is *added* says the expert
+has more than the novice. This one says the expert needs less, and that the tile has been revealed
+rather than upgraded.
+
 ## Why backwards
 
 Collecting is the wrong model for expertise. Badges, levels and streaks all say the same thing — you
@@ -133,6 +148,160 @@ are stricter than for anything else a tile carries, and they are not optional:
 - **What happens on a base-model change.** An adapter is a delta over something specific. If the
   base changes underneath it, the crystal's meaning changes with it, and that has to be handled
   honestly rather than silently.
+
+## Wearing in parallel, and merging back
+
+A tile does not have to wear on one machine. The same starting crystal can be summoned onto a Mac
+mini, a phone, a television and a wallet pass, and each one wears it differently — because each is
+used differently. Those are separate dimensions of the same tile, worn at the same time.
+
+They can be brought back together. Each dimension records the ancestor it diverged from, so a merge
+has a common point to work from and can walk each history forward from it — the same shape as a
+three-way merge, and for the same reason: you cannot merge two things without knowing what they
+were before they parted.
+
+The result is one whole tile again, carrying every parent in its lineage, which becomes the current
+singleton that each device re-summons.
+
+### Where this goes
+
+The algorithm is fixable later. This is the shape it is being built toward, and it is worth
+stating plainly rather than only in constraints.
+
+**One tile, worn everywhere at once.** The Mac mini wears it on what you build. The television
+wears it on what you watch and ask about. The wallet pass wears it on where you actually went. The
+phone wears it on what you needed in the ten seconds you had. None of those contexts is visible to
+any of the others, and none of them could have been simulated — they had to be lived.
+
+**Merging is how the tile learns what no single device could teach it.** Not a synchronisation
+step, not a backup: the dimensions come home and the tile that results knows things none of its
+parents did, because it saw the same person from four directions. The singleton goes back out in
+the morning and every device starts again from a tile better than the one it contributed.
+
+**And it keeps going.** Wear that a person could never accumulate alone accrues across a life lived
+in several places at once, so over years the crystal grinds toward a nub — not because one machine
+was hammered, but because the tile was there for everything. What is left is small, specific, and
+extremely good at being *yours*.
+
+**The nub is a file.** It is not an account, a subscription, or a service that can be discontinued.
+It travels, it is summonable by seven words, and it works on a machine with no network. Whatever
+the person built over those years, they keep — which is the whole promise this project exists to
+make good on.
+
+### Merge deltas, not weights — the Dream Catcher rule
+
+The hard problem above dissolves once the right thing is being merged.
+
+**Dream Catcher Protocol** (Amendment XVI, the scaling law for parallel AI-produced content) says
+it in one line: *parallel streams produce deltas, not state; deltas merge deterministically via a
+composite key of frame tick and UTC timestamp; nothing is ever overwritten, only appended.* Its
+reason is exactly ours — without it, scaling the fleet scales the collision rate; with it, scaling
+scales throughput.
+
+**And a tile is a frame** ([RAPPID-TILE-PROTOCOL](RAPPID-TILE-PROTOCOL.md)) — so the tiles a
+dimension produces *are* its delta stream, already keyed and already mergeable. There is no separate
+event log to build.
+
+Applied here: **a dimension's real substance is its delta stream, not its adapter.** What the Mac
+mini learned is an ordered, append-only record of what happened; the trained weights are a
+*derivation* of that record. So:
+
+- **Deltas merge deterministically.** Keyed by frame and timestamp, dedupable, order-stable, and
+  never overwriting. Two devices that ran at the same moment produce two entries, not a conflict.
+- **The adapter is re-derived from the merged stream**, not blended from two adapters. There is no
+  averaging step to be lossy about.
+- **A better trainer later is a re-derivation, not a migration.** The merged stream is the durable
+  asset; every improvement in how weights are learned can be applied retroactively to histories
+  already captured.
+
+This is also why the design survives the pessimistic case. **If models never get good at merging
+adaptations, nothing here breaks** — the delta stream is still complete, still ordered, still
+merged, and still the thing a capability is rebuilt from. What would be lost is a shortcut, not the
+system.
+
+And the stream is independently useful even setting weights aside entirely: it is a faithful record
+of how a capability was actually used across every device, which is what you want for replaying a
+session, auditing what a tile did, teaching someone the path, or reproducing any dimension exactly
+as it was.
+
+### What merges cleanly, and what does not (the weights half)
+
+This is the part to be honest about, because the two halves of a tile behave completely differently.
+
+- **Transcripts and usage merge cleanly.** They are append-only records of things that happened.
+  Union them, order them, done — nothing is in conflict because nothing is claiming to replace
+  anything.
+- **Trained weights do not.** Combining adapters is a real technique and it is lossy: two
+  adaptations averaged can be worse than either, and confidently so. A merge that silently averages
+  and reports success is the failure mode here.
+
+**Today.** That is a statement about the current state of the art, not a property of the problem —
+merging adaptations is an active area and it will get better. So the refusal below is a *stage*,
+not a verdict, and the design has to leave the path open: record every merge attempt and its inputs
+whether it succeeded or refused, so that when a better merger exists it can be run over histories
+already captured rather than needing a protocol change. Do not prune a green bud.
+
+So, for now, a weight merge must be allowed to **refuse**. If two dimensions were trained in incompatible
+directions — one toward terse answers, one toward thorough ones — the honest outcomes are to keep
+both as separate tiles, or to make the person choose, never to produce a blended thing that is
+quietly worse than what went in and carries a crystal implying it is better.
+
+### Reassimilation: forward from a point, both dimensions where they agree
+
+A merge does not produce a compromise. It produces **one tile that goes forward from a chosen
+point**, carrying both dimensions wherever they do not contradict what came before them.
+
+- **Non-contradicting frames are simply both kept.** Two devices that learned different things
+  learned different things; there is nothing to reconcile, and the fold contains both.
+- **A contradiction is surfaced, never resolved silently.** Where two dimensions disagree about the
+  same thing upstream, the merge stops and says so. Picking a winner quietly is how a person ends up
+  with a tile that behaves in a way nobody chose.
+- **The result goes forward from the merge point**, with every parent in its lineage, so the
+  history that produced it stays walkable rather than being flattened away.
+
+### On the ordering — what it is, honestly
+
+The key is a **hybrid logical clock**: a logical tick paired with physical time, which is the
+standard way to get an order that respects causality while staying close to wall-clock. Append-only
+deltas that converge without coordination are an **operation-based CRDT**; folding them to current
+state is **event sourcing**; merging from a common ancestor is a **three-way merge**.
+
+Every one of those primitives is established and proven, which is the advantage: convergence is a
+solved problem and this inherits the proofs rather than re-deriving them.
+
+**But the primitives being known does not make the system known.** Each lives in its own pocket
+solving its own local problem — CRDTs in collaborative text editors, hybrid logical clocks in
+distributed databases, event sourcing in backends, adapters in machine learning, three-way merge in
+version control. Gunpowder was well understood as a firework long before anyone pointed it at a
+fortress; the chemistry was not the invention, the application was.
+
+What this assembles, and what no shipped system I can point to does end to end:
+
+- **One object that is three things at once** — the CRDT delta, the interface affordance a person
+  drags, and the unit a capability travels in. Normally the merge layer hides *under* the UI; here
+  the tile a person picks up is the delta itself, so docking does not trigger a merge, it **is** the
+  merge.
+- **Model adaptation as a fold rather than a merge.** The trained artifact is derived from the
+  stream instead of being something you combine, which routes around the one part of this that is
+  genuinely unsolved.
+- **The whole loop closed** — summon, assemble, wear across heterogeneous devices, merge
+  deterministically, re-derive, republish, re-summon — with no service anywhere in it.
+
+Stated with the honesty it deserves: *I cannot find prior art for the assembly* is a weaker claim
+than *none exists*, and the real test is whether it ships and works, not whether it is unprecedented.
+
+### Wear does not add up
+
+Two dimensions each worn thirty percent do not merge into a tile worn sixty percent. The crystal
+measures **what the tile still needs**, which is a property of the merged weights — so wear is
+**recomputed after the merge**, never summed. Treating wear as a balance to be totalled would let a
+tile become a master by being used badly in two places at once.
+
+### The public and private faces merge the same way
+
+A dimension worn privately on a person's own device and one worn in public use are both real wear.
+They merge by the same rule, and the privacy rules above still hold: what merges into a published
+tile is the capability and its lineage, not the training taken from private material.
 
 ## Rules
 

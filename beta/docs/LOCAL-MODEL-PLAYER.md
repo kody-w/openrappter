@@ -7,6 +7,24 @@ local too, so the whole product runs with no service in the loop.
 The shape is one this system already uses twice: **a self-made player in an iframe, fed by
 static data, driven over a declared bus.**
 
+## Which line this belongs to
+
+**This is an openrappter-line capability. It is deliberately not part of the Microsoft downstream's
+out-of-the-box experience**, and that is a product decision rather than a sequencing one.
+
+A managed business deployment already has model access: entitlements, governance, and a model the
+organisation has chosen and can reason about. Shipping an on-device fallback into that shape adds a
+large download, a second model whose behaviour differs from the sanctioned one, and a governance
+surface somebody now has to answer for — in exchange for solving a problem that deployment does not
+have. "Batteries included" there means the entitlements the org already holds simply work.
+
+The local player solves a different problem, for the line where nobody is entitled to anything: work
+from nothing, on any machine, with no service in the loop. That is what openrappter is for, and it is
+where this belongs.
+
+Neither line is a lesser version of the other. They are answering different questions, and a
+capability that is essential in one can be dead weight in the other.
+
 ## Where the data comes from
 
 [`kody-w/rapp-static-apis`](https://github.com/kody-w/rapp-static-apis) specifies
@@ -62,6 +80,35 @@ has gone:
   corresponds to *intent*, so provenance survives a re-encoding.
 - **No arbitrary execution.** The same law the command surface already holds: an injected thing
   that can run anything is not a payload, it is a hole.
+
+## The link carries layers, not just tiles
+
+A model layer is bytes with a hash, which is exactly what the
+[quantum-link](SUMMON-PROTOCOL.md) resolves. Nothing about the mechanism cares whether the bytes are
+a capability or a tensor, so the same addressing that summons a tile summons **a layer** — and that
+is what makes a local model practical rather than aspirational.
+
+- **Deduplication across models.** Fine-tunes overwhelmingly share a base. Content-addressed layers
+  mean the shared ones resolve to the same address, so summoning a second model fetches only what
+  actually differs from the first.
+- **Progressive materialisation.** You do not need the whole model before anything can happen.
+  Resolve the layers needed to start, begin, and continue resolving underneath — which is what makes
+  it feel instant even the first time.
+- **The cache becomes the network.** Once a layer is local, every model that shares it resolves with
+  no fetch at all, on a machine with no connection.
+- **Verification is free.** The hash is the address, so checking what arrived is the same operation
+  as finding it.
+
+This is what "bring layers of the AI down locally, instantly" means concretely: not one enormous
+transfer, but a lot of small immutable pieces that mostly turn out to be already here.
+
+### What it does not fix
+
+The first resolution of any given layer is still a real download over a real connection — instant
+applies to everything after that, and to everything shared with something already local. Layer-level
+dedupe also needs publishers to emit layers as separate addressable objects; a monolithic weight
+file is one address and dedupes with nothing. And large layers exceed raw file endpoints, so the
+manifest points at release assets or chunked sets.
 
 ## What this is honestly not
 

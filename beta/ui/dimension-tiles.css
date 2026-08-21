@@ -562,7 +562,12 @@
 
 /* Attribution is carried on the object. When the driver moves a tile the tile
    itself says so, briefly — never a toast, never a message in the chat. */
-.dimension-tile.actor-marked::after {
+.dimension-tile-surface-control button {
+  position: relative;
+}
+
+.dimension-tile.actor-marked::after,
+.dimension-tile-surface-control button.actor-marked::after {
   position: absolute;
   z-index: 4;
   right: 6px;
@@ -572,6 +577,20 @@
   background: rgba(88, 166, 255, .92);
   color: #06131f;
   content: "AI";
+  font: 700 9px/1.35 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .06em;
+  pointer-events: none;
+}
+
+.dimension-tile-primary-actor-mark {
+  position: absolute;
+  z-index: 2147483645;
+  top: 10px;
+  right: 10px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, .92);
+  color: #06131f;
   font: 700 9px/1.35 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: .06em;
   pointer-events: none;

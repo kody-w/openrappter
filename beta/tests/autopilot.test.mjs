@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { uiDriverInternals } from "../electron/ui-driver-server.mjs";
+import {
+  createAutopilotInstallationSource,
+  instrumentRappUi,
+} from "../electron/injection-sources.mjs";
 import { createAutopilot } from "../ui/autopilot.js";
 
 class FakeEvent {
@@ -185,6 +189,10 @@ class FakeElement {
   contains(element) {
     if (element === this) return true;
     return this.children.some((child) => child.contains(element));
+  }
+
+  focus() {
+    this.ownerDocument.activeElement = this;
   }
 
   dispatchEvent(event) {
@@ -429,6 +437,7 @@ function makeFixture({
   remotePrimary = false,
   sourceSetsMime = true,
   supplyTileAdapter = true,
+  transcriptTurns = null,
 } = {}) {
   const document = new FakeDocument();
   const window = fakeWindow(document);
@@ -461,6 +470,8 @@ function makeFixture({
   let modelCalls = 0;
   let otherClicks = 0;
   let parkedSequence = 0;
+  const sentTexts = [];
+  const typedTexts = [];
   const tileElements = new Map();
 
   const controls = new Map();
@@ -587,22 +598,6 @@ function makeFixture({
   ], sequence);
   document.body.appendChild(chatSource);
 
-  let undoControl = null;
-  function ensureUndoControl() {
-    if (undoControl?.isConnected) return undoControl;
-    undoControl = document.createElement("button");
-    undoControl.dataset.drive = "tiles.undo";
-    undoControl.textContent = "Undo";
-    undoControl.addEventListener("click", () => {
-      const foldedTile = [...state.values()].find((tile) => tile.status === "folded");
-      if (foldedTile) foldedTile.status = "parked";
-      render();
-    });
-    document.body.appendChild(undoControl);
-    return undoControl;
-  }
-  if (folded) ensureUndoControl();
-
   const other = document.createElement("button");
   other.dataset.drive = "other.button";
   other.textContent = "Other";
@@ -610,6 +605,43 @@ function makeFixture({
     otherClicks += 1;
   });
   document.body.appendChild(other);
+
+  const dash = document.createElement("button");
+  dash.dataset.drive = "dash.button";
+  dash.textContent = "--foo";
+  document.body.appendChild(dash);
+
+  const chatElement = document.createElement("div");
+  chatElement.id = "chat";
+  chatElement.dataset.drive = "brainstem.chat";
+  document.body.appendChild(chatElement);
+  let requestSequence = 0;
+  const recordModelCall = () => {
+    modelCalls += 1;
+    requestSequence += 1;
+    const slot = document.createElement("section");
+    slot.classList.add("response-slot");
+    slot.dataset.requestId = String(requestSequence);
+    chatElement.appendChild(slot);
+  };
+  const composer = document.createElement("textarea");
+  composer.id = "input";
+  composer.dataset.drive = "brainstem.composer";
+  composer.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    recordModelCall();
+  });
+  document.body.appendChild(composer);
+  const send = document.createElement("button");
+  send.id = "send";
+  send.dataset.drive = "brainstem.send";
+  send.addEventListener("click", recordModelCall);
+  document.body.appendChild(send);
+  const modelProxy = document.createElement("button");
+  modelProxy.dataset.drive = "other.modelProxy";
+  modelProxy.addEventListener("click", recordModelCall);
+  document.body.appendChild(modelProxy);
 
   function createTile(record, index) {
     const tile = document.createElement("article");
@@ -674,10 +706,18 @@ function makeFixture({
       fold.textContent = "Fold";
       fold.addEventListener("click", () => {
         state.get(record.id).status = "folded";
-        ensureUndoControl();
         render();
       });
       tile.appendChild(fold);
+    } else {
+      const undo = document.createElement("button");
+      undo.dataset.drive = "tiles.undo";
+      undo.textContent = "Undo";
+      undo.addEventListener("click", () => {
+        state.get(record.id).status = "parked";
+        render();
+      });
+      tile.appendChild(undo);
     }
     return tile;
   }
@@ -700,19 +740,22 @@ function makeFixture({
 
   const chat = {
     async read({ last } = {}) {
-      const turns = largeTranscript
+      const turns = transcriptTurns || (largeTranscript
         ? [{ role: "assistant", text: "x".repeat(100_000) }]
         : [
             { role: "user", text: "hello" },
             { role: "assistant", text: "hi" },
-          ];
+          ]);
       return last === undefined ? turns : turns.slice(-last);
     },
     async send(text) {
       modelCalls += 1;
+      sentTexts.push(String(text));
       return { accepted: true, text };
     },
-    async type() {},
+    async type(text) {
+      typedTexts.push(String(text));
+    },
   };
 
   const tiles = {
@@ -735,11 +778,13 @@ function makeFixture({
     chat,
     console: { log: (line) => logs.push(line) },
     document,
+    composer,
     tiles: supplyTileAdapter ? tiles : undefined,
     window,
   });
 
   return {
+    composer,
     document,
     get currentSurface() {
       return currentSurface;
@@ -752,10 +797,13 @@ function makeFixture({
     },
     logs,
     other,
+    modelProxy,
     primary,
     rapp,
     render,
     sequence,
+    send,
+    sentTexts,
     snapshot() {
       return [...state.values()]
         .map((record) => ({ ...record }))
@@ -763,6 +811,7 @@ function makeFixture({
     },
     state,
     tile: (id) => tileElements.get(id) || null,
+    typedTexts,
     window,
   };
 }
@@ -917,6 +966,12 @@ test("every verb except chat.send leaves the model-call counter at zero", async 
     ["tile.fold", { id: "tile-7" }],
     ["tile.undo", {}],
   ]);
+  const fixtureRegistry = makeFixture();
+  assert.deepEqual(
+    [...invocations.keys()].sort(),
+    fixtureRegistry.rapp.registry.map((entry) => entry.cmd).sort(),
+    "every registry verb must be invoked here, and no phantom verbs",
+  );
   for (const [cmd, args] of invocations) {
     const fixture = makeFixture({
       bunched: cmd === "tile.unbunch",
@@ -931,6 +986,86 @@ test("every verb except chat.send leaves the model-call counter at zero", async 
     );
   }
   t.diagnostic(`proved ${invocations.size} verbs independently`);
+});
+
+test("raw UI verbs refuse known chat-send paths without spending a model call", async () => {
+  const clickFixture = makeFixture();
+  const clicked = await clickFixture.rapp({
+    cmd: "ui.click",
+    args: { handle: "brainstem.send" },
+  });
+  assert.equal(clicked.ok, false);
+  assert.equal(clicked.results[0].reason, "bad_argument");
+  assert.match(clicked.results[0].error, /use chat\.send, which costs a model call/);
+  assert.equal(clicked.results[0].costs_model, false);
+  assert.equal(clickFixture.modelCalls, 0);
+
+  const pressFixture = makeFixture();
+  pressFixture.composer.focus();
+  const pressed = await pressFixture.rapp({
+    cmd: "ui.press",
+    args: { key: "Enter" },
+  });
+  assert.equal(pressed.ok, false);
+  assert.equal(pressed.results[0].reason, "bad_argument");
+  assert.match(pressed.results[0].error, /use chat\.send, which costs a model call/);
+  assert.equal(pressed.results[0].costs_model, false);
+  assert.equal(pressFixture.modelCalls, 0);
+});
+
+test("a generic UI action reports when its target starts a model call", async () => {
+  const fixture = makeFixture();
+  const result = await fixture.rapp({
+    cmd: "ui.click",
+    args: { handle: "other.modelProxy" },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.results[0].costs_model, true);
+  assert.equal(fixture.modelCalls, 1);
+  assert.match(fixture.logs[0], /\[model call\]$/);
+});
+
+test("quoted dash-leading values and the end-of-flags separator stay literal", async () => {
+  const fixture = makeFixture();
+  const quotedSend = await fixture.rapp('chat.send "-- what does this do?"');
+  assert.equal(quotedSend.ok, true);
+  assert.equal(fixture.sentTexts.at(-1), "-- what does this do?");
+
+  const quotedType = await fixture.rapp('chat.type "--- section"');
+  assert.equal(quotedType.ok, true);
+  assert.equal(fixture.typedTexts.at(-1), "--- section");
+
+  const equalsValue = await fixture.rapp("ui.wait dash.button --text=--foo");
+  assert.equal(equalsValue.ok, true);
+  const quotedFlagValue = await fixture.rapp('ui.wait dash.button --text="--foo"');
+  assert.equal(quotedFlagValue.ok, true);
+  const separateQuotedValue = await fixture.rapp('ui.wait dash.button --text "--foo"');
+  assert.equal(separateQuotedValue.ok, true);
+
+  const separated = await fixture.rapp("chat.send -- --foo");
+  assert.equal(separated.ok, true);
+  assert.equal(fixture.sentTexts.at(-1), "--foo");
+
+  const unknownFlag = await fixture.rapp("chat.send --nope");
+  assert.equal(unknownFlag.ok, false);
+  assert.equal(unknownFlag.results[0].reason, "bad_argument");
+});
+
+test("tile.fold followed by tile.undo uses the folded tile control", async () => {
+  const fixture = makeFixture();
+  const folded = await fixture.rapp("tile.fold tile-7");
+  assert.equal(folded.ok, true);
+  assert.equal(fixture.state.get("tile-7").status, "folded");
+  assert.equal(
+    fixture.tile("tile-7").children.find(
+      (child) => child.dataset.drive === "tiles.undo",
+    )?.textContent,
+    "Undo",
+  );
+
+  const undone = await fixture.rapp("tile.undo");
+  assert.equal(undone.ok, true);
+  assert.equal(fixture.state.get("tile-7").status, "parked");
 });
 
 test("scripts over the 64-command cap are refused before running", async () => {
@@ -1133,6 +1268,37 @@ test("result envelopes stay within 64 KB", async () => {
   const result = await fixture.rapp("chat.read");
   assert.ok(new TextEncoder().encode(JSON.stringify(result)).byteLength <= 64 * 1024);
   assert.equal(result.result_truncated, true);
+  assert.equal(result.results[0].reason, "result_too_large");
+});
+
+test("many-turn chat reads retain recent turns and report all omissions", async () => {
+  const transcriptTurns = Array.from({ length: 80 }, (_, index) => ({
+    role: index % 2 ? "assistant" : "user",
+    text: `${index}:`.padEnd(4000, "x"),
+  }));
+  const fixture = makeFixture({ transcriptTurns });
+  const result = await fixture.rapp("chat.read");
+  const read = result.results[0];
+  assert.equal(result.ok, true);
+  assert.equal(result.result_truncated, true);
+  assert.ok(read.turns.length > 0);
+  assert.ok(read.turns.length < 50);
+  assert.equal(read.turns.at(-1).text, transcriptTurns.at(-1).text);
+  assert.equal(read.turns_omitted, 80 - read.turns.length);
+});
+
+test("chat.read defaults to the latest 50 turns before envelope truncation", async () => {
+  const transcriptTurns = Array.from({ length: 60 }, (_, index) => ({
+    role: index % 2 ? "assistant" : "user",
+    text: `turn ${index}`,
+  }));
+  const fixture = makeFixture({ transcriptTurns });
+  const result = await fixture.rapp("chat.read");
+  const read = result.results[0];
+  assert.equal(result.result_truncated, undefined);
+  assert.equal(read.turns.length, 50);
+  assert.equal(read.turns[0].text, "turn 10");
+  assert.equal(read.turns_omitted, 10);
 });
 
 test("production DOM fallbacks perform the drag without test adapters", async () => {
@@ -1208,14 +1374,29 @@ test("the driver validates, budgets, and executes Autopilot in the shell frame",
 test("the shell and injected rapplication frames install the same Autopilot module", () => {
   const shell = readFileSync(new URL("../ui/index.html", import.meta.url), "utf8");
   const main = readFileSync(new URL("../electron/main.mjs", import.meta.url), "utf8");
+  const classicSource = readFileSync(
+    new URL("../ui/autopilot.js", import.meta.url),
+    "utf8",
+  ).replace("export function createAutopilot", "function createAutopilot");
   const driver = readFileSync(
     new URL("../electron/ui-driver-server.mjs", import.meta.url),
     "utf8",
   );
   assert.doesNotMatch(shell, /type="module" src="autopilot\.js"/);
   assert.match(main, /autopilotClassicSource/);
-  assert.match(main, /<script>\$\{classicSource\}<\/script>/);
+  assert.match(main, /createInstrumentedRappUi/);
   assert.match(main, /did-finish-load/);
   assert.match(main, /autopilotInstallationSource\(\)/);
+  const installation = createAutopilotInstallationSource({
+    capability: "test-capability",
+    classicSource,
+  });
+  assert.match(installation, /function createAutopilot/);
+  assert.match(
+    instrumentRappUi("<html><head></head></html>", {
+      autopilotSource: installation,
+    }),
+    /<script>[\s\S]*function createAutopilot[\s\S]*<\/script>/,
+  );
   assert.match(driver, /commandHasAutopilot\(command\)/);
 });

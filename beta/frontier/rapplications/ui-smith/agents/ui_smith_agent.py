@@ -1,5 +1,5 @@
 """
-UI Smith — a Frontier RAPPlication (headless).
+UI Smith — a Frontier rapplication (headless).
 
 The Brainstem never needs a pre-built, foreign UI. Given an agent.py — any
 agent.py it already understands — UI Smith DERIVES a fit-for-purpose UI from the

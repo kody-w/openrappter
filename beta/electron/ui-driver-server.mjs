@@ -1228,10 +1228,23 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
         180000,
       );
       const deadline = Date.now() + timeoutMs;
+      let missedSlotPolls = 0;
       while (Date.now() < deadline) {
         const slot = document.querySelector(
           `#chat .response-slot[data-request-id="${requestId}"]`,
         );
+        if (!slot) {
+          missedSlotPolls += 1;
+          if (missedSlotPolls >= 2) {
+            throw new Error(
+              "The visible Brainstem chat was cleared or reset before the reply "
+                + "arrived; the delegated request was cancelled.",
+            );
+          }
+          await sleep(150);
+          continue;
+        }
+        missedSlotPolls = 0;
         const reply = slot?.querySelector(
           ".msg.assistant:not(.typing-indicator):not(.stream-arriving)",
         );

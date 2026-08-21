@@ -5,13 +5,13 @@ title RAPP Brainstem Frontier Installer
 set "BRAINSTEM_HOME=%USERPROFILE%\.brainstem"
 set "BETA_HOME=%BRAINSTEM_HOME%\beta-launcher"
 set "BETA_SOURCE=%BETA_HOME%\src"
-set "REPO_URL=https://github.com/microsoft/aibast-agents-library.git"
+set "REPO_URL=https://github.com/kody-w/openrappter.git"
 set "REPO_REF=main"
 set "REPO_COMMIT="
 set "RELEASE_TAG="
 set "RUNTIME_VERSION_URL="
 set "NODE_VERSION=24.19.0"
-set "BOOTSTRAP_URL=https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/install.ps1"
+set "BOOTSTRAP_URL=https://raw.githubusercontent.com/kody-w/openrappter/main/install.ps1"
 
 if defined BRAINSTEM_BETA_HOME set "BETA_HOME=%BRAINSTEM_BETA_HOME%"
 if defined BRAINSTEM_BETA_REPO_URL set "REPO_URL=%BRAINSTEM_BETA_REPO_URL%"
@@ -60,10 +60,10 @@ set "BOOTSTRAP=%TEMP%\rapp-brainstem-bootstrap-%RANDOM%.ps1"
 echo [..] Preparing the shared global Brainstem...
 curl.exe -fL --progress-bar "%BOOTSTRAP_URL%" -o "%BOOTSTRAP%"
 if errorlevel 1 goto :fail
-if /i not "%REPO_URL%"=="https://github.com/microsoft/aibast-agents-library.git" (
+if /i not "%REPO_URL%"=="https://github.com/kody-w/openrappter.git" (
   set "GIT_CONFIG_COUNT=1"
   set "GIT_CONFIG_KEY_0=url.%REPO_URL%.insteadOf"
-  set "GIT_CONFIG_VALUE_0=https://github.com/microsoft/aibast-agents-library.git"
+  set "GIT_CONFIG_VALUE_0=https://github.com/kody-w/openrappter.git"
 )
 if defined RELEASE_TAG (
   set "BRAINSTEM_REPO_URL=%REPO_URL%"
@@ -207,6 +207,15 @@ if errorlevel 1 goto :fail
 
 echo.
 echo [..] Installing Electron and the bundled GitHub Copilot CLI...
+REM Put the portable runtime first on PATH. npm.cmd runs the package's own
+REM scripts, and `npm test` is `node --test` — where `node` resolves from PATH,
+REM not from the npm that invoked it. Without this, a machine with an older
+REM system Node installs with the portable runtime and then verifies with the
+REM wrong one: node:sqlite is absent before 22.5, so eleven test files fail to
+REM load and the install reports failure while the correct runtime sits unused
+REM beside it. install.sh has done this since line 247; this is its counterpart.
+set "PATH=%NODE_DIR%;%PATH%"
+
 set "npm_config_cache=%BETA_HOME%\npm-cache"
 pushd "%BETA_SOURCE%\beta"
 REM --ignore-scripts: a package postinstall must not fetch and execute a native

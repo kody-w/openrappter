@@ -1712,6 +1712,8 @@ function installTileDragFrameBridge(settings) {
       event.preventDefault();
       window.parent.postMessage({
         type: "rapp-beta:tile-keyboard-park",
+        actor: event.__rappAutopilotActor
+          || (window.__rappAutopilotEvents?.has(event) ? "ai" : "user"),
         surface,
       }, "*");
     }, { signal: controller.signal });

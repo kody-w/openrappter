@@ -2,6 +2,7 @@ const AUTOPILOT_VERSION = "rapp-autopilot/1.0";
 const COMMAND_LIMIT = 64;
 const RESULT_LIMIT_BYTES = 64 * 1024;
 const TEXT_LIMIT = 64 * 1024;
+const CHAT_READ_DEFAULT_TURNS = 50;
 const SURFACES = Object.freeze(["herd", "arena", "binder"]);
 const SPEEDS = Object.freeze({
   natural: Object.freeze({ hoverMs: 240, moveMs: 720, steps: 12 }),
@@ -35,16 +36,49 @@ function textBytes(value) {
 
 function boundedEnvelope(envelope) {
   if (textBytes(envelope) <= RESULT_LIMIT_BYTES) return envelope;
-  const results = envelope.results.map((result) => ({ ...result }));
+  const results = envelope.results.map((result) => Object.fromEntries(
+    Object.entries(result).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? [...value] : value,
+    ]),
+  ));
+  const candidate = () => ({
+    ...envelope,
+    ok: results.every((result) => result.ok),
+    results,
+    result_truncated: true,
+  });
+  while (true) {
+    let largest = null;
+    for (const [resultIndex, result] of results.entries()) {
+      for (const [key, value] of Object.entries(result)) {
+        if (!Array.isArray(value) || value.length <= 1) continue;
+        if (!largest || value.length > largest.length) {
+          largest = { key, length: value.length, resultIndex };
+        }
+      }
+    }
+    if (!largest) break;
+    const result = results[largest.resultIndex];
+    const omitted = Math.max(1, Math.floor(largest.length / 2));
+    result[largest.key] = result[largest.key].slice(omitted);
+    result[`${largest.key}_omitted`] = (
+      Number(result[`${largest.key}_omitted`]) || 0
+    ) + omitted;
+    result.result_truncated = true;
+    const shrunk = candidate();
+    if (textBytes(shrunk) <= RESULT_LIMIT_BYTES) return shrunk;
+  }
   for (let index = results.length - 1; index >= 0; index -= 1) {
     const result = results[index];
     results[index] = {
       cmd: result.cmd,
-      ok: result.ok,
+      ok: false,
+      reason: "result_too_large",
       result_truncated: true,
     };
-    const candidate = { ...envelope, results, result_truncated: true };
-    if (textBytes(candidate) <= RESULT_LIMIT_BYTES) return candidate;
+    const truncated = candidate();
+    if (textBytes(truncated) <= RESULT_LIMIT_BYTES) return truncated;
   }
   return {
     ok: false,
@@ -81,11 +115,15 @@ function tokenize(line) {
   const tokens = [];
   let token = "";
   let quote = "";
+  let quoted = false;
+  let literal = false;
   let escaped = false;
   let started = false;
   for (const character of String(line || "")) {
     if (escaped) {
       token += character;
+      quoted = true;
+      if (token.length === 1) literal = true;
       started = true;
       escaped = false;
       continue;
@@ -98,19 +136,24 @@ function tokenize(line) {
     if (quote) {
       if (character === quote) quote = "";
       else token += character;
+      quoted = true;
       started = true;
       continue;
     }
     if (character === "\"" || character === "'") {
+      if (!started) literal = true;
       quote = character;
+      quoted = true;
       started = true;
       continue;
     }
     if (character === "#" && !started && tokens.length === 0) break;
     if (/\s/.test(character)) {
       if (started) {
-        tokens.push(token);
+        tokens.push({ literal, quoted, text: token });
         token = "";
+        quoted = false;
+        literal = false;
         started = false;
       }
       continue;
@@ -126,7 +169,7 @@ function tokenize(line) {
       "Argument input requires a closed single- or double-quoted value.",
     );
   }
-  if (started) tokens.push(token);
+  if (started) tokens.push({ literal, quoted, text: token });
   return tokens;
 }
 
@@ -176,6 +219,7 @@ export function createAutopilot(ctx = {}) {
   const remoteTargets = new Map();
   const pendingMessages = new Map();
   let messageSequence = 0;
+  let lastFoldedTileId = null;
 
   function sleep(delayMs) {
     return new Promise((resolve) => {
@@ -853,7 +897,16 @@ export function createAutopilot(ctx = {}) {
     }
   }
 
-  async function clickElement(element, { animate = true } = {}) {
+  function modelSendInputError(argument) {
+    return new AutopilotInputError(
+      argument,
+      "a non-model UI action; use chat.send for model calls",
+      `Argument ${argument} does not accept the chat send control; use chat.send, `
+        + "which costs a model call.",
+    );
+  }
+
+  async function clickElement(element, { animate = true, allowSend = false } = {}) {
     if (!element) {
       throw new AutopilotInputError(
         "handle",
@@ -863,6 +916,9 @@ export function createAutopilot(ctx = {}) {
     }
     if (element.disabled || element.getAttribute?.("aria-disabled") === "true") {
       throw new Error(`UI control ${driveHandle(element) || "(unknown)"} is disabled.`);
+    }
+    if (!allowSend && element === chatSendControl()) {
+      throw modelSendInputError("handle");
     }
     const point = center(elementRect(element));
     const cursor = createCursor();
@@ -928,6 +984,15 @@ export function createAutopilot(ctx = {}) {
     const details = keyDetails(key);
     const element = doc?.activeElement || doc?.body;
     if (!element) throw new Error("The page has no keyboard target.");
+    if (
+      (details.key === "Enter" && element === chatInput())
+      || (
+        ["Enter", " "].includes(details.key)
+        && element === chatSendControl()
+      )
+    ) {
+      throw modelSendInputError("key");
+    }
     const down = makeEvent("keydown", details, "keyboard");
     const up = makeEvent("keyup", details, "keyboard");
     element.dispatchEvent(down);
@@ -1067,6 +1132,35 @@ export function createAutopilot(ctx = {}) {
       || doc?.getElementById?.("send");
   }
 
+  function chatRequestIds() {
+    const chat = findByHandle("brainstem.chat") || doc?.getElementById?.("chat");
+    return new Set(
+      [...(chat?.querySelectorAll?.(".response-slot") || [])]
+        .map((slot) => String(slot.dataset?.requestId || ""))
+        .filter(Boolean),
+    );
+  }
+
+  function modelCallStarted(before) {
+    return [...chatRequestIds()].some((requestId) => !before.has(requestId));
+  }
+
+  async function observeModelCall(action) {
+    const before = chatRequestIds();
+    try {
+      const result = await action();
+      await Promise.resolve();
+      return {
+        ...(result && typeof result === "object" ? result : {}),
+        costs_model: modelCallStarted(before),
+      };
+    } catch (error) {
+      await Promise.resolve();
+      if (modelCallStarted(before)) error.costsModel = true;
+      throw error;
+    }
+  }
+
   function setControlValue(element, value) {
     const next = String(value);
     const prototype = Object.getPrototypeOf(element);
@@ -1081,24 +1175,31 @@ export function createAutopilot(ctx = {}) {
   }
 
   async function localChatRead(last) {
+    let messages;
+    let previouslyOmitted = 0;
     if (suppliedChat?.read) {
-      const turns = await suppliedChat.read({ last });
-      return { turns: Array.isArray(turns) ? turns : turns?.turns || [] };
+      const response = await suppliedChat.read({ last });
+      messages = Array.isArray(response) ? response : response?.turns || [];
+      previouslyOmitted = Number(response?.turns_omitted) || 0;
+    } else {
+      const chat = findByHandle("brainstem.chat") || doc?.getElementById?.("chat");
+      if (!chat) throw new Error("The visible Brainstem transcript is unavailable.");
+      messages = [...chat.querySelectorAll?.(".msg.user,.msg.assistant") || []]
+        .filter((message) => (
+          !message.classList?.contains?.("typing-indicator")
+          && !message.classList?.contains?.("stream-arriving")
+          && !message.hasAttribute?.("data-rapp-provisional")
+        ))
+        .map((message) => ({
+          role: message.classList?.contains?.("user") ? "user" : "assistant",
+          text: normalizedText(message.querySelector?.(".bubble") || message).slice(0, 16000),
+        }));
     }
-    const chat = findByHandle("brainstem.chat") || doc?.getElementById?.("chat");
-    if (!chat) throw new Error("The visible Brainstem transcript is unavailable.");
-    const messages = [...chat.querySelectorAll?.(".msg.user,.msg.assistant") || []]
-      .filter((message) => (
-        !message.classList?.contains?.("typing-indicator")
-        && !message.classList?.contains?.("stream-arriving")
-        && !message.hasAttribute?.("data-rapp-provisional")
-      ))
-      .map((message) => ({
-        role: message.classList?.contains?.("user") ? "user" : "assistant",
-        text: normalizedText(message.querySelector?.(".bubble") || message).slice(0, 16000),
-      }));
+    const limit = last ?? CHAT_READ_DEFAULT_TURNS;
+    const turns = messages.slice(-limit);
     return {
-      turns: last === undefined ? messages : messages.slice(-last),
+      turns,
+      turns_omitted: previouslyOmitted + Math.max(0, messages.length - turns.length),
     };
   }
 
@@ -1133,7 +1234,7 @@ export function createAutopilot(ctx = {}) {
       [...(doc?.querySelectorAll?.("#chat .response-slot[data-request-id]") || [])]
         .map((slot) => String(slot.dataset?.requestId || "")),
     );
-    await clickElement(send);
+    await clickElement(send, { allowSend: true });
     let requestId = null;
     const accepted = await waitUntil(() => {
       const slots = [...(doc?.querySelectorAll?.(
@@ -1636,6 +1737,7 @@ export function createAutopilot(ctx = {}) {
       tileRecord(tileElement(args.id))?.status === "folded"
     ));
     if (!folded) throw new Error(`Tile "${args.id}" did not fold through its visible control.`);
+    lastFoldedTileId = args.id;
     emitChange("tile.fold", { id: args.id });
     return { actor: "ai", folded: true, id: args.id, ok: true };
   }
@@ -1644,7 +1746,9 @@ export function createAutopilot(ctx = {}) {
     if (!isShellPage() && win?.parent && win.parent !== win) {
       return requestParent("command", { args: {}, cmd: "tile.undo" });
     }
-    const control = findByHandle("tiles.undo");
+    const preferredTile = lastFoldedTileId ? tileElement(lastFoldedTileId) : null;
+    const control = descendantByHandle(preferredTile, "tiles.undo")
+      || findByHandle("tiles.undo");
     if (!control) {
       throw new Error("The visible 10 second tile undo control is unavailable.");
     }
@@ -1658,6 +1762,7 @@ export function createAutopilot(ctx = {}) {
       ))
     ));
     if (!undone) throw new Error("The visible tile undo control did not restore a folded tile.");
+    lastFoldedTileId = null;
     emitChange("tile.undo");
     return { actor: "ai", ok: true, undone: true };
   }
@@ -1702,7 +1807,12 @@ export function createAutopilot(ctx = {}) {
       example: "ui.click brainstem.menu",
       run: async (args) => {
         const local = findByHandle(args.handle);
-        if (local) return { ok: true, ...(await clickElement(local)) };
+        if (local) {
+          return {
+            ok: true,
+            ...(await observeModelCall(() => clickElement(local))),
+          };
+        }
         if (isShellPage()) return requestFrame("ui.click", args);
         throw new Error(`UI handle "${args.handle}" is unavailable.`);
       },
@@ -1724,7 +1834,10 @@ export function createAutopilot(ctx = {}) {
           )
         )
           ? requestFrame("ui.press", args)
-          : { ok: true, ...localPress(args.key) }
+          : {
+              ok: true,
+              ...(await observeModelCall(() => localPress(args.key))),
+            }
       ),
     }),
     descriptor({
@@ -2020,19 +2133,23 @@ export function createAutopilot(ctx = {}) {
   }
 
   function normalizeCli(tokens) {
-    const cmd = String(tokens[0] || "");
+    const cmd = String(tokens[0]?.text || "");
     const entry = commands.get(cmd);
     if (!entry) return { cmd, error: unknownCommand(cmd) };
     const positionals = [];
     const flags = {};
     for (let index = 1; index < tokens.length; index += 1) {
       const token = tokens[index];
-      if (!token.startsWith("--")) {
-        positionals.push(token);
+      if (!token.literal && token.text === "--") {
+        positionals.push(...tokens.slice(index + 1).map((item) => item.text));
+        break;
+      }
+      if (token.literal || !token.text.startsWith("--")) {
+        positionals.push(token.text);
         continue;
       }
-      const equals = token.indexOf("=");
-      const name = token.slice(2, equals > 2 ? equals : undefined);
+      const equals = token.text.indexOf("=");
+      const name = token.text.slice(2, equals > 2 ? equals : undefined);
       const field = entry.flags.find((candidate) => candidate.name === name);
       if (!field) {
         throw new AutopilotInputError(
@@ -2047,12 +2164,17 @@ export function createAutopilot(ctx = {}) {
           }.`,
         );
       }
-      let value = equals > 2 ? token.slice(equals + 1) : undefined;
+      let value = equals > 2 ? token.text.slice(equals + 1) : undefined;
+      let valueWasQuoted = equals > 2 && token.quoted;
       if (value === undefined) {
         index += 1;
-        value = tokens[index];
+        value = tokens[index]?.text;
+        valueWasQuoted = tokens[index]?.quoted === true;
       }
-      if (value === undefined || String(value).startsWith("--")) {
+      if (
+        value === undefined
+        || (equals <= 2 && !valueWasQuoted && String(value).startsWith("--"))
+      ) {
         throw new AutopilotInputError(
           name,
           acceptedType(field),
@@ -2168,10 +2290,13 @@ export function createAutopilot(ctx = {}) {
       }
       const args = defaultArgs(normalized.cmd, normalized.args);
       const value = await normalized.entry.run(args);
+      const costsModel = normalized.entry.costsModel === true
+        || value?.costs_model === true;
       const result = {
         cmd: normalized.cmd,
         ok: value?.ok !== false,
         ...(value && typeof value === "object" ? value : {}),
+        costs_model: costsModel,
       };
       if (
         result.ok
@@ -2185,14 +2310,17 @@ export function createAutopilot(ctx = {}) {
       const cmd = normalized?.cmd
         || item.cmd
         || item.value?.cmd
-        || item.tokens?.[0]
+        || item.tokens?.[0]?.text
         || "(command)";
       const result = error instanceof AutopilotInputError
         ? resultError(cmd, "bad_argument", error.message, {
             argument: error.argument,
             accepts: error.accepts,
+            costs_model: Boolean(normalized?.entry?.costsModel || error?.costsModel),
           })
-        : resultError(cmd, "command_failed", error?.message || error);
+        : resultError(cmd, "command_failed", error?.message || error, {
+            costs_model: Boolean(normalized?.entry?.costsModel || error?.costsModel),
+          });
       if (log) logResult(result);
       return result;
     }
@@ -2202,7 +2330,8 @@ export function createAutopilot(ctx = {}) {
     const suffix = result.ok
       ? "ok"
       : `failed (${result.reason || "command_failed"}): ${result.error || ""}`.trim();
-    logConsole.log(`[rapp] ${result.cmd} ${suffix}`);
+    const cost = result.costs_model ? " [model call]" : "";
+    logConsole.log(`[rapp] ${result.cmd} ${suffix}${cost}`);
   }
 
   async function executeForwarded(payload) {
@@ -2245,9 +2374,17 @@ export function createAutopilot(ctx = {}) {
     if (action === "ui.click") {
       const element = findByHandle(payload.handle);
       if (!element) throw new Error(`UI handle "${payload.handle}" is unavailable.`);
-      return { ok: true, ...(await clickElement(element)) };
+      return {
+        ok: true,
+        ...(await observeModelCall(() => clickElement(element))),
+      };
     }
-    if (action === "ui.press") return { ok: true, ...localPress(payload.key) };
+    if (action === "ui.press") {
+      return {
+        ok: true,
+        ...(await observeModelCall(() => localPress(payload.key))),
+      };
+    }
     if (action === "ui.wait") {
       return { ok: true, ...(await localWait(payload.handle, payload.text)) };
     }

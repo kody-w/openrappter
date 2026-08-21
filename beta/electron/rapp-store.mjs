@@ -1,4 +1,4 @@
-// RAPP Store client — the source of RAPPlications a twin hatches from.
+// RAPP Store client — the source of rapplications a twin hatches from.
 //
 // The store publishes a single catalog (index.json, schema "rapp-store/1.0")
 // whose `rapplications[]` each name a **sha256-pinned single-file agent.py**
@@ -105,7 +105,7 @@ function normalizeEntry(entry) {
     // Per-repo terms vary (MIT, source-available ARR, PolyForm-NC …) — surface
     // the entry's own license so a twin/consumer honors it, never assume MIT.
     license: entry.license || null,
-    // A RAPPlication is specialized agents PLUS a specialized UI for its use
+    // A rapplication is specialized agents PLUS a specialized UI for its use
     // case; the twin tile renders this UI, bound to the twin's worker port.
     uiUrl: entry.ui_url || null,
     uiSha256: (entry.ui_sha256 || "").toLowerCase(),
@@ -257,10 +257,10 @@ export class RappStoreClient {
     const wanted = String(id || "").trim().toLowerCase();
     const entry = (await this.revalidate()).rapplications
       .find((e) => e.id.toLowerCase() === wanted);
-    if (!entry) throw new Error(`No RAPPlication "${id}" in the RAPP Store.`);
+    if (!entry) throw new Error(`No rapplication "${id}" in the RAPP Store.`);
     if (entry.yanked) {
       const error = new Error(
-        `RAPPlication "${entry.id}" has been yanked (recalled); refusing to resolve or download it.`,
+        `rapplication "${entry.id}" has been yanked (recalled); refusing to resolve or download it.`,
       );
       error.code = "yanked";
       error.entry = entry;
@@ -268,7 +268,7 @@ export class RappStoreClient {
     }
     if (entry.deprecated) {
       const error = new Error(
-        `RAPPlication "${entry.id}" is deprecated by its publisher; `
+        `rapplication "${entry.id}" is deprecated by its publisher; `
         + "refusing to install or hatch it — pick its replacement from the store.",
       );
       error.code = "deprecated";
@@ -283,7 +283,7 @@ export class RappStoreClient {
       && compareBetaVersions(entry.minAppVersion, this.appVersion) === 1
     ) {
       const error = new Error(
-        `RAPPlication "${entry.id}" needs app version ${entry.minAppVersion} or newer `
+        `rapplication "${entry.id}" needs app version ${entry.minAppVersion} or newer `
         + `(this launcher is ${this.appVersion}) — update the app, then hatch it.`,
       );
       error.code = "min_app_version";
@@ -297,14 +297,14 @@ export class RappStoreClient {
   // sha256 before returning. Gated entries that 404 are reported as auth-needed.
   async download(id) {
     const entry = await this.resolve(id);
-    if (!entry.singletonUrl) throw new Error(`RAPPlication "${entry.id}" has no singleton_url.`);
+    if (!entry.singletonUrl) throw new Error(`rapplication "${entry.id}" has no singleton_url.`);
     let bytes;
     try {
       bytes = await this.#fetch(entry.singletonUrl, { asBytes: true });
     } catch (error) {
       if (error.status === 404 && entry.gated) {
         const gated = new Error(
-          `RAPPlication "${entry.id}" is gated (access: private). `
+          `rapplication "${entry.id}" is gated (access: private). `
           + "Sign in / provide a read-scoped token for its private repo to hatch it.",
         );
         gated.code = "gated";

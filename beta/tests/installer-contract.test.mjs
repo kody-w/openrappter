@@ -17,6 +17,10 @@ const main = readFileSync(
   path.join(root, "electron", "main.mjs"),
   "utf8",
 ).replaceAll("\r\n", "\n");
+const activityView = readFileSync(
+  path.join(root, "electron", "activity-view.mjs"),
+  "utf8",
+);
 const brainSurgeon = readFileSync(
   path.join(root, "electron", "brain-surgeon.mjs"),
   "utf8",
@@ -72,9 +76,9 @@ const brainstemUi = readFileSync(
   "utf8",
 );
 
-test("beta installers use AIBAST as the canonical source", () => {
+test("beta installers use this distribution as the canonical source", () => {
   for (const installer of [unix, windows]) {
-    assert.match(installer, /microsoft\/aibast-agents-library/);
+    assert.match(installer, /kody-w\/openrappter/);
     assert.doesNotMatch(installer, /kody-w\/rapp-installer/);
   }
 });
@@ -204,8 +208,9 @@ test("chat can hot-load an animated driver for the real frontend", () => {
   assert.match(routeManager, /globalAgentEntries/);
   assert.match(uiDriverServer, /\/v1\/recording-upload/);
   assert.match(uiDriverServer, /createWriteStream/);
-  assert.match(main, /__rappBetaRenderDriveStep/);
-  assert.match(main, /__rappBetaRenderDriveMedia/);
+  assert.match(main, /createActivityViewInstallationSource/);
+  assert.match(activityView, /__rappBetaRenderDriveStep/);
+  assert.match(activityView, /__rappBetaRenderDriveMedia/);
   assert.match(main, /brainstem\.composer/);
   assert.match(main, /brainstem\.chat\.msg\[r-/);
   assert.match(renderer, /event\.summary/);

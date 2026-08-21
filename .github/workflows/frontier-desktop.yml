@@ -1,0 +1,81 @@
+# The Frontier desktop app had no packaging path in this repository. beta/ has an
+# electron-builder config and a dist:mac script, and nothing ever ran them — so
+# "it builds" was an assumption rather than a fact, and a release could only be
+# made by hand on someone's laptop.
+#
+# On a branch this proves the app still packages. On a v*-frontier tag it
+# publishes the artifacts to a GitHub release.
+name: Frontier desktop
+
+on:
+  push:
+    branches: [main]
+    paths: ['beta/**', '.github/workflows/frontier-desktop.yml']
+    tags: ['v*-frontier']
+  pull_request:
+    paths: ['beta/**', '.github/workflows/frontier-desktop.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: frontier-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+          - os: windows-latest
+            script: dist:win
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The engines floor in beta/package.json, enforced by engine-strict.
+          node-version: '24.19.0'
+
+      - name: Install dependencies
+        working-directory: beta
+        # beta/.npmrc sets ignore-scripts because a transitive postinstall
+        # downloads and chmods an unchecked native binary. Passed explicitly so
+        # the protection survives that file moving.
+        run: npm ci --ignore-scripts
+
+      - name: Install the Electron binary the packager needs
+        working-directory: beta
+        # ignore-scripts also skips Electron's own postinstall, which is the one
+        # lifecycle script this app genuinely needs.
+        run: node node_modules/electron/install.js
+
+      - name: Package
+        working-directory: beta
+        run: npm run ${{ matrix.script }}
+
+      - name: What was produced
+        working-directory: beta
+        shell: bash
+        run: |
+          echo "artifacts:"
+          find release dist -maxdepth 2 -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \) 2>/dev/null | sed 's/^/  /' || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontier-${{ matrix.os }}
+          path: |
+            beta/release/**/*.dmg
+            beta/release/**/*.zip
+            beta/release/**/*.exe
+            beta/dist/**/*.dmg
+            beta/dist/**/*.zip
+            beta/dist/**/*.exe
+          if-no-files-found: warn
+          retention-days: 14

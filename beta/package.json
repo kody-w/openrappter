@@ -1,5 +1,5 @@
 {
-  "name": "@aibast/rapp-brainstem-frontier",
+  "name": "@openrappter/frontier",
   "version": "0.1.0-beta.7",
   "description": "Skill Recorder-style desktop launcher for the shared RAPP Brainstem runtime.",
   "private": true,
@@ -26,7 +26,9 @@
     "dist:mac": "electron-builder --mac dmg zip --arm64 --publish never",
     "package:gate": "node scripts/package-gate.mjs",
     "proof:frontier-runtime": "node scripts/frontier-runtime-proof.mjs",
-    "proof:gitmolt-runtime": "bash scripts/gitmolt-runtime-proof.sh"
+    "proof:gitmolt-runtime": "bash scripts/gitmolt-runtime-proof.sh",
+    "dist:win": "electron-builder --win nsis zip --x64 --publish never",
+    "dist:linux": "electron-builder --linux AppImage --x64 --publish never"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "2.1.2",
@@ -40,7 +42,7 @@
     "electron-builder": "^26.15.6"
   },
   "build": {
-    "appId": "com.microsoft.aibast.rapp-brainstem-beta",
+    "appId": "io.github.kody-w.openrappter.frontier",
     "productName": "RAPP Brainstem Frontier",
     "directories": {
       "output": "release",
@@ -106,6 +108,13 @@
     },
     "linux": {
       "icon": "build/icons"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kody-w",
+        "repo": "openrappter"
+      }
+    ]
   }
 }

@@ -372,7 +372,7 @@ EOF
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>RAPP Brainstem Frontier</string>
   <key>CFBundleDisplayName</key><string>RAPP Brainstem Frontier</string>
-  <key>CFBundleIdentifier</key><string>com.microsoft.aibast.rapp-brainstem-beta</string>
+  <key>CFBundleIdentifier</key><string>io.github.kody-w.openrappter.frontier</string>
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>RAPP Brainstem Frontier</string>

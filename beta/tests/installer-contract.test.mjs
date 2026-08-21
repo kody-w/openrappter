@@ -91,8 +91,29 @@ test("beta installers use AIBAST as the canonical source", () => {
   }
 });
 
+// CORRECTED 2026-08-21. This asserted the identity of the distribution the
+// Frontier was imported FROM. Shipping this app under @aibast/… with a bundle
+// identifier of com.microsoft.aibast.… claimed a namespace this distribution
+// does not own — on macOS the appId IS the bundle identifier a signed app is
+// registered under, so it is not cosmetic. The identity now matches the
+// repository that publishes it.
 test("Frontier is the primary customer-facing launcher identity", () => {
-  assert.equal(packageJson.name, "@aibast/rapp-brainstem-frontier");
+  assert.equal(packageJson.name, "@openrappter/frontier");
+  assert.equal(
+    packageJson.build.appId,
+    "io.github.kody-w.openrappter.frontier",
+    "the bundle identifier must belong to whoever ships the app",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(packageJson),
+    /com\.microsoft|@aibast\//,
+    "no upstream namespace may remain in the shipped identity",
+  );
+  assert.deepEqual(
+    packageJson.build.publish,
+    [{ provider: "github", owner: "kody-w", repo: "openrappter" }],
+    "electron-builder needs somewhere to publish, or a release can only be made by hand",
+  );
   assert.equal(packageJson.version, "0.1.0-beta.7");
   assert.equal(readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim(), packageJson.version);
   for (const installer of [unix, windows]) {

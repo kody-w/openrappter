@@ -4,40 +4,23 @@ import process from 'node:process';
 import type { Command } from 'commander';
 
 import {
+  H,
   RAPPID_CARD_FIXTURE_NAMES,
-  RAPPID_CARD_TEST_PROFILE,
-  SqliteCardStateStore,
+  SQLiteCardState,
+  CardTrustStore,
   buildRappidCardFixture,
-  makeDeepLink,
-  manifestHash,
-  parseManifestJson,
+  parseCardLink,
+  readCardResource,
   renderRappidCardQrPng,
   renderRappidCardQrSvg,
-  simulateRappidCard,
-  simulateRappidCardFixtureInput,
   simulateRappidCardFixture,
+  verifyCardLink,
   writeRappidCardFixtureDeck,
 } from '../rappid-card/index.js';
-import type {
-  CardAlgorithm,
-  CardProviders,
-  CardTrustProvider,
-  QrArtifactFormat,
-  RappidCardFixtureName,
-  RappidCardManifest,
-} from '../rappid-card/index.js';
+import type { QrArtifactFormat } from '../rappid-card/index.js';
 
 function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
-}
-
-function fixtureName(value: string): RappidCardFixtureName {
-  if (!RAPPID_CARD_FIXTURE_NAMES.includes(value as RappidCardFixtureName)) {
-    throw new Error(
-      `fixture must be one of: ${RAPPID_CARD_FIXTURE_NAMES.join(', ')}`,
-    );
-  }
-  return value as RappidCardFixtureName;
 }
 
 function qrFormat(value: string): QrArtifactFormat {
@@ -47,192 +30,183 @@ function qrFormat(value: string): QrArtifactFormat {
   return value;
 }
 
-async function readLink(
-  value: string | undefined,
-  manifest: RappidCardManifest,
-): Promise<string> {
-  if (!value) return makeDeepLink(manifest);
-  if (value.startsWith('rappid://')) return value;
-  return (await readFile(value, 'utf8')).trim();
+async function readLink(value: string): Promise<string> {
+  return value.startsWith('rappid://')
+    ? value
+    : (await readFile(value, 'utf8')).trim();
 }
 
-interface TrustBundle {
-  policy: unknown;
-  authorization: unknown;
-  revocations: unknown;
-  authorityKeys: Record<string, string>;
-}
-
-async function explicitTrustProvider(path: string): Promise<CardTrustProvider> {
-  const raw = JSON.parse(await readFile(path, 'utf8')) as unknown;
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('trust file must be a closed trust-bundle object');
-  }
-  const bundle = raw as Partial<TrustBundle>;
-  if (
-    bundle.policy === undefined
-    || bundle.authorization === undefined
-    || bundle.revocations === undefined
-    || bundle.authorityKeys === null
-    || typeof bundle.authorityKeys !== 'object'
-    || Array.isArray(bundle.authorityKeys)
-    || Object.keys(bundle).sort().join(',')
-      !== 'authorityKeys,authorization,policy,revocations'
-  ) {
-    throw new Error(
-      'trust file requires exactly policy, authorization, revocations, and authorityKeys',
-    );
-  }
-  for (const [keyId, publicKey] of Object.entries(bundle.authorityKeys)) {
-    if (
-      !/^[a-z][a-z0-9._-]{0,63}$/.test(keyId)
-      || typeof publicKey !== 'string'
-      || !/^[A-Za-z0-9_-]{43}$/.test(publicKey)
-    ) {
-      throw new Error(`trust authority ${keyId} is invalid`);
-    }
-  }
+async function inspect(cardPath: string, linkValue: string) {
+  const bytes = await readFile(cardPath);
+  const frame = readCardResource(bytes);
+  const linkText = await readLink(linkValue);
+  const parsedLink = parseCardLink(linkText);
   return {
-    getPolicyForOrigin: () => structuredClone(bundle.policy),
-    getAuthorization: () => structuredClone(bundle.authorization),
-    getRevocations: () => structuredClone(bundle.revocations),
-    getAuthorityKey(keyId: string, _algorithm: CardAlgorithm) {
-      return bundle.authorityKeys![keyId] ?? null;
-    },
+    frame,
+    link: linkText,
+    parsed_link: parsedLink,
+    payload_particle: H('rapp/1:particle', frame.payload),
+    canonical_bytes: bytes.byteLength,
   };
-}
-
-function matchingFixture(manifest: RappidCardManifest) {
-  const hash = manifestHash(manifest);
-  return RAPPID_CARD_FIXTURE_NAMES
-    .map((name) => buildRappidCardFixture(name))
-    .find((fixture) => manifestHash(fixture.manifest) === hash);
-}
-
-async function inspectCard(
-  cardPath: string,
-  options: {
-    link?: string;
-    fixture?: boolean;
-    trust?: string;
-    state?: string;
-  },
-): Promise<void> {
-  const manifest = parseManifestJson(await readFile(cardPath, 'utf8'));
-  const link = await readLink(options.link, manifest);
-  const fixture = matchingFixture(manifest);
-  let snapshot;
-  if (options.fixture === true) {
-    if (!fixture || manifest.profile !== RAPPID_CARD_TEST_PROFILE) {
-      throw new Error('--fixture accepts only a generated test-profile card');
-    }
-    fixture.deepLink = link;
-    fixture.providers = {
-      ...fixture.providers,
-      manifests: { getManifest: () => structuredClone(manifest) },
-    };
-    snapshot = await simulateRappidCardFixtureInput(fixture, false);
-  } else {
-    if (!options.trust || !options.state) {
-      throw new Error(
-        'production verification requires explicit --trust and --state files',
-      );
-    }
-    const providers: CardProviders = {
-      manifests: { getManifest: () => structuredClone(manifest) },
-      trust: await explicitTrustProvider(options.trust),
-      content: { getPart: () => null },
-      challenge: { respond: () => '0'.repeat(86) },
-    };
-    const stateStore = await SqliteCardStateStore.open(options.state);
-    try {
-      snapshot = await simulateRappidCard(link, {
-        approve: false,
-        providers,
-        stateStore,
-      });
-    } finally {
-      stateStore.close();
-    }
-  }
-  print({
-    file: cardPath,
-    profile: manifest.profile,
-    syntheticFixture: manifest.profile === RAPPID_CARD_TEST_PROFILE,
-    canonicalManifestHash: manifestHash(manifest),
-    exactDeepLink: link,
-    simulation: snapshot,
-  });
-  if (snapshot.state === 'failed') process.exitCode = 1;
 }
 
 export function registerRappidCardCommand(program: Command): void {
   const command = program
     .command('rappid-card')
-    .description('Generate, inspect, verify, render, and simulate virtual RAPPID Debug Cards');
+    .description('Inspect and verify exact RAPP/1 calling-card/debug-card frames');
 
   command
     .command('fixtures <directory>')
-    .description('Write the deterministic signed-trust fixture deck and real QR artifacts')
+    .description('Export the vendored PR9 conformance deck and QR artifacts')
     .option('--format <format>', 'svg, png, or both', qrFormat, 'svg')
     .action(async (directory: string, options: { format: QrArtifactFormat }) => {
       print(await writeRappidCardFixtureDeck(directory, options.format));
     });
 
-  for (const [name, description] of [
-    ['inspect', 'Parse, hash, and preview-verify a closed RAPPID card manifest'],
-    ['verify', 'Verify a card and report a non-zero exit code on any failed control'],
-  ] as const) {
-    command
-      .command(`${name} <card>`)
-      .description(description)
-      .option('--link <uri-or-file>', 'Exact link or a file containing it')
-      .option('--fixture', 'Use only the built-in signed synthetic fixture authority')
-      .option('--trust <file>', 'Explicit signed production trust bundle; no ambient credentials')
-      .option('--state <sqlite>', 'Durable transactional replay/trust-sequence database')
-      .action(async (
-        card: string,
-        options: {
-          link?: string;
-          fixture?: boolean;
-          trust?: string;
-          state?: string;
-        },
-      ) => inspectCard(card, options));
-  }
+  command
+    .command('inspect <card>')
+    .description('Parse canonical eleven-key frame bytes and compact URI')
+    .requiredOption('--link <uri-or-file>', 'Exact compact URI or link file')
+    .action(async (card: string, options: { link: string }) => {
+      print(await inspect(card, options.link));
+    });
+
+  command
+    .command('verify <card>')
+    .description('Verify one vendored scenario at its exact ordered PR9 step')
+    .requiredOption('--link <uri-or-file>', 'Exact compact URI or link file')
+    .option('--scenario <name>', 'PR9 mandatory scenario')
+    .option('--bundle <json>', 'Explicit production verification bundle')
+    .requiredOption('--state <sqlite>', 'Durable SQLite nonce/sequence state')
+    .action(async (
+      card: string,
+      options: {
+        link: string;
+        scenario?: string;
+        bundle?: string;
+        state: string;
+      },
+    ) => {
+      if (Boolean(options.scenario) === Boolean(options.bundle)) {
+        throw new Error('verify requires exactly one of --scenario or --bundle');
+      }
+      const inspected = await inspect(card, options.link);
+      if (options.scenario) {
+        if (!RAPPID_CARD_FIXTURE_NAMES.includes(options.scenario)) {
+          throw new Error(`unknown PR9 scenario: ${options.scenario}`);
+        }
+        const fixture = buildRappidCardFixture(options.scenario);
+        if (
+          JSON.stringify(inspected.frame) !== JSON.stringify(fixture.frame)
+          || inspected.link !== fixture.link
+        ) {
+          print({
+            ok: false,
+            step: 'content-address',
+            reason: 'card/link bytes do not equal the selected vendored scenario',
+            result: null,
+          });
+          process.exitCode = 1;
+          return;
+        }
+        const { verdict } = await simulateRappidCardFixture(
+          options.scenario,
+          options.state,
+        );
+        print(verdict);
+        if (verdict.ok !== fixture.expected.ok) process.exitCode = 1;
+        return;
+      }
+      if (!options.bundle) throw new Error('verification bundle is required');
+      const bundle = JSON.parse(await readFile(options.bundle, 'utf8')) as {
+        runtime_policy_authority: string;
+        runtime_policy: Parameters<typeof verifyCardLink>[0]['runtime_policy'];
+        authority_view: Parameters<typeof verifyCardLink>[0]['authority_view'];
+        revocation_view: Parameters<typeof verifyCardLink>[0]['revocation_view'];
+        trust: Array<{ kid: string; spki_der_b64: string }>;
+        now_utc: string;
+        connection_id: string;
+        fetch_trace: Parameters<typeof verifyCardLink>[0]['fetch_trace'];
+        hydrated_parts_b64: Record<string, string>;
+        continuity: Parameters<typeof verifyCardLink>[0]['continuity'];
+      };
+      const state = await SQLiteCardState.open(options.state);
+      const trust = new CardTrustStore(
+        Object.fromEntries(
+          bundle.trust.map((entry) => [
+            entry.kid,
+            Buffer.from(entry.spki_der_b64, 'base64'),
+          ]),
+        ),
+        bundle.runtime_policy_authority,
+      );
+      const verdict = verifyCardLink({
+        uri: inspected.link,
+        frame: inspected.frame,
+        trust,
+        now_utc: bundle.now_utc,
+        runtime_policy: bundle.runtime_policy,
+        authority_view: bundle.authority_view,
+        revocation_view: bundle.revocation_view,
+        state,
+        connection_id: bundle.connection_id,
+        fetch_trace: bundle.fetch_trace,
+        hydrated: Object.fromEntries(
+          Object.entries(bundle.hydrated_parts_b64).map(([name, value]) => [
+            name,
+            Buffer.from(value, 'base64'),
+          ]),
+        ),
+        continuity: bundle.continuity,
+      });
+      print(verdict);
+      if (!verdict.ok) process.exitCode = 1;
+    });
+
+  command
+    .command('simulate <scenario>')
+    .description('Run one vendored mandatory PR9 scenario')
+    .requiredOption('--state <sqlite>', 'Durable SQLite nonce/sequence state')
+    .action(async (scenario: string, options: { state: string }) => {
+      if (!RAPPID_CARD_FIXTURE_NAMES.includes(scenario)) {
+        throw new Error(`unknown PR9 scenario: ${scenario}`);
+      }
+      const fixture = buildRappidCardFixture(scenario);
+      const { verdict } = await simulateRappidCardFixture(scenario, options.state);
+      print(verdict);
+      const expected = fixture.expected;
+      if (
+        verdict.ok !== expected.ok
+        || verdict.step !== expected.step
+        || (
+          expected.reason_contains !== null
+          && !verdict.reason.includes(expected.reason_contains)
+        )
+      ) {
+        process.exitCode = 1;
+      }
+    });
 
   command
     .command('qr <link> <output>')
-    .description('Render the exact compact deep link as a scannable QR SVG or PNG')
+    .description('Render the exact canonical compact URI as QR SVG or PNG')
     .option('--format <format>', 'svg or png', (value) => {
       const format = qrFormat(value);
       if (format === 'both') throw new Error('qr accepts svg or png, not both');
       return format;
     }, 'svg')
     .action(async (
-      link: string,
+      linkValue: string,
       output: string,
       options: { format: 'svg' | 'png' },
     ) => {
+      const link = await readLink(linkValue);
+      parseCardLink(link);
       if (options.format === 'png') {
         await writeFile(output, await renderRappidCardQrPng(link));
       } else {
         await writeFile(output, await renderRappidCardQrSvg(link), 'utf8');
       }
-      print({ output, format: options.format, exactDeepLink: link });
-    });
-
-  command
-    .command('simulate <fixture>')
-    .description('Run one deterministic signed-trust fixture; --approve is required to hydrate')
-    .option('--approve', 'Explicitly approve permitted content hydration', false)
-    .action(async (value: string, options: { approve: boolean }) => {
-      const name = fixtureName(value);
-      const fixture = buildRappidCardFixture(name);
-      print({
-        fixture: name,
-        exactDeepLink: fixture.deepLink,
-        simulation: await simulateRappidCardFixture(name, options.approve),
-      });
+      print({ output, format: options.format, link });
     });
 }

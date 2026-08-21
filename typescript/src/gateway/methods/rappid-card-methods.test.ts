@@ -1,76 +1,78 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { registerRappidCardMethods } from './rappid-card-methods.js';
 
 type Handler = (params: Record<string, unknown>) => Promise<unknown>;
+const roots: string[] = [];
 
-function registrar(): {
-  methods: Map<string, Handler>;
-  auth: Map<string, boolean>;
-} {
+afterEach(() => {
+  roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
+});
+
+function registrar() {
   const methods = new Map<string, Handler>();
   const auth = new Map<string, boolean>();
+  const dataDir = join(process.cwd(), `.pr9-gateway-${process.pid}-${roots.length}`);
+  roots.push(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   registerRappidCardMethods({
     registerMethod(name, handler, options) {
-      const invoke = handler as unknown as (
-        params: Record<string, unknown>,
-        connection: unknown,
-      ) => Promise<unknown>;
-      methods.set(name, (params) => invoke(params, {}));
+      methods.set(name, (params) =>
+        (handler as (value: Record<string, unknown>, connection: unknown) => Promise<unknown>)(
+          params,
+          {},
+        ));
       auth.set(name, options?.requiresAuth === true);
     },
-  });
+  }, { dataDir });
   return { methods, auth };
 }
 
-describe('RAPPID card gateway methods', () => {
-  it('keeps every developer simulation method behind gateway authentication', () => {
+describe('PR9 RAPPID card gateway methods', () => {
+  it('registers only authenticated test-vector methods', () => {
     const { methods, auth } = registrar();
     expect([...methods.keys()].sort()).toEqual([
-      'rappid.card.fixtures',
       'rappid.card.preview',
-      'rappid.card.simulate',
+      'rappid.card.scenarios',
+      'rappid.card.verify',
     ]);
     expect([...auth.values()]).toEqual([true, true, true]);
   });
 
-  it('lists the full deck and exposes exact link plus real SVG at preview', async () => {
+  it('lists all 49 scenarios and previews exact frame/link/QR wire names', async () => {
     const { methods } = registrar();
-    const fixtures = await methods.get('rappid.card.fixtures')!({}) as unknown[];
-    expect(fixtures).toHaveLength(13);
-    const result = await methods.get('rappid.card.preview')!({
-      fixture: 'valid',
-    }) as {
-      exactDeepLink: string;
-      qrSvg: string;
-      simulation: { state: string; hydrated: unknown[] };
-    };
-    expect(result.exactDeepLink).toMatch(/^rappid:\/\/link\//);
-    expect(result.qrSvg).toContain('<svg');
-    expect(result.simulation).toMatchObject({
-      state: 'preview',
-      hydrated: [],
+    const scenarios = await methods.get('rappid.card.scenarios')!({}) as unknown[];
+    expect(scenarios).toHaveLength(49);
+    const preview = await methods.get('rappid.card.preview')!({
+      scenario: 'physical-payload-reproduction',
+    }) as Record<string, unknown>;
+    expect(preview).toMatchObject({
+      scenario: 'physical-payload-reproduction',
+      provenance: 'rapp-1 commit 392f850',
+      expected: { ok: true, step: null },
+      frame: { kind: 'body.debug-card', spec: 'rapp/1' },
     });
+    expect(String(preview.exact_link)).toMatch(/^rappid:\/\/link\//);
+    expect(String(preview.qr_svg)).toContain('<svg');
   });
 
-  it('requires explicit approve=true and surfaces awake/failure states', async () => {
+  it('requires explicit approval and exposes exact verifier step', async () => {
     const { methods } = registrar();
-    await expect(methods.get('rappid.card.simulate')!({
-      fixture: 'valid',
-    })).rejects.toThrow('explicit approve=true');
-
-    const awake = await methods.get('rappid.card.simulate')!({
-      fixture: 'valid',
+    await expect(methods.get('rappid.card.verify')!({
+      scenario: 'valid-test',
+    })).rejects.toThrow('approve=true');
+    const valid = await methods.get('rappid.card.verify')!({
+      scenario: 'valid-test',
       approve: true,
-    }) as { simulation: { state: string } };
-    const failed = await methods.get('rappid.card.simulate')!({
-      fixture: 'challenge-failure',
+    }) as { verification: { ok: boolean; step: string | null } };
+    const expired = await methods.get('rappid.card.verify')!({
+      scenario: 'expired',
       approve: true,
-    }) as { simulation: { state: string; error: { code: string } } };
-    expect(awake.simulation.state).toBe('awake');
-    expect(failed.simulation).toMatchObject({
-      state: 'failed',
-      error: { code: 'challenge_failed' },
-    });
+    }) as { verification: { ok: boolean; step: string | null } };
+    expect(valid.verification).toMatchObject({ ok: true, step: null });
+    expect(expired.verification).toMatchObject({ ok: false, step: 'expiry' });
   });
 });

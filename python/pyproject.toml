@@ -15,7 +15,6 @@ dependencies = [
     # Powers the gateway and bounded provider HTTP client. 3.13 adds an
     # explicit response-header-count cap alongside line/field-size limits.
     "aiohttp>=3.13",
-    "cryptography>=50,<51",
     "qrcode[pil]>=8.2,<9",
 ]
 authors = [
@@ -57,6 +56,11 @@ Issues = "https://github.com/kody-w/openrappter/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openrappter"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"../tests/vectors/rapp-1-392f850/rappid-card/deck.json" = "openrappter/rappid_card/test_vectors/deck.json"
+"../tests/vectors/rapp-1-392f850/rappid-card/physical.rappid-card.json" = "openrappter/rappid_card/test_vectors/physical.rappid-card.json"
+"../tests/vectors/rapp-1-392f850/rappid-card/physical-payload.txt" = "openrappter/rappid_card/test_vectors/physical-payload.txt"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

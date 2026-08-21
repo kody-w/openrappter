@@ -9,16 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added the dual-runtime Virtual RAPPID Debug Card: a strict closed
-  `.rappid-card.json` contract, deterministic canonical hash and compact
-  non-secret link, separate fixture/production profiles, signed habitat
-  policy, signer-to-subject authorization, signed monotonic revocation views,
-  approved-origin and decoded-URL secret enforcement, durable transactional
-  SQLite replay, a 13-fixture mutation deck plus positive production vectors,
-  real QR SVG/PNG generation, CLI inspection/simulation commands, and an
-  authenticated Habitat page with explicit approval and visible failure/awake
-  states. TypeScript and Python regenerate the same committed wire vectors. No
-  auto-discovered agent was added.
+- Added the dual-runtime RAPP/1 §7.10 Calling Card / Debug Card verifier,
+  reconciled byte-for-byte with `rapp-1` commit `392f850`. The virtual resource
+  is the canonical eleven-key frame; production is `body.calling-card` +
+  `rappid-card/1`, debug is `body.debug-card` + `rappid-card-test/1`; signatures
+  are detached unencoded EdDSA JWS with SPKI→RAPPID binding. Signed runtime
+  policy, authority delegation, typed revocation, strict endpoint/fetch
+  evidence, durable `hydrating`/`awake` replay, `rapp/1:egg` inventory, particle
+  continuity, all 49 named scenarios, and physical byte/link reproduction are
+  enforced in the exact normative order. No auto-discovered agent was added.
 
 ### Fixed
 

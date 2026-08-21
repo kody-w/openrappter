@@ -1,106 +1,56 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import {
-  RAPPID_CARD_FILENAME,
-} from './types.js';
-import {
-  RAPPID_CARD_FIXTURE_NAMES,
-  buildRappidCardFixture,
-  listRappidCardFixtures,
-} from './fixtures.js';
-import {
-  renderRappidCardQrPng,
-  renderRappidCardQrSvg,
-} from './qr.js';
+import { canonical } from './contract.js';
+import { loadRappidCardDeck } from './fixtures.js';
+import { renderRappidCardQrPng, renderRappidCardQrSvg } from './qr.js';
 
 export type QrArtifactFormat = 'svg' | 'png' | 'both';
-
-export interface FixtureDeckWriteResult {
-  directory: string;
-  fixtures: number;
-  files: string[];
-}
 
 export async function writeRappidCardFixtureDeck(
   directory: string,
   format: QrArtifactFormat = 'svg',
-): Promise<FixtureDeckWriteResult> {
+): Promise<{ directory: string; fixtures: number; files: string[]; provenance: string }> {
   const root = resolve(directory);
   await mkdir(root, { recursive: true });
   const files: string[] = [];
-  const deck = {
-    schema: 'rappid-card-fixture-deck/1',
-    fixtures: listRappidCardFixtures(),
-  };
-  const deckPath = join(root, 'deck.json');
-  await writeFile(deckPath, `${JSON.stringify(deck, null, 2)}\n`, 'utf8');
-  files.push(deckPath);
-
-  for (const name of RAPPID_CARD_FIXTURE_NAMES) {
-    const fixture = buildRappidCardFixture(name);
-    const fixtureDirectory = join(root, name);
-    await mkdir(fixtureDirectory, { recursive: true });
-    const cardPath = join(fixtureDirectory, RAPPID_CARD_FILENAME);
-    const linkPath = join(fixtureDirectory, 'rappid-card.link.txt');
-    const policyPath = join(fixtureDirectory, 'rappid-card.policy.json');
-    const authorizationPath = join(
-      fixtureDirectory,
-      'rappid-card.authorization.json',
-    );
-    const revocationsPath = join(
-      fixtureDirectory,
-      'rappid-card.revocations.json',
-    );
-    await writeFile(
-      cardPath,
-      `${JSON.stringify(fixture.manifest, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(linkPath, `${fixture.deepLink}\n`, 'utf8');
-    await writeFile(
-      policyPath,
-      `${JSON.stringify(fixture.policy, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      authorizationPath,
-      `${JSON.stringify(fixture.authorization, null, 2)}\n`,
-      'utf8',
-    );
-    await writeFile(
-      revocationsPath,
-      `${JSON.stringify(fixture.revocations, null, 2)}\n`,
-      'utf8',
-    );
-    files.push(
-      cardPath,
-      linkPath,
-      policyPath,
-      authorizationPath,
-      revocationsPath,
-    );
-    if (format === 'svg' || format === 'both') {
-      const svgPath = join(fixtureDirectory, 'rappid-card.svg');
-      await writeFile(
-        svgPath,
-        await renderRappidCardQrSvg(fixture.deepLink),
-        'utf8',
-      );
-      files.push(svgPath);
+  const deck = loadRappidCardDeck();
+  for (const vector of deck.vectors) {
+    const target = join(root, vector.name);
+    await mkdir(target, { recursive: true });
+    const outputs: Record<string, string> = {
+      '.rappid-card.json': canonical(vector.frame),
+      'rappid-card.link.txt': `${vector.link}\n`,
+      'runtime-policy.json': canonical(vector.runtime_policy),
+      'authority-view.json': canonical(vector.authority_view),
+      'revocation-view.json': canonical(vector.revocation_view),
+    };
+    for (const [name, text] of Object.entries(outputs)) {
+      const path = join(target, name);
+      await writeFile(path, text, 'utf8');
+      files.push(path);
     }
-    if (format === 'png' || format === 'both') {
-      const pngPath = join(fixtureDirectory, 'rappid-card.png');
-      await writeFile(
-        pngPath,
-        await renderRappidCardQrPng(fixture.deepLink),
-      );
-      files.push(pngPath);
+    if (
+      vector.expected.step !== 'parse'
+      && (format === 'svg' || format === 'both')
+    ) {
+      const path = join(target, 'rappid-card.svg');
+      await writeFile(path, await renderRappidCardQrSvg(vector.link), 'utf8');
+      files.push(path);
+    }
+    if (
+      vector.expected.step !== 'parse'
+      && (format === 'png' || format === 'both')
+    ) {
+      const path = join(target, 'rappid-card.png');
+      await writeFile(path, await renderRappidCardQrPng(vector.link));
+      files.push(path);
     }
   }
   return {
     directory: root,
-    fixtures: RAPPID_CARD_FIXTURE_NAMES.length,
+    fixtures: deck.vectors.length,
     files,
+    provenance: 'rapp-1 commit 392f850',
   };
 }

@@ -7,11 +7,12 @@ from io import BytesIO
 import qrcode
 import qrcode.image.svg
 
-from .contract import parse_deep_link
+from .contract import parse_card_link
 
 
 def _qr(deep_link: str) -> qrcode.QRCode:
-    exact = parse_deep_link(deep_link)["deepLink"]
+    parse_card_link(deep_link)
+    exact = deep_link
     qr = qrcode.QRCode(
         error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=10,

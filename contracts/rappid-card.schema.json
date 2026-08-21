@@ -1,237 +1,163 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openrappter.dev/contracts/rappid-card.schema.json",
-  "title": "OpenRappter virtual RAPPID card",
-  "description": "A closed, non-secret, content-addressed handoff manifest. The conventional filename is .rappid-card.json.",
+  "title": "RAPP/1 RAPPID Calling Card or Debug Card frame",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema",
-    "profile",
-    "policyId",
-    "rappid",
-    "endpoint",
-    "nonce",
-    "issuedAt",
-    "expiresAt",
-    "protocol",
-    "runtime",
-    "classification",
-    "scopes",
-    "parts",
-    "challenge",
-    "signature"
+    "spec",
+    "kind",
+    "stream_id",
+    "seq",
+    "utc",
+    "payload",
+    "payload_hash",
+    "frame_hash",
+    "prev",
+    "prev_wave",
+    "sig"
   ],
   "properties": {
-    "schema": {
-      "const": "rappid-card/1"
-    },
-    "profile": {
-      "enum": [
-        "rappid-card-test/1",
-        "rappid-card-production/1"
+    "spec": { "const": "rapp/1" },
+    "kind": { "enum": ["body.calling-card", "body.debug-card"] },
+    "stream_id": { "$ref": "#/$defs/rappid" },
+    "seq": { "$ref": "#/$defs/uint53" },
+    "utc": { "$ref": "#/$defs/utc" },
+    "payload": { "$ref": "#/$defs/payload" },
+    "payload_hash": { "$ref": "#/$defs/hex64" },
+    "frame_hash": { "$ref": "#/$defs/hex64" },
+    "prev": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/hex64" }
       ]
     },
-    "policyId": {
+    "prev_wave": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/hex64" }
+      ]
+    },
+    "sig": { "$ref": "#/$defs/jws" }
+  },
+  "$defs": {
+    "uint53": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "hex64": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "utc": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "lclabel": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "versioned": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*/[1-9][0-9]*$"
     },
     "rappid": {
       "type": "string",
-      "pattern": "^rappid:@[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?:[0-9a-f]{64}$",
-      "maxLength": 180
+      "pattern": "^rappid:@[a-z0-9]+(?:-[a-z0-9]+)*/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}$"
     },
-    "endpoint": {
+    "jws": {
       "type": "string",
-      "pattern": "^https://[a-z0-9.-]+(?::[1-9][0-9]{0,4})?/[A-Za-z0-9._~/-]*$",
-      "maxLength": 256
+      "pattern": "^[A-Za-z0-9_-]+\\.\\.[A-Za-z0-9_-]+$"
     },
-    "nonce": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{32}$"
+    "parent": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rappid", "particle"],
+          "properties": {
+            "rappid": { "$ref": "#/$defs/rappid" },
+            "particle": { "$ref": "#/$defs/hex64" }
+          }
+        }
+      ]
     },
-    "issuedAt": {
-      "type": "string",
-      "format": "date-time",
-      "maxLength": 32
-    },
-    "expiresAt": {
-      "type": "string",
-      "format": "date-time",
-      "maxLength": 32
-    },
-    "protocol": {
-      "type": "string",
-      "pattern": "^rappid-link/[1-9][0-9]*$",
-      "maxLength": 32
-    },
-    "runtime": {
-      "$ref": "#/$defs/runtime"
-    },
-    "classification": {
-      "$ref": "#/$defs/classification"
-    },
-    "scopes": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 6,
-      "uniqueItems": true,
-      "items": {
-        "$ref": "#/$defs/scope"
-      }
-    },
-    "parts": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 6,
-      "items": {
-        "$ref": "#/$defs/part"
-      }
-    },
-    "challenge": {
-      "$ref": "#/$defs/authenticator"
-    },
-    "signature": {
-      "$ref": "#/$defs/signature"
-    }
-  },
-  "$defs": {
-    "semver": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
-      "maxLength": 32
-    },
-    "runtime": {
+    "compatibility": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "minimum",
-        "maximum"
-      ],
+      "required": ["protocol", "runtime", "features"],
       "properties": {
-        "name": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9-]{0,31}$"
-        },
-        "minimum": {
-          "$ref": "#/$defs/semver"
-        },
-        "maximum": {
-          "$ref": "#/$defs/semver"
+        "protocol": { "$ref": "#/$defs/versioned" },
+        "runtime": { "$ref": "#/$defs/versioned" },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/versioned" }
         }
       }
     },
-    "classification": {
-      "enum": [
-        "public",
-        "internal",
-        "restricted"
-      ]
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["part", "space", "hash", "bytes", "required"],
+      "properties": {
+        "part": { "$ref": "#/$defs/lclabel" },
+        "space": { "const": "rapp/1:egg" },
+        "hash": { "$ref": "#/$defs/hex64" },
+        "bytes": { "$ref": "#/$defs/uint53" },
+        "required": { "type": "boolean" }
+      }
     },
-    "scope": {
-      "enum": [
-        "identity:read",
-        "traits:read",
-        "skill:hydrate",
-        "sonic:hydrate",
-        "capability:hydrate"
-      ]
-    },
-    "part": {
+    "payload": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "name",
-        "hash",
-        "bytes",
-        "mediaType",
+        "profile",
+        "rappid",
+        "soul_hash",
+        "parent",
+        "engram_root",
+        "reflex_capability_root",
+        "compatibility",
         "classification",
-        "scope",
-        "required"
+        "requested_scope",
+        "expires_utc",
+        "revocation_url",
+        "endpoint_origin",
+        "wake_challenge",
+        "inventory",
+        "key_id"
       ],
       "properties": {
-        "name": {
-          "enum": [
-            "identity",
-            "traits",
-            "skill-manifest",
-            "sonic-profile",
-            "capability-manifest"
-          ]
+        "profile": {
+          "enum": ["rappid-card/1", "rappid-card-test/1"]
         },
-        "hash": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "bytes": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 65536
-        },
-        "mediaType": {
-          "enum": [
-            "application/json",
-            "text/plain",
-            "application/vnd.rapp.skill+json",
-            "application/vnd.rapp.sonic+json",
-            "application/vnd.rapp.capability+json"
-          ]
-        },
+        "rappid": { "$ref": "#/$defs/rappid" },
+        "soul_hash": { "$ref": "#/$defs/hex64" },
+        "parent": { "$ref": "#/$defs/parent" },
+        "engram_root": { "$ref": "#/$defs/hex64" },
+        "reflex_capability_root": { "$ref": "#/$defs/hex64" },
+        "compatibility": { "$ref": "#/$defs/compatibility" },
         "classification": {
-          "$ref": "#/$defs/classification"
+          "enum": ["public", "internal", "confidential", "restricted"]
         },
-        "scope": {
-          "$ref": "#/$defs/scope"
+        "requested_scope": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/lclabel" }
         },
-        "required": {
-          "type": "boolean"
-        }
-      }
-    },
-    "authenticator": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "algorithm",
-        "keyId"
-      ],
-      "properties": {
-        "algorithm": {
-          "enum": [
-            "ed25519-test",
-            "ed25519"
-          ]
+        "expires_utc": { "$ref": "#/$defs/utc" },
+        "revocation_url": { "type": "string" },
+        "endpoint_origin": { "type": "string" },
+        "wake_challenge": { "$ref": "#/$defs/hex64" },
+        "inventory": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/inventory" }
         },
-        "keyId": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
-        }
-      }
-    },
-    "signature": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "algorithm",
-        "keyId",
-        "value"
-      ],
-      "properties": {
-        "algorithm": {
-          "enum": [
-            "ed25519-test",
-            "ed25519"
-          ]
-        },
-        "keyId": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
-        },
-        "value": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]{86}$"
-        }
+        "key_id": { "$ref": "#/$defs/rappid" }
       }
     }
   }

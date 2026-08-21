@@ -1,200 +1,238 @@
-# Virtual RAPPID Debug Card
+# RAPPID Calling Card and Debug Card
 
-The Virtual RAPPID Debug Card is a developer simulation surface for exercising
-a RAPPID handoff without a real network, device credential, private memory, or
-production identity. TypeScript and Python implement the same closed manifest,
-fixture deck, state machine, and wire snapshots.
+OpenRappter implements RAPP/1 SPEC §7.10 exactly as finalized in
+`kody-w/rapp-1` commit `392f850`.
 
-It is a transport and hydration test surface. It does not change the canonical
-RAPPID, RAPP/1 body frames, Quantum RAPPID growth APIs, or committed-message
-reveal behavior.
-
-## Card and link contract
-
-The conventional card filename is:
+There is no private card envelope. A `.rappid-card.json` resource is canonical
+JSON for one ordinary eleven-key RAPP/1 frame:
 
 ```text
-.rappid-card.json
+spec, kind, stream_id, seq, utc, payload,
+payload_hash, frame_hash, prev, prev_wave, sig
 ```
 
-The schema is [`contracts/rappid-card.schema.json`](../contracts/rappid-card.schema.json).
-Every object is closed. A card carries only:
-
-- the canonical RAPPID;
-- a canonical HTTPS endpoint, signed policy identifier, and nonce;
-- issue/expiry, protocol, and runtime compatibility bounds;
-- classification and explicit hydration scopes;
-- bounded content-addressed part descriptors;
-- challenge and signature metadata.
-
-It cannot carry a secret, credential, plaintext private memory, executable,
-command, arbitrary media type, arbitrary part name, or filesystem path.
-Hydrated bytes come only from an injected content provider, are size-checked,
-and must re-hash to the declared SHA-256 address before they become visible to
-the simulator.
-
-The manifest hash is SHA-256 over the deterministic canonical JSON form: keys
-sorted, no whitespace, ASCII escapes, and identical number rendering in both
-runtimes. The compact non-secret link is exactly:
-
-```text
-rappid://link/<rappid>?m=<manifest-hash>&e=<endpoint>&n=<nonce>
-```
-
-No other query fields, duplicate fields, fragment, alternate ordering, or
-non-canonical spelling is accepted. The endpoint is decoded before policy
-checks. Userinfo, query parameters, fragments, percent-encoded path material,
-non-HTTPS schemes, and non-canonical origins are refused, so an encoded token
-or password cannot hide inside `e=`.
-
-## Profiles and keys
-
-The profiles are intentionally distinct:
-
-| Profile | Accepted mode | Authenticator |
+| Use | Frame kind | Payload profile |
 |---|---|---|
-| `rappid-card-test/1` | Fixture only | `ed25519-test` with deterministic synthetic fixture keys |
-| `rappid-card-production/1` | Production only | `ed25519` with explicitly injected public trust anchors |
+| Production | `body.calling-card` | `rappid-card/1` |
+| Test/debug | `body.debug-card` | `rappid-card-test/1` |
 
-Synthetic fixture identities and private keys live only in fixture/vector
-generation code. Production mode rejects the test profile and `ed25519-test`
-before trust lookup. The core never reads environment variables, keychains,
-cloud metadata, or ambient credentials.
+## Exact payload
 
-Production trust is not a signer-key map or a caller-provided scope set:
-
-1. A local public authority anchor verifies a signed
-   `rappid-card-policy/1` document.
-2. That policy authority verifies one signed
-   `rappid-card-authorization/1` binding the signer key to the exact subject
-   RAPPID, scopes, classification ceiling, and endpoint origins.
-3. The same authority verifies a signed
-   `rappid-card-revocations/1` view.
-4. The authorized signer public key verifies the card and the post-hydration
-   continuity challenge.
-
-The closed trust document contract is
-[`contracts/rappid-card-trust.schema.json`](../contracts/rappid-card-trust.schema.json).
-Policy resolution and origin approval happen before the manifest provider is
-called, so an unapproved decoded endpoint cannot reach a network-capable
-provider.
-
-## State machine
-
-The reducer is pure and the provider effects are outside it:
+The frame payload is closed and uses these snake_case members:
 
 ```text
-parse
-  -> verify
-  -> preview
-  -> explicit approve
-  -> hydrate permitted content-addressed parts
-  -> continuity challenge
-  -> awake
+profile
+rappid
+soul_hash
+parent
+engram_root
+reflex_capability_root
+compatibility
+classification
+requested_scope
+expires_utc
+revocation_url
+endpoint_origin
+wake_challenge
+inventory
+key_id
 ```
 
-Any rejected control transitions to `failed` with a stable error code. Preview
-does not hydrate. Approval is a separate action. Production requires the
-runtime's SQLite state store; policy, authorization, and revocation sequences
-are checked for rollback in the same transaction that claims a nonce. The
-claim survives process restart. Audit output is capped at 64 deterministic
-events.
+`parent` is `null` or exactly `{rappid,particle}`. Compatibility is exactly
+`{protocol,runtime,features}` using sorted versioned tokens. Classification is
+one of `public`, `internal`, `confidential`, `restricted`; requested scopes are
+sorted lclabel tokens.
 
-The continuity challenge binds the manifest hash, nonce, and sorted hashes of
-the parts that actually hydrated. A reconnect during hydration can retry the
-same verified content lookup once; it does not re-parse, re-authorize, or
-weaken the signature boundary.
+Inventory entries are exactly `{part,space,hash,bytes,required}`. The required
+core parts are sorted as `engram`, `reflex-capability`, `soul`, all in
+`rapp/1:egg`. Their hashes bind `engram_root`,
+`reflex_capability_root`, and `soul_hash`.
 
-## Deterministic fixture deck
+## Signature and identity
 
-Both runtimes expose the same 13 fixtures:
+The frame's existing `sig` member is required. It is detached, unencoded JWS:
 
-| Fixture | Expected result |
-|---|---|
-| `valid` | Awake |
-| `expired` | `card_expired` |
-| `revoked` | `revoked` |
-| `wrong-hash` | `manifest_hash_mismatch` |
-| `unknown-key` | `unknown_key` |
-| `incompatible-runtime-protocol` | `incompatible_protocol` |
-| `classification-violation` | `classification_violation` |
-| `insufficient-scope` | `insufficient_scope` |
-| `missing-part` | `missing_part` after explicit approval |
-| `challenge-failure` | `challenge_failed` after hydration |
-| `reconnect-during-hydration` | Awake after one bounded resume |
-| `duplicate-nonce` | `duplicate_nonce` |
-| `physical-payload-reproduction` | Awake from the exact QR/deep-link payload |
+```text
+protected-header .. Ed25519-signature
+```
 
-[`tests/rappid-card-vectors.json`](../tests/rappid-card-vectors.json) contains
-the signed manifests, policies, signer authorizations, revocation views,
-canonical hashes, exact links, previews, approved runs, hydrated part
-descriptors, and audit events. TypeScript and Python each regenerate the full
-fixture document and require structural equality.
+The protected header is canonical JSON with exactly:
 
-[`tests/rappid-card-production-vectors.json`](../tests/rappid-card-production-vectors.json)
-adds positive `ed25519` production vectors: an accepted view, a higher-sequence
-rotation, and a signed lower-sequence rollback probe. Neither runtime has a
-built-in production private key.
+```json
+{"alg":"EdDSA","b64":false,"crit":["b64"],"kid":"<keyed-rappid>"}
+```
+
+Signing input is:
+
+```text
+BASE64URL(canonical(header)) + "." + canonical(frame without sig)
+```
+
+`payload.key_id` must equal `kid`. The resolved Ed25519 SPKI must hash back to
+the key RAPPID tail with `Hb("rapp/1:rappid", SPKI_DER)`. A verifying key is not
+issuing authority by itself.
+
+## Compact link and endpoint evidence
+
+The public, non-secret link is:
+
+```text
+rappid://link/<percent-encoded-rappid>?m=<payload-particle>&e=<endpoint>&n=<nonce>
+```
+
+The exact query order is `m,e,n`. `m` equals both `frame.payload_hash` and
+`H("rapp/1:particle", frame.payload)`. `e` is a canonically percent-encoded
+HTTPS URL ending `.rappid-card.json`. `n` is 16–64 unpadded base64url
+characters.
+
+Endpoints reject userinfo, ports, queries (including empty `?`), fragments
+(including empty `#`), spaces/control characters, backslashes, malformed or
+non-canonical percent encoding, double encoding, empty/dot segments, and
+non-global IP literals. Signed `endpoint_origin` and `revocation_url` origins
+must be authority-approved.
+
+Fetch evidence is a 1–8 element array of exact
+`{url,resolved_ip}` hops. Every redirect origin must be approved and every
+observed IP globally routable. Production fetchers must apply the same checks
+to live DNS/socket results before each request and after every redirect.
+
+## Authenticated policy, delegation, and revocation
+
+Runtime behavior comes from signed documents, never caller booleans or sets.
+
+### `rappid-card-runtime-policy/1`
+
+Exact members:
+
+```text
+schema, policy_seq, generated_utc, effective_utc, expires_utc,
+authority_rappid, signer_key_id, provenance, card_authority,
+protocol, runtime, features, profiles, max_classification,
+granted_scope, max_registry_age_seconds, sig
+```
+
+The policy selects exactly one profile and authenticates protocol/runtime,
+feature superset, classification ceiling, granted scopes, card authority,
+registry freshness, and its monotonic sequence.
+
+### `rappid-card-authority/1`
+
+Exact members:
+
+```text
+schema, registry_seq, generated_utc, effective_utc, expires_utc,
+authority_rappid, signer_key_id, provenance, approved_origins,
+authorizations, sig
+```
+
+Authorization entries are exactly:
+
+```text
+issuer_key_id, subject_rappid, role,
+not_before_utc, not_after_utc, revoked_utc
+```
+
+Role is `subject` or `card-issuer`. Production's positive vector uses explicit
+non-synthetic `card-issuer` delegation. Debug profile and policy authorities
+must be visibly owned by `synthetic`; production refuses them.
+
+### `rappid-card-revocations/1`
+
+Exact members:
+
+```text
+schema, registry_seq, generated_utc, effective_utc, expires_utc,
+authority_rappid, signer_key_id, provenance, entries, sig
+```
+
+Entries are typed as `manifest-hash`, `key-id`, or `subject-rappid`, with exact
+`target_type,target,effective_utc,reason`. Missing, forged, stale,
+wrong-provenance, rollback, and same-sequence fork views fail closed.
+
+## Exact verification order
+
+The runtime stops at the first failing step:
+
+1. `parse`
+2. `content-address`
+3. `schema`
+4. `signature`
+5. `expiry`
+6. `revocation`
+7. `compatibility`
+8. `classification-scope`
+9. `replay-nonce`
+10. `hydration`
+11. `continuity`
+
+The SQLite backend transactionally commits `hydrating` before part access,
+allows only the same connection to resume after restart, refuses other threads
+and processes, and commits `awake` before success. It also persists monotonic
+sequence/hash floors for runtime policy, authority view, and revocation view.
+
+Continuity is the exact object:
+
+```text
+rappid, soul_hash, parent, engram_root,
+reflex_capability_root, nonce
+```
+
+Both the signed `wake_challenge` and hydrated response must equal
+`H("rapp/1:particle", continuity)`.
+
+## Authoritative vectors
+
+OpenRappter vendors byte-identical PR9 artifacts under:
+
+```text
+tests/vectors/rapp-1-392f850/rappid-card/
+```
+
+- `deck.json`: 49 mandatory named scenarios in exact order.
+- `physical.rappid-card.json`: canonical eleven-key debug frame bytes.
+- `physical-payload.txt`: exact compact physical URI.
+- `PROVENANCE.json`: source commit and SHA-256 attestations.
+
+Both TypeScript and Python consume this deck. The 49 scenario verdicts plus the
+separate physical byte/link reproduction assertion are the 50 mandatory card
+checks. Drift tests pin all schema tokens, key sets, scenario names, and order.
 
 ## CLI
 
-The same commands are available from the TypeScript and Python launchers:
-
 ```bash
-# TypeScript
-cd typescript
-npm run build:server
-node dist/index.js rappid-card fixtures ../rappid-card-deck --format both
-node dist/index.js rappid-card simulate valid
-node dist/index.js rappid-card simulate valid --approve
-node dist/index.js rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json --fixture
-node dist/index.js rappid-card verify ../rappid-card-deck/valid/.rappid-card.json \
-  --link ../rappid-card-deck/valid/rappid-card.link.txt --fixture
-node dist/index.js rappid-card qr '<exact-rappid-link>' ./rappid-card.svg
+# Export canonical frames, links, trust documents, and QR artifacts
+openrappter rappid-card fixtures ./rappid-card-deck --format both
 
-# Python
-cd python
-python -m openrappter.cli rappid-card fixtures ../rappid-card-deck --format both
-python -m openrappter.cli rappid-card simulate valid
-python -m openrappter.cli rappid-card simulate valid --approve
-python -m openrappter.cli rappid-card inspect ../rappid-card-deck/valid/.rappid-card.json --fixture
-python -m openrappter.cli rappid-card verify ../rappid-card-deck/valid/.rappid-card.json \
-  --link ../rappid-card-deck/valid/rappid-card.link.txt --fixture
-python -m openrappter.cli rappid-card qr '<exact-rappid-link>' ./rappid-card.svg
+# Inspect canonical frame bytes and link
+openrappter rappid-card inspect \
+  ./rappid-card-deck/physical-payload-reproduction/.rappid-card.json \
+  --link ./rappid-card-deck/physical-payload-reproduction/rappid-card.link.txt
+
+# Run exact verification with durable state
+openrappter rappid-card verify \
+  ./rappid-card-deck/physical-payload-reproduction/.rappid-card.json \
+  --link ./rappid-card-deck/physical-payload-reproduction/rappid-card.link.txt \
+  --scenario physical-payload-reproduction \
+  --state ./rappid-card-state.sqlite
+
+# Verify a non-vendored production frame with explicit PR9 inputs
+openrappter rappid-card verify ./production.rappid-card.json \
+  --link ./production-link.txt \
+  --bundle ./production-verification-bundle.json \
+  --state ./production-card-state.sqlite
+
+# Run any mandatory negative or positive vector
+openrappter rappid-card simulate expired --state ./expired-state.sqlite
 ```
 
-`simulate` stops at preview unless `--approve` is supplied. `inspect` and
-`verify` never fetch ambient keys. Production verification requires both an
-explicit `--trust` JSON bundle (signed policy, authorization, revocation view,
-and public authority keys) and a durable `--state` SQLite path.
+The explicit production bundle carries only verifier inputs:
+`runtime_policy_authority`, `runtime_policy`, `authority_view`,
+`revocation_view`, `trust` (`kid` + `spki_der_b64`), `now_utc`,
+`connection_id`, `fetch_trace`, `hydrated_parts_b64`, and `continuity`.
+Every contained document remains untrusted and is verified in the normative
+order.
 
-Fixture export writes each manifest, the exact link sidecar, and a real QR SVG
-or PNG generated by the `qrcode` ecosystem libraries. The implementation does
-not draw placeholder modules.
-
-## Habitat integration
-
-The **RAPPID Debug Card** page appears beside **Quantum RAPPIDs** in the
-OpenRappter UI. It exposes fixture selection, the exact deep link, a scannable
-QR, bounded audit events, and visible preview/failure/awake states. Hydration
-requires the page's explicit approval button.
-
-The browser calls only authenticated gateway methods:
-
-- `rappid.card.fixtures`
-- `rappid.card.preview`
-- `rappid.card.simulate`
-
-Fixture private keys and provider authority stay server-side. The gateway
-simulation uses signed fixture trust documents and in-memory fixture state; it
-performs no network request and reads no credential store. The production API
-does not accept that state store.
-
-## Current boundary
-
-The shipped production profile is a verified provider contract, not a
-production pairing deployment. It verifies Ed25519 trust documents and keeps
-durable replay state, but OpenRappter does not yet ship a hardware-backed
-private signer, trust-distribution service, remote content transport, or QR
-camera decoder. The Debug Card Habitat deliberately remains fixture-only; a
-production host must supply reviewed trust/content/challenge providers.
+The Habitat remains test-vector-only and requires an explicit button before
+running hydration. It exposes exact frame/link wire names and the declared
+verification step. No production trust or auto-execution authority is added
+to the browser.

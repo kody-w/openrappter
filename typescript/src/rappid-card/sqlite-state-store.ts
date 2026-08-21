@@ -1,288 +1,241 @@
-import { chmod, mkdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import {
-  DurableCardStateStore,
-  RappidCardError,
-} from './types.js';
-import type { CardTrustStateInput } from './types.js';
+import { CONNECTION, NONCE, hex64, lclabel, rappidValid, uint53, validUtc } from './contract.js';
+import { CardStateBackend } from './types.js';
 
 interface Statement {
   run(...params: unknown[]): { changes: number };
   get(...params: unknown[]): unknown;
 }
-
 interface Database {
   exec(sql: string): void;
   prepare(sql: string): Statement;
   pragma(value: string): unknown;
-  transaction<T>(operation: () => T): () => T;
   close(): void;
 }
+type DatabaseConstructor = new (
+  path: string,
+  options?: { timeout?: number },
+) => Database;
 
-type DatabaseConstructor = new (path: string) => Database;
-
-export class SqliteCardStateStore extends DurableCardStateStore {
+export class SQLiteCardState extends CardStateBackend {
   private constructor(
-    private readonly database: Database,
     readonly path: string,
-    private readonly replayLimit: number,
+    private readonly DatabaseClass: DatabaseConstructor,
   ) {
     super();
-    this.assertDurableBrand();
   }
 
-  static async open(
-    databasePath: string,
-    replayLimit = 10_000,
-  ): Promise<SqliteCardStateStore> {
-    if (databasePath === ':memory:' || !Number.isInteger(replayLimit) || replayLimit < 1) {
-      throw new RappidCardError(
-        'state_store_invalid',
-        'production replay state requires a durable SQLite file and positive limit',
-      );
+  static async open(pathValue: string): Promise<SQLiteCardState> {
+    if (pathValue === ':memory:') {
+      throw new Error('SQLiteCardState requires a durable filesystem path');
     }
-    const path = resolve(databasePath);
-    const directory = dirname(path);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await chmod(directory, 0o700);
+    const path = resolve(pathValue);
+    await mkdir(dirname(path), { recursive: true });
     const DatabaseClass =
       (await import('better-sqlite3')).default as unknown as DatabaseConstructor;
-    const database = new DatabaseClass(path);
-    database.pragma('busy_timeout = 5000');
-    database.pragma('journal_mode = WAL');
-    database.pragma('synchronous = FULL');
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS rappid_card_policy_state (
-        policy_id TEXT PRIMARY KEY,
-        sequence INTEGER NOT NULL,
-        document_hash TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS rappid_card_authorization_state (
-        policy_id TEXT NOT NULL,
-        authorization_id TEXT NOT NULL,
-        sequence INTEGER NOT NULL,
-        document_hash TEXT NOT NULL,
-        PRIMARY KEY (policy_id, authorization_id)
-      );
-      CREATE TABLE IF NOT EXISTS rappid_card_revocation_state (
-        policy_id TEXT PRIMARY KEY,
-        sequence INTEGER NOT NULL,
-        document_hash TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS rappid_card_replay (
-        nonce TEXT PRIMARY KEY,
-        policy_id TEXT NOT NULL,
-        manifest_hash TEXT NOT NULL,
-        accepted_at INTEGER NOT NULL
-      );
-    `);
-    await chmod(path, 0o600);
-    return new SqliteCardStateStore(database, path, replayLimit);
+    const database = new DatabaseClass(path, { timeout: 30_000 });
+    try {
+      database.pragma('journal_mode = WAL');
+      database.pragma('synchronous = FULL');
+      database.pragma('busy_timeout = 30000');
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS card_nonce (
+          nonce TEXT PRIMARY KEY,
+          connection_id TEXT NOT NULL,
+          state TEXT NOT NULL CHECK(state IN ('hydrating','awake')),
+          updated_utc TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS card_sequence (
+          namespace TEXT NOT NULL,
+          authority TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          view_hash TEXT NOT NULL,
+          PRIMARY KEY(namespace, authority)
+        );
+      `);
+    } finally {
+      database.close();
+    }
+    return new SQLiteCardState(path, DatabaseClass);
   }
 
-  recordPolicy(
-    policyId: string,
-    sequence: number,
-    documentHash: string,
+  claimNonce(
+    nonce: string,
+    connectionId: string,
+    utc: string,
+  ): [boolean, string] {
+    this.validateNonce(nonce, connectionId, utc);
+    const database = this.connect();
+    try {
+      database.exec('BEGIN IMMEDIATE');
+      const row = database.prepare(
+        'SELECT connection_id, state FROM card_nonce WHERE nonce=?',
+      ).get(nonce) as { connection_id: string; state: string } | undefined;
+      if (row === undefined) {
+        database.prepare(
+          "INSERT INTO card_nonce(nonce,connection_id,state,updated_utc) VALUES(?,?,'hydrating',?)",
+        ).run(nonce, connectionId, utc);
+        database.exec('COMMIT');
+        return [true, 'new'];
+      }
+      if (row.connection_id === connectionId && row.state === 'hydrating') {
+        database.prepare(
+          'UPDATE card_nonce SET updated_utc=? WHERE nonce=?',
+        ).run(utc, nonce);
+        database.exec('COMMIT');
+        return [true, 'resume'];
+      }
+      database.exec('ROLLBACK');
+      return row.state === 'hydrating'
+        ? [false, 'nonce is already hydrating on another connection']
+        : [false, 'nonce has already awakened'];
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      database.close();
+    }
+  }
+
+  markAwake(
+    nonce: string,
+    connectionId: string,
+    utc: string,
+  ): [boolean, string] {
+    this.validateNonce(nonce, connectionId, utc);
+    const database = this.connect();
+    try {
+      database.exec('BEGIN IMMEDIATE');
+      const changed = database.prepare(
+        "UPDATE card_nonce SET state='awake', updated_utc=? WHERE nonce=? AND connection_id=? AND state='hydrating'",
+      ).run(utc, nonce, connectionId).changes;
+      if (changed !== 1) {
+        database.exec('ROLLBACK');
+        return [false, 'nonce claim was lost before awake'];
+      }
+      database.exec('COMMIT');
+      return [true, 'awake'];
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      database.close();
+    }
+  }
+
+  acceptSequence(
+    namespace: string,
+    authority: string,
+    seq: number,
+    viewHash: string,
+  ): [boolean, string] {
+    if (!lclabel(namespace) || !rappidValid(authority)) {
+      throw new Error('invalid signed-view sequence key');
+    }
+    if (!uint53(seq) || !hex64(viewHash)) {
+      throw new Error('invalid signed-view sequence value');
+    }
+    const database = this.connect();
+    try {
+      database.exec('BEGIN IMMEDIATE');
+      const row = database.prepare(
+        'SELECT seq, view_hash FROM card_sequence WHERE namespace=? AND authority=?',
+      ).get(namespace, authority) as { seq: number; view_hash: string } | undefined;
+      if (row === undefined) {
+        database.prepare(
+          'INSERT INTO card_sequence(namespace,authority,seq,view_hash) VALUES(?,?,?,?)',
+        ).run(namespace, authority, seq, viewHash);
+        database.exec('COMMIT');
+        return [true, 'new'];
+      }
+      if (seq < row.seq) {
+        database.exec('ROLLBACK');
+        return [false, `${namespace} sequence rollback`];
+      }
+      if (seq === row.seq && viewHash !== row.view_hash) {
+        database.exec('ROLLBACK');
+        return [false, `${namespace} sequence fork`];
+      }
+      if (seq > row.seq) {
+        database.prepare(
+          'UPDATE card_sequence SET seq=?, view_hash=? WHERE namespace=? AND authority=?',
+        ).run(seq, viewHash, namespace, authority);
+      }
+      database.exec('COMMIT');
+      return [true, 'current'];
+    } catch (error) {
+      try { database.exec('ROLLBACK'); } catch {}
+      throw error;
+    } finally {
+      database.close();
+    }
+  }
+
+  seedNonce(
+    nonce: string,
+    connectionId: string,
+    state: 'hydrating' | 'awake',
+    utc: string,
   ): void {
-    const operation = this.database.transaction(() => {
-      const current = this.state('rappid_card_policy_state', policyId);
-      if (sequence < (current?.sequence ?? -1)) {
-        throw new RappidCardError(
-          'policy_rollback',
-          'signed policy sequence moved backwards',
-        );
-      }
-      if (
-        current
-        && sequence === current.sequence
-        && documentHash !== current.documentHash
-      ) {
-        throw new RappidCardError(
-          'policy_equivocation',
-          'signed policy changed without advancing its sequence',
-        );
-      }
-      this.database.prepare(`
-        INSERT INTO rappid_card_policy_state
-          (policy_id, sequence, document_hash)
-        VALUES (?, ?, ?)
-        ON CONFLICT(policy_id) DO UPDATE SET
-          sequence = excluded.sequence,
-          document_hash = excluded.document_hash
-      `).run(policyId, sequence, documentHash);
-    });
-    operation();
+    this.validateNonce(nonce, connectionId, utc);
+    const database = this.connect();
+    try {
+      database.prepare(
+        'INSERT OR REPLACE INTO card_nonce(nonce,connection_id,state,updated_utc) VALUES(?,?,?,?)',
+      ).run(nonce, connectionId, state, utc);
+    } finally {
+      database.close();
+    }
   }
 
-  record(input: CardTrustStateInput, claimNonce: boolean): void {
-    const operation = this.database.transaction(() => {
-      const policyState = this.state(
-        'rappid_card_policy_state',
-        input.policyId,
-      );
-      const authorizationState = this.authorizationState(
-        input.policyId,
-        input.authorizationId,
-      );
-      const revocationState = this.state(
-        'rappid_card_revocation_state',
-        input.policyId,
-      );
-      if (input.policySequence < (policyState?.sequence ?? -1)) {
-        throw new RappidCardError(
-          'policy_rollback',
-          'signed policy sequence moved backwards',
-        );
-      }
-      if (
-        policyState
-        && input.policySequence === policyState.sequence
-        && input.policyHash !== policyState.documentHash
-      ) {
-        throw new RappidCardError(
-          'policy_equivocation',
-          'signed policy changed without advancing its sequence',
-        );
-      }
-      if (
-        input.authorizationSequence
-        < (authorizationState?.sequence ?? -1)
-      ) {
-        throw new RappidCardError(
-          'authorization_rollback',
-          'signed authorization sequence moved backwards',
-        );
-      }
-      if (
-        authorizationState
-        && input.authorizationSequence === authorizationState.sequence
-        && input.authorizationHash !== authorizationState.documentHash
-      ) {
-        throw new RappidCardError(
-          'authorization_equivocation',
-          'signed authorization changed without advancing its sequence',
-        );
-      }
-      if (input.revocationSequence < (revocationState?.sequence ?? -1)) {
-        throw new RappidCardError(
-          'revocation_rollback',
-          'signed revocation sequence moved backwards',
-        );
-      }
-      if (
-        revocationState
-        && input.revocationSequence === revocationState.sequence
-        && input.revocationHash !== revocationState.documentHash
-      ) {
-        throw new RappidCardError(
-          'revocation_equivocation',
-          'signed revocation view changed without advancing its sequence',
-        );
-      }
-      if (
-        this.database.prepare(
-          'SELECT 1 AS present FROM rappid_card_replay WHERE nonce = ?',
-        ).get(input.nonce)
-      ) {
-        throw new RappidCardError(
-          'duplicate_nonce',
-          'card nonce has already been accepted',
-        );
-      }
-      this.database.prepare(`
-        INSERT INTO rappid_card_policy_state
-          (policy_id, sequence, document_hash)
-        VALUES (?, ?, ?)
-        ON CONFLICT(policy_id) DO UPDATE SET
-          sequence = excluded.sequence,
-          document_hash = excluded.document_hash
-      `).run(input.policyId, input.policySequence, input.policyHash);
-      this.database.prepare(`
-        INSERT INTO rappid_card_authorization_state
-          (policy_id, authorization_id, sequence, document_hash)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(policy_id, authorization_id)
-        DO UPDATE SET
-          sequence = excluded.sequence,
-          document_hash = excluded.document_hash
-      `).run(
-        input.policyId,
-        input.authorizationId,
-        input.authorizationSequence,
-        input.authorizationHash,
-      );
-      this.database.prepare(`
-        INSERT INTO rappid_card_revocation_state
-          (policy_id, sequence, document_hash)
-        VALUES (?, ?, ?)
-        ON CONFLICT(policy_id) DO UPDATE SET
-          sequence = excluded.sequence,
-          document_hash = excluded.document_hash
-      `).run(
-        input.policyId,
-        input.revocationSequence,
-        input.revocationHash,
-      );
-      if (claimNonce) {
-        this.database.prepare(`
-          INSERT INTO rappid_card_replay
-            (nonce, policy_id, manifest_hash, accepted_at)
-          VALUES (?, ?, ?, ?)
-        `).run(
-          input.nonce,
-          input.policyId,
-          input.manifestHash,
-          Date.now(),
-        );
-        const count = (
-          this.database.prepare(
-            'SELECT COUNT(*) AS count FROM rappid_card_replay',
-          ).get() as { count: number }
-        ).count;
-        if (count > this.replayLimit) {
-          this.database.prepare(`
-            DELETE FROM rappid_card_replay
-            WHERE rowid IN (
-              SELECT rowid FROM rappid_card_replay
-              ORDER BY accepted_at, rowid
-              LIMIT ?
-            )
-          `).run(count - this.replayLimit);
-        }
-      }
-    });
-    operation();
+  seedSequence(
+    namespace: string,
+    authority: string,
+    seq: number,
+    viewHash: string,
+  ): void {
+    if (!lclabel(namespace) || !rappidValid(authority)) throw new Error('invalid sequence seed key');
+    if (!uint53(seq) || !hex64(viewHash)) throw new Error('invalid sequence seed value');
+    const database = this.connect();
+    try {
+      database.prepare(
+        'INSERT OR REPLACE INTO card_sequence(namespace,authority,seq,view_hash) VALUES(?,?,?,?)',
+      ).run(namespace, authority, seq, viewHash);
+    } finally {
+      database.close();
+    }
   }
 
-  close(): void {
-    this.database.close();
+  nonceState(nonce: string): {
+    connection_id: string;
+    state: string;
+    updated_utc: string;
+  } | null {
+    const database = this.connect();
+    try {
+      const row = database.prepare(
+        'SELECT connection_id,state,updated_utc FROM card_nonce WHERE nonce=?',
+      ).get(nonce) as
+        | { connection_id: string; state: string; updated_utc: string }
+        | undefined;
+      return row ?? null;
+    } finally {
+      database.close();
+    }
   }
 
-  private state(
-    table: string,
-    policyId: string,
-  ): { sequence: number; documentHash: string } | undefined {
-    const row = this.database.prepare(
-      `SELECT sequence, document_hash AS documentHash
-       FROM ${table}
-       WHERE policy_id = ?`,
-    ).get(policyId) as { sequence: number; documentHash: string } | undefined;
-    return row;
+  private connect(): Database {
+    const database = new this.DatabaseClass(this.path, { timeout: 30_000 });
+    database.pragma('busy_timeout = 30000');
+    database.pragma('synchronous = FULL');
+    return database;
   }
 
-  private authorizationState(
-    policyId: string,
-    authorizationId: string,
-  ): { sequence: number; documentHash: string } | undefined {
-    const row = this.database.prepare(`
-      SELECT sequence, document_hash AS documentHash
-      FROM rappid_card_authorization_state
-      WHERE policy_id = ? AND authorization_id = ?
-    `).get(policyId, authorizationId) as
-      | { sequence: number; documentHash: string }
-      | undefined;
-    return row;
+  private validateNonce(nonce: string, connectionId: string, utc: string): void {
+    if (!NONCE.test(nonce)) throw new Error('invalid card nonce');
+    if (!CONNECTION.test(connectionId)) throw new Error('invalid card connection_id');
+    if (validUtc(utc) === null) throw new Error('invalid card nonce timestamp');
   }
 }

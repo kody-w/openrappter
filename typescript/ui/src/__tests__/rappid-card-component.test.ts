@@ -9,74 +9,55 @@ interface CardElement extends HTMLElement {
   updateComplete: Promise<boolean>;
 }
 
-const fixtures = [
-  {
-    name: 'valid',
-    label: 'Valid card',
-    description: 'A valid synthetic card.',
-    transport: 'virtual',
-    expectedState: 'awake',
-    expectedError: null,
-  },
-  {
-    name: 'challenge-failure',
-    label: 'Continuity challenge failure',
-    description: 'Challenge fails after hydration.',
-    transport: 'virtual',
-    expectedState: 'failed',
-    expectedError: 'challenge_failed',
-  },
-];
+const scenario = {
+  name: 'valid-test',
+  profile: 'rappid-card-test/1',
+  kind: 'body.debug-card',
+  physical: false,
+  expected: { ok: true, step: null, reason_contains: null },
+};
 
-function run(state: 'preview' | 'awake' | 'failed') {
-  return {
-    fixture: 'valid',
-    exactDeepLink:
-      'rappid://link/rappid:@openrappter/virtual-debug-card:'
-      + 'a'.repeat(64)
-      + '?m='
-      + 'b'.repeat(64)
-      + '&e=fixture-habitat&n='
-      + 'c'.repeat(32),
-    qrSvg: '<svg viewBox="0 0 21 21"><path d="M0 0h1v1H0z"/></svg>',
-    simulation: {
-      state,
-      outcome: state === 'awake' ? 'awake' : state === 'failed' ? 'failed' : 'pending',
-      error:
-        state === 'failed'
-          ? { code: 'challenge_failed', message: 'continuity challenge verification failed' }
-          : null,
-      preview: {
-        rappid: 'rappid:@openrappter/virtual-debug-card:' + 'a'.repeat(64),
-        profile: 'rappid-card-test/1',
-        policyId: 'fixture-policy-1',
-        authorizationId: 'fixture-authorization-1',
-        endpoint: 'https://fixture.openrappter.test/rappid-card',
-        origin: 'https://fixture.openrappter.test',
-        issuerKeyId: 'fixture-signer-1',
-        classification: 'public',
-        scopes: ['identity:read'],
-        policySequence: 7,
-        authorizationSequence: 3,
-        revocationSequence: 11,
-        parts: [
-          {
-            name: 'identity',
-            hash: 'd'.repeat(64),
-            bytes: 42,
-            mediaType: 'application/json',
-            required: true,
-          },
-        ],
+const frame = {
+  spec: 'rapp/1',
+  kind: 'body.debug-card',
+  stream_id: `rappid:@synthetic/card-subject:${'a'.repeat(64)}`,
+  payload_hash: 'b'.repeat(64),
+  payload: {
+    profile: 'rappid-card-test/1',
+    rappid: `rappid:@synthetic/card-subject:${'a'.repeat(64)}`,
+    classification: 'public',
+    key_id: `rappid:@synthetic/rappid-card-test:${'c'.repeat(64)}`,
+    endpoint_origin: 'https://cards.example',
+    requested_scope: ['memory-read'],
+    inventory: [
+      {
+        part: 'engram',
+        space: 'rapp/1:egg',
+        hash: 'd'.repeat(64),
+        bytes: 74,
+        required: true,
       },
-      hydrated: state === 'awake'
-        ? [{ name: 'identity', hash: 'd'.repeat(64), bytes: 42, mediaType: 'application/json' }]
-        : [],
-      audit: [
-        { seq: 1, state: 'parsed', event: 'link.parsed', detail: 'fixture-habitat' },
-        { seq: 2, state, event: state === 'awake' ? 'card.awake' : 'preview.ready', detail: 'fixture' },
-      ],
-    },
+    ],
+  },
+};
+
+function response(verification?: {
+  ok: boolean;
+  step: string | null;
+  reason: string;
+  result: { status: string; runtime_policy_seq: number; authority_seq: number; revocation_seq: number } | null;
+}) {
+  return {
+    scenario: 'valid-test',
+    exact_link:
+      `rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A${'a'.repeat(64)}`
+      + `?m=${'b'.repeat(64)}&e=https%3A%2F%2Fcards.example%2Fx.rappid-card.json`
+      + '&n=valid-test-card-0001',
+    qr_svg: '<svg viewBox="0 0 21 21"><path d="M0 0h1v1H0z"/></svg>',
+    frame,
+    expected: scenario.expected,
+    verification,
+    provenance: 'rapp-1 commit 392f850',
   };
 }
 
@@ -87,79 +68,86 @@ async function settle(element: CardElement): Promise<void> {
   await element.updateComplete;
 }
 
-describe('openrappter-rappid-card', () => {
+describe('openrappter-rappid-card PR9 surface', () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
   });
 
-  it('loads fixture selection, exact link, real QR, and preview without hydration', async () => {
+  it('loads scenario/frame/exact-link preview without verification', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
-      if (method === 'rappid.card.fixtures') return fixtures;
-      if (method === 'rappid.card.preview') return run('preview');
-      throw new Error(`unexpected method ${method}`);
+      if (method === 'rappid.card.scenarios') return [scenario];
+      if (method === 'rappid.card.preview') return response();
+      throw new Error(`unexpected ${method}`);
     });
     const element = document.createElement('openrappter-rappid-card') as CardElement;
     document.body.append(element);
     await settle(element);
-
     const text = element.shadowRoot?.textContent ?? '';
-    expect(text).toContain('Virtual RAPPID Debug Card');
+    expect(text).toContain('RAPP/1 PR9');
+    expect(text).toContain('body.debug-card');
     expect(text).toContain('rappid-card-test/1');
     expect(text).toContain('preview');
-    expect(element.shadowRoot?.querySelector('img')?.src).toContain('data:image/svg+xml');
-    expect(gateway.call).toHaveBeenCalledWith('rappid.card.preview', {
-      fixture: 'valid',
-    });
-    expect(gateway.call).not.toHaveBeenCalledWith(
-      'rappid.card.simulate',
-      expect.anything(),
-    );
+    expect(gateway.call).not.toHaveBeenCalledWith('rappid.card.verify', expect.anything());
   });
 
-  it('sends a separate explicit approval and renders awake', async () => {
+  it('requires a separate explicit verify action and renders awake', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
-      if (method === 'rappid.card.fixtures') return fixtures;
-      if (method === 'rappid.card.preview') return run('preview');
-      if (method === 'rappid.card.simulate') return run('awake');
-      throw new Error(`unexpected method ${method}`);
+      if (method === 'rappid.card.scenarios') return [scenario];
+      if (method === 'rappid.card.preview') return response();
+      if (method === 'rappid.card.verify') {
+        return response({
+          ok: true,
+          step: null,
+          reason: 'awake',
+          result: {
+            status: 'awake',
+            runtime_policy_seq: 7,
+            authority_seq: 11,
+            revocation_seq: 13,
+          },
+        });
+      }
+      throw new Error(`unexpected ${method}`);
     });
     const element = document.createElement('openrappter-rappid-card') as CardElement;
     document.body.append(element);
     await settle(element);
-
-    const approve = Array.from(
+    const button = Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? [],
-    ).find((button) => button.textContent?.includes('Explicitly approve'));
-    approve?.click();
+    ).find((entry) => entry.textContent?.includes('Explicitly run'));
+    button?.click();
     await settle(element);
-
-    expect(gateway.call).toHaveBeenCalledWith('rappid.card.simulate', {
-      fixture: 'valid',
+    expect(gateway.call).toHaveBeenCalledWith('rappid.card.verify', {
+      scenario: 'valid-test',
       approve: true,
     });
     expect(element.shadowRoot?.textContent).toContain('awake');
   });
 
-  it('renders a visible challenge failure state', async () => {
+  it('renders the declared refusal step', async () => {
     vi.spyOn(gateway, 'call').mockImplementation(async (method) => {
-      if (method === 'rappid.card.fixtures') return fixtures;
-      if (method === 'rappid.card.preview') return run('preview');
-      if (method === 'rappid.card.simulate') return run('failed');
-      throw new Error(`unexpected method ${method}`);
+      if (method === 'rappid.card.scenarios') return [scenario];
+      if (method === 'rappid.card.preview') return response();
+      if (method === 'rappid.card.verify') {
+        return response({
+          ok: false,
+          step: 'signature',
+          reason: 'unknown signing key',
+          result: null,
+        });
+      }
+      throw new Error(`unexpected ${method}`);
     });
     const element = document.createElement('openrappter-rappid-card') as CardElement;
     document.body.append(element);
     await settle(element);
-
-    const approve = Array.from(
+    const button = Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('button') ?? [],
-    ).find((button) => button.textContent?.includes('Explicitly approve'));
-    approve?.click();
+    ).find((entry) => entry.textContent?.includes('Explicitly run'));
+    button?.click();
     await settle(element);
-
-    const text = element.shadowRoot?.textContent ?? '';
-    expect(text).toContain('failed');
-    expect(text).toContain('challenge_failed');
+    expect(element.shadowRoot?.textContent).toContain('signature');
+    expect(element.shadowRoot?.textContent).toContain('unknown signing key');
   });
 });

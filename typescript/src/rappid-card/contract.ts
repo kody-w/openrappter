@@ -1,1025 +1,851 @@
 import {
-  createPrivateKey,
   createPublicKey,
-  sign as cryptoSign,
   verify as cryptoVerify,
 } from 'node:crypto';
+import { isIP } from 'node:net';
 
-import { canonicalJson, sha256Hex } from '../rappids/canonical.js';
-import type { JsonValue } from '../rappids/types.js';
 import {
-  RAPPID_CARD_AUTHORIZATION_SCHEMA,
-  RAPPID_CARD_POLICY_SCHEMA,
-  RAPPID_CARD_PRODUCTION_PROFILE,
-  RAPPID_CARD_REVOCATIONS_SCHEMA,
-  RAPPID_CARD_SCHEMA,
-  RAPPID_CARD_TEST_PROFILE,
-  RappidCardError,
+  rappCanonicalJson,
+  rappH,
+  rappHb,
+} from '../rappids/canonical.js';
+import {
+  CARD_CALLING,
+  CARD_CLASSIFICATIONS,
+  CARD_COMPATIBILITY_KEYS,
+  CARD_DEBUG,
+  CARD_INVENTORY_KEYS,
+  CARD_PAYLOAD_KEYS,
+  CARD_PROFILE,
+  CARD_REQUIRED_PARTS,
+  CARD_TEST_PROFILE,
+  CARD_VIRTUAL_SUFFIX,
+  FRAME_KEYS,
+  RAPP_SPEC,
 } from './types.js';
 import type {
-  CardAlgorithm,
-  CardClassification,
-  CardMediaType,
-  CardPartName,
-  CardProfile,
-  CardScope,
-  ParsedRappidCardLink,
-  RappidCardAuthorization,
-  RappidCardManifest,
-  RappidCardPolicy,
-  RappidCardRevocations,
-  RappidCardSignature,
+  CardContinuity,
+  CardFrame,
+  CardInventoryEntry,
+  CardPayload,
+  JsonValue,
+  ParsedCardLink,
 } from './types.js';
 
-export const CARD_SIGNATURE_DOMAIN = 'rappid-card/1:signature';
-export const CARD_POLICY_SIGNATURE_DOMAIN = 'rappid-card/1:policy';
-export const CARD_AUTHORIZATION_SIGNATURE_DOMAIN = 'rappid-card/1:authorization';
-export const CARD_REVOCATIONS_SIGNATURE_DOMAIN = 'rappid-card/1:revocations';
-export const CARD_CHALLENGE_DOMAIN = 'rappid-card/1:continuity';
-
-const HEX_32 = /^[0-9a-f]{32}$/;
-const HEX_64 = /^[0-9a-f]{64}$/;
-const BASE64URL_32 = /^[A-Za-z0-9_-]{43}$/;
-const BASE64URL_64 = /^[A-Za-z0-9_-]{86}$/;
-const ENDPOINT_PATH = /^\/[A-Za-z0-9._~/-]*$/;
-const KEY_ID = /^[a-z][a-z0-9._-]{0,63}$/;
-const POLICY_ID = /^[a-z][a-z0-9._-]{0,63}$/;
-const AUTHORIZATION_ID = /^[a-z][a-z0-9._-]{0,63}$/;
+const HEX64 = /^[0-9a-f]{64}$/;
+const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const LCLABEL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RAPPID =
-  /^rappid:@[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?\/[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?:[0-9a-f]{64}$/;
-const PROTOCOL = /^rappid-link\/[1-9][0-9]*$/;
-const SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-const RFC3339_UTC =
-  /^(?:[0-9]{4})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$/;
-const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+  /^rappid:@([a-z0-9]+(?:-[a-z0-9]+)*)\/([a-z0-9]+(?:-[a-z0-9]+)*):([0-9a-f]{64})$/;
+const PROFILE_TOKEN = /^[a-z0-9]+(?:-[a-z0-9]+)*\/[1-9][0-9]*$/;
+const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
+const CONNECTION = /^[A-Za-z0-9._-]{1,128}$/;
+const HOST_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const PERCENT = /%[0-9A-Fa-f]{2}/;
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+const JWS_HEADER_KEYS = ['alg', 'b64', 'crit', 'kid'];
+const PARENT_KEYS = ['particle', 'rappid'];
 
-const PROFILES = new Set<CardProfile>([
-  RAPPID_CARD_TEST_PROFILE,
-  RAPPID_CARD_PRODUCTION_PROFILE,
+const FORBIDDEN_TEXT =
+  /(?:\bpassword\b|\bpasswd\b|\bapi[-_ ]?key\b|\bcookie\b|\bauthorization\b|\bbearer(?:\s|[-_:])|\bprivate[-_ ]?memory\b|\bplaintext[-_ ]?memory\b|\bauto[-_ ]?execute\b)/i;
+const FORBIDDEN_KEYS = new Set([
+  'password',
+  'passwd',
+  'api-key',
+  'api_key',
+  'apikey',
+  'cookie',
+  'set-cookie',
+  'authorization',
+  'bearer',
+  'private-memory',
+  'private_memory',
+  'plaintext-memory',
+  'auto-execute',
+  'auto_execute',
+  'instruction',
+  'command',
 ]);
-const CLASSIFICATIONS = new Set<CardClassification>([
-  'public',
-  'internal',
-  'restricted',
-]);
-const SCOPES = new Set<CardScope>([
-  'identity:read',
-  'traits:read',
-  'skill:hydrate',
-  'sonic:hydrate',
-  'capability:hydrate',
-]);
-const PART_NAMES = new Set<CardPartName>([
-  'identity',
-  'traits',
-  'skill-manifest',
-  'sonic-profile',
-  'capability-manifest',
-]);
-const MEDIA_TYPES = new Set<CardMediaType>([
-  'application/json',
-  'text/plain',
-  'application/vnd.rapp.skill+json',
-  'application/vnd.rapp.sonic+json',
-  'application/vnd.rapp.capability+json',
-]);
-const ALGORITHMS = new Set<CardAlgorithm>([
-  'ed25519-test',
-  'ed25519',
-]);
+let materialScannersEnabled = true;
 
-type JsonRecord = Record<string, unknown>;
-type Unsigned<T extends { signature: RappidCardSignature }> = Omit<T, 'signature'>;
-
-function objectAt(value: unknown, path: string): JsonRecord {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new RappidCardError('schema_invalid', `${path} must be an object`);
-  }
-  return value as JsonRecord;
+export function canonical(value: unknown): string {
+  return rappCanonicalJson(value as JsonValue);
 }
 
-function closedObject(
-  value: unknown,
-  path: string,
-  required: readonly string[],
-): JsonRecord {
-  const object = objectAt(value, path);
-  const keys = Object.keys(object).sort();
-  const expected = [...required].sort();
-  if (
-    keys.length !== expected.length
-    || keys.some((key, index) => key !== expected[index])
-  ) {
-    const unexpected = keys.filter((key) => !expected.includes(key));
-    const missing = expected.filter((key) => !keys.includes(key));
-    const detail = [
-      unexpected.length ? `unexpected ${unexpected.join(', ')}` : '',
-      missing.length ? `missing ${missing.join(', ')}` : '',
-    ].filter(Boolean).join('; ');
-    throw new RappidCardError(
-      'schema_invalid',
-      `${path} is closed${detail ? `: ${detail}` : ''}`,
-    );
-  }
-  return object;
+export function H(space: string, value: unknown): string {
+  return rappH(space, value as JsonValue);
 }
 
-function stringAt(
-  object: JsonRecord,
-  key: string,
-  path: string,
-  pattern?: RegExp,
-): string {
-  const value = object[key];
-  if (typeof value !== 'string' || (pattern && !pattern.test(value))) {
-    throw new RappidCardError('schema_invalid', `${path}.${key} is invalid`);
-  }
-  return value;
+export function Hb(space: string, value: Uint8Array): string {
+  return rappHb(space, value);
 }
 
-function integerAt(object: JsonRecord, key: string, path: string): number {
-  const value = object[key];
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new RappidCardError('schema_invalid', `${path}.${key} is invalid`);
-  }
-  return value as number;
+export function rappidValid(value: unknown): value is string {
+  return typeof value === 'string' && RAPPID.test(value);
 }
 
-function enumAt<T extends string>(
-  object: JsonRecord,
-  key: string,
-  path: string,
-  values: Set<T>,
-): T {
-  const value = stringAt(object, key, path);
-  if (!values.has(value as T)) {
-    throw new RappidCardError('schema_invalid', `${path}.${key} is invalid`);
-  }
-  return value as T;
+export function uint53(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-function stringArrayAt<T extends string>(
-  object: JsonRecord,
-  key: string,
-  path: string,
-  options: {
-    values?: Set<T>;
-    pattern?: RegExp;
-    minimum?: number;
-    maximum?: number;
-  } = {},
-): T[] {
-  const value = object[key];
-  const minimum = options.minimum ?? 0;
-  const maximum = options.maximum ?? 64;
-  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    throw new RappidCardError(
-      'schema_invalid',
-      `${path}.${key} must contain ${minimum}..${maximum} items`,
-    );
-  }
-  const result = value.map((item, index) => {
-    if (
-      typeof item !== 'string'
-      || (options.values && !options.values.has(item as T))
-      || (options.pattern && !options.pattern.test(item))
-    ) {
-      throw new RappidCardError(
-        'schema_invalid',
-        `${path}.${key}[${index}] is invalid`,
-      );
-    }
-    return item as T;
-  });
-  if (new Set(result).size !== result.length) {
-    throw new RappidCardError('schema_invalid', `${path}.${key} must be unique`);
-  }
-  return result;
+export function hex64(value: unknown): value is string {
+  return typeof value === 'string' && HEX64.test(value);
 }
 
-function validateSignature(value: unknown, path: string): RappidCardSignature {
-  const object = closedObject(value, path, ['algorithm', 'keyId', 'value']);
-  return {
-    algorithm: enumAt(object, 'algorithm', path, ALGORITHMS),
-    keyId: stringAt(object, 'keyId', path, KEY_ID),
-    value: stringAt(object, 'value', path, BASE64URL_64),
-  };
+export function lclabel(value: unknown): value is string {
+  return typeof value === 'string' && LCLABEL.test(value);
 }
 
-function validateAuthenticator(
-  value: unknown,
-  path: string,
-): { algorithm: CardAlgorithm; keyId: string } {
-  const object = closedObject(value, path, ['algorithm', 'keyId']);
-  return {
-    algorithm: enumAt(object, 'algorithm', path, ALGORITHMS),
-    keyId: stringAt(object, 'keyId', path, KEY_ID),
-  };
-}
-
-function validateTimestamp(value: string, path: string): void {
+export function validUtc(value: unknown): Date | null {
+  if (typeof value !== 'string' || !UTC.test(value)) return null;
   const timestamp = Date.parse(value);
   if (
-    !RFC3339_UTC.test(value)
-    || Number.isNaN(timestamp)
-    || new Date(timestamp).toISOString().replace('.000Z', 'Z') !== value
+    Number.isNaN(timestamp)
+    || new Date(timestamp).toISOString() !== value
   ) {
-    throw new RappidCardError('schema_invalid', `${path} must be UTC RFC3339 seconds`);
+    return null;
   }
+  return new Date(timestamp);
 }
 
-function validateWindow(start: string, end: string, path: string): void {
-  validateTimestamp(start, `${path}.start`);
-  validateTimestamp(end, `${path}.end`);
-  if (Date.parse(end) <= Date.parse(start)) {
-    throw new RappidCardError('schema_invalid', `${path} end must be later than start`);
-  }
+function exactKeys(value: unknown, keys: readonly string[]): boolean {
+  return (
+    value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort())
+  );
 }
 
-function validateRuntime(value: unknown, path: string): RappidCardManifest['runtime'] {
-  const runtime = closedObject(value, path, ['name', 'minimum', 'maximum']);
-  const result = {
-    name: stringAt(runtime, 'name', path, /^[a-z][a-z0-9-]{0,31}$/),
-    minimum: stringAt(runtime, 'minimum', path, SEMVER),
-    maximum: stringAt(runtime, 'maximum', path, SEMVER),
-  };
-  if (compareSemver(result.minimum, result.maximum) > 0) {
-    throw new RappidCardError(
-      'schema_invalid',
-      `${path}.minimum must not exceed maximum`,
-    );
+export function verifyFrame(
+  frame: unknown,
+  head: CardFrame | null = null,
+  streamIdOfRecord?: string,
+): [boolean, string | null, string] {
+  if (!exactKeys(frame, FRAME_KEYS)) {
+    return [false, '1', 'key set != 11'];
   }
-  return result;
-}
-
-export function validateOrigin(value: string, path = 'origin'): string {
-  if (value.length > 200 || value.includes('%')) {
-    throw new RappidCardError('schema_invalid', `${path} is invalid`);
-  }
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new RappidCardError('schema_invalid', `${path} is invalid`);
-  }
+  const value = frame as CardFrame;
+  if (value.spec !== RAPP_SPEC) return [false, '1', 'spec != rapp/1'];
   if (
-    url.protocol !== 'https:'
-    || url.username !== ''
-    || url.password !== ''
-    || url.pathname !== '/'
-    || url.search !== ''
-    || url.hash !== ''
-    || url.origin !== value
+    typeof value.kind !== 'string'
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.kind)
   ) {
-    throw new RappidCardError('schema_invalid', `${path} is invalid`);
+    return [false, '1', 'kind grammar'];
   }
-  return value;
-}
-
-export function validateEndpoint(value: string, path = 'card.endpoint'): string {
-  if (value.length > 256 || value.includes('%')) {
-    throw new RappidCardError('endpoint_invalid', `${path} is not a canonical HTTPS URL`);
+  if (typeof value.stream_id !== 'string') return [false, '1', 'stream_id type'];
+  if (!uint53(value.seq)) return [false, '1', 'seq not uint53'];
+  if (validUtc(value.utc) === null) return [false, '1', 'utc not fixed form'];
+  if (value.payload === null || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
+    return [false, '1', 'payload not object'];
   }
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new RappidCardError('endpoint_invalid', `${path} is not a canonical HTTPS URL`);
+  if (!hex64(value.payload_hash)) return [false, '1', 'payload_hash not 64hex'];
+  if (!hex64(value.frame_hash)) return [false, '1', 'frame_hash not 64hex'];
+  for (const [name, pointer] of [['prev', value.prev], ['prev_wave', value.prev_wave]] as const) {
+    if (pointer !== null && !hex64(pointer)) return [false, '1', `${name} not null|64hex`];
   }
-  if (
-    url.username !== ''
-    || url.password !== ''
-    || url.search !== ''
-    || url.hash !== ''
-  ) {
-    throw new RappidCardError(
-      'endpoint_secret_forbidden',
-      `${path} must not contain userinfo, query parameters, or fragments`,
-    );
+  if (streamIdOfRecord !== undefined && value.stream_id !== streamIdOfRecord) {
+    return [false, '1a', 'stream_id mismatch (cross-stream replay)'];
   }
-  if (
-    url.protocol !== 'https:'
-    || !ENDPOINT_PATH.test(url.pathname)
-    || url.href !== value
-  ) {
-    throw new RappidCardError('endpoint_invalid', `${path} is not a canonical HTTPS URL`);
+  if (value.payload_hash !== H('rapp/1:particle', value.payload as unknown as JsonValue)) {
+    return [false, '2', 'payload_hash mismatch'];
   }
-  return value;
-}
-
-export function endpointOrigin(endpoint: string): string {
-  return new URL(validateEndpoint(endpoint)).origin;
-}
-
-function approvedOriginsAt(
-  object: JsonRecord,
-  key: string,
-  path: string,
-): string[] {
-  return stringArrayAt<string>(object, key, path, {
-    minimum: 1,
-    maximum: 16,
-  }).map((origin, index) => validateOrigin(origin, `${path}.${key}[${index}]`));
+  const unsignedWave = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'frame_hash' && key !== 'sig'),
+  ) as unknown as JsonValue;
+  if (value.frame_hash !== H('rapp/1:wave', unsignedWave)) {
+    return [false, '3', 'frame_hash mismatch'];
+  }
+  if (head === null) {
+    if (value.seq !== 0 || value.prev !== null) {
+      return [false, '4', 'genesis must be seq=0 prev=null'];
+    }
+  } else {
+    if (value.seq !== head.seq + 1) return [false, '4', 'seq not contiguous'];
+    if (value.prev !== head.payload_hash) return [false, '4', 'prev != head payload_hash'];
+    if (value.utc < head.utc) return [false, '4', 'utc < head utc'];
+  }
+  const swarm = value.stream_id.startsWith('net:');
+  if (swarm && value.seq > 0) {
+    if (head !== null && value.prev_wave !== head.frame_hash) {
+      return [false, '5', 'prev_wave != head frame_hash'];
+    }
+  } else if (value.prev_wave !== null) {
+    return [false, '5', 'prev_wave must be null off swarm'];
+  }
+  if (swarm && value.sig === null) return [false, '6', 'swarm frame must be signed'];
+  return [true, null, 'ok'];
 }
 
 function assertNoDuplicateJsonKeys(raw: string): void {
   let index = 0;
-  const whitespace = () => {
+  const skip = () => {
     while (/\s/.test(raw[index] ?? '')) index += 1;
   };
-  const string = (): string => {
-    const start = index;
-    index += 1;
+  const parseString = (): string => {
+    const start = index++;
     while (index < raw.length) {
-      if (raw[index] === '\\') {
-        index += 2;
-        continue;
-      }
-      if (raw[index] === '"') {
-        index += 1;
-        return JSON.parse(raw.slice(start, index)) as string;
-      }
-      index += 1;
+      if (raw[index] === '\\') index += 2;
+      else if (raw[index++] === '"') return JSON.parse(raw.slice(start, index)) as string;
     }
-    throw new SyntaxError('unterminated JSON string');
+    throw new Error('unterminated JSON string');
   };
-  const value = (): void => {
-    whitespace();
+  const parseValue = (): void => {
+    skip();
     if (raw[index] === '{') {
-      object();
+      parseObject();
       return;
     }
     if (raw[index] === '[') {
       index += 1;
-      whitespace();
+      skip();
       if (raw[index] === ']') {
         index += 1;
         return;
       }
       for (;;) {
-        value();
-        whitespace();
+        parseValue();
+        skip();
         if (raw[index] === ']') {
           index += 1;
           return;
         }
-        if (raw[index] !== ',') throw new SyntaxError('invalid JSON array');
-        index += 1;
+        if (raw[index++] !== ',') throw new Error('invalid JSON array');
       }
     }
     if (raw[index] === '"') {
-      string();
+      parseString();
       return;
     }
     while (index < raw.length && !/[\s,\]}]/.test(raw[index])) index += 1;
   };
-  const object = (): void => {
+  const parseObject = (): void => {
     index += 1;
     const keys = new Set<string>();
-    whitespace();
+    skip();
     if (raw[index] === '}') {
       index += 1;
       return;
     }
     for (;;) {
-      whitespace();
-      if (raw[index] !== '"') throw new SyntaxError('invalid JSON object key');
-      const key = string();
-      if (keys.has(key)) {
-        throw new RappidCardError('json_invalid', `duplicate JSON object key: ${key}`);
-      }
+      skip();
+      if (raw[index] !== '"') throw new Error('invalid object key');
+      const key = parseString();
+      if (keys.has(key)) throw new Error(`duplicate JSON member ${JSON.stringify(key)}`);
       keys.add(key);
-      whitespace();
-      if (raw[index] !== ':') throw new SyntaxError('invalid JSON object');
-      index += 1;
-      value();
-      whitespace();
+      skip();
+      if (raw[index++] !== ':') throw new Error('invalid JSON object');
+      parseValue();
+      skip();
       if (raw[index] === '}') {
         index += 1;
         return;
       }
-      if (raw[index] !== ',') throw new SyntaxError('invalid JSON object');
-      index += 1;
+      if (raw[index++] !== ',') throw new Error('invalid JSON object');
     }
   };
-  try {
-    value();
-  } catch (error) {
-    if (error instanceof RappidCardError) throw error;
-  }
+  parseValue();
 }
 
-export function parseManifestJson(raw: string): RappidCardManifest {
-  if (Buffer.byteLength(raw, 'utf8') > 128 * 1024) {
-    throw new RappidCardError('schema_invalid', 'card manifest exceeds 128 KiB');
+export function readCardResource(bytes: Uint8Array): CardFrame {
+  const raw = Buffer.from(bytes).toString('utf8');
+  assertNoDuplicateJsonKeys(raw);
+  const value = JSON.parse(raw) as unknown;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('card resource must be a JSON object');
   }
-  try {
-    assertNoDuplicateJsonKeys(raw);
-    return validateManifest(JSON.parse(raw) as unknown);
-  } catch (error) {
-    if (error instanceof RappidCardError) throw error;
-    throw new RappidCardError(
-      'json_invalid',
-      error instanceof Error ? error.message : String(error),
-    );
+  if (canonical(value as JsonValue) !== raw) {
+    throw new Error('card resource bytes are not canonical');
   }
+  return value as CardFrame;
 }
 
-export function validateManifest(value: unknown): RappidCardManifest {
-  const manifest = closedObject(value, 'card', [
-    'schema',
-    'profile',
-    'policyId',
-    'rappid',
-    'endpoint',
-    'nonce',
-    'issuedAt',
-    'expiresAt',
-    'protocol',
-    'runtime',
-    'classification',
-    'scopes',
-    'parts',
-    'challenge',
-    'signature',
-  ]);
-  if (stringAt(manifest, 'schema', 'card') !== RAPPID_CARD_SCHEMA) {
-    throw new RappidCardError('schema_invalid', 'card.schema is invalid');
+function canonicalPercentEncode(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function wellFormedPercent(value: string): boolean {
+  for (let index = value.indexOf('%'); index >= 0; index = value.indexOf('%', index + 3)) {
+    if (!/^[0-9A-Fa-f]{2}$/.test(value.slice(index + 1, index + 3))) return false;
   }
-  const profile = enumAt(manifest, 'profile', 'card', PROFILES);
-  const policyId = stringAt(manifest, 'policyId', 'card', POLICY_ID);
-  const rappid = stringAt(manifest, 'rappid', 'card', RAPPID);
-  const endpoint = validateEndpoint(stringAt(manifest, 'endpoint', 'card'));
-  const nonce = stringAt(manifest, 'nonce', 'card', HEX_32);
-  const issuedAt = stringAt(manifest, 'issuedAt', 'card');
-  const expiresAt = stringAt(manifest, 'expiresAt', 'card');
-  validateWindow(issuedAt, expiresAt, 'card.validity');
-  const protocol = stringAt(manifest, 'protocol', 'card', PROTOCOL);
-  const runtime = validateRuntime(manifest.runtime, 'card.runtime');
-  const classification = enumAt(manifest, 'classification', 'card', CLASSIFICATIONS);
-  const scopes = stringArrayAt(manifest, 'scopes', 'card', {
-    values: SCOPES,
-    minimum: 1,
-    maximum: 6,
-  });
-  if (!Array.isArray(manifest.parts) || manifest.parts.length < 1 || manifest.parts.length > 6) {
-    throw new RappidCardError('schema_invalid', 'card.parts must contain 1..6 items');
-  }
-  const parts = manifest.parts.map((part, index) => {
-    const path = `card.parts[${index}]`;
-    const object = closedObject(part, path, [
-      'name',
-      'hash',
-      'bytes',
-      'mediaType',
-      'classification',
-      'scope',
-      'required',
-    ]);
-    const bytes = object.bytes;
-    if (!Number.isSafeInteger(bytes) || (bytes as number) < 1 || (bytes as number) > 65536) {
-      throw new RappidCardError('schema_invalid', `${path}.bytes is invalid`);
+  return true;
+}
+
+export function decodedComponentRounds(value: string): string[] {
+  const rounds = [value];
+  let current = value;
+  for (let count = 0; count < 2; count += 1) {
+    if (!wellFormedPercent(current)) throw new Error('bad percent encoding');
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      throw new Error('URL component is not UTF-8');
     }
-    if (typeof object.required !== 'boolean') {
-      throw new RappidCardError('schema_invalid', `${path}.required is invalid`);
+    if (decoded === current) break;
+    rounds.push(decoded);
+    current = decoded;
+  }
+  return rounds;
+}
+
+function ipv4Number(host: string): number | null {
+  if (isIP(host) !== 4) return null;
+  const octets = host.split('.').map(Number);
+  return (
+    ((octets[0] << 24) >>> 0)
+    + (octets[1] << 16)
+    + (octets[2] << 8)
+    + octets[3]
+  ) >>> 0;
+}
+
+function inRange(value: number, base: number, prefix: number): boolean {
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return (value & mask) === (base & mask);
+}
+
+function ipv6BigInt(address: string): bigint {
+  let value = address.toLowerCase();
+  let ipv4Tail: number[] | null = null;
+  const lastColon = value.lastIndexOf(':');
+  const tail = value.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    ipv4Tail = tail.split('.').map(Number);
+    value =
+      `${value.slice(0, lastColon)}:`
+      + `${((ipv4Tail[0] << 8) | ipv4Tail[1]).toString(16)}:`
+      + `${((ipv4Tail[2] << 8) | ipv4Tail[3]).toString(16)}`;
+  }
+  const [leftRaw, rightRaw = ''] = value.split('::');
+  const left = leftRaw ? leftRaw.split(':').filter(Boolean) : [];
+  const right = rightRaw ? rightRaw.split(':').filter(Boolean) : [];
+  const fill = Array(Math.max(0, 8 - left.length - right.length)).fill('0');
+  const groups = [...left, ...fill, ...right];
+  if (groups.length !== 8) throw new Error('invalid IPv6 address');
+  return groups.reduce(
+    (result, group) => (result << 16n) | BigInt(parseInt(group, 16)),
+    0n,
+  );
+}
+
+function ipv6InRange(value: bigint, base: string, prefix: number): boolean {
+  const baseValue = ipv6BigInt(base);
+  const shift = BigInt(128 - prefix);
+  return (value >> shift) === (baseValue >> shift);
+}
+
+export function ipIsGlobal(host: string): boolean {
+  const version = isIP(host);
+  if (version === 0) return false;
+  if (version === 6) {
+    const value = ipv6BigInt(host);
+    if (ipv6InRange(value, '::ffff:0:0', 96)) {
+      return ipIsGlobal([
+        Number((value >> 24n) & 0xffn),
+        Number((value >> 16n) & 0xffn),
+        Number((value >> 8n) & 0xffn),
+        Number(value & 0xffn),
+      ].join('.'));
     }
-    return {
-      name: enumAt(object, 'name', path, PART_NAMES),
-      hash: stringAt(object, 'hash', path, HEX_64),
-      bytes: bytes as number,
-      mediaType: enumAt(object, 'mediaType', path, MEDIA_TYPES),
-      classification: enumAt(object, 'classification', path, CLASSIFICATIONS),
-      scope: enumAt(object, 'scope', path, SCOPES),
-      required: object.required,
-    };
-  });
-  if (new Set(parts.map((part) => part.name)).size !== parts.length) {
-    throw new RappidCardError('schema_invalid', 'card.parts names must be unique');
+    const exceptions: Array<[string, number]> = [
+      ['2001:1::1', 128],
+      ['2001:1::2', 128],
+      ['2001:3::', 32],
+      ['2001:4:112::', 48],
+      ['2001:20::', 28],
+      ['2001:30::', 28],
+    ];
+    if (exceptions.some(([base, prefix]) => ipv6InRange(value, base, prefix))) {
+      return true;
+    }
+    const privateRanges: Array<[string, number]> = [
+      ['::1', 128],
+      ['::', 128],
+      ['64:ff9b:1::', 48],
+      ['100::', 64],
+      ['2001::', 23],
+      ['2001:db8::', 32],
+      ['2002::', 16],
+      ['3fff::', 20],
+      ['fc00::', 7],
+      ['fe80::', 10],
+    ];
+    return !privateRanges.some(([base, prefix]) =>
+      ipv6InRange(value, base, prefix));
   }
-  if (new Set(parts.map((part) => part.hash)).size !== parts.length) {
-    throw new RappidCardError('schema_invalid', 'card.parts hashes must be unique');
+  const value = ipv4Number(host)!;
+  const blocked: Array<[number, number]> = [
+    [0x00000000, 8],
+    [0x0a000000, 8],
+    [0x64400000, 10],
+    [0x7f000000, 8],
+    [0xa9fe0000, 16],
+    [0xac100000, 12],
+    [0xc0000200, 24],
+    [0xc0a80000, 16],
+    [0xc6120000, 15],
+    [0xc6336400, 24],
+    [0xcb007100, 24],
+    [0xf0000000, 4],
+  ];
+  if (value === 0xc0000009 || value === 0xc000000a) return true;
+  if (inRange(value, 0xc0000000, 24)) return false;
+  return !blocked.some(([base, prefix]) => inRange(value, base, prefix));
+}
+
+export interface CardUrlInfo {
+  url: string;
+  origin: string;
+  host: string;
+  literal_ip: string | null;
+  decoded_path: string;
+  decoded_rounds: string[];
+}
+
+export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 2048) {
+    throw new Error('HTTPS URL is absent or too long');
   }
-  const challenge = validateAuthenticator(manifest.challenge, 'card.challenge');
-  const signature = validateSignature(manifest.signature, 'card.signature');
-  if (
-    challenge.algorithm !== signature.algorithm
-    || challenge.keyId !== signature.keyId
-  ) {
-    throw new RappidCardError(
-      'schema_invalid',
-      'card challenge must use the authorized signing key',
-    );
+  if (!/^[\x00-\x7f]+$/.test(value)) {
+    throw new Error('HTTPS URL host/path must use canonical ASCII/percent encoding');
   }
-  return {
-    schema: RAPPID_CARD_SCHEMA,
-    profile,
-    policyId,
-    rappid,
-    endpoint,
-    nonce,
-    issuedAt,
-    expiresAt,
-    protocol,
-    runtime,
-    classification,
-    scopes,
-    parts,
-    challenge,
-    signature,
-  };
-}
-
-export function validatePolicy(value: unknown): RappidCardPolicy {
-  const policy = closedObject(value, 'policy', [
-    'schema',
-    'policyId',
-    'sequence',
-    'issuedAt',
-    'expiresAt',
-    'allowedProfiles',
-    'protocol',
-    'runtime',
-    'maxClassification',
-    'grantedScopes',
-    'approvedOrigins',
-    'signature',
-  ]);
-  if (stringAt(policy, 'schema', 'policy') !== RAPPID_CARD_POLICY_SCHEMA) {
-    throw new RappidCardError('schema_invalid', 'policy.schema is invalid');
+  if ([...value].some((character) => character.charCodeAt(0) <= 0x20 || character.charCodeAt(0) === 0x7f)) {
+    throw new Error('HTTPS URL contains whitespace or control characters');
   }
-  const issuedAt = stringAt(policy, 'issuedAt', 'policy');
-  const expiresAt = stringAt(policy, 'expiresAt', 'policy');
-  validateWindow(issuedAt, expiresAt, 'policy.validity');
-  return {
-    schema: RAPPID_CARD_POLICY_SCHEMA,
-    policyId: stringAt(policy, 'policyId', 'policy', POLICY_ID),
-    sequence: integerAt(policy, 'sequence', 'policy'),
-    issuedAt,
-    expiresAt,
-    allowedProfiles: stringArrayAt(policy, 'allowedProfiles', 'policy', {
-      values: PROFILES,
-      minimum: 1,
-      maximum: 2,
-    }),
-    protocol: stringAt(policy, 'protocol', 'policy', PROTOCOL),
-    runtime: validateRuntime(policy.runtime, 'policy.runtime'),
-    maxClassification: enumAt(
-      policy,
-      'maxClassification',
-      'policy',
-      CLASSIFICATIONS,
-    ),
-    grantedScopes: stringArrayAt(policy, 'grantedScopes', 'policy', {
-      values: SCOPES,
-      minimum: 1,
-      maximum: 6,
-    }),
-    approvedOrigins: approvedOriginsAt(policy, 'approvedOrigins', 'policy'),
-    signature: validateSignature(policy.signature, 'policy.signature'),
-  };
-}
-
-export function validateAuthorization(value: unknown): RappidCardAuthorization {
-  const authorization = closedObject(value, 'authorization', [
-    'schema',
-    'authorizationId',
-    'policyId',
-    'sequence',
-    'subjectRappid',
-    'signerKeyId',
-    'signerAlgorithm',
-    'signerPublicKey',
-    'notBefore',
-    'notAfter',
-    'maxClassification',
-    'grantedScopes',
-    'approvedOrigins',
-    'signature',
-  ]);
-  if (
-    stringAt(authorization, 'schema', 'authorization')
-    !== RAPPID_CARD_AUTHORIZATION_SCHEMA
-  ) {
-    throw new RappidCardError('schema_invalid', 'authorization.schema is invalid');
-  }
-  const notBefore = stringAt(authorization, 'notBefore', 'authorization');
-  const notAfter = stringAt(authorization, 'notAfter', 'authorization');
-  validateWindow(notBefore, notAfter, 'authorization.validity');
-  return {
-    schema: RAPPID_CARD_AUTHORIZATION_SCHEMA,
-    authorizationId: stringAt(
-      authorization,
-      'authorizationId',
-      'authorization',
-      AUTHORIZATION_ID,
-    ),
-    policyId: stringAt(authorization, 'policyId', 'authorization', POLICY_ID),
-    sequence: integerAt(authorization, 'sequence', 'authorization'),
-    subjectRappid: stringAt(authorization, 'subjectRappid', 'authorization', RAPPID),
-    signerKeyId: stringAt(authorization, 'signerKeyId', 'authorization', KEY_ID),
-    signerAlgorithm: enumAt(
-      authorization,
-      'signerAlgorithm',
-      'authorization',
-      ALGORITHMS,
-    ),
-    signerPublicKey: stringAt(
-      authorization,
-      'signerPublicKey',
-      'authorization',
-      BASE64URL_32,
-    ),
-    notBefore,
-    notAfter,
-    maxClassification: enumAt(
-      authorization,
-      'maxClassification',
-      'authorization',
-      CLASSIFICATIONS,
-    ),
-    grantedScopes: stringArrayAt(
-      authorization,
-      'grantedScopes',
-      'authorization',
-      { values: SCOPES, minimum: 1, maximum: 6 },
-    ),
-    approvedOrigins: approvedOriginsAt(
-      authorization,
-      'approvedOrigins',
-      'authorization',
-    ),
-    signature: validateSignature(authorization.signature, 'authorization.signature'),
-  };
-}
-
-export function validateRevocations(value: unknown): RappidCardRevocations {
-  const revocations = closedObject(value, 'revocations', [
-    'schema',
-    'policyId',
-    'sequence',
-    'issuedAt',
-    'expiresAt',
-    'revokedManifestHashes',
-    'revokedSignerKeyIds',
-    'revokedAuthorizationIds',
-    'signature',
-  ]);
-  if (
-    stringAt(revocations, 'schema', 'revocations')
-    !== RAPPID_CARD_REVOCATIONS_SCHEMA
-  ) {
-    throw new RappidCardError('schema_invalid', 'revocations.schema is invalid');
-  }
-  const issuedAt = stringAt(revocations, 'issuedAt', 'revocations');
-  const expiresAt = stringAt(revocations, 'expiresAt', 'revocations');
-  validateWindow(issuedAt, expiresAt, 'revocations.validity');
-  return {
-    schema: RAPPID_CARD_REVOCATIONS_SCHEMA,
-    policyId: stringAt(revocations, 'policyId', 'revocations', POLICY_ID),
-    sequence: integerAt(revocations, 'sequence', 'revocations'),
-    issuedAt,
-    expiresAt,
-    revokedManifestHashes: stringArrayAt(
-      revocations,
-      'revokedManifestHashes',
-      'revocations',
-      { pattern: HEX_64, maximum: 1024 },
-    ),
-    revokedSignerKeyIds: stringArrayAt(
-      revocations,
-      'revokedSignerKeyIds',
-      'revocations',
-      { pattern: KEY_ID, maximum: 1024 },
-    ),
-    revokedAuthorizationIds: stringArrayAt(
-      revocations,
-      'revokedAuthorizationIds',
-      'revocations',
-      { pattern: AUTHORIZATION_ID, maximum: 1024 },
-    ),
-    signature: validateSignature(revocations.signature, 'revocations.signature'),
-  };
-}
-
-function privateKeyFromSeed(seed: Uint8Array) {
-  if (seed.byteLength !== 32) {
-    throw new RappidCardError('key_invalid', 'Ed25519 private seed must be 32 bytes');
-  }
-  return createPrivateKey({
-    key: Buffer.concat([ED25519_PKCS8_PREFIX, Buffer.from(seed)]),
-    format: 'der',
-    type: 'pkcs8',
-  });
-}
-
-function publicKeyFromRaw(raw: string) {
-  if (!BASE64URL_32.test(raw)) {
-    throw new RappidCardError('key_invalid', 'Ed25519 public key is invalid');
-  }
-  return createPublicKey({
-    key: { kty: 'OKP', crv: 'Ed25519', x: raw },
-    format: 'jwk',
-  });
-}
-
-export function ed25519PublicKey(seed: Uint8Array): string {
-  const key = createPublicKey(privateKeyFromSeed(seed)).export({ format: 'jwk' });
-  if (typeof key.x !== 'string' || !BASE64URL_32.test(key.x)) {
-    throw new RappidCardError('key_invalid', 'could not derive Ed25519 public key');
-  }
-  return key.x;
-}
-
-function signCanonical(
-  domain: string,
-  value: JsonValue,
-  seed: Uint8Array,
-): string {
-  return cryptoSign(
-    null,
-    Buffer.from(`${domain}\n${canonicalJson(value)}`, 'utf8'),
-    privateKeyFromSeed(seed),
-  ).toString('base64url');
-}
-
-function verifyCanonical(
-  domain: string,
-  value: JsonValue,
-  signature: string,
-  publicKey: string,
-): boolean {
-  if (!BASE64URL_64.test(signature)) return false;
-  return cryptoVerify(
-    null,
-    Buffer.from(`${domain}\n${canonicalJson(value)}`, 'utf8'),
-    publicKeyFromRaw(publicKey),
-    Buffer.from(signature, 'base64url'),
-  );
-}
-
-export function unsignedDocument<T extends { signature: RappidCardSignature }>(
-  document: T,
-): Unsigned<T> {
-  const { signature: _signature, ...unsigned } = document;
-  return unsigned;
-}
-
-export const unsignedManifest = unsignedDocument;
-
-function signDocument<T extends { signature: RappidCardSignature }>(
-  document: Unsigned<T>,
-  domain: string,
-  signature: {
-    algorithm: CardAlgorithm;
-    keyId: string;
-    privateKey: Uint8Array;
-  },
-): T {
-  return {
-    ...document,
-    signature: {
-      algorithm: signature.algorithm,
-      keyId: signature.keyId,
-      value: signCanonical(
-        domain,
-        document as unknown as JsonValue,
-        signature.privateKey,
-      ),
-    },
-  } as T;
-}
-
-export function signManifest(
-  manifest: Omit<RappidCardManifest, 'signature'>,
-  signature: {
-    algorithm: CardAlgorithm;
-    keyId: string;
-    privateKey: Uint8Array;
-  },
-): RappidCardManifest {
-  return validateManifest(
-    signDocument<RappidCardManifest>(manifest, CARD_SIGNATURE_DOMAIN, signature),
-  );
-}
-
-export function signPolicy(
-  policy: Omit<RappidCardPolicy, 'signature'>,
-  signature: {
-    algorithm: CardAlgorithm;
-    keyId: string;
-    privateKey: Uint8Array;
-  },
-): RappidCardPolicy {
-  return validatePolicy(
-    signDocument<RappidCardPolicy>(policy, CARD_POLICY_SIGNATURE_DOMAIN, signature),
-  );
-}
-
-export function signAuthorization(
-  authorization: Omit<RappidCardAuthorization, 'signature'>,
-  signature: {
-    algorithm: CardAlgorithm;
-    keyId: string;
-    privateKey: Uint8Array;
-  },
-): RappidCardAuthorization {
-  return validateAuthorization(
-    signDocument<RappidCardAuthorization>(
-      authorization,
-      CARD_AUTHORIZATION_SIGNATURE_DOMAIN,
-      signature,
-    ),
-  );
-}
-
-export function signRevocations(
-  revocations: Omit<RappidCardRevocations, 'signature'>,
-  signature: {
-    algorithm: CardAlgorithm;
-    keyId: string;
-    privateKey: Uint8Array;
-  },
-): RappidCardRevocations {
-  return validateRevocations(
-    signDocument<RappidCardRevocations>(
-      revocations,
-      CARD_REVOCATIONS_SIGNATURE_DOMAIN,
-      signature,
-    ),
-  );
-}
-
-export function verifyManifestSignature(
-  manifest: RappidCardManifest,
-  publicKey: string,
-): boolean {
-  return verifyCanonical(
-    CARD_SIGNATURE_DOMAIN,
-    unsignedDocument(manifest) as unknown as JsonValue,
-    manifest.signature.value,
-    publicKey,
-  );
-}
-
-export function verifyPolicySignature(
-  policy: RappidCardPolicy,
-  publicKey: string,
-): boolean {
-  return verifyCanonical(
-    CARD_POLICY_SIGNATURE_DOMAIN,
-    unsignedDocument(policy) as unknown as JsonValue,
-    policy.signature.value,
-    publicKey,
-  );
-}
-
-export function verifyAuthorizationSignature(
-  authorization: RappidCardAuthorization,
-  publicKey: string,
-): boolean {
-  return verifyCanonical(
-    CARD_AUTHORIZATION_SIGNATURE_DOMAIN,
-    unsignedDocument(authorization) as unknown as JsonValue,
-    authorization.signature.value,
-    publicKey,
-  );
-}
-
-export function verifyRevocationsSignature(
-  revocations: RappidCardRevocations,
-  publicKey: string,
-): boolean {
-  return verifyCanonical(
-    CARD_REVOCATIONS_SIGNATURE_DOMAIN,
-    unsignedDocument(revocations) as unknown as JsonValue,
-    revocations.signature.value,
-    publicKey,
-  );
-}
-
-export function challengeValue(
-  request: {
-    manifestHash: string;
-    nonce: string;
-    partHashes: readonly string[];
-  },
-  privateKey: Uint8Array,
-): string {
-  const value = {
-    manifestHash: request.manifestHash,
-    nonce: request.nonce,
-    partHashes: [...request.partHashes].sort(),
-  };
-  return signCanonical(
-    CARD_CHALLENGE_DOMAIN,
-    value as unknown as JsonValue,
-    privateKey,
-  );
-}
-
-export function verifyChallenge(
-  response: string,
-  request: {
-    manifestHash: string;
-    nonce: string;
-    partHashes: readonly string[];
-  },
-  publicKey: string,
-): boolean {
-  const value = {
-    manifestHash: request.manifestHash,
-    nonce: request.nonce,
-    partHashes: [...request.partHashes].sort(),
-  };
-  return verifyCanonical(
-    CARD_CHALLENGE_DOMAIN,
-    value as unknown as JsonValue,
-    response,
-    publicKey,
-  );
-}
-
-export function canonicalManifest(manifest: RappidCardManifest): string {
-  return canonicalJson(manifest as unknown as JsonValue);
-}
-
-export function canonicalDocumentHash(value: unknown): string {
-  return sha256Hex(
-    Buffer.from(canonicalJson(value as JsonValue), 'utf8'),
-  );
-}
-
-export function manifestHash(manifest: RappidCardManifest): string {
-  return canonicalDocumentHash(manifest);
-}
-
-export function makeDeepLink(
-  manifest: RappidCardManifest,
-  hash = manifestHash(manifest),
-): string {
-  return `rappid://link/${manifest.rappid}?m=${hash}&e=${encodeURIComponent(manifest.endpoint)}&n=${manifest.nonce}`;
-}
-
-export function parseDeepLink(value: string): ParsedRappidCardLink {
-  if (value.length > 2048 || !value.startsWith('rappid://link/')) {
-    throw new RappidCardError('link_invalid', 'deep link must use rappid://link/');
-  }
-  let url: URL;
+  if (value.includes('\\')) throw new Error('HTTPS URL contains a backslash');
+  if (value.includes('?')) throw new Error('HTTPS URL query marker is forbidden, including an empty query');
+  if (value.includes('#')) throw new Error('HTTPS URL fragment marker is forbidden, including an empty fragment');
+  if (!wellFormedPercent(value)) throw new Error('HTTPS URL contains bad percent encoding');
+  let parsed: URL;
   try {
-    url = new URL(value);
+    parsed = new URL(value);
   } catch {
-    throw new RappidCardError('link_invalid', 'deep link is not a valid URI');
+    throw new Error('HTTPS URL cannot be parsed');
   }
-  if (url.protocol !== 'rappid:' || url.host !== 'link' || url.hash !== '') {
-    throw new RappidCardError('link_invalid', 'deep link authority or fragment is invalid');
+  if (parsed.protocol !== 'https:' || !parsed.hostname) {
+    throw new Error('URL must use canonical HTTPS with a host');
   }
-  const keys = [...url.searchParams.keys()];
-  if (
-    keys.length !== 3
-    || new Set(keys).size !== 3
-    || !['m', 'e', 'n'].every((key) => keys.includes(key))
-  ) {
-    throw new RappidCardError('link_invalid', 'deep link must contain exactly m, e, and n');
+  if (parsed.username !== '' || parsed.password !== '' || new URL(value).host.includes('@')) {
+    throw new Error('HTTPS URL user-info is forbidden');
   }
+  if (parsed.port !== '') throw new Error('HTTPS URL ports are forbidden; use the canonical default origin');
+  const parsedHost = parsed.hostname;
+  const host =
+    parsedHost.startsWith('[') && parsedHost.endsWith(']')
+      ? parsedHost.slice(1, -1)
+      : parsedHost;
+  if (host !== host.toLowerCase()) throw new Error('HTTPS host must be lowercase');
+  const ipVersion = isIP(host);
+  let expectedNetloc: string;
+  let literal: string | null = null;
+  if (ipVersion === 0) {
+    const labels = host.split('.');
+    if (labels.length < 2 || labels.some((label) => !HOST_LABEL.test(label))) {
+      throw new Error('HTTPS host is not a canonical DNS name');
+    }
+    expectedNetloc = host;
+  } else {
+    if (!ipIsGlobal(host)) {
+      throw new Error('loopback/private/link-local/reserved IP literals are forbidden');
+    }
+    literal = host;
+    expectedNetloc = ipVersion === 6 ? `[${host}]` : host;
+  }
+  const authority = value.slice('https://'.length).split('/')[0];
+  if (authority !== expectedNetloc) throw new Error('HTTPS authority is not canonical');
+  const encodedPath = value.slice(`https://${authority}`.length);
+  if (!encodedPath.startsWith('/')) throw new Error('HTTPS URL path must be absolute');
+  const rounds = decodedComponentRounds(encodedPath);
+  const decodedPath = rounds[1] ?? rounds[0];
+  if (PERCENT.test(decodedPath)) throw new Error('double-encoded HTTPS path is forbidden');
+  if (canonicalPercentEncode(decodedPath).replaceAll('%2F', '/') !== encodedPath) {
+    throw new Error('HTTPS path is not canonically percent-encoded');
+  }
+  if ([...decodedPath].some((character) => character === '\\' || character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f)) {
+    throw new Error('decoded HTTPS path is unsafe');
+  }
+  const segments = decodedPath.split('/').slice(1);
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    throw new Error('HTTPS path contains an empty or dot segment');
+  }
+  if (suffix !== undefined && !decodedPath.endsWith(suffix)) {
+    throw new Error(`HTTPS path must end ${suffix}`);
+  }
+  return {
+    url: value,
+    origin: `https://${expectedNetloc}`,
+    host,
+    literal_ip: literal,
+    decoded_path: decodedPath,
+    decoded_rounds: rounds,
+  };
+}
+
+export function canonicalCardOrigin(value: string): string {
+  if (!value.startsWith('https://') || value.slice('https://'.length).includes('/')) {
+    throw new Error('card origin must be exactly https://host');
+  }
+  const info = cardUrlInfo(`${value}/origin`);
+  if (info.origin !== value) throw new Error('card origin is not canonical');
+  return value;
+}
+
+export function forbiddenUrlMaterial(value: unknown): boolean {
+  if (!materialScannersEnabled) return false;
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    const candidates = [value, parsed.host, ...decodedComponentRounds(parsed.pathname)];
+    return candidates.some((candidate) => FORBIDDEN_TEXT.test(candidate));
+  } catch {
+    return false;
+  }
+}
+
+export function forbiddenCardMaterial(value: unknown): boolean {
+  if (!materialScannersEnabled) return false;
+  if (Array.isArray(value)) return value.some(forbiddenCardMaterial);
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).some(([key, child]) =>
+      FORBIDDEN_KEYS.has(key.toLowerCase()) || forbiddenCardMaterial(child));
+  }
+  return typeof value === 'string' && FORBIDDEN_TEXT.test(value);
+}
+
+export function withMaterialScannersDisabledForTest<T>(operation: () => T): T {
+  const previous = materialScannersEnabled;
+  materialScannersEnabled = false;
+  try {
+    return operation();
+  } finally {
+    materialScannersEnabled = previous;
+  }
+}
+
+export function parseCardLink(uri: string): ParsedCardLink {
+  if (typeof uri !== 'string') throw new Error('card URI must be a string');
+  if (uri.includes('#')) throw new Error('card URI fragments are forbidden, including an empty fragment');
+  let parsed: URL;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    throw new Error('card URI must use rappid://link with no fragment');
+  }
+  if (parsed.protocol !== 'rappid:' || parsed.host !== 'link') {
+    throw new Error('card URI must use rappid://link with no fragment');
+  }
+  const rawAfterAuthority = uri.slice('rappid://link'.length);
+  const queryIndex = rawAfterAuthority.indexOf('?');
+  const path = queryIndex < 0 ? rawAfterAuthority : rawAfterAuthority.slice(0, queryIndex);
+  const query = queryIndex < 0 ? '' : rawAfterAuthority.slice(queryIndex + 1);
+  if (!path.startsWith('/') || path.slice(1).includes('/')) {
+    throw new Error('card URI path must contain one percent-encoded RAPPID');
+  }
+  const encodedRappid = path.slice(1);
   let rappid: string;
   try {
-    rappid = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+    rappid = decodeURIComponent(encodedRappid);
   } catch {
-    throw new RappidCardError('link_invalid', 'deep link fields are invalid');
+    throw new Error('malformed card URI encoding');
   }
-  const manifestHashValue = url.searchParams.get('m') ?? '';
-  const endpoint = url.searchParams.get('e') ?? '';
-  const nonce = url.searchParams.get('n') ?? '';
-  if (!RAPPID.test(rappid) || !HEX_64.test(manifestHashValue) || !HEX_32.test(nonce)) {
-    throw new RappidCardError('link_invalid', 'deep link fields are invalid');
+  if (canonicalPercentEncode(rappid) !== encodedRappid) {
+    throw new Error('RAPPID path is not canonically percent-encoded');
   }
-  validateEndpoint(endpoint, 'deep link endpoint');
-  const exact =
-    `rappid://link/${rappid}?m=${manifestHashValue}`
-    + `&e=${encodeURIComponent(endpoint)}&n=${nonce}`;
-  if (value !== exact) {
-    throw new RappidCardError('link_invalid', 'deep link is not in canonical compact form');
+  if (!rappidValid(rappid)) throw new Error('card URI path is not a canonical RAPPID');
+  const rawPairs = query.split('&').map((pair) => {
+    const split = pair.indexOf('=');
+    if (split < 0) throw new Error('malformed card URI encoding');
+    return [pair.slice(0, split), pair.slice(split + 1)] as const;
+  });
+  if (
+    rawPairs.length !== 3
+    || rawPairs.map(([key]) => key).join(',') !== 'm,e,n'
+  ) {
+    throw new Error('card URI query must be exactly m, e, n in canonical order');
   }
+  let manifestHash: string;
+  let endpoint: string;
+  let nonce: string;
+  try {
+    manifestHash = decodeURIComponent(rawPairs[0][1]);
+    endpoint = decodeURIComponent(rawPairs[1][1]);
+    nonce = decodeURIComponent(rawPairs[2][1]);
+  } catch {
+    throw new Error('malformed card URI encoding');
+  }
+  if (!hex64(manifestHash)) throw new Error('card URI m is not lowercase 64hex');
+  const endpointInfo = cardUrlInfo(endpoint, CARD_VIRTUAL_SUFFIX);
+  if (forbiddenUrlMaterial(endpoint)) throw new Error('card URI endpoint contains prohibited material');
+  if (!NONCE.test(nonce)) throw new Error('card URI n must be 16-64 base64url characters');
+  const canonicalUri =
+    `rappid://link/${canonicalPercentEncode(rappid)}`
+    + `?m=${manifestHash}&e=${canonicalPercentEncode(endpoint)}&n=${nonce}`;
+  if (uri !== canonicalUri) throw new Error('card URI is not in canonical compact form');
   return {
     rappid,
-    manifestHash: manifestHashValue,
+    manifest_hash: manifestHash,
     endpoint,
+    endpoint_origin: endpointInfo.origin,
     nonce,
-    deepLink: exact,
   };
 }
 
-export function compareSemver(left: string, right: string): number {
-  const a = left.match(SEMVER);
-  const b = right.match(SEMVER);
-  if (!a || !b) throw new RappidCardError('schema_invalid', 'invalid semantic version');
-  for (let index = 1; index <= 3; index += 1) {
-    const delta = Number(a[index]) - Number(b[index]);
-    if (delta !== 0) return delta < 0 ? -1 : 1;
+export class CardTrustStore {
+  private readonly keys = new Map<string, Buffer>();
+
+  constructor(
+    entries: Record<string, Uint8Array>,
+    readonly runtimePolicyAuthority: string,
+  ) {
+    if (Object.keys(entries).length === 0) throw new Error('card trust keys must be a non-empty object');
+    for (const [kid, value] of Object.entries(entries)) {
+      const spki = Buffer.from(value);
+      if (!rappidValid(kid)) throw new Error(`card trust key id is not a RAPPID: ${JSON.stringify(kid)}`);
+      if (spki.length !== 44 || !spki.subarray(0, 12).equals(ED25519_SPKI_PREFIX)) {
+        throw new Error(`card trust key ${JSON.stringify(kid)} is not an Ed25519 SPKI`);
+      }
+      if (Hb('rapp/1:rappid', spki) !== kid.split(':').at(-1)) {
+        throw new Error(`card trust SPKI does not bind ${JSON.stringify(kid)}`);
+      }
+      this.keys.set(kid, spki);
+    }
+    if (!this.keys.has(runtimePolicyAuthority)) {
+      throw new Error('runtime policy authority is not a trust anchor');
+    }
   }
-  return 0;
+
+  spki(kid: string): Buffer | null {
+    return this.keys.get(kid) ?? null;
+  }
 }
 
-export function classificationRank(value: CardClassification): number {
-  return ['public', 'internal', 'restricted'].indexOf(value);
+function base64urlDecode(value: string): Buffer {
+  if (typeof value !== 'string' || value.length === 0 || value.includes('=')) {
+    throw new Error('base64url segment must be non-empty and unpadded');
+  }
+  const raw = Buffer.from(value, 'base64url');
+  if (raw.toString('base64url') !== value) throw new Error('non-canonical base64url segment');
+  return raw;
 }
+
+export function verifyDetachedEdDsa(
+  value: JsonValue,
+  signature: unknown,
+  expectedKid: string,
+  trust: CardTrustStore,
+): [boolean, string] {
+  if (!(trust instanceof CardTrustStore)) return [false, 'a CardTrustStore is required'];
+  if (typeof signature !== 'string') return [false, 'signature must be a detached JWS string'];
+  const parts = signature.split('.');
+  if (parts.length !== 3 || parts[1] !== '') return [false, 'sig must use detached compact serialization'];
+  let headerBytes: Buffer;
+  let signatureBytes: Buffer;
+  let header: unknown;
+  try {
+    headerBytes = base64urlDecode(parts[0]);
+    signatureBytes = base64urlDecode(parts[2]);
+    const raw = headerBytes.toString('utf8');
+    assertNoDuplicateJsonKeys(raw);
+    header = JSON.parse(raw);
+  } catch (error) {
+    return [false, error instanceof Error ? error.message : String(error)];
+  }
+  if (!exactKeys(header, JWS_HEADER_KEYS)) return [false, 'JWS protected header key set is not §10'];
+  const expected = { alg: 'EdDSA', b64: false, crit: ['b64'], kid: expectedKid };
+  if (JSON.stringify(header) !== JSON.stringify(expected)) {
+    return [false, 'JWS protected header values do not match the expected key id'];
+  }
+  if (headerBytes.toString('utf8') !== canonical(expected as unknown as JsonValue)) {
+    return [false, 'JWS protected header is not canonical'];
+  }
+  const spki = trust.spki(expectedKid);
+  if (spki === null) return [false, 'unknown signing key'];
+  const signingInput = Buffer.concat([
+    Buffer.from(parts[0], 'ascii'),
+    Buffer.from('.', 'ascii'),
+    Buffer.from(canonical(value), 'utf8'),
+  ]);
+  const publicKey = createPublicKey({ key: spki, format: 'der', type: 'spki' });
+  if (!cryptoVerify(null, signingInput, publicKey, signatureBytes)) {
+    return [false, 'Ed25519 signature verification failed'];
+  }
+  return [true, 'ok'];
+}
+
+export function verifyFrameEdDsa(
+  frame: CardFrame,
+  trust: CardTrustStore,
+): [boolean, string] {
+  const profile = frame.payload.profile;
+  const kid = frame.payload.key_id;
+  const synthetic = kid.startsWith('rappid:@synthetic/');
+  if (profile === CARD_PROFILE && synthetic) {
+    return [false, 'synthetic test key refused for production profile'];
+  }
+  if (profile === CARD_TEST_PROFILE && !synthetic) {
+    return [false, 'test profile requires a visibly synthetic key'];
+  }
+  const unsigned = Object.fromEntries(
+    Object.entries(frame).filter(([key]) => key !== 'sig'),
+  ) as unknown as JsonValue;
+  return verifyDetachedEdDsa(unsigned, frame.sig, kid, trust);
+}
+
+export function sortedUniqueStrings(
+  values: unknown,
+  grammar: RegExp,
+): values is string[] {
+  return (
+    Array.isArray(values)
+    && values.every((value) => typeof value === 'string' && grammar.test(value))
+    && JSON.stringify(values) === JSON.stringify([...new Set(values)].sort())
+  );
+}
+
+export function cardContinuity(
+  payload: CardPayload,
+  nonce: string,
+): CardContinuity {
+  return {
+    rappid: payload.rappid,
+    soul_hash: payload.soul_hash,
+    parent: payload.parent,
+    engram_root: payload.engram_root,
+    reflex_capability_root: payload.reflex_capability_root,
+    nonce,
+  };
+}
+
+export function cardPayloadError(
+  payload: unknown,
+  frame: CardFrame,
+  link: ParsedCardLink,
+): string | null {
+  if (!exactKeys(payload, CARD_PAYLOAD_KEYS)) {
+    return `manifest payload must have exactly ${JSON.stringify([...CARD_PAYLOAD_KEYS].sort())}`;
+  }
+  const value = payload as CardPayload;
+  if (value.profile === CARD_PROFILE) {
+    if (frame.kind !== CARD_CALLING) return 'rappid-card/1 requires body.calling-card';
+  } else if (value.profile === CARD_TEST_PROFILE) {
+    if (frame.kind !== CARD_DEBUG) return 'rappid-card-test/1 requires body.debug-card';
+  } else return 'manifest profile is not a registered card profile';
+  if (forbiddenCardMaterial(value)) return 'manifest contains secret, private-memory, or auto-execute material';
+  if (value.rappid !== frame.stream_id || value.rappid !== link.rappid) {
+    return 'manifest rappid, frame stream_id, and URI RAPPID must byte-equal';
+  }
+  if (!rappidValid(value.rappid)) return 'manifest rappid is not canonical';
+  if (!rappidValid(value.key_id)) return 'manifest key_id is not a canonical keyed RAPPID';
+  let origin: string;
+  try {
+    origin = canonicalCardOrigin(value.endpoint_origin);
+    cardUrlInfo(value.revocation_url);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  if (origin !== link.endpoint_origin) return 'URI endpoint origin does not match the signed manifest endpoint_origin';
+  if (forbiddenUrlMaterial(value.revocation_url)) return 'revocation_url contains prohibited material';
+  if (value.parent !== null) {
+    if (!exactKeys(value.parent, PARENT_KEYS)) return 'manifest parent must be null or exactly {rappid, particle}';
+    if (!rappidValid(value.parent.rappid) || !hex64(value.parent.particle)) {
+      return 'manifest parent is not a canonical RAPPID/particle pointer';
+    }
+    if (value.parent.rappid === value.rappid) return 'manifest rappid cannot be its own parent';
+  }
+  for (const key of ['soul_hash', 'engram_root', 'reflex_capability_root', 'wake_challenge'] as const) {
+    if (!hex64(value[key])) return `manifest ${key} is not lowercase 64hex`;
+  }
+  if (!exactKeys(value.compatibility, CARD_COMPATIBILITY_KEYS)) {
+    return 'compatibility must be exactly {protocol, runtime, features}';
+  }
+  if (!PROFILE_TOKEN.test(value.compatibility.protocol) || !PROFILE_TOKEN.test(value.compatibility.runtime)) {
+    return 'compatibility protocol/runtime is not a versioned token';
+  }
+  if (!sortedUniqueStrings(value.compatibility.features, PROFILE_TOKEN)) {
+    return 'compatibility features must be sorted unique versioned tokens';
+  }
+  if (!(CARD_CLASSIFICATIONS as readonly string[]).includes(value.classification)) {
+    return 'classification is not a registered card classification';
+  }
+  if (!sortedUniqueStrings(value.requested_scope, LCLABEL)) {
+    return 'requested_scope must be sorted unique lclabels';
+  }
+  const expires = validUtc(value.expires_utc);
+  const issued = validUtc(frame.utc);
+  if (expires === null || issued === null || expires <= issued) {
+    return 'expires_utc must be calendar-valid and later than frame utc';
+  }
+  if (!Array.isArray(value.inventory)) return 'inventory must be an array';
+  const seen: string[] = [];
+  const byPart = new Map<string, CardInventoryEntry>();
+  for (const entry of value.inventory) {
+    if (!exactKeys(entry, CARD_INVENTORY_KEYS)) {
+      return 'inventory entries must be exactly {part, space, hash, bytes, required}';
+    }
+    if (!lclabel(entry.part)) return 'inventory part is not an lclabel';
+    if (entry.space !== 'rapp/1:egg' || !hex64(entry.hash)) {
+      return 'inventory address must be lowercase 64hex in rapp/1:egg';
+    }
+    if (!uint53(entry.bytes) || typeof entry.required !== 'boolean') {
+      return 'inventory bytes/required types are invalid';
+    }
+    seen.push(entry.part);
+    byPart.set(entry.part, entry);
+  }
+  if (JSON.stringify(seen) !== JSON.stringify([...seen].sort())) {
+    return 'inventory must be sorted by part UTF-8 bytes';
+  }
+  if (new Set(seen).size !== seen.length) return 'inventory contains duplicate parts';
+  if (!CARD_REQUIRED_PARTS.every((part) => byPart.has(part))) {
+    return 'inventory omits a required soul, engram, or reflex-capability root';
+  }
+  if (!CARD_REQUIRED_PARTS.every((part) => byPart.get(part)!.required)) {
+    return 'core card inventory parts must be required';
+  }
+  const roots = {
+    soul: value.soul_hash,
+    engram: value.engram_root,
+    'reflex-capability': value.reflex_capability_root,
+  };
+  for (const [part, root] of Object.entries(roots)) {
+    if (byPart.get(part)!.hash !== root) return `${part} inventory hash does not match its signed manifest root`;
+  }
+  if (typeof frame.sig !== 'string') return 'card frame must carry a signature';
+  return null;
+}
+
+export function verifyHydration(
+  inventory: CardInventoryEntry[],
+  hydrated: Record<string, Uint8Array>,
+): [boolean, string] {
+  if (hydrated === null || typeof hydrated !== 'object' || Array.isArray(hydrated)) {
+    return [false, 'hydrated parts must be an object of part name to octets'];
+  }
+  if (!Object.keys(hydrated).every(lclabel)) return [false, 'hydrated part names must be lclabels'];
+  const permitted = new Map(inventory.map((entry) => [entry.part, entry]));
+  const extra = Object.keys(hydrated).filter((part) => !permitted.has(part)).sort();
+  if (extra.length) return [false, `hydration attempted unpermitted part ${JSON.stringify(extra[0])}`];
+  const missing = inventory.filter((entry) => entry.required && !(entry.part in hydrated)).map((entry) => entry.part).sort();
+  if (missing.length) return [false, `required hydration part missing: ${missing[0]}`];
+  for (const part of Object.keys(hydrated).sort()) {
+    const bytes = hydrated[part];
+    const entry = permitted.get(part)!;
+    if (!(bytes instanceof Uint8Array)) return [false, `hydrated part ${JSON.stringify(part)} is not bytes`];
+    if (bytes.byteLength !== entry.bytes || Hb(entry.space, bytes) !== entry.hash) {
+      return [false, `hydrated part ${JSON.stringify(part)} does not match its permitted address`];
+    }
+  }
+  return [true, 'ok'];
+}
+
+export {
+  CONNECTION,
+  LCLABEL,
+  NONCE,
+  PROFILE_TOKEN,
+  exactKeys,
+};

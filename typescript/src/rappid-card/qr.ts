@@ -1,9 +1,10 @@
 import QRCode from 'qrcode';
 
-import { parseDeepLink } from './contract.js';
+import { parseCardLink } from './contract.js';
 
 export async function renderRappidCardQrSvg(deepLink: string): Promise<string> {
-  const exact = parseDeepLink(deepLink).deepLink;
+  parseCardLink(deepLink);
+  const exact = deepLink;
   return QRCode.toString(exact, {
     type: 'svg',
     errorCorrectionLevel: 'M',
@@ -12,7 +13,8 @@ export async function renderRappidCardQrSvg(deepLink: string): Promise<string> {
 }
 
 export async function renderRappidCardQrPng(deepLink: string): Promise<Buffer> {
-  const exact = parseDeepLink(deepLink).deepLink;
+  parseCardLink(deepLink);
+  const exact = deepLink;
   return QRCode.toBuffer(exact, {
     type: 'png',
     errorCorrectionLevel: 'M',

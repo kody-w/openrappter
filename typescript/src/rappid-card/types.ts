@@ -1,314 +1,382 @@
-export const RAPPID_CARD_SCHEMA = 'rappid-card/1' as const;
-export const RAPPID_CARD_POLICY_SCHEMA = 'rappid-card-policy/1' as const;
-export const RAPPID_CARD_AUTHORIZATION_SCHEMA = 'rappid-card-authorization/1' as const;
-export const RAPPID_CARD_REVOCATIONS_SCHEMA = 'rappid-card-revocations/1' as const;
-export const RAPPID_CARD_TEST_PROFILE = 'rappid-card-test/1' as const;
-export const RAPPID_CARD_PRODUCTION_PROFILE = 'rappid-card-production/1' as const;
-export const RAPPID_CARD_PROTOCOL = 'rappid-link/1' as const;
-export const RAPPID_CARD_RUNTIME_NAME = 'openrappter' as const;
-export const RAPPID_CARD_RUNTIME_VERSION = '1.13.0' as const;
-export const RAPPID_CARD_FILENAME = '.rappid-card.json' as const;
-export const MAX_AUDIT_EVENTS = 64;
-export const MAX_REPLAY_NONCES = 128;
+export const RAPP_SPEC = 'rapp/1' as const;
+export const CARD_PROFILE = 'rappid-card/1' as const;
+export const CARD_TEST_PROFILE = 'rappid-card-test/1' as const;
+export const CARD_VIRTUAL_SUFFIX = '.rappid-card.json' as const;
+export const CARD_CALLING = 'body.calling-card' as const;
+export const CARD_DEBUG = 'body.debug-card' as const;
+export const CARD_RUNTIME_POLICY_SCHEMA = 'rappid-card-runtime-policy/1' as const;
+export const CARD_AUTHORITY_SCHEMA = 'rappid-card-authority/1' as const;
+export const CARD_REVOCATION_SCHEMA = 'rappid-card-revocations/1' as const;
+export const CARD_CLASSIFICATIONS = [
+  'public',
+  'internal',
+  'confidential',
+  'restricted',
+] as const;
+export const CARD_REQUIRED_PARTS = [
+  'engram',
+  'reflex-capability',
+  'soul',
+] as const;
+export const CARD_VERIFY_STEPS = [
+  'parse',
+  'content-address',
+  'schema',
+  'signature',
+  'expiry',
+  'revocation',
+  'compatibility',
+  'classification-scope',
+  'replay-nonce',
+  'hydration',
+  'continuity',
+] as const;
+export const FRAME_KEYS = [
+  'frame_hash',
+  'kind',
+  'payload',
+  'payload_hash',
+  'prev',
+  'prev_wave',
+  'seq',
+  'sig',
+  'spec',
+  'stream_id',
+  'utc',
+] as const;
+export const CARD_PAYLOAD_KEYS = [
+  'classification',
+  'compatibility',
+  'endpoint_origin',
+  'engram_root',
+  'expires_utc',
+  'inventory',
+  'key_id',
+  'parent',
+  'profile',
+  'rappid',
+  'reflex_capability_root',
+  'requested_scope',
+  'revocation_url',
+  'soul_hash',
+  'wake_challenge',
+] as const;
+export const CARD_COMPATIBILITY_KEYS = [
+  'features',
+  'protocol',
+  'runtime',
+] as const;
+export const CARD_INVENTORY_KEYS = [
+  'bytes',
+  'hash',
+  'part',
+  'required',
+  'space',
+] as const;
+export const CARD_CONTINUITY_KEYS = [
+  'engram_root',
+  'nonce',
+  'parent',
+  'rappid',
+  'reflex_capability_root',
+  'soul_hash',
+] as const;
+export const CARD_PROVENANCE_KEYS = ['channel', 'source'] as const;
+export const CARD_FETCH_HOP_KEYS = ['resolved_ip', 'url'] as const;
+export const CARD_REVOCATION_ENTRY_KEYS = [
+  'effective_utc',
+  'reason',
+  'target',
+  'target_type',
+] as const;
+export const CARD_RUNTIME_POLICY_KEYS = [
+  'authority_rappid',
+  'card_authority',
+  'effective_utc',
+  'expires_utc',
+  'features',
+  'generated_utc',
+  'granted_scope',
+  'max_classification',
+  'max_registry_age_seconds',
+  'policy_seq',
+  'profiles',
+  'protocol',
+  'provenance',
+  'runtime',
+  'schema',
+  'sig',
+  'signer_key_id',
+] as const;
+export const CARD_AUTHORITY_VIEW_KEYS = [
+  'approved_origins',
+  'authorizations',
+  'authority_rappid',
+  'effective_utc',
+  'expires_utc',
+  'generated_utc',
+  'provenance',
+  'registry_seq',
+  'schema',
+  'sig',
+  'signer_key_id',
+] as const;
+export const CARD_REVOCATION_VIEW_KEYS = [
+  'authority_rappid',
+  'effective_utc',
+  'entries',
+  'expires_utc',
+  'generated_utc',
+  'provenance',
+  'registry_seq',
+  'schema',
+  'sig',
+  'signer_key_id',
+] as const;
 
-export type CardProfile =
-  | typeof RAPPID_CARD_TEST_PROFILE
-  | typeof RAPPID_CARD_PRODUCTION_PROFILE;
-export type CardClassification = 'public' | 'internal' | 'restricted';
-export type CardScope =
-  | 'identity:read'
-  | 'traits:read'
-  | 'skill:hydrate'
-  | 'sonic:hydrate'
-  | 'capability:hydrate';
-export type CardPartName =
-  | 'identity'
-  | 'traits'
-  | 'skill-manifest'
-  | 'sonic-profile'
-  | 'capability-manifest';
-export type CardMediaType =
-  | 'application/json'
-  | 'text/plain'
-  | 'application/vnd.rapp.skill+json'
-  | 'application/vnd.rapp.sonic+json'
-  | 'application/vnd.rapp.capability+json';
-export type CardAlgorithm = 'ed25519-test' | 'ed25519';
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+export type CardProfile = typeof CARD_PROFILE | typeof CARD_TEST_PROFILE;
+export type CardKind = typeof CARD_CALLING | typeof CARD_DEBUG;
+export type CardClassification = (typeof CARD_CLASSIFICATIONS)[number];
+export type CardStep = (typeof CARD_VERIFY_STEPS)[number];
 
-export interface RappidCardPart {
-  name: CardPartName;
+export interface CardParent {
+  rappid: string;
+  particle: string;
+}
+
+export interface CardCompatibility {
+  protocol: string;
+  runtime: string;
+  features: string[];
+}
+
+export interface CardInventoryEntry {
+  part: string;
+  space: 'rapp/1:egg';
   hash: string;
   bytes: number;
-  mediaType: CardMediaType;
-  classification: CardClassification;
-  scope: CardScope;
   required: boolean;
 }
 
-export interface RappidCardAuthenticator {
-  algorithm: CardAlgorithm;
-  keyId: string;
-}
-
-export interface RappidCardSignature extends RappidCardAuthenticator {
-  value: string;
-}
-
-export interface RappidCardManifest {
-  schema: typeof RAPPID_CARD_SCHEMA;
+export interface CardPayload {
   profile: CardProfile;
-  policyId: string;
   rappid: string;
-  endpoint: string;
-  nonce: string;
-  issuedAt: string;
-  expiresAt: string;
-  protocol: string;
-  runtime: {
-    name: string;
-    minimum: string;
-    maximum: string;
-  };
+  soul_hash: string;
+  parent: CardParent | null;
+  engram_root: string;
+  reflex_capability_root: string;
+  compatibility: CardCompatibility;
   classification: CardClassification;
-  scopes: CardScope[];
-  parts: RappidCardPart[];
-  challenge: RappidCardAuthenticator;
-  signature: RappidCardSignature;
+  requested_scope: string[];
+  expires_utc: string;
+  revocation_url: string;
+  endpoint_origin: string;
+  wake_challenge: string;
+  inventory: CardInventoryEntry[];
+  key_id: string;
 }
 
-export interface RappidCardPolicy {
-  schema: typeof RAPPID_CARD_POLICY_SCHEMA;
-  policyId: string;
-  sequence: number;
-  issuedAt: string;
-  expiresAt: string;
-  allowedProfiles: CardProfile[];
-  protocol: string;
-  runtime: {
-    name: string;
-    minimum: string;
-    maximum: string;
-  };
-  maxClassification: CardClassification;
-  grantedScopes: CardScope[];
-  approvedOrigins: string[];
-  signature: RappidCardSignature;
-}
-
-export interface RappidCardAuthorization {
-  schema: typeof RAPPID_CARD_AUTHORIZATION_SCHEMA;
-  authorizationId: string;
-  policyId: string;
-  sequence: number;
-  subjectRappid: string;
-  signerKeyId: string;
-  signerAlgorithm: CardAlgorithm;
-  signerPublicKey: string;
-  notBefore: string;
-  notAfter: string;
-  maxClassification: CardClassification;
-  grantedScopes: CardScope[];
-  approvedOrigins: string[];
-  signature: RappidCardSignature;
-}
-
-export interface RappidCardRevocations {
-  schema: typeof RAPPID_CARD_REVOCATIONS_SCHEMA;
-  policyId: string;
-  sequence: number;
-  issuedAt: string;
-  expiresAt: string;
-  revokedManifestHashes: string[];
-  revokedSignerKeyIds: string[];
-  revokedAuthorizationIds: string[];
-  signature: RappidCardSignature;
-}
-
-export interface ParsedRappidCardLink {
-  rappid: string;
-  manifestHash: string;
-  endpoint: string;
-  nonce: string;
-  deepLink: string;
-}
-
-export interface CardManifestProvider {
-  getManifest(
-    endpoint: string,
-    manifestHash: string,
-  ): Promise<unknown> | unknown;
-}
-
-export interface CardTrustProvider {
-  getPolicyForOrigin(origin: string): Promise<unknown> | unknown;
-  getAuthorization(
-    policyId: string,
-    signerKeyId: string,
-    subjectRappid: string,
-  ): Promise<unknown> | unknown;
-  getRevocations(policyId: string): Promise<unknown> | unknown;
-  getAuthorityKey(
-    keyId: string,
-    algorithm: CardAlgorithm,
-  ): Promise<string | null> | string | null;
-}
-
-export interface CardContentProvider {
-  getPart(hash: string): Promise<Uint8Array | null> | Uint8Array | null;
-}
-
-export interface ContinuityChallengeRequest {
-  algorithm: CardAlgorithm;
-  keyId: string;
-  manifestHash: string;
-  nonce: string;
-  partHashes: string[];
-}
-
-export interface CardChallengeProvider {
-  respond(
-    request: ContinuityChallengeRequest,
-  ): Promise<string> | string;
-}
-
-export interface CardProviders {
-  manifests: CardManifestProvider;
-  trust: CardTrustProvider;
-  content: CardContentProvider;
-  challenge: CardChallengeProvider;
-}
-
-export interface CardTrustStateInput {
-  policyId: string;
-  policySequence: number;
-  policyHash: string;
-  authorizationId: string;
-  authorizationSequence: number;
-  authorizationHash: string;
-  revocationSequence: number;
-  revocationHash: string;
-  nonce: string;
-  manifestHash: string;
-}
-
-export abstract class CardStateStore {
-  abstract recordPolicy(
-    policyId: string,
-    sequence: number,
-    documentHash: string,
-  ): Promise<void> | void;
-
-  abstract record(
-    input: CardTrustStateInput,
-    claimNonce: boolean,
-  ): Promise<void> | void;
-}
-
-export abstract class DurableCardStateStore extends CardStateStore {
-  readonly #durableCardStateStore = true;
-
-  protected assertDurableBrand(): void {
-    if (!this.#durableCardStateStore) throw new Error('unreachable');
-  }
-
-  abstract close(): Promise<void> | void;
-}
-
-export type CardState =
-  | 'idle'
-  | 'parsed'
-  | 'verified'
-  | 'preview'
-  | 'approved'
-  | 'hydrating'
-  | 'challenging'
-  | 'awake'
-  | 'failed';
-
-export interface CardAuditEvent {
+export interface CardFrame {
+  spec: 'rapp/1';
+  kind: CardKind;
+  stream_id: string;
   seq: number;
-  state: CardState;
-  event: string;
-  detail: string;
+  utc: string;
+  payload: CardPayload;
+  payload_hash: string;
+  frame_hash: string;
+  prev: string | null;
+  prev_wave: string | null;
+  sig: string;
 }
 
-export interface CardPreview {
+export interface CardProvenance {
+  source: string;
+  channel: string;
+}
+
+export interface CardRuntimePolicy {
+  schema: 'rappid-card-runtime-policy/1';
+  policy_seq: number;
+  generated_utc: string;
+  effective_utc: string;
+  expires_utc: string;
+  authority_rappid: string;
+  signer_key_id: string;
+  provenance: CardProvenance;
+  card_authority: string;
+  protocol: string;
+  runtime: string;
+  features: string[];
+  profiles: string[];
+  max_classification: CardClassification;
+  granted_scope: string[];
+  max_registry_age_seconds: number;
+  sig: string;
+}
+
+export interface CardAuthorization {
+  issuer_key_id: string;
+  subject_rappid: string | null;
+  role: 'subject' | 'card-issuer';
+  not_before_utc: string;
+  not_after_utc: string;
+  revoked_utc: string | null;
+}
+
+export interface CardAuthorityView {
+  schema: 'rappid-card-authority/1';
+  registry_seq: number;
+  generated_utc: string;
+  effective_utc: string;
+  expires_utc: string;
+  authority_rappid: string;
+  signer_key_id: string;
+  provenance: CardProvenance;
+  approved_origins: string[];
+  authorizations: CardAuthorization[];
+  sig: string;
+}
+
+export interface CardRevocationEntry {
+  target_type: 'manifest-hash' | 'key-id' | 'subject-rappid';
+  target: string;
+  effective_utc: string;
+  reason: string;
+}
+
+export interface CardRevocationView {
+  schema: 'rappid-card-revocations/1';
+  registry_seq: number;
+  generated_utc: string;
+  effective_utc: string;
+  expires_utc: string;
+  authority_rappid: string;
+  signer_key_id: string;
+  provenance: CardProvenance;
+  entries: CardRevocationEntry[];
+  sig: string;
+}
+
+export interface CardFetchHop {
+  url: string;
+  resolved_ip: string;
+}
+
+export interface CardContinuity {
   rappid: string;
-  profile: CardProfile;
-  policyId: string;
-  authorizationId: string;
+  soul_hash: string;
+  parent: CardParent | null;
+  engram_root: string;
+  reflex_capability_root: string;
+  nonce: string;
+}
+
+export interface ParsedCardLink {
+  rappid: string;
+  manifest_hash: string;
   endpoint: string;
-  origin: string;
-  issuerKeyId: string;
-  classification: CardClassification;
-  scopes: CardScope[];
-  policySequence: number;
-  authorizationSequence: number;
-  revocationSequence: number;
-  parts: Array<{
-    name: CardPartName;
-    hash: string;
-    bytes: number;
-    mediaType: CardMediaType;
-    required: boolean;
-  }>;
+  endpoint_origin: string;
+  nonce: string;
 }
 
-export interface HydratedCardPart {
-  name: CardPartName;
-  hash: string;
-  bytes: number;
-  mediaType: CardMediaType;
+export interface CardAwakeResult {
+  status: 'awake';
+  profile: CardProfile;
+  rappid: string;
+  manifest_hash: string;
+  nonce: string;
+  runtime_policy_seq: number;
+  authority_seq: number;
+  revocation_seq: number;
 }
 
-export interface CardFailure {
-  code: string;
-  message: string;
+export interface CardVerificationResult {
+  ok: boolean;
+  step: CardStep | null;
+  reason: string;
+  result: CardAwakeResult | null;
 }
 
-export interface CardMachineEvent {
-  state: CardState;
-  event: string;
-  detail: string;
-  outcome?: CardSimulationSnapshot['outcome'];
-  error?: CardFailure | null;
-  manifestHash?: string | null;
-  deepLink?: string | null;
-  preview?: CardPreview | null;
-  hydrated?: HydratedCardPart[];
+export interface CardVector {
+  name: string;
+  frame: CardFrame;
+  link: string;
+  runtime_policy_authority: string;
+  runtime_policy: CardRuntimePolicy;
+  authority_view: CardAuthorityView;
+  revocation_view: CardRevocationView | null;
+  now_utc: string;
+  connection_id: string;
+  fetch_trace: CardFetchHop[];
+  hydrated_parts: string[];
+  continuity: CardContinuity;
+  state_seed: {
+    nonces: Array<{
+      nonce: string;
+      connection_id: string;
+      state: 'hydrating' | 'awake';
+      utc: string;
+    }>;
+    sequences: Array<{
+      namespace: string;
+      authority: string;
+      seq: number;
+      view_hash: string;
+    }>;
+  };
+  physical: boolean;
+  scanner_control: boolean;
+  expected: {
+    ok: boolean;
+    step: CardStep | null;
+    reason_contains: string | null;
+  };
 }
 
-export interface CardSimulationSnapshot {
-  state: CardState;
-  outcome: 'pending' | 'awake' | 'failed';
-  error: CardFailure | null;
-  manifestHash: string | null;
-  deepLink: string | null;
-  preview: CardPreview | null;
-  hydrated: HydratedCardPart[];
-  audit: CardAuditEvent[];
+export interface CardDeck {
+  schema: 'rappid-card-vectors/2';
+  production_profile: 'rappid-card/1';
+  test_profile: 'rappid-card-test/1';
+  virtual_suffix: '.rappid-card.json';
+  mandatory_scenarios: string[];
+  parts_b64: Record<string, string>;
+  trust: Array<{ kid: string; spki_der_b64: string }>;
+  vectors: CardVector[];
 }
 
-export interface CardSimulationOptions {
-  approve: boolean;
-  providers: CardProviders;
-  stateStore: DurableCardStateStore;
-  maxReconnects?: number;
+export abstract class CardStateBackend {
+  abstract claimNonce(
+    nonce: string,
+    connectionId: string,
+    utc: string,
+  ): [boolean, string];
+  abstract markAwake(
+    nonce: string,
+    connectionId: string,
+    utc: string,
+  ): [boolean, string];
+  abstract acceptSequence(
+    namespace: string,
+    authority: string,
+    seq: number,
+    viewHash: string,
+  ): [boolean, string];
 }
 
 export class RappidCardError extends Error {
   constructor(
-    readonly code: string,
+    readonly step: CardStep | 'parse' | 'schema',
     message: string,
   ) {
     super(message);
     this.name = 'RappidCardError';
-  }
-}
-
-export class RappidCardReconnectError extends Error {
-  constructor(message = 'content provider reconnected during hydration') {
-    super(message);
-    this.name = 'RappidCardReconnectError';
   }
 }

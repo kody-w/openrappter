@@ -85,14 +85,14 @@ See [Quantum RAPPIDs](./docs/quantum-rappids.md).
 
 ### Virtual RAPPID Debug Card
 
-The authenticated Habitat includes a deterministic RAPPID handoff simulator
-with 13 signed synthetic fixtures, a strict `.rappid-card.json` manifest, an
-exact compact deep link, real QR SVG/PNG generation, explicit approval before
-content-addressed hydration, signed signer-to-subject authorization, signed
-monotonic revocation views, approved HTTPS origins, durable transactional
-replay, and visible failure/awake results. TypeScript and Python regenerate
-the same shared wire vectors. Production mode refuses the synthetic test
-profile and never reads ambient credentials.
+The authenticated Habitat includes an exact RAPP/1 §7.10 Calling Card / Debug
+Card verifier. `.rappid-card.json` is canonical JSON for the ordinary
+eleven-key frame; production is `body.calling-card` + `rappid-card/1`, while
+test-only debug is `body.debug-card` + `rappid-card-test/1`. Both runtimes
+consume the byte-identical PR9 commit `392f850` deck, enforce detached
+unencoded EdDSA JWS with SPKI→RAPPID binding, signed runtime/authority/revocation
+views, strict endpoint/fetch evidence, durable `hydrating`/`awake` replay state,
+and the exact eleven-step verification order.
 
 See [Virtual RAPPID Debug Card](./docs/rappid-debug-card.md).
 

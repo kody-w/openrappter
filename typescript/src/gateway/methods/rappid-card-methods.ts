@@ -1,11 +1,11 @@
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import {
   RAPPID_CARD_FIXTURE_NAMES,
   buildRappidCardFixture,
   listRappidCardFixtures,
   simulateRappidCardFixture,
-} from '../../rappid-card/fixtures.js';
-import type {
-  RappidCardFixtureName,
 } from '../../rappid-card/fixtures.js';
 
 interface MethodRegistrar {
@@ -16,57 +16,82 @@ interface MethodRegistrar {
   ): void;
 }
 
-function fixtureName(value: unknown): RappidCardFixtureName {
+function scenarioName(value: unknown): string {
   if (
     typeof value !== 'string'
-    || !RAPPID_CARD_FIXTURE_NAMES.includes(value as RappidCardFixtureName)
+    || !RAPPID_CARD_FIXTURE_NAMES.includes(value)
   ) {
     throw new Error(
-      `fixture must be one of: ${RAPPID_CARD_FIXTURE_NAMES.join(', ')}`,
+      `scenario must be one of: ${RAPPID_CARD_FIXTURE_NAMES.join(', ')}`,
     );
   }
-  return value as RappidCardFixtureName;
+  return value;
 }
 
-export function registerRappidCardMethods(server: MethodRegistrar): void {
+export function registerRappidCardMethods(
+  server: MethodRegistrar,
+  options: { dataDir: string },
+): void {
   const auth = { requiresAuth: true };
-  const renderQr = async (deepLink: string) => {
+  let run = 0;
+  const renderQr = async (link: string) => {
     const { renderRappidCardQrSvg } = await import('../../rappid-card/qr.js');
-    return renderRappidCardQrSvg(deepLink);
+    return renderRappidCardQrSvg(link);
   };
 
-  server.registerMethod('rappid.card.fixtures', async () =>
-    listRappidCardFixtures(), auth);
+  server.registerMethod(
+    'rappid.card.scenarios',
+    async () => listRappidCardFixtures(),
+    auth,
+  );
 
-  server.registerMethod<{ fixture?: string }>(
+  server.registerMethod<{ scenario?: string }>(
     'rappid.card.preview',
     async (params) => {
-      const name = fixtureName(params?.fixture);
-      const fixture = buildRappidCardFixture(name);
+      const name = scenarioName(params?.scenario);
+      const vector = buildRappidCardFixture(name);
       return {
-        fixture: name,
-        exactDeepLink: fixture.deepLink,
-        qrSvg: await renderQr(fixture.deepLink),
-        simulation: await simulateRappidCardFixture(name, false),
+        scenario: name,
+        exact_link: vector.link,
+        qr_svg: await renderQr(vector.link),
+        frame: vector.frame,
+        expected: vector.expected,
+        provenance: 'rapp-1 commit 392f850',
       };
     },
     auth,
   );
 
-  server.registerMethod<{ fixture?: string; approve?: boolean }>(
-    'rappid.card.simulate',
+  server.registerMethod<{ scenario?: string; approve?: boolean }>(
+    'rappid.card.verify',
     async (params) => {
-      const name = fixtureName(params?.fixture);
+      const name = scenarioName(params?.scenario);
       if (params?.approve !== true) {
-        throw new Error('explicit approve=true is required to hydrate a RAPPID card');
+        throw new Error('explicit approve=true is required to run hydration');
       }
-      const fixture = buildRappidCardFixture(name);
-      return {
-        fixture: name,
-        exactDeepLink: fixture.deepLink,
-        qrSvg: await renderQr(fixture.deepLink),
-        simulation: await simulateRappidCardFixture(name, true),
-      };
+      const vector = buildRappidCardFixture(name);
+      const path = join(
+        options.dataDir,
+        'rappid-card-debug',
+        `${name}-${process.pid}-${run++}.sqlite`,
+      );
+      try {
+        const { verdict } = await simulateRappidCardFixture(name, path);
+        return {
+          scenario: name,
+          exact_link: vector.link,
+          qr_svg: await renderQr(vector.link),
+          frame: vector.frame,
+          expected: vector.expected,
+          verification: verdict,
+          provenance: 'rapp-1 commit 392f850',
+        };
+      } finally {
+        await Promise.all(
+          ['', '-wal', '-shm'].map((suffix) =>
+            rm(`${path}${suffix}`, { force: true })),
+        );
+      }
     },
     auth,
   );

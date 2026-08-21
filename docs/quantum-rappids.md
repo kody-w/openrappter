@@ -100,19 +100,17 @@ after the selected approval policy and RAPP/1 verification pass.
 
 ## Virtual Debug Card
 
-The Habitat's **RAPPID Debug Card** page exercises transport and hydration
-without mutating a Quantum RAPPID. It uses the closed `.rappid-card.json`
-manifest, deterministic synthetic `rappid-card-test/1` fixtures, an exact
-non-secret `rappid://link/...` URI, and real QR artifacts. The flow stops at a
-verified preview until the developer explicitly approves content-addressed
-hydration and the continuity challenge passes.
+The Habitat's **RAPPID Debug Card** page exercises the exact RAPP/1 §7.10
+profile without mutating a Quantum RAPPID. `.rappid-card.json` is the canonical
+eleven-key frame, never a private envelope. The test-only UI consumes the
+vendored PR9 `rappid-card-test/1` deck, shows exact frame/link fields, and runs
+the ordered verifier only after explicit approval.
 
-The card carries hashes and policy metadata, never private memory, credentials,
-commands, executable bytes, or filesystem paths. Every external decision is an
-injected provider; the fixture Habitat uses no real network. Production mode
-refuses test profiles and signatures, verifies signed signer-to-subject
-authorization and monotonic revocation views, restricts decoded endpoints to
-signed HTTPS origins, and requires durable transactional replay state.
+Production calling cards use `body.calling-card` + `rappid-card/1`; debug cards
+use `body.debug-card` + `rappid-card-test/1`. Detached EdDSA JWS, keyed
+SPKI→RAPPID binding, signed runtime policy/authority/revocation views, observed
+endpoint redirect/DNS evidence, durable replay state, `rapp/1:egg` inventory,
+and particle continuity all follow SPEC §7.10 exactly.
 
 See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
 

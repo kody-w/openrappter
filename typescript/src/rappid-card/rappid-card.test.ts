@@ -4,610 +4,327 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
-  BoundedCardStateStore,
+  CARD_AUTHORITY_SCHEMA,
+  CARD_AUTHORITY_VIEW_KEYS,
+  CARD_CALLING,
+  CARD_CLASSIFICATIONS,
+  CARD_DEBUG,
+  CARD_PAYLOAD_KEYS,
+  CARD_PROFILE,
+  CARD_REVOCATION_SCHEMA,
+  CARD_REVOCATION_VIEW_KEYS,
+  CARD_RUNTIME_POLICY_KEYS,
+  CARD_RUNTIME_POLICY_SCHEMA,
+  CARD_TEST_PROFILE,
+  CARD_VERIFY_STEPS,
+  CARD_VIRTUAL_SUFFIX,
+  FRAME_KEYS,
+  H,
+  Hb,
   RAPPID_CARD_FIXTURE_NAMES,
-  SqliteCardStateStore,
+  SQLiteCardState,
+  CardTrustStore,
   buildRappidCardFixture,
-  buildRappidCardVectorDocument,
-  makeDeepLink,
-  manifestHash,
-  parseDeepLink,
-  parseManifestJson,
-  reduceCardState,
+  canonical,
+  cardParts,
+  cardTrust,
+  loadRappidCardDeck,
+  parseCardLink,
+  ipIsGlobal,
+  physicalVectorBytes,
+  readCardResource,
   renderRappidCardQrPng,
   renderRappidCardQrSvg,
-  signFixtureAuthorization,
-  signFixtureManifest,
-  signFixturePolicy,
-  signFixtureRevocations,
-  simulateRappidCard,
   simulateRappidCardFixture,
-  simulateRappidCardFixtureInput,
-  unsignedDocument,
-  validateManifest,
+  stateForVector,
+  verifyCardLinkScannerControlForTest,
   writeRappidCardFixtureDeck,
 } from './index.js';
-import type {
-  CardProviders,
-  CardSimulationSnapshot,
-  RappidCardFixture,
-  RappidCardManifest,
-} from './index.js';
 
-const vectors = JSON.parse(
-  readFileSync(
-    new URL('../../../tests/rappid-card-vectors.json', import.meta.url),
-    'utf8',
-  ),
-) as Awaited<ReturnType<typeof buildRappidCardVectorDocument>>;
-
-interface ProductionVector {
-  name: string;
-  manifest: RappidCardManifest;
-  manifestHash: string;
-  deepLink: string;
-  policy: unknown;
-  authorization: unknown;
-  revocations: unknown;
-  authorityKeys: Record<string, string>;
-  contents: Record<string, string>;
-  challengeResponse: string;
-  preview: CardSimulationSnapshot;
-  approved: CardSimulationSnapshot;
-}
-
-const productionVectors = JSON.parse(
-  readFileSync(
-    new URL('../../../tests/rappid-card-production-vectors.json', import.meta.url),
-    'utf8',
-  ),
-) as {
-  schema: string;
-  vectors: ProductionVector[];
-};
-
-const generatedPaths: string[] = [];
+const generated: string[] = [];
 
 afterEach(() => {
-  for (const path of generatedPaths.splice(0)) {
-    rmSync(path, { recursive: true, force: true });
-    rmSync(`${path}-wal`, { force: true });
-    rmSync(`${path}-shm`, { force: true });
+  for (const path of generated.splice(0)) {
+    for (const suffix of ['', '-wal', '-shm']) {
+      rmSync(`${path}${suffix}`, { recursive: true, force: true });
+    }
   }
 });
 
-function fixtureWithManifest(
-  fixture: RappidCardFixture,
-  manifest: RappidCardManifest,
-): RappidCardFixture {
-  const hash = manifestHash(manifest);
-  return {
-    ...fixture,
-    manifest,
-    manifestHash: hash,
-    deepLink: makeDeepLink(manifest, hash),
-    providers: {
-      ...fixture.providers,
-      manifests: { getManifest: () => structuredClone(manifest) },
-    },
-    stateStore: new BoundedCardStateStore(),
-  };
+function statePath(name: string): string {
+  const path = join(process.cwd(), `.pr9-card-${name}-${process.pid}.sqlite`);
+  generated.push(path);
+  return path;
 }
 
-function productionProviders(vector: ProductionVector): CardProviders {
-  return {
-    manifests: {
-      getManifest: () => structuredClone(vector.manifest),
-    },
-    trust: {
-      getPolicyForOrigin: () => structuredClone(vector.policy),
-      getAuthorization: () => structuredClone(vector.authorization),
-      getRevocations: () => structuredClone(vector.revocations),
-      getAuthorityKey(keyId) {
-        return vector.authorityKeys[keyId] ?? null;
-      },
-    },
-    content: {
-      getPart(hash) {
-        const value = vector.contents[hash];
-        return value === undefined ? null : Buffer.from(value, 'base64');
-      },
-    },
-    challenge: {
-      respond: () => vector.challengeResponse,
-    },
-  };
-}
+const mandatory = [
+  'valid-test', 'valid-production', 'expired', 'manifest-revoked', 'key-revoked',
+  'subject-revoked', 'wrong-manifest-hash', 'unknown-signing-key',
+  'attacker-key-impersonation', 'delegation-expired', 'delegation-revoked',
+  'forged-revocation-view', 'stale-revocation-view', 'unavailable-revocation-view',
+  'rollback-revocation-view', 'protocol-incompatible', 'runtime-incompatible',
+  'unsupported-feature', 'feature-superset', 'classification-violation',
+  'insufficient-scope', 'missing-engram-part', 'continuity-challenge-failure',
+  'reconnect-during-hydration', 'duplicate-replayed-nonce',
+  'physical-payload-reproduction', 'test-profile-production',
+  'synthetic-key-production', 'auto-execute', 'endpoint-userinfo',
+  'endpoint-empty-query', 'endpoint-empty-fragment', 'endpoint-space',
+  'endpoint-backslash', 'endpoint-bad-percent', 'endpoint-double-encoding',
+  'endpoint-loopback-literal', 'endpoint-private-literal',
+  'endpoint-link-local-literal', 'endpoint-reserved-literal',
+  'endpoint-unapproved-origin', 'endpoint-redirect-origin', 'endpoint-private-dns',
+  'secret-endpoint-password', 'secret-password', 'secret-api-key', 'secret-cookie',
+  'secret-bearer', 'secret-private-memory',
+] as const;
 
-async function sqliteStore(label: string): Promise<SqliteCardStateStore> {
-  const path = join(
-    process.cwd(),
-    `.rappid-card-${label}-${process.pid}.sqlite`,
-  );
-  generatedPaths.push(path);
-  return SqliteCardStateStore.open(path);
-}
-
-describe('authenticated virtual RAPPID card contract', () => {
-  it('matches the shared TypeScript/Python signed-trust vectors', async () => {
-    expect(await buildRappidCardVectorDocument()).toEqual(vectors);
-    expect(vectors.schema).toBe('rappid-card-vectors/2');
-    expect(vectors.fixtures).toHaveLength(13);
-  });
-
-  it('rejects caller-selected fixture trust on the production entry point', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const store = await sqliteStore('test-profile-refusal');
-    try {
-      const result = await simulateRappidCard(fixture.deepLink, {
-        approve: false,
-        providers: fixture.providers,
-        stateStore: store,
-      });
-      expect(result.error?.code).toBe('test_signature_forbidden');
-    } finally {
-      store.close();
-    }
-  });
-
-  it('requires the concrete durable state store in production', async () => {
-    const vector = productionVectors.vectors[0];
-    const result = await simulateRappidCard(vector.deepLink, {
-      approve: false,
-      providers: productionProviders(vector),
-      stateStore: new BoundedCardStateStore() as never,
-    });
-    expect(result.error?.code).toBe('durable_state_required');
-  });
-
-  it('rejects secret, memory, command, credential, path, and inline payload fields', () => {
-    const manifest = buildRappidCardFixture('valid').manifest;
-    for (const field of [
-      'secret',
-      'privateMemory',
-      'command',
-      'credentials',
-      'path',
-      'payload',
-    ]) {
-      expect(() => validateManifest({ ...manifest, [field]: 'forbidden' }))
-        .toThrow(/card is closed/);
-    }
-    expect(() =>
-      validateManifest({
-        ...manifest,
-        parts: [{ ...manifest.parts[0], path: '../../private' }],
-      }),
-    ).toThrow(/card\.parts\[0\] is closed/);
-  });
-
-  it('keeps deterministic canonical hashes independent of insertion order', () => {
-    const manifest = buildRappidCardFixture('valid').manifest;
-    const reordered = Object.fromEntries(Object.entries(manifest).reverse());
-    expect(manifestHash(validateManifest(reordered))).toBe(manifestHash(manifest));
-  });
-
-  it('requires canonical m/e/n ordering and decoded secret-free HTTPS endpoints', () => {
-    const fixture = buildRappidCardFixture('valid');
-    expect(parseDeepLink(fixture.deepLink).deepLink).toBe(fixture.deepLink);
-    expect(() => parseDeepLink(`${fixture.deepLink}&extra=1`))
-      .toThrow(/exactly m, e, and n/);
-    const secretEndpoint = encodeURIComponent(
-      'https://user:password@fixture.openrappter.test/rappid-card',
-    );
-    expect(() =>
-      parseDeepLink(
-        fixture.deepLink.replace(
-          /&e=[^&]+/,
-          `&e=${secretEndpoint}`,
-        ),
-      ),
-    ).toThrow(/must not contain userinfo/);
-    const queryEndpoint = encodeURIComponent(
-      'https://fixture.openrappter.test/rappid-card?token=secret',
-    );
-    expect(() =>
-      parseDeepLink(
-        fixture.deepLink.replace(/&e=[^&]+/, `&e=${queryEndpoint}`),
-      ),
-    ).toThrow(/must not contain userinfo/);
-  });
-
-  it('rejects duplicate JSON keys before canonicalization', () => {
-    const raw = JSON.stringify(buildRappidCardFixture('valid').manifest);
-    expect(() =>
-      parseManifestJson(raw.replace(
-        '"schema":"rappid-card/1"',
-        '"schema":"rappid-card/1","schema":"rappid-card/1"',
-      )),
-    ).toThrow(/duplicate JSON object key: schema/);
-  });
-});
-
-describe('signed trust and mutation controls', () => {
-  it.each(RAPPID_CARD_FIXTURE_NAMES)(
-    'runs the %s fixture deterministically',
-    async (name) => {
-      const fixture = buildRappidCardFixture(name);
-      const result = await simulateRappidCardFixture(name, true);
-      expect(result.state).toBe(fixture.expectedState);
-      expect(result.error?.code ?? null).toBe(fixture.expectedError);
-    },
-  );
-
-  it('stops at preview until approval is explicit', async () => {
-    const preview = await simulateRappidCardFixture('valid', false);
-    expect(preview.state).toBe('preview');
-    expect(preview.hydrated).toEqual([]);
-    expect(preview.preview).toMatchObject({
-      policyId: 'fixture-policy-1',
-      authorizationId: 'fixture-authorization-1',
-      origin: 'https://fixture.openrappter.test',
-      policySequence: 7,
-      authorizationSequence: 3,
-      revocationSequence: 11,
-    });
-  });
-
-  it('fails a card signature mutation even when the link hash is updated', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const manifest = structuredClone(fixture.manifest);
-    manifest.signature.value =
-      `${manifest.signature.value[0] === 'A' ? 'B' : 'A'}${manifest.signature.value.slice(1)}`;
-    const result = await simulateRappidCardFixtureInput(
-      fixtureWithManifest(fixture, manifest),
-      false,
-    );
-    expect(result.error?.code).toBe('signature_invalid');
-  });
-
-  it('rejects policy and revocation tampering before using their contents', async () => {
-    const policyFixture = buildRappidCardFixture('valid');
-    const policy = structuredClone(policyFixture.policy);
-    policy.maxClassification = 'restricted';
-    policyFixture.providers = {
-      ...policyFixture.providers,
-      trust: {
-        ...policyFixture.providers.trust,
-        getPolicyForOrigin: () => policy,
-      },
-    };
-    expect(
-      (await simulateRappidCardFixtureInput(policyFixture, false)).error?.code,
-    ).toBe('policy_signature_invalid');
-
-    const revocationFixture = buildRappidCardFixture('valid');
-    const revocations = structuredClone(revocationFixture.revocations);
-    revocations.revokedManifestHashes.push(revocationFixture.manifestHash);
-    revocationFixture.providers = {
-      ...revocationFixture.providers,
-      trust: {
-        ...revocationFixture.providers.trust,
-        getRevocations: () => revocations,
-      },
-    };
-    expect(
-      (await simulateRappidCardFixtureInput(revocationFixture, false)).error?.code,
-    ).toBe('revocation_signature_invalid');
-  });
-
-  it('enforces signer-to-subject authorization after authority verification', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const authorization = signFixtureAuthorization({
-      ...unsignedDocument(fixture.authorization),
-      subjectRappid:
-        `rappid:@openrappter/other-subject:${'a'.repeat(64)}`,
-    });
-    fixture.providers = {
-      ...fixture.providers,
-      trust: {
-        ...fixture.providers.trust,
-        getAuthorization: () => authorization,
-      },
-    };
-    const result = await simulateRappidCardFixtureInput(fixture, false);
-    expect(result.error?.code).toBe('signer_subject_unauthorized');
-  });
-
-  it('requires endpoint origin in both signed policy and signer authorization', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const unsigned = {
-      ...unsignedDocument(fixture.manifest),
-      endpoint: 'https://unapproved.openrappter.test/rappid-card',
-    };
-    const changed = fixtureWithManifest(
-      fixture,
-      signFixtureManifest(unsigned),
-    );
-    let manifestFetched = false;
-    changed.providers = {
-      ...changed.providers,
-      manifests: {
-        getManifest: () => {
-          manifestFetched = true;
-          return structuredClone(changed.manifest);
-        },
-      },
-      trust: {
-        ...changed.providers.trust,
-        getPolicyForOrigin: () => structuredClone(changed.policy),
-      },
-    };
-    const result = await simulateRappidCardFixtureInput(changed, false);
-    expect(result.error?.code).toBe('origin_not_approved');
-    expect(manifestFetched).toBe(false);
-  });
-
-  it('fails hash, classification, scope, and challenge controls', async () => {
-    const results = await Promise.all([
-      simulateRappidCardFixture('wrong-hash', true),
-      simulateRappidCardFixture('classification-violation', true),
-      simulateRappidCardFixture('insufficient-scope', true),
-      simulateRappidCardFixture('challenge-failure', true),
+describe('PR9 contract drift', () => {
+  it('pins exact profiles, kinds, trust schemas, classifications, and steps', () => {
+    expect(CARD_PROFILE).toBe('rappid-card/1');
+    expect(CARD_TEST_PROFILE).toBe('rappid-card-test/1');
+    expect(CARD_VIRTUAL_SUFFIX).toBe('.rappid-card.json');
+    expect([CARD_CALLING, CARD_DEBUG]).toEqual([
+      'body.calling-card',
+      'body.debug-card',
     ]);
-    expect(results.map((result) => result.error?.code)).toEqual([
-      'manifest_hash_mismatch',
-      'classification_violation',
-      'insufficient_scope',
-      'challenge_failed',
+    expect([
+      CARD_RUNTIME_POLICY_SCHEMA,
+      CARD_AUTHORITY_SCHEMA,
+      CARD_REVOCATION_SCHEMA,
+    ]).toEqual([
+      'rappid-card-runtime-policy/1',
+      'rappid-card-authority/1',
+      'rappid-card-revocations/1',
+    ]);
+    expect(CARD_CLASSIFICATIONS).toEqual([
+      'public', 'internal', 'confidential', 'restricted',
+    ]);
+    expect(CARD_VERIFY_STEPS).toEqual([
+      'parse', 'content-address', 'schema', 'signature', 'expiry', 'revocation',
+      'compatibility', 'classification-scope', 'replay-nonce', 'hydration',
+      'continuity',
     ]);
   });
 
-  it('fails a same-length hydrated content mutation', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    let corrupted = false;
-    const originalContent = fixture.providers.content;
-    fixture.providers = {
-      ...fixture.providers,
-      content: {
-        async getPart(hash) {
-          const value = await originalContent.getPart(hash);
-          if (value === null || corrupted) return value;
-          corrupted = true;
-          const copy = Uint8Array.from(value);
-          copy[0] ^= 0xff;
-          return copy;
-        },
-      },
+  it('pins exact frame/payload/trust key sets to the vendored deck', () => {
+    const vector = loadRappidCardDeck().vectors[0];
+    expect(Object.keys(vector.frame).sort()).toEqual([...FRAME_KEYS].sort());
+    expect(Object.keys(vector.frame.payload).sort()).toEqual([...CARD_PAYLOAD_KEYS].sort());
+    expect(Object.keys(vector.runtime_policy).sort()).toEqual([...CARD_RUNTIME_POLICY_KEYS].sort());
+    expect(Object.keys(vector.authority_view).sort()).toEqual([...CARD_AUTHORITY_VIEW_KEYS].sort());
+    expect(Object.keys(vector.revocation_view!).sort()).toEqual([...CARD_REVOCATION_VIEW_KEYS].sort());
+    const cardSchema = JSON.parse(
+      readFileSync(
+        new URL('../../../contracts/rappid-card.schema.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      required: string[];
+      $defs: { payload: { required: string[] } };
     };
-    const result = await simulateRappidCardFixtureInput(fixture, true);
-    expect(result.error?.code).toBe('part_hash_mismatch');
-  });
-
-  it('fails incompatible runtime independently of protocol', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const manifest = signFixtureManifest({
-      ...unsignedDocument(fixture.manifest),
-      runtime: {
-        name: 'openrappter',
-        minimum: '2.0.0',
-        maximum: '2.0.0',
-      },
-    });
-    const result = await simulateRappidCardFixtureInput(
-      fixtureWithManifest(fixture, manifest),
-      false,
-    );
-    expect(result.error?.code).toBe('incompatible_runtime');
-  });
-
-  it('rejects a signed revocation rollback through the state transaction', async () => {
-    const store = new BoundedCardStateStore();
-    const current = buildRappidCardFixture('valid');
-    current.stateStore = store;
-    current.revocations = signFixtureRevocations({
-      ...unsignedDocument(current.revocations),
-      sequence: 12,
-    });
-    current.providers = {
-      ...current.providers,
-      trust: {
-        ...current.providers.trust,
-        getRevocations: () => structuredClone(current.revocations),
-      },
+    const trustSchema = JSON.parse(
+      readFileSync(
+        new URL('../../../contracts/rappid-card-trust.schema.json', import.meta.url),
+        'utf8',
+      ),
+    ) as {
+      $defs: {
+        runtime_policy: { required: string[] };
+        authority_view: { required: string[] };
+        revocation_view: { required: string[] };
+      };
     };
-    expect(
-      (await simulateRappidCardFixtureInput(current, false)).state,
-    ).toBe('preview');
-
-    const stale = buildRappidCardFixture('valid');
-    stale.stateStore = store;
-    const result = await simulateRappidCardFixtureInput(stale, false);
-    expect(result.error?.code).toBe('revocation_rollback');
+    expect(cardSchema.required.sort()).toEqual([...FRAME_KEYS].sort());
+    expect(cardSchema.$defs.payload.required.sort()).toEqual([...CARD_PAYLOAD_KEYS].sort());
+    expect(trustSchema.$defs.runtime_policy.required.sort()).toEqual([...CARD_RUNTIME_POLICY_KEYS].sort());
+    expect(trustSchema.$defs.authority_view.required.sort()).toEqual([...CARD_AUTHORITY_VIEW_KEYS].sort());
+    expect(trustSchema.$defs.revocation_view.required.sort()).toEqual([...CARD_REVOCATION_VIEW_KEYS].sort());
   });
 
-  it('rejects same-sequence signed revocation equivocation', async () => {
-    const store = new BoundedCardStateStore();
-    const first = buildRappidCardFixture('valid');
-    first.stateStore = store;
-    expect(
-      (await simulateRappidCardFixtureInput(first, false)).state,
-    ).toBe('preview');
-
-    const fork = buildRappidCardFixture('valid');
-    fork.stateStore = store;
-    fork.revocations = signFixtureRevocations({
-      ...unsignedDocument(fork.revocations),
-      revokedManifestHashes: ['e'.repeat(64)],
-    });
-    fork.providers = {
-      ...fork.providers,
-      trust: {
-        ...fork.providers.trust,
-        getRevocations: () => structuredClone(fork.revocations),
-      },
-    };
-    const result = await simulateRappidCardFixtureInput(fork, false);
-    expect(result.error?.code).toBe('revocation_equivocation');
+  it('pins every mandatory scenario name and order', () => {
+    const deck = loadRappidCardDeck();
+    expect(deck.mandatory_scenarios).toEqual(mandatory);
+    expect(deck.vectors.map((vector) => vector.name)).toEqual(mandatory);
+    expect(RAPPID_CARD_FIXTURE_NAMES).toEqual(mandatory);
   });
 
-  it('rejects policy rollback before calling the manifest provider', async () => {
-    const store = new BoundedCardStateStore();
-    const current = buildRappidCardFixture('valid');
-    current.stateStore = store;
-    current.policy = signFixturePolicy({
-      ...unsignedDocument(current.policy),
-      sequence: 8,
-    });
-    current.providers = {
-      ...current.providers,
-      trust: {
-        ...current.providers.trust,
-        getPolicyForOrigin: () => structuredClone(current.policy),
-      },
-    };
-    expect(
-      (await simulateRappidCardFixtureInput(current, false)).state,
-    ).toBe('preview');
-
-    const stale = buildRappidCardFixture('valid');
-    stale.stateStore = store;
-    let manifestFetched = false;
-    stale.providers = {
-      ...stale.providers,
-      manifests: {
-        getManifest: () => {
-          manifestFetched = true;
-          return structuredClone(stale.manifest);
-        },
-      },
-    };
-    const result = await simulateRappidCardFixtureInput(stale, false);
-    expect(result.error?.code).toBe('policy_rollback');
-    expect(manifestFetched).toBe(false);
-  });
-
-  it('atomically records a nonce and rejects replay', async () => {
-    const fixture = buildRappidCardFixture('valid');
-    const store = new BoundedCardStateStore();
-    fixture.stateStore = store;
-    const first = await simulateRappidCardFixtureInput(fixture, true);
-    const secondFixture = buildRappidCardFixture('valid');
-    secondFixture.stateStore = store;
-    const second = await simulateRappidCardFixtureInput(secondFixture, true);
-    expect(first.state).toBe('awake');
-    expect(second.error?.code).toBe('duplicate_nonce');
-  });
-
-  it('persists replay across SQLite close and reopen', async () => {
-    const vector = productionVectors.vectors[0];
-    const path = join(
-      process.cwd(),
-      `.rappid-card-durable-replay-${process.pid}.sqlite`,
-    );
-    generatedPaths.push(path);
-    let store = await SqliteCardStateStore.open(path);
-    const first = await simulateRappidCard(vector.deepLink, {
-      approve: true,
-      providers: productionProviders(vector),
-      stateStore: store,
-    });
-    store.close();
-    store = await SqliteCardStateStore.open(path);
-    try {
-      const second = await simulateRappidCard(vector.deepLink, {
-        approve: true,
-        providers: productionProviders(vector),
-        stateStore: store,
-      });
-      expect(first.state).toBe('awake');
-      expect(second.error?.code).toBe('duplicate_nonce');
-    } finally {
-      store.close();
-    }
-  });
-
-  it('bounds fixture replay entries and audit events', () => {
-    const store = new BoundedCardStateStore(3);
-    for (const [index, nonce] of ['a', 'b', 'c', 'd'].entries()) {
-      store.record({
-        policyId: 'p',
-        policySequence: index,
-        policyHash: `${index}`.padStart(64, '0'),
-        authorizationId: 'a',
-        authorizationSequence: index,
-        authorizationHash: `${index + 10}`.padStart(64, '0'),
-        revocationSequence: index,
-        revocationHash: `${index + 20}`.padStart(64, '0'),
-        nonce,
-        manifestHash: 'f'.repeat(64),
-      }, true);
-    }
-    expect(store.values()).toEqual(['b', 'c', 'd']);
-
-    let snapshot: CardSimulationSnapshot = {
-      state: 'idle',
-      outcome: 'pending',
-      error: null,
-      manifestHash: null,
-      deepLink: null,
-      preview: null,
-      hydrated: [],
-      audit: [],
-    };
-    for (let index = 0; index < 100; index += 1) {
-      snapshot = reduceCardState(snapshot, {
-        state: 'parsed',
-        event: 'bounded',
-        detail: String(index),
-      });
-    }
-    expect(snapshot.audit).toHaveLength(64);
-    expect(snapshot.audit[0].seq).toBe(37);
-    expect(snapshot.audit.at(-1)?.seq).toBe(100);
+  it('matches the reference global-IP classification at edge ranges', () => {
+    expect(ipIsGlobal('8.8.8.8')).toBe(true);
+    expect(ipIsGlobal('192.0.0.9')).toBe(true);
+    expect(ipIsGlobal('192.0.2.1')).toBe(false);
+    expect(ipIsGlobal('224.0.0.1')).toBe(true);
+    expect(ipIsGlobal('2001:4860:4860::8888')).toBe(true);
+    expect(ipIsGlobal('2001:db8::1')).toBe(false);
+    expect(ipIsGlobal('::ffff:10.0.0.1')).toBe(false);
+    expect(ipIsGlobal('::ffff:8.8.8.8')).toBe(true);
   });
 });
 
-describe('positive production vectors', () => {
-  it('accepts valid and rotated Ed25519 trust views, then rejects rollback', async () => {
-    const store = await sqliteStore('production-vectors');
-    try {
-      for (const vector of productionVectors.vectors) {
-        const preview = await simulateRappidCard(vector.deepLink, {
-          approve: false,
-          providers: productionProviders(vector),
-          stateStore: store,
-        });
-        expect(preview).toEqual(vector.preview);
-        if (vector.approved.state === 'awake') {
-          const approved = await simulateRappidCard(vector.deepLink, {
-            approve: true,
-            providers: productionProviders(vector),
-            stateStore: store,
-          });
-          expect(approved).toEqual(vector.approved);
-        } else {
-          expect(preview).toEqual(vector.approved);
-        }
-      }
-    } finally {
-      store.close();
+describe('PR9 mandatory deck', () => {
+  it.each(mandatory)('%s fails or succeeds at the declared step', async (name) => {
+    const vector = buildRappidCardFixture(name);
+    const { verdict } = await simulateRappidCardFixture(name, statePath(name));
+    expect(verdict.ok).toBe(vector.expected.ok);
+    expect(verdict.step).toBe(vector.expected.step);
+    if (vector.expected.reason_contains !== null) {
+      expect(verdict.reason).toContain(vector.expected.reason_contains);
+    }
+  });
+
+  it('accepts the production vector with explicit signed delegation', async () => {
+    const vector = buildRappidCardFixture('valid-production');
+    const { verdict } = await simulateRappidCardFixture(
+      vector.name,
+      statePath('production'),
+    );
+    expect(verdict).toMatchObject({
+      ok: true,
+      step: null,
+      reason: 'awake',
+      result: { profile: 'rappid-card/1', status: 'awake' },
+    });
+    expect(vector.frame.payload.key_id).not.toContain('@synthetic/');
+    expect(
+      vector.authority_view.authorizations.some(
+        (entry) =>
+          entry.issuer_key_id === vector.frame.payload.key_id
+          && entry.role === 'card-issuer',
+      ),
+    ).toBe(true);
+  });
+
+  it('covers manifest, key, and subject revocation independently', async () => {
+    for (const name of ['manifest-revoked', 'key-revoked', 'subject-revoked']) {
+      const { verdict } = await simulateRappidCardFixture(name, statePath(name));
+      expect(verdict.step).toBe('revocation');
     }
   });
 });
 
-describe('real QR and fixture artifacts', () => {
-  it('renders genuine QR SVG and PNG bytes for the exact link', async () => {
-    const link = buildRappidCardFixture('physical-payload-reproduction').deepLink;
+describe('physical payload reproduction', () => {
+  it('uses canonical eleven-key frame bytes and exact compact link', () => {
+    const physical = physicalVectorBytes();
+    const frame = readCardResource(physical.frame);
+    const link = physical.link.toString('utf8').trim();
+    const vector = buildRappidCardFixture('physical-payload-reproduction');
+    const parsed = parseCardLink(link);
+    expect(physical.frame.toString('utf8')).toBe(canonical(frame));
+    expect(frame).toEqual(vector.frame);
+    expect(link).toBe(vector.link);
+    expect(parsed.manifest_hash).toBe(frame.payload_hash);
+    expect(frame.payload_hash).toBe(H('rapp/1:particle', frame.payload));
+    expect(Object.keys(frame).sort()).toEqual([...FRAME_KEYS].sort());
+  });
+
+  it('renders the exact physical URI as genuine SVG and PNG QR artifacts', async () => {
+    const link = physicalVectorBytes().link.toString('utf8').trim();
     const svg = await renderRappidCardQrSvg(link);
     const png = await renderRappidCardQrPng(link);
     expect(svg).toContain('<svg');
     expect(svg).toContain('<path');
     expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
   });
+});
 
-  it('writes cards with signed trust and QR sidecars', async () => {
-    const directory = join(
-      process.cwd(),
-      `.rappid-card-test-output-${process.pid}`,
+describe('detached JWS, content roots, and durable state', () => {
+  it('binds every trust SPKI to its keyed RAPPID tail', () => {
+    const deck = loadRappidCardDeck();
+    const keys = Object.fromEntries(
+      deck.trust.map((entry) => [entry.kid, Buffer.from(entry.spki_der_b64, 'base64')]),
     );
-    generatedPaths.push(directory);
+    expect(() => new CardTrustStore(keys, deck.vectors[0].runtime_policy_authority))
+      .not.toThrow();
+    const [kid, spki] = Object.entries(keys)[0];
+    const mutated = Buffer.from(spki);
+    mutated[mutated.length - 1] ^= 1;
+    expect(() =>
+      new CardTrustStore({ ...keys, [kid]: mutated }, deck.vectors[0].runtime_policy_authority),
+    ).toThrow(/does not bind/);
+  });
+
+  it('uses rapp/1:egg roots for exactly soul, engram, and reflex-capability', () => {
+    const frame = buildRappidCardFixture('valid-test').frame;
+    const parts = cardParts();
+    expect(frame.payload.inventory.map((entry) => entry.part)).toEqual([
+      'engram', 'reflex-capability', 'soul',
+    ]);
+    for (const entry of frame.payload.inventory) {
+      expect(entry.space).toBe('rapp/1:egg');
+      expect(entry.hash).toBe(Hb('rapp/1:egg', parts[entry.part]));
+    }
+  });
+
+  it('proves all seven prohibited-material scenarios depend on the scanners', async () => {
+    const controls = loadRappidCardDeck().vectors.filter(
+      (vector) => vector.scanner_control,
+    );
+    expect(controls).toHaveLength(7);
+    for (const vector of controls) {
+      const state = await stateForVector(
+        vector,
+        statePath(`scanner-${vector.name}`),
+      );
+      const parts = cardParts();
+      const verdict = verifyCardLinkScannerControlForTest({
+        uri: vector.link,
+        frame: vector.frame,
+        trust: cardTrust(vector),
+        now_utc: vector.now_utc,
+        runtime_policy: vector.runtime_policy,
+        authority_view: vector.authority_view,
+        revocation_view: vector.revocation_view,
+        state,
+        connection_id: vector.connection_id,
+        fetch_trace: vector.fetch_trace,
+        hydrated: Object.fromEntries(
+          vector.hydrated_parts.map((part) => [part, parts[part]]),
+        ),
+        continuity: vector.continuity,
+      });
+      expect(verdict.ok, `${vector.name}: ${verdict.reason}`).toBe(true);
+    }
+  });
+
+  it('persists hydrating, resumes same connection after restart, then commits awake', async () => {
+    const vector = buildRappidCardFixture('missing-engram-part');
+    const path = statePath('restart');
+    const first = await simulateRappidCardFixture(vector.name, path);
+    const nonce = parseCardLink(vector.link).nonce;
+    expect(first.verdict.step).toBe('hydration');
+    expect(first.state.nonceState(nonce)?.state).toBe('hydrating');
+    const resumed = await simulateRappidCardFixture(
+      vector.name,
+      path,
+      ['engram', 'reflex-capability', 'soul'],
+    );
+    expect(resumed.verdict.ok).toBe(true);
+    expect(resumed.state.nonceState(nonce)?.state).toBe('awake');
+  });
+
+  it('rejects nonce contention and signed-view rollback/fork', async () => {
+    const path = statePath('state');
+    const state = await SQLiteCardState.open(path);
+    const authority = loadRappidCardDeck().vectors[0].runtime_policy.authority_rappid;
+    expect(state.claimNonce('thread-contention-nonce', 'connection-a', '2026-08-21T12:30:00.000Z')[0]).toBe(true);
+    expect(state.claimNonce('thread-contention-nonce', 'connection-b', '2026-08-21T12:30:00.000Z')[0]).toBe(false);
+    expect(state.acceptSequence('card-revocation', authority, 10, 'a'.repeat(64))[0]).toBe(true);
+    expect(state.acceptSequence('card-revocation', authority, 9, 'b'.repeat(64))[0]).toBe(false);
+    expect(state.acceptSequence('card-revocation', authority, 10, 'c'.repeat(64))[0]).toBe(false);
+    expect(state.acceptSequence('card-revocation', authority, 11, 'd'.repeat(64))[0]).toBe(true);
+  });
+});
+
+describe('artifact export', () => {
+  it('exports all 49 canonical frame/link/trust fixtures with provenance', async () => {
+    const directory = join(process.cwd(), `.pr9-card-export-${process.pid}`);
+    generated.push(directory);
     const result = await writeRappidCardFixtureDeck(directory, 'svg');
-    expect(result.fixtures).toBe(13);
+    expect(result.fixtures).toBe(49);
+    expect(result.provenance).toBe('rapp-1 commit 392f850');
     expect(result.files.filter((file) => file.endsWith('/.rappid-card.json')))
-      .toHaveLength(13);
-    expect(
-      result.files.filter((file) => file.endsWith('rappid-card.policy.json')),
-    ).toHaveLength(13);
+      .toHaveLength(49);
+    const physical = readFileSync(
+      join(directory, 'physical-payload-reproduction', '.rappid-card.json'),
+    );
+    expect(physical).toEqual(physicalVectorBytes().frame);
   });
 });

@@ -32,7 +32,11 @@ describe('speech seam — one implementation', () => {
   it('build copies the module next to the compiled output', () => {
     // The anatomy page reads it at runtime, and deploy only ships dist/.
     const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
-    expect(pkg.scripts['copy:assets']).toContain('local-speech.js');
+    const command = String(pkg.scripts['copy:assets']);
+    const implementation = command.includes('copy-assets.mjs')
+      ? readFileSync(join(process.cwd(), 'scripts/copy-assets.mjs'), 'utf8')
+      : command;
+    expect(implementation).toContain('local-speech.js');
   });
 
   it('the module is dependency-free so single-file surfaces can inline it', () => {

@@ -1,715 +1,523 @@
-import { sha256Hex } from '../rappids/canonical.js';
 import {
-  canonicalDocumentHash,
-  classificationRank,
-  compareSemver,
-  endpointOrigin,
-  manifestHash,
-  parseDeepLink,
-  parseManifestJson,
-  validateAuthorization,
-  validateManifest,
-  validatePolicy,
-  validateRevocations,
-  verifyAuthorizationSignature,
-  verifyChallenge,
-  verifyManifestSignature,
-  verifyPolicySignature,
-  verifyRevocationsSignature,
-} from './contract.js';
-import {
-  MAX_AUDIT_EVENTS,
-  RAPPID_CARD_PRODUCTION_PROFILE,
-  RAPPID_CARD_PROTOCOL,
-  RAPPID_CARD_RUNTIME_NAME,
-  RAPPID_CARD_RUNTIME_VERSION,
-  RAPPID_CARD_TEST_PROFILE,
-  RappidCardError,
-  RappidCardReconnectError,
+  CARD_AUTHORITY_SCHEMA,
+  CARD_AUTHORITY_VIEW_KEYS,
+  CARD_CLASSIFICATIONS,
+  CARD_CONTINUITY_KEYS,
+  CARD_FETCH_HOP_KEYS,
+  CARD_PROFILE,
+  CARD_PROVENANCE_KEYS,
+  CARD_REVOCATION_ENTRY_KEYS,
+  CARD_REVOCATION_SCHEMA,
+  CARD_REVOCATION_VIEW_KEYS,
+  CARD_RUNTIME_POLICY_KEYS,
+  CARD_RUNTIME_POLICY_SCHEMA,
+  CARD_TEST_PROFILE,
+  CardStateBackend,
+  FRAME_KEYS,
 } from './types.js';
 import type {
-  CardAlgorithm,
-  CardAuditEvent,
-  CardMachineEvent,
-  CardPreview,
-  CardProviders,
-  CardSimulationOptions,
-  CardSimulationSnapshot,
-  CardStateStore,
-  CardTrustStateInput,
-  HydratedCardPart,
-  RappidCardAuthorization,
-  RappidCardManifest,
-  RappidCardPolicy,
-  RappidCardRevocations,
+  CardAuthorityView,
+  CardAuthorization,
+  CardContinuity,
+  CardFetchHop,
+  CardFrame,
+  CardPayload,
+  CardRevocationEntry,
+  CardRevocationView,
+  CardRuntimePolicy,
+  CardVerificationResult,
+  JsonValue,
 } from './types.js';
+import {
+  CONNECTION,
+  H,
+  LCLABEL,
+  PROFILE_TOKEN,
+  CardTrustStore,
+  cardContinuity,
+  cardPayloadError,
+  cardUrlInfo,
+  canonicalCardOrigin,
+  exactKeys,
+  forbiddenUrlMaterial,
+  hex64,
+  ipIsGlobal,
+  lclabel,
+  parseCardLink,
+  rappidValid,
+  sortedUniqueStrings,
+  uint53,
+  validUtc,
+  verifyDetachedEdDsa,
+  verifyFrame,
+  verifyFrameEdDsa,
+  verifyHydration,
+  withMaterialScannersDisabledForTest,
+} from './contract.js';
 
-interface InternalSimulationOptions {
-  approve: boolean;
-  providers: CardProviders;
-  stateStore: CardStateStore;
-  maxReconnects?: number;
-}
-
-interface VerifiedTrust {
-  policy: RappidCardPolicy;
-  authorization: RappidCardAuthorization;
-  revocations: RappidCardRevocations;
-  origin: string;
-  state: CardTrustStateInput;
-}
-
-interface VerifiedPolicy {
-  policy: RappidCardPolicy;
-  authorityKey: string;
-  origin: string;
-}
-
-export function initialCardSnapshot(): CardSimulationSnapshot {
-  return {
-    state: 'idle',
-    outcome: 'pending',
-    error: null,
-    manifestHash: null,
-    deepLink: null,
-    preview: null,
-    hydrated: [],
-    audit: [],
-  };
-}
-
-/** Pure state transition. Provider effects live in the simulation driver. */
-export function reduceCardState(
-  snapshot: CardSimulationSnapshot,
-  transition: CardMachineEvent,
-): CardSimulationSnapshot {
-  const audit: CardAuditEvent[] = [
-    ...snapshot.audit,
-    {
-      seq: snapshot.audit.length
-        ? snapshot.audit[snapshot.audit.length - 1].seq + 1
-        : 1,
-      state: transition.state,
-      event: transition.event,
-      detail: transition.detail,
-    },
-  ].slice(-MAX_AUDIT_EVENTS);
-  return {
-    ...snapshot,
-    state: transition.state,
-    outcome: transition.outcome ?? snapshot.outcome,
-    error: transition.error === undefined ? snapshot.error : transition.error,
-    manifestHash:
-      transition.manifestHash === undefined
-        ? snapshot.manifestHash
-        : transition.manifestHash,
-    deepLink:
-      transition.deepLink === undefined
-        ? snapshot.deepLink
-        : transition.deepLink,
-    preview:
-      transition.preview === undefined
-        ? snapshot.preview
-        : transition.preview,
-    hydrated:
-      transition.hydrated === undefined
-        ? snapshot.hydrated
-        : transition.hydrated,
-    audit,
-  };
-}
-
-function fail(
-  snapshot: CardSimulationSnapshot,
-  error: RappidCardError,
-): CardSimulationSnapshot {
-  return reduceCardState(snapshot, {
-    state: 'failed',
-    event: 'card.failed',
-    detail: error.code,
-    outcome: 'failed',
-    error: { code: error.code, message: error.message },
-  });
-}
-
-function providerError(error: unknown): RappidCardError {
-  if (error instanceof RappidCardError) return error;
-  return new RappidCardError(
-    'provider_error',
-    error instanceof Error ? error.message : String(error),
-  );
-}
-
-function previewFor(
-  manifest: RappidCardManifest,
-  trust: VerifiedTrust,
-): CardPreview {
-  return {
-    rappid: manifest.rappid,
-    profile: manifest.profile,
-    policyId: trust.policy.policyId,
-    authorizationId: trust.authorization.authorizationId,
-    endpoint: manifest.endpoint,
-    origin: trust.origin,
-    issuerKeyId: manifest.signature.keyId,
-    classification: manifest.classification,
-    scopes: [...manifest.scopes],
-    policySequence: trust.policy.sequence,
-    authorizationSequence: trust.authorization.sequence,
-    revocationSequence: trust.revocations.sequence,
-    parts: manifest.parts.map((part) => ({
-      name: part.name,
-      hash: part.hash,
-      bytes: part.bytes,
-      mediaType: part.mediaType,
-      required: part.required,
-    })),
-  };
-}
-
-function assertCurrent(
-  notBefore: string,
-  notAfter: string,
-  now: number,
-  codePrefix: string,
-): void {
-  if (Date.parse(notBefore) > now) {
-    throw new RappidCardError(
-      `${codePrefix}_not_yet_valid`,
-      `${codePrefix.replaceAll('_', ' ')} has not reached its validity window`,
-    );
+function provenanceError(provenance: unknown): string | null {
+  if (!exactKeys(provenance, CARD_PROVENANCE_KEYS)) {
+    return 'provenance must be exactly {source, channel}';
   }
-  if (Date.parse(notAfter) <= now) {
-    throw new RappidCardError(
-      `${codePrefix}_expired`,
-      `${codePrefix.replaceAll('_', ' ')} has expired`,
-    );
-  }
-}
-
-function assertRuntime(
-  runtime: RappidCardManifest['runtime'],
-  code: string,
-): void {
-  if (
-    runtime.name !== RAPPID_CARD_RUNTIME_NAME
-    || compareSemver(RAPPID_CARD_RUNTIME_VERSION, runtime.minimum) < 0
-    || compareSemver(RAPPID_CARD_RUNTIME_VERSION, runtime.maximum) > 0
-  ) {
-    throw new RappidCardError(
-      code,
-      `requires ${runtime.name} ${runtime.minimum}..${runtime.maximum}`,
-    );
-  }
-}
-
-function expectedAlgorithm(allowTestProfile: boolean): CardAlgorithm {
-  return allowTestProfile ? 'ed25519-test' : 'ed25519';
-}
-
-function assertProfile(
-  manifest: RappidCardManifest,
-  allowTestProfile: boolean,
-): CardAlgorithm {
-  if (!allowTestProfile && manifest.profile === RAPPID_CARD_TEST_PROFILE) {
-    throw new RappidCardError(
-      'test_profile_forbidden',
-      'production mode refuses the test profile',
-    );
-  }
-  const profile = allowTestProfile
-    ? RAPPID_CARD_TEST_PROFILE
-    : RAPPID_CARD_PRODUCTION_PROFILE;
-  const algorithm = expectedAlgorithm(allowTestProfile);
-  if (manifest.profile !== profile) {
-    throw new RappidCardError(
-      allowTestProfile ? 'fixture_profile_required' : 'profile_forbidden',
-      allowTestProfile
-        ? 'fixture mode accepts only the synthetic test profile'
-        : 'production mode requires the production profile',
-    );
-  }
-  if (
-    manifest.signature.algorithm !== algorithm
-    || manifest.challenge.algorithm !== algorithm
-  ) {
-    throw new RappidCardError(
-      allowTestProfile
-        ? 'fixture_signature_required'
-        : 'test_signature_forbidden',
-      allowTestProfile
-        ? 'fixture mode requires Ed25519 test signatures'
-        : 'production mode refuses synthetic test signatures',
-    );
-  }
-  return algorithm;
-}
-
-async function verifiedTrust(
-  manifest: RappidCardManifest,
-  linkHash: string,
-  providers: CardProviders,
-  allowTestProfile: boolean,
-  now: number,
-  preflight: VerifiedPolicy,
-): Promise<VerifiedTrust> {
-  assertProfile(manifest, allowTestProfile);
-  assertCurrent(manifest.issuedAt, manifest.expiresAt, now, 'card');
-  if (manifest.protocol !== RAPPID_CARD_PROTOCOL) {
-    throw new RappidCardError(
-      'incompatible_protocol',
-      `card requires ${manifest.protocol}; runtime provides ${RAPPID_CARD_PROTOCOL}`,
-    );
-  }
-  assertRuntime(manifest.runtime, 'incompatible_runtime');
-  const { policy, authorityKey, origin } = preflight;
-  if (policy.policyId !== manifest.policyId) {
-    throw new RappidCardError('policy_mismatch', 'signed policy id does not match the card');
-  }
-  if (!policy.allowedProfiles.includes(manifest.profile)) {
-    throw new RappidCardError(
-      'profile_forbidden',
-      'signed habitat policy does not allow this card profile',
-    );
-  }
-  if (policy.protocol !== manifest.protocol) {
-    throw new RappidCardError(
-      'policy_protocol_mismatch',
-      'signed habitat policy does not authorize this protocol',
-    );
-  }
-
-  const rawAuthorization = await providers.trust.getAuthorization(
-    manifest.policyId,
-    manifest.signature.keyId,
-    manifest.rappid,
-  );
-  if (rawAuthorization === null || rawAuthorization === undefined) {
-    throw new RappidCardError(
-      'unknown_key',
-      `no signed authorization binds ${manifest.signature.keyId} to ${manifest.rappid}`,
-    );
-  }
-  const authorization = validateAuthorization(rawAuthorization);
-  if (
-    authorization.signature.keyId !== policy.signature.keyId
-    || authorization.signature.algorithm !== policy.signature.algorithm
-    || !verifyAuthorizationSignature(authorization, authorityKey)
-  ) {
-    throw new RappidCardError(
-      'authorization_signature_invalid',
-      'signer authorization verification failed',
-    );
-  }
-  if (
-    authorization.policyId !== policy.policyId
-    || authorization.subjectRappid !== manifest.rappid
-    || authorization.signerKeyId !== manifest.signature.keyId
-    || authorization.signerAlgorithm !== manifest.signature.algorithm
-  ) {
-    throw new RappidCardError(
-      'signer_subject_unauthorized',
-      'signed authorization does not bind this signer to this RAPPID',
-    );
-  }
-  assertCurrent(
-    authorization.notBefore,
-    authorization.notAfter,
-    now,
-    'authorization',
-  );
-  if (!authorization.approvedOrigins.includes(origin)) {
-    throw new RappidCardError(
-      'signer_origin_unauthorized',
-      `signer authorization does not permit endpoint origin ${origin}`,
-    );
-  }
-  if (!verifyManifestSignature(manifest, authorization.signerPublicKey)) {
-    throw new RappidCardError(
-      'signature_invalid',
-      'card signature verification failed',
-    );
-  }
-
-  if (
-    classificationRank(manifest.classification)
-      > classificationRank(policy.maxClassification)
-    || classificationRank(manifest.classification)
-      > classificationRank(authorization.maxClassification)
-  ) {
-    throw new RappidCardError(
-      'classification_violation',
-      `card classification ${manifest.classification} exceeds signed authority`,
-    );
-  }
-  const policyScopes = new Set(policy.grantedScopes);
-  const authorizationScopes = new Set(authorization.grantedScopes);
-  for (const part of manifest.parts) {
-    if (
-      classificationRank(part.classification)
-        > classificationRank(manifest.classification)
-      || classificationRank(part.classification)
-        > classificationRank(policy.maxClassification)
-      || classificationRank(part.classification)
-        > classificationRank(authorization.maxClassification)
-    ) {
-      throw new RappidCardError(
-        'classification_violation',
-        `part ${part.name} exceeds the permitted classification`,
-      );
-    }
-    if (
-      !manifest.scopes.includes(part.scope)
-      || !policyScopes.has(part.scope)
-      || !authorizationScopes.has(part.scope)
-    ) {
-      throw new RappidCardError(
-        'insufficient_scope',
-        `part ${part.name} requires ${part.scope}`,
-      );
-    }
-  }
-
-  const rawRevocations = await providers.trust.getRevocations(policy.policyId);
-  if (rawRevocations === null || rawRevocations === undefined) {
-    throw new RappidCardError(
-      'revocation_view_missing',
-      'signed revocation view is unavailable',
-    );
-  }
-  const revocations = validateRevocations(rawRevocations);
-  if (
-    revocations.policyId !== policy.policyId
-    || revocations.signature.keyId !== policy.signature.keyId
-    || revocations.signature.algorithm !== policy.signature.algorithm
-    || !verifyRevocationsSignature(revocations, authorityKey)
-  ) {
-    throw new RappidCardError(
-      'revocation_signature_invalid',
-      'signed revocation view verification failed',
-    );
-  }
-  assertCurrent(
-    revocations.issuedAt,
-    revocations.expiresAt,
-    now,
-    'revocation_view',
-  );
-  if (
-    revocations.revokedManifestHashes.includes(linkHash)
-    || revocations.revokedSignerKeyIds.includes(manifest.signature.keyId)
-    || revocations.revokedAuthorizationIds.includes(
-      authorization.authorizationId,
-    )
-  ) {
-    throw new RappidCardError(
-      'revoked',
-      'card, signer, or signer authorization is revoked',
-    );
-  }
-  return {
-    policy,
-    authorization,
-    revocations,
-    origin,
-    state: {
-      policyId: policy.policyId,
-      policySequence: policy.sequence,
-      policyHash: canonicalDocumentHash(policy),
-      authorizationId: authorization.authorizationId,
-      authorizationSequence: authorization.sequence,
-      authorizationHash: canonicalDocumentHash(authorization),
-      revocationSequence: revocations.sequence,
-      revocationHash: canonicalDocumentHash(revocations),
-      nonce: manifest.nonce,
-      manifestHash: linkHash,
-    },
-  };
-}
-
-async function verifiedPolicyForEndpoint(
-  endpoint: string,
-  providers: CardProviders,
-  stateStore: CardStateStore,
-  allowTestProfile: boolean,
-  now: number,
-): Promise<VerifiedPolicy> {
-  const algorithm = expectedAlgorithm(allowTestProfile);
-  const origin = endpointOrigin(endpoint);
-  const rawPolicy = await providers.trust.getPolicyForOrigin(origin);
-  if (rawPolicy === null || rawPolicy === undefined) {
-    throw new RappidCardError(
-      'policy_not_found',
-      `no signed habitat policy is configured for endpoint origin ${origin}`,
-    );
-  }
-  const policy = validatePolicy(rawPolicy);
-  if (policy.signature.algorithm !== algorithm) {
-    throw new RappidCardError(
-      !allowTestProfile && policy.signature.algorithm === 'ed25519-test'
-        ? 'test_signature_forbidden'
-        : 'policy_signature_invalid',
-      !allowTestProfile && policy.signature.algorithm === 'ed25519-test'
-        ? 'production mode refuses synthetic test signatures'
-        : 'signed policy uses the wrong trust profile',
-    );
-  }
-  const authorityKey = await providers.trust.getAuthorityKey(
-    policy.signature.keyId,
-    policy.signature.algorithm,
-  );
-  if (authorityKey === null) {
-    throw new RappidCardError(
-      'unknown_authority',
-      `policy authority ${policy.signature.keyId} is unknown`,
-    );
-  }
-  if (!verifyPolicySignature(policy, authorityKey)) {
-    throw new RappidCardError(
-      'policy_signature_invalid',
-      'signed habitat policy verification failed',
-    );
-  }
-  assertCurrent(policy.issuedAt, policy.expiresAt, now, 'policy');
-  if (policy.protocol !== RAPPID_CARD_PROTOCOL) {
-    throw new RappidCardError(
-      'policy_protocol_mismatch',
-      'signed habitat policy does not authorize this protocol',
-    );
-  }
-  assertRuntime(policy.runtime, 'policy_runtime_mismatch');
-  if (!policy.approvedOrigins.includes(origin)) {
-    throw new RappidCardError(
-      'origin_not_approved',
-      `endpoint origin ${origin} is not approved by signed policy`,
-    );
-  }
-  await stateStore.recordPolicy(
-    policy.policyId,
-    policy.sequence,
-    canonicalDocumentHash(policy),
-  );
-  return { policy, authorityKey, origin };
-}
-
-async function hydratePart(
-  manifest: RappidCardManifest,
-  index: number,
-  options: InternalSimulationOptions,
-  onReconnect: () => void,
-): Promise<HydratedCardPart | null> {
-  const part = manifest.parts[index];
-  const maximumReconnects = options.maxReconnects ?? 1;
-  let reconnects = 0;
-  for (;;) {
-    try {
-      const content = await options.providers.content.getPart(part.hash);
-      if (content === null) {
-        if (!part.required) return null;
-        throw new RappidCardError(
-          'missing_part',
-          `required part ${part.name} is unavailable`,
-        );
-      }
-      if (content.byteLength !== part.bytes) {
-        throw new RappidCardError(
-          'part_size_mismatch',
-          `part ${part.name} does not match its declared byte count`,
-        );
-      }
-      if (sha256Hex(content) !== part.hash) {
-        throw new RappidCardError(
-          'part_hash_mismatch',
-          `part ${part.name} does not match its content address`,
-        );
-      }
-      return {
-        name: part.name,
-        hash: part.hash,
-        bytes: part.bytes,
-        mediaType: part.mediaType,
-      };
-    } catch (error) {
-      if (
-        error instanceof RappidCardReconnectError
-        && reconnects < maximumReconnects
-      ) {
-        reconnects += 1;
-        onReconnect();
-        continue;
-      }
-      throw error;
-    }
-  }
-}
-
-async function simulateInternal(
-  deepLink: string,
-  options: InternalSimulationOptions,
-  allowTestProfile: boolean,
-  now: number,
-): Promise<CardSimulationSnapshot> {
-  let snapshot = initialCardSnapshot();
+  const value = provenance as { source: string; channel: string };
   try {
-    const link = parseDeepLink(deepLink);
-    snapshot = reduceCardState(snapshot, {
-      state: 'parsed',
-      event: 'link.parsed',
-      detail: link.endpoint,
-      manifestHash: link.manifestHash,
-      deepLink: link.deepLink,
-    });
-    const preflight = await verifiedPolicyForEndpoint(
-      link.endpoint,
-      options.providers,
-      options.stateStore,
-      allowTestProfile,
-      now,
-    );
-    const raw = await options.providers.manifests.getManifest(
-      link.endpoint,
-      link.manifestHash,
-    );
-    if (raw === null || raw === undefined) {
-      throw new RappidCardError(
-        'manifest_not_found',
-        'manifest provider returned no card',
-      );
-    }
-    const manifest =
-      typeof raw === 'string'
-        ? parseManifestJson(raw)
-        : validateManifest(raw);
-    if (manifestHash(manifest) !== link.manifestHash) {
-      throw new RappidCardError(
-        'manifest_hash_mismatch',
-        'manifest hash does not match deep link',
-      );
-    }
-    if (
-      manifest.rappid !== link.rappid
-      || manifest.endpoint !== link.endpoint
-      || manifest.nonce !== link.nonce
-    ) {
-      throw new RappidCardError(
-        'link_manifest_mismatch',
-        'manifest identity, endpoint, or nonce does not match deep link',
-      );
-    }
-    const trust = await verifiedTrust(
-      manifest,
-      link.manifestHash,
-      options.providers,
-      allowTestProfile,
-      now,
-      preflight,
-    );
-    await options.stateStore.record(trust.state, false);
-    snapshot = reduceCardState(snapshot, {
-      state: 'verified',
-      event: 'card.verified',
-      detail: trust.authorization.authorizationId,
-    });
-    snapshot = reduceCardState(snapshot, {
-      state: 'preview',
-      event: 'preview.ready',
-      detail: `${manifest.parts.length} content-addressed parts`,
-      preview: previewFor(manifest, trust),
-    });
-    if (!options.approve) return snapshot;
-
-    snapshot = reduceCardState(snapshot, {
-      state: 'approved',
-      event: 'approval.explicit',
-      detail: 'developer approved hydration',
-    });
-    await options.stateStore.record(trust.state, true);
-    snapshot = reduceCardState(snapshot, {
-      state: 'hydrating',
-      event: 'hydration.started',
-      detail: `${manifest.parts.length} permitted parts`,
-    });
-    const hydrated: HydratedCardPart[] = [];
-    for (let index = 0; index < manifest.parts.length; index += 1) {
-      const part = await hydratePart(manifest, index, options, () => {
-        snapshot = reduceCardState(snapshot, {
-          state: 'hydrating',
-          event: 'hydration.reconnected',
-          detail: manifest.parts[index].name,
-        });
-      });
-      if (part !== null) hydrated.push(part);
-      snapshot = reduceCardState(snapshot, {
-        state: 'hydrating',
-        event: 'part.hydrated',
-        detail: manifest.parts[index].name,
-        hydrated: [...hydrated],
-      });
-    }
-    snapshot = reduceCardState(snapshot, {
-      state: 'challenging',
-      event: 'challenge.started',
-      detail: manifest.challenge.keyId,
-    });
-    const request = {
-      algorithm: manifest.challenge.algorithm,
-      keyId: manifest.challenge.keyId,
-      manifestHash: link.manifestHash,
-      nonce: manifest.nonce,
-      partHashes: hydrated.map((part) => part.hash),
-    };
-    const response = await options.providers.challenge.respond(request);
-    if (
-      !verifyChallenge(
-        response,
-        request,
-        trust.authorization.signerPublicKey,
-      )
-    ) {
-      throw new RappidCardError(
-        'challenge_failed',
-        'continuity challenge verification failed',
-      );
-    }
-    return reduceCardState(snapshot, {
-      state: 'awake',
-      event: 'card.awake',
-      detail: `${hydrated.length} verified parts`,
-      outcome: 'awake',
-      error: null,
-    });
+    cardUrlInfo(value.source);
   } catch (error) {
-    return fail(snapshot, providerError(error));
+    return `provenance source: ${error instanceof Error ? error.message : String(error)}`;
   }
+  if (forbiddenUrlMaterial(value.source)) return 'provenance source contains prohibited material';
+  if (!lclabel(value.channel)) return 'provenance channel is not an lclabel';
+  return null;
 }
 
-export async function simulateRappidCard(
-  deepLink: string,
-  options: CardSimulationOptions,
-): Promise<CardSimulationSnapshot> {
-  const { SqliteCardStateStore } = await import('./sqlite-state-store.js');
-  if (!(options.stateStore instanceof SqliteCardStateStore)) {
-    return fail(
-      initialCardSnapshot(),
-      new RappidCardError(
-        'durable_state_required',
-        'production mode requires the transactional SQLite card state store',
-      ),
-    );
+function temporalDocumentError(
+  document: {
+    generated_utc: string;
+    effective_utc: string;
+    expires_utc: string;
+  },
+  now: Date,
+  maxAgeSeconds?: number,
+): string | null {
+  const generated = validUtc(document.generated_utc);
+  const effective = validUtc(document.effective_utc);
+  const expires = validUtc(document.expires_utc);
+  if (generated === null || effective === null || expires === null) {
+    return 'signed document time is not calendar-valid';
   }
-  return simulateInternal(deepLink, options, false, Date.now());
+  if (!(effective <= generated && generated <= now && now < expires)) {
+    return 'signed document is not currently effective';
+  }
+  if (maxAgeSeconds !== undefined) {
+    const age = (now.getTime() - generated.getTime()) / 1000;
+    if (age < 0 || age > maxAgeSeconds) return 'signed document is stale';
+  }
+  return null;
 }
 
-/** Test-profile entry point. Production callers must use `simulateRappidCard`. */
-export async function simulateRappidCardFixtureMode(
-  deepLink: string,
-  options: InternalSimulationOptions,
-  fixtureNow = '2035-01-01T12:00:00Z',
-): Promise<CardSimulationSnapshot> {
-  return simulateInternal(
-    deepLink,
-    options,
-    true,
-    Date.parse(fixtureNow),
+function documentHash(document: Record<string, unknown>): string {
+  return H(
+    'rapp/1:particle',
+    Object.fromEntries(
+      Object.entries(document).filter(([key]) => key !== 'sig'),
+    ) as JsonValue,
   );
+}
+
+function verifyRuntimePolicy(
+  policy: unknown,
+  trust: CardTrustStore,
+  now: Date,
+  state: CardStateBackend,
+): [boolean, string] {
+  if (!exactKeys(policy, CARD_RUNTIME_POLICY_KEYS)) {
+    return [false, 'runtime policy has the wrong closed schema'];
+  }
+  const value = policy as CardRuntimePolicy;
+  if (value.schema !== CARD_RUNTIME_POLICY_SCHEMA) {
+    return [false, 'runtime policy schema token is wrong'];
+  }
+  if (
+    value.authority_rappid !== trust.runtimePolicyAuthority
+    || value.signer_key_id !== value.authority_rappid
+  ) {
+    return [false, 'runtime policy signer is not the out-of-band authority'];
+  }
+  const unsigned = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'sig'),
+  ) as JsonValue;
+  let verdict = verifyDetachedEdDsa(
+    unsigned,
+    value.sig,
+    value.signer_key_id,
+    trust,
+  );
+  if (!verdict[0]) return verdict;
+  let reason = temporalDocumentError(value, now);
+  if (reason) return [false, reason];
+  reason = provenanceError(value.provenance);
+  if (reason) return [false, reason];
+  if (!uint53(value.policy_seq)) return [false, 'runtime policy_seq is not uint53'];
+  if (!rappidValid(value.card_authority) || trust.spki(value.card_authority) === null) {
+    return [false, 'runtime policy card_authority is not a trust anchor'];
+  }
+  if (!PROFILE_TOKEN.test(value.protocol) || !PROFILE_TOKEN.test(value.runtime)) {
+    return [false, 'runtime policy protocol/runtime token is invalid'];
+  }
+  if (!sortedUniqueStrings(value.features, PROFILE_TOKEN)) {
+    return [false, 'runtime policy features are invalid'];
+  }
+  if (!sortedUniqueStrings(value.profiles, PROFILE_TOKEN)) {
+    return [false, 'runtime policy profiles are invalid'];
+  }
+  if (!value.profiles.every((profile) => profile === CARD_PROFILE || profile === CARD_TEST_PROFILE)) {
+    return [false, 'runtime policy includes an unknown profile'];
+  }
+  const synthetic = value.authority_rappid.startsWith('rappid:@synthetic/');
+  if (value.profiles.includes(CARD_PROFILE) && synthetic) {
+    return [false, 'production runtime policy cannot use a synthetic authority'];
+  }
+  if (value.profiles.includes(CARD_TEST_PROFILE) && !synthetic) {
+    return [false, 'test runtime policy must use a visibly synthetic authority'];
+  }
+  if (value.card_authority.startsWith('rappid:@synthetic/') !== synthetic) {
+    return [false, 'runtime policy and card-authority roots must share test/production class'];
+  }
+  if (value.profiles.length !== 1) {
+    return [false, 'runtime policy must select exactly one production or test profile'];
+  }
+  if (!(CARD_CLASSIFICATIONS as readonly string[]).includes(value.max_classification)) {
+    return [false, 'runtime policy max_classification is invalid'];
+  }
+  if (!sortedUniqueStrings(value.granted_scope, LCLABEL)) {
+    return [false, 'runtime policy granted_scope is invalid'];
+  }
+  if (!uint53(value.max_registry_age_seconds) || value.max_registry_age_seconds <= 0) {
+    return [false, 'runtime policy max_registry_age_seconds is invalid'];
+  }
+  verdict = state.acceptSequence(
+    'runtime-policy',
+    value.authority_rappid,
+    value.policy_seq,
+    documentHash(value as unknown as Record<string, unknown>),
+  );
+  return verdict[0] ? [true, 'ok'] : verdict;
+}
+
+function verifyFetchTrace(
+  trace: unknown,
+  endpoint: string,
+  approvedOrigins: string[],
+): [boolean, string] {
+  if (!Array.isArray(trace) || trace.length < 1 || trace.length > 8) {
+    return [false, 'fetch trace must contain 1-8 observed hops'];
+  }
+  if (!exactKeys(trace[0], CARD_FETCH_HOP_KEYS) || (trace[0] as CardFetchHop).url !== endpoint) {
+    return [false, 'fetch trace does not begin at URI endpoint'];
+  }
+  for (let index = 0; index < trace.length; index += 1) {
+    const hop = trace[index];
+    if (!exactKeys(hop, CARD_FETCH_HOP_KEYS)) {
+      return [false, 'fetch hop must be exactly {url, resolved_ip}'];
+    }
+    const value = hop as CardFetchHop;
+    let info;
+    try {
+      info = cardUrlInfo(value.url, index === trace.length - 1 ? '.rappid-card.json' : undefined);
+    } catch (error) {
+      return [false, `fetch hop is invalid: ${error instanceof Error ? error.message : String(error)}`];
+    }
+    if (forbiddenUrlMaterial(value.url)) return [false, 'fetch hop URL contains prohibited material'];
+    if (!approvedOrigins.includes(info.origin)) return [false, 'fetch redirect crossed to an unapproved origin'];
+    if (!ipIsGlobal(value.resolved_ip)) {
+      return [false, 'fetch DNS/IP result is loopback/private/link-local/reserved'];
+    }
+  }
+  return [true, 'ok'];
+}
+
+function authorizationKey(entry: CardAuthorization): string {
+  return JSON.stringify([
+    entry.issuer_key_id,
+    entry.subject_rappid ?? '',
+    entry.role,
+    entry.not_before_utc,
+    entry.not_after_utc,
+    entry.revoked_utc ?? '',
+  ]);
+}
+
+function verifyAuthorityView(
+  view: unknown,
+  policy: CardRuntimePolicy,
+  trust: CardTrustStore,
+  now: Date,
+  state: CardStateBackend,
+  frame: CardFrame,
+  link: ReturnType<typeof parseCardLink>,
+  fetchTrace: CardFetchHop[],
+): [boolean, string] {
+  if (!exactKeys(view, CARD_AUTHORITY_VIEW_KEYS)) return [false, 'authority view has the wrong closed schema'];
+  const value = view as CardAuthorityView;
+  if (value.schema !== CARD_AUTHORITY_SCHEMA) return [false, 'authority view schema token is wrong'];
+  if (value.authority_rappid !== policy.card_authority || value.signer_key_id !== value.authority_rappid) {
+    return [false, 'authority view signer is not the runtime policy card_authority'];
+  }
+  const unsigned = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'sig'),
+  ) as JsonValue;
+  let verdict = verifyDetachedEdDsa(unsigned, value.sig, value.signer_key_id, trust);
+  if (!verdict[0]) return verdict;
+  let reason = temporalDocumentError(value, now, policy.max_registry_age_seconds);
+  if (reason) return [false, reason];
+  reason = provenanceError(value.provenance);
+  if (reason) return [false, reason];
+  if (!uint53(value.registry_seq)) return [false, 'authority registry_seq is not uint53'];
+  if (!Array.isArray(value.approved_origins)) return [false, 'approved_origins must be an array'];
+  let canonicalOrigins: string[];
+  try {
+    canonicalOrigins = value.approved_origins.map(canonicalCardOrigin);
+  } catch (error) {
+    return [false, error instanceof Error ? error.message : String(error)];
+  }
+  if (value.approved_origins.some((origin) => forbiddenUrlMaterial(`${origin}/origin`))) {
+    return [false, 'approved origin contains prohibited material'];
+  }
+  if (JSON.stringify(value.approved_origins) !== JSON.stringify([...new Set(canonicalOrigins)].sort())) {
+    return [false, 'approved_origins must be canonical, sorted, and unique'];
+  }
+  if (!Array.isArray(value.authorizations)) return [false, 'authorizations must be an array'];
+  for (const entry of value.authorizations) {
+    if (!exactKeys(entry, ['issuer_key_id', 'subject_rappid', 'role', 'not_before_utc', 'not_after_utc', 'revoked_utc'])) {
+      return [false, 'authorization has the wrong closed schema'];
+    }
+    if (!rappidValid(entry.issuer_key_id)) return [false, 'authorization issuer_key_id is invalid'];
+    if (entry.subject_rappid !== null && !rappidValid(entry.subject_rappid)) {
+      return [false, 'authorization subject_rappid is invalid'];
+    }
+    if (entry.role !== 'subject' && entry.role !== 'card-issuer') return [false, 'authorization role is invalid'];
+    if (entry.role === 'subject' && entry.subject_rappid === null) {
+      return [false, 'subject authorization requires an explicit subject_rappid'];
+    }
+    const before = validUtc(entry.not_before_utc);
+    const after = validUtc(entry.not_after_utc);
+    const revoked = entry.revoked_utc === null ? null : validUtc(entry.revoked_utc);
+    if (before === null || after === null || before >= after) return [false, 'authorization tenure is invalid'];
+    if (entry.revoked_utc !== null && (revoked === null || revoked < before)) {
+      return [false, 'authorization revoked_utc is invalid'];
+    }
+  }
+  const keys = value.authorizations.map(authorizationKey);
+  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) return [false, 'authorizations must be sorted'];
+  if (new Set(keys).size !== keys.length) return [false, 'authorizations contain a duplicate'];
+  verdict = state.acceptSequence('card-authority', value.authority_rappid, value.registry_seq, documentHash(value as unknown as Record<string, unknown>));
+  if (!verdict[0]) return verdict;
+  if (link.endpoint_origin !== frame.payload.endpoint_origin) return [false, 'endpoint origin does not match signed manifest'];
+  if (!value.approved_origins.includes(link.endpoint_origin)) return [false, 'endpoint origin is not approved by signed authority policy'];
+  const revocationOrigin = cardUrlInfo(frame.payload.revocation_url).origin;
+  if (!value.approved_origins.includes(revocationOrigin)) return [false, 'revocation origin is not approved by signed authority policy'];
+  verdict = verifyFetchTrace(fetchTrace, link.endpoint, value.approved_origins);
+  if (!verdict[0]) return verdict;
+  const issued = validUtc(frame.utc)!;
+  const issuer = frame.payload.key_id;
+  const subject = frame.payload.rappid;
+  const authorized = value.authorizations.some((entry) => {
+    if (entry.issuer_key_id !== issuer) return false;
+    const before = validUtc(entry.not_before_utc)!;
+    const after = validUtc(entry.not_after_utc)!;
+    const revoked = entry.revoked_utc === null ? null : validUtc(entry.revoked_utc)!;
+    const subjectOk =
+      entry.role === 'subject'
+        ? entry.subject_rappid === subject
+        : entry.subject_rappid === null || entry.subject_rappid === subject;
+    return subjectOk && before <= issued && issued < after && now < after && (revoked === null || now < revoked);
+  });
+  return authorized
+    ? [true, 'ok']
+    : [false, 'issuer key has no current signed authorization for this subject'];
+}
+
+function revocationKey(entry: CardRevocationEntry): string {
+  return JSON.stringify([entry.target_type, entry.target, entry.effective_utc, entry.reason]);
+}
+
+function verifyRevocationView(
+  view: unknown,
+  policy: CardRuntimePolicy,
+  trust: CardTrustStore,
+  now: Date,
+  state: CardStateBackend,
+  payload: CardPayload,
+  manifestHash: string,
+): [boolean, string] {
+  if (view === null || view === undefined) return [false, 'revocation view unavailable'];
+  if (!exactKeys(view, CARD_REVOCATION_VIEW_KEYS)) return [false, 'revocation view has the wrong closed schema'];
+  const value = view as CardRevocationView;
+  if (value.schema !== CARD_REVOCATION_SCHEMA) return [false, 'revocation view schema token is wrong'];
+  if (value.authority_rappid !== policy.card_authority || value.signer_key_id !== value.authority_rappid) {
+    return [false, 'revocation signer is not the runtime policy card_authority'];
+  }
+  const unsigned = Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'sig'),
+  ) as JsonValue;
+  let verdict = verifyDetachedEdDsa(unsigned, value.sig, value.signer_key_id, trust);
+  if (!verdict[0]) return verdict;
+  let reason = temporalDocumentError(value, now, policy.max_registry_age_seconds);
+  if (reason) return [false, reason];
+  reason = provenanceError(value.provenance);
+  if (reason) return [false, reason];
+  if (value.provenance.source !== payload.revocation_url) {
+    return [false, 'revocation provenance does not match signed manifest location'];
+  }
+  if (!uint53(value.registry_seq)) return [false, 'revocation registry_seq is not uint53'];
+  if (!Array.isArray(value.entries)) return [false, 'revocation entries must be an array'];
+  for (const entry of value.entries) {
+    if (!exactKeys(entry, CARD_REVOCATION_ENTRY_KEYS)) return [false, 'revocation entry has the wrong closed schema'];
+    let targetOk = false;
+    if (entry.target_type === 'manifest-hash') targetOk = hex64(entry.target);
+    else if (entry.target_type === 'key-id' || entry.target_type === 'subject-rappid') targetOk = rappidValid(entry.target);
+    else return [false, 'revocation target_type is invalid'];
+    if (!targetOk || validUtc(entry.effective_utc) === null) return [false, 'revocation target/effective_utc is invalid'];
+    if (!lclabel(entry.reason)) return [false, 'revocation reason is not an lclabel'];
+  }
+  const keys = value.entries.map(revocationKey);
+  if (JSON.stringify(keys) !== JSON.stringify([...keys].sort())) return [false, 'revocation entries must be sorted'];
+  if (new Set(keys).size !== keys.length) return [false, 'revocation entries contain a duplicate'];
+  verdict = state.acceptSequence('card-revocation', value.authority_rappid, value.registry_seq, documentHash(value as unknown as Record<string, unknown>));
+  if (!verdict[0]) return verdict;
+  const targets = {
+    'manifest-hash': manifestHash,
+    'key-id': payload.key_id,
+    'subject-rappid': payload.rappid,
+  };
+  for (const entry of value.entries) {
+    if (entry.target === targets[entry.target_type] && validUtc(entry.effective_utc)! <= now) {
+      return [false, `${entry.target_type} is revoked`];
+    }
+  }
+  return [true, 'ok'];
+}
+
+export interface VerifyCardInput {
+  uri: string;
+  frame: CardFrame;
+  trust: CardTrustStore;
+  now_utc: string;
+  runtime_policy: CardRuntimePolicy;
+  authority_view: CardAuthorityView;
+  revocation_view: CardRevocationView | null;
+  state: CardStateBackend;
+  connection_id: string;
+  fetch_trace: CardFetchHop[];
+  hydrated: Record<string, Uint8Array>;
+  continuity: CardContinuity;
+  head?: CardFrame | null;
+}
+
+export function verifyCardLink(input: VerifyCardInput): CardVerificationResult {
+  let link;
+  try {
+    link = parseCardLink(input.uri);
+  } catch (error) {
+    return { ok: false, step: 'parse', reason: error instanceof Error ? error.message : String(error), result: null };
+  }
+  if (input.frame === null || typeof input.frame !== 'object' || input.frame.payload === null || typeof input.frame.payload !== 'object') {
+    return { ok: false, step: 'content-address', reason: 'endpoint did not return a frame payload', result: null };
+  }
+  let computed: string;
+  try {
+    computed = H('rapp/1:particle', input.frame.payload as unknown as JsonValue);
+  } catch (error) {
+    return { ok: false, step: 'content-address', reason: error instanceof Error ? error.message : String(error), result: null };
+  }
+  if (computed !== link.manifest_hash || input.frame.payload_hash !== link.manifest_hash) {
+    return { ok: false, step: 'content-address', reason: 'URI m does not match the manifest particle', result: null };
+  }
+  if (!exactKeys(input.frame, FRAME_KEYS)) {
+    return { ok: false, step: 'schema', reason: 'card resource is not the eleven-key frame', result: null };
+  }
+  const frameVerdict = verifyFrame(input.frame, input.head ?? null, link.rappid);
+  if (!frameVerdict[0]) {
+    return { ok: false, step: 'schema', reason: `frame §7.5 step ${frameVerdict[1]}: ${frameVerdict[2]}`, result: null };
+  }
+  const payloadReason = cardPayloadError(input.frame.payload, input.frame, link);
+  if (payloadReason) return { ok: false, step: 'schema', reason: payloadReason, result: null };
+  if (!(input.trust instanceof CardTrustStore)) {
+    return { ok: false, step: 'signature', reason: 'a CardTrustStore is required', result: null };
+  }
+  if (!(input.state instanceof CardStateBackend)) {
+    return { ok: false, step: 'signature', reason: 'a transactional CardStateBackend is required', result: null };
+  }
+  const now = validUtc(input.now_utc);
+  if (now === null) return { ok: false, step: 'signature', reason: 'trusted clock now_utc is not calendar-valid', result: null };
+  let verdict = verifyFrameEdDsa(input.frame, input.trust);
+  if (!verdict[0]) return { ok: false, step: 'signature', reason: verdict[1], result: null };
+  try {
+    verdict = verifyRuntimePolicy(input.runtime_policy, input.trust, now, input.state);
+  } catch (error) {
+    return { ok: false, step: 'signature', reason: `runtime policy state failure: ${error instanceof Error ? error.message : String(error)}`, result: null };
+  }
+  if (!verdict[0]) return { ok: false, step: 'signature', reason: verdict[1], result: null };
+  if (!input.runtime_policy.profiles.includes(input.frame.payload.profile)) {
+    return { ok: false, step: 'signature', reason: 'runtime policy does not authorize this profile', result: null };
+  }
+  try {
+    verdict = verifyAuthorityView(input.authority_view, input.runtime_policy, input.trust, now, input.state, input.frame, link, input.fetch_trace);
+  } catch (error) {
+    return { ok: false, step: 'signature', reason: `authority state failure: ${error instanceof Error ? error.message : String(error)}`, result: null };
+  }
+  if (!verdict[0]) return { ok: false, step: 'signature', reason: verdict[1], result: null };
+  if (now >= validUtc(input.frame.payload.expires_utc)!) {
+    return { ok: false, step: 'expiry', reason: 'card manifest is expired', result: null };
+  }
+  try {
+    verdict = verifyRevocationView(input.revocation_view, input.runtime_policy, input.trust, now, input.state, input.frame.payload, link.manifest_hash);
+  } catch (error) {
+    return { ok: false, step: 'revocation', reason: `revocation state failure: ${error instanceof Error ? error.message : String(error)}`, result: null };
+  }
+  if (!verdict[0]) return { ok: false, step: 'revocation', reason: verdict[1], result: null };
+  const compatibility = input.frame.payload.compatibility;
+  if (
+    compatibility.protocol !== input.runtime_policy.protocol
+    || compatibility.runtime !== input.runtime_policy.runtime
+    || !compatibility.features.every((feature) => input.runtime_policy.features.includes(feature))
+  ) {
+    return { ok: false, step: 'compatibility', reason: 'runtime/protocol requirements are not satisfied', result: null };
+  }
+  const classification = CARD_CLASSIFICATIONS.indexOf(input.frame.payload.classification);
+  const maximum = CARD_CLASSIFICATIONS.indexOf(input.runtime_policy.max_classification);
+  const missingScope = input.frame.payload.requested_scope.filter((scope) => !input.runtime_policy.granted_scope.includes(scope)).sort();
+  if (classification > maximum) return { ok: false, step: 'classification-scope', reason: 'classification exceeds local policy', result: null };
+  if (missingScope.length) return { ok: false, step: 'classification-scope', reason: `requested scope not granted: ${missingScope[0]}`, result: null };
+  if (!CONNECTION.test(input.connection_id)) return { ok: false, step: 'replay-nonce', reason: 'connection_id is invalid', result: null };
+  try {
+    verdict = input.state.claimNonce(link.nonce, input.connection_id, input.now_utc);
+  } catch (error) {
+    return { ok: false, step: 'replay-nonce', reason: `transactional nonce claim failed: ${error instanceof Error ? error.message : String(error)}`, result: null };
+  }
+  if (!verdict[0]) return { ok: false, step: 'replay-nonce', reason: verdict[1], result: null };
+  verdict = verifyHydration(input.frame.payload.inventory, input.hydrated);
+  if (!verdict[0]) return { ok: false, step: 'hydration', reason: verdict[1], result: null };
+  if (!exactKeys(input.continuity, CARD_CONTINUITY_KEYS)) {
+    return { ok: false, step: 'continuity', reason: 'continuity response has the wrong schema', result: null };
+  }
+  const expectedValue = cardContinuity(input.frame.payload, link.nonce);
+  let expectedChallenge: string;
+  let actualChallenge: string;
+  try {
+    expectedChallenge = H('rapp/1:particle', expectedValue as unknown as JsonValue);
+    actualChallenge = H('rapp/1:particle', input.continuity as unknown as JsonValue);
+  } catch {
+    return { ok: false, step: 'continuity', reason: 'continuity response is not a canonical value', result: null };
+  }
+  if (input.frame.payload.wake_challenge !== expectedChallenge || actualChallenge !== input.frame.payload.wake_challenge) {
+    return { ok: false, step: 'continuity', reason: 'one-time continuity challenge failed', result: null };
+  }
+  try {
+    verdict = input.state.markAwake(link.nonce, input.connection_id, input.now_utc);
+  } catch (error) {
+    return { ok: false, step: 'replay-nonce', reason: `transactional awake commit failed: ${error instanceof Error ? error.message : String(error)}`, result: null };
+  }
+  if (!verdict[0]) return { ok: false, step: 'replay-nonce', reason: verdict[1], result: null };
+  return {
+    ok: true,
+    step: null,
+    reason: 'awake',
+    result: {
+      status: 'awake',
+      profile: input.frame.payload.profile,
+      rappid: input.frame.payload.rappid,
+      manifest_hash: link.manifest_hash,
+      nonce: link.nonce,
+      runtime_policy_seq: input.runtime_policy.policy_seq,
+      authority_seq: input.authority_view.registry_seq,
+      revocation_seq: input.revocation_view!.registry_seq,
+    },
+  };
+}
+
+export function verifyCardLinkScannerControlForTest(
+  input: VerifyCardInput,
+): CardVerificationResult {
+  return withMaterialScannersDisabledForTest(() => verifyCardLink(input));
 }

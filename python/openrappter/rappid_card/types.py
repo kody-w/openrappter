@@ -1,67 +1,46 @@
-"""Closed wire and provider types for the virtual RAPPID Debug Card."""
+"""Exact PR9 RAPPID card wire constants and lightweight adapter types."""
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
-RAPPID_CARD_SCHEMA = "rappid-card/1"
-RAPPID_CARD_POLICY_SCHEMA = "rappid-card-policy/1"
-RAPPID_CARD_AUTHORIZATION_SCHEMA = "rappid-card-authorization/1"
-RAPPID_CARD_REVOCATIONS_SCHEMA = "rappid-card-revocations/1"
-RAPPID_CARD_TEST_PROFILE = "rappid-card-test/1"
-RAPPID_CARD_PRODUCTION_PROFILE = "rappid-card-production/1"
-RAPPID_CARD_PROTOCOL = "rappid-link/1"
-RAPPID_CARD_RUNTIME_NAME = "openrappter"
-RAPPID_CARD_RUNTIME_VERSION = "1.13.0"
-RAPPID_CARD_FILENAME = ".rappid-card.json"
-MAX_AUDIT_EVENTS = 64
-MAX_REPLAY_NONCES = 128
+from . import pr9_reference as R
 
-CardManifest = Dict[str, Any]
-CardSnapshot = Dict[str, Any]
+RAPPID_CARD_SCHEMA = R.SPEC
+RAPPID_CARD_PROFILE = R.CARD_PROFILE
+RAPPID_CARD_TEST_PROFILE = R.CARD_TEST_PROFILE
+RAPPID_CARD_RUNTIME_POLICY_SCHEMA = R.CARD_RUNTIME_POLICY_SCHEMA
+RAPPID_CARD_AUTHORITY_SCHEMA = R.CARD_AUTHORITY_SCHEMA
+RAPPID_CARD_REVOCATIONS_SCHEMA = R.CARD_REVOCATION_SCHEMA
+RAPPID_CARD_FILENAME = R.CARD_VIRTUAL_SUFFIX
+RAPPID_CARD_VERIFY_STEPS = R.CARD_VERIFY_STEPS
+RAPPID_CARD_PAYLOAD_KEYS = frozenset(R.CARD_PAYLOAD_KEYS)
+RAPPID_CARD_RUNTIME_POLICY_KEYS = frozenset(R.CARD_RUNTIME_POLICY_KEYS)
+RAPPID_CARD_AUTHORITY_KEYS = frozenset(R.CARD_AUTHORITY_VIEW_KEYS)
+RAPPID_CARD_REVOCATION_KEYS = frozenset(R.CARD_REVOCATION_VIEW_KEYS)
+RAPPID_CARD_CLASSIFICATIONS = R.CARD_CLASSIFICATIONS
+RAPPID_CARD_REQUIRED_PARTS = R.CARD_REQUIRED_PARTS
+
+
+@dataclass(frozen=True)
+class CardVectorResult:
+    ok: bool
+    step: Optional[str]
+    reason: str
+    result: Optional[Dict[str, Any]]
+
+    def to_wire(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "step": self.step,
+            "reason": self.reason,
+            "result": self.result,
+        }
 
 
 class RappidCardError(Exception):
-    """A stable, wire-visible card failure."""
-
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, step: str, message: str) -> None:
         super().__init__(message)
-        self.code = code
+        self.step = step
         self.message = message
-
-
-class RappidCardReconnectError(Exception):
-    """The injected content provider reconnected during one hydration."""
-
-
-@dataclass
-class CardProviders:
-    get_manifest: Callable[[str, str], Any]
-    get_policy_for_origin: Callable[[str], Any]
-    get_authorization: Callable[[str, str, str], Any]
-    get_revocations: Callable[[str], Any]
-    get_authority_key: Callable[[str, str], Optional[str]]
-    get_part: Callable[[str], Optional[bytes]]
-    challenge_response: Callable[[Dict[str, Any]], str]
-
-
-class CardStateStore(ABC):
-    @abstractmethod
-    def record_policy(
-        self, policy_id: str, sequence: int, document_hash: str
-    ) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def record(
-        self, trust_state: Dict[str, Any], claim_nonce: bool
-    ) -> None:
-        raise NotImplementedError
-
-
-class DurableCardStateStore(CardStateStore):
-    @abstractmethod
-    def close(self) -> None:
-        raise NotImplementedError

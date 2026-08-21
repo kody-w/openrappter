@@ -3368,7 +3368,7 @@ export class GatewayServer {
     // Showcase methods
     registerShowcaseMethods(this);
     registerRappidMethods(this, { dataDir: this.dataDir });
-    registerRappidCardMethods(this);
+    registerRappidCardMethods(this, { dataDir: this.dataDir });
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }

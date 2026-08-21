@@ -252,8 +252,8 @@ export function drill(local, remote, {
   const seen = new Set();
   const capped = [];
   let searched = 0;
-  let enumerated = 0;
-  let exhausted = true;
+  let position = 0;
+  let stoppedEarly = false;
 
   outer:
   for (const components of lookups) {
@@ -262,7 +262,7 @@ export function drill(local, remote, {
       // The deadline governs the search, not only the hits — a long fruitless
       // sweep is exactly the case a person is waiting through.
       if (deadline !== null && Date.now() - startedAt > deadline) {
-        exhausted = false;
+        stoppedEarly = true;
         break outer;
       }
       searched += 1;
@@ -270,21 +270,19 @@ export function drill(local, remote, {
       const candidates = lane.table.get(at) || [];
       if (candidates.length > fanoutCap) {
         // A repeated payload matches every one of its twins. Say what was left
-        // unexamined rather than silently sampling it.
+        // unexamined rather than silently sampling it. This is reported through
+        // `capped` and does NOT mean the budgeted walk stopped early — those are
+        // different facts and conflating them made `exhausted` meaningless.
         capped.push(Object.freeze({
           key: at, matched: candidates.length, examined: fanoutCap,
         }));
-        exhausted = false;
       }
       for (const there of candidates.slice(0, fanoutCap)) {
-        // The same two frames reached by two lookups is one pair found two
-        // ways, not two pairs. An index is a convenience; the key is the key.
         const identity = `${here.frame_hash}|${there.frame_hash}`;
         if (seen.has(identity)) {
-          // Already enumerated on an earlier lane. If it is in this call's
-          // result, record the extra lane that found it; if it was skipped by
-          // the cursor, it stays skipped. Either way it is not a new position,
-          // or a resumed drill would hand back what it already returned.
+          // Already enumerated on an earlier lane. Record the extra lane if the
+          // pair is in this call's result; if the cursor skipped it, it stays
+          // skipped. Either way it is not a new position.
           const existing = found.get(identity);
           if (existing) {
             existing.via.push([...components]);
@@ -292,17 +290,24 @@ export function drill(local, remote, {
           }
           continue;
         }
-        seen.add(identity);
-        // The cursor counts enumerated candidate positions, so resuming yields
-        // the tail of the one-shot enumeration rather than repeating its head.
-        enumerated += 1;
-        if (enumerated <= skip) continue;
+
+        // The cursor is a position in this fixed enumeration, counting every
+        // unique pair whether it was skipped or stored. A pair is only marked
+        // seen once it has been ACCOUNTED for — if the budget stops us here we
+        // leave the position untouched, so resuming from it yields exactly the
+        // tail and never re-delivers what was already returned.
+        if (position < skip) {
+          seen.add(identity);
+          position += 1;
+          continue;
+        }
         if (found.size >= limit
           || (deadline !== null && Date.now() - startedAt > deadline)) {
-          enumerated -= 1;
-          exhausted = false;
+          stoppedEarly = true;
           break outer;
         }
+        seen.add(identity);
+        position += 1;
         found.set(identity, {
           key: at,
           keys: [at],
@@ -329,8 +334,13 @@ export function drill(local, remote, {
     searched,
     hits: pairs.length,
     pairs: Object.freeze(pairs),
-    exhausted,
-    resumeAfter: enumerated,
+    // Whether the budgeted walk reached the end of the search space. A fan-out
+    // cap does not make this false: the walk finished, and `capped` separately
+    // names each coordinate whose candidates were too numerous to examine.
+    exhausted: !stoppedEarly,
+    // A position in the fixed enumeration. Passing it back as budget.resumeAfter
+    // continues from exactly here.
+    resumeAfter: position,
     capped: Object.freeze(capped),
   });
 }

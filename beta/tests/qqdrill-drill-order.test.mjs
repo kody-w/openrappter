@@ -7,6 +7,27 @@ import {
   drill,
 } from "../electron/qqdrill.mjs";
 
+/** A dimension of six frames, distinguished from its twin only by when it ran. */
+function dimensionOf(id, ran) {
+  const stream = "rappid:@rapp/walk:" + "a".repeat(64);
+  const frames = [];
+  let prev = null;
+  for (let index = 0; index < 6; index += 1) {
+    const frame = buildFrame({
+      kind: "qqdrill.tick",
+      streamId: stream,
+      seq: index,
+      utc: `2026-08-21T12:00:${String(ran + index).padStart(2, "0")}.000Z`,
+      payload: { asserts: { step: index }, requires: {} },
+      prev,
+      prevWave: null,
+    });
+    frames.push(frame);
+    prev = frame.payload_hash;
+  }
+  return dimension({ dimension_id: id, clock_key: 1 }, frames);
+}
+
 // ROOT CAUSE D — enumeration order and resume.
 // Regression tests for docs/QQDRILL-PROTOCOL.md, section
 // "How far a drill goes is how long the person waits".
@@ -297,5 +318,70 @@ test("D4: every budget rung is a subset of the next and of the unbudgeted result
     );
 
     previous = rung;
+  }
+});
+
+// D5 — added 2026-08-21 after a second review found the cursor could move
+// BACKWARD under a deadline and that a fired fan-out cap pinned exhausted:false
+// forever, freezing the walk. The cursor is now a position in a fixed
+// enumeration, counting every unique pair whether skipped or stored, and a pair
+// is marked seen only once it has been ACCOUNTED for — so a budget stop leaves
+// the position untouched rather than half-consuming it.
+//
+// The property worth locking in is the one a caller relies on: walking a drill
+// in small steps must reconstruct the one-shot result exactly. Not a superset,
+// not a prefix repeated — the same set, each pair once.
+test("D5. an incremental walk reconstructs the one-shot result exactly", () => {
+  const local = dimensionOf("walk-local", 0);
+  const remote = dimensionOf("walk-remote", 30);
+
+  const oneShot = drill(local, remote);
+  assert.ok(oneShot.hits >= 4, "the fixture must produce enough pairs to walk");
+  assert.equal(oneShot.exhausted, true, "an unbudgeted drill finishes");
+
+  const identify = (pair) => `${pair.here.frame_hash}|${pair.there.frame_hash}`;
+  const walked = [];
+  let cursor = 0;
+  let steps = 0;
+
+  while (steps < 50) {
+    steps += 1;
+    const page = drill(local, remote, { budget: { pairs: 2, resumeAfter: cursor } });
+    walked.push(...page.pairs.map(identify));
+    if (page.exhausted) break;
+    assert.ok(page.resumeAfter > cursor, "the cursor must advance, never stall or move back");
+    cursor = page.resumeAfter;
+  }
+
+  assert.ok(steps < 50, "the walk must terminate rather than cycle");
+  assert.equal(
+    walked.length,
+    new Set(walked).size,
+    "no pair may be delivered twice across the walk",
+  );
+  assert.deepEqual(
+    [...new Set(walked)].sort(),
+    oneShot.pairs.map(identify).sort(),
+    "the walk must find exactly what a single unbudgeted drill finds",
+  );
+});
+
+// A fan-out cap elides candidates at one coordinate. That is a cap doing its
+// job, not the budgeted walk stopping early, and reporting it as exhausted:false
+// made that flag mean nothing — a caller could never tell "I ran out of
+// patience" from "one coordinate had a lot of twins".
+test("D6. a fan-out cap is reported separately from stopping early", () => {
+  const local = dimensionOf("cap-local", 0);
+  const remote = dimensionOf("cap-remote", 30);
+
+  const capped = drill(local, remote, { fanoutCap: 1 });
+  assert.equal(capped.exhausted, true, "the walk reached the end of the search space");
+  const wide = drill(local, remote);
+  assert.ok(
+    capped.hits <= wide.hits,
+    "a cap can only reduce what was examined, never increase it",
+  );
+  for (const entry of capped.capped) {
+    assert.ok(entry.matched > entry.examined, "a capped entry names what it left unexamined");
   }
 });

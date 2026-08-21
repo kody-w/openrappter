@@ -4,7 +4,7 @@ import test from "node:test";
 const ROOT = new URL("../electron", import.meta.url).pathname;
 
 const { buildFrame, verifyFrame } = await import(`${ROOT}/qqdrill-deps.mjs`);
-const { assimilate, compatibility, makeLine } = await import(`${ROOT}/qqdrill.mjs`);
+const { assimilate, compatibility, makeLine, established } = await import(`${ROOT}/qqdrill.mjs`);
 
 // rapp-qqdrill/1.0 regression suite — the fold's honesty.
 //
@@ -56,6 +56,22 @@ function baseLine() {
  * Two incoming frames from one other dimension. B contradicts what A asserts,
  * so exactly one of them may ever join this line.
  */
+/**
+ * A pair whose FIRST candidate declares a precondition the second one breaks.
+ * This is the case backward fidelity is actually about: the fold refuses a frame
+ * that would invalidate something already assimilated, because that something
+ * said in writing what it depended on.
+ */
+function preconditionPair() {
+  return chain(
+    [
+      { asserts: { wind: 5 }, requires: { sky: "clear" } },
+      { asserts: { sky: "overcast" } },
+    ],
+    { streamId: OTHER_STREAM, saltAncestry: "2".repeat(64), startSeq: 5, ran: 40 },
+  );
+}
+
 function contradictingPair() {
   return chain(
     [{ asserts: { sky: "clear" } }, { asserts: { sky: "storm" } }],
@@ -81,81 +97,62 @@ const hashes = (entries) => entries
 // happened to be folded last" is the module's own statement of the rule the
 // protocol writes as: "the merge may only add ancestry, never invalidate a
 // descendant. Everything that held before the join still holds after it."
-test("B1. a second fold must refuse what the first fold's facts already contradict", () => {
-  const [first, second] = contradictingPair();
+// CORRECTED 2026-08-21 after an independent review. B1 and B2 were written
+// against a rule the module used to enforce and no longer does: that a fact
+// settled by a fold became sticky, so any later frame asserting a different
+// value for that key was refused. That rule was wrong three ways at once —
+// folding a byte-identical twin permanently blocked every later update to its
+// key, a settled fact could never be superseded, and each join re-asserted the
+// whole accumulated history until the payload crossed RAPP/1's 1 MiB ceiling
+// and the line could never be folded again.
+//
+// The rule that replaces it is the one the protocol states: a frame is refused
+// only when it contradicts a DECLARED PRECONDITION of something already on the
+// line. `phase: morning` followed by `phase: noon` is time passing.
+//
+// The invariant these tests exist to protect is unchanged, and is what they now
+// assert: how the caller chunked its candidates must never change the outcome.
+test("B1. a declared precondition refuses, in one call or two alike", () => {
+  const [needsClearSky, breaksIt] = preconditionPair();
   const line = baseLine();
 
-  const oneCall = assimilate(line, [first, second]);
-  assert.deepEqual(hashes(oneCall.merged), [first.frame_hash].sort(), "one call joins only the first");
-  assert.deepEqual(hashes(oneCall.refused), [second.frame_hash].sort(), "one call refuses the contradiction");
+  const oneCall = assimilate(line, [needsClearSky, breaksIt]);
+  assert.deepEqual(hashes(oneCall.merged), [needsClearSky.frame_hash], "the precondition-holder joins");
+  assert.deepEqual(hashes(oneCall.refused), [breaksIt.frame_hash], "the frame that breaks it does not");
 
-  // The same two candidates, folded as the drill handed them back: one, then
-  // the other, against the line the first fold produced.
-  const step1 = assimilate(line, [first]);
+  // Split across two calls. The join minted by the first carries forward the
+  // preconditions of what it absorbed, so the second call meets exactly the
+  // constraint the second candidate would have met inside the first call.
+  const step1 = assimilate(line, [needsClearSky]);
+  const step2 = assimilate(step1.line, [breaksIt]);
   assert.equal(step1.merged.length, 1, "the first candidate joins either way");
-  const step2 = assimilate(step1.line, [second]);
-
-  assert.deepEqual(
-    hashes(step2.merged),
-    [],
-    "sky=clear is established on this line; a frame asserting sky=storm must be refused however late it arrives",
-  );
-  assert.deepEqual(
-    hashes(step2.refused),
-    [second.frame_hash],
-    "the refusal is a result and must be recorded, not skipped by a forgetful fold",
-  );
-  assert.equal(step2.joined, null, "nothing joined, so no join frame may be minted");
-  assert.equal(step2.head, step1.head, "a refused fold does not move HEAD");
+  assert.deepEqual(hashes(step2.merged), [], "and the second is still refused a call later");
+  assert.equal(step2.refused[0].contradicts[0].key, "sky", "for the same recorded reason");
 });
 
-// DEFECT B: because `established` is per-call, a frame refused by a fold can be
-// re-offered against the line that same fold produced and will be accepted the
-// second time. Patience alone flips the verdict.
-//
-// QQDRILL-PROTOCOL.md: "the merge may only add ancestry, never invalidate a
-// descendant. Everything that held before the join still holds after it."
-test("B2. re-offering a refused frame against the resulting line is a no-op", () => {
-  const [first, second] = contradictingPair();
+test("B2. a bare disagreement is time passing, not a contradiction", () => {
+  const [earlier, later] = contradictingPair();
   const line = baseLine();
 
-  const folded = assimilate(line, [first, second]);
-  assert.equal(folded.refused.length, 1, "the batch fold refused the contradiction");
+  // Neither frame declares a precondition and nothing on the line requires the
+  // sky to be anything, so a later frame saying the sky changed is exactly what
+  // an append-only history of a changing world looks like.
+  const oneCall = assimilate(line, [earlier, later]);
+  assert.equal(oneCall.refused.length, 0, "nothing declared a dependency, so nothing is invalidated");
+  assert.equal(oneCall.merged.length, 2);
 
-  // Wait, then offer the refused frame again. Nothing about the line has
-  // changed in its favour, so nothing about the verdict may change either.
-  const again = assimilate(folded.line, [second]);
-
-  assert.equal(again.merged.length, 0, "a refused frame is still refused when it is offered again");
-  assert.equal(again.joined, null, "no join frame may be minted for a frame that cannot join");
+  const step1 = assimilate(line, [earlier]);
+  const step2 = assimilate(step1.line, [later]);
+  assert.equal(step2.merged.length, 1, "and the same holds a call later");
   assert.equal(
-    again.head,
-    folded.head,
-    "HEAD after the retry must equal HEAD after the fold — waiting longer cannot advance the lineage",
-  );
-  assert.deepEqual(
-    again.line.frames.map((frame) => frame.frame_hash),
-    folded.line.frames.map((frame) => frame.frame_hash),
-    "the line gains nothing from a fold that merged nothing",
-  );
-  assert.equal(
-    again.line.frames.some((frame) => frame.payload?.asserts?.sky === "storm"),
-    false,
-    "the contradicted fact must never reach the line",
+    established(step2.line).sky,
+    established(oneCall.line).sky,
+    "both paths leave the line believing the same thing about the sky",
   );
 });
 
-// DEFECT B: the outcome of folding a candidate set is currently a function of
-// (line, candidate set, call boundaries). It must be a function of (line,
-// candidate set) alone.
-//
-// QQDRILL-PROTOCOL.md: "Whatever a drill chooses to probe, and however it ranks
-// what it finds, an assimilation must still refuse anything contradicting
-// downstream ... Policy decides *what you look at*. It never decides *what is
-// true*." And: "A drill stopped after two pairs is a smaller drill, not a
-// broken one, and resuming continues from exactly where it stopped."
 test("B3. the merged/refused partition does not depend on where the calls were cut", () => {
-  const [first, second] = contradictingPair();
+  const [first, second] = preconditionPair();
   const line = baseLine();
 
   const oneCall = assimilate(line, [first, second]);
@@ -176,16 +173,16 @@ test("B3. the merged/refused partition does not depend on where the calls were c
     "and must refuse the same set",
   );
 
-  // The facts the line ends up carrying are the same fact either way.
-  const assertedSky = (result) => result.line.frames
-    .map((frame) => frame.payload?.asserts?.sky)
-    .filter((value) => value !== undefined);
+  // What must agree is the FACT the line ends up carrying, not the frame-by-frame
+  // history. Two calls mint two joins where one call mints one; that difference
+  // is append-only history working, not a disagreement.
   assert.deepEqual(
-    assertedSky(step2),
-    assertedSky(oneCall),
-    "the line must end up asserting the same thing about the sky in both paths",
+    established(step2.line).wind,
+    established(oneCall.line).wind,
+    "the line must end up carrying the same fact either way",
   );
 });
+
 
 // ---------------------------------------------------------------------------
 // ROOT CAUSE E — prototype-chain lookups in compatibility().
@@ -315,12 +312,23 @@ test("E3. asserts named __proto__ are ordinary data through the verdict, the joi
   });
   assert.equal(ok, true, `the join must still be a valid RAPP/1 frame: ${why}`);
 
-  // The fact is established on the line. A later fold must see it.
+  // A later fold updating the same key. Nothing on the line declared a
+  // dependency on it, so this is an ordinary update and joins — the point of
+  // the test is that a key named __proto__ is treated as data at every step,
+  // not that it is treated as special.
   const second = assimilate(first.line, [danger]);
   assert.equal(
     second.merged.length,
-    0,
-    "__proto__=safe is established on this line; a later fold asserting __proto__=danger must be refused",
+    1,
+    "__proto__ is ordinary data: nothing declared a dependency on it, so a later "
+      + "fold updating it joins like any other key",
   );
-  assert.equal(second.head, first.head, "and HEAD must not move");
+  assert.notEqual(second.head, first.head, "and the line continues from the new join");
+  const secondAsserts = second.joined.payload.asserts;
+  assert.equal(
+    Object.hasOwn(secondAsserts, "__proto__"),
+    true,
+    "carried in the second join as its own data property too",
+  );
+  assert.equal(Object.prototype.danger, undefined, "and still nothing on Object.prototype");
 });

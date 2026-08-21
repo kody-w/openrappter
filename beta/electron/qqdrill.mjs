@@ -501,11 +501,18 @@ export function runsFrom(points, local, remote) {
     void stepThere;
   }
 
-  return Object.freeze([...runs].sort((a, b) => (b.length - a.length)
-    || (b.substance - a.substance)
-    || (Math.abs(a.offset) - Math.abs(b.offset))
-    || (a.offset - b.offset)
-    || (a.startHere - b.startHere)));
+  return Object.freeze([...runs].sort((a, b) => {
+    if (b.length !== a.length) return b.length - a.length;
+    if (b.substance !== a.substance) return b.substance - a.substance;
+    // Exact lane, not the float offset — see the note in alignment().
+    const la = BigInt(a.lane);
+    const lb = BigInt(b.lane);
+    const absA = la < 0n ? -la : la;
+    const absB = lb < 0n ? -lb : lb;
+    if (absA !== absB) return absA < absB ? -1 : 1;
+    if (la !== lb) return la < lb ? -1 : 1;
+    return a.startHere - b.startHere;
+  }));
 }
 
 /**
@@ -550,9 +557,20 @@ export function alignment(points, local, remote) {
       offset: pins[0].offset,
       pins: Object.freeze([...pins].sort((a, b) => a.here - b.here)),
     }))
-    .sort((a, b) => (b.pins.length - a.pins.length)
-      || (Math.abs(a.offset) - Math.abs(b.offset))
-      || (a.offset - b.offset));
+    // Ties break on the EXACT lane, never on the float offset. Number() maps
+    // distinct BigInt lanes onto the same double past 2^53, so a float
+    // comparator returns 0 for genuinely different diagonals and the winner
+    // becomes whichever happened to be inserted first — array order deciding a
+    // merge, which is the exact thing this module claims it never does.
+    .sort((a, b) => {
+      if (b.pins.length !== a.pins.length) return b.pins.length - a.pins.length;
+      const la = BigInt(a.lane);
+      const lb = BigInt(b.lane);
+      const absA = la < 0n ? -la : la;
+      const absB = lb < 0n ? -lb : lb;
+      if (absA !== absB) return absA < absB ? -1 : 1;
+      return la === lb ? 0 : (la < lb ? -1 : 1);
+    });
 
   const primary = ordered[0];
   return Object.freeze({
@@ -567,12 +585,26 @@ export function alignment(points, local, remote) {
   });
 }
 
-/** Where a local tick lands in the other dimension, by exact arithmetic. */
-export function placeThere(align, hereSeq) {
+/**
+ * Where a local tick lands in the other dimension, as an exact rational.
+ * Every decision inside this module uses this form; the convenience wrapper
+ * below returns a Number for display and must not be compared for equality.
+ */
+export function placeThereExact(align, hereSeq) {
   if (!align?.ok) throw new Error(`cannot place without an alignment: ${align?.reason}`);
   const { n, d } = align.exactRatio;
   const lane = BigInt(align.lane);
-  return Number(n * BigInt(hereSeq) + lane) / Number(d);
+  return Object.freeze({ n: n * BigInt(hereSeq) + lane, d });
+}
+
+/**
+ * The same placement as a Number, for printing. Named honestly: this divides in
+ * binary64 and therefore rounds, so it is a rendering of the answer rather than
+ * the answer. Use placeThereExact for anything that decides something.
+ */
+export function placeThere(align, hereSeq) {
+  const { n, d } = placeThereExact(align, hereSeq);
+  return Number(n) / Number(d);
 }
 
 // ── the line ────────────────────────────────────────────────────────────────
@@ -593,21 +625,20 @@ function descendantsOf(line, fromFrameHash) {
 }
 
 /**
- * The facts previous FOLDS established on this line, read from the join frames
- * they left behind. Read from the line rather than accumulated per call, so
- * folding a set of candidates in one call and folding it across several calls
- * reach the same verdict — how long someone waited must never change what is
- * true.
+ * What the line has asserted, folded in chain order. Reporting only — nothing
+ * refuses on the strength of it.
  *
- * Deliberately NOT every assert on the line. An ordinary frame asserting
- * `phase: "morning"` and a later one asserting `phase: "noon"` is time passing,
- * not a contradiction, and a rule that could not tell the difference would
- * refuse every frame that refines an earlier moment.
+ * An earlier attempt used these as sticky facts that a later frame could
+ * contradict, and it was wrong in three directions at once: folding a
+ * byte-identical twin permanently blocked every later update to that key,
+ * a fact once settled could never be superseded, and the join grew by the whole
+ * accumulated history until it hit RAPP/1's 1 MiB ceiling and the line could
+ * never fold again. `phase: morning` followed by `phase: noon` is time passing.
+ * Only a descendant's declared precondition refuses anything.
  */
 export function established(line) {
   const facts = Object.create(null);
   for (const frame of line.frames) {
-    if (frame?.kind !== "qqdrill.join") continue;
     for (const [key, value] of Object.entries(assertsOf(frame))) facts[key] = value;
   }
   return facts;
@@ -620,7 +651,7 @@ export function established(line) {
  * refused — whole. A frame with pieces removed existed in neither dimension,
  * and the fold is not entitled to invent one.
  */
-export function compatibility(incoming, line, { from = null, facts = null } = {}) {
+export function compatibility(incoming, line, { from = null } = {}) {
   const asserts = assertsOf(incoming);
   const contradicts = [];
 
@@ -641,21 +672,6 @@ export function compatibility(incoming, line, { from = null, facts = null } = {}
           asserted: asserts[key],
         }));
       }
-    }
-  }
-
-  // A frame that asserts against what a fold already settled is refused however
-  // late it arrives, which is what makes a split fold equal a single one.
-  const settled = facts ?? established(line);
-  for (const key of Object.keys(asserts)) {
-    if (!Object.hasOwn(settled, key)) continue;
-    const verdict = equalValues(asserts[key], settled[key]);
-    if (!verdict.ok) {
-      contradicts.push(Object.freeze({ key, unencodable: true, reason: verdict.reason }));
-    } else if (!verdict.equal) {
-      contradicts.push(Object.freeze({
-        establishedOnLine: true, key, required: settled[key], asserted: asserts[key],
-      }));
     }
   }
 
@@ -689,25 +705,22 @@ export function assimilate(line, incoming, {
   const candidates = [...incoming].sort(foldOrder);
   const merged = [];
   const refused = [];
-  // What this fold has settled so far, seeded with what earlier folds settled.
-  // A candidate meets the same facts whether it arrives in this call or a later
-  // one, which is what makes patience irrelevant to the verdict.
-  //
-  // Null prototype, deliberately: Object.assign writes through [[Set]], so on an
-  // ordinary object a key named __proto__ would hit the prototype setter and
-  // change the object's prototype instead of becoming data. An asserted key is
-  // data whatever it is called.
-  const foldFacts = Object.assign(Object.create(null), established(line));
+  // Null prototype, deliberately: a key named __proto__ written through [[Set]]
+  // on an ordinary object hits the prototype setter instead of becoming data.
+  // An asserted key is data whatever it is called.
+  const foldAsserts = Object.create(null);
+  const foldRequires = Object.create(null);
   let working = line;
 
   for (const frame of candidates) {
-    const verdict = compatibility(frame, working, { from, facts: foldFacts });
+    const verdict = compatibility(frame, working, { from });
     if (!verdict.ok) {
       refused.push(Object.freeze({ frame: frame.frame_hash, contradicts: verdict.contradicts }));
       continue;
     }
     merged.push(frame);
-    for (const [key, value] of Object.entries(assertsOf(frame))) foldFacts[key] = value;
+    for (const [key, value] of Object.entries(assertsOf(frame))) foldAsserts[key] = value;
+    for (const [key, value] of Object.entries(requiresOf(frame))) foldRequires[key] = value;
     working = Object.freeze({ frames: Object.freeze([...working.frames, frame]), head: frame.frame_hash });
   }
 
@@ -744,7 +757,6 @@ export function assimilate(line, incoming, {
     });
   }
 
-  const facts = foldFacts;
   const joinUtc = utc || (localHead && localHead.utc > last.utc ? localHead.utc : last.utc);
 
   let joined;
@@ -756,9 +768,19 @@ export function assimilate(line, incoming, {
       utc: joinUtc,
       payload: {
         protocol: PROTOCOL,
+        // What THIS fold assimilated — not the accumulated history. Inherited
+        // facts are already on the line in the joins that recorded them, and
+        // re-asserting them grew the payload until it hit RAPP/1's 1 MiB limit
+        // and the line could never be folded again.
+        //
         // Object.fromEntries defines own properties, so an asserted __proto__
-        // travels in the join as data rather than mutating the payload.
-        asserts: Object.fromEntries(Object.entries(facts)),
+        // travels as data rather than mutating the payload.
+        asserts: Object.fromEntries(Object.entries(foldAsserts)),
+        // The preconditions of the frames this fold absorbed. Carrying them
+        // makes the join a descendant that declares what its contents needed,
+        // so a candidate offered in a LATER call meets exactly the constraints
+        // it would have met arriving in this one.
+        requires: Object.fromEntries(Object.entries(foldRequires)),
         assimilated: merged.map((frame) => frame.frame_hash),
         refused: refused.map((entry) => entry.frame),
         // Fidelity travels with the join, so the lineage records which spans

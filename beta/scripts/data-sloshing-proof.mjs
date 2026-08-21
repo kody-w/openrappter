@@ -50,7 +50,7 @@ const proofLocation = {
   lat: 47.6062,
   lon: -122.3321,
 };
-const credentialProbe = "ghp_DataSloshingProofToken1234567890";
+const credentialProbe = "ghp_DataSloshingProofToken1234567890";  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
 const rows = [];
 const previousEnvironment = new Map();
 const modelState = {

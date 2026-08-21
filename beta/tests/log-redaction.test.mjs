@@ -39,14 +39,14 @@ import { testPython } from "./_python.mjs";
 
 
 const GITHUB_TOKENS = [
-  "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
-  "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
-  "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
-  "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
-  "ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",
+  "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
+  "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
+  "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
+  "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
+  "ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890",  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
   "github_pat_11AA22BB33CC44DD55EE66FF77GG88HH",
 ];
-const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_123";
+const JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature_123";  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
 const BURST_LINE_COUNT = 5 * 1024;
 const BURST_FILL = "x".repeat(1011);
 

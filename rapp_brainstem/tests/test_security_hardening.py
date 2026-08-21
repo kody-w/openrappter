@@ -50,7 +50,7 @@ class _FakeExchangeResp:
 # ── #1 CRITICAL: /debug/auth must not leak a token, and is loopback-only ───────
 
 def test_debug_auth_never_returns_token_body(client, monkeypatch):
-    monkeypatch.setattr(bs, "get_github_token", lambda: "ghu_faketoken1234567890")
+    monkeypatch.setattr(bs, "get_github_token", lambda: "ghu_faketoken1234567890")  # rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
     monkeypatch.setattr(bs, "_read_token_file", lambda: {"access_token": "ghu_x", "refresh_token": "r"})
     monkeypatch.setattr(bs, "_load_copilot_cache", lambda github_token=None: None)
     monkeypatch.setattr(bs, "_exchange_github_for_copilot", lambda t: _FakeExchangeResp(200))
@@ -74,7 +74,7 @@ def test_debug_auth_forbidden_from_non_loopback(client, monkeypatch):
         called["exchange"] = True
         return _FakeExchangeResp(200)
 
-    monkeypatch.setattr(bs, "get_github_token", lambda: "ghu_faketoken1234567890")
+    monkeypatch.setattr(bs, "get_github_token", lambda: "ghu_faketoken1234567890")  # rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
     monkeypatch.setattr(bs, "_exchange_github_for_copilot", _boom)
 
     r = client.get("/debug/auth", environ_overrides={"REMOTE_ADDR": "10.0.0.42"})
@@ -243,7 +243,7 @@ def test_support_report_synthesis_falls_back_on_invalid_model_output(monkeypatch
 def test_exchange_2xx_logs_status_only(monkeypatch, capsys):
     # A successful exchange must log only the status — never the (token-bearing) body.
     monkeypatch.setattr(bs.requests, "get", lambda *a, **k: _FakeExchangeResp(200))
-    bs._exchange_github_for_copilot("ghu_faketoken1234567890")
+    bs._exchange_github_for_copilot("ghu_faketoken1234567890")  # rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
     printed = capsys.readouterr().out
     assert "LEAKED_COPILOT_TOKEN_XYZ" not in printed
     assert "HTTP 200 (ok)" in printed

@@ -208,7 +208,7 @@ test("a successful update never runs the rollback installer", { skip: !posix }, 
 });
 
 test("installer output is redacted before update.log persists it", { skip: !posix }, async () => {
-  const secret = "ghp_updateRunnerSecret123456789";
+  const secret = "ghp_updateRunnerSecret123456789";  // rapp-keyring: allow synthetic fixture — this value exists to prove it gets redacted
   const { result, log } = await runUpdater({
     forward: ({ beta }) => (
       `echo "Authorization: Bearer ${secret}"\n`

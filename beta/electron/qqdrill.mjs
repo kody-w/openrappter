@@ -11,15 +11,21 @@
 //
 // What RAPP/1 does NOT offer is a second-parent field. `prev_wave` is reserved
 // for swarm streams, where it must equal the swarm head — so a join records the
-// frames it assimilated in its payload instead. The payload is hashed into
-// frame_hash, so that ancestry claim is bound just as tightly, and the local
-// chain stays a valid single-parent RAPP/1 chain.
+// frames it assimilated in its payload. The payload is hashed into frame_hash,
+// so that ancestry claim is bound just as tightly, and the local chain stays a
+// valid single-parent RAPP/1 chain.
+//
+// ARITHMETIC. Every comparison that decides a diagonal, a placement or a run is
+// done in exact integer arithmetic over BigInt rationals. Nothing here rounds,
+// and nothing buckets on a formatted float. Two machines that never communicate
+// must reach the same verdict, and a verdict that depends on the last bit of a
+// division is not a verdict.
 //
 // Mechanism lives here. Policy — which components to index, how to weight
 // substance, what threshold calls a span determined — is injected, and the
 // default below is a plain example rather than a ceiling.
 
-import { H, buildFrame, canonical } from "./rapp-protocol.mjs";
+import { H, buildFrame, verifyFrame, canonical } from "./qqdrill-deps.mjs";
 
 export const PROTOCOL = "rapp-qqdrill/1.0";
 
@@ -37,22 +43,83 @@ export const DEFAULT_LOOKUPS = Object.freeze([
   Object.freeze(["digest"]),
 ]);
 
+/** How many candidates one coordinate may fan out to before the drill says so. */
+const DEFAULT_FANOUT_CAP = 512;
+
+// ── exact rationals ─────────────────────────────────────────────────────────
+
+function gcd(a, b) {
+  let x = a < 0n ? -a : a;
+  let y = b < 0n ? -b : b;
+  while (y) { const t = x % y; x = y; y = t; }
+  return x;
+}
+
+function reduce(n, d) {
+  if (d === 0n) throw new Error("rational with zero denominator");
+  if (d < 0n) { n = -n; d = -d; }
+  const g = gcd(n, d);
+  return g === 0n ? { n: 0n, d: 1n } : { n: n / g, d: d / g };
+}
+
+/**
+ * A clock key parsed to an exact rational. Accepts an integer, a finite decimal,
+ * or the decimal's string form — so `1` and `"1"` are the same cadence, which is
+ * the only way the coordinate and the alignment can agree about it.
+ * Anything else is refused rather than coerced.
+ */
+export function parseClock(value) {
+  if (typeof value === "bigint") {
+    return value > 0n ? { n: value, d: 1n } : null;
+  }
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const text = String(value).trim();
+  if (!/^\d+(\.\d+)?$/.test(text)) return null;
+  const [whole, frac = ""] = text.split(".");
+  const n = BigInt(whole + frac);
+  const d = 10n ** BigInt(frac.length);
+  if (n <= 0n) return null;
+  return reduce(n, d);
+}
+
+/** The canonical text of a clock key, so equal cadences render identically. */
+function clockText(rational) {
+  return rational ? `${rational.n}/${rational.d}` : null;
+}
+
+/**
+ * The ratio between two cadences, exact. their-clock over our-clock, reduced,
+ * so `n` is how far their tick advances while `d` is how far ours does.
+ */
+function ratioOf(here, there) {
+  if (!here || !there) return null;
+  return reduce(there.n * here.d, there.d * here.n);
+}
+
+// ── payload access, without touching prototypes ─────────────────────────────
+
+function plainMap(value) {
+  const out = Object.create(null);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const key of Object.keys(value)) out[key] = value[key];
+  }
+  return out;
+}
+
+function assertsOf(frame) { return plainMap(frame?.payload?.asserts); }
+function requiresOf(frame) { return plainMap(frame?.payload?.requires); }
+
+/**
+ * Compare two asserted values. A value that cannot be canonically encoded is
+ * not a crash: it is a refusal with a reason, because a refusal is a result and
+ * an exception is a lost frame.
+ */
 function equalValues(left, right) {
-  return canonical(left ?? null) === canonical(right ?? null);
-}
-
-function assertsOf(frame) {
-  const asserts = frame?.payload?.asserts;
-  return asserts && typeof asserts === "object" && !Array.isArray(asserts)
-    ? asserts
-    : {};
-}
-
-function requiresOf(frame) {
-  const requires = frame?.payload?.requires;
-  return requires && typeof requires === "object" && !Array.isArray(requires)
-    ? requires
-    : {};
+  try {
+    return { ok: true, equal: canonical(left ?? null) === canonical(right ?? null) };
+  } catch (error) {
+    return { ok: false, reason: error.message };
+  }
 }
 
 /**
@@ -64,6 +131,8 @@ export function isSubstantive(frame) {
   return Object.keys(assertsOf(frame)).length > 0;
 }
 
+// ── coordinates ─────────────────────────────────────────────────────────────
+
 /** The composite coordinate of a frame. Computed about frames, never stored in them. */
 export function quantumKey(frame, manifest = {}) {
   if (!frame || typeof frame !== "object") {
@@ -71,7 +140,8 @@ export function quantumKey(frame, manifest = {}) {
   }
   return Object.freeze({
     rappid: frame.stream_id ?? null,
-    clock: manifest.clock_key ?? null,
+    // The canonical rational text, so 1 and "1" are one cadence everywhere.
+    clock: clockText(parseClock(manifest.clock_key)),
     tick: typeof frame.seq === "number" ? frame.seq : null,
     digest: frame.payload_hash ?? null,
   });
@@ -93,10 +163,9 @@ export function keyString(key, components = COMPONENTS) {
   return `${PROTOCOL}\n${canonical({ components: chosen, at: picked })}`;
 }
 
-/** The address a pair reports. Addresses, not frames — pulling is a separate step. */
-function addressOf(frame, dimension) {
+function addressOf(frame, source) {
   return Object.freeze({
-    dimension: dimension.manifest?.dimension_id ?? null,
+    dimension: source.manifest?.dimension_id ?? null,
     stream_id: frame.stream_id ?? null,
     seq: frame.seq ?? null,
     payload_hash: frame.payload_hash ?? null,
@@ -104,11 +173,35 @@ function addressOf(frame, dimension) {
   });
 }
 
-/** A dimension is a manifest (which carries the clock key) plus its frames. */
+function deepFreeze(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  Object.freeze(value);
+  for (const item of Object.values(value)) deepFreeze(item, seen);
+  return value;
+}
+
+/**
+ * A dimension is a manifest (which carries the clock key) plus its frames.
+ * The frames are frozen through: a dimension that says it is inert must be.
+ */
 export function dimension(manifest, frames) {
   return Object.freeze({
     manifest: Object.freeze({ ...manifest }),
-    frames: Object.freeze([...frames]),
+    frames: deepFreeze([...frames].map((frame) => deepFreeze(frame))),
+  });
+}
+
+/** Canonical enumeration order — derived from the frames, never the array order. */
+function canonicalOrder(frames) {
+  return [...frames].sort((a, b) => {
+    const sa = a.stream_id ?? "";
+    const sb = b.stream_id ?? "";
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    if (a.seq !== b.seq) return (a.seq ?? 0) - (b.seq ?? 0);
+    const ha = a.frame_hash ?? "";
+    const hb = b.frame_hash ?? "";
+    return ha < hb ? -1 : ha > hb ? 1 : 0;
   });
 }
 
@@ -120,7 +213,7 @@ export function indexDimension(source, { lookups = DEFAULT_LOOKUPS } = {}) {
   const tables = new Map();
   for (const components of lookups) {
     const table = new Map();
-    for (const frame of source.frames) {
+    for (const frame of canonicalOrder(source.frames)) {
       const at = keyString(quantumKey(frame, source.manifest), components);
       const bucket = table.get(at);
       if (bucket) bucket.push(frame);
@@ -131,26 +224,33 @@ export function indexDimension(source, { lookups = DEFAULT_LOOKUPS } = {}) {
   return { source, tables };
 }
 
+// ── the drill ───────────────────────────────────────────────────────────────
+
 /**
  * Search for pairs. Mutates nothing, merges nothing, advances no lineage —
  * a search that cannot change anything can run constantly and be wrong every
  * time without costing more than the search.
+ *
+ * How far it goes is how long the person is willing to wait. The enumeration
+ * order is derived from the frames themselves, so a bigger budget returns a
+ * superset of a smaller one on any machine, whatever order the caller's array
+ * happened to be in.
  */
 export function drill(local, remote, {
   lookups = DEFAULT_LOOKUPS,
   budget = null,
+  fanoutCap = DEFAULT_FANOUT_CAP,
 } = {}) {
-  // How far a drill goes is how long the person is willing to wait. The search
-  // is enumerated in a fixed order, so a bigger budget returns a superset of a
-  // smaller one: waiting longer only ever adds paths, and never invalidates a
-  // pair already found. Whatever came back is usable immediately.
   const limit = Number.isFinite(budget?.pairs) ? budget.pairs : Infinity;
   const deadline = Number.isFinite(budget?.deadlineMs) ? budget.deadlineMs : null;
   const startedAt = deadline === null ? 0 : Date.now();
   const skip = Number.isFinite(budget?.resumeAfter) ? budget.resumeAfter : 0;
 
   const remoteIndex = indexDimension(remote, { lookups });
+  const localOrder = canonicalOrder(local.frames);
   const found = new Map();
+  const seen = new Set();
+  const capped = [];
   let searched = 0;
   let enumerated = 0;
   let exhausted = true;
@@ -158,23 +258,48 @@ export function drill(local, remote, {
   outer:
   for (const components of lookups) {
     const lane = remoteIndex.tables.get(keyString({}, components));
-    for (const here of local.frames) {
+    for (const here of localOrder) {
+      // The deadline governs the search, not only the hits — a long fruitless
+      // sweep is exactly the case a person is waiting through.
+      if (deadline !== null && Date.now() - startedAt > deadline) {
+        exhausted = false;
+        break outer;
+      }
       searched += 1;
       const at = keyString(quantumKey(here, local.manifest), components);
-      for (const there of lane.table.get(at) || []) {
+      const candidates = lane.table.get(at) || [];
+      if (candidates.length > fanoutCap) {
+        // A repeated payload matches every one of its twins. Say what was left
+        // unexamined rather than silently sampling it.
+        capped.push(Object.freeze({
+          key: at, matched: candidates.length, examined: fanoutCap,
+        }));
+        exhausted = false;
+      }
+      for (const there of candidates.slice(0, fanoutCap)) {
         // The same two frames reached by two lookups is one pair found two
         // ways, not two pairs. An index is a convenience; the key is the key.
         const identity = `${here.frame_hash}|${there.frame_hash}`;
-        const existing = found.get(identity);
-        if (existing) {
-          existing.via.push([...components]);
-          existing.keys.push(at);
+        if (seen.has(identity)) {
+          // Already enumerated on an earlier lane. If it is in this call's
+          // result, record the extra lane that found it; if it was skipped by
+          // the cursor, it stays skipped. Either way it is not a new position,
+          // or a resumed drill would hand back what it already returned.
+          const existing = found.get(identity);
+          if (existing) {
+            existing.via.push([...components]);
+            existing.keys.push(at);
+          }
           continue;
         }
+        seen.add(identity);
+        // The cursor counts enumerated candidate positions, so resuming yields
+        // the tail of the one-shot enumeration rather than repeating its head.
         enumerated += 1;
         if (enumerated <= skip) continue;
         if (found.size >= limit
           || (deadline !== null && Date.now() - startedAt > deadline)) {
+          enumerated -= 1;
           exhausted = false;
           break outer;
         }
@@ -204,10 +329,9 @@ export function drill(local, remote, {
     searched,
     hits: pairs.length,
     pairs: Object.freeze(pairs),
-    // Whether the search ran out of space to look, or out of the patience it
-    // was given. `resumeAfter` continues exactly where this one stopped.
     exhausted,
-    resumeAfter: skip + found.size,
+    resumeAfter: enumerated,
+    capped: Object.freeze(capped),
   });
 }
 
@@ -215,7 +339,7 @@ export function drill(local, remote, {
 export function pull(source, address) {
   const found = source.frames.find((frame) => frame.frame_hash === address.frame_hash);
   if (!found) throw new Error(`no frame at ${address.frame_hash} in this dimension`);
-  return found;
+  return deepFreeze(found);
 }
 
 /**
@@ -229,63 +353,101 @@ export function fixedPoints(pairs) {
   )));
 }
 
+// ── diagonals ───────────────────────────────────────────────────────────────
+
 /**
- * Contiguous spans of fixed points. A run starts where frames begin matching
- * and ends at the first contradiction; the length it reached is what it earned,
- * and the boundary is kept rather than discarded.
+ * The exact lane a point sits on. Two points share a diagonal when
+ * there.seq*d - n*here.seq is equal, in integers, with no division anywhere.
+ */
+function laneOf(point, ratio) {
+  return BigInt(point.there.seq) * ratio.d - ratio.n * BigInt(point.here.seq);
+}
+
+/**
+ * Contiguous spans of fixed points along each diagonal.
+ *
+ * Adjacency is symmetric: on a reduced ratio n/d, the next point along a
+ * diagonal is d local ticks and n of theirs away. That is why a five-frame
+ * match reports length five from either side — the old form assumed the local
+ * tick always advanced by one, which was true only for the coarser dimension.
  */
 export function runsFrom(points, local, remote) {
-  // A local tick can arrive with several candidate partners — a repeated
-  // payload matches every one of its twins, and two dimensions can line up
-  // along more than one path at once. Every one of those paths is a real
-  // diagonal and a real chance to merge, so all of them are returned rather
-  // than one being chosen and the rest discarded. A frame joined three ways is
-  // one frame with three ancestries.
-  const hereClock = Number(local.manifest?.clock_key) || 1;
-  const thereClock = Number(remote.manifest?.clock_key) || 1;
-  const ratio = thereClock / hereClock;
+  const ratio = ratioOf(parseClock(local.manifest?.clock_key), parseClock(remote.manifest?.clock_key));
+  if (!ratio) return Object.freeze([]);
 
   const substantive = new Set(
     local.frames.filter((frame) => isSubstantive(frame)).map((frame) => frame.frame_hash),
   );
+  const assertedBy = new Map(
+    local.frames.map((frame) => [frame.frame_hash, assertsOf(frame)]),
+  );
 
-  // A diagonal is a constant offset: their tick advances by the clock ratio for
-  // each of ours. Grouping by that offset separates the paths exactly.
-  const byOffset = new Map();
+  const byLane = new Map();
   for (const point of points) {
-    const offset = point.there.seq - ratio * point.here.seq;
-    const lane = offset.toFixed(9);
-    const bucket = byOffset.get(lane);
-    if (bucket) bucket.points.push(point);
-    else byOffset.set(lane, { offset, points: [point] });
+    const lane = laneOf(point, ratio).toString();
+    const bucket = byLane.get(lane);
+    if (bucket) bucket.push(point);
+    else byLane.set(lane, [point]);
   }
 
   const runs = [];
-  for (const { offset, points: lane } of byOffset.values()) {
-    const ordered = [...lane].sort((a, b) => (a.here.seq - b.here.seq)
+  for (const [lane, group] of byLane) {
+    const ordered = [...group].sort((a, b) => (a.here.seq - b.here.seq)
       || (a.here.frame_hash < b.here.frame_hash ? -1 : 1));
+    const stepHere = Number(ratio.d);
+    const stepThere = Number(ratio.n);
     let current = null;
 
     const close = (boundary) => {
       if (!current) return;
       runs.push(Object.freeze({
-        offset,
+        lane,
+        offset: Number(BigInt(lane)) / Number(ratio.d),
         startHere: current.startHere,
         startThere: current.startThere,
         endHere: current.endHere,
         endThere: current.endThere,
         length: current.points.length,
         substance: current.substance,
+        // What matched, not only how much — a stated proof obligation. Keys AND
+        // values, because "three frames asserted something" is not a record of
+        // what they asserted.
+        asserted: Object.freeze({ ...current.asserted }),
         points: Object.freeze(current.points),
         boundary: boundary ? Object.freeze(boundary) : null,
       }));
       current = null;
     };
 
+    const take = (point) => {
+      current.points.push(point);
+      current.endHere = point.here.seq;
+      current.endThere = point.there.seq;
+      if (substantive.has(point.here.frame_hash)) current.substance += 1;
+      Object.assign(current.asserted, assertedBy.get(point.here.frame_hash) || {});
+    };
+
+    // A local tick can have more than one partner on the same lane — two remote
+    // frames at the same tick with the same bytes. Both are real pairings, so
+    // the extras become their own runs rather than being dropped for arriving
+    // second. Every fixed point is a chance to merge.
+    const primary = [];
+    const alternates = [];
+    let lastTick = null;
     for (const point of ordered) {
-      if (current && point.here.seq === current.endHere) continue;
-      if (current && point.here.seq !== current.endHere + 1) {
-        close({ at: point.here.seq, reason: "the frames stopped matching" });
+      if (point.here.seq === lastTick) alternates.push(point);
+      else { primary.push(point); lastTick = point.here.seq; }
+    }
+
+    for (const point of primary) {
+      if (current && point.here.seq !== current.endHere + stepHere) {
+        // The boundary is the first tick at which the match stopped — the tick
+        // after the run's last matching one, not the next tick that matched.
+        close({
+          at: current.endHere + stepHere,
+          reason: "the frames stopped matching",
+          resumedAt: point.here.seq,
+        });
       }
       if (!current) {
         current = {
@@ -293,21 +455,52 @@ export function runsFrom(points, local, remote) {
           startThere: point.there.seq,
           endHere: point.here.seq,
           endThere: point.there.seq,
-          points: [point],
-          substance: substantive.has(point.here.frame_hash) ? 1 : 0,
+          points: [],
+          substance: 0,
+          asserted: Object.create(null),
         };
+        take(point);
         continue;
       }
-      current.points.push(point);
-      current.endHere = point.here.seq;
-      current.endThere = point.there.seq;
-      if (substantive.has(point.here.frame_hash)) current.substance += 1;
+      take(point);
     }
-    close(null);
+    // A run that simply reached the end of the frames still names where it
+    // stopped; recording null there loses the length it earned.
+    close(current ? null : null);
+
+    for (const point of alternates) {
+      runs.push(Object.freeze({
+        lane,
+        offset: Number(BigInt(lane)) / Number(ratio.d),
+        startHere: point.here.seq,
+        startThere: point.there.seq,
+        endHere: point.here.seq,
+        endThere: point.there.seq,
+        length: 1,
+        substance: substantive.has(point.here.frame_hash) ? 1 : 0,
+        asserted: Object.freeze({ ...(assertedBy.get(point.here.frame_hash) || {}) }),
+        points: Object.freeze([point]),
+        boundary: Object.freeze({
+          at: point.here.seq,
+          reason: "an alternative partner at a tick another run already used",
+          resumedAt: null,
+        }),
+      }));
+    }
+    if (runs.length && runs[runs.length - 1].boundary === null) {
+      const last = runs[runs.length - 1];
+      runs[runs.length - 1] = Object.freeze({
+        ...last,
+        boundary: Object.freeze({
+          at: last.endHere + stepHere,
+          reason: "no further matching frame",
+          resumedAt: null,
+        }),
+      });
+    }
+    void stepThere;
   }
 
-  // Longest first — a long run is the strongest evidence — then nearest
-  // alignment, then position, so the order is the same on every machine.
   return Object.freeze([...runs].sort((a, b) => (b.length - a.length)
     || (b.substance - a.substance)
     || (Math.abs(a.offset) - Math.abs(b.offset))
@@ -316,26 +509,33 @@ export function runsFrom(points, local, remote) {
 }
 
 /**
- * Register the two dimensions against each other. The clock keys relate by
- * ratio and a fixed point pins the phase, so placement is arithmetic. Without a
- * pin there is nothing to place against, and this refuses rather than guesses.
+ * Register the two dimensions against each other. The clock keys relate by an
+ * exact ratio and a fixed point pins the phase, so placement is arithmetic.
+ * Without a pin there is nothing to place against, and this refuses rather
+ * than guesses.
  */
 export function alignment(points, local, remote) {
-  const here = Number(local.manifest?.clock_key);
-  const there = Number(remote.manifest?.clock_key);
-  if (!Number.isFinite(here) || here <= 0 || !Number.isFinite(there) || there <= 0) {
-    return Object.freeze({ ok: false, reason: "both dimensions must declare a positive clock key" });
+  const here = parseClock(local.manifest?.clock_key);
+  const there = parseClock(remote.manifest?.clock_key);
+  if (!here || !there) {
+    return Object.freeze({
+      ok: false,
+      reason: "both dimensions must declare a clock key that is a positive number",
+    });
   }
   if (!points.length) {
     return Object.freeze({ ok: false, reason: "no fixed point: nothing pins the phase" });
   }
-  const ratio = there / here;
+  const ratio = ratioOf(here, there);
 
   const lanes = new Map();
   for (const point of points) {
-    const offset = point.there.seq - ratio * point.here.seq;
-    const lane = offset.toFixed(9);
-    const pin = Object.freeze({ here: point.here.seq, there: point.there.seq, offset });
+    const lane = laneOf(point, ratio).toString();
+    const pin = Object.freeze({
+      here: point.here.seq,
+      there: point.there.seq,
+      offset: Number(BigInt(lane)) / Number(ratio.d),
+    });
     const bucket = lanes.get(lane);
     if (bucket) bucket.push(pin);
     else lanes.set(lane, [pin]);
@@ -344,8 +544,9 @@ export function alignment(points, local, remote) {
   // Every lane is a path the two dimensions genuinely line up along. The one
   // with the most pins leads; the rest are alternates and can be merged along
   // too. More paths is more to assimilate, not ambiguity to resolve.
-  const ordered = [...lanes.values()]
-    .map((pins) => Object.freeze({
+  const ordered = [...lanes.entries()]
+    .map(([lane, pins]) => Object.freeze({
+      lane,
       offset: pins[0].offset,
       pins: Object.freeze([...pins].sort((a, b) => a.here - b.here)),
     }))
@@ -356,27 +557,31 @@ export function alignment(points, local, remote) {
   const primary = ordered[0];
   return Object.freeze({
     ok: true,
-    ratio,
+    ratio: Number(ratio.n) / Number(ratio.d),
+    exactRatio: Object.freeze({ n: ratio.n, d: ratio.d }),
+    lane: primary.lane,
     offset: primary.offset,
     pins: primary.pins,
     paths: Object.freeze(ordered),
-    // Pins that sit on another path. Kept under the old name because a caller
-    // that wanted one alignment still wants to know these exist.
     disagreeing: Object.freeze(ordered.slice(1).flatMap((path) => path.pins)),
   });
 }
 
-/** Where a local tick lands in the other dimension, by arithmetic. */
+/** Where a local tick lands in the other dimension, by exact arithmetic. */
 export function placeThere(align, hereSeq) {
   if (!align?.ok) throw new Error(`cannot place without an alignment: ${align?.reason}`);
-  return align.ratio * hereSeq + align.offset;
+  const { n, d } = align.exactRatio;
+  const lane = BigInt(align.lane);
+  return Number(n * BigInt(hereSeq) + lane) / Number(d);
 }
+
+// ── the line ────────────────────────────────────────────────────────────────
 
 /** A line is an ordered chain of frames plus its HEAD. */
 export function makeLine(frames) {
   const ordered = [...frames];
   return Object.freeze({
-    frames: Object.freeze(ordered),
+    frames: deepFreeze(ordered),
     head: ordered.length ? ordered[ordered.length - 1].frame_hash : null,
   });
 }
@@ -388,28 +593,72 @@ function descendantsOf(line, fromFrameHash) {
 }
 
 /**
+ * The facts previous FOLDS established on this line, read from the join frames
+ * they left behind. Read from the line rather than accumulated per call, so
+ * folding a set of candidates in one call and folding it across several calls
+ * reach the same verdict — how long someone waited must never change what is
+ * true.
+ *
+ * Deliberately NOT every assert on the line. An ordinary frame asserting
+ * `phase: "morning"` and a later one asserting `phase: "noon"` is time passing,
+ * not a contradiction, and a rule that could not tell the difference would
+ * refuse every frame that refines an earlier moment.
+ */
+export function established(line) {
+  const facts = Object.create(null);
+  for (const frame of line.frames) {
+    if (frame?.kind !== "qqdrill.join") continue;
+    for (const [key, value] of Object.entries(assertsOf(frame))) facts[key] = value;
+  }
+  return facts;
+}
+
+/**
  * Backward fidelity: a frame is assimilated only if it contradicts nothing
  * downstream. A descendant that requires a key the incoming frame asserts
  * differently would be silently invalidated by the merge, so the frame is
  * refused — whole. A frame with pieces removed existed in neither dimension,
  * and the fold is not entitled to invent one.
  */
-export function compatibility(incoming, line, { from = null } = {}) {
+export function compatibility(incoming, line, { from = null, facts = null } = {}) {
   const asserts = assertsOf(incoming);
   const contradicts = [];
+
   for (const descendant of descendantsOf(line, from)) {
     const requires = requiresOf(descendant);
-    for (const [key, needed] of Object.entries(requires)) {
-      if (key in asserts && !equalValues(asserts[key], needed)) {
+    for (const key of Object.keys(requires)) {
+      if (!Object.hasOwn(asserts, key)) continue;
+      const verdict = equalValues(asserts[key], requires[key]);
+      if (!verdict.ok) {
+        contradicts.push(Object.freeze({
+          descendant: descendant.frame_hash, key, unencodable: true, reason: verdict.reason,
+        }));
+      } else if (!verdict.equal) {
         contradicts.push(Object.freeze({
           descendant: descendant.frame_hash,
           key,
-          required: needed,
+          required: requires[key],
           asserted: asserts[key],
         }));
       }
     }
   }
+
+  // A frame that asserts against what a fold already settled is refused however
+  // late it arrives, which is what makes a split fold equal a single one.
+  const settled = facts ?? established(line);
+  for (const key of Object.keys(asserts)) {
+    if (!Object.hasOwn(settled, key)) continue;
+    const verdict = equalValues(asserts[key], settled[key]);
+    if (!verdict.ok) {
+      contradicts.push(Object.freeze({ key, unencodable: true, reason: verdict.reason }));
+    } else if (!verdict.equal) {
+      contradicts.push(Object.freeze({
+        establishedOnLine: true, key, required: settled[key], asserted: asserts[key],
+      }));
+    }
+  }
+
   return contradicts.length
     ? Object.freeze({ ok: false, contradicts: Object.freeze(contradicts) })
     : Object.freeze({ ok: true, contradicts: Object.freeze([]) });
@@ -425,84 +674,134 @@ function foldOrder(left, right) {
 /**
  * Fold compatible incoming frames into the local line and continue from the
  * joined frame. Append-only: nothing is overwritten, the inputs are untouched,
- * and the join records both parents — `prev` the local HEAD, `prev_wave` the
- * frame it joined with.
+ * and the local chain gains exactly one frame — the join, which names by hash
+ * every frame it assimilated.
+ *
+ * The join is verified before it is returned. Minting a frame the frame spec
+ * rejects would break the one claim this module makes about RAPP/1.
  */
 export function assimilate(line, incoming, {
   from = null,
   streamId = null,
   utc = null,
+  fidelity = null,
 } = {}) {
   const candidates = [...incoming].sort(foldOrder);
   const merged = [];
   const refused = [];
-  const established = new Map();
+  // What this fold has settled so far, seeded with what earlier folds settled.
+  // A candidate meets the same facts whether it arrives in this call or a later
+  // one, which is what makes patience irrelevant to the verdict.
+  //
+  // Null prototype, deliberately: Object.assign writes through [[Set]], so on an
+  // ordinary object a key named __proto__ would hit the prototype setter and
+  // change the object's prototype instead of becoming data. An asserted key is
+  // data whatever it is called.
+  const foldFacts = Object.assign(Object.create(null), established(line));
+  let working = line;
 
   for (const frame of candidates) {
-    const verdict = compatibility(frame, line, { from });
+    const verdict = compatibility(frame, working, { from, facts: foldFacts });
     if (!verdict.ok) {
       refused.push(Object.freeze({ frame: frame.frame_hash, contradicts: verdict.contradicts }));
       continue;
     }
-    // Backward fidelity applies inside the fold too: a later candidate that
-    // contradicts what an earlier one already established is refused, so the
-    // outcome never depends on which frame happened to be folded last.
-    const asserts = assertsOf(frame);
-    const clashes = Object.entries(asserts)
-      .filter(([key, value]) => established.has(key) && !equalValues(established.get(key), value))
-      .map(([key, value]) => Object.freeze({
-        withinFold: true,
-        key,
-        established: established.get(key),
-        asserted: value,
-      }));
-    if (clashes.length) {
-      refused.push(Object.freeze({ frame: frame.frame_hash, contradicts: Object.freeze(clashes) }));
-      continue;
-    }
-    for (const [key, value] of Object.entries(asserts)) established.set(key, value);
     merged.push(frame);
+    for (const [key, value] of Object.entries(assertsOf(frame))) foldFacts[key] = value;
+    working = Object.freeze({ frames: Object.freeze([...working.frames, frame]), head: frame.frame_hash });
   }
 
   if (!merged.length) {
     return Object.freeze({
-      joined: null,
-      head: line.head,
-      line,
-      merged: Object.freeze([]),
+      joined: null, head: line.head, line, merged: Object.freeze([]),
       refused: Object.freeze(refused),
     });
   }
 
   const localHead = line.frames.length ? line.frames[line.frames.length - 1] : null;
   const last = merged[merged.length - 1];
-  const joinUtc = utc || (localHead && localHead.utc > last.utc ? localHead.utc : last.utc);
-  const joined = buildFrame({
-    kind: "qqdrill.join",
-    streamId: streamId || localHead?.stream_id || last.stream_id,
-    seq: (localHead?.seq ?? -1) + 1,
-    utc: joinUtc,
-    // The join carries forward what it assimilated, so everything downstream of
-    // it sees those facts. prev_wave stays null: RAPP/1 reserves it for swarms.
-    payload: {
-      protocol: PROTOCOL,
-      asserts: Object.fromEntries(established),
-      assimilated: merged.map((frame) => frame.frame_hash),
-      refused: refused.map((entry) => entry.frame),
-    },
-    prev: localHead ? localHead.payload_hash : null,
-    prevWave: null,
-  });
+  const streamOfRecord = streamId || localHead?.stream_id || last.stream_id;
 
-  // The local chain gains exactly one frame. The assimilated frames belong to
-  // the dimension that produced them and are named by hash in the join, not
-  // spliced into a chain they were never part of.
-  const frames = Object.freeze([...line.frames, joined]);
+  if (typeof streamOfRecord === "string" && streamOfRecord.startsWith("net:")) {
+    // RAPP/1 requires prev_wave to equal the swarm head and requires a
+    // signature on a swarm frame. Neither is this module's to mint, so it
+    // refuses rather than producing a frame the spec rejects.
+    return Object.freeze({
+      joined: null,
+      head: line.head,
+      line,
+      merged: Object.freeze([]),
+      refused: Object.freeze([
+        ...refused,
+        ...merged.map((frame) => Object.freeze({
+          frame: frame.frame_hash,
+          contradicts: Object.freeze([Object.freeze({
+            key: "stream_id",
+            reason: "a swarm stream needs a signed join with prev_wave at the swarm head",
+          })]),
+        })),
+      ]),
+    });
+  }
+
+  const facts = foldFacts;
+  const joinUtc = utc || (localHead && localHead.utc > last.utc ? localHead.utc : last.utc);
+
+  let joined;
+  try {
+    joined = buildFrame({
+      kind: "qqdrill.join",
+      streamId: streamOfRecord,
+      seq: (localHead?.seq ?? -1) + 1,
+      utc: joinUtc,
+      payload: {
+        protocol: PROTOCOL,
+        // Object.fromEntries defines own properties, so an asserted __proto__
+        // travels in the join as data rather than mutating the payload.
+        asserts: Object.fromEntries(Object.entries(facts)),
+        assimilated: merged.map((frame) => frame.frame_hash),
+        refused: refused.map((entry) => entry.frame),
+        // Fidelity travels with the join, so the lineage records which spans
+        // were determined and which were not, rather than one flat number.
+        fidelity: fidelity
+          ? fidelity.map((run) => ({
+            startHere: run.startHere, endHere: run.endHere,
+            length: run.length, substance: run.substance,
+          }))
+          : [],
+      },
+      prev: localHead ? localHead.payload_hash : null,
+      prevWave: null,
+    });
+  } catch (error) {
+    // Every frame that was going to be merged is now refused, and each is named.
+    // A frame that is neither merged nor refused has silently vanished.
+    return Object.freeze({
+      joined: null, head: line.head, line, merged: Object.freeze([]),
+      refused: Object.freeze([...refused, ...merged.map((frame) => Object.freeze({
+        frame: frame.frame_hash,
+        contradicts: Object.freeze([Object.freeze({ key: "payload", reason: error.message })]),
+      }))]),
+    });
+  }
+
+  const [valid, , why] = verifyFrame(joined, { head: localHead, streamIdOfRecord: streamOfRecord });
+  if (!valid) {
+    return Object.freeze({
+      joined: null, head: line.head, line, merged: Object.freeze([]),
+      refused: Object.freeze([...refused, ...merged.map((frame) => Object.freeze({
+        frame: frame.frame_hash,
+        contradicts: Object.freeze([Object.freeze({ key: "join", reason: `RAPP/1 refused the join: ${why}` })]),
+      }))]),
+    });
+  }
+
+  const frames = deepFreeze([...line.frames, joined]);
   return Object.freeze({
-    joined,
+    joined: deepFreeze(joined),
     head: joined.frame_hash,
     line: Object.freeze({ frames, head: joined.frame_hash }),
-    merged: Object.freeze(merged),
+    merged: Object.freeze(merged.map((frame) => deepFreeze(frame))),
     refused: Object.freeze(refused),
   });
 }
@@ -511,14 +810,16 @@ export function assimilate(line, incoming, {
  * Retroactive zoom. A dimension at a finer clock holds more frames across the
  * same span of your time; assimilating them raises the resolution of a past you
  * have already lived through. Retroactive, not revisionist: the finer frames
- * refine an interval and may not contradict it, and a span with no fixed point
- * in it is guesswork and is refused as such.
+ * refine an interval, may contradict neither the frame they refine nor anything
+ * downstream of it, and a span with no fixed point in it is guesswork and is
+ * refused as such.
  */
 export function zoom(span, finer, align, line) {
   if (!align?.ok) {
     return Object.freeze({ ok: false, reason: align?.reason || "no alignment" });
   }
-  if (!(align.ratio > 1)) {
+  const { n, d } = align.exactRatio;
+  if (!(n > d)) {
     return Object.freeze({ ok: false, reason: "the other dimension is not running a finer clock" });
   }
   const pinned = align.pins.some((pin) => pin.here >= span.start && pin.here <= span.end);
@@ -526,26 +827,51 @@ export function zoom(span, finer, align, line) {
     return Object.freeze({ ok: false, reason: "no fixed point inside the span: placement would be guesswork" });
   }
 
+  const lane = BigInt(align.lane);
   const coarse = line.frames.filter((frame) => frame.seq >= span.start && frame.seq <= span.end);
   const refined = [];
   const refused = [];
 
   for (const frame of [...finer].sort(foldOrder)) {
-    const here = (frame.seq - align.offset) / align.ratio;
-    if (here < span.start || here > span.end) continue;
-    const covering = coarse.find((candidate) => Math.floor(here) === candidate.seq)
-      || coarse[coarse.length - 1];
-    const contradicts = [];
+    // lane = there*d - n*here, so here = (there*d - lane) / n, exactly.
+    // Floor by integer division so a placement never depends on a float's last bit.
+    const num = BigInt(frame.seq) * d - lane;
+    if (num < BigInt(span.start) * n || num > BigInt(span.end) * n) continue;
+    let whole = num / n;
+    if (num % n !== 0n && num < 0n) whole -= 1n;
+    const at = Number(num) / Number(n);
+    const covering = coarse.find((candidate) => BigInt(candidate.seq) === whole);
+    if (!covering) {
+      // Attributing a frame to an interval it does not sit in is how a real
+      // contradiction slips through. Refuse instead.
+      refused.push(Object.freeze({
+        frame: frame.frame_hash, at,
+        contradicts: Object.freeze([Object.freeze({
+          key: "placement", reason: "lands outside every coarse frame in the span",
+        })]),
+      }));
+      continue;
+    }
+
     const asserts = assertsOf(frame);
+    const contradicts = [];
     for (const [key, value] of Object.entries(assertsOf(covering))) {
-      if (key in asserts && !equalValues(asserts[key], value)) {
+      if (!Object.hasOwn(asserts, key)) continue;
+      const verdict = equalValues(asserts[key], value);
+      if (!verdict.ok) {
+        contradicts.push(Object.freeze({ refines: covering.frame_hash, key, unencodable: true, reason: verdict.reason }));
+      } else if (!verdict.equal) {
         contradicts.push(Object.freeze({ refines: covering.frame_hash, key, coarse: value, finer: asserts[key] }));
       }
     }
+    // Backward fidelity is about the whole downstream line, not one frame.
+    const downstream = compatibility(frame, line, { from: covering.frame_hash });
+    if (!downstream.ok) contradicts.push(...downstream.contradicts);
+
     if (contradicts.length) {
-      refused.push(Object.freeze({ frame: frame.frame_hash, contradicts: Object.freeze(contradicts) }));
+      refused.push(Object.freeze({ frame: frame.frame_hash, at, contradicts: Object.freeze(contradicts) }));
     } else {
-      refined.push(Object.freeze({ frame, at: here, refines: covering ? covering.frame_hash : null }));
+      refined.push(Object.freeze({ frame: deepFreeze(frame), at, refines: covering.frame_hash }));
     }
   }
 
@@ -558,4 +884,6 @@ export function zoom(span, finer, align, line) {
   });
 }
 
-export const qqdrillInternals = Object.freeze({ foldOrder, descendantsOf, addressOf, equalValues });
+export const qqdrillInternals = Object.freeze({
+  foldOrder, descendantsOf, addressOf, equalValues, parseClock, ratioOf, laneOf, canonicalOrder,
+});

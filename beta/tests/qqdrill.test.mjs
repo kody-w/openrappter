@@ -427,7 +427,15 @@ test("the coordinate is computed about frames, never stored in them", () => {
     assert.equal(component in frame, false, `RAPP/1 frames gain no ${component} field`);
   }
   const key = quantumKey(frame, { clock_key: 7 });
-  assert.equal(key.clock, 7, "the clock key comes from the dimension manifest");
+  // The coordinate carries the clock as a canonical exact rational, not the raw
+  // manifest value. That is what makes clock_key 7 and clock_key "7" one cadence
+  // rather than two disjoint coordinates that alignment() would still call ratio 1.
+  assert.equal(key.clock, "7/1", "the clock key comes from the dimension manifest, normalised");
+  assert.equal(
+    quantumKey(frame, { clock_key: "7" }).clock,
+    key.clock,
+    "a clock key written as a string is the same cadence",
+  );
   assert.equal(key.tick, frame.seq);
   assert.equal(key.digest, frame.payload_hash);
 });

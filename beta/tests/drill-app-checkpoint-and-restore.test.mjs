@@ -573,3 +573,44 @@ test("a fold from a URL checkpoints first, and is just as recoverable", async ()
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+// Found 2026-08-21 by driving the published beta page in a real browser: fold,
+// then fold again against a commons with nothing new, then restore — and the
+// line came back to the state AFTER the first fold rather than before it. The
+// second fold had taken a checkpoint of the already-folded line and become the
+// most recent one, so the no-op quietly consumed the recovery point the person
+// was relying on. A fold that changes nothing must cost nothing.
+test("a fold that merges nothing does not spend the way back", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "drill-noop-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createStore(root);
+
+  const local = chain([{ asserts: { sky: "clear" } }]);
+  fs.mkdirSync(path.dirname(store.linePath), { recursive: true });
+  fs.writeFileSync(store.linePath, local.map((f) => JSON.stringify(f)).join("\n") + "\n", "utf8");
+  const beforeAnyFold = readLine(store).head;
+
+  const doc = {
+    manifest: { dimension_id: "commons", clock_key: 1 },
+    frames: chain([{ asserts: { sky: "clear" } }, { asserts: { wind: 5 } }], { ran: 30 }),
+  };
+  const source = path.join(root, "commons.json");
+  fs.writeFileSync(source, JSON.stringify(doc), "utf8");
+
+  await fold(store, source);
+  const afterRealFold = readLine(store).head;
+  assert.notEqual(afterRealFold, beforeAnyFold, "the first fold changed the line");
+
+  const second = await fold(store, source);
+  assert.equal(second.merged.length, 0, "the second fold has nothing new to absorb");
+  assert.equal(second.checkpoint, null, "and reports that it took no checkpoint");
+
+  const back = restore(store);
+  assert.equal(back.ok, true);
+  assert.equal(
+    back.head,
+    beforeAnyFold,
+    "restore must return to the state before the fold that actually changed something, "
+      + "not to the state a no-op fold happened to photograph",
+  );
+});

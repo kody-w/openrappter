@@ -18,7 +18,7 @@
 //   scan changes nothing — it is safe to run constantly
 //   fold checkpoints first — there is no un-merge, so there must be a way back
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, copyFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -344,11 +344,18 @@ export async function fold(store, source) {
 
   if (result.joined) {
     writeJsonl(store.linePath, result.line.frames);
+  } else {
+    // Nothing merged, so nothing was written and there is nothing to go back
+    // from. Keeping the checkpoint would burn the way back: a person who folds,
+    // then folds again against a commons with nothing new, then restores would
+    // land on the state AFTER the first fold rather than before it — the
+    // no-op quietly consuming the recovery point they were counting on.
+    rmSync(path.join(store.checkpointDir, taken), { force: true });
   }
 
   record(store, "fold", {
     source: loaded.source,
-    checkpoint: taken,
+    checkpoint: result.joined ? taken : null,
     offered: good.length,
     merged: result.merged.map((frame) => frame.frame_hash),
     refused: result.refused.map((entry) => ({
@@ -373,7 +380,7 @@ export async function fold(store, source) {
 
   return Object.freeze({
     source: loaded.source,
-    checkpoint: taken,
+    checkpoint: result.joined ? taken : null,
     merged: result.merged,
     refused,
     rejected: Object.freeze(rejected),

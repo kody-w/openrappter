@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>openrappter beta — the drill, running here</title>
+<meta name="description" content="Find work another machine already did, check it cannot invalidate anything you built, and absorb it. Running in your browser, on the code that ships.">
+<script type="importmap">
+{ "imports": { "node:crypto": "./lib/node-crypto.mjs", "fflate": "./lib/fflate.mjs" } }
+</script>
+<style>
+  :root{
+    --ground:#0f1214; --panel:#161b1e; --edge:#242c31; --edge-2:#333d44;
+    --ink:#e8edee; --muted:#98a5a9; --faint:#6d797e;
+    --accent:#4fa79c; --ok:#5fc27e; --no:#e8807a; --warn:#e0a544;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font:400 15px/1.65 var(--sans);
+    font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px 90px}
+  header{padding:46px 0 24px;border-bottom:2px solid var(--edge-2)}
+  .eyebrow{font:500 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+  h1{margin:12px 0 8px;font:600 31px/1.15 var(--sans);letter-spacing:-.02em}
+  .lede{margin:0;color:var(--muted);max-width:62ch}
+  .real{margin-top:16px;border-left:2px solid var(--accent);background:#13201f;
+    padding:11px 15px;font-size:14px;color:var(--muted)}
+  .real b{color:var(--ink);font-weight:600}
+  h2{margin:34px 0 6px;font:600 18px/1.3 var(--sans)}
+  h2 .n{color:var(--accent);font:500 12px/1 var(--mono);margin-right:8px}
+  .sub{margin:0 0 14px;color:var(--muted);max-width:64ch;font-size:14.5px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.cols{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--edge);border-radius:3px;padding:14px 16px}
+  .card h3{margin:0 0 8px;font:500 11px/1 var(--mono);letter-spacing:.1em;
+    text-transform:uppercase;color:var(--faint)}
+  pre{margin:0;font:400 12px/1.6 var(--mono);white-space:pre-wrap;word-break:break-word;
+    color:var(--muted);max-height:230px;overflow:auto}
+  .row{display:flex;gap:9px;flex-wrap:wrap;margin:16px 0 0}
+  button{font:500 13px/1 var(--sans);padding:10px 15px;border-radius:3px;cursor:pointer;
+    background:var(--panel);color:var(--ink);border:1px solid var(--edge-2);transition:.12s}
+  button:hover:not(:disabled){border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08100f;font-weight:600}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  #out{margin-top:16px;background:#0b0e10;border:1px solid var(--edge);border-radius:3px;
+    padding:15px 17px;font:400 12.5px/1.7 var(--mono);white-space:pre-wrap;
+    word-break:break-word;min-height:150px;color:var(--muted)}
+  .ok{color:var(--ok)} .no{color:var(--no)} .wa{color:var(--warn)}
+  .hi{color:var(--ink);font-weight:600}
+  .dim{color:var(--faint)}
+  table{border-collapse:collapse;width:100%;margin:10px 0 0;font-size:13.5px}
+  th{text-align:left;font:500 10.5px/1.4 var(--mono);letter-spacing:.09em;text-transform:uppercase;
+    color:var(--faint);padding:7px 10px;border-bottom:1px solid var(--edge-2)}
+  td{padding:8px 10px;border-bottom:1px solid var(--edge);vertical-align:top;color:var(--muted)}
+  td.k{color:var(--ink);font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+  footer{margin-top:44px;padding-top:22px;border-top:1px solid var(--edge);
+    color:var(--faint);font:400 12.5px/1.7 var(--mono)}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">openrappter · v3 beta</div>
+  <h1>The drill, running here</h1>
+  <p class="lede">Machines normally redo work other machines already did. This finds work
+  someone else already finished, checks it cannot invalidate anything you built on, and
+  absorbs it. It does not create capability — it stops capability that already exists from
+  being lost.</p>
+  <div class="real"><b>This page runs the code that ships.</b> Not a demonstration written to
+  look like it. <code>qqdrill.mjs</code> and the RAPP/1 frame spec are loaded unmodified from
+  the repository; only SHA-256 is supplied by the browser, because the protocol hashes
+  synchronously and Web Crypto does not. A test fails the build if this copy ever drifts from
+  the shipped one.</div>
+</header>
+
+<h2><span class="n">01</span>What the two sides hold</h2>
+<p class="sub">Your line is what this device lived through. The commons is the same situation
+as it ran somewhere else — the first ticks identical, then it kept going and you did not.</p>
+<div class="cols">
+  <div class="card"><h3>Your line</h3><pre id="mine"></pre></div>
+  <div class="card"><h3>The commons</h3><pre id="theirs"></pre></div>
+</div>
+
+<h2><span class="n">02</span>Try it</h2>
+<p class="sub">Scan changes nothing and is safe to press as often as you like. Fold takes a
+checkpoint first, then absorbs only what cannot invalidate anything already on your line.</p>
+<div class="row">
+  <button class="primary" id="scan">Scan</button>
+  <button id="fold">Fold</button>
+  <button id="poison">Add a frame that contradicts you</button>
+  <button id="restore">Restore</button>
+  <button id="reset">Start over</button>
+</div>
+<div id="out">Press <b>Scan</b>.</div>
+
+<h2><span class="n">03</span>What just happened</h2>
+<table>
+  <tr><th>Term</th><th>What it means</th></tr>
+  <tr><td class="k">fixed point</td><td>The same bytes reached along a different history. It pins the two lines against each other, so everything around it lines up by arithmetic rather than guesswork.</td></tr>
+  <tr><td class="k">run</td><td>How many ticks matched in a row. Longer is stronger evidence — one match can be coincidence, six cannot.</td></tr>
+  <tr><td class="k">merged</td><td>Absorbed. It could not invalidate anything you had already built on.</td></tr>
+  <tr><td class="k">refused</td><td>Turned away, with the reason. Something on your line declared it depended on a fact this frame contradicts.</td></tr>
+  <tr><td class="k">checkpoint</td><td>A copy taken before the fold. There is no un-merge, so there is a way back.</td></tr>
+</table>
+
+<footer>
+  openrappter v3 · Apache-2.0 · <a href="https://github.com/kody-w/openrappter">github.com/kody-w/openrappter</a><br>
+  Install: <code>curl -fsSL https://raw.githubusercontent.com/kody-w/openrappter/main/beta/install.sh | bash</code>
+</footer>
+</div>
+
+<script type="module">
+import { buildFrame } from "./lib/qqdrill-deps.mjs";
+import { alignment, assimilate, dimension, drill, fixedPoints, makeLine, runsFrom }
+  from "./lib/qqdrill.mjs";
+
+const out = document.getElementById("out");
+const show = (html) => { out.innerHTML = html; };
+const short = (h) => (h ? String(h).slice(0, 8) : "—");
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+const STREAM = "rappid:@rapp/weather:" + "a".repeat(64);
+const at = (s) => `2026-08-21T12:${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}.000Z`;
+
+function chain(entries, ran) {
+  const frames = [];
+  let prev = null;
+  entries.forEach((entry, i) => {
+    const frame = buildFrame({
+      kind: "qqdrill.tick", streamId: STREAM, seq: i, utc: at(ran + i),
+      payload: { asserts: entry.asserts, requires: entry.requires || {} },
+      prev, prevWave: null,
+    });
+    frames.push(frame);
+    prev = frame.payload_hash;
+  });
+  return frames;
+}
+
+// Your line depends on the sky being clear — that dependency is what lets a fold
+// refuse something later, and it is stated in the data rather than assumed.
+const MINE = [
+  { asserts: { sky: "clear" } },
+  { asserts: { wind: 5 } },
+  { asserts: { plan: "picnic" }, requires: { sky: "clear" } },
+];
+const THEIRS = [
+  { asserts: { sky: "clear" } },
+  { asserts: { wind: 5 } },
+  { asserts: { plan: "picnic" }, requires: { sky: "clear" } },
+  { asserts: { temp: 20 } },
+  { asserts: { pressure: 1014 } },
+];
+
+let line, commonsEntries, checkpoint = null;
+
+function render() {
+  const asText = (frames) => frames
+    .map((f) => `${String(f.seq).padStart(2)}  ${short(f.frame_hash)}  ${JSON.stringify(f.payload.asserts)}`
+      + (Object.keys(f.payload.requires || {}).length ? `  needs ${JSON.stringify(f.payload.requires)}` : ""))
+    .join("\n");
+  document.getElementById("mine").textContent = asText(line.frames);
+  document.getElementById("theirs").textContent = asText(chain(commonsEntries, 600));
+}
+
+function reset() {
+  line = makeLine(chain(MINE, 0));
+  commonsEntries = [...THEIRS];
+  checkpoint = null;
+  render();
+  show("Press <b>Scan</b>.");
+}
+
+const here = () => dimension({ dimension_id: "you", clock_key: 1 }, line.frames);
+const there = () => dimension({ dimension_id: "commons", clock_key: 1 }, chain(commonsEntries, 600));
+
+document.getElementById("scan").onclick = () => {
+  const a = here(); const b = there();
+  const found = drill(a, b);
+  const pins = fixedPoints(found.pairs);
+  const runs = runsFrom(pins, a, b);
+  const align = alignment(pins, a, b);
+  show(
+    `<span class="hi">searched</span> ${found.searched} coordinates, found ${found.pairs.length} pair(s)\n` +
+    `<span class="hi">fixed points</span> ${pins.length} <span class="dim">— same bytes, different history</span>\n` +
+    runs.map((r) => `<span class="hi">run</span> ticks ${r.startHere}–${r.endHere}: length ${r.length}, substance ${r.substance}`).join("\n") +
+    (runs.length ? "\n" : "") +
+    (align.ok
+      ? `<span class="hi">alignment</span> ratio ${align.ratio}, ${align.pins.length} pin(s) — the two clocks are locked together\n`
+      : `<span class="wa">alignment</span> ${esc(align.reason)}\n`) +
+    `\n<span class="dim">Nothing changed. Your line is byte-for-byte what it was.</span>`
+  );
+};
+
+document.getElementById("fold").onclick = () => {
+  const before = line;                     // captured BEFORE anything is written
+  const held = new Set();
+  for (const f of line.frames) {
+    held.add(f.frame_hash);
+    for (const a of f.payload?.assimilated || []) held.add(a);
+  }
+  const incoming = chain(commonsEntries, 600).filter((f) => !held.has(f.frame_hash));
+  const result = assimilate(line, incoming);
+  // Only spend the way back if something actually changed. A fold that merges
+  // nothing has nothing to go back from, and overwriting the checkpoint would
+  // quietly consume the recovery point from the fold that DID change something.
+  if (result.joined) { checkpoint = before; line = result.line; }
+  render();
+  const merged = result.merged.map((f) => `  <span class="ok">merged </span> ${short(f.frame_hash)} ${esc(JSON.stringify(f.payload.asserts))}`).join("\n");
+  const refused = result.refused.map((r) => {
+    const w = r.contradicts?.[0] || {};
+    const why = w.reason || `${w.key}: your line needs ${JSON.stringify(w.required)}, this offers ${JSON.stringify(w.asserted)}`;
+    return `  <span class="no">refused</span> ${short(r.frame)} <span class="dim">${esc(why)}</span>`;
+  }).join("\n");
+  show(
+    (result.joined
+      ? `<span class="dim">checkpoint taken before anything was written</span>\n\n`
+      : `<span class="dim">no checkpoint needed — nothing was written</span>\n\n`) +
+    (merged || `  <span class="dim">nothing new to absorb</span>`) +
+    (refused ? "\n" + refused : "") +
+    `\n\n<span class="hi">head</span> ${short(result.head)}` +
+    (refused ? `\n\n<span class="dim">A refusal is a result. Your line was protected, not broken.</span>` : "")
+  );
+};
+
+document.getElementById("poison").onclick = () => {
+  if (commonsEntries.some((e) => e.asserts.sky === "storm")) {
+    show(`<span class="wa">already added</span> — press <b>Fold</b> to see it refused.`);
+    return;
+  }
+  commonsEntries = [...commonsEntries, { asserts: { sky: "storm" } }];
+  render();
+  show(
+    `Added a commons frame asserting <span class="hi">sky: storm</span>.\n\n` +
+    `Your line's picnic frame declared it depends on <span class="hi">sky: clear</span>.\n` +
+    `Press <b>Fold</b> — everything else still lands, and this one is turned away by name.`
+  );
+};
+
+document.getElementById("restore").onclick = () => {
+  if (!checkpoint) { show(`<span class="wa">nothing to restore</span> — no fold has happened yet.`); return; }
+  line = checkpoint;
+  checkpoint = null;
+  render();
+  show(
+    `<span class="ok">restored</span> to the checkpoint\n<span class="hi">head</span> ${short(line.head)}\n\n` +
+    `<span class="dim">Nothing was unwritten. An earlier generation was elected as live, and the ` +
+    `restore is itself part of the record — that is why there can be no un-merge and still a way back.</span>`
+  );
+};
+
+document.getElementById("reset").onclick = reset;
+reset();
+</script>
+</body>
+</html>

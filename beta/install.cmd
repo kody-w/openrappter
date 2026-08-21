@@ -11,10 +11,19 @@ set "REPO_COMMIT="
 set "RELEASE_TAG="
 set "RUNTIME_VERSION_URL="
 set "NODE_VERSION=24.19.0"
-set "BOOTSTRAP_URL=https://raw.githubusercontent.com/kody-w/openrappter/main/install.ps1"
+REM The bootstrap is the KERNEL's installer, so it follows KERNEL_REPO_URL and
+REM must not be repointed along with the Frontier. Repointing it at a repository
+REM that ships only beta/ downloads that repository's own unrelated installer.
+set "BOOTSTRAP_URL=https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/install.ps1"
 
 if defined BRAINSTEM_BETA_HOME set "BETA_HOME=%BRAINSTEM_BETA_HOME%"
 if defined BRAINSTEM_BETA_REPO_URL set "REPO_URL=%BRAINSTEM_BETA_REPO_URL%"
+REM The kernel's home, which is not necessarily the Frontier's home. Defaults to
+REM REPO_URL so existing forks are unaffected; a downstream that ships only beta/
+REM sets this to a repository that actually hosts the kernel.
+REM This distribution ships only the Frontier, so the kernel comes from upstream.
+set "KERNEL_REPO_URL=https://github.com/microsoft/aibast-agents-library.git"
+if defined BRAINSTEM_BETA_KERNEL_REPO_URL set "KERNEL_REPO_URL=%BRAINSTEM_BETA_KERNEL_REPO_URL%"
 if defined BRAINSTEM_BETA_REF set "REPO_REF=%BRAINSTEM_BETA_REF%"
 set "UPDATE_REF=%REPO_REF%"
 if defined BRAINSTEM_BETA_UPDATE_REF set "UPDATE_REF=%BRAINSTEM_BETA_UPDATE_REF%"
@@ -60,10 +69,10 @@ set "BOOTSTRAP=%TEMP%\rapp-brainstem-bootstrap-%RANDOM%.ps1"
 echo [..] Preparing the shared global Brainstem...
 curl.exe -fL --progress-bar "%BOOTSTRAP_URL%" -o "%BOOTSTRAP%"
 if errorlevel 1 goto :fail
-if /i not "%REPO_URL%"=="https://github.com/kody-w/openrappter.git" (
+if /i not "%KERNEL_REPO_URL%"=="https://github.com/microsoft/aibast-agents-library.git" (
   set "GIT_CONFIG_COUNT=1"
-  set "GIT_CONFIG_KEY_0=url.%REPO_URL%.insteadOf"
-  set "GIT_CONFIG_VALUE_0=https://github.com/kody-w/openrappter.git"
+  set "GIT_CONFIG_KEY_0=url.%KERNEL_REPO_URL%.insteadOf"
+  set "GIT_CONFIG_VALUE_0=https://github.com/microsoft/aibast-agents-library.git"
 )
 if defined RELEASE_TAG (
   set "BRAINSTEM_REPO_URL=%REPO_URL%"

@@ -9,6 +9,15 @@ BRAINSTEM_HOME="${BRAINSTEM_HOME:-$HOME/.brainstem}"
 BETA_HOME="${BRAINSTEM_BETA_HOME:-$BRAINSTEM_HOME/beta-launcher}"
 BETA_SOURCE="$BETA_HOME/src"
 REPO_URL="${BRAINSTEM_BETA_REPO_URL:-https://github.com/kody-w/openrappter.git}"
+# Where the Brainstem KERNEL comes from, which is not necessarily where the
+# Frontier comes from. They coincide in this distribution and do not in a
+# downstream that ships only beta/ — pointing REPO_URL at such a repository used
+# to redirect the kernel clone there too, and the install failed fetching a kernel
+# that was never there. Defaults to REPO_URL so existing forks are unaffected.
+# This distribution ships only the Frontier, so the kernel comes from upstream
+# rather than from here. Overridable, but it must be a repository that actually
+# hosts the Brainstem kernel and its installer.
+KERNEL_REPO_URL="${BRAINSTEM_BETA_KERNEL_REPO_URL:-https://github.com/microsoft/aibast-agents-library.git}"
 REPO_REF="${BRAINSTEM_BETA_REF:-main}"
 UPDATE_REF="${BRAINSTEM_BETA_UPDATE_REF:-$REPO_REF}"
 REPO_COMMIT="${BRAINSTEM_BETA_COMMIT:-}"
@@ -162,13 +171,15 @@ setup_global_brainstem() {
         install_args+=(--version "$REPO_COMMIT")
     fi
 
-    local canonical_repo="https://github.com/kody-w/openrappter.git"
-    if [ "$REPO_URL" = "$canonical_repo" ]; then
+    local canonical_repo="https://github.com/microsoft/aibast-agents-library.git"
+    # Redirect the kernel's canonical URL to wherever the KERNEL lives — not to
+    # wherever the Frontier lives.
+    if [ "$KERNEL_REPO_URL" = "$canonical_repo" ]; then
         BRAINSTEM_HOME="$BRAINSTEM_HOME" \
             bash "$BETA_SOURCE/install.sh" "${install_args[@]}"
     else
         local config_count="${GIT_CONFIG_COUNT:-0}"
-        local config_key="GIT_CONFIG_KEY_${config_count}=url.${REPO_URL}.insteadOf"
+        local config_key="GIT_CONFIG_KEY_${config_count}=url.${KERNEL_REPO_URL}.insteadOf"
         local config_value="GIT_CONFIG_VALUE_${config_count}=${canonical_repo}"
         env \
             "GIT_CONFIG_COUNT=$((config_count + 1))" \

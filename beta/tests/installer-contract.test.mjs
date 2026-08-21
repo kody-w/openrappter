@@ -76,7 +76,7 @@ const brainstemUi = readFileSync(
   "utf8",
 );
 
-test("beta installers use this distribution as the canonical source", () => {
+test("beta installers use AIBAST as the canonical source", () => {
   for (const installer of [unix, windows]) {
     assert.match(installer, /kody-w\/openrappter/);
     assert.doesNotMatch(installer, /kody-w\/rapp-installer/);
@@ -350,3 +350,70 @@ test("desktop chrome omits the redundant wrapper toolbar", () => {
   assert.doesNotMatch(renderer, /brainstemStatus|copilotStatus|setPill/);
   assert.doesNotMatch(renderer, /openBrowser|openVscode|restart/);
 });
+
+// npm runs a package's scripts with the shell's PATH, and `npm test` is
+// `node --test` — so `node` resolves from PATH rather than from the npm that
+// invoked it. install.sh has exported the portable runtime onto PATH since it was
+// written; install.cmd did not, so a Windows machine with an older system Node
+// installed with the portable runtime and then verified with the wrong one,
+// failing eleven test files on a missing node:sqlite while the correct runtime sat
+// unused beside it.
+test("both installers put the portable runtime first on PATH", () => {
+  assert.match(
+    unix,
+    /export PATH="\$node_dir\/bin:\$PATH"/,
+    "install.sh must export the portable node onto PATH",
+  );
+  assert.match(
+    windows,
+    /set "PATH=%NODE_DIR%;%PATH%"/,
+    "install.cmd must prepend the portable node to PATH, or npm test shells out "
+      + "to whatever node the machine happens to have",
+  );
+  // And it must happen before the verification block that depends on it.
+  const pathAt = windows.indexOf('set "PATH=%NODE_DIR%;%PATH%"');
+  const testAt = windows.indexOf('npm.cmd" test');
+  assert.ok(pathAt > 0 && testAt > 0 && pathAt < testAt, "PATH must be set before npm test runs");
+});
+
+// The kernel and the Frontier are separate artifacts and do not always live in the
+// same repository. One URL used to serve both, so pointing REPO_URL at a
+// distribution that ships only beta/ also redirected the kernel clone there, and
+// the install failed fetching a kernel that was never in that repository.
+test("the kernel source is separable from the Frontier source", () => {
+  for (const [name, installer] of [["install.sh", unix], ["install.cmd", windows]]) {
+    assert.match(
+      installer,
+      /KERNEL_REPO_URL/,
+      `${name} must have a kernel source distinct from REPO_URL`,
+    );
+    assert.match(
+      installer,
+      /BRAINSTEM_BETA_KERNEL_REPO_URL/,
+      `${name} must let the kernel source be overridden independently`,
+    );
+  }
+  // The redirect must target the kernel's home, not the Frontier's.
+  assert.match(unix, /url\.\$\{KERNEL_REPO_URL\}\.insteadOf/);
+  assert.match(windows, /url\.%KERNEL_REPO_URL%\.insteadOf/);
+  assert.doesNotMatch(unix, /url\.\$\{REPO_URL\}\.insteadOf/);
+  assert.doesNotMatch(windows, /url\.%REPO_URL%\.insteadOf/);
+});
+
+// The bootstrap is the KERNEL's installer, fetched from its own URL. A blanket
+// repoint of this file — replacing every upstream reference when standing up a
+// downstream distribution — moves BOOTSTRAP_URL too, and Windows then downloads
+// that distribution's own unrelated root installer. That is what broke the first
+// v3 install attempt.
+test("the kernel bootstrap URL is not the Frontier's URL", () => {
+  const line = windows.split("\n").find((l) => l.includes("set \"BOOTSTRAP_URL="));
+  assert.ok(line, "install.cmd must define BOOTSTRAP_URL");
+  assert.match(line, /install\.ps1"?$/, "BOOTSTRAP_URL must point at a kernel installer");
+  assert.doesNotMatch(
+    line,
+    /%REPO_URL%/,
+    "BOOTSTRAP_URL must not be derived from REPO_URL — the kernel and the Frontier "
+      + "are separate artifacts with separate homes",
+  );
+});
+

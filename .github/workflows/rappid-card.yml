@@ -59,6 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --quiet build pytest
+          python -m pip install --quiet -e "./python[dev]"
           python -m pytest python/tests/test_rappid_card.py -q
           rm -rf python/direct-dist python/dist .wheel-direct .wheel-sdist
           python -m build --wheel --outdir python/direct-dist python

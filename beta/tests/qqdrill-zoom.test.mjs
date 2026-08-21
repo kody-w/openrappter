@@ -64,6 +64,27 @@ const wasRefined = (zoomed, frame) =>
 // contradict the coarse frame they refine, or backward fidelity refuses them."
 // And backward fidelity is defined over the whole downstream line: "a frame is
 // assimilated only if it contradicts nothing downstream of the current frame."
+/** A chain whose only distinguishing feature from its twin is when it ran. */
+function chainAt(entries, ran) {
+  const stream = "rappid:@rapp/zoom:" + "a".repeat(64);
+  const frames = [];
+  let prev = null;
+  entries.forEach((entry, index) => {
+    const frame = buildFrame({
+      kind: "qqdrill.tick",
+      streamId: stream,
+      seq: index,
+      utc: `2026-08-21T12:00:${String(ran + index).padStart(2, "0")}.000Z`,
+      payload: { asserts: entry.asserts || {}, requires: entry.requires || {} },
+      prev,
+      prevWave: null,
+    });
+    frames.push(frame);
+    prev = frame.payload_hash;
+  });
+  return frames;
+}
+
 test("C-1: a finer frame that contradicts a descendant of the span is refused", () => {
   // The local line: two quiet coarse ticks, then a descendant built on sky=clear.
   const line = makeLine(chain([
@@ -242,4 +263,42 @@ test("C-3: a non-representable clock ratio still places a finer frame in its own
     false,
     "a frame asserting exactly what the frame it refines asserts cannot contradict it",
   );
+});
+
+// C-4 — added 2026-08-21 after a second review found finer frames vanishing.
+// A span of coarse ticks [start, end] covers the INTERVAL from start up to just
+// before end+1. Bounding the placement at exactly `end` dropped every finer
+// frame sitting BETWEEN two coarse ticks — into neither refined nor refused,
+// which is the one outcome a fold may never produce. Zooming exists precisely
+// to bring in the frames between your own ticks.
+test("C-4: every finer frame inside the span is accounted for, none silently dropped", () => {
+  const coarse = dimension({ dimension_id: "coarse", clock_key: 1 }, chainAt([
+    { asserts: { sky: "clear" } },
+    { asserts: { sky: "clear" } },
+  ], 0));
+  // Ten times the cadence: their ticks 0..10 land on our 0.0 .. 1.0, so nine of
+  // them sit strictly between our tick 0 and our tick 1.
+  const fine = dimension({ dimension_id: "fine", clock_key: 10 }, chainAt(
+    Array.from({ length: 11 }, (unused, index) => (
+      index % 10 === 0 ? { asserts: { sky: "clear" } } : { asserts: { gust: index } }
+    )),
+    30,
+  ));
+
+  const points = fixedPoints(drill(coarse, fine).pairs);
+  const align = alignment(points, coarse, fine);
+  assert.equal(align.ok, true, "the identical frames pin the two clocks");
+
+  const line = makeLine(coarse.frames);
+  const zoomed = zoom({ start: 0, end: 0 }, fine.frames, align, line);
+  assert.equal(zoomed.ok, true);
+
+  const inSpan = fine.frames.filter((frame) => frame.seq >= 0 && frame.seq < 10);
+  assert.equal(
+    zoomed.refined.length + zoomed.refused.length,
+    inSpan.length,
+    "every finer frame in the interval must be either refined or refused — a frame "
+      + "that is neither has vanished, and the fold cannot account for it",
+  );
+  assert.ok(zoomed.refined.length > 1, "the frames between our ticks are the point of zooming");
 });

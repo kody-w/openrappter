@@ -73,7 +73,30 @@ export function parseClock(value) {
     return value > 0n ? { n: value, d: 1n } : null;
   }
   if (typeof value !== "number" && typeof value !== "string") return null;
-  const text = String(value).trim();
+  if (typeof value === "number" && !Number.isFinite(value)) return null;
+
+  let text = String(value).trim();
+
+  // Expand exponent notation. JS renders 1e-9 and 1e21 that way, so a plain
+  // decimal regex rejects perfectly ordinary clock keys — and every rejection
+  // used to collapse to the same null, which made two dimensions with DIFFERENT
+  // unusable cadences pair as though their cadences matched. A refusal must
+  // never become an equality.
+  const exponent = /^(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(text);
+  if (exponent) {
+    const [, whole, frac = "", rawExp] = exponent;
+    const exp = Number(rawExp);
+    const digits = whole + frac;
+    const pointFrom = whole.length + exp;
+    if (pointFrom <= 0) {
+      text = `0.${"0".repeat(-pointFrom)}${digits}`;
+    } else if (pointFrom >= digits.length) {
+      text = digits + "0".repeat(pointFrom - digits.length);
+    } else {
+      text = `${digits.slice(0, pointFrom)}.${digits.slice(pointFrom)}`;
+    }
+  }
+
   if (!/^\d+(\.\d+)?$/.test(text)) return null;
   const [whole, frac = ""] = text.split(".");
   const n = BigInt(whole + frac);
@@ -141,7 +164,14 @@ export function quantumKey(frame, manifest = {}) {
   return Object.freeze({
     rappid: frame.stream_id ?? null,
     // The canonical rational text, so 1 and "1" are one cadence everywhere.
-    clock: clockText(parseClock(manifest.clock_key)),
+    // A declared-but-unreadable cadence renders as itself rather than as null,
+    // so two dimensions whose clock keys are both unusable but DIFFERENT do not
+    // pair as though they agreed. Absent stays null: declaring no cadence is a
+    // different thing from declaring one nobody can parse.
+    clock: manifest.clock_key === undefined || manifest.clock_key === null
+      ? null
+      : (clockText(parseClock(manifest.clock_key))
+        ?? `unreadable:${canonical(String(manifest.clock_key))}`),
     tick: typeof frame.seq === "number" ? frame.seq : null,
     digest: frame.payload_hash ?? null,
   });
@@ -369,6 +399,16 @@ export function fixedPoints(pairs) {
  * The exact lane a point sits on. Two points share a diagonal when
  * there.seq*d - n*here.seq is equal, in integers, with no division anywhere.
  */
+function placeable(point) {
+  return Number.isSafeInteger(point?.here?.seq) && Number.isSafeInteger(point?.there?.seq);
+}
+
+/**
+ * The exact lane a point sits on. Callers must filter with placeable() first —
+ * a frame from another dimension can carry a fractional or absent seq, and
+ * converting that to a BigInt throws. A foreign frame is refusable input, not a
+ * crash: one bad frame used to kill the whole run computation.
+ */
 function laneOf(point, ratio) {
   return BigInt(point.there.seq) * ratio.d - ratio.n * BigInt(point.here.seq);
 }
@@ -394,6 +434,7 @@ export function runsFrom(points, local, remote) {
 
   const byLane = new Map();
   for (const point of points) {
+    if (!placeable(point)) continue;
     const lane = laneOf(point, ratio).toString();
     const bucket = byLane.get(lane);
     if (bucket) bucket.push(point);
@@ -546,7 +587,9 @@ export function alignment(points, local, remote) {
   const ratio = ratioOf(here, there);
 
   const lanes = new Map();
+  const unplaceable = points.filter((point) => !placeable(point));
   for (const point of points) {
+    if (!placeable(point)) continue;
     const lane = laneOf(point, ratio).toString();
     const pin = Object.freeze({
       here: point.here.seq,
@@ -582,9 +625,20 @@ export function alignment(points, local, remote) {
       return la === lb ? 0 : (la < lb ? -1 : 1);
     });
 
+  if (!ordered.length) {
+    return Object.freeze({
+      ok: false,
+      reason: "every fixed point carries a tick that is not a whole number, so none can be placed",
+      unplaceable: Object.freeze(unplaceable.map((point) => point.here.frame_hash)),
+    });
+  }
+
   const primary = ordered[0];
   return Object.freeze({
     ok: true,
+    // Fixed points whose ticks are not whole numbers cannot sit on a diagonal.
+    // Named rather than silently dropped.
+    unplaceable: Object.freeze(unplaceable.map((point) => point.here.frame_hash)),
     ratio: Number(ratio.n) / Number(ratio.d),
     exactRatio: Object.freeze({ n: ratio.n, d: ratio.d }),
     lane: primary.lane,
@@ -865,10 +919,25 @@ export function zoom(span, finer, align, line) {
   const refused = [];
 
   for (const frame of [...finer].sort(foldOrder)) {
+    if (!Number.isSafeInteger(frame.seq)) {
+      // A foreign frame with a fractional or absent tick cannot be placed. Say
+      // so rather than throwing on the BigInt conversion or dropping it.
+      refused.push(Object.freeze({
+        frame: frame.frame_hash,
+        contradicts: Object.freeze([Object.freeze({
+          key: "seq", reason: "tick is not a whole number, so the frame cannot be placed",
+        })]),
+      }));
+      continue;
+    }
     // lane = there*d - n*here, so here = (there*d - lane) / n, exactly.
     // Floor by integer division so a placement never depends on a float's last bit.
     const num = BigInt(frame.seq) * d - lane;
-    if (num < BigInt(span.start) * n || num > BigInt(span.end) * n) continue;
+    // A span of coarse ticks [start, end] covers the INTERVAL from start up to
+    // just before end+1. Bounding at exactly end dropped every finer frame
+    // sitting between two coarse ticks — silently, into neither refined nor
+    // refused — which is the whole point of zooming.
+    if (num < BigInt(span.start) * n || num >= BigInt(span.end + 1) * n) continue;
     let whole = num / n;
     if (num % n !== 0n && num < 0n) whole -= 1n;
     const at = Number(num) / Number(n);
@@ -903,7 +972,16 @@ export function zoom(span, finer, align, line) {
     if (contradicts.length) {
       refused.push(Object.freeze({ frame: frame.frame_hash, at, contradicts: Object.freeze(contradicts) }));
     } else {
-      refined.push(Object.freeze({ frame: deepFreeze(frame), at, refines: covering.frame_hash }));
+      refined.push(Object.freeze({
+        frame: deepFreeze(frame),
+        // The exact position, and a float rendering for display. The float can
+        // read 192156999999.99997 where the exact value is 192157000000, so a
+        // caller that compares `at` against the frame named in `refines` must
+        // use atExact.
+        atExact: Object.freeze({ n: num, d: n }),
+        at,
+        refines: covering.frame_hash,
+      }));
     }
   }
 

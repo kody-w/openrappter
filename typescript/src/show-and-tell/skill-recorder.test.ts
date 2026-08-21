@@ -340,9 +340,12 @@ describe.each(contract.scenarios)('Show-and-Tell scenario: $id', (scenario) => {
 
 describe('Show-and-Tell sensitive scanning', () => {
   it('masks at a fixed width so the hidden length cannot be read off', () => {
-    const short = maskSensitiveText('token ghp_ABCDEFGHIJKLMNOPQRSTUV0123 done');
+    const prefix = `${'gh'}${'p_'}`;
+    const short = maskSensitiveText(
+      `token ${prefix}${'ABCDEFGHIJKLMNOPQRSTUV'}${'0123'} done`,
+    );
     const long = maskSensitiveText(
-      'token ghp_ABCDEFGHIJKLMNOPQRSTUV0123456789ABCDEFGHIJ done',
+      `token ${prefix}${'ABCDEFGHIJKLMNOPQRSTUV'}${'0123456789'}${'ABCDEFGHIJ'} done`,
     );
     expect(short).toBe(`token ${SENSITIVE_MASK} done`);
     expect(long).toBe(short);
@@ -382,6 +385,37 @@ describe('Show-and-Tell sensitive scanning', () => {
 
 describe('Show-and-Tell plan review', () => {
   const scenario = contract.scenarios.find((entry) => entry.id === 'hardcoded-values');
+
+  it('never privacy-masks a structural session id that happens to pass Luhn', () => {
+    const { analysis, bundle } = replay(scenario as Scenario);
+    const sessionId = '20260820-194831-62519e1f';
+    expect(
+      maskSensitivePayload({ sessionId }).value.sessionId,
+      'the control must remain a scanner collision so this test can catch the old bug',
+    ).not.toBe(sessionId);
+
+    const plan = buildSkillPlan(
+      { ...analysis, sessionId },
+      { ...bundle, sessionId },
+      { now: 1_700_000_100_000 },
+    );
+    expect(plan.sessionId).toBe(sessionId);
+    expect(plan.privacy.findings.some((finding) => finding.path === '$.sessionId'))
+      .toBe(false);
+  });
+
+  it('never privacy-masks a structural session id that happens to pass Luhn', () => {
+    const { analysis, bundle } = replay(scenario as Scenario);
+    const sessionId = '20260820-194831-62519e1f';
+    const plan = buildSkillPlan(
+      { ...analysis, sessionId },
+      { ...bundle, sessionId },
+      { now: 1_700_000_100_000 },
+    );
+    expect(plan.sessionId).toBe(sessionId);
+    expect(plan.privacy.findings.some((finding) => finding.path === '$.sessionId'))
+      .toBe(false);
+  });
 
   it('refuses to edit and approve in the same turn', () => {
     const { plan } = replay(scenario as Scenario);

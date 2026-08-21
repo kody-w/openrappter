@@ -384,9 +384,19 @@ export function buildSkillPlan(
     evidenceStats: bundle.stats,
     openQuestions,
   };
-  const scanned = maskSensitivePayload(draft);
+  const scanned = maskSensitivePayload({
+    title: draft.title,
+    intent: draft.intent,
+    useWhen: draft.useWhen,
+    useFor: draft.useFor,
+    doNotUseWhen: draft.doNotUseWhen,
+    steps: draft.steps,
+    values: draft.values,
+    openQuestions: draft.openQuestions,
+  });
   const findings = mergeFindings(inputFindings, scanned.findings);
   return {
+    ...draft,
     ...scanned.value,
     privacy: {
       findings,
@@ -498,7 +508,9 @@ export function revisePlan(
     });
   }
 
-  const feedback = sanitizeShowAndTellText(input.feedback, 2000);
+  const feedback = maskSensitiveText(
+    sanitizeShowAndTellText(input.feedback, 2000),
+  );
   const edited =
     rawSteps.length > 0
     || rawValues.length > 0
@@ -533,9 +545,19 @@ export function revisePlan(
     },
     '$.edit',
   );
-  const scanned = maskSensitivePayload(draft);
+  const scanned = maskSensitivePayload({
+    title: draft.title,
+    intent: draft.intent,
+    useWhen: draft.useWhen,
+    useFor: draft.useFor,
+    doNotUseWhen: draft.doNotUseWhen,
+    steps: draft.steps,
+    values: draft.values,
+    openQuestions: draft.openQuestions,
+  });
   const findings = mergeFindings(editFindings, scanned.findings);
   return {
+    ...draft,
     ...scanned.value,
     revision: current.revision + 1,
     privacy: {

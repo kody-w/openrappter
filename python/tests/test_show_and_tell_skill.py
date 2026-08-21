@@ -24,6 +24,7 @@ from openrappter.show_and_tell import (
     SENSITIVE_MASK,
     ShowAndTellStore,
     build_deterministic_analysis,
+    mask_sensitive_payload,
     privacy_reduced_path,
 )
 from openrappter.show_and_tell_marketplace import (
@@ -99,6 +100,26 @@ def replay(scenario):
 def approved_plan(scenario):
     _analysis, _bundle, plan = replay(scenario)
     return revise_plan(plan, approve=True, now=1_700_000_200_000)
+
+
+def test_never_privacy_masks_a_structural_session_id_that_happens_to_pass_luhn():
+    analysis, bundle, _plan = replay(SCENARIOS["hardcoded-values"])
+    session_id = "20260820-194831-62519e1f"
+    masked, _findings = mask_sensitive_payload({"sessionId": session_id})
+    assert masked["sessionId"] != session_id, (
+        "the control must remain a scanner collision so this test catches the old bug"
+    )
+    plan = build_skill_plan(
+        {**analysis, "sessionId": session_id},
+        {**bundle, "sessionId": session_id},
+        now=1_700_000_100_000,
+    )
+
+    assert plan["sessionId"] == session_id
+    assert not any(
+        finding["path"] == "$.sessionId"
+        for finding in plan["privacy"]["findings"]
+    )
 
 
 @pytest.mark.parametrize("scenario_id", sorted(SCENARIOS))
@@ -421,7 +442,7 @@ def test_propose_proposes_exactly_one_plan_and_builds_nothing(recorded):
 
     proposed = json.loads(agent.perform(action="propose", session_id=session_id))
 
-    assert proposed["status"] == "success"
+    assert proposed["status"] == "success", proposed
     assert proposed["proposal_only"] is True
     assert proposed["built"] is False
     assert "artifacts" not in proposed

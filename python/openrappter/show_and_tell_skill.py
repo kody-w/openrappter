@@ -661,9 +661,21 @@ def build_skill_plan(
         "evidenceStats": bundle.get("stats", {}),
         "openQuestions": open_questions,
     }
-    masked, scanned_findings = mask_sensitive_payload(draft)
+    masked, scanned_findings = mask_sensitive_payload(
+        {
+            "title": draft["title"],
+            "intent": draft["intent"],
+            "useWhen": draft["useWhen"],
+            "useFor": draft["useFor"],
+            "doNotUseWhen": draft["doNotUseWhen"],
+            "steps": draft["steps"],
+            "values": draft["values"],
+            "openQuestions": draft["openQuestions"],
+        }
+    )
     findings = _merge_findings(input_findings, scanned_findings)
     return {
+        **draft,
         **masked,
         "privacy": {
             "findings": findings,
@@ -779,7 +791,7 @@ def revise_plan(
             )
         values = edited_values
 
-    feedback_text = _safe_text(feedback, 2000)
+    feedback_text = mask_sensitive_text(_safe_text(feedback, 2000))
     edited = bool(
         raw_steps
         or raw_values
@@ -812,9 +824,21 @@ def revise_plan(
         },
         "$.edit",
     )
-    masked, scanned_findings = mask_sensitive_payload(draft)
+    masked, scanned_findings = mask_sensitive_payload(
+        {
+            "title": draft["title"],
+            "intent": draft["intent"],
+            "useWhen": draft["useWhen"],
+            "useFor": draft["useFor"],
+            "doNotUseWhen": draft["doNotUseWhen"],
+            "steps": draft["steps"],
+            "values": draft["values"],
+            "openQuestions": draft["openQuestions"],
+        }
+    )
     findings = _merge_findings(edit_findings, scanned_findings)
     return {
+        **draft,
         **masked,
         "revision": current["revision"] + 1,
         "privacy": {

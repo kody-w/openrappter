@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   REQUIRED_TRANSPLANT_CHECK_IDS,
+  REQUIRED_TRANSPLANT_PROBE_TEST_NAMES,
   TRANSPLANT_RESULT_PREFIX,
   TRANSPLANT_RESULT_SCHEMA,
   canonicalJson,
@@ -65,6 +66,7 @@ const packageScripts = loadPackageScripts();
 const PINNED_CHECK_IDS = [
   "result-schema",
   "compiled-runtime",
+  "isolated-scenario-evidence",
   "host-identity-preserved",
   "authenticated-http-import",
   "python-agent-bridge",
@@ -74,7 +76,7 @@ const PINNED_CHECK_IDS = [
   "deterministic-second-execution",
   "flight-recorder-integrity",
   "no-provider-model-events",
-  "loopback-only-traffic",
+  "loopback-gateway-requests",
   "unsandboxed-file-boundary",
   "bounded-runtime",
   "missing-python-controlled",
@@ -83,21 +85,35 @@ const PINNED_CHECK_IDS = [
   "fixture-source-hash-pinned",
 ] as const satisfies readonly LiveOrganTransplantCheckId[];
 
+const PINNED_PROBE_TEST_NAMES = [
+  "live organ transplant independent observer hashes both bundled fixtures before importing either one",
+  "live organ transplant independent observer keeps one real GatewayServer and one real AgentRegistry object in one host process",
+  "live organ transplant independent observer proves the bearer header gates the real HTTP importer",
+  "live organ transplant independent observer resolves the imported object as the real PythonAgent bridge",
+  "live organ transplant independent observer executes the actual PythonAgent twice with the pinned digest",
+  "live organ transplant independent observer rejects the invalid replacement before committed bytes or live identity change",
+  "live organ transplant independent observer reopens the database with the production ledger and exactly matches the production export",
+  "live organ transplant independent observer observes loopback gateway requests and no provider or model activity",
+] as const;
+
 function controlledMissingPythonResult(): LiveOrganTransplantMissingPythonResult {
   return {
     schema: TRANSPLANT_RESULT_SCHEMA,
     status: "python-unavailable",
     demo: "live-organ-transplant",
     command: manifestJson.command.display,
+    scenario: {
+      nonce: "missing-python-nonce",
+      evidenceDirectory: "/repository/.test-scratch/missing-python",
+    },
     reason: "python-unavailable",
-    pythonExecutable: manifestJson.missingPython.executable,
+    pythonExecutable: "/repository/.test-scratch/missing-python/missing-python",
     message: "Python >=3.10 is unavailable.",
     sandboxed: false,
     preservationBoundary: "file-only",
     elapsedMs: 12,
     providerCalls: 0,
     modelCalls: 0,
-    externalNetworkRequests: 0,
     evidence: {
       missing: [],
       skipped: [],
@@ -119,9 +135,14 @@ describe("live organ transplant manifest", () => {
       node: ">=20.9.0",
       python: ">=3.10",
       model: "none",
-      externalNetwork: "forbidden",
       loopbackGateway: true,
     });
+    expect(manifestJson.runtimeLimits).toEqual({
+      commandTimeoutMs: 30_000,
+      missingPythonTimeoutMs: 30_000,
+      demoMaxElapsedMs: 30_000,
+    });
+    expect(manifestJson.missingPython.expectedExitCode).toBe(69);
   });
 
   it("keeps the literal command identical to the package scripts", () => {
@@ -142,8 +163,15 @@ describe("live organ transplant manifest", () => {
     );
   });
 
-  it("exposes the deliberately failing fixture hash pin", () => {
+  it("exposes both deliberately failing fixture hash pins", () => {
+    expect(manifestJson.fixture.bundledPath).toBe(
+      "typescript/src/demo/fixtures/checksum_agent.py",
+    );
+    expect(manifestJson.fixture.invalidBundledPath).toBe(
+      "typescript/src/demo/fixtures/checksum_agent_invalid.py",
+    );
     expect(manifestJson.fixture.sourceSha256).toBeNull();
+    expect(manifestJson.fixture.invalidSourceSha256).toBeNull();
     expect(manifestJson.fixture.todo).toMatch(
       /TODO\(runtime-builder\).*SHA-256.*deliberately fails/i,
     );
@@ -160,6 +188,7 @@ describe("live organ transplant manifest", () => {
       "crash-recovery guarantees",
       "replay guarantees",
       "air-gap guarantees",
+      "enforced egress controls",
       "Python sandboxing",
       "arbitrary-Python safety",
     ]);
@@ -235,6 +264,9 @@ describe("live organ transplant result records", () => {
 describe("live organ transplant evaluator surface", () => {
   it("pins every required check ID literally and exposes no skip state", () => {
     expect(REQUIRED_TRANSPLANT_CHECK_IDS).toEqual(PINNED_CHECK_IDS);
+    expect(REQUIRED_TRANSPLANT_PROBE_TEST_NAMES).toEqual(
+      PINNED_PROBE_TEST_NAMES,
+    );
 
     const evaluation = evaluateLiveOrganTransplant({
       manifest: manifestJson,

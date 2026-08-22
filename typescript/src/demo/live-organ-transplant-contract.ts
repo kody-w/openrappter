@@ -12,6 +12,8 @@ export const TRANSPLANT_RESULT_SCHEMA =
   "openrappter-live-organ-transplant-result/1.0" as const;
 export const TRANSPLANT_MANIFEST_SCHEMA =
   "openrappter-live-organ-transplant-manifest/1.0" as const;
+export const TRANSPLANT_PROBE_SCHEMA =
+  "openrappter-live-organ-transplant-probe/1.0" as const;
 export const TRANSPLANT_DEMO_ID = "live-organ-transplant" as const;
 export const TRANSPLANT_AGENT_NAME = "ChecksumAgent" as const;
 export const TRANSPLANT_RUNTIME_ENTRYPOINT =
@@ -20,6 +22,12 @@ export const TRANSPLANT_GATEWAY_MODULE =
   "typescript/dist/gateway/server.js" as const;
 export const TRANSPLANT_PYTHON_BRIDGE_MODULE =
   "typescript/dist/agents/PythonAgent.js" as const;
+export const TRANSPLANT_INTEGRATION_TEST =
+  "src/__tests__/integration/live-organ-transplant.integration.test.ts" as const;
+export const TRANSPLANT_VALID_FIXTURE =
+  "typescript/src/demo/fixtures/checksum_agent.py" as const;
+export const TRANSPLANT_INVALID_FIXTURE =
+  "typescript/src/demo/fixtures/checksum_agent_invalid.py" as const;
 
 export const REQUIRED_TRANSPLANT_EVENT_KINDS = [
   "demo.transplant.started",
@@ -29,9 +37,21 @@ export const REQUIRED_TRANSPLANT_EVENT_KINDS = [
   "demo.transplant.completed",
 ] as const;
 
+export const REQUIRED_TRANSPLANT_PROBE_TEST_NAMES = [
+  "live organ transplant independent observer hashes both bundled fixtures before importing either one",
+  "live organ transplant independent observer keeps one real GatewayServer and one real AgentRegistry object in one host process",
+  "live organ transplant independent observer proves the bearer header gates the real HTTP importer",
+  "live organ transplant independent observer resolves the imported object as the real PythonAgent bridge",
+  "live organ transplant independent observer executes the actual PythonAgent twice with the pinned digest",
+  "live organ transplant independent observer rejects the invalid replacement before committed bytes or live identity change",
+  "live organ transplant independent observer reopens the database with the production ledger and exactly matches the production export",
+  "live organ transplant independent observer observes loopback gateway requests and no provider or model activity",
+] as const;
+
 export const REQUIRED_TRANSPLANT_CHECK_IDS = [
   "result-schema",
   "compiled-runtime",
+  "isolated-scenario-evidence",
   "host-identity-preserved",
   "authenticated-http-import",
   "python-agent-bridge",
@@ -41,7 +61,7 @@ export const REQUIRED_TRANSPLANT_CHECK_IDS = [
   "deterministic-second-execution",
   "flight-recorder-integrity",
   "no-provider-model-events",
-  "loopback-only-traffic",
+  "loopback-gateway-requests",
   "unsandboxed-file-boundary",
   "bounded-runtime",
   "missing-python-controlled",
@@ -75,28 +95,32 @@ export interface LiveOrganTransplantManifest {
   expectedSha256: string;
   fixture: {
     filename: string;
+    bundledPath: typeof TRANSPLANT_VALID_FIXTURE;
+    invalidBundledPath: typeof TRANSPLANT_INVALID_FIXTURE;
     sourceSha256: string | null;
+    invalidSourceSha256: string | null;
     todo: string;
   };
   dependencies: {
     node: string;
     python: string;
     model: "none";
-    externalNetwork: "forbidden";
     loopbackGateway: true;
   };
   runtimeLimits: {
-    commandTimeoutMs: number;
-    missingPythonTimeoutMs: number;
-    demoMaxElapsedMs: number;
+    commandTimeoutMs: 30_000;
+    missingPythonTimeoutMs: 30_000;
+    demoMaxElapsedMs: 30_000;
   };
   missingPython: {
     environmentVariable: "OPENRAPPTER_PYTHON";
-    executable: string;
+    executableBasename: string;
     expectedExitCode: number;
   };
   artifacts: {
     evidenceRoot: string;
+    directoryEnvironmentVariable: "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY";
+    nonceEnvironmentVariable: "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE";
   };
   claims: string[];
   forbiddenClaims: string[];
@@ -108,10 +132,16 @@ export interface TransplantArtifactDescriptor {
   sizeBytes: number;
 }
 
+export interface TransplantScenarioEvidence {
+  nonce: string;
+  evidenceDirectory: string;
+}
+
 export interface TransplantRuntimeEvidence {
   mode: "compiled-javascript";
   entrypoint: typeof TRANSPLANT_RUNTIME_ENTRYPOINT;
   entrypointSha256: string;
+  entrypointSizeBytes: number;
   typescriptRuntimeLoaderUsed: boolean;
   nodeVersion: string;
   elapsedMs: number;
@@ -148,7 +178,6 @@ export interface TransplantGatewayEvidence {
   baseUrl: string;
   authMode: "token";
   productionImportRoute: boolean;
-  externalRequestCount: number;
   requests: TransplantGatewayRequestEvidence[];
 }
 
@@ -196,14 +225,12 @@ export interface TransplantExecutionEvidence {
 export interface TransplantFlightRecorderEvidence {
   enabled: boolean;
   persisted: boolean;
-  reopened: boolean;
   database: TransplantArtifactDescriptor;
   export: TransplantArtifactDescriptor;
   exportSchema: "openrappter-flight-export/1.0";
   exportedAt: string;
   eventCount: number;
   events: FlightEvent[];
-  reloadedEventIds: string[];
 }
 
 export interface LiveOrganTransplantSuccessResult {
@@ -211,6 +238,7 @@ export interface LiveOrganTransplantSuccessResult {
   status: "success";
   demo: typeof TRANSPLANT_DEMO_ID;
   command: string;
+  scenario: TransplantScenarioEvidence;
   runtime: TransplantRuntimeEvidence;
   host: TransplantHostEvidence;
   gateway: TransplantGatewayEvidence;
@@ -244,6 +272,7 @@ export interface LiveOrganTransplantMissingPythonResult {
   status: "python-unavailable";
   demo: typeof TRANSPLANT_DEMO_ID;
   command: string;
+  scenario: TransplantScenarioEvidence;
   reason: "python-unavailable";
   pythonExecutable: string;
   message: string;
@@ -252,7 +281,6 @@ export interface LiveOrganTransplantMissingPythonResult {
   elapsedMs: number;
   providerCalls: number;
   modelCalls: number;
-  externalNetworkRequests: number;
   evidence: {
     missing: string[];
     skipped: string[];
@@ -271,6 +299,109 @@ export interface TransplantArtifactObservation {
   json: JsonValue | null;
 }
 
+export interface TransplantScenarioObservation {
+  nonce: string;
+  evidenceDirectory: string;
+  startedEmpty: boolean;
+  timedOut: boolean;
+  elapsedMs: number;
+}
+
+export interface TransplantProbeReport {
+  testFile: typeof TRANSPLANT_INTEGRATION_TEST;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  skippedTests: number;
+  exactTestNames: boolean;
+  passedTestNames: string[];
+}
+
+export interface TransplantIndependentProbeEvidence {
+  schema: typeof TRANSPLANT_PROBE_SCHEMA;
+  nonce: string;
+  collections: {
+    fixtures: boolean;
+    process: boolean;
+    gateway: boolean;
+    agent: boolean;
+    executions: boolean;
+    rejection: boolean;
+    flight: boolean;
+    provider: boolean;
+  };
+  process: {
+    pidBefore: number;
+    pidAfter: number;
+    gatewayReferenceStable: boolean;
+    registryReferenceStable: boolean;
+    registryConstructorCount: number;
+  };
+  gateway: {
+    serverClass: string;
+    registryClass: string;
+    authMode: string;
+    authorizationScheme: string;
+    unauthenticatedStatus: number;
+    unauthenticatedImporterCalls: number;
+    totalImporterCalls: number;
+    acceptedStatus: number;
+    rejectedStatus: number;
+    requestUrls: string[];
+  };
+  fixtures: {
+    validPath: string;
+    invalidPath: string;
+    validSha256: string;
+    invalidSha256: string;
+    manifestValidSha256: string | null;
+    manifestInvalidSha256: string | null;
+  };
+  agent: {
+    className: string;
+    bridgeModule: string;
+    sourceFile: string;
+    sourceSha256Before: string;
+    sourceSha256After: string;
+    objectReferenceStable: boolean;
+    registryReferenceStable: boolean;
+  };
+  executions: {
+    first: TransplantExecutionEvidence;
+    second: TransplantExecutionEvidence;
+  };
+  rejection: {
+    rejectedBeforeCommit: boolean;
+    committed: boolean;
+    targetBytesUnchanged: boolean;
+    targetStatUnchanged: boolean;
+    candidateDiffersFromCommitted: boolean;
+  };
+  flight: {
+    databasePath: string;
+    exportPath: string;
+    pathsDistinct: boolean;
+    databaseSha256: string;
+    exportSha256: string;
+    expectedDatabaseSha256: string;
+    expectedExportSha256: string;
+    reopenedQuerySucceeded: boolean;
+    productionValidationPassed: boolean;
+    persistedEventIds: string[];
+    reopenedEventIds: string[];
+    productionExportEventIds: string[];
+    persistedContentHashes: string[];
+    reopenedContentHashes: string[];
+    productionExportContentHashes: string[];
+    allContentHashesValid: boolean;
+  };
+  provider: {
+    manifestModelDependency: string;
+    providerEventCount: number;
+    modelEventCount: number;
+  };
+}
+
 export interface LiveOrganTransplantObservations {
   executedCommand: string;
   successExitCode: number | null;
@@ -279,13 +410,23 @@ export interface LiveOrganTransplantObservations {
   missingPythonRecordCount: number;
   successRecordCanonical: boolean;
   missingPythonRecordCanonical: boolean;
-  successElapsedMs: number;
-  missingPythonElapsedMs: number;
+  controlledMissingPythonExecutable: string;
+  successScenario: TransplantScenarioObservation;
+  missingPythonScenario: TransplantScenarioObservation;
+  frozenSuccessEvidence: {
+    captured: boolean;
+    fileCount: number;
+    inventorySha256: string;
+    unchangedAfterProbe: boolean;
+    unchangedAfterMissingPython: boolean;
+  };
   artifacts: {
     runtimeEntrypoint: TransplantArtifactObservation;
     flightDatabase: TransplantArtifactObservation;
     flightExport: TransplantArtifactObservation;
   };
+  probeReport: TransplantProbeReport;
+  independentProbe: TransplantIndependentProbeEvidence;
   missingEvidence: string[];
   skippedEvidence: string[];
 }
@@ -369,14 +510,6 @@ function isSha256(value: unknown): value is string {
   return typeof value === "string" && SHA256_PATTERN.test(value);
 }
 
-function isIsoTimestamp(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    Number.isFinite(Date.parse(value))
-  );
-}
-
 export function isJsonValue(value: unknown): value is JsonValue {
   if (
     value === null ||
@@ -411,9 +544,9 @@ function isManifestCommand(
 export function isLiveOrganTransplantManifest(
   value: unknown,
 ): value is LiveOrganTransplantManifest {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
       "schema",
       "version",
       "demo",
@@ -427,70 +560,81 @@ export function isLiveOrganTransplantManifest(
       "artifacts",
       "claims",
       "forbiddenClaims",
-    ]) ||
-    value.schema !== TRANSPLANT_MANIFEST_SCHEMA ||
-    value.version !== 1 ||
-    value.demo !== TRANSPLANT_DEMO_ID ||
-    !isManifestCommand(value.command) ||
-    typeof value.input !== "string" ||
-    value.input.length === 0 ||
-    !isSha256(value.expectedSha256) ||
-    !isRecord(value.fixture) ||
-    !hasOnlyKeys(value.fixture, ["filename", "sourceSha256", "todo"]) ||
-    typeof value.fixture.filename !== "string" ||
-    !value.fixture.filename.endsWith(".py") ||
-    !(
-      value.fixture.sourceSha256 === null ||
-      isSha256(value.fixture.sourceSha256)
-    ) ||
-    typeof value.fixture.todo !== "string" ||
-    value.fixture.todo.length === 0 ||
-    !isRecord(value.dependencies) ||
-    !hasOnlyKeys(value.dependencies, [
+    ]) &&
+    value.schema === TRANSPLANT_MANIFEST_SCHEMA &&
+    value.version === 1 &&
+    value.demo === TRANSPLANT_DEMO_ID &&
+    isManifestCommand(value.command) &&
+    typeof value.input === "string" &&
+    value.input.length > 0 &&
+    isSha256(value.expectedSha256) &&
+    isRecord(value.fixture) &&
+    hasOnlyKeys(value.fixture, [
+      "filename",
+      "bundledPath",
+      "invalidBundledPath",
+      "sourceSha256",
+      "invalidSourceSha256",
+      "todo",
+    ]) &&
+    typeof value.fixture.filename === "string" &&
+    value.fixture.filename.endsWith(".py") &&
+    value.fixture.bundledPath === TRANSPLANT_VALID_FIXTURE &&
+    value.fixture.invalidBundledPath === TRANSPLANT_INVALID_FIXTURE &&
+    (value.fixture.sourceSha256 === null ||
+      isSha256(value.fixture.sourceSha256)) &&
+    (value.fixture.invalidSourceSha256 === null ||
+      isSha256(value.fixture.invalidSourceSha256)) &&
+    typeof value.fixture.todo === "string" &&
+    value.fixture.todo.length > 0 &&
+    isRecord(value.dependencies) &&
+    hasOnlyKeys(value.dependencies, [
       "node",
       "python",
       "model",
-      "externalNetwork",
       "loopbackGateway",
-    ]) ||
-    typeof value.dependencies.node !== "string" ||
-    typeof value.dependencies.python !== "string" ||
-    value.dependencies.model !== "none" ||
-    value.dependencies.externalNetwork !== "forbidden" ||
-    value.dependencies.loopbackGateway !== true ||
-    !isRecord(value.runtimeLimits) ||
-    !hasOnlyKeys(value.runtimeLimits, [
+    ]) &&
+    typeof value.dependencies.node === "string" &&
+    typeof value.dependencies.python === "string" &&
+    value.dependencies.model === "none" &&
+    value.dependencies.loopbackGateway === true &&
+    isRecord(value.runtimeLimits) &&
+    hasOnlyKeys(value.runtimeLimits, [
       "commandTimeoutMs",
       "missingPythonTimeoutMs",
       "demoMaxElapsedMs",
-    ]) ||
-    !isPositiveInteger(value.runtimeLimits.commandTimeoutMs) ||
-    !isPositiveInteger(value.runtimeLimits.missingPythonTimeoutMs) ||
-    !isPositiveInteger(value.runtimeLimits.demoMaxElapsedMs) ||
-    value.runtimeLimits.demoMaxElapsedMs >
-      value.runtimeLimits.commandTimeoutMs ||
-    !isRecord(value.missingPython) ||
-    !hasOnlyKeys(value.missingPython, [
+    ]) &&
+    value.runtimeLimits.commandTimeoutMs === 30_000 &&
+    value.runtimeLimits.missingPythonTimeoutMs === 30_000 &&
+    value.runtimeLimits.demoMaxElapsedMs === 30_000 &&
+    isRecord(value.missingPython) &&
+    hasOnlyKeys(value.missingPython, [
       "environmentVariable",
-      "executable",
+      "executableBasename",
       "expectedExitCode",
-    ]) ||
-    value.missingPython.environmentVariable !== "OPENRAPPTER_PYTHON" ||
-    typeof value.missingPython.executable !== "string" ||
-    value.missingPython.executable.length === 0 ||
-    !isNonNegativeInteger(value.missingPython.expectedExitCode) ||
-    !isRecord(value.artifacts) ||
-    !hasOnlyKeys(value.artifacts, ["evidenceRoot"]) ||
-    typeof value.artifacts.evidenceRoot !== "string" ||
-    value.artifacts.evidenceRoot.length === 0 ||
-    !isStringArray(value.claims) ||
-    value.claims.length === 0 ||
-    !isStringArray(value.forbiddenClaims) ||
-    value.forbiddenClaims.length === 0
-  ) {
-    return false;
-  }
-  return true;
+    ]) &&
+    value.missingPython.environmentVariable === "OPENRAPPTER_PYTHON" &&
+    typeof value.missingPython.executableBasename === "string" &&
+    /^[A-Za-z0-9._-]+$/.test(value.missingPython.executableBasename) &&
+    isPositiveInteger(value.missingPython.expectedExitCode) &&
+    isRecord(value.artifacts) &&
+    hasOnlyKeys(value.artifacts, [
+      "evidenceRoot",
+      "directoryEnvironmentVariable",
+      "nonceEnvironmentVariable",
+    ]) &&
+    typeof value.artifacts.evidenceRoot === "string" &&
+    value.artifacts.evidenceRoot.length > 0 &&
+    value.artifacts.directoryEnvironmentVariable ===
+      "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY" &&
+    value.artifacts.nonceEnvironmentVariable ===
+      "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE" &&
+    isStringArray(value.claims) &&
+    value.claims.length > 0 &&
+    isStringArray(value.forbiddenClaims) &&
+    value.forbiddenClaims.includes("air-gap guarantees") &&
+    value.forbiddenClaims.includes("enforced egress controls")
+  );
 }
 
 function isArtifactDescriptor(
@@ -506,6 +650,19 @@ function isArtifactDescriptor(
   );
 }
 
+function isScenarioEvidence(
+  value: unknown,
+): value is TransplantScenarioEvidence {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["nonce", "evidenceDirectory"]) &&
+    typeof value.nonce === "string" &&
+    value.nonce.length > 0 &&
+    typeof value.evidenceDirectory === "string" &&
+    value.evidenceDirectory.length > 0
+  );
+}
+
 function isRuntimeEvidence(value: unknown): value is TransplantRuntimeEvidence {
   return (
     isRecord(value) &&
@@ -513,6 +670,7 @@ function isRuntimeEvidence(value: unknown): value is TransplantRuntimeEvidence {
       "mode",
       "entrypoint",
       "entrypointSha256",
+      "entrypointSizeBytes",
       "typescriptRuntimeLoaderUsed",
       "nodeVersion",
       "elapsedMs",
@@ -520,6 +678,7 @@ function isRuntimeEvidence(value: unknown): value is TransplantRuntimeEvidence {
     value.mode === "compiled-javascript" &&
     value.entrypoint === TRANSPLANT_RUNTIME_ENTRYPOINT &&
     isSha256(value.entrypointSha256) &&
+    isPositiveInteger(value.entrypointSizeBytes) &&
     typeof value.typescriptRuntimeLoaderUsed === "boolean" &&
     typeof value.nodeVersion === "string" &&
     value.nodeVersion.length > 0 &&
@@ -584,7 +743,6 @@ function isGatewayEvidence(value: unknown): value is TransplantGatewayEvidence {
       "baseUrl",
       "authMode",
       "productionImportRoute",
-      "externalRequestCount",
       "requests",
     ]) &&
     value.serverClass === "GatewayServer" &&
@@ -595,7 +753,6 @@ function isGatewayEvidence(value: unknown): value is TransplantGatewayEvidence {
     typeof value.baseUrl === "string" &&
     value.authMode === "token" &&
     typeof value.productionImportRoute === "boolean" &&
-    isNonNegativeInteger(value.externalRequestCount) &&
     Array.isArray(value.requests) &&
     value.requests.every(isGatewayRequestEvidence)
   );
@@ -696,40 +853,31 @@ function isExecutionEvidence(
   );
 }
 
-function isFlightEvent(value: unknown): value is FlightEvent {
-  return (
-    isRecord(value) &&
-    hasOnlyKeys(value, FLIGHT_EVENT_KEYS) &&
-    value.schema === FLIGHT_EVENT_SCHEMA &&
-    typeof value.id === "string" &&
-    value.id.length > 0 &&
-    isPositiveInteger(value.sequence) &&
-    typeof value.kind === "string" &&
-    value.kind.length > 0 &&
-    typeof value.source === "string" &&
-    value.source.length > 0 &&
-    (value.status === "started" ||
-      value.status === "success" ||
-      value.status === "error" ||
-      value.status === "decision" ||
-      value.status === "info") &&
-    typeof value.traceId === "string" &&
-    value.traceId.length > 0 &&
-    (value.parentId === null || typeof value.parentId === "string") &&
-    (value.sessionId === undefined || typeof value.sessionId === "string") &&
-    (value.workspaceId === undefined ||
-      typeof value.workspaceId === "string") &&
-    (value.providerId === undefined || typeof value.providerId === "string") &&
-    (value.model === undefined || typeof value.model === "string") &&
-    (value.agentName === undefined || typeof value.agentName === "string") &&
-    (value.toolName === undefined || typeof value.toolName === "string") &&
-    isIsoTimestamp(value.timestamp) &&
-    (value.durationMs === undefined || isNonNegativeNumber(value.durationMs)) &&
-    isRecord(value.metadata) &&
-    isJsonValue(value.metadata) &&
-    (value.payload === undefined || isJsonValue(value.payload)) &&
-    isSha256(value.contentHash)
-  );
+function isFlightEventDisplayEvidence(value: unknown): value is FlightEvent {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, FLIGHT_EVENT_KEYS) ||
+    value.schema !== FLIGHT_EVENT_SCHEMA ||
+    typeof value.id !== "string" ||
+    value.id.length === 0 ||
+    !isPositiveInteger(value.sequence) ||
+    typeof value.kind !== "string" ||
+    typeof value.source !== "string" ||
+    typeof value.status !== "string" ||
+    typeof value.traceId !== "string" ||
+    !(value.parentId === null || typeof value.parentId === "string") ||
+    typeof value.timestamp !== "string" ||
+    !isRecord(value.metadata) ||
+    !isJsonValue(value.metadata) ||
+    !isSha256(value.contentHash)
+  ) {
+    return false;
+  }
+  try {
+    return verifyFlightEventHash(value as unknown as FlightEvent);
+  } catch {
+    return false;
+  }
 }
 
 function isFlightRecorderEvidence(
@@ -740,26 +888,23 @@ function isFlightRecorderEvidence(
     hasOnlyKeys(value, [
       "enabled",
       "persisted",
-      "reopened",
       "database",
       "export",
       "exportSchema",
       "exportedAt",
       "eventCount",
       "events",
-      "reloadedEventIds",
     ]) &&
     typeof value.enabled === "boolean" &&
     typeof value.persisted === "boolean" &&
-    typeof value.reopened === "boolean" &&
     isArtifactDescriptor(value.database) &&
     isArtifactDescriptor(value.export) &&
     value.exportSchema === "openrappter-flight-export/1.0" &&
-    isIsoTimestamp(value.exportedAt) &&
+    typeof value.exportedAt === "string" &&
+    value.exportedAt.length > 0 &&
     isPositiveInteger(value.eventCount) &&
     Array.isArray(value.events) &&
-    value.events.every(isFlightEvent) &&
-    isStringArray(value.reloadedEventIds)
+    value.events.every(isFlightEventDisplayEvidence)
   );
 }
 
@@ -775,6 +920,7 @@ function isSuccessResultShape(
       "status",
       "demo",
       "command",
+      "scenario",
       "runtime",
       "host",
       "gateway",
@@ -795,6 +941,7 @@ function isSuccessResultShape(
     value.demo === TRANSPLANT_DEMO_ID &&
     typeof value.command === "string" &&
     value.command.length > 0 &&
+    isScenarioEvidence(value.scenario) &&
     isRuntimeEvidence(value.runtime) &&
     isHostEvidence(value.host) &&
     isGatewayEvidence(value.gateway) &&
@@ -845,6 +992,7 @@ export function isLiveOrganTransplantMissingPythonResult(
       "status",
       "demo",
       "command",
+      "scenario",
       "reason",
       "pythonExecutable",
       "message",
@@ -853,7 +1001,6 @@ export function isLiveOrganTransplantMissingPythonResult(
       "elapsedMs",
       "providerCalls",
       "modelCalls",
-      "externalNetworkRequests",
       "evidence",
     ]) &&
     value.schema === TRANSPLANT_RESULT_SCHEMA &&
@@ -861,6 +1008,7 @@ export function isLiveOrganTransplantMissingPythonResult(
     value.demo === TRANSPLANT_DEMO_ID &&
     typeof value.command === "string" &&
     value.command.length > 0 &&
+    isScenarioEvidence(value.scenario) &&
     value.reason === "python-unavailable" &&
     typeof value.pythonExecutable === "string" &&
     value.pythonExecutable.length > 0 &&
@@ -870,7 +1018,6 @@ export function isLiveOrganTransplantMissingPythonResult(
     isNonNegativeNumber(value.elapsedMs) &&
     isNonNegativeInteger(value.providerCalls) &&
     isNonNegativeInteger(value.modelCalls) &&
-    isNonNegativeInteger(value.externalNetworkRequests) &&
     isRecord(value.evidence) &&
     hasOnlyKeys(value.evidence, ["missing", "skipped"]) &&
     isStringArray(value.evidence.missing) &&
@@ -892,6 +1039,235 @@ function isArtifactObservation(
   );
 }
 
+function isScenarioObservation(
+  value: unknown,
+): value is TransplantScenarioObservation {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      "nonce",
+      "evidenceDirectory",
+      "startedEmpty",
+      "timedOut",
+      "elapsedMs",
+    ]) &&
+    typeof value.nonce === "string" &&
+    value.nonce.length > 0 &&
+    typeof value.evidenceDirectory === "string" &&
+    value.evidenceDirectory.length > 0 &&
+    typeof value.startedEmpty === "boolean" &&
+    typeof value.timedOut === "boolean" &&
+    isNonNegativeNumber(value.elapsedMs)
+  );
+}
+
+function isProbeReport(value: unknown): value is TransplantProbeReport {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      "testFile",
+      "totalTests",
+      "passedTests",
+      "failedTests",
+      "skippedTests",
+      "exactTestNames",
+      "passedTestNames",
+    ]) &&
+    value.testFile === TRANSPLANT_INTEGRATION_TEST &&
+    isNonNegativeInteger(value.totalTests) &&
+    isNonNegativeInteger(value.passedTests) &&
+    isNonNegativeInteger(value.failedTests) &&
+    isNonNegativeInteger(value.skippedTests) &&
+    typeof value.exactTestNames === "boolean" &&
+    isStringArray(value.passedTestNames)
+  );
+}
+
+function isCollections(
+  value: unknown,
+): value is TransplantIndependentProbeEvidence["collections"] {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      "fixtures",
+      "process",
+      "gateway",
+      "agent",
+      "executions",
+      "rejection",
+      "flight",
+      "provider",
+    ]) &&
+    Object.values(value).every((entry) => typeof entry === "boolean")
+  );
+}
+
+export function isTransplantIndependentProbeEvidence(
+  value: unknown,
+): value is TransplantIndependentProbeEvidence {
+  if (
+    !isRecord(value) ||
+    !isJsonValue(value) ||
+    !hasOnlyKeys(value, [
+      "schema",
+      "nonce",
+      "collections",
+      "process",
+      "gateway",
+      "fixtures",
+      "agent",
+      "executions",
+      "rejection",
+      "flight",
+      "provider",
+    ]) ||
+    value.schema !== TRANSPLANT_PROBE_SCHEMA ||
+    typeof value.nonce !== "string" ||
+    value.nonce.length === 0 ||
+    !isCollections(value.collections)
+  ) {
+    return false;
+  }
+
+  const processEvidence = value.process;
+  const gateway = value.gateway;
+  const fixtures = value.fixtures;
+  const agent = value.agent;
+  const executions = value.executions;
+  const rejection = value.rejection;
+  const flight = value.flight;
+  const provider = value.provider;
+  return (
+    isRecord(processEvidence) &&
+    hasOnlyKeys(processEvidence, [
+      "pidBefore",
+      "pidAfter",
+      "gatewayReferenceStable",
+      "registryReferenceStable",
+      "registryConstructorCount",
+    ]) &&
+    isPositiveInteger(processEvidence.pidBefore) &&
+    isPositiveInteger(processEvidence.pidAfter) &&
+    typeof processEvidence.gatewayReferenceStable === "boolean" &&
+    typeof processEvidence.registryReferenceStable === "boolean" &&
+    isPositiveInteger(processEvidence.registryConstructorCount) &&
+    isRecord(gateway) &&
+    hasOnlyKeys(gateway, [
+      "serverClass",
+      "registryClass",
+      "authMode",
+      "authorizationScheme",
+      "unauthenticatedStatus",
+      "unauthenticatedImporterCalls",
+      "totalImporterCalls",
+      "acceptedStatus",
+      "rejectedStatus",
+      "requestUrls",
+    ]) &&
+    typeof gateway.serverClass === "string" &&
+    typeof gateway.registryClass === "string" &&
+    typeof gateway.authMode === "string" &&
+    typeof gateway.authorizationScheme === "string" &&
+    isNonNegativeInteger(gateway.unauthenticatedStatus) &&
+    isNonNegativeInteger(gateway.unauthenticatedImporterCalls) &&
+    isNonNegativeInteger(gateway.totalImporterCalls) &&
+    isNonNegativeInteger(gateway.acceptedStatus) &&
+    isNonNegativeInteger(gateway.rejectedStatus) &&
+    isStringArray(gateway.requestUrls) &&
+    isRecord(fixtures) &&
+    hasOnlyKeys(fixtures, [
+      "validPath",
+      "invalidPath",
+      "validSha256",
+      "invalidSha256",
+      "manifestValidSha256",
+      "manifestInvalidSha256",
+    ]) &&
+    typeof fixtures.validPath === "string" &&
+    typeof fixtures.invalidPath === "string" &&
+    isSha256(fixtures.validSha256) &&
+    isSha256(fixtures.invalidSha256) &&
+    (fixtures.manifestValidSha256 === null ||
+      isSha256(fixtures.manifestValidSha256)) &&
+    (fixtures.manifestInvalidSha256 === null ||
+      isSha256(fixtures.manifestInvalidSha256)) &&
+    isRecord(agent) &&
+    hasOnlyKeys(agent, [
+      "className",
+      "bridgeModule",
+      "sourceFile",
+      "sourceSha256Before",
+      "sourceSha256After",
+      "objectReferenceStable",
+      "registryReferenceStable",
+    ]) &&
+    typeof agent.className === "string" &&
+    typeof agent.bridgeModule === "string" &&
+    typeof agent.sourceFile === "string" &&
+    isSha256(agent.sourceSha256Before) &&
+    isSha256(agent.sourceSha256After) &&
+    typeof agent.objectReferenceStable === "boolean" &&
+    typeof agent.registryReferenceStable === "boolean" &&
+    isRecord(executions) &&
+    hasOnlyKeys(executions, ["first", "second"]) &&
+    isExecutionEvidence(executions.first) &&
+    isExecutionEvidence(executions.second) &&
+    isRecord(rejection) &&
+    hasOnlyKeys(rejection, [
+      "rejectedBeforeCommit",
+      "committed",
+      "targetBytesUnchanged",
+      "targetStatUnchanged",
+      "candidateDiffersFromCommitted",
+    ]) &&
+    Object.values(rejection).every((entry) => typeof entry === "boolean") &&
+    isRecord(flight) &&
+    hasOnlyKeys(flight, [
+      "databasePath",
+      "exportPath",
+      "pathsDistinct",
+      "databaseSha256",
+      "exportSha256",
+      "expectedDatabaseSha256",
+      "expectedExportSha256",
+      "reopenedQuerySucceeded",
+      "productionValidationPassed",
+      "persistedEventIds",
+      "reopenedEventIds",
+      "productionExportEventIds",
+      "persistedContentHashes",
+      "reopenedContentHashes",
+      "productionExportContentHashes",
+      "allContentHashesValid",
+    ]) &&
+    typeof flight.databasePath === "string" &&
+    typeof flight.exportPath === "string" &&
+    typeof flight.pathsDistinct === "boolean" &&
+    isSha256(flight.databaseSha256) &&
+    isSha256(flight.exportSha256) &&
+    isSha256(flight.expectedDatabaseSha256) &&
+    isSha256(flight.expectedExportSha256) &&
+    typeof flight.reopenedQuerySucceeded === "boolean" &&
+    typeof flight.productionValidationPassed === "boolean" &&
+    isStringArray(flight.persistedEventIds) &&
+    isStringArray(flight.reopenedEventIds) &&
+    isStringArray(flight.productionExportEventIds) &&
+    isStringArray(flight.persistedContentHashes) &&
+    isStringArray(flight.reopenedContentHashes) &&
+    isStringArray(flight.productionExportContentHashes) &&
+    typeof flight.allContentHashesValid === "boolean" &&
+    isRecord(provider) &&
+    hasOnlyKeys(provider, [
+      "manifestModelDependency",
+      "providerEventCount",
+      "modelEventCount",
+    ]) &&
+    typeof provider.manifestModelDependency === "string" &&
+    isNonNegativeInteger(provider.providerEventCount) &&
+    isNonNegativeInteger(provider.modelEventCount)
+  );
+}
+
 export function isLiveOrganTransplantObservations(
   value: unknown,
 ): value is LiveOrganTransplantObservations {
@@ -905,9 +1281,13 @@ export function isLiveOrganTransplantObservations(
       "missingPythonRecordCount",
       "successRecordCanonical",
       "missingPythonRecordCanonical",
-      "successElapsedMs",
-      "missingPythonElapsedMs",
+      "controlledMissingPythonExecutable",
+      "successScenario",
+      "missingPythonScenario",
+      "frozenSuccessEvidence",
       "artifacts",
+      "probeReport",
+      "independentProbe",
       "missingEvidence",
       "skippedEvidence",
     ]) &&
@@ -920,8 +1300,23 @@ export function isLiveOrganTransplantObservations(
     isNonNegativeInteger(value.missingPythonRecordCount) &&
     typeof value.successRecordCanonical === "boolean" &&
     typeof value.missingPythonRecordCanonical === "boolean" &&
-    isNonNegativeNumber(value.successElapsedMs) &&
-    isNonNegativeNumber(value.missingPythonElapsedMs) &&
+    typeof value.controlledMissingPythonExecutable === "string" &&
+    isScenarioObservation(value.successScenario) &&
+    isScenarioObservation(value.missingPythonScenario) &&
+    isRecord(value.frozenSuccessEvidence) &&
+    hasOnlyKeys(value.frozenSuccessEvidence, [
+      "captured",
+      "fileCount",
+      "inventorySha256",
+      "unchangedAfterProbe",
+      "unchangedAfterMissingPython",
+    ]) &&
+    typeof value.frozenSuccessEvidence.captured === "boolean" &&
+    isNonNegativeInteger(value.frozenSuccessEvidence.fileCount) &&
+    isSha256(value.frozenSuccessEvidence.inventorySha256) &&
+    typeof value.frozenSuccessEvidence.unchangedAfterProbe === "boolean" &&
+    typeof value.frozenSuccessEvidence.unchangedAfterMissingPython ===
+      "boolean" &&
     isRecord(value.artifacts) &&
     hasOnlyKeys(value.artifacts, [
       "runtimeEntrypoint",
@@ -931,6 +1326,8 @@ export function isLiveOrganTransplantObservations(
     isArtifactObservation(value.artifacts.runtimeEntrypoint) &&
     isArtifactObservation(value.artifacts.flightDatabase) &&
     isArtifactObservation(value.artifacts.flightExport) &&
+    isProbeReport(value.probeReport) &&
+    isTransplantIndependentProbeEvidence(value.independentProbe) &&
     isStringArray(value.missingEvidence) &&
     isStringArray(value.skippedEvidence)
   );
@@ -1011,114 +1408,55 @@ function artifactMatches(
   );
 }
 
-function isFlightExport(value: unknown): value is {
-  schema: "openrappter-flight-export/1.0";
-  exportedAt: string;
-  events: FlightEvent[];
-} {
+function pathIsInside(pathValue: string, directory: string): boolean {
+  const normalizedDirectory = directory.replace(/[\\/]+$/, "");
   return (
-    isRecord(value) &&
-    hasOnlyKeys(value, ["schema", "exportedAt", "events"]) &&
-    value.schema === "openrappter-flight-export/1.0" &&
-    isIsoTimestamp(value.exportedAt) &&
-    Array.isArray(value.events) &&
-    value.events.every(isFlightEvent)
+    pathValue !== normalizedDirectory &&
+    (pathValue.startsWith(`${normalizedDirectory}/`) ||
+      pathValue.startsWith(`${normalizedDirectory}\\`)) &&
+    !pathValue.split(/[\\/]/).includes("..")
   );
 }
 
-function pathIsInsideEvidenceRoot(
-  path: string,
-  manifest: LiveOrganTransplantManifest,
-): boolean {
-  const root = manifest.artifacts.evidenceRoot.replace(/\/+$/, "");
-  return path.startsWith(`${root}/`) && !path.includes("..");
+function loopbackRequest(value: {
+  url: string;
+  hostname?: string;
+  path?: string;
+  method?: string;
+}): boolean {
+  try {
+    const parsed = new URL(value.url);
+    return (
+      parsed.protocol === "http:" &&
+      parsed.hostname === "127.0.0.1" &&
+      (value.hostname === undefined || value.hostname === "127.0.0.1") &&
+      (value.path === undefined || value.path === "/agents/import") &&
+      (value.method === undefined || value.method === "POST")
+    );
+  } catch {
+    return false;
+  }
 }
 
-function flightRecorderIsValid(
-  result: LiveOrganTransplantSuccessResult,
-  manifest: LiveOrganTransplantManifest,
-  observations: LiveOrganTransplantObservations,
-): boolean {
-  const flight = result.flightRecorder;
-  const events = flight.events;
-  const ids = events.map((event) => event.id);
-  const uniqueIds = new Set(ids);
-  const traces = new Set(events.map((event) => event.traceId));
-  const kinds = new Set(events.map((event) => event.kind));
-  const executionCount = events.filter(
-    (event) => event.kind === "agent.execute.completed",
-  ).length;
-  const exported = observations.artifacts.flightExport.json;
-
+function exactProbeReport(report: TransplantProbeReport): boolean {
   return (
-    flight.enabled &&
-    flight.persisted &&
-    flight.reopened &&
-    flight.eventCount === events.length &&
-    events.length >= 6 &&
-    uniqueIds.size === events.length &&
-    traces.size === 1 &&
-    events.every((event, index) => event.sequence === index + 1) &&
-    events.every(verifyFlightEventHash) &&
-    REQUIRED_TRANSPLANT_EVENT_KINDS.every((kind) => kinds.has(kind)) &&
-    executionCount >= 2 &&
-    isDeepStrictEqual(flight.reloadedEventIds, ids) &&
-    pathIsInsideEvidenceRoot(flight.database.path, manifest) &&
-    pathIsInsideEvidenceRoot(flight.export.path, manifest) &&
-    artifactMatches(flight.database, observations.artifacts.flightDatabase) &&
-    artifactMatches(flight.export, observations.artifacts.flightExport) &&
-    isFlightExport(exported) &&
-    exported.schema === flight.exportSchema &&
-    exported.exportedAt === flight.exportedAt &&
-    isDeepStrictEqual(exported.events, events)
-  );
-}
-
-function noProviderOrModelEvents(
-  result: LiveOrganTransplantSuccessResult,
-): boolean {
-  return (
-    result.providerUsage.providerCalls === 0 &&
-    result.providerUsage.modelCalls === 0 &&
-    result.flightRecorder.events.every(
-      (event) =>
-        event.providerId === undefined &&
-        event.model === undefined &&
-        !event.kind.startsWith("provider.") &&
-        !event.kind.startsWith("model."),
+    report.testFile === TRANSPLANT_INTEGRATION_TEST &&
+    report.totalTests === REQUIRED_TRANSPLANT_PROBE_TEST_NAMES.length &&
+    report.passedTests === REQUIRED_TRANSPLANT_PROBE_TEST_NAMES.length &&
+    report.failedTests === 0 &&
+    report.skippedTests === 0 &&
+    report.exactTestNames &&
+    isDeepStrictEqual(
+      report.passedTestNames,
+      REQUIRED_TRANSPLANT_PROBE_TEST_NAMES,
     )
   );
 }
 
-function loopbackTrafficOnly(
-  result: LiveOrganTransplantSuccessResult,
+function completeCollections(
+  collections: TransplantIndependentProbeEvidence["collections"],
 ): boolean {
-  const gateway = result.gateway;
-  if (
-    gateway.bind !== "loopback" ||
-    gateway.address !== "127.0.0.1" ||
-    gateway.externalRequestCount !== 0 ||
-    gateway.requests.length !== 2 ||
-    gateway.baseUrl !== `http://127.0.0.1:${gateway.port}`
-  ) {
-    return false;
-  }
-  return gateway.requests.every((request) => {
-    try {
-      const parsed = new URL(request.url);
-      return (
-        parsed.protocol === "http:" &&
-        parsed.hostname === "127.0.0.1" &&
-        parsed.port === String(gateway.port) &&
-        parsed.pathname === "/agents/import" &&
-        request.hostname === "127.0.0.1" &&
-        request.path === "/agents/import" &&
-        request.method === "POST"
-      );
-    } catch {
-      return false;
-    }
-  });
+  return Object.values(collections).every((entry) => entry === true);
 }
 
 function check(
@@ -1147,7 +1485,7 @@ export function evaluateLiveOrganTransplant(
   const observations = isLiveOrganTransplantObservations(input.observations)
     ? input.observations
     : undefined;
-
+  const probe = observations?.independentProbe;
   const validImport = result
     ? findGatewayRequest(result, "valid-import")
     : undefined;
@@ -1181,27 +1519,69 @@ export function evaluateLiveOrganTransplant(
           {
             path: result.runtime.entrypoint,
             sha256: result.runtime.entrypointSha256,
-            sizeBytes: observations.artifacts.runtimeEntrypoint.sizeBytes ?? 0,
+            sizeBytes: result.runtime.entrypointSizeBytes,
           },
           observations.artifacts.runtimeEntrypoint,
         ) &&
         (observations.artifacts.runtimeEntrypoint.sizeBytes ?? 0) > 0,
       ),
-      "compiled JavaScript entrypoint must exist and match its measured hash",
+      "compiled JavaScript entrypoint must exist and match gate-hashed bytes",
+    ),
+    check(
+      "isolated-scenario-evidence",
+      Boolean(
+        result &&
+        missingPythonResult &&
+        observations &&
+        result.scenario.nonce === observations.successScenario.nonce &&
+        result.scenario.evidenceDirectory ===
+          observations.successScenario.evidenceDirectory &&
+        missingPythonResult.scenario.nonce ===
+          observations.missingPythonScenario.nonce &&
+        missingPythonResult.scenario.evidenceDirectory ===
+          observations.missingPythonScenario.evidenceDirectory &&
+        observations.successScenario.startedEmpty &&
+        observations.missingPythonScenario.startedEmpty &&
+        observations.successScenario.nonce !==
+          observations.missingPythonScenario.nonce &&
+        observations.successScenario.evidenceDirectory !==
+          observations.missingPythonScenario.evidenceDirectory &&
+        observations.frozenSuccessEvidence.captured &&
+        observations.frozenSuccessEvidence.fileCount > 0 &&
+        observations.frozenSuccessEvidence.unchangedAfterProbe &&
+        observations.frozenSuccessEvidence.unchangedAfterMissingPython &&
+        pathIsInside(
+          result.flightRecorder.database.path,
+          observations.successScenario.evidenceDirectory,
+        ) &&
+        pathIsInside(
+          result.flightRecorder.export.path,
+          observations.successScenario.evidenceDirectory,
+        ) &&
+        result.flightRecorder.database.path !==
+          result.flightRecorder.export.path,
+      ),
+      "unique empty scenario directories and nonces must remain isolated and frozen",
     ),
     check(
       "host-identity-preserved",
       Boolean(
         result &&
+        probe &&
         result.host.pidBefore === result.host.pidAfter &&
-        result.host.startIdentityBefore === result.host.startIdentityAfter,
+        result.host.startIdentityBefore === result.host.startIdentityAfter &&
+        probe.process.pidBefore === probe.process.pidAfter &&
+        probe.process.gatewayReferenceStable &&
+        probe.process.registryReferenceStable &&
+        probe.process.registryConstructorCount === 1,
       ),
-      "PID and process-start identity must remain unchanged",
+      "display PID/start identity and independently held server/registry references must stay stable",
     ),
     check(
       "authenticated-http-import",
       Boolean(
         result &&
+        probe &&
         validImport &&
         result.gateway.serverClass === "GatewayServer" &&
         result.gateway.serverModule === TRANSPLANT_GATEWAY_MODULE &&
@@ -1214,51 +1594,77 @@ export function evaluateLiveOrganTransplant(
         validImport.status === 200 &&
         result.imports.accepted.httpStatus === 200 &&
         result.imports.accepted.responseStatus === "ok" &&
-        result.imports.accepted.committed,
+        result.imports.accepted.committed &&
+        probe.gateway.serverClass === "GatewayServer" &&
+        probe.gateway.registryClass === "AgentRegistry" &&
+        probe.gateway.authMode === "token" &&
+        probe.gateway.authorizationScheme === "Bearer" &&
+        probe.gateway.unauthenticatedStatus === 401 &&
+        probe.gateway.unauthenticatedImporterCalls === 0 &&
+        probe.gateway.totalImporterCalls === 2 &&
+        probe.gateway.acceptedStatus === 200,
       ),
-      "production GatewayServer import route must accept an authenticated POST",
+      "pinned observer must send the bearer-authenticated POST itself after a 401 control",
     ),
     check(
       "python-agent-bridge",
       Boolean(
         result &&
+        probe &&
         result.agent.name === TRANSPLANT_AGENT_NAME &&
         result.agent.bridgeClass === "PythonAgent" &&
         result.agent.bridgeModule === TRANSPLANT_PYTHON_BRIDGE_MODULE &&
-        result.agent.registryClass === "AgentRegistry",
+        result.agent.registryClass === "AgentRegistry" &&
+        probe.agent.className === "PythonAgent" &&
+        probe.agent.bridgeModule === TRANSPLANT_PYTHON_BRIDGE_MODULE &&
+        probe.agent.sourceFile.endsWith(result.agent.filename),
       ),
-      "ChecksumAgent must be Python-backed and resolved by AgentRegistry",
+      "observer must hold the actual PythonAgent resolved from the one real registry",
     ),
     check(
       "known-vector-first-execution",
       Boolean(
         result &&
         manifest &&
+        probe &&
         result.executions.first.input === manifest.input &&
         result.executions.first.output.algorithm === "sha256" &&
-        result.executions.first.output.digest === manifest.expectedSha256,
+        result.executions.first.output.digest === manifest.expectedSha256 &&
+        probe.executions.first.input === manifest.input &&
+        probe.executions.first.output.algorithm === "sha256" &&
+        probe.executions.first.output.digest === manifest.expectedSha256,
       ),
-      "first execution must match the manifest SHA-256 known vector",
+      "demo and actual independently executed PythonAgent must match the known vector",
     ),
     check(
       "bad-candidate-rejected-before-commit",
       Boolean(
         result &&
+        probe &&
         invalidReplacement &&
         invalidReplacement.status === 400 &&
         invalidReplacement.authenticated &&
+        invalidReplacement.authorization === "bearer-token" &&
+        invalidReplacement.method === "POST" &&
+        invalidReplacement.path === "/agents/import" &&
         result.imports.rejected.httpStatus === 400 &&
         result.imports.rejected.responseStatus === "error" &&
         result.imports.rejected.rejectedBeforeCommit &&
         result.imports.rejected.committed === false &&
-        result.imports.rejected.filename === result.imports.accepted.filename,
+        result.imports.rejected.filename === result.imports.accepted.filename &&
+        probe.gateway.rejectedStatus === 400 &&
+        probe.rejection.rejectedBeforeCommit &&
+        probe.rejection.committed === false &&
+        probe.rejection.targetBytesUnchanged &&
+        probe.rejection.targetStatUnchanged,
       ),
-      "contract-invalid candidate must receive HTTP 400 before commit",
+      "invalid fixture must be rejected before any committed file metadata or bytes change",
     ),
     check(
       "previous-generation-preserved",
       Boolean(
         result &&
+        probe &&
         result.preservation.previousGenerationPreserved &&
         result.agent.sourceSha256Before === result.agent.sourceSha256After &&
         result.agent.objectIdentityBefore ===
@@ -1266,14 +1672,19 @@ export function evaluateLiveOrganTransplant(
         result.agent.registryInstanceIdBefore ===
           result.agent.registryInstanceIdAfter &&
         result.imports.rejected.candidateSourceSha256 !==
-          result.agent.sourceSha256Before,
+          result.agent.sourceSha256Before &&
+        probe.agent.objectReferenceStable &&
+        probe.agent.registryReferenceStable &&
+        probe.agent.sourceSha256Before === probe.agent.sourceSha256After &&
+        probe.rejection.candidateDiffersFromCommitted,
       ),
-      "previous source bytes and live registry object must remain active",
+      "actual source bytes plus live object and registry references must remain active",
     ),
     check(
       "deterministic-second-execution",
       Boolean(
         result &&
+        probe &&
         isDeepStrictEqual(
           transplantDeterministicCore(
             result.agent.name,
@@ -1283,38 +1694,132 @@ export function evaluateLiveOrganTransplant(
             result.agent.name,
             result.executions.second,
           ),
+        ) &&
+        isDeepStrictEqual(
+          transplantDeterministicCore(
+            TRANSPLANT_AGENT_NAME,
+            probe.executions.first,
+          ),
+          transplantDeterministicCore(
+            TRANSPLANT_AGENT_NAME,
+            probe.executions.second,
+          ),
         ),
       ),
-      "second deterministic core must equal the first; timing and identities are excluded",
+      "actual PythonAgent and display evidence must produce the same deterministic core twice",
     ),
     check(
       "flight-recorder-integrity",
       Boolean(
         result &&
-        manifest &&
         observations &&
-        flightRecorderIsValid(result, manifest, observations),
+        probe &&
+        result.flightRecorder.enabled &&
+        result.flightRecorder.persisted &&
+        result.flightRecorder.database.path !==
+          result.flightRecorder.export.path &&
+        result.flightRecorder.eventCount ===
+          result.flightRecorder.events.length &&
+        result.flightRecorder.events.length >= 6 &&
+        result.flightRecorder.events.every(isFlightEventDisplayEvidence) &&
+        REQUIRED_TRANSPLANT_EVENT_KINDS.every((kind) =>
+          result.flightRecorder.events.some((event) => event.kind === kind),
+        ) &&
+        artifactMatches(
+          result.flightRecorder.database,
+          observations.artifacts.flightDatabase,
+        ) &&
+        artifactMatches(
+          result.flightRecorder.export,
+          observations.artifacts.flightExport,
+        ) &&
+        probe.flight.pathsDistinct &&
+        probe.flight.databasePath !== probe.flight.exportPath &&
+        probe.flight.databasePath === result.flightRecorder.database.path &&
+        probe.flight.exportPath === result.flightRecorder.export.path &&
+        probe.flight.databaseSha256 === probe.flight.expectedDatabaseSha256 &&
+        probe.flight.exportSha256 === probe.flight.expectedExportSha256 &&
+        probe.flight.reopenedQuerySucceeded &&
+        probe.flight.productionValidationPassed &&
+        probe.flight.allContentHashesValid &&
+        isDeepStrictEqual(
+          result.flightRecorder.events.map((event) => event.id),
+          probe.flight.persistedEventIds,
+        ) &&
+        isDeepStrictEqual(
+          result.flightRecorder.events.map((event) => event.contentHash),
+          probe.flight.persistedContentHashes,
+        ) &&
+        isDeepStrictEqual(
+          probe.flight.persistedEventIds,
+          probe.flight.reopenedEventIds,
+        ) &&
+        isDeepStrictEqual(
+          probe.flight.persistedEventIds,
+          probe.flight.productionExportEventIds,
+        ) &&
+        isDeepStrictEqual(
+          probe.flight.persistedContentHashes,
+          probe.flight.reopenedContentHashes,
+        ) &&
+        isDeepStrictEqual(
+          probe.flight.persistedContentHashes,
+          probe.flight.productionExportContentHashes,
+        ),
       ),
-      "persisted and reopened Flight Recorder artifacts and event hashes must verify",
+      "production ledger reopen, validator import, IDs, hashes, and distinct export must agree exactly",
     ),
     check(
       "no-provider-model-events",
-      Boolean(result && noProviderOrModelEvents(result)),
-      "provider/model counters and Flight Recorder events must remain zero",
+      Boolean(
+        result &&
+        missingPythonResult &&
+        manifest &&
+        probe &&
+        manifest.dependencies.model === "none" &&
+        result.providerUsage.providerCalls === 0 &&
+        result.providerUsage.modelCalls === 0 &&
+        missingPythonResult.providerCalls === 0 &&
+        missingPythonResult.modelCalls === 0 &&
+        result.flightRecorder.events.every(
+          (event) =>
+            event.providerId === undefined &&
+            event.model === undefined &&
+            !event.kind.startsWith("provider.") &&
+            !event.kind.startsWith("model."),
+        ) &&
+        probe.provider.manifestModelDependency === "none" &&
+        probe.provider.providerEventCount === 0 &&
+        probe.provider.modelEventCount === 0,
+      ),
+      "digest-pinned donor must need no provider/model and persisted events must show none",
     ),
     check(
-      "loopback-only-traffic",
-      Boolean(result && loopbackTrafficOnly(result)),
-      "all gateway traffic must be HTTP loopback with no external requests",
+      "loopback-gateway-requests",
+      Boolean(
+        result &&
+        probe &&
+        result.gateway.bind === "loopback" &&
+        result.gateway.address === "127.0.0.1" &&
+        result.gateway.requests.length === 2 &&
+        result.gateway.baseUrl === `http://127.0.0.1:${result.gateway.port}` &&
+        result.gateway.requests.every(loopbackRequest) &&
+        probe.gateway.requestUrls.length === 3 &&
+        probe.gateway.requestUrls.every((url) => loopbackRequest({ url })),
+      ),
+      "only observed gateway requests are claimed loopback; OS egress is not claimed",
     ),
     check(
       "unsandboxed-file-boundary",
       Boolean(
         result &&
+        missingPythonResult &&
         result.preservation.sandboxed === false &&
-        result.preservation.preservationBoundary === "file-only",
+        result.preservation.preservationBoundary === "file-only" &&
+        missingPythonResult.sandboxed === false &&
+        missingPythonResult.preservationBoundary === "file-only",
       ),
-      "result must state sandboxed:false and preservationBoundary:file-only",
+      "both scenarios must state sandboxed:false and preservationBoundary:file-only",
     ),
     check(
       "bounded-runtime",
@@ -1323,19 +1828,17 @@ export function evaluateLiveOrganTransplant(
         missingPythonResult &&
         manifest &&
         observations &&
-        result.runtime.elapsedMs <= manifest.runtimeLimits.demoMaxElapsedMs &&
-        result.executions.first.elapsedMs <=
-          manifest.runtimeLimits.demoMaxElapsedMs &&
-        result.executions.second.elapsedMs <=
-          manifest.runtimeLimits.demoMaxElapsedMs &&
-        missingPythonResult.elapsedMs <=
-          manifest.runtimeLimits.missingPythonTimeoutMs &&
-        observations.successElapsedMs <=
-          manifest.runtimeLimits.commandTimeoutMs &&
-        observations.missingPythonElapsedMs <=
-          manifest.runtimeLimits.missingPythonTimeoutMs,
+        manifest.runtimeLimits.demoMaxElapsedMs === 30_000 &&
+        result.runtime.elapsedMs <= 30_000 &&
+        result.executions.first.elapsedMs <= 30_000 &&
+        result.executions.second.elapsedMs <= 30_000 &&
+        missingPythonResult.elapsedMs <= 30_000 &&
+        observations.successScenario.elapsedMs <= 30_000 &&
+        observations.missingPythonScenario.elapsedMs <= 30_000 &&
+        !observations.successScenario.timedOut &&
+        !observations.missingPythonScenario.timedOut,
       ),
-      "runtime and both command scenarios must stay within manifest deadlines",
+      "independent wall clock and all display timings must stay within 30 seconds",
     ),
     check(
       "missing-python-controlled",
@@ -1343,21 +1846,21 @@ export function evaluateLiveOrganTransplant(
         missingPythonResult &&
         manifest &&
         observations &&
+        manifest.missingPython.expectedExitCode !== 0 &&
         observations.missingPythonExitCode ===
           manifest.missingPython.expectedExitCode &&
         observations.missingPythonRecordCount === 1 &&
         observations.missingPythonRecordCanonical &&
         missingPythonResult.reason === "python-unavailable" &&
         missingPythonResult.pythonExecutable ===
-          manifest.missingPython.executable &&
+          observations.controlledMissingPythonExecutable &&
         /python/i.test(missingPythonResult.message) &&
         missingPythonResult.sandboxed === false &&
         missingPythonResult.preservationBoundary === "file-only" &&
         missingPythonResult.providerCalls === 0 &&
-        missingPythonResult.modelCalls === 0 &&
-        missingPythonResult.externalNetworkRequests === 0,
+        missingPythonResult.modelCalls === 0,
       ),
-      "missing Python must produce one controlled, explicit, non-model result",
+      "absent interpreter must be rechecked and produce one canonical nonzero controlled exit",
     ),
     check(
       "exact-command-parity",
@@ -1379,27 +1882,43 @@ export function evaluateLiveOrganTransplant(
         result &&
         missingPythonResult &&
         observations &&
+        probe &&
         result.evidence.missing.length === 0 &&
         result.evidence.skipped.length === 0 &&
         missingPythonResult.evidence.missing.length === 0 &&
         missingPythonResult.evidence.skipped.length === 0 &&
         observations.missingEvidence.length === 0 &&
-        observations.skippedEvidence.length === 0,
+        observations.skippedEvidence.length === 0 &&
+        exactProbeReport(observations.probeReport) &&
+        completeCollections(probe.collections) &&
+        probe.nonce === observations.successScenario.nonce,
       ),
-      "missing or skipped evidence is always a failure",
+      "all literal probe tests and every evidence collection must pass with zero skips",
     ),
     check(
       "fixture-source-hash-pinned",
       Boolean(
         result &&
         manifest &&
+        probe &&
         isSha256(manifest.fixture.sourceSha256) &&
+        isSha256(manifest.fixture.invalidSourceSha256) &&
         manifest.fixture.sourceSha256 === result.agent.sourceSha256Before &&
         manifest.fixture.sourceSha256 ===
           result.imports.accepted.candidateSourceSha256 &&
-        manifest.fixture.filename === result.agent.filename,
+        manifest.fixture.invalidSourceSha256 ===
+          result.imports.rejected.candidateSourceSha256 &&
+        manifest.fixture.filename === result.agent.filename &&
+        probe.fixtures.validPath === manifest.fixture.bundledPath &&
+        probe.fixtures.invalidPath === manifest.fixture.invalidBundledPath &&
+        probe.fixtures.validSha256 === manifest.fixture.sourceSha256 &&
+        probe.fixtures.invalidSha256 === manifest.fixture.invalidSourceSha256 &&
+        probe.fixtures.manifestValidSha256 === manifest.fixture.sourceSha256 &&
+        probe.fixtures.manifestInvalidSha256 ===
+          manifest.fixture.invalidSourceSha256 &&
+        probe.agent.sourceSha256Before === manifest.fixture.sourceSha256,
       ),
-      "manifest fixture source hash must be a real SHA-256 pin matching the accepted source",
+      "observer must hash both literal bundled fixtures and link them to accepted/rejected bytes",
     ),
   ];
 

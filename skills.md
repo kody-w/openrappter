@@ -4,12 +4,23 @@
 
 ## What Is openrappter
 
-openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses GitHub Copilot as the cloud AI backbone — your agent data (memory, config, state) stays local in `~/.openrappter/`. Copilot handles inference; everything else runs on the user's machine.
+openrappter is a dual-runtime (Python + TypeScript) AI agent framework.
+Memory, config, and state files live under `~/.openrappter/`; model traffic and
+context disclosure depend on the selected inference mode, while enabled tools
+and integrations may have their own network paths.
 
 - **Repo**: `https://github.com/kody-w/openrappter`
 - **License**: Apache-2.0
 - **TypeScript Version**: 1.13.0
 - **Python Version**: 1.13.0
+
+### Data and execution modes
+
+| Mode | Model/provider path | Local state and execution boundary | Account/auth |
+|---|---|---|---|
+| **Live Organ Transplant demo** | No model/provider calls; deterministic proof only | Loopback gateway; Python executes with logged-in OS user authority. Loopback is not an OS egress boundary. No OS egress claim is made. | No model account or provider authentication |
+| **Local model** | Model traffic stays on the configured local endpoint | Memory/config files remain local; enabled channels, tools, downloads, updates, and integrations may use separate network paths | No cloud-model account; local endpoint setup may be required |
+| **GitHub Copilot / cloud** | Prompts are sent to, and model outputs are returned by, the selected provider | Memory/config files remain local, but selected context may be included in provider prompts; integrations have separate data paths | GitHub account with Copilot access and authentication required for Copilot mode |
 
 ---
 
@@ -19,7 +30,6 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 |---|---|---|
 | Node.js >=20.9 | `node --version` | TypeScript runtime |
 | Python 3.10+ | `python3 --version` | Python runtime |
-| GitHub Copilot CLI | `copilot --version` | Required — provides AI-powered routing via the Copilot SDK. |
 
 ---
 
@@ -32,23 +42,65 @@ git clone https://github.com/kody-w/openrappter.git
 cd openrappter
 ```
 
-### Quickstart Demo (recommended first step)
+### Live Organ Transplant (recommended first demo)
 
-See data sloshing, agents, and chaining in action — no build step, no API keys:
+Prove in one command that a running TypeScript host can register and invoke a
+Python-backed agent without restarting, reject a broken replacement, preserve
+the working generation, and emit a verified receipt.
+
+```bash
+./quickstart.sh --demo live-organ-transplant
+```
+
+Supported platforms are macOS, Linux, and WSL; native Windows is deferred.
+The demo requires Node.js >=20.9 and Python >=3.10. It is deterministic, makes
+no model/provider calls, and binds its gateway to loopback.
+
+> **Authority warning:** Compatibility inspection and every invocation execute
+> Python with the logged-in OS user's filesystem, network, environment, and
+> subprocess authority. Loopback is not an OS egress boundary, subprocess
+> isolation is not a security boundary, and file preservation cannot undo
+> external side effects.
+
+See the [README proof and evidence details](./README.md#see-a-live-organ-transplant).
+
+### Generic Quickstart Tour
+
+The original guided tour remains available and needs no API keys:
 
 ```bash
 ./quickstart.sh
 ```
 
-This installs TypeScript dependencies (if needed) and runs a guided 5-step tour showing data sloshing, ShellAgent, MemoryAgent, and agent-to-agent chaining. Takes ~5 seconds. After the demo, continue below for the full setup.
+It installs TypeScript dependencies if needed and runs a five-step tour of data
+sloshing, ShellAgent, MemoryAgent, and agent-to-agent chaining. After either
+demo, continue below for the full setup.
 
 ### TypeScript Runtime
 
 ```bash
 cd typescript
-npm install
+npm ci
 npm run build
 ```
+
+`npm ci` installs the lockfile-pinned `@github/copilot` dependency into this
+repository's `typescript/node_modules`; a machine-wide `copilot` executable is
+not a prerequisite.
+
+Copilot mode requires a GitHub account with Copilot access. Authenticate through
+the current interactive device-code flow:
+
+```bash
+openrappter onboard
+# From an uninstalled source checkout after npm run build:
+node dist/index.js onboard
+```
+
+Advanced operators may set `OPENRAPPTER_COPILOT_CLI` or `COPILOT_CLI_PATH` to
+an independently managed executable. This optional override takes precedence
+over the repository-local locked copy, so its version and trust are the
+operator's responsibility.
 
 ### Electron Desktop
 
@@ -56,10 +108,10 @@ The Electron shell reuses the same OpenRappter gateway and packaged UI:
 
 ```bash
 cd typescript
-npm install
+npm ci
 npm run build
 cd desktop
-npm install
+npm ci
 npm start
 ```
 
@@ -589,6 +641,10 @@ Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `ski
 
 ## 12. Architecture Overview
 
+The diagram below shows GitHub Copilot/cloud mode. The deterministic flagship
+demo has no inference layer; local-model mode replaces that box with the
+configured local endpoint.
+
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  User Input (CLI / Web UI / Channels)                    │
@@ -679,7 +735,7 @@ openrappter/
 ```bash
 cd typescript
 rm -rf node_modules dist
-npm install
+npm ci
 npm run build
 ```
 
@@ -708,14 +764,20 @@ pyenv install 3.11
 pyenv local 3.11
 ```
 
-### Copilot CLI Not Found
+### Copilot mode setup
 
-openrappter requires the Copilot SDK for AI-powered agent routing:
+Restore the repository-local locked CLI and run the interactive authentication
+flow; do not add an ambient global package:
 
 ```bash
-npm install -g @githubnext/github-copilot-cli
-github-copilot-cli auth
+cd typescript
+npm ci
+npm run build
+node dist/index.js onboard
 ```
+
+Installed users can run `openrappter onboard`. Copilot mode requires a GitHub
+account with Copilot access; deterministic and local-model modes do not.
 
 ### Memory File Issues
 
@@ -760,8 +822,9 @@ Config files support `${VAR_NAME}` environment variable substitution. All schema
 ```bash
 # Install & demo
 git clone https://github.com/kody-w/openrappter.git && cd openrappter
-./quickstart.sh                                   # Guided demo (no build needed)
-cd typescript && npm install && npm run build     # Full TypeScript build
+./quickstart.sh --demo live-organ-transplant      # Recommended deterministic flagship
+./quickstart.sh                                   # Generic five-step tour
+cd typescript && npm ci && npm run build          # Locked TypeScript build
 cd ../python && pip install .                      # Python
 
 # Start everything (three terminals)
@@ -796,6 +859,6 @@ openrappter rappterhub install author/agent
 - Both runtimes can be installed independently — pick the user's preferred language
 - TypeScript must be rebuilt after adding new agents (`npm run build`)
 - Python agents are hot-loaded automatically; review the execution warning in Section 8 before adding a file
-- All agent data is local-first in `~/.openrappter/`
-- Copilot provides cloud AI inference — no separate API keys needed
+- Memory, config, and state files are local; selected prompt context and integration traffic follow the mode table above
+- Copilot mode uses GitHub/Copilot account authentication; local-model and deterministic demo modes do not require Copilot
 - This skill should complete in under 5 minutes

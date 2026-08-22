@@ -686,27 +686,27 @@ export async function prepareUpdate({
     packageDir: update.packageDir,
     parentPid: process.pid,
     platform,
+    releaseTag: update.releaseTag,
     remoteUrl: update.remoteUrl,
     redactionPath,
     requestPath,
     resultPath,
     rollbackCommit: update.currentCommit,
     rollbackInstallerPath,
+    rollbackReleaseTag: releaseTagFor(update.currentVersion),
+    rollbackRuntimeVersionUrl: githubRawUrl(
+      update.remoteUrl,
+      update.currentCommit,
+      "rapp_brainstem/VERSION",
+    ),
+    runtimeVersionUrl: githubRawUrl(
+      update.remoteUrl,
+      update.latestCommit,
+      "rapp_brainstem/VERSION",
+    ),
     runnerPath,
     updateRef: update.updateRef,
   };
-  if (platform === "win32") {
-    request.bootstrapUrl = githubRawUrl(
-      update.remoteUrl,
-      update.latestCommit,
-      "install.ps1",
-    );
-    request.rollbackBootstrapUrl = githubRawUrl(
-      update.remoteUrl,
-      update.currentCommit,
-      "install.ps1",
-    );
-  }
   writeFileSync(requestPath, `${JSON.stringify(request, null, 2)}\n`, {
     mode: 0o600,
   });

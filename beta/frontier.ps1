@@ -67,8 +67,6 @@ $env:BRAINSTEM_BETA_RELEASE_TAG = $tag
 $env:BRAINSTEM_BETA_RUNTIME_VERSION_URL =
     "https://raw.githubusercontent.com/$repo/$commit/rapp_brainstem/VERSION"
 $env:BRAINSTEM_BETA_COMMIT = $commit
-$env:BRAINSTEM_BETA_BOOTSTRAP_URL =
-    "https://raw.githubusercontent.com/$repo/$commit/install.ps1"
 $installer = Join-Path $env:TEMP "rapp-frontier-$commit.cmd"
 try {
     Invoke-WebRequest `

@@ -115,7 +115,7 @@ test("OpenRappter is the primary customer-facing application identity", () => {
     [{ provider: "github", owner: "kody-w", repo: "openrappter" }],
     "electron-builder needs somewhere to publish, or a release can only be made by hand",
   );
-  assert.equal(packageJson.version, "0.1.0-beta.8");
+  assert.equal(packageJson.version, "0.1.0-beta.9");
   assert.equal(readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim(), packageJson.version);
   for (const installer of [unix, windows]) {
     assert.match(installer, /openrappter-app/);
@@ -178,11 +178,19 @@ test("released beta installs can pin the launcher and runtime to one commit", ()
     assert.match(installer, /BRAINSTEM_BETA_COMMIT/);
     assert.match(installer, /40-character commit SHA/);
     assert.match(installer, /reset --hard FETCH_HEAD/);
+    assert.match(installer, /BOOTSTRAP_SHA256/);
   }
-  assert.match(unix, /--version "\$REPO_COMMIT"/);
-  assert.match(unix, /GIT_CONFIG_KEY_/);
-  assert.match(windows, /--version "%REPO_COMMIT%"/);
-  assert.match(windows, /GIT_CONFIG_KEY_0/);
+  assert.match(unix, /RELEASE_TAG="brainstem-beta-v\$release_version"/);
+  assert.match(windows, /set "FRONTIER_VERSION=0\.1\.0-beta\.9"/);
+  assert.match(windows, /set "RELEASE_TAG=brainstem-beta-v%FRONTIER_VERSION%"/);
+  assert.match(unix, /BRAINSTEM_REPO_REF="\$runtime_ref"/);
+  assert.match(unix, /git -C "\$BRAINSTEM_HOME\/src" rev-parse HEAD/);
+  assert.match(unix, /BRAINSTEM_BIN="\$OPENRAPPTER_HOME\/kernel-bin"/);
+  assert.doesNotMatch(unix, /--version "\$REPO_COMMIT"/);
+  assert.match(windows, /set "BRAINSTEM_BIN=%OPENRAPPTER_HOME%\\kernel-bin"/);
+  assert.match(windows, /set "RUNTIME_COMMIT_FILE=%TEMP%\\rapp-runtime-commit-%RANDOM%-%RANDOM%\.txt"/);
+  assert.match(windows, /"%GIT_EXE%" -C "%BRAINSTEM_HOME%\\src" rev-parse HEAD > "!RUNTIME_COMMIT_FILE!"/);
+  assert.doesNotMatch(windows, /--version "%REPO_COMMIT%"/);
   assert.match(windows, /set "ACTUAL_COMMIT_FILE=%TEMP%\\rapp-beta-commit-%RANDOM%-%RANDOM%\.txt"/);
   assert.match(windows, /"%GIT_EXE%" -C "%BETA_SOURCE%" rev-parse HEAD > "!ACTUAL_COMMIT_FILE!"/);
   assert.match(windows, /set \/p "ACTUAL_COMMIT="<"!ACTUAL_COMMIT_FILE!"/);
@@ -220,6 +228,7 @@ test("stable Frontier bootstraps resolve and run the latest published release", 
   }
   assert.match(frontierUnix, /beta\/install\.sh/);
   assert.match(frontierWindows, /beta\/install\.cmd/);
+  assert.doesNotMatch(frontierWindows, /BRAINSTEM_BETA_BOOTSTRAP_URL/);
 });
 
 test("dedicated beta page scripts parse", () => {
@@ -451,29 +460,59 @@ test("the kernel source is separable from the Frontier source", () => {
       /BRAINSTEM_BETA_KERNEL_REPO_URL/,
       `${name} must let the kernel source be overridden independently`,
     );
+    assert.match(
+      installer,
+      /BRAINSTEM_BETA_KERNEL_REPO_REF/,
+      `${name} must let the kernel ref be overridden independently`,
+    );
   }
-  // The redirect must target the kernel's home, not the Frontier's.
-  assert.match(unix, /url\.\$\{KERNEL_REPO_URL\}\.insteadOf/);
-  assert.match(windows, /url\.%KERNEL_REPO_URL%\.insteadOf/);
-  assert.doesNotMatch(unix, /url\.\$\{REPO_URL\}\.insteadOf/);
-  assert.doesNotMatch(windows, /url\.%REPO_URL%\.insteadOf/);
+  assert.match(unix, /local runtime_repo="\$KERNEL_REPO_URL"/);
+  assert.match(unix, /runtime_repo="\$REPO_URL"/);
+  assert.match(windows, /set "BRAINSTEM_REPO_URL=%KERNEL_REPO_URL%"/);
+  assert.match(windows, /set "BRAINSTEM_REPO_URL=%REPO_URL%"/);
+  assert.doesNotMatch(unix, /GIT_CONFIG_KEY_/);
+  assert.doesNotMatch(windows, /GIT_CONFIG_KEY_0/);
 });
 
-// The bootstrap is the KERNEL's installer, fetched from its own URL. A blanket
-// repoint of this file — replacing every upstream reference when standing up a
-// downstream distribution — moves BOOTSTRAP_URL too, and Windows then downloads
-// that distribution's own unrelated root installer. That is what broke the first
-// v3 install attempt.
-test("the kernel bootstrap URL is not the Frontier's URL", () => {
-  const line = windows.split("\n").find((l) => l.includes("set \"BOOTSTRAP_URL="));
-  assert.ok(line, "install.cmd must define BOOTSTRAP_URL");
-  assert.match(line, /install\.ps1"?$/, "BOOTSTRAP_URL must point at a kernel installer");
-  assert.doesNotMatch(
-    line,
-    /%REPO_URL%/,
-    "BOOTSTRAP_URL must not be derived from REPO_URL — the kernel and the Frontier "
-      + "are separate artifacts with separate homes",
+// The bootstrap is a separately pinned KERNEL installer. Pulling mutable main,
+// or calling the Frontier repository's unrelated root installer, silently
+// replaced the estate directory during the first public beta.8 proof.
+test("the kernel bootstrap is immutable and distinct from the Frontier installer", () => {
+  const unixLine = unix.split("\n").find((line) => line.includes("KERNEL_BOOTSTRAP_URL="));
+  const windowsLine = windows.split("\n").find((line) => line.includes("set \"BOOTSTRAP_URL="));
+  assert.ok(unixLine, "install.sh must define KERNEL_BOOTSTRAP_URL");
+  assert.ok(windowsLine, "install.cmd must define BOOTSTRAP_URL");
+  assert.match(unixLine, /[0-9a-f]{40}\/install\.sh/);
+  assert.match(windowsLine, /[0-9a-f]{40}\/install\.ps1"?$/);
+  assert.match(unix, /KERNEL_BOOTSTRAP_SHA256=.*[0-9a-f]{64}/);
+  assert.match(windows, /set "BOOTSTRAP_SHA256=[0-9a-f]{64}"/);
+  assert.match(unix, /URL and SHA-256 are both required/);
+  assert.match(windows, /URL and SHA-256 are both required/);
+  assert.doesNotMatch(unix, /bash "\$BETA_SOURCE\/install\.sh"/);
+  assert.doesNotMatch(windowsLine, /%REPO_URL%/);
+});
+
+test("both transition helpers are byte-identical to their reviewed source", () => {
+  const matches = [
+    unix.match(/^TRANSITION_HELPER_BASE64="([A-Za-z0-9+/=]+)"$/m),
+    windows.match(/^set "TRANSITION_HELPER_BASE64=([A-Za-z0-9+/=]+)"$/m),
+  ];
+  for (const match of matches) {
+    assert.ok(match, "each installer must carry the offline transition helper");
+    assert.equal(
+      Buffer.from(match[1], "base64").toString("utf8"),
+      read("scripts/stage-transition-rollback.mjs"),
+    );
+  }
+  const mainBlock = unix.slice(unix.indexOf("main() {"));
+  assert.ok(
+    mainBlock.indexOf("stage_transition_rollback")
+      < mainBlock.indexOf("sync_beta_source"),
+    "the rollback shim must be staged before the launcher checkout can move",
   );
+  assert.match(windows, /BRAINSTEM_BETA_TRANSITION_ROLLBACK/);
+  assert.match(windows, /update-request-!TRANSITION_ID!\.json/);
+  assert.match(windows, /rollback-installer-!TRANSITION_ID!\.cmd/);
 });
 
 

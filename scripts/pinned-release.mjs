@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { parsePackageReleaseTag } from './release-preflight.mjs';
 
 const REPOSITORY = process.env.OPENRAPPTER_REPOSITORY ?? 'kody-w/openrappter';
 const INSTALLER_FILES = ['install-pinned.sh'];
@@ -165,8 +166,8 @@ if (!command || command === 'help') {
   process.stdout.write(
     'Usage:\n'
     + '  node scripts/pinned-release.mjs hashes  --commit <sha>\n'
-    + '  node scripts/pinned-release.mjs notes   --commit <sha> --version <vX.Y.Z>\n'
-    + '  node scripts/pinned-release.mjs publish --commit <sha> --version <vX.Y.Z> [--dry-run]\n',
+    + '  node scripts/pinned-release.mjs notes   --commit <sha> --version <vX.Y.Z[-PRERELEASE]>\n'
+    + '  node scripts/pinned-release.mjs publish --commit <sha> --version <vX.Y.Z[-PRERELEASE]> [--dry-run]\n',
   );
   process.exit(command ? 0 : 1);
 }
@@ -182,7 +183,11 @@ if (command === 'hashes') {
 
 const version = typeof args.version === 'string' ? args.version : undefined;
 if (!version) fail('--version is required (e.g. --version v1.10.1).');
-if (!/^v\d+\.\d+\.\d+/.test(version)) fail(`--version must look like v1.2.3; got '${version}'.`);
+try {
+  parsePackageReleaseTag(version);
+} catch (error) {
+  fail(error.message);
+}
 
 if (command === 'notes') {
   process.stdout.write(buildNotes(commit, version));

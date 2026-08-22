@@ -16,6 +16,7 @@ import {
   inspectRegistryArtifacts,
   parseMacosReleaseTag,
   parsePackageReleaseTag,
+  pythonArtifactVersion,
   REQUIRED_RELEASE_FILES,
   validateReleaseState,
   waitForRegistryArtifacts,
@@ -27,25 +28,26 @@ const requireFromTypescript = createRequire(
 const { parse: parseYaml } = requireFromTypescript('yaml');
 
 const VERSION = '1.10.0';
+const PRERELEASE_VERSION = '1.11.0-beta.9';
 const PACKAGE_NAME = 'openrappter';
 
-function validState(overrides = {}) {
+function validState(overrides = {}, version = VERSION) {
   return {
-    tag: `v${VERSION}`,
+    tag: `v${version}`,
     typescriptPackageName: PACKAGE_NAME,
-    typescriptPackageVersion: VERSION,
-    typescriptPackageLockVersion: VERSION,
-    typescriptPackageLockRootVersion: VERSION,
-    desktopPackageVersion: VERSION,
-    desktopPackageLockVersion: VERSION,
-    desktopPackageLockRootVersion: VERSION,
+    typescriptPackageVersion: version,
+    typescriptPackageLockVersion: version,
+    typescriptPackageLockRootVersion: version,
+    desktopPackageVersion: version,
+    desktopPackageLockVersion: version,
+    desktopPackageLockRootVersion: version,
     pythonProjectName: PACKAGE_NAME,
-    pythonProjectVersion: VERSION,
-    typescriptRuntimeVersion: VERSION,
-    pythonRuntimeVersion: VERSION,
+    pythonProjectVersion: version,
+    typescriptRuntimeVersion: version,
+    pythonRuntimeVersion: version,
     typescriptRuntimeSourceValid: true,
     existingFiles: [...REQUIRED_RELEASE_FILES],
-    artifactNames: expectedArtifactNames(VERSION),
+    artifactNames: expectedArtifactNames(version),
     ...overrides,
   };
 }
@@ -117,6 +119,20 @@ test('accepts a matching strict tag, versions, files, and artifact names', () =>
   assert.equal(parseMacosReleaseTag('v1.10.0-bar'), '1.10.0');
 });
 
+test('accepts a matching strict prerelease across tags, runtimes, and artifacts', () => {
+  assert.deepEqual(validateReleaseState(validState({}, PRERELEASE_VERSION)), []);
+  assert.equal(
+    parsePackageReleaseTag(`v${PRERELEASE_VERSION}`),
+    PRERELEASE_VERSION,
+  );
+  assert.equal(pythonArtifactVersion(PRERELEASE_VERSION), '1.11.0b9');
+  assert.deepEqual(expectedArtifactNames(PRERELEASE_VERSION), [
+    'openrappter-1.11.0-beta.9.tgz',
+    'openrappter-1.11.0b9-py3-none-any.whl',
+    'openrappter-1.11.0b9.tar.gz',
+  ]);
+});
+
 test('rejects a tag that does not match package and runtime versions', () => {
   const errors = validateReleaseState(validState({
     tag: 'v1.10.1',
@@ -136,11 +152,32 @@ test('rejects a mismatching runtime report', () => {
   ]);
 });
 
-test('rejects malformed package and malicious macOS release tags', () => {
-  for (const tag of ['1.2.3', 'v1.2', 'v01.2.3', 'v1.2.3-rc.1']) {
-    assert.throws(() => parsePackageReleaseTag(tag), /must match vX\.Y\.Z exactly/);
-  }
+test('rejects a prerelease runtime report that does not exactly match the tag', () => {
+  assert.deepEqual(validateReleaseState(validState({
+    pythonRuntimeVersion: '1.11.0-beta.8',
+  }, PRERELEASE_VERSION)), [
+    'Python runtime version 1.11.0-beta.8 does not match tag version 1.11.0-beta.9',
+  ]);
+});
 
+test('rejects malformed package tags and unsupported build metadata', () => {
+  const malformedTags = [
+    '1.2.3',
+    'v1.2',
+    'v01.2.3',
+    'v1.2.3-',
+    'v1.2.3-beta..1',
+    'v1.2.3-beta.01',
+    'v1.2.3+build.1',
+    'v1.2.3-beta.1+build.2',
+    'v1.2.3\nmalicious',
+  ];
+  for (const tag of malformedTags) {
+    assert.throws(() => parsePackageReleaseTag(tag), /strict SemVer/);
+  }
+});
+
+test('keeps macOS Bar tags stable-only and injection-safe', () => {
   const maliciousTags = [
     'v1.2.3;echo PWNED-bar',
     'v1.2.3${IFS}touch-bar',
@@ -154,6 +191,43 @@ test('rejects malformed package and malicious macOS release tags', () => {
   for (const tag of maliciousTags) {
     assert.throws(() => parseMacosReleaseTag(tag), /must match vX\.Y\.Z-bar exactly/);
   }
+});
+
+test('pinned release tooling shares strict prerelease and build-metadata rules', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const commit = spawnSync('git', ['rev-parse', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).stdout.trim();
+  const prerelease = spawnSync(
+    'node',
+    [
+      'scripts/pinned-release.mjs',
+      'notes',
+      '--commit',
+      commit,
+      '--version',
+      'v1.14.0-rc.1',
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.equal(prerelease.status, 0, prerelease.stderr);
+  assert.match(prerelease.stdout, /OpenRappter v1\.14\.0-rc\.1/);
+
+  const buildMetadata = spawnSync(
+    'node',
+    [
+      'scripts/pinned-release.mjs',
+      'notes',
+      '--commit',
+      commit,
+      '--version',
+      'v1.14.0+build.1',
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.equal(buildMetadata.status, 1);
+  assert.match(buildMetadata.stderr, /without build metadata/);
 });
 
 test('macOS build script rejects an injected version before invoking build tools', () => {
@@ -175,7 +249,28 @@ test('rejects malformed component versions', () => {
     typescriptPackageVersion: '1.9',
   }));
   assert.ok(errors.some((error) =>
-    error.includes('typescript/package.json version must match X.Y.Z exactly')));
+    error.includes('typescript/package.json version must be strict SemVer')));
+});
+
+test('rejects prereleases that PyPI cannot represent without changing identity', () => {
+  const version = '1.11.0-preview.1';
+  const state = validState({ tag: `v${version}`, artifactNames: undefined });
+  for (const key of [
+    'typescriptPackageVersion',
+    'typescriptPackageLockVersion',
+    'typescriptPackageLockRootVersion',
+    'desktopPackageVersion',
+    'desktopPackageLockVersion',
+    'desktopPackageLockRootVersion',
+    'pythonProjectVersion',
+    'typescriptRuntimeVersion',
+    'pythonRuntimeVersion',
+  ]) {
+    state[key] = version;
+  }
+  const errors = validateReleaseState(state);
+  assert.ok(errors.some((error) =>
+    error.includes('use alpha.N, beta.N, or rc.N')));
 });
 
 test('rejects missing, extra, or incorrectly named artifacts', () => {
@@ -191,14 +286,18 @@ test('rejects missing, extra, or incorrectly named artifacts', () => {
   assert.ok(errors.includes('unexpected artifact name: openrappter-v1.10.0.tar.gz'));
 });
 
-test('orders stable semver numerically and rejects non-release versions', () => {
+test('orders stable and prerelease SemVer and rejects malformed versions', () => {
   assert.equal(compareSemver('1.10.0', '1.9.99'), 1);
   assert.equal(compareSemver('2.0.0', '1.999.999'), 1);
   assert.equal(compareSemver('1.10.0', '1.10.0'), 0);
   assert.equal(compareSemver('1.9.99', '1.10.0'), -1);
   assert.equal(compareSemver('100000000000000000000.0.0', '2.0.0'), 1);
-  assert.throws(() => compareSemver('1.10.0-rc.1', '1.10.0'), /must match X\.Y\.Z/);
-  assert.throws(() => compareSemver('01.10.0', '1.10.0'), /must match X\.Y\.Z/);
+  assert.equal(compareSemver('1.10.0-rc.1', '1.10.0'), -1);
+  assert.equal(compareSemver('1.10.0-beta.10', '1.10.0-beta.9'), 1);
+  assert.equal(compareSemver('1.10.0-beta.9', '1.10.0-rc.1'), -1);
+  assert.equal(compareSemver('1.10.0-beta', '1.10.0-beta.1'), -1);
+  assert.throws(() => compareSemver('01.10.0', '1.10.0'), /strict SemVer/);
+  assert.throws(() => compareSemver('1.10.0+build.1', '1.10.0'), /strict SemVer/);
 });
 
 test('selects latest only for the highest registry and repository release', () => {
@@ -229,6 +328,19 @@ test('selects latest only for the highest registry and repository release', () =
     latestVersion: '1.9.8',
     publishedVersions: ['1.11.0'],
   }).tag, 'release-1-10-0');
+
+  assert.deepEqual(chooseNpmPublishTag({
+    candidateVersion: '2.0.0-beta.9',
+    latestVersion: '1.10.0',
+    publishedVersions: ['1.10.0'],
+  }), {
+    tag: 'beta',
+    currentReleaseVersion: '1.10.0',
+    isCurrentRelease: true,
+  });
+  assert.throws(() => chooseNpmPublishTag({
+    candidateVersion: '2.0.0-0.canary.1',
+  }), /use alpha\.N, beta\.N, or rc\.N/);
 });
 
 test('npm release index is injectable, stable-only, and fails closed', async () => {
@@ -255,7 +367,15 @@ test('npm release index is injectable, stable-only, and fails closed', async () 
         'dist-tags': { latest: 'not-semver' },
       }),
     }),
-    /npm latest version must match X\.Y\.Z/,
+    /npm latest version must be strict SemVer/,
+  );
+  await assert.rejects(
+    fetchNpmReleaseIndex(PACKAGE_NAME, {
+      fetchImpl: async () => response(200, {
+        'dist-tags': { latest: '1.11.0-beta.1' },
+      }),
+    }),
+    /npm latest version must be a stable X\.Y\.Z version/,
   );
   await assert.rejects(
     fetchNpmReleaseIndex(PACKAGE_NAME, {
@@ -493,6 +613,13 @@ test('registry publication reconciles exact artifacts and selects an explicit np
       < workflow.indexOf('- name: Publish only missing PyPI artifacts with OIDC'),
   );
   assert.match(workflow, /--npm-publish-tag-candidate "\$RELEASE_VERSION"/);
+  assert.match(workflow, /latest\|alpha\|beta\|rc\|"\$historical_tag"/);
+  assert.match(
+    workflow,
+    /prerelease: \$\{\{ needs\.preflight\.outputs\.prerelease == 'true' \}\}/,
+  );
+  assert.match(workflow, /release-dist\/openrappter-\*-py3-none-any\.whl/);
+  assert.match(workflow, /release-dist\/openrappter-\*\.tar\.gz/);
   const publishStart = workflow.indexOf('          npm publish \\');
   const publishEnd = workflow.indexOf('\n\n      - name:', publishStart);
   assert.notEqual(publishStart, -1);

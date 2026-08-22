@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Release preflight now accepts strict SemVer prerelease tags such as
+  `v1.14.0-beta.9` when every TypeScript and Python manifest/runtime reports
+  the exact same version. It still rejects malformed tags, build metadata, and
+  version drift; Python artifacts use their lossless PEP 440 filename form,
+  npm prereleases never move `latest`, and GitHub prereleases are marked
+  explicitly.
+
 - Deciding whether a recorded value hides a locator for an excluded file means
   walking it, and the walk gives up past 16 levels and fails closed. Both
   runtimes consulted that guard for values that never needed walking, so the

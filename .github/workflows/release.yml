@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.validate.outputs.version }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -72,7 +73,13 @@ jobs:
             --typescript-runtime-version "$typescript_runtime_version" \
             --python-runtime-version "$python_runtime_version"
 
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          release_version="${GITHUB_REF_NAME#v}"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          if [[ "$release_version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
 
   flight-recorder-gate:
     name: Flight Recorder cross-runtime gate
@@ -476,11 +483,15 @@ jobs:
 
       - name: Generate and verify checksums
         working-directory: release-dist
+        shell: bash
         run: |
-          sha256sum \
-            "openrappter-${RELEASE_VERSION}.tgz" \
-            "openrappter-${RELEASE_VERSION}-py3-none-any.whl" \
-            "openrappter-${RELEASE_VERSION}.tar.gz" > SHA256SUMS
+          set -euo pipefail
+          mapfile -t artifacts < <(
+            find . -maxdepth 1 -type f -name 'openrappter-*' -printf '%f\n' \
+              | LC_ALL=C sort
+          )
+          test "${#artifacts[@]}" -eq 3
+          sha256sum "${artifacts[@]}" > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Upload immutable release artifacts
@@ -552,9 +563,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python_wheels=(release-dist/openrappter-*-py3-none-any.whl)
+          test "${#python_wheels[@]}" -eq 1
+          test -f "${python_wheels[0]}"
           python -m venv "$RUNNER_TEMP/openrappter-wheel-smoke"
           "$RUNNER_TEMP/openrappter-wheel-smoke/bin/pip" install \
-            "release-dist/openrappter-${RELEASE_VERSION}-py3-none-any.whl"
+            "${python_wheels[0]}"
           reported_version="$(
             "$RUNNER_TEMP/openrappter-wheel-smoke/bin/python" -c \
               'from openrappter import __version__; print(__version__, end="")'
@@ -570,9 +584,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python_sdists=(release-dist/openrappter-*.tar.gz)
+          test "${#python_sdists[@]}" -eq 1
+          test -f "${python_sdists[0]}"
           python -m venv "$RUNNER_TEMP/openrappter-sdist-smoke"
           "$RUNNER_TEMP/openrappter-sdist-smoke/bin/pip" install \
-            "release-dist/openrappter-${RELEASE_VERSION}.tar.gz"
+            "${python_sdists[0]}"
           reported_version="$(
             "$RUNNER_TEMP/openrappter-sdist-smoke/bin/python" -c \
               'from openrappter import __version__; print(__version__, end="")'
@@ -699,7 +716,7 @@ jobs:
           )"
           historical_tag="release-${RELEASE_VERSION//./-}"
           case "$publish_tag" in
-            latest|"$historical_tag") ;;
+            latest|alpha|beta|rc|"$historical_tag") ;;
             *)
               printf 'Unexpected npm dist-tag: %q\n' "$publish_tag" >&2
               exit 1
@@ -766,12 +783,13 @@ jobs:
         with:
           name: v${{ env.RELEASE_VERSION }}
           generate_release_notes: true
+          prerelease: ${{ needs.preflight.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
           overwrite_files: false
           files: |
             release-dist/openrappter-${{ env.RELEASE_VERSION }}.tgz
-            release-dist/openrappter-${{ env.RELEASE_VERSION }}-py3-none-any.whl
-            release-dist/openrappter-${{ env.RELEASE_VERSION }}.tar.gz
+            release-dist/openrappter-*-py3-none-any.whl
+            release-dist/openrappter-*.tar.gz
             release-dist/SHA256SUMS
             desktop-dist/*.dmg
             desktop-dist/*.zip

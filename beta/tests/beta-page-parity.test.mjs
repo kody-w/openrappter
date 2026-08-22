@@ -19,7 +19,15 @@ const pageLib = path.join(repoRoot, "docs", "beta", "lib");
 
 const COPIED = ["rapp-protocol.mjs", "qqdrill-deps.mjs", "qqdrill.mjs"];
 
-test("the beta page runs the shipped modules, byte for byte", () => {
+// The installer sparse-checks-out `beta` and `tools/rapp1` only, so an INSTALLED
+// Frontier has no docs/ at all — and it runs this suite as its install gate.
+// Enforcing a repository-shaped invariant there turned every install red for a
+// defect the user cannot have and cannot fix. The parity these tests protect is
+// a property of the repository, so they only run where the repository is.
+const inRepository = existsSync(path.join(repoRoot, "docs", "beta", "index.html"));
+const only = inRepository ? test : test.skip;
+
+only("the beta page runs the shipped modules, byte for byte", () => {
   const drifted = [];
   for (const name of COPIED) {
     const shipped = path.join(betaRoot, "electron", name);
@@ -37,7 +45,7 @@ test("the beta page runs the shipped modules, byte for byte", () => {
   );
 });
 
-test("only the crypto shim is reimplemented for the browser", () => {
+only("only the crypto shim is reimplemented for the browser", () => {
   // The page is allowed to supply SHA-256, because the protocol hashes
   // synchronously and Web Crypto does not. It is not allowed to reimplement
   // anything above that, because that is where drift would actually hurt.

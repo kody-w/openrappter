@@ -15,8 +15,14 @@ The spine describes two distinct fleet topologies that must not be conflated:
 - **(B) Distributed single runtime:** one operator owns one runtime distributed
   across several estates. This is not the Frontier topology.
 
-A herd where Brainstem and Brain Surgeon drive several twin workers implements
+A herd where Brainstem and Rappter Surgeon drive several twin workers implements
 topology A.
+
+The Good AI Neighbor contract adds the device-level boundary: every top-level
+coordinator is its own Electron estate and Dock creature. An estate may host
+multiple neighborhoods and herd any resident twin it owns. Separate estates
+collaborate over attributed `/chat`; they never merge mutable ownership merely
+because they share a device.
 
 ## The rules we must not drift from (with citations)
 

@@ -47,7 +47,7 @@ function extractExpression(startMarker, endMarker, source = mainSource) {
 }
 
 const smoothStreamCss = vm.runInNewContext(
-  extractExpression("const smoothStreamCss =", ";\nconst betaHome ="),
+  extractExpression("const smoothStreamCss =", ";\nconst ledger ="),
 );
 const bridgeExpression = extractExpression(
   "const BETA_FRAME_BRIDGE_SOURCE =",
@@ -108,7 +108,7 @@ test("CRLF main.mjs extracts and materializes the frame bridge", () => {
   const crlfSource = mainSource.replaceAll("\n", "\r\n");
   const crlfCssExpression = extractExpression(
     "const smoothStreamCss =",
-    ";\nconst betaHome =",
+    ";\nconst ledger =",
     crlfSource,
   );
   const crlfBridgeExpression = extractExpression(

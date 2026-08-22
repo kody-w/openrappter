@@ -1,10 +1,20 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title RAPP Brainstem Frontier Installer
+title OpenRappter Installer
 
-set "BRAINSTEM_HOME=%USERPROFILE%\.brainstem"
-set "BETA_HOME=%BRAINSTEM_HOME%\beta-launcher"
+if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%USERPROFILE%\.openrappter"
+set "BRAINSTEM_HOME=%OPENRAPPTER_HOME%\brainstem"
+if defined OPENRAPPTER_BRAINSTEM_HOME set "BRAINSTEM_HOME=%OPENRAPPTER_BRAINSTEM_HOME%"
+set "BETA_HOME=%OPENRAPPTER_HOME%\desktop"
+if defined BRAINSTEM_BETA_HOME set "BETA_HOME=%BRAINSTEM_BETA_HOME%"
 set "BETA_SOURCE=%BETA_HOME%\src"
+
+powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; function N([string]$p) { $full=[IO.Path]::GetFullPath($p).TrimEnd([IO.Path]::DirectorySeparatorChar); $root=[IO.Path]::GetPathRoot($full); $cursor=$root; foreach($part in $full.Substring($root.Length).Split([IO.Path]::DirectorySeparatorChar,[StringSplitOptions]::RemoveEmptyEntries)) { $cursor=[IO.Path]::Combine($cursor,$part); if(Test-Path -LiteralPath $cursor) { $item=Get-Item -Force -LiteralPath $cursor; if(-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) { throw 'unsafe path component' } } else { break } }; return $full }; function W([string]$child,[string]$parent) { return $child.Equals($parent,[StringComparison]::OrdinalIgnoreCase) -or $child.StartsWith($parent+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase) }; function O([string]$a,[string]$b) { return (W $a $b) -or (W $b $a) }; $open=N $env:OPENRAPPTER_HOME; $brain=N $env:BRAINSTEM_HOME; $beta=N $env:BETA_HOME; $bare=N ([IO.Path]::Combine($env:USERPROFILE,'.brainstem')); if((O $open $bare) -or (O $brain $bare) -or (O $beta $bare) -or $brain.Equals($open,[StringComparison]::OrdinalIgnoreCase) -or -not (W $brain $open) -or $beta.Equals($open,[StringComparison]::OrdinalIgnoreCase) -or -not (W $beta $open) -or (O $brain $beta)) { exit 42 }"
+if errorlevel 1 (
+  echo [X] Refusing species driftback: OpenRappter paths must be canonical, non-reparse children of its own home.
+  exit /b 1
+)
+if "%BRAINSTEM_BETA_VALIDATE_PATHS_ONLY%"=="1" exit /b 0
 set "REPO_URL=https://github.com/kody-w/openrappter.git"
 set "REPO_REF=main"
 set "REPO_COMMIT="
@@ -16,7 +26,6 @@ REM must not be repointed along with the Frontier. Repointing it at a repository
 REM that ships only beta/ downloads that repository's own unrelated installer.
 set "BOOTSTRAP_URL=https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/install.ps1"
 
-if defined BRAINSTEM_BETA_HOME set "BETA_HOME=%BRAINSTEM_BETA_HOME%"
 if defined BRAINSTEM_BETA_REPO_URL set "REPO_URL=%BRAINSTEM_BETA_REPO_URL%"
 REM The kernel's home, which is not necessarily the Frontier's home. Defaults to
 REM REPO_URL so existing forks are unaffected; a downstream that ships only beta/
@@ -35,8 +44,8 @@ if defined BRAINSTEM_BETA_BOOTSTRAP_URL set "BOOTSTRAP_URL=%BRAINSTEM_BETA_BOOTS
 set "BETA_SOURCE=%BETA_HOME%\src"
 
 echo.
-echo RAPP Brainstem Frontier Launcher
-echo Skill Recorder-style desktop launch over the shared global Brainstem
+echo OpenRappter Launcher
+echo OpenRappter is the fully built-out twin; Brainstem is the bare twin
 echo.
 
 if defined REPO_COMMIT (
@@ -250,13 +259,16 @@ if not exist "%ELECTRON_EXE%" (
 
 set "LAUNCHER=%BETA_HOME%\launch.cmd"
 > "%LAUNCHER%" echo @echo off
+>>"%LAUNCHER%" echo set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
+>>"%LAUNCHER%" echo set "OPENRAPPTER_BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%LAUNCHER%" echo set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%LAUNCHER%" echo set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
 >>"%LAUNCHER%" echo set "BRAINSTEM_BETA_REPO_URL=%REPO_URL%"
 >>"%LAUNCHER%" echo set "BRAINSTEM_BETA_UPDATE_REF=%UPDATE_REF%"
+>>"%LAUNCHER%" echo set "BRAINSTEM_BETA_OWN_PORT=1"
 >>"%LAUNCHER%" echo start "" "%ELECTRON_EXE%" "%BETA_SOURCE%\beta"
 
-set "SURGEON_LAUNCHER=%BETA_HOME%\brainstem-surgeon.cmd"
+set "SURGEON_LAUNCHER=%BETA_HOME%\openrappter-surgeon.cmd"
 > "%SURGEON_LAUNCHER%" echo @echo off
 >>"%SURGEON_LAUNCHER%" echo set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%SURGEON_LAUNCHER%" echo set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
@@ -264,21 +276,38 @@ set "SURGEON_LAUNCHER=%BETA_HOME%\brainstem-surgeon.cmd"
 >>"%SURGEON_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\surgeon-chat.mjs" %%*
 set "USER_BIN=%USERPROFILE%\.local\bin"
 if not exist "%USER_BIN%" mkdir "%USER_BIN%"
+copy /y "%LAUNCHER%" "%USER_BIN%\openrappter-app.cmd" >nul
 copy /y "%LAUNCHER%" "%USER_BIN%\brainstem-frontier.cmd" >nul
 copy /y "%LAUNCHER%" "%USER_BIN%\brainstem-beta.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-app.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-frontier.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-beta.cmd" >nul
+copy /y "%SURGEON_LAUNCHER%" "%USER_BIN%\openrappter-surgeon.cmd" >nul
 copy /y "%SURGEON_LAUNCHER%" "%USER_BIN%\brainstem-surgeon.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%SURGEON_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-surgeon.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%SURGEON_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-surgeon.cmd" >nul
 
-set "CHAT_LAUNCHER=%BETA_HOME%\brainstem-chat.cmd"
+set "CHAT_LAUNCHER=%BETA_HOME%\openrappter-chat.cmd"
 > "%CHAT_LAUNCHER%" echo @echo off
+>>"%CHAT_LAUNCHER%" echo set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
 >>"%CHAT_LAUNCHER%" echo set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%CHAT_LAUNCHER%" echo set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
 >>"%CHAT_LAUNCHER%" echo set "BRAINSTEM_BETA_LAUNCHER=%LAUNCHER%"
->>"%CHAT_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\brainstem-chat.mjs" %%*
-copy /y "%CHAT_LAUNCHER%" "%USER_BIN%\brainstem-chat.cmd" >nul
-if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%CHAT_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-chat.cmd" >nul
+>>"%CHAT_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-chat.mjs" %%*
+copy /y "%CHAT_LAUNCHER%" "%USER_BIN%\openrappter-chat.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%CHAT_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-chat.cmd" >nul
+
+set "DRIVE_LAUNCHER=%BETA_HOME%\openrappter-drive.cmd"
+> "%DRIVE_LAUNCHER%" echo @echo off
+>>"%DRIVE_LAUNCHER%" echo set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
+>>"%DRIVE_LAUNCHER%" echo set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
+>>"%DRIVE_LAUNCHER%" echo set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
+>>"%DRIVE_LAUNCHER%" echo set "BRAINSTEM_BETA_LAUNCHER=%LAUNCHER%"
+>>"%DRIVE_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\brainstem-chat.mjs" %%*
+copy /y "%DRIVE_LAUNCHER%" "%USER_BIN%\openrappter-drive.cmd" >nul
+copy /y "%DRIVE_LAUNCHER%" "%USER_BIN%\brainstem-chat.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%DRIVE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-drive.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%DRIVE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-chat.cmd" >nul
 
 set "WALKTHROUGH_LAUNCHER=%BETA_HOME%\brainstem-walkthrough.cmd"
 > "%WALKTHROUGH_LAUNCHER%" echo @echo off
@@ -286,17 +315,57 @@ set "WALKTHROUGH_LAUNCHER=%BETA_HOME%\brainstem-walkthrough.cmd"
 >>"%WALKTHROUGH_LAUNCHER%" echo set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
 >>"%WALKTHROUGH_LAUNCHER%" echo set "BRAINSTEM_BETA_LAUNCHER=%LAUNCHER%"
 >>"%WALKTHROUGH_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\walkthrough-via-chat.mjs" %%*
+copy /y "%WALKTHROUGH_LAUNCHER%" "%USER_BIN%\openrappter-walkthrough.cmd" >nul
 copy /y "%WALKTHROUGH_LAUNCHER%" "%USER_BIN%\brainstem-walkthrough.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%WALKTHROUGH_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-walkthrough.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%WALKTHROUGH_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\brainstem-walkthrough.cmd" >nul
 
-cscript.exe //nologo "%BETA_SOURCE%\beta\scripts\create-windows-shortcuts.js" "%ELECTRON_EXE%" "%BETA_SOURCE%\beta"
+set "TILE_LAUNCHER=%BETA_HOME%\openrappter-tile.cmd"
+> "%TILE_LAUNCHER%" echo @echo off
+>>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
+>>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_HOME set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
+>>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
+>>"%TILE_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-tile.mjs" %%*
+copy /y "%TILE_LAUNCHER%" "%USER_BIN%\openrappter-tile.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%TILE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-tile.cmd" >nul
+
+set "PACK_LAUNCHER=%BETA_HOME%\openrappter-pack.cmd"
+> "%PACK_LAUNCHER%" echo @echo off
+>>"%PACK_LAUNCHER%" echo if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
+>>"%PACK_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
+>>"%PACK_LAUNCHER%" echo if not defined BRAINSTEM_BETA_HOME set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
+>>"%PACK_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\rappter-pack.mjs" %%*
+copy /y "%PACK_LAUNCHER%" "%USER_BIN%\openrappter-pack.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%PACK_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-pack.cmd" >nul
+
+set "PACK_NODE_LAUNCHER=%BETA_HOME%\openrappter-pack-node.cmd"
+> "%PACK_NODE_LAUNCHER%" echo @echo off
+>>"%PACK_NODE_LAUNCHER%" echo if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
+>>"%PACK_NODE_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
+>>"%PACK_NODE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_HOME set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
+>>"%PACK_NODE_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\rappter-pack-node.mjs"
+copy /y "%PACK_NODE_LAUNCHER%" "%USER_BIN%\openrappter-pack-node.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%PACK_NODE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-pack-node.cmd" >nul
+
+set "HATCH_LAUNCHER=%BETA_HOME%\openrappter-hatch.cmd"
+> "%HATCH_LAUNCHER%" echo @echo off
+>>"%HATCH_LAUNCHER%" echo if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_PYTHON set "BRAINSTEM_BETA_PYTHON=%PYTHON_EXE%"
+>>"%HATCH_LAUNCHER%" echo if not defined RAPPTER_PACK_CONFIG set "RAPPTER_PACK_CONFIG=%OPENRAPPTER_HOME%\pack.json"
+>>"%HATCH_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-hatch.mjs" %%*
+copy /y "%HATCH_LAUNCHER%" "%USER_BIN%\openrappter-hatch.cmd" >nul
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%HATCH_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-hatch.cmd" >nul
+
+cscript.exe //nologo "%BETA_SOURCE%\beta\scripts\create-windows-shortcuts.js" "%LAUNCHER%" "%BETA_SOURCE%\beta" "%ELECTRON_EXE%"
 if errorlevel 1 goto :fail
 
 echo.
-echo [OK] RAPP Brainstem Frontier is installed.
-echo      Frontier and standard Brainstem share: %BRAINSTEM_HOME%
-echo      Start later with: brainstem-frontier
-echo      Use the RAPP Brainstem Frontier desktop or Start Menu shortcut.
+echo [OK] OpenRappter is installed.
+echo      Brainstem runtime data: %BRAINSTEM_HOME%
+echo      Start later with: openrappter-app
+echo      Use the OpenRappter desktop or Start Menu shortcut.
 echo.
 if not "%BRAINSTEM_BETA_NO_LAUNCH%"=="1" start "" "%ELECTRON_EXE%" "%BETA_SOURCE%\beta"
 exit /b 0
@@ -308,6 +377,6 @@ goto :fail
 
 :fail
 echo.
-echo [X] RAPP Brainstem Frontier installation failed.
+echo [X] OpenRappter installation failed.
 echo     Review the error above and re-run this installer.
 exit /b 1

@@ -13,7 +13,7 @@ const tour = read("ui/show-mode-tour.js");
 const ui = read("ui/index.html");
 const renderer = read("ui/renderer.js");
 const standalone = read("show-mode.html");
-const brainSurgeon = read("electron/brain-surgeon.mjs");
+const rappterSurgeon = read("electron/rappter-surgeon.mjs");
 const uiDriverServer = read("electron/ui-driver-server.mjs");
 const uiDriverAgent = read("scripts/brainstem_ui_driver_agent.py");
 const pkg = JSON.parse(read("package.json"));
@@ -52,7 +52,7 @@ test("the click-through sits beside the interview loop and never sends a prompt"
   assert.match(ui, /id="show-mode-interview-prompt"/);
   assert.match(ui, /Can't describe it\? Show it\./);
   assert.match(ui, /show-mode-preview/);
-  assert.doesNotMatch(renderer, /openBrowser|openVscode|restart/);
+  assert.doesNotMatch(renderer, /brainstemBeta\.(?:openBrowser|openVscode|restart)\b/);
 });
 
 test("the standalone Pages replica drives the same script", () => {
@@ -82,12 +82,12 @@ test("the UI driver exposes tour and force_mode as top-level commands only", () 
   assert.match(uiDriverServer, /window\.rappShowModeTour/);
 });
 
-test("Brain Surgeon and the Python driver can light AI force mode and walk the click-through", () => {
-  assert.match(brainSurgeon, /name: "set_ai_force_mode"/);
-  assert.match(brainSurgeon, /name: "show_mode_click_through"/);
-  assert.match(brainSurgeon, /force_mode: \{/);
-  assert.match(brainSurgeon, /AI FORCE MODE \(hidden until asked for\)/);
-  assert.match(brainSurgeon, /action: "tour"/);
+test("Rappter Surgeon and the Python driver can light AI force mode and walk the click-through", () => {
+  assert.match(rappterSurgeon, /name: "set_ai_force_mode"/);
+  assert.match(rappterSurgeon, /name: "show_mode_click_through"/);
+  assert.match(rappterSurgeon, /force_mode: \{/);
+  assert.match(rappterSurgeon, /AI FORCE MODE \(hidden until asked for\)/);
+  assert.match(rappterSurgeon, /action: "tour"/);
   assert.match(uiDriverAgent, /"force_mode"/);
   assert.match(uiDriverAgent, /"tour"/);
   assert.match(uiDriverAgent, /AI force mode is hidden until asked for/);

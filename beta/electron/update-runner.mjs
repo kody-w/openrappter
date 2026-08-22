@@ -8,6 +8,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
+import path from "node:path";
 
 import {
   openPrivateAppendFile,
@@ -75,6 +76,15 @@ function loadRequest(requestPath) {
   ]) {
     requireString(request, key);
   }
+  request.openRappterHome = typeof request.openRappterHome === "string"
+    && request.openRappterHome
+    ? request.openRappterHome
+    : path.dirname(request.betaHome);
+  request.openRappterBrainstemHome =
+    typeof request.openRappterBrainstemHome === "string"
+    && request.openRappterBrainstemHome
+      ? request.openRappterBrainstemHome
+      : request.brainstemHome;
   if (!Number.isInteger(request.parentPid) || request.parentPid < 1) {
     throw new Error("Update request has an invalid parent process.");
   }
@@ -207,6 +217,8 @@ function writeResult(request, result) {
 function installUpdate(request, logFd) {
   const env = {
     ...process.env,
+    OPENRAPPTER_HOME: request.openRappterHome,
+    OPENRAPPTER_BRAINSTEM_HOME: request.openRappterBrainstemHome,
     BRAINSTEM_HOME: request.brainstemHome,
     BRAINSTEM_BETA_COMMIT: request.commit,
     BRAINSTEM_BETA_HOME: request.betaHome,
@@ -283,7 +295,7 @@ async function main() {
   try {
     writeLog(
       logFd,
-      `\n[${new Date().toISOString()}] Updating RAPP Brainstem Frontier to ${request.commit}\n`,
+      `\n[${new Date().toISOString()}] Updating OpenRappter to ${request.commit}\n`,
     );
     await waitForParent(
       request.parentPid,

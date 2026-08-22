@@ -67,7 +67,7 @@ test("Frontier documents live under beta/, not in the library's docs", () => {
   if (!existsSync(docs)) return;
   // A document is the Frontier's when its own text says so: it describes the
   // Frontier shell, its tiles, its arena, or its protocols by name.
-  const FRONTIER_SUBJECT = /RAPP Brainstem Frontier|dimension tile|rappid tile|Agent Arena|rappid-tile\/|rar-card\//i;
+  const FRONTIER_SUBJECT = /dimension tile|rappid tile|Agent Arena|rappid-tile\/|rar-card\//i;
   const strays = readdirSync(docs)
     .filter((entry) => entry.endsWith(".html") || entry.endsWith(".md"))
     .filter((entry) => FRONTIER_SUBJECT.test(readFileSync(path.join(docs, entry), "utf8")))

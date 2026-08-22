@@ -7,11 +7,9 @@
     content="default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: http://127.0.0.1:* http://localhost:*; media-src http://127.0.0.1:* http://localhost:*;"
   >
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RAPP Brainstem Frontier</title>
-  <!-- Brandmark: the exact Brainstem brain glyph the Grail app serves (do not
-       alter — this is the "swoosh"). App/dock icon lives in build/icon.* . -->
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%2358a6ff'%3E%3Cpath d='M184 0c-30.9 0-56.5 22.7-61.1 52.3C54.5 67 0 130 0 206.8c0 41.6 17.4 79.2 45.3 105.9-2 9.2-3.3 18.8-3.3 28.7 0 55.3 35.8 102.2 85.5 119C142.2 493 172.6 512 208 512h16c35.3 0 64-28.7 64-64V86c0-8.8-7.2-16-16-16h-16c-8.8 0-16 7.2-16 16v16c0 8.8-7.2 16-16 16s-16-7.2-16-16V64c0-35.3-28.7-64-64-64h40zm144 0c30.9 0 56.5 22.7 61.1 52.3C457.5 67 512 130 512 206.8c0 41.6-17.4 79.2-45.3 105.9 2 9.2 3.3 18.8 3.3 28.7 0 55.3-35.8 102.2-85.5 119C369.8 493 339.4 512 304 512h-16c-35.3 0-64-28.7-64-64V86c0-8.8 7.2-16 16-16h16c8.8 0 16 7.2 16 16v16c0 8.8 7.2 16 16 16s16-7.2 16-16V64c0-35.3 28.7-64 64-64h-40z'/%3E%3C/svg%3E">
-  <meta name="theme-color" content="#2563eb">
+  <title>OpenRappter</title>
+  <link rel="icon" href="../build/icon.svg">
+  <meta name="theme-color" content="#07111f">
   <style>
     :root {
       color-scheme: dark;
@@ -80,6 +78,23 @@
     .tile h1 { margin: 0 0 10px; font-size: 24px; }
     .tile p { margin: 7px 0; color: #8c959f; line-height: 1.55; }
     #error { color: #ff7b72; white-space: pre-wrap; }
+    #neighborhood-identity {
+      position: fixed; z-index: 13; top: 10px; left: 10px;
+      display: flex; align-items: center; gap: 8px;
+      max-width: min(420px, calc(100vw - 20px)); padding: 7px 10px;
+      border: 1px solid #285b55; border-radius: 999px;
+      background: rgba(7, 17, 31, .9); color: #e7fff9;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+      font-size: 11px; pointer-events: none;
+    }
+    #neighborhood-identity .creature {
+      width: 9px; height: 9px; flex: none; border-radius: 50%;
+      background: #58f5d2; box-shadow: 0 0 12px rgba(88, 245, 210, .7);
+    }
+    #neighborhood-identity strong {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #neighborhood-identity small { color: #82a7a0; white-space: nowrap; }
     #intro {
       position: fixed;
       z-index: 20;
@@ -471,7 +486,7 @@
     .herd-tile.twin .tw-turn.self .tw-who { color: #7ea6ff; }
     .herd-tile.twin .tw-msg.user { background: linear-gradient(180deg,#3d7cf0,#356fe0); color: #fff; border-bottom-right-radius: 4px; }
     .herd-tile.twin .tw-msg.assistant { align-self: flex-start; background: #1c1e23; border: 1px solid #2a2d33; border-left: 2px solid #7c6bd0; color: #d7dae0; border-bottom-left-radius: 4px; }
-    /* A driver turn (the Brainstem / Brain Surgeon steering the twin) — distinct
+    /* A driver turn (the Brainstem / Rappter Surgeon steering the twin) — distinct
        blue, left-aligned, so it never reads as the human's own message. */
     .herd-tile.twin .tw-msg.driver { align-self: flex-start; background: #152238; border: 1px solid #24406a; border-left: 2px solid #3d7cf0; color: #cfe0ff; border-bottom-left-radius: 4px; }
     .herd-tile.twin .tw-turn.driver .tw-who { color: #7ea6ff; }
@@ -757,27 +772,32 @@
   </style>
 </head>
 <body>
+  <div id="neighborhood-identity" data-drive="shell.neighborhood" aria-live="polite">
+    <span class="creature" aria-hidden="true"></span>
+    <strong>OpenRappter</strong>
+    <small>Good AI Estate · alpha · 1 neighborhood</small>
+  </div>
   <main>
     <div id="splash" data-drive="shell.splash">
       <div class="tile">
-        <h1>Starting your global Brainstem</h1>
-        <p>This launcher uses the same agents, memories, authentication, and port 7071 as the regular installer.</p>
+        <h1>Starting OpenRappter</h1>
+        <p>Loading your agents, memories, GitHub Copilot connection, and local Brainstem runtime.</p>
         <p id="error" data-drive="shell.error"></p>
       </div>
     </div>
     <iframe
       id="brainstem"
       data-drive="shell.brainstem"
-      title="RAPP Brainstem chat"
+      title="OpenRappter chat"
       sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals allow-popups"
     ></iframe>
   </main>
-  <aside id="explorer" data-drive="shell.explorer" aria-label="Live Brainstem agents Explorer">
+  <aside id="explorer" data-drive="shell.explorer" aria-label="Live OpenRappter agents Explorer">
     <header>
       <span aria-hidden="true">🗂️</span>
       <span class="explorer-title">
         <strong>Explorer</strong>
-        <span>live Brainstem workspace</span>
+        <span>live OpenRappter workspace</span>
       </span>
       <span class="explorer-head-actions">
         <button id="explorer-refresh" data-drive="shell.explorerRefresh" type="button" title="Refresh agents">↻</button>
@@ -789,7 +809,7 @@
       <div id="agent-viewer-tab" data-drive="shell.agentViewerTab">No agent selected</div>
       <div class="agent-viewer-empty" id="agent-viewer-empty" data-drive="shell.agentViewerEmpty">
         Select an <code>agent.py</code> file to inspect the exact source the
-        live Brainstem discovers on every chat request.
+        OpenRappter discovers on every chat request.
       </div>
       <pre id="agent-source" data-drive="shell.agentSource" hidden></pre>
     </div>
@@ -801,7 +821,7 @@
     </svg>
     GitHub Copilot
   </button>
-  <aside id="surgeon" data-drive="shell.surgeon" aria-label="GitHub Copilot Brain Surgeon">
+  <aside id="surgeon" data-drive="shell.surgeon" aria-label="GitHub Copilot Rappter Surgeon">
     <header>
       <span class="surgeon-badge">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
@@ -810,14 +830,14 @@
       </span>
       <span class="surgeon-title">
         <strong>GitHub Copilot</strong>
-        <span>Brain Surgeon · agent mode</span>
+        <span>Rappter Surgeon · agent mode</span>
       </span>
       <span id="surgeon-model" data-drive="shell.surgeonModel">Agent</span>
       <button class="surgeon-head-btn herd-header-btn" id="surgeon-herd-btn" data-drive="shell.surgeonHerd" type="button"
-        title="Herd view — chat with several Copilots at once">⊞</button>
+        title="Herd view">⊞</button>
       <button class="surgeon-head-btn" id="surgeon-new" data-drive="shell.surgeonReset" type="button"
-        title="Clear and reset Brain Surgeon chat"
-        aria-label="Clear and reset Brain Surgeon chat">↺</button>
+        title="Clear and reset Rappter Surgeon chat"
+        aria-label="Clear and reset Rappter Surgeon chat">↺</button>
       <button class="surgeon-head-btn" id="surgeon-close" data-drive="shell.surgeonClose" type="button" title="Hide Copilot">×</button>
     </header>
     <div id="surgeon-tabs" data-drive="shell.surgeonTabs"></div>
@@ -826,7 +846,7 @@
       <div class="surgeon-box">
         <textarea id="surgeon-input" data-drive="shell.surgeonComposer" rows="2" placeholder="Describe what to build or do…"></textarea>
         <div class="surgeon-bar">
-          <span id="surgeon-mode" data-drive="shell.surgeonMode">Agent · files, shell, tests, Brainstem</span>
+          <span id="surgeon-mode" data-drive="shell.surgeonMode">Agent · files, shell, tests, OpenRappter</span>
           <button id="surgeon-send" data-drive="shell.surgeonSend" type="button">Build</button>
         </div>
       </div>
@@ -840,7 +860,7 @@
     </div>
     <div class="ambient-settings-body">
       <p class="ambient-settings-copy">
-        Frontier keeps this context on this device and refreshes it for every completed turn.
+        OpenRappter keeps this context on this device and refreshes it for every completed turn.
         A user-set location wins; device location is next. Approximate IP location is city-level,
         opt-in, and off by default. City-level coarsens coordinates to an approximately 50 km cell.
         Labels and addresses are never sent to a geocoder, so a saved location also needs latitude
@@ -889,13 +909,13 @@
       <div class="intro-hero">
         <div class="eyebrow">Learn AI · teach AI · keep the skill</div>
         <h1 id="intro-title" data-drive="shell.introTitle">Learn it, teach it back, and take it with you.</h1>
-        <p>Chat is the control surface. GitHub Copilot teaches by doing: it can build and hotload an agent, drive the visible Brainstem, test the result, and explain the loop while you watch. The new skill becomes a portable RAPP capability that can follow you into the right Microsoft platform downstream.</p>
+        <p>Brainstem is the bare twin; OpenRappter is the fully built-out twin. They share the exact `/chat` wire while keeping separate identity, state, and worker ports. Chat is the control surface. GitHub Copilot teaches by doing: it can build and hotload an agent, drive the visible application, test the result, and preserve the skill as a portable RAPP capability.</p>
       </div>
       <div class="intro-body">
         <div class="intro-grid">
           <article class="intro-tile">
             <h2>What is this for?</h2>
-            <p>Tell Copilot the outcome you need. It helps you learn the pattern, turns that learning into a single-file capability, hotloads it beside the global agents, and proves it through the real Brainstem chat.</p>
+            <p>Tell Copilot the outcome you need. It helps you learn the pattern, turns that learning into a single-file capability, hotloads it beside the global agents, and proves it through the real OpenRappter chat.</p>
             <p><strong>It is the fastest path from an idea to evidence.</strong> It is not the final production host.</p>
           </article>
           <article class="intro-tile">
@@ -926,8 +946,8 @@
             <h2>How the tools fit together</h2>
             <div class="tool-grid">
               <div class="tool"><strong>Scout</strong><span>Use for accessible employee workflows, Work IQ, knowledge, and shareable skills when the experience already fits.</span></div>
-              <div class="tool"><strong>GitHub Copilot</strong><span>Use the built-in Brain Surgeon panel as the full builder: create, test, diagnose, repair, and operate agents without leaving this window. VS Code remains optional.</span></div>
-              <div class="tool"><strong>RAPP Brainstem</strong><span>Use as the local proving ground: hot-load capabilities, interview the agent, inspect tool calls, and lock in intent.</span></div>
+              <div class="tool"><strong>GitHub Copilot</strong><span>Use the built-in Rappter Surgeon panel as the full builder: create, test, diagnose, repair, and operate agents without leaving this window. VS Code remains optional.</span></div>
+              <div class="tool"><strong>OpenRappter</strong><span>Use the full local application as the proving ground: hot-load capabilities, inspect tool calls, and keep the resulting RAPP.</span></div>
               <div class="tool"><strong>Copilot Studio / Foundry</strong><span>Use for governed production delivery, enterprise identity, connectors, telemetry, scale, and customer handoff.</span></div>
             </div>
           </article>
@@ -935,9 +955,9 @@
             <h2>The rapid customer loop</h2>
             <ol>
               <li><strong>Frame:</strong> capture the problem, users, inputs, outputs, constraints, and success proof.</li>
-              <li><strong>Delegate:</strong> chat with the Brainstem; let the AI load the smallest useful agent set.</li>
+              <li><strong>Delegate:</strong> chat with OpenRappter; let the AI load the smallest useful agent set.</li>
               <li><strong>Watch:</strong> let the agent operate the real interface with visible cursor, click, and typing feedback.</li>
-              <li><strong>Correct:</strong> tell the built-in Brain Surgeon to inspect the failure, fix it, and retest while you watch.</li>
+              <li><strong>Correct:</strong> tell the built-in Rappter Surgeon to inspect the failure, fix it, and retest while you watch.</li>
               <li><strong>Package:</strong> share the agents, demo, evidence, requirements, and recommended production route.</li>
             </ol>
           </article>
@@ -951,9 +971,39 @@
               <li>A clear route to Scout, Copilot Studio, Foundry, custom code, or "do not proceed."</li>
             </ul>
           </article>
+          <article class="intro-tile wide" id="openrappter-self-tile">
+            <h2>This local OpenRappter is its own tile</h2>
+            <p>
+              Export the user-owned agents, soul, memory, routing, settings, and
+              parked tiles as one hash-verified local RAPPID. Tokens, secrets,
+              logs, recordings, binaries, and source are excluded.
+            </p>
+            <div class="ambient-settings-actions">
+              <button id="openrappter-tile-export" data-drive="shell.tileExport" type="button">Export tile</button>
+              <button id="openrappter-tile-import" data-drive="shell.tileImport" type="button">Import tile</button>
+              <button id="openrappter-tile-backup" data-drive="shell.tileBackup" class="primary" type="button">Back up now</button>
+            </div>
+            <p id="openrappter-tile-status" role="status" aria-live="polite">
+              Reading this tile's local identity…
+            </p>
+          </article>
+          <article class="intro-tile wide" id="rappter-pack-sentinel">
+            <h2>Rappter Pack Sentinel</h2>
+            <p>
+              One matrix sees every configured Brainstem and OpenRappter across
+              the pack, compares observed results with declared expectations,
+              and elects only the first valid deliverable.
+            </p>
+            <div class="ambient-settings-actions">
+              <button id="rappter-pack-run" data-drive="shell.pack" class="primary" type="button">Run pack</button>
+            </div>
+            <p id="rappter-pack-status" role="status" aria-live="polite">
+              Reading the configured pack…
+            </p>
+          </article>
           <article class="intro-tile wide">
             <h2>Start with this prompt — or show it instead</h2>
-            <div class="prompt" id="show-mode-interview-prompt" data-drive="shell.showModePrompt">I am working on a rapid customer proof. Interview me until you understand the business problem, users, inputs, expected outputs, constraints, and what would prove success. Then propose the smallest single-file RAPP agent set that can test the idea locally with synthetic or approved data. Build it, run it through Brainstem, show me the evidence, identify production gaps, and recommend whether the final experience belongs in Scout, Copilot Studio, Foundry, or custom code. Do not call the prototype production-ready.</div>
+            <div class="prompt" id="show-mode-interview-prompt" data-drive="shell.showModePrompt">I am working on a rapid customer proof. Interview me until you understand the business problem, users, inputs, expected outputs, constraints, and what would prove success. Then propose the smallest single-file RAPP agent set that can test the idea locally with synthetic or approved data. Build it, run it through OpenRappter, show me the evidence, identify production gaps, and recommend the right production host. Do not call the prototype production-ready.</div>
             <div class="intro-show-mode">
               <span><strong>Can't describe it? Show it.</strong> Show Mode turns a live recording, a video, screenshots, or a transcript into an agent you test here first, then promote. Preview the click-through — nothing runs live.</span>
               <button type="button" data-drive="shell.showModeTour" data-show-mode-tour="true">Show Mode click-through</button>
@@ -962,7 +1012,7 @@
         </div>
         <div class="intro-footer">
           <small>Default posture: builder-operated, local-first, synthetic or approved data, human validation, then governed promotion.</small>
-          <button id="enter" data-drive="shell.enter" class="primary" type="button">Enter Brainstem</button>
+          <button id="enter" data-drive="shell.enter" class="primary" type="button">Enter OpenRappter</button>
         </div>
       </div>
     </div>

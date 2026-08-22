@@ -143,7 +143,7 @@ export function shellFixture(html = readFileSync(shellPath, "utf8")) {
   const nodes = walk(root);
   const interactive = nodes.filter(isInteractive);
   const bodyText = normalizedText(nodeText(root));
-  const title = decodeEntities(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "Frontier");
+  const title = decodeEntities(html.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || "OpenRappter");
   return {
     bodyText,
     interactive: interactive.map((node) => ({

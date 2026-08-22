@@ -408,7 +408,7 @@ test("baseline never reports a partial restore even with fallback state", async 
 test("a control word without the route manager is an error, not a silent pass", async () => {
   await assert.rejects(
     executeLineageCommand({ message: "restore" }),
-    /Frontier route manager/,
+    /OpenRappter route manager/,
   );
 });
 

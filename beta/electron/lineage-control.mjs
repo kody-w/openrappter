@@ -208,7 +208,7 @@ export async function executeLineageCommand({
     };
   }
   if (!routeManager) {
-    throw new Error("Molt Lineage control requires the Frontier route manager.");
+    throw new Error("Molt Lineage control requires the OpenRappter route manager.");
   }
   if (!commandUsesKnownEnvironments(command, routeManager)) {
     return {

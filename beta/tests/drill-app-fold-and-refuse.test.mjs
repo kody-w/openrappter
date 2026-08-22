@@ -561,36 +561,22 @@ test("what folded is readable from the line afterwards, as plain files", async (
   }
 });
 
-// The commons this exists for lives at a URL. If folding over the network gave
-// a different answer from folding the same bytes off a stick, nobody could tell
-// whether what they absorbed depended on how it arrived.
-test("a commons served over http folds to the same result as the same document on disk", async (t) => {
+// Remote delivery and local drilling are separate. A URL cannot reach the fold;
+// after summon/save, the ordinary local file path produces the verified result.
+test("a remote commons cannot fold until its bytes are saved locally", async (t) => {
   const doc = historyDoc();
-  const body = JSON.stringify(doc);
-
   const fromDisk = bench();
   const diskResult = await fold(fromDisk.store, fromDisk.publish("history.json", doc));
-
-  const overHttp = bench();
-  const url = await serveJson(body, t);
-  const httpResult = await fold(overHttp.store, url);
-
-  assert.deepEqual(
-    [...frameNames(httpResult.merged)].sort(),
-    [...frameNames(diskResult.merged)].sort(),
-    "the same document merges the same frames however it arrived",
+  const remote = bench();
+  const remoteHead = readLine(remote.store).head;
+  await assert.rejects(
+    () => fold(remote.store, "https://raw.githubusercontent.com/owner/repo/main/history.json"),
+    /local lookup|summon and save/i,
   );
-  assert.equal(httpResult.refused.length, diskResult.refused.length);
-
+  assert.equal(readLine(remote.store).head, remoteHead);
   const diskLine = readLine(fromDisk.store);
-  const httpLine = readLine(overHttp.store);
-  assert.deepEqual(
-    factsOn(httpLine),
-    factsOn(diskLine),
-    "and the two lines say exactly the same thing",
-  );
-  assert.match(String(httpResult.head), /^[0-9a-f]{64}$/, "the networked fold moved a head too");
-  for (const frameHash of frameNames(httpResult.merged)) {
-    assert.ok(lineMentions(httpLine, frameHash), "and what it absorbed is on its line");
+  assert.match(String(diskResult.head), /^[0-9a-f]{64}$/);
+  for (const frameHash of frameNames(diskResult.merged)) {
+    assert.ok(lineMentions(diskLine, frameHash), "saved local bytes were absorbed");
   }
 });

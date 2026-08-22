@@ -65,3 +65,7 @@ openclaw/
 # on import; this keeps them.
 !beta/build/
 !beta/build/**
+
+# Generated Electron packages belong in GitHub Releases, never Git history.
+/beta/release/
+/beta/.release-media-tools/

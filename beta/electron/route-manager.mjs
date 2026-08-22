@@ -320,6 +320,7 @@ function verifyMoltWithMolter({
       encoding: "utf8",
       env: {
         ...process.env,
+        PYTHONDONTWRITEBYTECODE: "1",
         PYTHONPATH: pythonPath,
         PYTHONUTF8: "1",
       },
@@ -1805,7 +1806,7 @@ export class BetaRouteManager {
     if (!active) throw new Error(`Active agent not found: ${safeName}`);
     if (active.scope === "memory") {
       throw new Error(
-        `${safeName} is generated from the Frontier identity and cannot be deleted.`,
+        `${safeName} is generated from the OpenRappter identity and cannot be deleted.`,
       );
     }
     if (active.scope === "ephemeral") {

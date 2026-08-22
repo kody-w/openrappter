@@ -941,7 +941,7 @@ test("walkthrough recording pads with visible recap tiles", () => {
   assert.match(source, /brainstem-beta-walkthrough-recap/);
   assert.match(
     uiDriverInternals.walkthroughRecapChapters("baseline").join(" "),
-    /Frontier Brainstem → Hippocampus → Microsoft stack/,
+    /OpenRappter Brainstem → Hippocampus → Microsoft stack/,
   );
   assert.match(
     uiDriverInternals.walkthroughRecapChapters("stack-churn").join(" "),
@@ -1629,7 +1629,7 @@ test("chat never adopts a request slot the person created", async (t) => {
     const ownBubble = attribution.slots[0].previousElementSibling;
     assert.equal(result.requestId, 1);
     assert.equal(ownBubble.dataset.rappActor, "ai");
-    assert.equal(ownBubble.title, "Sent by the Brain Surgeon");
+    assert.equal(ownBubble.title, "Sent by the Rappter Surgeon");
   });
 });
 

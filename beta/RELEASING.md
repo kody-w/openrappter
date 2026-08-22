@@ -1,11 +1,17 @@
-# Releasing RAPP Brainstem Frontier
+# Releasing OpenRappter
 
-RAPP Brainstem Frontier follows Skill Recorder's source-only release pattern:
+OpenRappter follows Skill Recorder's source-only release pattern:
 
 1. Publish an immutable annotated tag after the staging commit passes.
 2. Record the full release commit and installer hashes in the GitHub Release.
 3. Do not attach locally assembled Electron applications to the source release.
 4. Test the installer against the exact commit from a clean isolated home.
+
+Local Electron packaging is currently supported only for macOS ARM64 acceptance
+evidence. Windows and Linux distributable targets remain disabled until
+target-native ffmpeg/ffprobe hashes and builders are pinned. Local ZIP/DMG
+artifacts are development-signed, not notarized, and **must not** be attached to
+the source release; ordinary users install through the source installer.
 
 ## 1. Prepare and validate
 
@@ -34,7 +40,7 @@ versioned product:
 version="0.1.0-beta.1"
 release_commit="<full-40-character-commit>"
 tag="brainstem-beta-v$version"
-git tag -a "$tag" "$release_commit" -m "RAPP Brainstem Frontier v$version"
+git tag -a "$tag" "$release_commit" -m "OpenRappter v$version"
 git push upstream "$tag"
 ```
 
@@ -72,7 +78,7 @@ gh release create "$tag" \
   --repo microsoft/aibast-agents-library \
   --verify-tag \
   --prerelease \
-  --title "RAPP Brainstem Frontier v$version" \
+  --title "OpenRappter v$version" \
   --notes-file "<release-notes-file>"
 ```
 

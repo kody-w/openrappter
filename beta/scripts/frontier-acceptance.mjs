@@ -1,13 +1,13 @@
-// Force-mode acceptance test for the RAPP Brainstem Frontier.
+// Force-mode acceptance test for the OpenRappter.
 //
-// Drives the LIVE Frontier through the token-authenticated UI-driver bridge and
+// Drives the LIVE OpenRappter through the token-authenticated UI-driver bridge and
 // asserts the beta's headline behaviors end-to-end — most importantly the
 // Brainstem<->twin autonomous loop (the visible Brainstem plans, the twin
 // executes, the Brainstem says DONE), plus the brandmark and the herd tile.
 //
 //   node scripts/frontier-acceptance.mjs
 //
-// Requires the Frontier to be open (start it first, e.g. `npm start`, or via the
+// Requires the OpenRappter to be open (start it first, e.g. `npm start`, or via the
 // beta launcher) and Copilot signed in. Exits 0 on pass, 1 on failure, 2 if the
 // bridge is unavailable. Read-only aside from hatching one throwaway twin.
 import { readFileSync } from "node:fs";
@@ -22,7 +22,7 @@ let md;
 try {
   md = JSON.parse(readFileSync(metaPath, "utf8"));
 } catch {
-  console.error(`No UI-driver bridge at ${metaPath}. Start the Frontier first, then re-run.`);
+  console.error(`No UI-driver bridge at ${metaPath}. Start the OpenRappter first, then re-run.`);
   process.exit(2);
 }
 
@@ -47,7 +47,7 @@ const record = (name, pass, detail = "") => {
 try {
   // 1. App is healthy and shows the brandmark favicon.
   const shell = await cmd({ action: "inspect", target: "shell", limit: 1 });
-  record("app healthy (shell responds)", /Frontier/i.test(shell.title || ""), shell.title);
+  record("app healthy (shell responds)", /OpenRappter/i.test(shell.title || ""), shell.title);
   // (The brandmark favicon + all icon sizes are asserted statically in
   // tests/brandmark.test.mjs; here we focus on live force-mode behavior.)
 

@@ -22,13 +22,13 @@ export const STORE_SCHEMA = "rapp-store/1.0";
 export const AIBAST_REGISTRY_SCHEMA = "rapp-agent/1.0";
 export const AIBAST_RAW_BASE = "https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/";
 
-// The three RAR library sources the Frontier browser can point at. AIBAST is
+// The three RAR library sources the OpenRappter browser can point at. AIBAST is
 // the default; "custom" is any user-supplied RAR-compliant catalog URL
 // (either the rapp-store/1.0 index shape or an AIBAST-style registry.json).
 export const FRONTIER_STORE_URL = "https://microsoft.github.io/aibast-agents-library/beta/frontier/store/index.json";
 export const STORE_SOURCES = {
   aibast: { key: "aibast", label: "AIBAST RAR", url: AIBAST_REGISTRY_URL },
-  frontier: { key: "frontier", label: "Frontier Store", url: FRONTIER_STORE_URL },
+  frontier: { key: "frontier", label: "OpenRappter Store", url: FRONTIER_STORE_URL },
   public: { key: "public", label: "Public RAR", url: DEFAULT_STORE_URL },
 };
 

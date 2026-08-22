@@ -1,4 +1,4 @@
-# RAPP Brainstem Frontier Golden Path
+# OpenRappter Golden Path
 
 ## North star
 
@@ -31,7 +31,7 @@ experience. Those remain optional expert surfaces.
 ```text
 ┌────────────────────┬──────────────────────────┬──────────────────────┐
 │ Live Explorer      │ RAPP Brainstem           │ GitHub Copilot       │
-│                    │                          │ Brain Surgeon        │
+│                    │                          │ Rappter Surgeon        │
 │ global agents      │ the actual /chat surface │ full coding-agent    │
 │ routed stacks      │ visible agent execution  │ loop                 │
 │ source preview     │ user memory and results  │ files/shell/tests    │
@@ -42,6 +42,10 @@ experience. Those remain optional expert surfaces.
 
 - Shows the exact agent files in the active routed composition.
 - Separates shared/global capabilities from stack-specific capabilities.
+- Treats each top-level AI companion as a Good AI Estate: one visible Electron
+  Dock creature owns one isolated mutable estate containing one or more
+  neighborhoods and herds. Other estates collaborate explicitly over `/chat`;
+  they do not share memory, agents, routes, ports, or lifecycle authority.
 - Lets the user inspect source without requiring an editor.
 - Updates when Copilot installs, removes, or changes a routed agent.
 
@@ -53,7 +57,7 @@ experience. Those remain optional expert surfaces.
 - Hotloads ordinary `*_agent.py` files from its configured `AGENTS_PATH`.
 - Shows agent calls, results, memory behavior, and the proof conversation.
 
-### Right: GitHub Copilot Brain Surgeon
+### Right: GitHub Copilot Rappter Surgeon
 
 - Runs the full bundled GitHub Copilot coding-agent loop.
 - Can inspect files, run shell commands, edit, test, and iterate.
@@ -79,7 +83,7 @@ The system performs the work and keeps the evidence visible.
 External AIs can enter the same on-screen loop:
 
 ```bash
-brainstem-surgeon "Build and test the agent I need"
+openrappter-surgeon "Build and test the agent I need"
 brainstem-chat "Run the proven workflow"
 brainstem-walkthrough
 ```
@@ -210,7 +214,7 @@ interface, driven the same way, with the model reserved for the part only a mode
 ## Autonomous five-minute walkthrough
 
 `brainstem-walkthrough` is the release demonstration of the golden path. An
-external AI enters the visible Brain Surgeon chat and guides Copilot through six
+external AI enters the visible Rappter Surgeon chat and guides Copilot through six
 chapters:
 
 1. orient the learner to caller RAPPID, UUID memory, stacks, overlays, and the
@@ -222,7 +226,7 @@ chapters:
    path;
 6. stop recording and hand back the reusable lesson plus saved evidence.
 
-The command verifies both chat layers: the Brain Surgeon must complete its
+The command verifies both chat layers: the Rappter Surgeon must complete its
 guided tool loop, and the center Brainstem transcript must contain
 `LEARNED_AND_TAUGHT:RAPP_READY`. It also verifies that the one-turn agent is no
 longer present and that a new WebM was saved. The recording is full-decoded,
@@ -232,7 +236,7 @@ gallery as visible evidence of what changed between iterations.
 
 ## One-click Copilot Studio promotion
 
-The Brain Surgeon start surface includes **Deploy loaded agents to Copilot
+The Rappter Surgeon start surface includes **Deploy loaded agents to Copilot
 Studio**. That pill completes the local-to-production story without sending the
 user to VS Code or a terminal:
 
@@ -286,7 +290,7 @@ technical step.
 They can ask an external AI to take over:
 
 ```text
-"Drive the Brain Surgeon for me."
+"Drive the Rappter Surgeon for me."
 "Fix this agent while I watch."
 "Run the next test."
 "Show me why this failed."
@@ -464,4 +468,4 @@ They can watch the system do their work, understand how it did it, inspect the
 capabilities it used, replay the demonstration, and promote the proven solution
 without first becoming a software engineer.
 
-That visible teach-by-doing loop is the RAPP Brainstem Frontier golden path.
+That visible teach-by-doing loop is the OpenRappter golden path.

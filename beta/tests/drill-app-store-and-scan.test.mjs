@@ -343,11 +343,9 @@ test("a commons that shares nothing reports zero hits honestly rather than error
   assert.equal(status(store).folds, 0);
 });
 
-// The commons lives at raw.githubusercontent.com. If a URL source answers
-// differently from the same bytes on disk, then what a person sees depends on
-// how they happened to reach the commons, and two machines drilling the same
-// published frames disagree about what they found.
-test("a URL commons and the same bytes on disk give the same answer", async (t) => {
+// The summon line may deliver remote bytes, but Quantum Drill itself is only a
+// local lookup. The URL is refused without a request; saved bytes remain useful.
+test("a URL commons is refused until the same bytes are saved locally", async (t) => {
   const root = freshRoot(t);
   const store = createStore(root);
   seed(store, localFrames());
@@ -355,28 +353,13 @@ test("a URL commons and the same bytes on disk give the same answer", async (t) 
   const filePath = writeJson(root, "commons.json", document);
   const url = await serveJson(t, document);
 
-  const loaded = await loadSource(url);
-  assert.equal(loaded.manifest.dimension_id, "commons", "the manifest comes back as published");
-  assert.equal(loaded.manifest.clock_key, 1);
-  assert.deepEqual(
-    loaded.frames.map((frame) => frame.frame_hash),
-    document.frames.map((frame) => frame.frame_hash),
-    "every published frame comes back, in order",
+  await assert.rejects(
+    () => loadSource(url),
+    /local lookup|summon and save/i,
   );
-
-  const overWire = await scan(store, url);
   const overDisk = await scan(store, filePath);
-
-  assert.equal(overWire.pairs.length, overDisk.pairs.length);
-  assert.equal(overWire.fixedPoints.length, overDisk.fixedPoints.length);
-  assert.deepEqual(
-    overWire.pairs.map((pair) => [pair.here.frame_hash, pair.there.frame_hash]),
-    overDisk.pairs.map((pair) => [pair.here.frame_hash, pair.there.frame_hash]),
-    "the same commons resolves the same pairs however it was reached",
-  );
-  assert.equal(overWire.alignment.ok, overDisk.alignment.ok);
-  assert.equal(overWire.alignment.ratio, overDisk.alignment.ratio);
-  assert.equal(overWire.changed, false, "fetching a commons is still only a search");
+  assert.ok(overDisk.pairs.length > 0);
+  assert.equal(overDisk.changed, false, "local lookup is still only a search");
   assert.equal(status(store).folds, 0);
 });
 
@@ -438,8 +421,15 @@ test("status counts checkpoints, folds and restores across a few operations", as
   assert.equal(afterRestore.folds, 1, "restoring does not un-count the fold — history is not rewritten");
   assert.equal(
     afterRestore.checkpoints,
-    1,
-    "the checkpoint survives the restore: nothing is deleted and no history is rewritten",
+    0,
+    "the restored checkpoint leaves the active undo stack",
+  );
+  const archived = path.join(store.restoredCheckpointDir, files[0]);
+  assert.ok(fs.existsSync(archived), "the used checkpoint survives in the restored-checkpoint archive");
+  assert.deepEqual(
+    readJsonl(archived).map((frame) => frame.frame_hash),
+    lineBefore,
+    "the archived checkpoint still holds the exact pre-fold line",
   );
   assert.equal(afterRestore.frames, before.frames, "the line is back to the generation before the fold");
   assert.equal(afterRestore.head, before.head);

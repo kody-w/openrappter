@@ -43,10 +43,10 @@ function readSettings(betaHome) {
   try {
     value = JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
-    throw new Error(`Invalid Frontier settings at ${file}: ${error.message}`);
+    throw new Error(`Invalid OpenRappter settings at ${file}: ${error.message}`);
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Invalid Frontier settings at ${file}.`);
+    throw new Error(`Invalid OpenRappter settings at ${file}.`);
   }
   return value;
 }

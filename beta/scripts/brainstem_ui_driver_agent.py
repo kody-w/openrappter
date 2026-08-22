@@ -1,4 +1,4 @@
-"""Hot-loadable agent that operates the visible RAPP Brainstem Frontier frontend."""
+"""Hot-loadable agent that operates the visible OpenRappter frontend."""
 
 import json
 import os
@@ -62,7 +62,7 @@ def _budget_text(value, limit=6000, handle="@page"):
     return preview + marker
 
 
-HELP_TEXT = """UI Driver v2 operates the actual visible RAPP Brainstem Frontier frontend with an animated AI cursor.
+HELP_TEXT = """UI Driver v2 operates the actual visible OpenRappter frontend with an animated AI cursor.
 - Prefer handle over selector/target_text. Handles are stable: @area.name or @list[key].part.
 - inspect returns {snapshot,frame,rows}; pass since to receive only changed rows (60 default, 80 max).
 - run accepts up to 40 steps. Steps support action, handle, selector, target_text, text, value, key, target, optional, tail, limit, and timing fields.
@@ -145,7 +145,7 @@ class BrainstemUiDriver(BasicAgent):
                 metadata = json.load(handle)
         except (OSError, ValueError) as error:
             return (
-                "The RAPP Brainstem Frontier UI driver is unavailable. "
+                "The OpenRappter UI driver is unavailable. "
                 f"Expected a running Frontier client at {metadata_path}: {error}"
             )
 
@@ -195,7 +195,7 @@ class BrainstemUiDriver(BasicAgent):
                 "captures": [{
                     "url": screenshot.get("captureUrl"),
                     "path": screenshot.get("path"),
-                    "alt": "Final RAPP Brainstem Frontier state after the recording",
+                    "alt": "Final OpenRappter state after the recording",
                 }],
                 "recordings": [{
                     "url": recording.get("url"),
@@ -222,7 +222,7 @@ class BrainstemUiDriver(BasicAgent):
                 "captures": [{
                     "url": capture_url,
                     "path": result.get("path"),
-                    "alt": "RAPP Brainstem Frontier after the agent action",
+                    "alt": "OpenRappter after the agent action",
                 }],
             }
             return structured

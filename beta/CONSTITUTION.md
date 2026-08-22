@@ -1,4 +1,4 @@
-# RAPP Brainstem Frontier — Constitution (beta)
+# OpenRappter — Constitution (beta)
 
 The Frontier's own law, downstream of the Brainstem `CONSTITUTION.md` and the
 rapp/1 spine. Where they conflict, the kernel's law wins. Amend by PR that
@@ -10,7 +10,7 @@ The factory install is **batteries included, and no more** — like a machine on
 first boot. It contains exactly:
 
 1. The **Grail kernel** (unmodified `brainstem.py`) and its venv.
-2. The **Frontier launcher** (Electron shell, Grail chat, Brain Surgeon, and the tile surfaces:
+2. The **Frontier launcher** (Electron shell, Grail chat, Rappter Surgeon, and the tile surfaces:
    the companion chat, the herd, the arena, the flock and the binder — herd and arena out of the
    box, all of them arrangeable by a preset the person can export and import).
 3. **Twins**: hatch from the RAPP Store or from a local `.egg` dropped on the

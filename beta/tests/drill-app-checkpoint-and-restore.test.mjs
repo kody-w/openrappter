@@ -122,6 +122,15 @@ function hashes(frames) {
   return frames.map((frame) => frame.frame_hash);
 }
 
+function assertValidLine(frames, label) {
+  let head = null;
+  for (const frame of frames) {
+    const [ok, , why] = verifyFrame(frame, { head });
+    assert.equal(ok, true, `${label} must remain a valid RAPP/1 line: ${why}`);
+    head = frame;
+  }
+}
+
 /** A count that may honestly be reported as a number or as the list itself. */
 function howMany(value) {
   if (Array.isArray(value)) return value.length;
@@ -323,11 +332,150 @@ test("a restore is recorded — never a silent rollback", async () => {
   );
 });
 
+test("a failed restore rolls back the line, checkpoint, journal, and snapshots", async () => {
+  const store = freshStore();
+  const folded = await fold(store, writeSource(store, "source-a", sourceDocument("a", 20)));
+  const liveBefore = readLine(store);
+  const checkpointBefore = checkpointFile(store, folded.checkpoint);
+  const journalBefore = journal(store);
+
+  const brokenStore = {
+    ...store,
+    journalPath: path.join(homeOf.get(store), "missing-parent", "journal.jsonl"),
+  };
+  assert.throws(
+    () => restore(brokenStore),
+    /ENOENT|no such file or directory/i,
+    "an unwritable journal makes the restore fail rather than go unrecorded",
+  );
+
+  assert.deepEqual(hashes(readLine(store).frames), hashes(liveBefore.frames), "the live line rolled back");
+  assert.ok(fs.existsSync(checkpointBefore), "the checkpoint is active for a retry");
+  assert.deepEqual(journal(store), journalBefore, "the durable journal is unchanged");
+  assert.deepEqual(fs.readdirSync(store.restoredCheckpointDir), [], "no checkpoint was archived");
+  assert.deepEqual(fs.readdirSync(store.supersededDir), [], "no superseded snapshot was left behind");
+});
+
+test("a corrupt checkpoint is refused before restore changes anything", async () => {
+  const store = freshStore();
+  const folded = await fold(store, writeSource(store, "source-a", sourceDocument("a", 20)));
+  const liveBefore = readLine(store);
+  const checkpoint = checkpointFile(store, folded.checkpoint);
+  const journalBefore = journal(store);
+
+  const damaged = readFrames(checkpoint);
+  damaged[damaged.length - 1].payload.asserts.tampered = true;
+  fs.writeFileSync(
+    checkpoint,
+    damaged.map((frame) => JSON.stringify(frame)).join("\n") + "\n",
+    "utf8",
+  );
+
+  assert.throws(
+    () => restore(store),
+    /checkpoint .* frame .* failed RAPP\/1 verification: payload_hash mismatch/i,
+  );
+  assert.deepEqual(hashes(readLine(store).frames), hashes(liveBefore.frames), "the live line is unchanged");
+  assert.ok(fs.existsSync(checkpoint), "the corrupt checkpoint remains active for inspection or repair");
+  assert.deepEqual(journal(store), journalBefore, "no restore was journaled");
+  assert.deepEqual(fs.readdirSync(store.restoredCheckpointDir), [], "nothing was archived");
+  assert.deepEqual(fs.readdirSync(store.supersededDir), [], "nothing was superseded");
+});
+
+test("empty stream ids are invalid and a checkpoint cannot switch valid streams", () => {
+  const store = freshStore();
+  fs.mkdirSync(store.checkpointDir, { recursive: true });
+  const empty = buildFrame({
+    kind: "qqdrill.tick",
+    streamId: "",
+    seq: 0,
+    utc: utcAt(40),
+    payload: { asserts: { stage: "first" }, requires: {} },
+    prev: null,
+    prevWave: null,
+  });
+  assert.equal(verifyFrame(empty, { head: null })[0], false);
+  const first = buildFrame({
+    kind: "qqdrill.tick",
+    streamId: STREAM,
+    seq: 0,
+    utc: utcAt(40),
+    payload: { asserts: { stage: "first" }, requires: {} },
+    prev: null,
+    prevWave: null,
+  });
+  const second = buildFrame({
+    kind: "qqdrill.tick",
+    streamId: `rappid:@rapp/other-weather:${"b".repeat(64)}`,
+    seq: 1,
+    utc: utcAt(41),
+    payload: { asserts: { stage: "second" }, requires: {} },
+    prev: first.payload_hash,
+    prevWave: null,
+  });
+  assert.equal(verifyFrame(first, { head: null })[0], true);
+  assert.equal(
+    verifyFrame(second, { head: first })[0],
+    true,
+    "the fixture isolates the cross-frame stream check from per-frame verification",
+  );
+  const checkpoint = path.join(
+    store.checkpointDir,
+    "2026-08-21T12-00-00-000Z-000.jsonl",
+  );
+  fs.writeFileSync(
+    checkpoint,
+    `${JSON.stringify(first)}\n${JSON.stringify(second)}\n`,
+  );
+  const liveBefore = readLine(store);
+
+  assert.throws(() => restore(store), /stream_id mismatch/i);
+  assert.deepEqual(hashes(readLine(store).frames), hashes(liveBefore.frames));
+  assert.ok(fs.existsSync(checkpoint), "the invalid checkpoint remains available for inspection");
+  assert.equal(status(store).restores, 0);
+});
+
+test("an active writer lock refuses a concurrent restore without changing state", async () => {
+  const store = freshStore();
+  const folded = await fold(store, writeSource(store, "source-a", sourceDocument("a", 20)));
+  const liveBefore = readLine(store);
+  const checkpoint = checkpointFile(store, folded.checkpoint);
+  fs.writeFileSync(
+    path.join(store.root, ".write.lock"),
+    `${JSON.stringify({ pid: process.pid, token: "other-writer" })}\n`,
+    { mode: 0o600 },
+  );
+
+  assert.throws(() => restore(store), /busy|writer|lock/i);
+  assert.deepEqual(hashes(readLine(store).frames), hashes(liveBefore.frames));
+  assert.ok(fs.existsSync(checkpoint), "the concurrent writer still owns the checkpoint");
+  assert.equal(status(store).restores, 0);
+});
+
+test("a dead writer lock refuses until an operator removes the exact stale file", async () => {
+  const store = freshStore();
+  const before = readLine(store);
+  await fold(store, writeSource(store, "source-a", sourceDocument("a", 20)));
+  fs.writeFileSync(
+    path.join(store.root, ".write.lock"),
+    `${JSON.stringify({ pid: 2_147_483_647, token: "dead-writer" })}\n`,
+    { mode: 0o600 },
+  );
+
+  assert.throws(() => restore(store), /stale writer lock/i);
+  assert.equal(status(store).restores, 0);
+  fs.rmSync(path.join(store.root, ".write.lock"));
+  const restored = restore(store);
+  assert.equal(restored.ok, true);
+  assert.equal(restored.head, before.head);
+  assert.equal(fs.existsSync(path.join(store.root, ".write.lock")), false);
+});
+
 // Restoring is electing an earlier generation, not un-merging. If restore
 // destroyed the folded frames, a person who rolled back one merge too many
 // would have nothing left to go forward to — and the "no un-merge" guarantee
 // would have been broken by the store instead of the protocol.
-test("restoring does not delete what was folded — it stays recoverable", async () => {
+test("restoring archives the used checkpoint and keeps every generation recoverable", async () => {
   const store = freshStore();
   const before = readLine(store);
 
@@ -349,14 +497,13 @@ test("restoring does not delete what was folded — it stays recoverable", async
     );
   }
 
-  assert.ok(
-    fs.existsSync(checkpoint),
-    "the checkpoint the fold took is still in the checkpoint directory, not consumed by restoring",
-  );
+  assert.equal(fs.existsSync(checkpoint), false, "the used checkpoint left the active undo stack");
+  const archived = path.join(store.restoredCheckpointDir, path.basename(checkpoint));
+  assert.ok(fs.existsSync(archived), "the used checkpoint moved to the restored-checkpoint archive");
   assert.deepEqual(
-    hashes(readFrames(checkpoint)),
+    hashes(readFrames(archived)),
     hashes(before.frames),
-    "and still reads back as the generation it captured",
+    "and the archived checkpoint still reads back as the generation it captured",
   );
 });
 
@@ -401,6 +548,7 @@ test("fold, restore, fold again: the second fold works and gets its own checkpoi
   const firstCheckpoint = checkpointFile(store, first.checkpoint);
   await restore(store);
   assert.equal(readLine(store).head, before.head);
+  const archivedFirst = path.join(store.restoredCheckpointDir, path.basename(firstCheckpoint));
 
   const second = await fold(store, writeSource(store, "source-b", sourceDocument("b", 30)));
   assert.ok(howMany(second.merged) > 0, "the second fold merges normally");
@@ -415,7 +563,8 @@ test("fold, restore, fold again: the second fold works and gets its own checkpoi
     path.resolve(firstCheckpoint),
     "the second fold's checkpoint is its own file, not the first one written over",
   );
-  assert.ok(fs.existsSync(firstCheckpoint), "and the first checkpoint survived the second fold");
+  assert.equal(fs.existsSync(firstCheckpoint), false, "the first checkpoint is no longer active");
+  assert.ok(fs.existsSync(archivedFirst), "and the first checkpoint survived in the archive");
   assert.deepEqual(
     hashes(readFrames(secondCheckpoint)),
     hashes(before.frames),
@@ -515,6 +664,87 @@ test("restore elects the most recent checkpoint — it undoes the last fold, not
   assert.notEqual(now.head, heads[0], "restoring did not wind the whole line back to the start");
 });
 
+test("successive restores walk the checkpoint stack once, then refuse", async (t) => {
+  const NativeDate = globalThis.Date;
+  const frozen = "2026-08-21T12:34:56.789Z";
+  globalThis.Date = class FrozenDate extends NativeDate {
+    constructor(...args) {
+      super(...(args.length ? args : [frozen]));
+    }
+
+    static now() {
+      return NativeDate.parse(frozen);
+    }
+  };
+  t.after(() => {
+    globalThis.Date = NativeDate;
+  });
+
+  const store = freshStore();
+  const original = readLine(store);
+
+  const first = await fold(store, writeSource(store, "source-a", sourceDocument("a", 20)));
+  const afterFirst = readLine(store);
+  const firstCheckpoint = checkpointFile(store, first.checkpoint);
+  const second = await fold(store, writeSource(store, "source-b", sourceDocument("b", 30)));
+  const afterSecond = readLine(store);
+  const secondCheckpoint = checkpointFile(store, second.checkpoint);
+  assert.equal(checkpointFiles(store).length, 2, "both folds left an active way back");
+
+  const backOne = restore(store);
+  assert.equal(backOne.ok, true);
+  assert.equal(backOne.head, afterFirst.head, "the first restore undoes only the second fold");
+  assert.equal(checkpointFiles(store).length, 1, "the used checkpoint left the active stack");
+  assert.ok(
+    fs.existsSync(path.join(store.restoredCheckpointDir, path.basename(secondCheckpoint))),
+    "the second checkpoint was archived rather than deleted",
+  );
+  const firstSuperseded = readFrames(path.join(store.supersededDir, backOne.superseded));
+  assert.deepEqual(
+    hashes(firstSuperseded),
+    hashes(afterSecond.frames),
+    "the first superseded file is the exact line the first restore stepped away from",
+  );
+  assertValidLine(firstSuperseded, "the first superseded file");
+
+  const backTwo = restore(store);
+  assert.equal(backTwo.ok, true);
+  assert.equal(backTwo.head, original.head, "the second restore reaches the pre-first-fold line");
+  assert.deepEqual(hashes(readLine(store).frames), hashes(original.frames));
+  assert.equal(checkpointFiles(store).length, 0, "both recovery points were consumed exactly once");
+  assert.ok(
+    fs.existsSync(path.join(store.restoredCheckpointDir, path.basename(firstCheckpoint))),
+    "the first checkpoint was archived too",
+  );
+  const secondSuperseded = readFrames(path.join(store.supersededDir, backTwo.superseded));
+  assert.deepEqual(
+    hashes(secondSuperseded),
+    hashes(afterFirst.frames),
+    "the second superseded file is the exact line the second restore stepped away from",
+  );
+  assertValidLine(secondSuperseded, "the second superseded file");
+  assert.notEqual(
+    backOne.superseded,
+    backTwo.superseded,
+    "two restores in the same millisecond receive distinct superseded paths",
+  );
+
+  const eventsBeforeRefusal = journal(store);
+  const supersededBeforeRefusal = fs.readdirSync(store.supersededDir).sort();
+  assert.equal(supersededBeforeRefusal.length, 2, "each real restore preserved one live generation");
+
+  const refused = restore(store);
+  assert.equal(refused.ok, false, "there is no third checkpoint to restore");
+  assert.match(refused.reason, /checkpoint/i);
+  assert.deepEqual(journal(store), eventsBeforeRefusal, "a refused no-op is not journaled as a restore");
+  assert.deepEqual(
+    fs.readdirSync(store.supersededDir).sort(),
+    supersededBeforeRefusal,
+    "a refused no-op writes no superseded copy",
+  );
+  assert.equal(status(store).restores, 2, "status counts only the two restores that moved the line");
+});
+
 // A search is meant to be free — the protocol's whole reason for keeping the
 // drill and the fold apart. If scanning left checkpoints behind, the checkpoint
 // directory a person digs through in a bad moment would be full of generations
@@ -538,40 +768,28 @@ test("a scan costs nothing: no checkpoint, no journal rollback point, no moved H
   assert.match(String(refusal.reason ?? refusal.detail ?? refusal.why ?? ""), /checkpoint/i);
 });
 
-// The safety net cannot depend on where the frames came from. Frames pulled off
-// the commons are exactly the ones a person is least sure about, so a fold from
-// a URL is the case where the way back matters most.
-test("a fold from a URL checkpoints first, and is just as recoverable", async () => {
+// The drill is a fast local lookup. Remote delivery is a separate summon/save
+// step, so a URL must be refused before a checkpoint or mutation can happen.
+test("a remote fold is refused before checkpointing; its saved bytes remain recoverable", async () => {
   const store = freshStore();
   const before = readLine(store);
   const document = sourceDocument("a", 20);
+  await assert.rejects(
+    () => fold(store, "https://raw.githubusercontent.com/owner/repo/main/dimension.json"),
+    /local lookup|summon and save/i,
+  );
+  assert.deepEqual(checkpointFiles(store), []);
+  assert.equal(readLine(store).head, before.head);
 
-  const server = http.createServer((request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify(document));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-
-  try {
-    const url = `http://127.0.0.1:${server.address().port}/dimension.json`;
-    const folded = await fold(store, url);
-    assert.ok(howMany(folded.merged) > 0, "the fetched dimension merged");
-
-    const checkpointed = readFrames(checkpointFile(store, folded.checkpoint));
-    assert.deepEqual(
-      hashes(checkpointed),
-      hashes(before.frames),
-      "the line was checkpointed before the fetched frames touched it",
-    );
-
-    const back = await restore(store);
-    assert.equal(back.head, before.head, "and a fold off the network is as reversible as a local one");
-    assert.equal(back.recorded, true, "and just as recorded");
-    assert.equal(readLine(store).head, before.head);
-    assert.ok(whereOnDisk(store.root, folded.head), "with what it folded still recoverable");
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
+  const saved = writeSource(store, "saved-remote", document);
+  const folded = await fold(store, saved);
+  assert.ok(howMany(folded.merged) > 0, "the saved dimension merged");
+  const checkpointed = readFrames(checkpointFile(store, folded.checkpoint));
+  assert.deepEqual(hashes(checkpointed), hashes(before.frames));
+  const back = await restore(store);
+  assert.equal(back.head, before.head);
+  assert.equal(back.recorded, true);
+  assert.ok(whereOnDisk(store.root, folded.head));
 });
 
 // Found 2026-08-21 by driving the published beta page in a real browser: fold,

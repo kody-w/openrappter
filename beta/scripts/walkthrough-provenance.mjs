@@ -44,6 +44,7 @@ export function betaSourceFingerprint(
         && !file.startsWith("beta/node_modules/")
         && file !== "beta/release"
         && !file.startsWith("beta/release/")
+        && existsSync(path.join(repoRoot, file))
       ))
       .sort();
     runtimeKind = "git";

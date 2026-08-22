@@ -20,7 +20,7 @@ const timeoutMs = Number.parseInt(
 );
 const customTask = process.argv.slice(2).join(" ").trim();
 const prompt = [
-  "Run the RAPP Brainstem Frontier update-control demonstration end to end.",
+  "Run the OpenRappter update-control demonstration end to end.",
   "Use delegate_to_brainstem exactly once with the complete one-turn agent",
   "below as ephemeral_agent. Do not install it into a persistent stack.",
   "",

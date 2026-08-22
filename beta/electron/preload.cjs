@@ -65,6 +65,20 @@ contextBridge.exposeInMainWorld("brainstemBeta", {
   getState: () => ipcRenderer.invoke("beta:get-state"),
   getAmbientSettings: () => ipcRenderer.invoke("beta:get-ambient-settings"),
   installUpdate: () => ipcRenderer.invoke("beta:install-update"),
+  openrappterTileDescribe: () => (
+    ipcRenderer.invoke("beta:openrappter-tile-describe")
+  ),
+  openrappterTileExport: () => (
+    ipcRenderer.invoke("beta:openrappter-tile-export")
+  ),
+  openrappterTileImport: () => (
+    ipcRenderer.invoke("beta:openrappter-tile-import")
+  ),
+  openrappterTileBackup: () => (
+    ipcRenderer.invoke("beta:openrappter-tile-backup")
+  ),
+  rappterPackStatus: () => ipcRenderer.invoke("beta:rappter-pack-status"),
+  rappterPackRun: () => ipcRenderer.invoke("beta:rappter-pack-run"),
   deleteAgent: (filename) => ipcRenderer.invoke("beta:delete-agent", filename),
   exportAgent: (filename) => ipcRenderer.invoke("beta:export-agent", filename),
   installFrameBridge: () => (

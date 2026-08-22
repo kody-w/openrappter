@@ -13,6 +13,7 @@ import {
   createStore,
   readLine,
   loadSource,
+  localSavedSource,
   fold,
 } from "../electron/drill-app.mjs";
 
@@ -202,62 +203,75 @@ test("loadSource reads a commons from a filesystem path", async (t) => {
   assert.deepEqual(loaded.frames[0].payload, frames[0].payload);
 });
 
-// The commons is populated by publishing to a plain URL — raw.githubusercontent
-// and nothing else. If http does not work, there is no commons to drill and the
-// app can only ever see what this one machine already had.
-test("loadSource fetches a commons from an http URL", async (t) => {
+test("local Drill refuses SMB, UNC, device, and remote-authority file sources", () => {
+  for (const source of [
+    "file://attacker.example/share/commons.json",
+    String.raw`\\attacker.example\share\commons.json`,
+    String.raw`\\?\C:\remote\commons.json`,
+    "//attacker.example/share/commons.json",
+  ]) {
+    assert.throws(
+      () => localSavedSource(source, { platform: "win32" }),
+      /refuses.*(?:remote|network|UNC|device)/i,
+    );
+  }
+  assert.equal(
+    localSavedSource("C:\\saved\\commons.json", { platform: "win32" }).protocol,
+    "file:",
+  );
+});
+
+// Publishing may populate a summon line, but delivery must finish before the
+// quick local Drill is called. It never fetches its own source.
+test("loadSource refuses an http URL and accepts its locally saved bytes", async (t) => {
   const frames = commonsFrames();
   const body = JSON.stringify(commonsDocument(frames));
+  let requests = 0;
   const server = await serve(t, (request, response) => {
+    requests += 1;
     response.writeHead(200, { "content-type": "application/json" });
     response.end(body);
   });
 
-  const loaded = await loadSource(`${server.origin}/commons.json`);
-
+  await assert.rejects(
+    () => loadSource(`${server.origin}/commons.json`),
+    /local lookup|summon and save/i,
+  );
+  assert.equal(requests, 0, "the Drill has no network fallback");
+  const loaded = await loadSource(
+    sourceFile(t, "saved-http", commonsDocument(frames)),
+  );
   assert.equal(loaded.manifest.dimension_id, "commons-weather");
   assert.equal(loaded.frames.length, frames.length);
   assert.deepEqual(
     loaded.frames.map((frame) => frame.frame_hash),
     frames.map((frame) => frame.frame_hash),
   );
-  // Bytes off the network are data. They must still be whole RAPP/1 frames.
+  // Saved bytes are data and remain subject to frame verification.
   for (const frame of loaded.frames) {
     const [ok, , why] = verifyFrame(frame, { streamIdOfRecord: STREAM });
     if (frame.seq === 0) assert.equal(ok, true, `fetched genesis must verify: ${why}`);
   }
 });
 
-// The difference between "the commons is offline" and "the commons is empty" is
-// the difference between trying again later and giving up. A person who is told
-// "nothing found" when the truth is "your wifi is down" stops drilling a source
-// that was going to pay.
-test("an unreachable source is an error that names the source, never an empty commons", async (t) => {
+test("remote availability is irrelevant to Drill; an empty saved summon is empty", async (t) => {
   const dead = await serve(t, (request, response) => response.end("{}"));
   const url = `${dead.origin}/commons.json`;
   await dead.close();
 
   const error = await refusal(() => loadSource(url), "an unreachable source");
-  assert.ok(
-    error.message.includes(url) || error.message.includes(`127.0.0.1:${dead.port}`),
-    `the failure must name the source it could not reach, got: ${error.message}`,
-  );
-
-  // And the contrast: a source that IS reachable and holds nothing loads, with
-  // no frames. That is the case "nothing found" is allowed to describe.
-  const empty = await serve(t, (request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ manifest: { dimension_id: "quiet", clock_key: 1 }, frames: [] }));
-  });
-  const loaded = await loadSource(`${empty.origin}/commons.json`);
+  assert.match(error.message, /local lookup|summon and save/i);
+  const loaded = await loadSource(sourceFile(t, "empty-saved", {
+    manifest: { dimension_id: "quiet", clock_key: 1 },
+    frames: [],
+  }));
   assert.deepEqual(loaded.frames, [], "an empty commons is a load, not a failure");
 });
 
-// A 404 means the address is wrong; a 500 means the host is broken. Collapsing
-// both into one message sends a person to fix the wrong thing, and a commons
-// address is a long string that is easy to get slightly wrong.
-test("a non-200 source is an error naming the status", async (t) => {
+test("HTTP statuses are never consulted by the local Drill", async (t) => {
+  let requests = 0;
   const server = await serve(t, (request, response) => {
+    requests += 1;
     const status = Number(request.url.replace("/", "")) || 500;
     response.writeHead(status, { "content-type": "text/plain" });
     response.end("no");
@@ -267,17 +281,14 @@ test("a non-200 source is an error naming the status", async (t) => {
     () => loadSource(`${server.origin}/404`),
     "a source that answers 404",
   );
-  assert.ok(missing.message.includes("404"), `the status must be named, got: ${missing.message}`);
-  assert.ok(
-    missing.message.includes(`${server.origin}/404`) || missing.message.includes("404"),
-    "and the source it came from is named too",
-  );
+  assert.match(missing.message, /local lookup|summon and save/i);
 
   const broken = await refusal(
     () => loadSource(`${server.origin}/500`),
     "a source that answers 500",
   );
-  assert.ok(broken.message.includes("500"), `the status must be named, got: ${broken.message}`);
+  assert.match(broken.message, /local lookup|summon and save/i);
+  assert.equal(requests, 0);
 });
 
 // Fetched bytes are data, never instructions and never assumed well-formed. A
@@ -301,15 +312,10 @@ test("valid JSON of the wrong shape is refused with a reason that names the sour
     );
   }
 
-  // Not JSON at all — a login page or an error page served with status 200 is
-  // the ordinary way a bad URL fails on the real web.
-  const server = await serve(t, (request, response) => {
-    response.writeHead(200, { "content-type": "text/html" });
-    response.end("<html><body>Sign in to continue</body></html>");
-  });
-  const url = `${server.origin}/commons.json`;
-  const error = await refusal(() => loadSource(url), "a source that is not JSON");
-  assert.ok(error.message.includes(url), `it must name the source, got: ${error.message}`);
+  const file = path.join(tempDir(t, "not-json"), "commons.json");
+  fs.writeFileSync(file, "<html><body>not JSON</body></html>");
+  const error = await refusal(() => loadSource(file), "a saved source that is not JSON");
+  assert.ok(error.message.includes(file), `it must name the source, got: ${error.message}`);
 });
 
 // A damaged document invalidates the whole document, not just the damaged part
@@ -432,11 +438,9 @@ test("the same commons offered in a shuffled order still reaches the same HEAD",
   );
 });
 
-// The same agreement, reached over the network rather than from a file. A
-// person drilling a published commons and a person who saved that same
-// document to disk must not end up on lines that differ — otherwise how the
-// commons was obtained becomes part of what it says.
-test("a commons folded over http and the same commons folded from a file agree", async (t) => {
+// A remote address cannot influence a line. After save, two local copies of
+// the same bytes still converge deterministically.
+test("a remote commons is inert; two saved copies still converge", async (t) => {
   const document = commonsDocument();
   const body = JSON.stringify(document);
   const server = await serve(t, (request, response) => {
@@ -444,17 +448,23 @@ test("a commons folded over http and the same commons folded from a file agree",
     response.end(body);
   });
 
-  const online = storeWithLine(t, "online", localFrames());
-  const offline = storeWithLine(t, "offline", localFrames());
-
-  const fetched = await fold(online, `${server.origin}/commons.json`);
+  const refused = storeWithLine(t, "remote-refused", localFrames());
+  const firstSaved = storeWithLine(t, "first-saved", localFrames());
+  const secondSaved = storeWithLine(t, "second-saved", localFrames());
+  const before = readLine(refused).head;
+  await assert.rejects(
+    () => fold(refused, `${server.origin}/commons.json`),
+    /local lookup|summon and save/i,
+  );
+  assert.equal(readLine(refused).head, before);
+  const first = await fold(firstSaved, sourceFile(t, "same-doc-a", document));
   await andThenMuchLater();
-  const read = await fold(offline, sourceFile(t, "same-doc", document));
+  const second = await fold(secondSaved, sourceFile(t, "same-doc-b", document));
 
-  assert.ok(hashesOf(fetched.merged).length > 0, "the fetched commons folded something");
-  assert.equal(read.head, fetched.head, "transport must not change the joined frame");
+  assert.ok(hashesOf(first.merged).length > 0, "the saved commons folded something");
+  assert.equal(second.head, first.head, "saved byte identity determines the join");
   assert.deepEqual(
-    readLine(offline).frames.map((frame) => frame.frame_hash),
-    readLine(online).frames.map((frame) => frame.frame_hash),
+    readLine(secondSaved).frames.map((frame) => frame.frame_hash),
+    readLine(firstSaved).frames.map((frame) => frame.frame_hash),
   );
 });

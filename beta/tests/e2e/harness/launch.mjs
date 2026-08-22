@@ -421,21 +421,28 @@ export async function launch({
   surgeonScript = {
     sessions: [{
       match: {},
-      turns: [{ final: "Fake Brain Surgeon is ready." }],
+      turns: [{ final: "Fake Rappter Surgeon is ready." }],
     }],
   },
   timeoutMs = DEFAULT_START_TIMEOUT_MS,
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), `frontier-e2e-${scenario}-`));
+  const openRappterHome = path.join(root, "openrappter");
   const paths = {
-    betaHome: path.join(root, "beta-home"),
-    brainstemHome: path.join(root, "brainstem-home"),
-    driverMetadata: path.join(root, "beta-home", "ui-driver.json"),
+    betaHome: path.join(openRappterHome, "desktop"),
+    brainstemHome: path.join(openRappterHome, "brainstem"),
+    driverMetadata: path.join(openRappterHome, "desktop", "ui-driver.json"),
     electronUserData: path.join(root, "electron-user-data"),
-    grail: path.join(root, "grail", "rapp_brainstem"),
+    grail: path.join(
+      openRappterHome,
+      "brainstem",
+      "src",
+      "rapp_brainstem",
+    ),
     lineageHome: path.join(root, "lineage"),
     osHome: path.join(root, "os-home"),
     root,
+    openRappterHome,
     stopFile: path.join(root, "control", "stop"),
     surgeonScript: path.join(root, "harness", "surgeon-script.json"),
     trace: path.join(root, "traces", `${scenario}.jsonl`),
@@ -539,6 +546,7 @@ export async function launch({
       BRAINSTEM_BETA_SURGEON_SCRIPT: paths.surgeonScript,
       BRAINSTEM_BETA_UI_DRIVER_FILE: paths.driverMetadata,
       BRAINSTEM_HOME: paths.brainstemHome,
+      OPENRAPPTER_HOME: paths.openRappterHome,
       ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
       GITHUB_MODEL: modelMode === "record" ? "auto" : "frontier-e2e-model",
       GITHUB_TOKEN: githubToken,

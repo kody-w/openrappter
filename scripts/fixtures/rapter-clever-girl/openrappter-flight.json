@@ -1,0 +1,114 @@
+{
+  "schema": "openrappter-flight-export/1.0",
+  "exportedAt": "2026-07-09T00:00:00.000Z",
+  "events": [
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-repair-u1",
+      "sequence": 1,
+      "traceId": "flight-trace-repair-05",
+      "parentId": null,
+      "sessionId": "flight-repair-05",
+      "timestamp": "2026-07-05T09:00:00.000Z",
+      "kind": "agent.execute.started",
+      "source": "openrappter",
+      "status": "started",
+      "metadata": {},
+      "payload": {
+        "role": "user",
+        "content": "PINEAPPLE-REPAIR-ECHO Recover the Windows setup workflow again: diagnose the broken PowerShell launcher and PATH quoting, make bootstrap reruns safe, and verify a clean desktop start. Read no credentials from https://setup.fictional.invalid/private."
+      },
+      "contentHash": "c5c338376edcc0fcbcd03e96b069bc79fec413ec6f39490591c18b70d5ebeb3f"
+    },
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-repair-a1",
+      "sequence": 2,
+      "traceId": "flight-trace-repair-05",
+      "parentId": "flight-repair-u1",
+      "sessionId": "flight-repair-05",
+      "timestamp": "2026-07-05T09:04:00.000Z",
+      "kind": "agent.execute.completed",
+      "source": "openrappter",
+      "status": "success",
+      "metadata": {},
+      "payload": {
+        "role": "assistant",
+        "content": "The recurring setup repair will be validated from a clean fictional Windows profile."
+      },
+      "contentHash": "67880c74c3fce84bfc83cef27fd48230fe6261fb510fb4fa4abd45b19c4c25b5"
+    },
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-review-u1",
+      "sequence": 1,
+      "traceId": "flight-trace-review-05",
+      "parentId": null,
+      "sessionId": "flight-review-05",
+      "timestamp": "2026-07-05T15:00:00.000Z",
+      "kind": "agent.execute.started",
+      "source": "openrappter",
+      "status": "started",
+      "metadata": {},
+      "payload": {
+        "role": "user",
+        "content": "MARIGOLD-REVIEW-ECHO Perform the final read-only release review: substantiate every claim, probe auth, replay, race and regression risks, confirm test evidence, and issue GO or NO-GO."
+      },
+      "contentHash": "f113653c048aa31b37b6f39bb74cfa7d46312a5565d8db3dc1f182ee5c6c425b"
+    },
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-review-a1",
+      "sequence": 2,
+      "traceId": "flight-trace-review-05",
+      "parentId": "flight-review-u1",
+      "sessionId": "flight-review-05",
+      "timestamp": "2026-07-05T15:05:00.000Z",
+      "kind": "agent.execute.completed",
+      "source": "openrappter",
+      "status": "success",
+      "metadata": {},
+      "payload": {
+        "role": "assistant",
+        "content": "The release gate will remain adversarial and evidence based."
+      },
+      "contentHash": "72a09632858eefaaab43e48daa20695b4ba34841b61958bf813bb2df310958be"
+    },
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-verify-u1",
+      "sequence": 1,
+      "traceId": "flight-trace-verify-05",
+      "parentId": null,
+      "sessionId": "flight-verify-05",
+      "timestamp": "2026-07-05T17:00:00.000Z",
+      "kind": "agent.execute.started",
+      "source": "openrappter",
+      "status": "started",
+      "metadata": {},
+      "payload": {
+        "role": "user",
+        "content": "INTENTIONAL-VERIFY-ECHO Planned verification loop: run the focused test, witness the expected failure, apply the predetermined fixture change, and rerun to green. This loop is deliberate validation."
+      },
+      "contentHash": "9a3af08a681400b7e09d9bee8e18784f097500b2d27cee1982cd5fe6014d5c7c"
+    },
+    {
+      "schema": "openrappter-event/1.0",
+      "id": "flight-verify-a1",
+      "sequence": 2,
+      "traceId": "flight-trace-verify-05",
+      "parentId": "flight-verify-u1",
+      "sessionId": "flight-verify-05",
+      "timestamp": "2026-07-05T17:04:00.000Z",
+      "kind": "agent.execute.completed",
+      "source": "openrappter",
+      "status": "success",
+      "metadata": {},
+      "payload": {
+        "role": "assistant",
+        "content": "The deliberate verification loop is complete."
+      },
+      "contentHash": "34ca0415ac3c273e2a2ec5a0e0f5ebbb05b2b847eaacd3c0bdb32c45539ed1e0"
+    }
+  ]
+}

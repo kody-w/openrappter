@@ -40,6 +40,9 @@ jobs:
           cache: npm
           cache-dependency-path: typescript/package-lock.json
       - run: npm ci
+      - name: Rapter Clever Girl Observe Mode acceptance gate
+        working-directory: ${{ github.workspace }}
+        run: node scripts/rapter-clever-girl-gate.mjs
       # `src/telephony/integration.test.ts` skips itself unless it finds the
       # RAPP Second Brain binary. It looks at RSB_BIN, then ~/rapp-secondbrain,
       # then ~/.local/bin — which is exactly where the installers in

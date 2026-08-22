@@ -1,0 +1,55 @@
+{
+  "schema": "openrappter-live-organ-transplant-manifest/1.0",
+  "version": 1,
+  "demo": "live-organ-transplant",
+  "command": {
+    "executable": "npm",
+    "args": ["run", "demo:transplant", "--silent"],
+    "display": "npm run demo:transplant --silent",
+    "workingDirectory": "typescript"
+  },
+  "input": "openrappter-live-organ-transplant",
+  "expectedSha256": "ab3db6c3d9a297c36792a96bb5d1c14e4de1b2d340467a1e35c6bae02095d033",
+  "fixture": {
+    "filename": "checksum_agent.py",
+    "sourceSha256": null,
+    "todo": "TODO(runtime-builder): replace null with the SHA-256 of the final bundled checksum_agent.py bytes; the acceptance evaluator deliberately fails until this pin is real."
+  },
+  "dependencies": {
+    "node": ">=20.9.0",
+    "python": ">=3.10",
+    "model": "none",
+    "externalNetwork": "forbidden",
+    "loopbackGateway": true
+  },
+  "runtimeLimits": {
+    "commandTimeoutMs": 120000,
+    "missingPythonTimeoutMs": 120000,
+    "demoMaxElapsedMs": 30000
+  },
+  "missingPython": {
+    "environmentVariable": "OPENRAPPTER_PYTHON",
+    "executable": "../.test-scratch/live-organ-transplant/missing-python",
+    "expectedExitCode": 0
+  },
+  "artifacts": {
+    "evidenceRoot": ".test-scratch/live-organ-transplant"
+  },
+  "claims": [
+    "An authenticated loopback POST to the production /agents/import route registers a bundled Python-backed ChecksumAgent in the live AgentRegistry.",
+    "The same TypeScript host process and AgentRegistry resolve both deterministic executions.",
+    "A contract-invalid candidate is rejected before commit and the previous generation's source bytes and live registry object remain active.",
+    "Persisted Flight Recorder evidence is reopened and every recorded event hash is verified.",
+    "Python execution is not sandboxed and the preservation boundary is file-only."
+  ],
+  "forbiddenClaims": [
+    "in-process Python execution",
+    "post-commit restoration terminology for candidate rejection",
+    "zero-downtime guarantees",
+    "crash-recovery guarantees",
+    "replay guarantees",
+    "air-gap guarantees",
+    "Python sandboxing",
+    "arbitrary-Python safety"
+  ]
+}

@@ -40,6 +40,8 @@ cd openrappter
 >
 > **Platforms:** The initial demo supports macOS, Linux, and WSL. Native Windows is deferred.
 
+![Live Organ Transplant walkthrough](docs/assets/live-organ-transplant-walkthrough.gif)
+
 **Prerequisites:** Node.js 20.9.0 or newer and Python 3.10 or newer must already
 be installed. No API keys or model authentication are needed.
 

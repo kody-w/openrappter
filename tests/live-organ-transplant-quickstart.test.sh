@@ -271,6 +271,14 @@ assert_contains "$readme_source" "$security_warning" \
 assert_contains "$readme_source" "$platform_copy" \
   "README pins supported platforms and Windows deferral"
 assert_contains "$readme_source" \
+  '![Live Organ Transplant walkthrough](docs/assets/live-organ-transplant-walkthrough.gif)' \
+  "README embeds the flagship visual walkthrough"
+if [ -s "$ROOT/docs/assets/live-organ-transplant-walkthrough.gif" ]; then
+  pass "flagship visual walkthrough exists and is non-empty"
+else
+  fail "flagship visual walkthrough exists and is non-empty"
+fi
+assert_contains "$readme_source" \
   'Upgrade a running agent without restarting its TypeScript host.' \
   "README leads with the running-agent benefit"
 assert_contains "$readme_source" 'rejects that candidate before commit' \

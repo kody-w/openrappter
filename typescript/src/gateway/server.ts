@@ -195,18 +195,15 @@ interface CurrentAgentImportResult {
   file?: string;
   error?: string;
   replaced?: boolean;
-}
-
-interface GatewayAgentImportResult extends CurrentAgentImportResult {
   committed?: boolean;
   rejectedBeforeCommit?: boolean;
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
-  commitState?: unknown;
-  retrySafe?: unknown;
-  warning?: unknown;
-};
+  commitState?: 'precommit' | 'committed' | 'restored' | 'unknown';
+  retrySafe?: boolean;
+  warning?: string;
+}
 
 interface AgentImportRuntimeBoundary {
   withAgentImportProvenance?: <T>(
@@ -423,7 +420,7 @@ function validateAgentImportEvidence(
   ) {
     return { kind: 'incomplete' };
   }
-  const machine = result as Partial<GatewayAgentImportResult>;
+  const machine = result as Partial<CurrentAgentImportResult>;
   if (machine.candidateSourceSha256 !== candidateSourceSha256) {
     return { kind: 'incomplete' };
   }
@@ -898,7 +895,7 @@ export class GatewayServer {
   private agentImporter?: (
     filename: string,
     contents: Buffer,
-  ) => Promise<GatewayAgentImportResult>;
+  ) => Promise<CurrentAgentImportResult>;
 
   setAgentImporter(fn: NonNullable<GatewayServer['agentImporter']>): void {
     this.agentImporter = fn;
@@ -1900,7 +1897,7 @@ export class GatewayServer {
                   return;
                 }
 
-                let result: GatewayAgentImportResult;
+                let result: CurrentAgentImportResult;
                 try {
                   result = await recorder.withParent(started.id, () =>
                     runWithAgentImportProvenance(

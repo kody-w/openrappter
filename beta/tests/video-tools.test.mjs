@@ -98,7 +98,7 @@ test("signed packaged media tools take precedence over ASAR dependencies", (t) =
   );
 });
 
-test("the factory install never runs package lifecycle scripts", () => {
+test("the factory install never runs package lifecycle scripts", (t) => {
   // ffmpeg-static's postinstall downloads a native binary from a third-party
   // release with no checksum and no signature, then chmods it 0755 — arbitrary
   // native code executed during the sacred one-liner, in a product that refuses
@@ -140,10 +140,15 @@ test("the factory install never runs package lifecycle scripts", () => {
   assert.match(prepare, /failed its .* SHA-256 pin/);
   assert.match(afterPack, /\.release-media-tools/);
   assert.match(afterPack, /support darwin-arm64 only/);
-  const workflow = readFileSync(
-    new URL("../../.github/workflows/frontier-desktop.yml", import.meta.url),
-    "utf8",
+  const workflowPath = new URL(
+    "../../.github/workflows/frontier-desktop.yml",
+    import.meta.url,
   );
+  if (!existsSync(workflowPath)) {
+    t.diagnostic("CI workflow is intentionally absent from the sparse customer checkout");
+    return;
+  }
+  const workflow = readFileSync(workflowPath, "utf8");
   const selectedScripts = [...workflow.matchAll(/^\s+script:\s*(\S+)/gm)]
     .map((match) => match[1]);
   assert.deepEqual(selectedScripts, ["dist:mac"]);

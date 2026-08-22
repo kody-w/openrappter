@@ -16,6 +16,7 @@ import {
 } from "./log-redaction.mjs";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
+const RELEASE_TAG_PATTERN = /^brainstem-beta-v[0-9A-Za-z._-]+$/;
 const INSTALLER_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 
 function sleep(ms) {
@@ -68,9 +69,11 @@ function loadRequest(requestPath) {
     "logPath",
     "packageDir",
     "redactionPath",
+    "releaseTag",
     "remoteUrl",
     "requestPath",
     "resultPath",
+    "runtimeVersionUrl",
     "runnerPath",
     "updateRef",
   ]) {
@@ -101,12 +104,25 @@ function loadRequest(requestPath) {
   if (!COMMIT_PATTERN.test(request.commit || "")) {
     throw new Error("Update request has an invalid commit.");
   }
+  for (const key of ["betaExpectedHead", "brainstemExpectedHead"]) {
+    if (!COMMIT_PATTERN.test(request[key])) {
+      throw new Error(`Update request has an invalid ${key}.`);
+    }
+  }
+  if (!RELEASE_TAG_PATTERN.test(request.releaseTag)) {
+    throw new Error("Update request has an invalid release tag.");
+  }
   // Rollback staging is optional on the wire (older requests), but when it is
   // present it must be coherent: a pinned previous commit and its installer.
   if (request.rollbackInstallerPath !== undefined || request.rollbackCommit !== undefined) {
     requireString(request, "rollbackInstallerPath");
+    requireString(request, "rollbackReleaseTag");
+    requireString(request, "rollbackRuntimeVersionUrl");
     if (!COMMIT_PATTERN.test(request.rollbackCommit || "")) {
       throw new Error("Update request has an invalid rollback commit.");
+    }
+    if (!RELEASE_TAG_PATTERN.test(request.rollbackReleaseTag)) {
+      throw new Error("Update request has an invalid rollback release tag.");
     }
   }
   return request;
@@ -136,12 +152,20 @@ function rollbackUpdate(request, logFd, failure) {
     `[..] Rolling back to ${outcome.commit} because: ${failure}\n`,
   );
   try {
+    gitOutput(
+      request,
+      request.brainstemRepoRoot,
+      ["checkout", "--detach", request.brainstemExpectedHead],
+    );
     const result = installUpdate(
       {
         ...request,
         commit: outcome.commit,
         installerPath: request.rollbackInstallerPath,
-        bootstrapUrl: request.rollbackBootstrapUrl,
+        preserveRuntime: true,
+        releaseTag: request.rollbackReleaseTag,
+        runtimeCommit: request.brainstemExpectedHead,
+        runtimeVersionUrl: request.rollbackRuntimeVersionUrl,
       },
       logFd,
     );
@@ -223,11 +247,14 @@ function installUpdate(request, logFd) {
     BRAINSTEM_BETA_COMMIT: request.commit,
     BRAINSTEM_BETA_HOME: request.betaHome,
     BRAINSTEM_BETA_NO_LAUNCH: "1",
+    BRAINSTEM_BETA_RELEASE_TAG: request.releaseTag,
     BRAINSTEM_BETA_REPO_URL: request.remoteUrl,
+    BRAINSTEM_BETA_RUNTIME_VERSION_URL: request.runtimeVersionUrl,
     BRAINSTEM_BETA_UPDATE_REF: request.updateRef,
   };
-  if (request.bootstrapUrl) {
-    env.BRAINSTEM_BETA_BOOTSTRAP_URL = request.bootstrapUrl;
+  if (request.preserveRuntime) {
+    env.BRAINSTEM_BETA_PRESERVE_RUNTIME = "1";
+    env.BRAINSTEM_BETA_RUNTIME_COMMIT = request.runtimeCommit;
   }
 
   let result;

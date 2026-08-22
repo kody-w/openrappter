@@ -20,11 +20,13 @@ set "REPO_REF=main"
 set "REPO_COMMIT="
 set "RELEASE_TAG="
 set "RUNTIME_VERSION_URL="
+set "PRESERVE_RUNTIME=0"
+set "RUNTIME_COMMIT="
 set "NODE_VERSION=24.19.0"
-REM The bootstrap is the KERNEL's installer, so it follows KERNEL_REPO_URL and
-REM must not be repointed along with the Frontier. Repointing it at a repository
-REM that ships only beta/ downloads that repository's own unrelated installer.
-set "BOOTSTRAP_URL=https://raw.githubusercontent.com/microsoft/aibast-agents-library/main/install.ps1"
+set "FRONTIER_VERSION=0.1.0-beta.9"
+set "BOOTSTRAP_URL=https://raw.githubusercontent.com/kody-w/aibast-agents-library/3900fc7e445c87e2ee10c25a1f6a24cd96770253/install.ps1"
+set "BOOTSTRAP_SHA256=dc7c997550920a3069c583f23e076f8451087f02b9e8508bc47cf57b6a4d3993"
+set "TRANSITION_HELPER_BASE64=aW1wb3J0IHsKICBjaG1vZFN5bmMsCiAgbHN0YXRTeW5jLAogIHJlYWRGaWxlU3luYywKICByZW5hbWVTeW5jLAogIHJtU3luYywKICB3cml0ZUZpbGVTeW5jLAp9IGZyb20gIm5vZGU6ZnMiOwppbXBvcnQgcGF0aCBmcm9tICJub2RlOnBhdGgiOwoKY29uc3QgQ09NTUlUX1BBVFRFUk4gPSAvXlswLTlhLWZdezQwfSQvaTsKY29uc3QgVkVSU0lPTl9QQVRURVJOID0gL15bMC05QS1aYS16Ll8tXSskLzsKY29uc3QgW3JlcXVlc3RQYXRoLCByb2xsYmFja1BhdGgsIHRhcmdldEluc3RhbGxlcl0gPSBwcm9jZXNzLmFyZ3Yuc2xpY2UoMik7CgpmdW5jdGlvbiByZXF1aXJlUmVndWxhckZpbGUoZmlsZSwgbGFiZWwpIHsKICBjb25zdCBzdGF0ID0gbHN0YXRTeW5jKGZpbGUpOwogIGlmICghc3RhdC5pc0ZpbGUoKSB8fCBzdGF0LmlzU3ltYm9saWNMaW5rKCkpIHsKICAgIHRocm93IG5ldyBFcnJvcihgJHtsYWJlbH0gbXVzdCBiZSBhIHJlZ3VsYXIgZmlsZS5gKTsKICB9Cn0KCmZ1bmN0aW9uIHNoZWxsUXVvdGUodmFsdWUpIHsKICByZXR1cm4gYCcke1N0cmluZyh2YWx1ZSkucmVwbGFjZUFsbCgiJyIsICInXFwnJyIpfSdgOwp9CgpmdW5jdGlvbiBwb3dlcnNoZWxsUXVvdGUodmFsdWUpIHsKICByZXR1cm4gYCcke1N0cmluZyh2YWx1ZSkucmVwbGFjZUFsbCgiJyIsICInJyIpfSdgOwp9Cgpmb3IgKGNvbnN0IFt2YWx1ZSwgbGFiZWxdIG9mIFsKICBbcmVxdWVzdFBhdGgsICJ1cGRhdGUgcmVxdWVzdCJdLAogIFtyb2xsYmFja1BhdGgsICJyb2xsYmFjayBpbnN0YWxsZXIiXSwKICBbdGFyZ2V0SW5zdGFsbGVyLCAidGFyZ2V0IGluc3RhbGxlciJdLApdKSB7CiAgaWYgKCF2YWx1ZSB8fCAhcGF0aC5pc0Fic29sdXRlKHZhbHVlKSkgewogICAgdGhyb3cgbmV3IEVycm9yKGAke2xhYmVsfSBwYXRoIG11c3QgYmUgYWJzb2x1dGUuYCk7CiAgfQp9CnJlcXVpcmVSZWd1bGFyRmlsZShyZXF1ZXN0UGF0aCwgIlVwZGF0ZSByZXF1ZXN0Iik7CnJlcXVpcmVSZWd1bGFyRmlsZShyb2xsYmFja1BhdGgsICJSb2xsYmFjayBpbnN0YWxsZXIiKTsKcmVxdWlyZVJlZ3VsYXJGaWxlKHRhcmdldEluc3RhbGxlciwgIlRhcmdldCBpbnN0YWxsZXIiKTsKCmNvbnN0IHJlcXVlc3QgPSBKU09OLnBhcnNlKHJlYWRGaWxlU3luYyhyZXF1ZXN0UGF0aCwgInV0ZjgiKSk7CmlmICh0eXBlb2YgcmVxdWVzdC5yZWxlYXNlVGFnID09PSAic3RyaW5nIiAmJiByZXF1ZXN0LnJlbGVhc2VUYWcpIHsKICBwcm9jZXNzLmV4aXQoMCk7Cn0KZm9yIChjb25zdCBrZXkgb2YgWwogICJicmFpbnN0ZW1FeHBlY3RlZEhlYWQiLAogICJicmFpbnN0ZW1SZXBvUm9vdCIsCiAgImN1cnJlbnRWZXJzaW9uIiwKICAiZ2l0RXhlY3V0YWJsZSIsCiAgInJlbW90ZVVybCIsCiAgInJvbGxiYWNrQ29tbWl0IiwKXSkgewogIGlmICh0eXBlb2YgcmVxdWVzdFtrZXldICE9PSAic3RyaW5nIiB8fCAhcmVxdWVzdFtrZXldKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoYExlZ2FjeSB1cGRhdGUgcmVxdWVzdCBpcyBtaXNzaW5nICR7a2V5fS5gKTsKICB9Cn0KaWYgKAogICFDT01NSVRfUEFUVEVSTi50ZXN0KHJlcXVlc3QuYnJhaW5zdGVtRXhwZWN0ZWRIZWFkKQogIHx8ICFDT01NSVRfUEFUVEVSTi50ZXN0KHJlcXVlc3Qucm9sbGJhY2tDb21taXQpCikgewogIHRocm93IG5ldyBFcnJvcigiTGVnYWN5IHVwZGF0ZSByZXF1ZXN0IGhhcyBhbiBpbnZhbGlkIGNvbW1pdC4iKTsKfQppZiAoIVZFUlNJT05fUEFUVEVSTi50ZXN0KHJlcXVlc3QuY3VycmVudFZlcnNpb24pKSB7CiAgdGhyb3cgbmV3IEVycm9yKCJMZWdhY3kgdXBkYXRlIHJlcXVlc3QgaGFzIGFuIGludmFsaWQgY3VycmVudCB2ZXJzaW9uLiIpOwp9CmNvbnN0IHJlbW90ZSA9IG5ldyBVUkwocmVxdWVzdC5yZW1vdGVVcmwpOwpjb25zdCBtYXRjaCA9IHJlbW90ZS5ocmVmLm1hdGNoKAogIC9eaHR0cHM6XC9cL2dpdGh1YlwuY29tXC8oW0EtWmEtejAtOV8uLV0rKVwvKFtBLVphLXowLTlfLi1dKz8pKD86XC5naXQpP1wvPyQvLAopOwppZiAoIW1hdGNoKSB7CiAgdGhyb3cgbmV3IEVycm9yKCJMZWdhY3kgdXBkYXRlIHJlcXVlc3QgaGFzIGFuIHVuc3VwcG9ydGVkIHJlcG9zaXRvcnkgVVJMLiIpOwp9Cgpjb25zdCBydW50aW1lVmVyc2lvblVybCA9IFsKICAiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwKICBtYXRjaFsxXSwKICBtYXRjaFsyXSwKICByZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCwKICAicmFwcF9icmFpbnN0ZW0vVkVSU0lPTiIsCl0uam9pbigiLyIpOwpjb25zdCBwb3NpeFNjcmlwdCA9IGAjIS9iaW4vYmFzaApzZXQgLWV1byBwaXBlZmFpbApleHBvcnQgQlJBSU5TVEVNX0JFVEFfVFJBTlNJVElPTl9ST0xMQkFDSz0xCmV4cG9ydCBCUkFJTlNURU1fQkVUQV9SRUxFQVNFX1RBRz0ke3NoZWxsUXVvdGUoYGJyYWluc3RlbS1iZXRhLXYke3JlcXVlc3QuY3VycmVudFZlcnNpb259YCl9CmV4cG9ydCBCUkFJTlNURU1fQkVUQV9SVU5USU1FX1ZFUlNJT05fVVJMPSR7c2hlbGxRdW90ZShydW50aW1lVmVyc2lvblVybCl9CmV4cG9ydCBCUkFJTlNURU1fQkVUQV9QUkVTRVJWRV9SVU5USU1FPTEKZXhwb3J0IEJSQUlOU1RFTV9CRVRBX1JVTlRJTUVfQ09NTUlUPSR7c2hlbGxRdW90ZShyZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCl9CnVuc2V0IEJSQUlOU1RFTV9CRVRBX0JPT1RTVFJBUF9VUkwgQlJBSU5TVEVNX0JFVEFfQk9PVFNUUkFQX1NIQTI1Ngoke3NoZWxsUXVvdGUocmVxdWVzdC5naXRFeGVjdXRhYmxlKX0gLUMgJHtzaGVsbFF1b3RlKHJlcXVlc3QuYnJhaW5zdGVtUmVwb1Jvb3QpfSBjaGVja291dCAtLWRldGFjaCAke3NoZWxsUXVvdGUocmVxdWVzdC5icmFpbnN0ZW1FeHBlY3RlZEhlYWQpfQpleGVjIC9iaW4vYmFzaCAke3NoZWxsUXVvdGUodGFyZ2V0SW5zdGFsbGVyKX0KYDsKY29uc3QgcG93ZXJzaGVsbFNjcmlwdCA9IGAkRXJyb3JBY3Rpb25QcmVmZXJlbmNlID0gJ1N0b3AnCiRlbnY6QlJBSU5TVEVNX0JFVEFfVFJBTlNJVElPTl9ST0xMQkFDSyA9ICcxJwokZW52OkJSQUlOU1RFTV9CRVRBX1JFTEVBU0VfVEFHID0gJHtwb3dlcnNoZWxsUXVvdGUoYGJyYWluc3RlbS1iZXRhLXYke3JlcXVlc3QuY3VycmVudFZlcnNpb259YCl9CiRlbnY6QlJBSU5TVEVNX0JFVEFfUlVOVElNRV9WRVJTSU9OX1VSTCA9ICR7cG93ZXJzaGVsbFF1b3RlKHJ1bnRpbWVWZXJzaW9uVXJsKX0KJGVudjpCUkFJTlNURU1fQkVUQV9QUkVTRVJWRV9SVU5USU1FID0gJzEnCiRlbnY6QlJBSU5TVEVNX0JFVEFfUlVOVElNRV9DT01NSVQgPSAke3Bvd2Vyc2hlbGxRdW90ZShyZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCl9ClJlbW92ZS1JdGVtIEVudjpCUkFJTlNURU1fQkVUQV9CT09UU1RSQVBfVVJMIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlClJlbW92ZS1JdGVtIEVudjpCUkFJTlNURU1fQkVUQV9CT09UU1RSQVBfU0hBMjU2IC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCiYgJHtwb3dlcnNoZWxsUXVvdGUocmVxdWVzdC5naXRFeGVjdXRhYmxlKX0gLUMgJHtwb3dlcnNoZWxsUXVvdGUocmVxdWVzdC5icmFpbnN0ZW1SZXBvUm9vdCl9IGNoZWNrb3V0IC0tZGV0YWNoICR7cG93ZXJzaGVsbFF1b3RlKHJlcXVlc3QuYnJhaW5zdGVtRXhwZWN0ZWRIZWFkKX0KaWYgKCRMQVNURVhJVENPREUgLW5lIDApIHsgZXhpdCAkTEFTVEVYSVRDT0RFIH0KJiAke3Bvd2Vyc2hlbGxRdW90ZSh0YXJnZXRJbnN0YWxsZXIpfQpleGl0ICRMQVNURVhJVENPREUKYDsKY29uc3Qgc2NyaXB0ID0gcm9sbGJhY2tQYXRoLnRvTG93ZXJDYXNlKCkuZW5kc1dpdGgoIi5jbWQiKQogID8gYEBlY2hvIG9mZlxyXG5wb3dlcnNoZWxsLmV4ZSAtTm9Qcm9maWxlIC1Ob25JbnRlcmFjdGl2ZSAtRXhlY3V0aW9uUG9saWN5IEJ5cGFzcyAtRW5jb2RlZENvbW1hbmQgJHsKICAgICAgQnVmZmVyLmZyb20ocG93ZXJzaGVsbFNjcmlwdCwgInV0ZjE2bGUiKS50b1N0cmluZygiYmFzZTY0IikKICAgIH1cclxuYAogIDogcG9zaXhTY3JpcHQ7Cgpjb25zdCB0ZW1wb3JhcnlQYXRoID0gYCR7cm9sbGJhY2tQYXRofS4ke3Byb2Nlc3MucGlkfS50bXBgOwp0cnkgewogIHdyaXRlRmlsZVN5bmModGVtcG9yYXJ5UGF0aCwgc2NyaXB0LCB7IGVuY29kaW5nOiAidXRmOCIsIGZsYWc6ICJ3eCIsIG1vZGU6IDBvNzAwIH0pOwogIHJlbmFtZVN5bmModGVtcG9yYXJ5UGF0aCwgcm9sbGJhY2tQYXRoKTsKICBjaG1vZFN5bmMocm9sbGJhY2tQYXRoLCAwbzcwMCk7Cn0gZmluYWxseSB7CiAgcm1TeW5jKHRlbXBvcmFyeVBhdGgsIHsgZm9yY2U6IHRydWUgfSk7Cn0K"
 
 if defined BRAINSTEM_BETA_REPO_URL set "REPO_URL=%BRAINSTEM_BETA_REPO_URL%"
 REM The kernel's home, which is not necessarily the Frontier's home. Defaults to
@@ -33,14 +35,27 @@ REM sets this to a repository that actually hosts the kernel.
 REM This distribution ships only the Frontier, so the kernel comes from upstream.
 set "KERNEL_REPO_URL=https://github.com/microsoft/aibast-agents-library.git"
 if defined BRAINSTEM_BETA_KERNEL_REPO_URL set "KERNEL_REPO_URL=%BRAINSTEM_BETA_KERNEL_REPO_URL%"
+set "KERNEL_REPO_REF=main"
+if defined BRAINSTEM_BETA_KERNEL_REPO_REF set "KERNEL_REPO_REF=%BRAINSTEM_BETA_KERNEL_REPO_REF%"
 if defined BRAINSTEM_BETA_REF set "REPO_REF=%BRAINSTEM_BETA_REF%"
 set "UPDATE_REF=%REPO_REF%"
 if defined BRAINSTEM_BETA_UPDATE_REF set "UPDATE_REF=%BRAINSTEM_BETA_UPDATE_REF%"
 if defined BRAINSTEM_BETA_COMMIT set "REPO_COMMIT=%BRAINSTEM_BETA_COMMIT%"
 if defined BRAINSTEM_BETA_RELEASE_TAG set "RELEASE_TAG=%BRAINSTEM_BETA_RELEASE_TAG%"
 if defined BRAINSTEM_BETA_RUNTIME_VERSION_URL set "RUNTIME_VERSION_URL=%BRAINSTEM_BETA_RUNTIME_VERSION_URL%"
+if defined BRAINSTEM_BETA_PRESERVE_RUNTIME set "PRESERVE_RUNTIME=%BRAINSTEM_BETA_PRESERVE_RUNTIME%"
+if defined BRAINSTEM_BETA_RUNTIME_COMMIT set "RUNTIME_COMMIT=%BRAINSTEM_BETA_RUNTIME_COMMIT%"
 if defined BRAINSTEM_BETA_NODE_VERSION set "NODE_VERSION=%BRAINSTEM_BETA_NODE_VERSION%"
-if defined BRAINSTEM_BETA_BOOTSTRAP_URL set "BOOTSTRAP_URL=%BRAINSTEM_BETA_BOOTSTRAP_URL%"
+if defined BRAINSTEM_BETA_BOOTSTRAP_URL (
+  if defined BRAINSTEM_BETA_BOOTSTRAP_SHA256 (
+    set "BOOTSTRAP_URL=%BRAINSTEM_BETA_BOOTSTRAP_URL%"
+    set "BOOTSTRAP_SHA256=%BRAINSTEM_BETA_BOOTSTRAP_SHA256%"
+  ) else (
+    echo Ignoring an unpaired Brainstem bootstrap override; URL and SHA-256 are both required.
+  )
+) else if defined BRAINSTEM_BETA_BOOTSTRAP_SHA256 (
+  echo Ignoring an unpaired Brainstem bootstrap override; URL and SHA-256 are both required.
+)
 set "BETA_SOURCE=%BETA_HOME%\src"
 
 echo.
@@ -60,10 +75,8 @@ if defined REPO_COMMIT (
       echo [X] BRAINSTEM_BETA_RELEASE_TAG must be a Frontier release tag.
       exit /b 1
     )
-    if not defined RUNTIME_VERSION_URL (
-      echo [X] BRAINSTEM_BETA_RUNTIME_VERSION_URL is required for a Frontier release.
-      exit /b 1
-    )
+  ) else (
+    set "RELEASE_TAG=brainstem-beta-v%FRONTIER_VERSION%"
   )
   set "REPO_REF=%REPO_COMMIT%"
 )
@@ -73,29 +86,107 @@ where curl.exe >nul 2>&1 || (
   exit /b 1
 )
 
+if not "%BRAINSTEM_BETA_TRANSITION_ROLLBACK%"=="1" (
+  set "UPDATE_INSTALLER_NAME=%~nx0"
+  if /i "!UPDATE_INSTALLER_NAME:~0,17!"=="update-installer-" (
+    set "TRANSITION_ID=!UPDATE_INSTALLER_NAME:~17!"
+    set "TRANSITION_ID=!TRANSITION_ID:.cmd=!"
+    set "TRANSITION_REQUEST=%~dp0update-request-!TRANSITION_ID!.json"
+    set "TRANSITION_ROLLBACK=%~dp0rollback-installer-!TRANSITION_ID!.cmd"
+    if not exist "!TRANSITION_REQUEST!" (
+      echo [X] The legacy update transition is missing its request.
+      goto :fail
+    )
+    if not exist "!TRANSITION_ROLLBACK!" (
+      echo [X] The legacy update transition is missing its rollback installer.
+      goto :fail
+    )
+    if not defined BRAINSTEM_BETA_NODE_EXE (
+      echo [X] The legacy update transition is missing its managed Node runtime.
+      goto :fail
+    )
+    if not exist "!BRAINSTEM_BETA_NODE_EXE!" (
+      echo [X] The legacy update transition managed Node runtime is missing.
+      goto :fail
+    )
+    "!BRAINSTEM_BETA_NODE_EXE!" --input-type=module -e "await import('data:text/javascript;base64,'+process.env.TRANSITION_HELPER_BASE64)" dummy "!TRANSITION_REQUEST!" "!TRANSITION_ROLLBACK!" "%~f0"
+    if errorlevel 1 (
+      echo [X] The legacy update rollback could not be made safe.
+      goto :fail
+    )
+  )
+)
+
+if "%PRESERVE_RUNTIME%"=="1" (
+  powershell.exe -NoProfile -Command "if ($env:BRAINSTEM_BETA_RUNTIME_COMMIT -notmatch '^[0-9a-fA-F]{40}$') { exit 1 }"
+  if errorlevel 1 (
+    echo [X] BRAINSTEM_BETA_RUNTIME_COMMIT must be a full 40-character commit SHA.
+    exit /b 1
+  )
+  if not exist "%BRAINSTEM_HOME%\src\rapp_brainstem\brainstem.py" (
+    echo [X] The preserved Brainstem runtime is missing.
+    goto :fail
+  )
+  if not exist "%BRAINSTEM_HOME%\venv\Scripts\python.exe" (
+    echo [X] The preserved Brainstem Python environment is missing.
+    goto :fail
+  )
+  set "GIT_EXE="
+  for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "GIT_EXE=%%G"
+  if not defined GIT_EXE if exist "%ProgramFiles%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles%\Git\cmd\git.exe"
+  if not defined GIT_EXE (
+    echo [X] Git is required to verify the preserved Brainstem runtime.
+    goto :fail
+  )
+  set "RUNTIME_COMMIT_FILE=%TEMP%\rapp-runtime-commit-%RANDOM%-%RANDOM%.txt"
+  "!GIT_EXE!" -C "%BRAINSTEM_HOME%\src" rev-parse HEAD > "!RUNTIME_COMMIT_FILE!"
+  if errorlevel 1 goto :cleanup_runtime_commit
+  set /p "ACTUAL_RUNTIME_COMMIT="<"!RUNTIME_COMMIT_FILE!"
+  del "!RUNTIME_COMMIT_FILE!" >nul 2>nul
+  set "RUNTIME_COMMIT_FILE="
+  if /i not "!ACTUAL_RUNTIME_COMMIT!"=="%RUNTIME_COMMIT%" (
+    echo [X] The preserved Brainstem runtime is at !ACTUAL_RUNTIME_COMMIT! instead of %RUNTIME_COMMIT%.
+    goto :fail
+  )
+  echo [OK] Preserved Brainstem runtime at !ACTUAL_RUNTIME_COMMIT!.
+  goto :brainstem_ready
+)
+
 if not exist "%BETA_HOME%" mkdir "%BETA_HOME%"
 set "BOOTSTRAP=%TEMP%\rapp-brainstem-bootstrap-%RANDOM%.ps1"
 echo [..] Preparing the shared global Brainstem...
 curl.exe -fL --progress-bar "%BOOTSTRAP_URL%" -o "%BOOTSTRAP%"
 if errorlevel 1 goto :fail
-if /i not "%KERNEL_REPO_URL%"=="https://github.com/microsoft/aibast-agents-library.git" (
-  set "GIT_CONFIG_COUNT=1"
-  set "GIT_CONFIG_KEY_0=url.%KERNEL_REPO_URL%.insteadOf"
-  set "GIT_CONFIG_VALUE_0=https://github.com/microsoft/aibast-agents-library.git"
+set "ACTUAL_BOOTSTRAP_HASH="
+for /f "skip=1 tokens=* delims=" %%H in ('certutil -hashfile "%BOOTSTRAP%" SHA256') do if not defined ACTUAL_BOOTSTRAP_HASH set "ACTUAL_BOOTSTRAP_HASH=%%H"
+set "ACTUAL_BOOTSTRAP_HASH=!ACTUAL_BOOTSTRAP_HASH: =!"
+if /i not "!ACTUAL_BOOTSTRAP_HASH!"=="%BOOTSTRAP_SHA256%" (
+  echo [X] The pinned Brainstem installer checksum did not match.
+  del /q "%BOOTSTRAP%" >nul 2>&1
+  goto :fail
 )
+set "BRAINSTEM_BIN=%OPENRAPPTER_HOME%\kernel-bin"
+set "BRAINSTEM_REPO_URL=%KERNEL_REPO_URL%"
+set "BRAINSTEM_REPO_REF=%KERNEL_REPO_REF%"
 if defined RELEASE_TAG (
   set "BRAINSTEM_REPO_URL=%REPO_URL%"
   set "BRAINSTEM_REPO_REF=%RELEASE_TAG%"
   set "BRAINSTEM_VERSION_URL=%RUNTIME_VERSION_URL%"
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BOOTSTRAP%" --no-launch
-) else if defined REPO_COMMIT (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BOOTSTRAP%" --no-launch --version "%REPO_COMMIT%"
 ) else (
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%BOOTSTRAP%" --no-launch
 )
 set "BOOTSTRAP_EXIT=%ERRORLEVEL%"
 del /q "%BOOTSTRAP%" >nul 2>&1
 if not "%BOOTSTRAP_EXIT%"=="0" goto :fail
+if not exist "%BRAINSTEM_HOME%\src\rapp_brainstem\brainstem.py" (
+  echo [X] The global Brainstem runtime was not installed.
+  goto :fail
+)
+if not exist "%BRAINSTEM_HOME%\venv\Scripts\python.exe" (
+  echo [X] The global Brainstem Python environment was not installed.
+  goto :fail
+)
 
 set "GIT_EXE="
 for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "GIT_EXE=%%G"
@@ -104,7 +195,20 @@ if not defined GIT_EXE (
   echo [X] Git was not available after the Brainstem bootstrap.
   goto :fail
 )
+if defined REPO_COMMIT (
+  set "RUNTIME_COMMIT_FILE=%TEMP%\rapp-runtime-commit-%RANDOM%-%RANDOM%.txt"
+  "%GIT_EXE%" -C "%BRAINSTEM_HOME%\src" rev-parse HEAD > "!RUNTIME_COMMIT_FILE!"
+  if errorlevel 1 goto :cleanup_runtime_commit
+  set /p "RUNTIME_COMMIT="<"!RUNTIME_COMMIT_FILE!"
+  del "!RUNTIME_COMMIT_FILE!" >nul 2>nul
+  set "RUNTIME_COMMIT_FILE="
+  if /i not "!RUNTIME_COMMIT!"=="%REPO_COMMIT%" (
+    echo [X] Brainstem runtime resolved to !RUNTIME_COMMIT! instead of %REPO_COMMIT%.
+    goto :fail
+  )
+)
 
+:brainstem_ready
 echo.
 echo [..] Downloading only the Frontier launcher source...
 if exist "%BETA_SOURCE%\.git" (
@@ -247,6 +351,7 @@ if errorlevel 1 goto :fail
 call "%NODE_DIR%\npm.cmd" run check
 if errorlevel 1 goto :fail
 set "BRAINSTEM_BETA_RUNTIME_DIR=%BRAINSTEM_HOME%\src\rapp_brainstem"
+set "BRAINSTEM_BETA_PYTHON=%BRAINSTEM_HOME%\venv\Scripts\python.exe"
 call "%NODE_DIR%\npm.cmd" test
 if errorlevel 1 goto :fail
 popd
@@ -324,7 +429,7 @@ set "TILE_LAUNCHER=%BETA_HOME%\openrappter-tile.cmd"
 > "%TILE_LAUNCHER%" echo @echo off
 >>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_HOME set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
->>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
+>>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%%BRAINSTEM_HOME%%\src\rapp_brainstem"
 >>"%TILE_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-tile.mjs" %%*
 copy /y "%TILE_LAUNCHER%" "%USER_BIN%\openrappter-tile.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%TILE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-tile.cmd" >nul
@@ -351,9 +456,9 @@ set "HATCH_LAUNCHER=%BETA_HOME%\openrappter-hatch.cmd"
 > "%HATCH_LAUNCHER%" echo @echo off
 >>"%HATCH_LAUNCHER%" echo if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
 >>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
->>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
->>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_PYTHON set "BRAINSTEM_BETA_PYTHON=%PYTHON_EXE%"
->>"%HATCH_LAUNCHER%" echo if not defined RAPPTER_PACK_CONFIG set "RAPPTER_PACK_CONFIG=%OPENRAPPTER_HOME%\pack.json"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%%BRAINSTEM_HOME%%\src\rapp_brainstem"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_PYTHON set "BRAINSTEM_BETA_PYTHON=%%BRAINSTEM_HOME%%\venv\Scripts\python.exe"
+>>"%HATCH_LAUNCHER%" echo if not defined RAPPTER_PACK_CONFIG set "RAPPTER_PACK_CONFIG=%%OPENRAPPTER_HOME%%\pack.json"
 >>"%HATCH_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-hatch.mjs" %%*
 copy /y "%HATCH_LAUNCHER%" "%USER_BIN%\openrappter-hatch.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%HATCH_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-hatch.cmd" >nul
@@ -369,6 +474,11 @@ echo      Use the OpenRappter desktop or Start Menu shortcut.
 echo.
 if not "%BRAINSTEM_BETA_NO_LAUNCH%"=="1" start "" "%ELECTRON_EXE%" "%BETA_SOURCE%\beta"
 exit /b 0
+
+:cleanup_runtime_commit
+if defined RUNTIME_COMMIT_FILE del "%RUNTIME_COMMIT_FILE%" >nul 2>nul
+set "RUNTIME_COMMIT_FILE="
+goto :fail
 
 :cleanup_actual_commit
 if defined ACTUAL_COMMIT_FILE del "%ACTUAL_COMMIT_FILE%" >nul 2>nul

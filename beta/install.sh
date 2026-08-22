@@ -19,11 +19,23 @@ REPO_URL="${BRAINSTEM_BETA_REPO_URL:-https://github.com/kody-w/openrappter.git}"
 # rather than from here. Overridable, but it must be a repository that actually
 # hosts the Brainstem kernel and its installer.
 KERNEL_REPO_URL="${BRAINSTEM_BETA_KERNEL_REPO_URL:-https://github.com/microsoft/aibast-agents-library.git}"
+KERNEL_REPO_REF="${BRAINSTEM_BETA_KERNEL_REPO_REF:-main}"
+KERNEL_BOOTSTRAP_URL="https://raw.githubusercontent.com/kody-w/aibast-agents-library/3900fc7e445c87e2ee10c25a1f6a24cd96770253/install.sh"
+KERNEL_BOOTSTRAP_SHA256="46b99381b76982c23232c9e7a891b1676ac53d4bfcf6ad8feeed488445c02a42"
+TRANSITION_HELPER_BASE64="aW1wb3J0IHsKICBjaG1vZFN5bmMsCiAgbHN0YXRTeW5jLAogIHJlYWRGaWxlU3luYywKICByZW5hbWVTeW5jLAogIHJtU3luYywKICB3cml0ZUZpbGVTeW5jLAp9IGZyb20gIm5vZGU6ZnMiOwppbXBvcnQgcGF0aCBmcm9tICJub2RlOnBhdGgiOwoKY29uc3QgQ09NTUlUX1BBVFRFUk4gPSAvXlswLTlhLWZdezQwfSQvaTsKY29uc3QgVkVSU0lPTl9QQVRURVJOID0gL15bMC05QS1aYS16Ll8tXSskLzsKY29uc3QgW3JlcXVlc3RQYXRoLCByb2xsYmFja1BhdGgsIHRhcmdldEluc3RhbGxlcl0gPSBwcm9jZXNzLmFyZ3Yuc2xpY2UoMik7CgpmdW5jdGlvbiByZXF1aXJlUmVndWxhckZpbGUoZmlsZSwgbGFiZWwpIHsKICBjb25zdCBzdGF0ID0gbHN0YXRTeW5jKGZpbGUpOwogIGlmICghc3RhdC5pc0ZpbGUoKSB8fCBzdGF0LmlzU3ltYm9saWNMaW5rKCkpIHsKICAgIHRocm93IG5ldyBFcnJvcihgJHtsYWJlbH0gbXVzdCBiZSBhIHJlZ3VsYXIgZmlsZS5gKTsKICB9Cn0KCmZ1bmN0aW9uIHNoZWxsUXVvdGUodmFsdWUpIHsKICByZXR1cm4gYCcke1N0cmluZyh2YWx1ZSkucmVwbGFjZUFsbCgiJyIsICInXFwnJyIpfSdgOwp9CgpmdW5jdGlvbiBwb3dlcnNoZWxsUXVvdGUodmFsdWUpIHsKICByZXR1cm4gYCcke1N0cmluZyh2YWx1ZSkucmVwbGFjZUFsbCgiJyIsICInJyIpfSdgOwp9Cgpmb3IgKGNvbnN0IFt2YWx1ZSwgbGFiZWxdIG9mIFsKICBbcmVxdWVzdFBhdGgsICJ1cGRhdGUgcmVxdWVzdCJdLAogIFtyb2xsYmFja1BhdGgsICJyb2xsYmFjayBpbnN0YWxsZXIiXSwKICBbdGFyZ2V0SW5zdGFsbGVyLCAidGFyZ2V0IGluc3RhbGxlciJdLApdKSB7CiAgaWYgKCF2YWx1ZSB8fCAhcGF0aC5pc0Fic29sdXRlKHZhbHVlKSkgewogICAgdGhyb3cgbmV3IEVycm9yKGAke2xhYmVsfSBwYXRoIG11c3QgYmUgYWJzb2x1dGUuYCk7CiAgfQp9CnJlcXVpcmVSZWd1bGFyRmlsZShyZXF1ZXN0UGF0aCwgIlVwZGF0ZSByZXF1ZXN0Iik7CnJlcXVpcmVSZWd1bGFyRmlsZShyb2xsYmFja1BhdGgsICJSb2xsYmFjayBpbnN0YWxsZXIiKTsKcmVxdWlyZVJlZ3VsYXJGaWxlKHRhcmdldEluc3RhbGxlciwgIlRhcmdldCBpbnN0YWxsZXIiKTsKCmNvbnN0IHJlcXVlc3QgPSBKU09OLnBhcnNlKHJlYWRGaWxlU3luYyhyZXF1ZXN0UGF0aCwgInV0ZjgiKSk7CmlmICh0eXBlb2YgcmVxdWVzdC5yZWxlYXNlVGFnID09PSAic3RyaW5nIiAmJiByZXF1ZXN0LnJlbGVhc2VUYWcpIHsKICBwcm9jZXNzLmV4aXQoMCk7Cn0KZm9yIChjb25zdCBrZXkgb2YgWwogICJicmFpbnN0ZW1FeHBlY3RlZEhlYWQiLAogICJicmFpbnN0ZW1SZXBvUm9vdCIsCiAgImN1cnJlbnRWZXJzaW9uIiwKICAiZ2l0RXhlY3V0YWJsZSIsCiAgInJlbW90ZVVybCIsCiAgInJvbGxiYWNrQ29tbWl0IiwKXSkgewogIGlmICh0eXBlb2YgcmVxdWVzdFtrZXldICE9PSAic3RyaW5nIiB8fCAhcmVxdWVzdFtrZXldKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoYExlZ2FjeSB1cGRhdGUgcmVxdWVzdCBpcyBtaXNzaW5nICR7a2V5fS5gKTsKICB9Cn0KaWYgKAogICFDT01NSVRfUEFUVEVSTi50ZXN0KHJlcXVlc3QuYnJhaW5zdGVtRXhwZWN0ZWRIZWFkKQogIHx8ICFDT01NSVRfUEFUVEVSTi50ZXN0KHJlcXVlc3Qucm9sbGJhY2tDb21taXQpCikgewogIHRocm93IG5ldyBFcnJvcigiTGVnYWN5IHVwZGF0ZSByZXF1ZXN0IGhhcyBhbiBpbnZhbGlkIGNvbW1pdC4iKTsKfQppZiAoIVZFUlNJT05fUEFUVEVSTi50ZXN0KHJlcXVlc3QuY3VycmVudFZlcnNpb24pKSB7CiAgdGhyb3cgbmV3IEVycm9yKCJMZWdhY3kgdXBkYXRlIHJlcXVlc3QgaGFzIGFuIGludmFsaWQgY3VycmVudCB2ZXJzaW9uLiIpOwp9CmNvbnN0IHJlbW90ZSA9IG5ldyBVUkwocmVxdWVzdC5yZW1vdGVVcmwpOwpjb25zdCBtYXRjaCA9IHJlbW90ZS5ocmVmLm1hdGNoKAogIC9eaHR0cHM6XC9cL2dpdGh1YlwuY29tXC8oW0EtWmEtejAtOV8uLV0rKVwvKFtBLVphLXowLTlfLi1dKz8pKD86XC5naXQpP1wvPyQvLAopOwppZiAoIW1hdGNoKSB7CiAgdGhyb3cgbmV3IEVycm9yKCJMZWdhY3kgdXBkYXRlIHJlcXVlc3QgaGFzIGFuIHVuc3VwcG9ydGVkIHJlcG9zaXRvcnkgVVJMLiIpOwp9Cgpjb25zdCBydW50aW1lVmVyc2lvblVybCA9IFsKICAiaHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwKICBtYXRjaFsxXSwKICBtYXRjaFsyXSwKICByZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCwKICAicmFwcF9icmFpbnN0ZW0vVkVSU0lPTiIsCl0uam9pbigiLyIpOwpjb25zdCBwb3NpeFNjcmlwdCA9IGAjIS9iaW4vYmFzaApzZXQgLWV1byBwaXBlZmFpbApleHBvcnQgQlJBSU5TVEVNX0JFVEFfVFJBTlNJVElPTl9ST0xMQkFDSz0xCmV4cG9ydCBCUkFJTlNURU1fQkVUQV9SRUxFQVNFX1RBRz0ke3NoZWxsUXVvdGUoYGJyYWluc3RlbS1iZXRhLXYke3JlcXVlc3QuY3VycmVudFZlcnNpb259YCl9CmV4cG9ydCBCUkFJTlNURU1fQkVUQV9SVU5USU1FX1ZFUlNJT05fVVJMPSR7c2hlbGxRdW90ZShydW50aW1lVmVyc2lvblVybCl9CmV4cG9ydCBCUkFJTlNURU1fQkVUQV9QUkVTRVJWRV9SVU5USU1FPTEKZXhwb3J0IEJSQUlOU1RFTV9CRVRBX1JVTlRJTUVfQ09NTUlUPSR7c2hlbGxRdW90ZShyZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCl9CnVuc2V0IEJSQUlOU1RFTV9CRVRBX0JPT1RTVFJBUF9VUkwgQlJBSU5TVEVNX0JFVEFfQk9PVFNUUkFQX1NIQTI1Ngoke3NoZWxsUXVvdGUocmVxdWVzdC5naXRFeGVjdXRhYmxlKX0gLUMgJHtzaGVsbFF1b3RlKHJlcXVlc3QuYnJhaW5zdGVtUmVwb1Jvb3QpfSBjaGVja291dCAtLWRldGFjaCAke3NoZWxsUXVvdGUocmVxdWVzdC5icmFpbnN0ZW1FeHBlY3RlZEhlYWQpfQpleGVjIC9iaW4vYmFzaCAke3NoZWxsUXVvdGUodGFyZ2V0SW5zdGFsbGVyKX0KYDsKY29uc3QgcG93ZXJzaGVsbFNjcmlwdCA9IGAkRXJyb3JBY3Rpb25QcmVmZXJlbmNlID0gJ1N0b3AnCiRlbnY6QlJBSU5TVEVNX0JFVEFfVFJBTlNJVElPTl9ST0xMQkFDSyA9ICcxJwokZW52OkJSQUlOU1RFTV9CRVRBX1JFTEVBU0VfVEFHID0gJHtwb3dlcnNoZWxsUXVvdGUoYGJyYWluc3RlbS1iZXRhLXYke3JlcXVlc3QuY3VycmVudFZlcnNpb259YCl9CiRlbnY6QlJBSU5TVEVNX0JFVEFfUlVOVElNRV9WRVJTSU9OX1VSTCA9ICR7cG93ZXJzaGVsbFF1b3RlKHJ1bnRpbWVWZXJzaW9uVXJsKX0KJGVudjpCUkFJTlNURU1fQkVUQV9QUkVTRVJWRV9SVU5USU1FID0gJzEnCiRlbnY6QlJBSU5TVEVNX0JFVEFfUlVOVElNRV9DT01NSVQgPSAke3Bvd2Vyc2hlbGxRdW90ZShyZXF1ZXN0LmJyYWluc3RlbUV4cGVjdGVkSGVhZCl9ClJlbW92ZS1JdGVtIEVudjpCUkFJTlNURU1fQkVUQV9CT09UU1RSQVBfVVJMIC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlClJlbW92ZS1JdGVtIEVudjpCUkFJTlNURU1fQkVUQV9CT09UU1RSQVBfU0hBMjU2IC1FcnJvckFjdGlvbiBTaWxlbnRseUNvbnRpbnVlCiYgJHtwb3dlcnNoZWxsUXVvdGUocmVxdWVzdC5naXRFeGVjdXRhYmxlKX0gLUMgJHtwb3dlcnNoZWxsUXVvdGUocmVxdWVzdC5icmFpbnN0ZW1SZXBvUm9vdCl9IGNoZWNrb3V0IC0tZGV0YWNoICR7cG93ZXJzaGVsbFF1b3RlKHJlcXVlc3QuYnJhaW5zdGVtRXhwZWN0ZWRIZWFkKX0KaWYgKCRMQVNURVhJVENPREUgLW5lIDApIHsgZXhpdCAkTEFTVEVYSVRDT0RFIH0KJiAke3Bvd2Vyc2hlbGxRdW90ZSh0YXJnZXRJbnN0YWxsZXIpfQpleGl0ICRMQVNURVhJVENPREUKYDsKY29uc3Qgc2NyaXB0ID0gcm9sbGJhY2tQYXRoLnRvTG93ZXJDYXNlKCkuZW5kc1dpdGgoIi5jbWQiKQogID8gYEBlY2hvIG9mZlxyXG5wb3dlcnNoZWxsLmV4ZSAtTm9Qcm9maWxlIC1Ob25JbnRlcmFjdGl2ZSAtRXhlY3V0aW9uUG9saWN5IEJ5cGFzcyAtRW5jb2RlZENvbW1hbmQgJHsKICAgICAgQnVmZmVyLmZyb20ocG93ZXJzaGVsbFNjcmlwdCwgInV0ZjE2bGUiKS50b1N0cmluZygiYmFzZTY0IikKICAgIH1cclxuYAogIDogcG9zaXhTY3JpcHQ7Cgpjb25zdCB0ZW1wb3JhcnlQYXRoID0gYCR7cm9sbGJhY2tQYXRofS4ke3Byb2Nlc3MucGlkfS50bXBgOwp0cnkgewogIHdyaXRlRmlsZVN5bmModGVtcG9yYXJ5UGF0aCwgc2NyaXB0LCB7IGVuY29kaW5nOiAidXRmOCIsIGZsYWc6ICJ3eCIsIG1vZGU6IDBvNzAwIH0pOwogIHJlbmFtZVN5bmModGVtcG9yYXJ5UGF0aCwgcm9sbGJhY2tQYXRoKTsKICBjaG1vZFN5bmMocm9sbGJhY2tQYXRoLCAwbzcwMCk7Cn0gZmluYWxseSB7CiAgcm1TeW5jKHRlbXBvcmFyeVBhdGgsIHsgZm9yY2U6IHRydWUgfSk7Cn0K"
+if [[ -n "${BRAINSTEM_BETA_BOOTSTRAP_URL:-}" && -n "${BRAINSTEM_BETA_BOOTSTRAP_SHA256:-}" ]]; then
+    KERNEL_BOOTSTRAP_URL="$BRAINSTEM_BETA_BOOTSTRAP_URL"
+    KERNEL_BOOTSTRAP_SHA256="$BRAINSTEM_BETA_BOOTSTRAP_SHA256"
+elif [[ -n "${BRAINSTEM_BETA_BOOTSTRAP_URL:-}" || -n "${BRAINSTEM_BETA_BOOTSTRAP_SHA256:-}" ]]; then
+    echo "Ignoring an unpaired Brainstem bootstrap override; URL and SHA-256 are both required." >&2
+fi
 REPO_REF="${BRAINSTEM_BETA_REF:-main}"
 UPDATE_REF="${BRAINSTEM_BETA_UPDATE_REF:-$REPO_REF}"
 REPO_COMMIT="${BRAINSTEM_BETA_COMMIT:-}"
 RELEASE_TAG="${BRAINSTEM_BETA_RELEASE_TAG:-}"
 RUNTIME_VERSION_URL="${BRAINSTEM_BETA_RUNTIME_VERSION_URL:-}"
+PRESERVE_RUNTIME="${BRAINSTEM_BETA_PRESERVE_RUNTIME:-0}"
+RUNTIME_COMMIT="${BRAINSTEM_BETA_RUNTIME_COMMIT:-}"
 NODE_VERSION="${BRAINSTEM_BETA_NODE_VERSION:-24.19.0}"
 NO_LAUNCH="${BRAINSTEM_BETA_NO_LAUNCH:-0}"
 PORTABLE_NODE_DIR=""
@@ -222,49 +234,110 @@ sync_beta_source() {
     echo -e "  ${GREEN}[OK]${NC} Frontier checkout contains beta/ plus RAPP/1 test vectors"
 }
 
+stage_transition_rollback() {
+    [ "${BRAINSTEM_BETA_TRANSITION_ROLLBACK:-0}" != "1" ] || return
+    local installer_path="$0"
+    local installer_name="${installer_path##*/}"
+    case "$installer_name" in
+        update-installer-*.sh) ;;
+        *) return ;;
+    esac
+
+    local update_id="${installer_name#update-installer-}"
+    update_id="${update_id%.sh}"
+    local cache_dir
+    cache_dir=$(cd -P -- "$(dirname -- "$installer_path")" && pwd -P)
+    installer_path="$cache_dir/$installer_name"
+    local request_path="$cache_dir/update-request-$update_id.json"
+    local rollback_path="$cache_dir/rollback-installer-$update_id.sh"
+    local node="${BRAINSTEM_BETA_NODE_EXE:-}"
+    [ -x "$node" ] || fail "the legacy update transition is missing its managed Node runtime"
+    [ -f "$request_path" ] || fail "the legacy update transition is missing its request"
+    [ -f "$rollback_path" ] || fail "the legacy update transition is missing its rollback installer"
+    TRANSITION_HELPER_BASE64="$TRANSITION_HELPER_BASE64" \
+    "$node" \
+        --input-type=module \
+        -e "await import('data:text/javascript;base64,'+process.env.TRANSITION_HELPER_BASE64)" \
+        dummy \
+        "$request_path" \
+        "$rollback_path" \
+        "$installer_path" \
+        || fail "the legacy update rollback could not be made safe"
+}
+
 setup_global_brainstem() {
     echo ""
     echo "Preparing the shared global Brainstem..."
-    if [ -n "$RELEASE_TAG" ]; then
-        [ -n "$RUNTIME_VERSION_URL" ] \
-            || fail "BRAINSTEM_BETA_RUNTIME_VERSION_URL is required for a Frontier release"
-        BRAINSTEM_HOME="$BRAINSTEM_HOME" \
-        BRAINSTEM_REPO_URL="$REPO_URL" \
-        BRAINSTEM_REPO_REF="$RELEASE_TAG" \
-        BRAINSTEM_VERSION_URL="$RUNTIME_VERSION_URL" \
-            bash "$BETA_SOURCE/install.sh" --no-launch
+
+    if [ "$PRESERVE_RUNTIME" = "1" ]; then
+        case "$RUNTIME_COMMIT" in
+            *[!0-9a-fA-F]*|"") fail "BRAINSTEM_BETA_RUNTIME_COMMIT must be a full 40-character commit SHA" ;;
+        esac
+        [ "${#RUNTIME_COMMIT}" -eq 40 ] \
+            || fail "BRAINSTEM_BETA_RUNTIME_COMMIT must be a full 40-character commit SHA"
         [ -f "$BRAINSTEM_HOME/src/rapp_brainstem/brainstem.py" ] \
-            || fail "the global Brainstem runtime was not installed"
-        [ ! -e "$BRAINSTEM_HOME/src/solutions" ] \
-            || fail "solution bundles leaked into the global Brainstem checkout"
+            || fail "the preserved Brainstem runtime is missing"
+        [ -x "$BRAINSTEM_HOME/venv/bin/python" ] \
+            || fail "the preserved Brainstem Python environment is missing"
+        local preserved_commit
+        preserved_commit=$(git -C "$BRAINSTEM_HOME/src" rev-parse HEAD | tr 'A-F' 'a-f')
+        [ "$preserved_commit" = "$(printf '%s' "$RUNTIME_COMMIT" | tr 'A-F' 'a-f')" ] \
+            || fail "the preserved Brainstem runtime is at $preserved_commit instead of $RUNTIME_COMMIT"
+        echo -e "  ${GREEN}[OK]${NC} Preserved Brainstem runtime at $preserved_commit"
         return
     fi
-    local install_args=(--no-launch)
-    if [ -n "$REPO_COMMIT" ]; then
-        install_args+=(--version "$REPO_COMMIT")
+
+    if [ -n "$REPO_COMMIT" ] && [ -z "$RELEASE_TAG" ]; then
+        local release_version
+        release_version=$(tr -d '[:space:]' < "$BETA_SOURCE/beta/VERSION")
+        case "$release_version" in
+            *[!0-9A-Za-z._-]*|"") fail "the pinned Frontier has an invalid VERSION" ;;
+        esac
+        RELEASE_TAG="brainstem-beta-v$release_version"
     fi
 
-    local canonical_repo="https://github.com/microsoft/aibast-agents-library.git"
-    # Redirect the kernel's canonical URL to wherever the KERNEL lives — not to
-    # wherever the Frontier lives.
-    if [ "$KERNEL_REPO_URL" = "$canonical_repo" ]; then
-        BRAINSTEM_HOME="$BRAINSTEM_HOME" \
-            bash "$BETA_SOURCE/install.sh" "${install_args[@]}"
-    else
-        local config_count="${GIT_CONFIG_COUNT:-0}"
-        local config_key="GIT_CONFIG_KEY_${config_count}=url.${KERNEL_REPO_URL}.insteadOf"
-        local config_value="GIT_CONFIG_VALUE_${config_count}=${canonical_repo}"
-        env \
-            "GIT_CONFIG_COUNT=$((config_count + 1))" \
-            "$config_key" \
-            "$config_value" \
-            BRAINSTEM_HOME="$BRAINSTEM_HOME" \
-            bash "$BETA_SOURCE/install.sh" "${install_args[@]}"
+    local runtime_repo="$KERNEL_REPO_URL"
+    local runtime_ref="$KERNEL_REPO_REF"
+    if [ -n "$RELEASE_TAG" ]; then
+        runtime_repo="$REPO_URL"
+        runtime_ref="$RELEASE_TAG"
     fi
+
+    local bootstrap
+    bootstrap=$(mktemp "${TMPDIR:-/tmp}/openrappter-kernel-bootstrap-XXXXXX")
+    if ! curl -fsSL "$KERNEL_BOOTSTRAP_URL" -o "$bootstrap"; then
+        rm -f "$bootstrap"
+        fail "the pinned Brainstem installer could not be downloaded"
+    fi
+    local bootstrap_hash
+    bootstrap_hash=$(sha256_file "$bootstrap")
+    if [ "$bootstrap_hash" != "$KERNEL_BOOTSTRAP_SHA256" ]; then
+        rm -f "$bootstrap"
+        fail "the pinned Brainstem installer checksum did not match"
+    fi
+
+    local status=0
+    BRAINSTEM_HOME="$BRAINSTEM_HOME" \
+    BRAINSTEM_BIN="$OPENRAPPTER_HOME/kernel-bin" \
+    BRAINSTEM_REPO_URL="$runtime_repo" \
+    BRAINSTEM_REPO_REF="$runtime_ref" \
+    BRAINSTEM_VERSION_URL="$RUNTIME_VERSION_URL" \
+        bash "$bootstrap" --no-launch || status=$?
+    rm -f "$bootstrap"
+    [ "$status" -eq 0 ] || fail "the global Brainstem installer failed"
+
     [ -f "$BRAINSTEM_HOME/src/rapp_brainstem/brainstem.py" ] \
         || fail "the global Brainstem runtime was not installed"
+    [ -x "$BRAINSTEM_HOME/venv/bin/python" ] \
+        || fail "the global Brainstem Python environment was not installed"
     [ ! -e "$BRAINSTEM_HOME/src/solutions" ] \
         || fail "solution bundles leaked into the global Brainstem checkout"
+    if [ -n "$REPO_COMMIT" ]; then
+        local runtime_commit
+        runtime_commit=$(git -C "$BRAINSTEM_HOME/src" rev-parse HEAD | tr 'A-F' 'a-f')
+        [ "$runtime_commit" = "$REPO_COMMIT" ] \
+            || fail "Brainstem runtime resolved to $runtime_commit instead of $REPO_COMMIT"
+    fi
 }
 
 node_platform() {
@@ -345,7 +418,9 @@ install_desktop_dependencies() {
         run_with_heartbeat "Installing Electron runtime" \
             "$node_dir/bin/node" node_modules/electron/install.js
         "$node_dir/bin/npm" run check
-        BRAINSTEM_BETA_RUNTIME_DIR="$BRAINSTEM_HOME/src/rapp_brainstem" \
+            export BRAINSTEM_HOME
+            export BRAINSTEM_BETA_PYTHON="$BRAINSTEM_HOME/venv/bin/python"
+            export BRAINSTEM_BETA_RUNTIME_DIR="$BRAINSTEM_HOME/src/rapp_brainstem"
             "$node_dir/bin/npm" test
     )
 }
@@ -477,7 +552,7 @@ EOF
 #!/bin/sh
 : "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
 : "\${BRAINSTEM_BETA_HOME:=$BETA_HOME}"
-: "\${BRAINSTEM_BETA_SOURCE_DIR:=$BRAINSTEM_RUNTIME_DIR}"
+: "\${BRAINSTEM_BETA_SOURCE_DIR:=\${BRAINSTEM_HOME}/src/rapp_brainstem}"
 export BRAINSTEM_HOME BRAINSTEM_BETA_HOME BRAINSTEM_BETA_SOURCE_DIR
 exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/openrappter-tile.mjs" "\$@"
 EOF
@@ -525,8 +600,8 @@ EOF
 #!/bin/sh
 : "\${OPENRAPPTER_HOME:=$OPENRAPPTER_HOME}"
 : "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
-: "\${BRAINSTEM_BETA_SOURCE_DIR:=$BRAINSTEM_RUNTIME_DIR}"
-: "\${BRAINSTEM_BETA_PYTHON:=$BRAINSTEM_PYTHON}"
+: "\${BRAINSTEM_BETA_SOURCE_DIR:=\${BRAINSTEM_HOME}/src/rapp_brainstem}"
+: "\${BRAINSTEM_BETA_PYTHON:=\${BRAINSTEM_HOME}/venv/bin/python}"
 : "\${RAPPTER_PACK_CONFIG:=\${OPENRAPPTER_HOME}/pack.json}"
 export OPENRAPPTER_HOME BRAINSTEM_HOME BRAINSTEM_BETA_SOURCE_DIR
 export BRAINSTEM_BETA_PYTHON RAPPTER_PACK_CONFIG
@@ -598,6 +673,7 @@ main() {
     echo "The full local-first OpenRappter application"
     echo ""
 
+    stage_transition_rollback
     require_command curl
     require_command git
     require_command tar

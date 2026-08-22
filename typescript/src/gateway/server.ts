@@ -200,7 +200,7 @@ interface CurrentAgentImportResult {
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
-  commitState?: 'precommit' | 'committed' | 'restored' | 'unknown';
+  commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
   retrySafe?: boolean;
   warning?: string;
 }
@@ -388,7 +388,7 @@ function validateActiveImportTrace(
 
 type ValidatedAgentImportEvidence =
   | { kind: 'accepted'; activeSourceSha256: string }
-  | { kind: 'precommit-rejection'; activeSourceSha256: string }
+  | { kind: 'precommit-rejection'; activeSourceSha256?: string }
   | {
       kind: 'restored';
       activeSourceSha256: string;
@@ -404,7 +404,6 @@ type ValidatedAgentImportEvidence =
       kind: 'recovery-required';
       activeSourceSha256: string;
       committed: boolean;
-      commitState: 'committed' | 'unknown';
       errorCode: string;
     }
   | { kind: 'incomplete' };
@@ -462,15 +461,20 @@ function validateAgentImportEvidence(
     machine.status === 'error'
     && machine.committed === false
     && machine.rejectedBeforeCommit === true
-    && isSha256(machine.activeSourceSha256)
     && errorCode !== undefined
-    && machine.commitState === 'precommit'
+    && machine.commitState === 'not-committed'
     && machine.retrySafe === true
     && machine.warning === undefined
+    && (
+      machine.activeSourceSha256 === undefined
+      || isSha256(machine.activeSourceSha256)
+    )
   ) {
     return {
       kind: 'precommit-rejection',
-      activeSourceSha256: machine.activeSourceSha256,
+      ...(machine.activeSourceSha256 === undefined
+        ? {}
+        : { activeSourceSha256: machine.activeSourceSha256 }),
     };
   }
   if (
@@ -495,14 +499,7 @@ function validateAgentImportEvidence(
     && machine.rejectedBeforeCommit === false
     && isSha256(machine.activeSourceSha256)
     && errorCode !== undefined
-    && (
-      machine.commitState === 'unknown'
-      || (
-        machine.commitState === 'committed'
-        && machine.committed === true
-        && machine.activeSourceSha256 === candidateSourceSha256
-      )
-    )
+    && machine.commitState === 'unknown'
     && machine.retrySafe === false
     && machine.warning === undefined
   ) {
@@ -510,7 +507,6 @@ function validateAgentImportEvidence(
       kind: 'recovery-required',
       activeSourceSha256: machine.activeSourceSha256,
       committed: machine.committed,
-      commitState: machine.commitState,
       errorCode,
     };
   }
@@ -2023,7 +2019,12 @@ export class GatewayServer {
                         committed: false,
                         rejectedBeforeCommit: true,
                         candidateSourceSha256,
-                        activeSourceSha256: evidence.activeSourceSha256,
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
                       },
                     }),
                   );
@@ -2085,7 +2086,7 @@ export class GatewayServer {
                         rejectedBeforeCommit: false,
                         candidateSourceSha256,
                         activeSourceSha256: evidence.activeSourceSha256,
-                        commitState: evidence.commitState,
+                        commitState: 'unknown',
                         retrySafe: false,
                         errorCode: evidence.errorCode,
                         recoveryRequired: true,

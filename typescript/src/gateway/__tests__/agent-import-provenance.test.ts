@@ -42,7 +42,7 @@ interface TestImportResult {
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
-  commitState?: 'precommit' | 'committed' | 'restored' | 'unknown';
+  commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
   retrySafe?: boolean;
   warning?: string;
 }
@@ -64,7 +64,7 @@ const INCOMPLETE_EVIDENCE_CASES: Array<{
       candidateSourceSha256,
       activeSourceSha256: sha256('previous active source'),
       errorCode: 'agent-contract-invalid',
-      commitState: 'precommit',
+      commitState: 'not-committed',
       retrySafe: true,
     }),
   },
@@ -224,7 +224,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: candidateSourceSha256,
-      commitState: 'committed',
+      commitState: 'unknown',
       retrySafe: false,
     }),
     metadata: (candidateSourceSha256, activeSourceSha256) => ({
@@ -235,7 +235,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256,
-      commitState: 'committed',
+      commitState: 'unknown',
       retrySafe: false,
       errorCode: 'IMPORT_ROLLBACK_FAILED',
       recoveryRequired: true,
@@ -739,7 +739,7 @@ describe('POST /agents/import causal provenance', () => {
       candidateSourceSha256,
       activeSourceSha256,
       errorCode: 'agent-contract-invalid',
-      commitState: 'precommit',
+      commitState: 'not-committed',
       retrySafe: true,
     }));
     const traceId = 'invalid-replacement-trace';
@@ -757,7 +757,7 @@ describe('POST /agents/import causal provenance', () => {
       candidateSourceSha256,
       activeSourceSha256,
       errorCode: 'agent-contract-invalid',
-      commitState: 'precommit',
+      commitState: 'not-committed',
       retrySafe: true,
     });
 
@@ -784,6 +784,46 @@ describe('POST /agents/import causal provenance', () => {
       candidateSourceSha256,
       activeSourceSha256,
     });
+  });
+
+  it('accepts a retry-safe precommit rejection with no prior active source', async () => {
+    const contents = 'first-install-invalid-source-sentinel';
+    const candidateSourceSha256 = sha256(contents);
+    const importResult: TestImportResult = {
+      status: 'error',
+      error: 'candidate validation failed before commit',
+      errorCode: 'IMPORT_CANDIDATE_INVALID',
+      committed: false,
+      rejectedBeforeCommit: true,
+      candidateSourceSha256,
+      commitState: 'not-committed',
+      retrySafe: true,
+    };
+    await startServer(async () => importResult);
+    const traceId = 'precommit-without-active-source';
+
+    const { response } = await postInsideTrace(
+      traceId,
+      provenanceBody(traceId, contents),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(importResult);
+    const events = await traceEvents(traceId);
+    const failed = events.find(
+      (event) => event.kind === 'gateway.agent.import.failed',
+    );
+    expect(failed?.metadata).toEqual({
+      requestId: 'gateway-request-2',
+      httpStatus: 400,
+      responseStatus: 'error',
+      committed: false,
+      rejectedBeforeCommit: true,
+      candidateSourceSha256,
+    });
+    expect(failed?.metadata).not.toHaveProperty('evidenceIncomplete');
+    expect(JSON.stringify(events)).not.toContain(contents);
+    expect(JSON.stringify(events)).not.toContain(TOKEN);
   });
 
   it.each(EXPLICIT_POSTCOMMIT_OUTCOMES)(

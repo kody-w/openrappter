@@ -8,8 +8,10 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -20,7 +22,10 @@ const GATE_REPORT_PREFIX = "OPENRAPPTER_TRANSPLANT_GATE_REPORT=";
 const DEMO_HARD_DEADLINE_MS = 30_000;
 const BUILD_HARD_DEADLINE_MS = 120_000;
 const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
-const TERMINATION_GRACE_MS = 1_000;
+const TERMINATION_GRACE_MS = 250;
+const WINDOWS_TASKKILL_DEADLINE_MS = 1_000;
+const CLOSE_SETTLEMENT_GRACE_MS = 250;
+const HARD_SETTLEMENT_FALLBACK_MS = 2_000;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GATE_PATH = fileURLToPath(import.meta.url);
 const TYPESCRIPT_ROOT = path.join(ROOT, "typescript");
@@ -51,6 +56,17 @@ const VITEST_ENTRYPOINT = path.join(
   "vitest",
   "vitest.mjs",
 );
+const VITEST_PACKAGE_ROOT = path.join(
+  TYPESCRIPT_ROOT,
+  "node_modules",
+  "vitest",
+);
+const VITEST_SUPPORT_ROOT = path.join(
+  TYPESCRIPT_ROOT,
+  "node_modules",
+  "@vitest",
+);
+const VITE_PACKAGE_ROOT = path.join(TYPESCRIPT_ROOT, "node_modules", "vite");
 
 const PINNED_CHECK_IDS = [
   "result-schema",
@@ -64,6 +80,7 @@ const PINNED_CHECK_IDS = [
   "previous-generation-preserved",
   "deterministic-second-execution",
   "flight-recorder-integrity",
+  "exact-command-causal-trace",
   "no-provider-model-events",
   "loopback-gateway-requests",
   "unsandboxed-file-boundary",
@@ -86,6 +103,29 @@ const PINNED_PROBE_TEST_NAMES = [
 ];
 
 const results = [];
+export const TRANSPLANT_GATE_PHASE_ORDER = [
+  "independent-probe",
+  "success-command",
+  "missing-python-command",
+];
+
+export class GatePhaseTracker {
+  #position = 0;
+
+  enter(phase) {
+    const expected = TRANSPLANT_GATE_PHASE_ORDER[this.#position];
+    if (phase !== expected) {
+      throw new Error(
+        `Gate phase order violation: expected ${expected ?? "completion"}, got ${phase}`,
+      );
+    }
+    this.#position += 1;
+  }
+
+  complete() {
+    return this.#position === TRANSPLANT_GATE_PHASE_ORDER.length;
+  }
+}
 
 function req(name, pass, detail = "") {
   results.push({ name, pass: Boolean(pass), detail });
@@ -122,6 +162,39 @@ function hashTreeOrEmpty(directory) {
   }
 }
 
+function hashInstalledTreeOrEmpty(directory) {
+  try {
+    const entries = [];
+    const walk = (current, prefix) => {
+      for (const entry of readdirSync(current, { withFileTypes: true }).sort(
+        (left, right) => left.name.localeCompare(right.name),
+      )) {
+        const fullPath = path.join(current, entry.name);
+        const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isSymbolicLink()) {
+          entries.push({
+            path: relativePath,
+            symlink: readlinkSync(fullPath),
+          });
+        } else if (entry.isDirectory()) {
+          walk(fullPath, relativePath);
+        } else if (entry.isFile()) {
+          const bytes = readFileSync(fullPath);
+          entries.push({
+            path: relativePath,
+            sizeBytes: bytes.length,
+            sha256: sha256(bytes),
+          });
+        }
+      }
+    };
+    walk(directory, "");
+    return sha256(JSON.stringify(entries));
+  } catch {
+    return "";
+  }
+}
+
 function trustedFileHashes() {
   return {
     gate: hashFileOrEmpty(GATE_PATH),
@@ -130,6 +203,10 @@ function trustedFileHashes() {
     manifest: hashFileOrEmpty(MANIFEST_PATH),
     package: hashFileOrEmpty(PACKAGE_PATH),
     packageLock: hashFileOrEmpty(PACKAGE_LOCK_PATH),
+    vitestEntrypoint: hashFileOrEmpty(VITEST_ENTRYPOINT),
+    vitestPackageTree: hashInstalledTreeOrEmpty(VITEST_PACKAGE_ROOT),
+    vitestSupportTree: hashInstalledTreeOrEmpty(VITEST_SUPPORT_ROOT),
+    vitePackageTree: hashInstalledTreeOrEmpty(VITE_PACKAGE_ROOT),
     sourceTree: hashTreeOrEmpty(path.join(TYPESCRIPT_ROOT, "src")),
     compiledTree: hashTreeOrEmpty(path.join(TYPESCRIPT_ROOT, "dist")),
   };
@@ -161,7 +238,10 @@ function readManifest() {
     !isRecord(parsed.artifacts) ||
     typeof parsed.artifacts.evidenceRoot !== "string" ||
     typeof parsed.artifacts.directoryEnvironmentVariable !== "string" ||
-    typeof parsed.artifacts.nonceEnvironmentVariable !== "string"
+    typeof parsed.artifacts.nonceEnvironmentVariable !== "string" ||
+    typeof parsed.artifacts.runtimePidHandoffEnvironmentVariable !== "string" ||
+    typeof parsed.artifacts.runtimePidHandoffFilename !== "string" ||
+    parsed.artifacts.runtimePidHandoffOpenFlag !== "wx"
   ) {
     throw new Error(
       "Manifest command, exact 30-second limits, nonzero missing-Python exit, or artifact controls are invalid.",
@@ -199,18 +279,32 @@ function directoryIsEmpty(directory) {
 }
 
 async function terminateSpecificTree(child) {
-  if (typeof child.pid !== "number") return;
+  if (typeof child.pid !== "number") return false;
   if (process.platform === "win32") {
-    await new Promise((resolve) => {
+    return new Promise((resolve) => {
       const killer = spawn(
         "taskkill",
         ["/PID", String(child.pid), "/T", "/F"],
         { shell: false, windowsHide: true, stdio: "ignore" },
       );
-      killer.once("error", () => resolve());
-      killer.once("close", () => resolve());
+      let settled = false;
+      const finish = (completed) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(completed);
+      };
+      const timer = setTimeout(() => {
+        try {
+          killer.kill("SIGKILL");
+        } catch {
+          // The targeted taskkill process already exited.
+        }
+        finish(false);
+      }, WINDOWS_TASKKILL_DEADLINE_MS);
+      killer.once("error", () => finish(false));
+      killer.once("close", () => finish(true));
     });
-    return;
   }
   try {
     process.kill(-child.pid, "SIGTERM");
@@ -218,7 +312,7 @@ async function terminateSpecificTree(child) {
     try {
       process.kill(child.pid, "SIGTERM");
     } catch {
-      return;
+      // The direct child exited; descendants in its group may also be gone.
     }
   }
   await new Promise((resolve) => setTimeout(resolve, TERMINATION_GRACE_MS));
@@ -231,11 +325,13 @@ async function terminateSpecificTree(child) {
       // The exact process tree already exited.
     }
   }
+  return true;
 }
 
-function runProcess(executable, args, options) {
+export function runProcess(executable, args, options) {
   return new Promise((resolve) => {
     const started = performance.now();
+    const startedAtMs = Date.now();
     const child = spawn(executable, args, {
       cwd: options.cwd,
       env: {
@@ -254,20 +350,95 @@ function runProcess(executable, args, options) {
     let timedOut = false;
     let captureExceeded = false;
     let spawnError = null;
-    let terminating = false;
+    let spawnObserved = false;
+    let exitObserved = false;
+    let closeObserved = false;
+    let exitCode = null;
+    let exitSignal = null;
+    let forcedSettled = false;
+    let groupTerminationAttempted = false;
+    let groupTerminationCompleted = false;
+    let pipesDestroyed = false;
+    let finished = false;
+    let terminationPromise = null;
+    let settleTimer = null;
 
-    const terminate = async (reason) => {
-      if (terminating) return;
-      terminating = true;
+    const destroyInheritedPipes = () => {
+      if (pipesDestroyed) return;
+      pipesDestroyed = true;
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
+
+    const finalize = (forced) => {
+      if (finished) return;
+      finished = true;
+      forcedSettled ||= forced;
+      clearTimeout(timeoutTimer);
+      clearTimeout(absoluteFallbackTimer);
+      if (settleTimer) clearTimeout(settleTimer);
+      resolve({
+        childPid: typeof child.pid === "number" ? child.pid : null,
+        status: typeof exitCode === "number" ? exitCode : null,
+        signal: exitSignal,
+        stdout,
+        stderr,
+        elapsedMs: Math.ceil(performance.now() - started),
+        startedAtMs,
+        finishedAtMs: Date.now(),
+        spawnObserved,
+        exitObserved,
+        closeObserved,
+        timedOut,
+        forcedSettled,
+        groupTerminationAttempted,
+        groupTerminationCompleted,
+        pipesDestroyed,
+        captureExceeded,
+        error:
+          spawnError ??
+          (timedOut
+            ? new Error(`timed out after ${options.timeoutMs}ms`)
+            : captureExceeded
+              ? new Error(`captured more than ${MAX_CAPTURE_BYTES} bytes`)
+              : forced
+                ? new Error("hard process settlement fallback was required")
+                : null),
+      });
+    };
+
+    const beginSettlement = (reason) => {
       if (reason === "timeout") timedOut = true;
       if (reason === "capture") captureExceeded = true;
-      await terminateSpecificTree(child);
+      if (!terminationPromise) {
+        groupTerminationAttempted = typeof child.pid === "number";
+        const terminateTree = options.terminateTree ?? terminateSpecificTree;
+        terminationPromise = Promise.resolve(terminateTree(child))
+          .catch(() => false)
+          .then((completed) => {
+            groupTerminationCompleted = completed;
+            destroyInheritedPipes();
+          });
+      }
+      void terminationPromise.then(() => {
+        if (finished) return;
+        if (closeObserved) {
+          finalize(false);
+          return;
+        }
+        if (!settleTimer) {
+          settleTimer = setTimeout(
+            () => finalize(true),
+            options.settleGraceMs ?? CLOSE_SETTLEMENT_GRACE_MS,
+          );
+        }
+      });
     };
 
     const capture = (target, chunk) => {
       capturedBytes += chunk.length;
       if (capturedBytes > MAX_CAPTURE_BYTES) {
-        void terminate("capture");
+        beginSettlement("capture");
         return target;
       }
       return target + chunk.toString("utf8");
@@ -279,33 +450,40 @@ function runProcess(executable, args, options) {
     child.stderr?.on("data", (chunk) => {
       stderr = capture(stderr, chunk);
     });
+    child.once("spawn", () => {
+      spawnObserved = true;
+    });
     child.once("error", (error) => {
       spawnError = error;
+      beginSettlement("spawn-error");
     });
-
-    const timeout = setTimeout(() => {
-      void terminate("timeout");
-    }, options.timeoutMs);
-
+    child.once("exit", (status, signal) => {
+      exitObserved = true;
+      exitCode = typeof status === "number" ? status : exitCode;
+      exitSignal = signal ?? exitSignal;
+      clearTimeout(timeoutTimer);
+      beginSettlement("direct-exit");
+    });
     child.once("close", (status, signal) => {
-      clearTimeout(timeout);
-      resolve({
-        status: typeof status === "number" ? status : null,
-        signal: signal ?? null,
-        stdout,
-        stderr,
-        elapsedMs: Math.ceil(performance.now() - started),
-        timedOut,
-        captureExceeded,
-        error:
-          spawnError ??
-          (timedOut
-            ? new Error(`timed out after ${options.timeoutMs}ms`)
-            : captureExceeded
-              ? new Error(`captured more than ${MAX_CAPTURE_BYTES} bytes`)
-              : null),
-      });
+      closeObserved = true;
+      exitCode = typeof status === "number" ? status : exitCode;
+      exitSignal = signal ?? exitSignal;
+      clearTimeout(timeoutTimer);
+      beginSettlement("close");
     });
+
+    const timeoutTimer = setTimeout(() => {
+      beginSettlement("timeout");
+    }, options.timeoutMs);
+    const absoluteFallbackTimer = setTimeout(
+      () => {
+        beginSettlement("hard-fallback");
+        destroyInheritedPipes();
+        finalize(true);
+      },
+      options.timeoutMs +
+        (options.hardFallbackMs ?? HARD_SETTLEMENT_FALLBACK_MS),
+    );
   });
 }
 
@@ -521,6 +699,7 @@ function emptyProbe(nonce) {
       first: structuredClone(execution),
       second: structuredClone(execution),
     },
+    operationOrder: [],
     rejection: {
       rejectedBeforeCommit: false,
       committed: false,
@@ -545,6 +724,8 @@ function emptyProbe(nonce) {
       reopenedContentHashes: [],
       productionExportContentHashes: [],
       allContentHashesValid: false,
+      events: [],
+      causalStepIds: [],
     },
     provider: {
       manifestModelDependency: "",
@@ -633,6 +814,206 @@ function printFailureOutput(label, run) {
   }
 }
 
+function scenarioObservation(nonce, evidenceDirectory, startedEmpty, run) {
+  return {
+    nonce,
+    evidenceDirectory,
+    startedEmpty,
+    childPid: run.childPid,
+    spawnObserved: run.spawnObserved,
+    exitObserved: run.exitObserved,
+    closeObserved: run.closeObserved,
+    timedOut: run.timedOut,
+    forcedSettled: run.forcedSettled,
+    groupTerminationAttempted: run.groupTerminationAttempted,
+    groupTerminationCompleted: run.groupTerminationCompleted,
+    pipesDestroyed: run.pipesDestroyed,
+    elapsedMs: run.elapsedMs,
+  };
+}
+
+function processSettled(run) {
+  return (
+    run.childPid !== null &&
+    run.spawnObserved &&
+    run.exitObserved &&
+    (run.closeObserved || run.forcedSettled) &&
+    run.groupTerminationAttempted &&
+    run.groupTerminationCompleted &&
+    run.pipesDestroyed
+  );
+}
+
+function emptyCausalWitness() {
+  return {
+    databaseReopened: false,
+    productionExportValidated: false,
+    databaseEvents: [],
+    persistedExportEvents: [],
+    reopenedExportEvents: [],
+    validatorEvents: [],
+  };
+}
+
+function inspectRuntimePidHandoff(
+  handoffPath,
+  nonce,
+  successDirectory,
+  successRun,
+  missingEvidence,
+) {
+  const artifact = inspectArtifact(handoffPath, {
+    parseJson: true,
+    allowedRoot: successDirectory,
+    missingEvidence,
+    label: "runtime PID handoff",
+  });
+  const observation = {
+    path: handoffPath,
+    exists: artifact.exists,
+    sha256: artifact.sha256,
+    schema: "",
+    nonce: "",
+    pid: null,
+  };
+  const payload = artifact.json;
+  const resolved = resolveReportedPath(handoffPath);
+  const fileStat =
+    resolved && existsSync(resolved) ? lstatSync(resolved) : null;
+  if (
+    !fileStat ||
+    fileStat.mtimeMs < successRun.startedAtMs - 1_000 ||
+    fileStat.mtimeMs > successRun.finishedAtMs + 1_000
+  ) {
+    missingEvidence.push(
+      "runtime PID handoff was not freshly created during the exact command",
+    );
+  }
+  if (
+    !isRecord(payload) ||
+    Object.keys(payload).sort().join(",") !== "nonce,pid,schema" ||
+    payload.schema !== "openrappter-runtime-pid/1.0" ||
+    payload.nonce !== nonce ||
+    !Number.isInteger(payload.pid) ||
+    payload.pid <= 0
+  ) {
+    missingEvidence.push(
+      "runtime PID handoff must be exact schema/nonce/positive PID JSON",
+    );
+    return observation;
+  }
+  observation.schema = payload.schema;
+  observation.nonce = payload.nonce;
+  observation.pid = payload.pid;
+  return observation;
+}
+
+async function reopenExactCommandFlight(
+  Ledger,
+  databaseObservation,
+  exportObservation,
+  witnessDirectory,
+  missingEvidence,
+) {
+  if (
+    !databaseObservation.exists ||
+    !exportObservation.exists ||
+    databaseObservation.path === exportObservation.path
+  ) {
+    missingEvidence.push(
+      "exact command Flight database/export are unavailable or aliased",
+    );
+    return emptyCausalWitness();
+  }
+  mkdirSync(witnessDirectory, { recursive: false, mode: 0o700 });
+  const databaseCopy = path.join(witnessDirectory, "exact-command.db");
+  const exportCopy = path.join(witnessDirectory, "exact-command.json");
+  copyFileSync(resolveReportedPath(databaseObservation.path), databaseCopy);
+  copyFileSync(resolveReportedPath(exportObservation.path), exportCopy);
+  if (
+    hashFile(databaseCopy) !== databaseObservation.sha256 ||
+    hashFile(exportCopy) !== exportObservation.sha256
+  ) {
+    missingEvidence.push("frozen Flight witness copy hash mismatch");
+    return emptyCausalWitness();
+  }
+
+  const persisted = JSON.parse(readFileSync(exportCopy, "utf8"));
+  const reopened = new Ledger({ databasePath: databaseCopy });
+  const validator = new Ledger({ inMemory: true });
+  try {
+    await reopened.initialize();
+    const databaseEvents = await reopened.query({ limit: 10_000 });
+    const reopenedExport = await reopened.export();
+    await validator.initialize();
+    const imported = await validator.import(persisted);
+    const validatorEvents = await validator.query({ limit: 10_000 });
+    const persistedEvents = Array.isArray(persisted.events)
+      ? persisted.events
+      : [];
+    return {
+      databaseReopened: true,
+      productionExportValidated:
+        imported === validatorEvents.length &&
+        JSON.stringify(persistedEvents) === JSON.stringify(validatorEvents) &&
+        JSON.stringify(persistedEvents) ===
+          JSON.stringify(reopenedExport.events),
+      databaseEvents,
+      persistedExportEvents: persistedEvents,
+      reopenedExportEvents: reopenedExport.events,
+      validatorEvents,
+    };
+  } catch (error) {
+    missingEvidence.push(
+      `exact command Flight reopen/validation failed: ${String(error)}`,
+    );
+    return emptyCausalWitness();
+  } finally {
+    await Promise.allSettled([reopened.close(), validator.close()]);
+  }
+}
+
+function pruneFailedGateRuns(evidenceBase, keep = 5) {
+  const failedRuns = readdirSync(evidenceBase, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        entry.name.startsWith("gate-") &&
+        existsSync(path.join(evidenceBase, entry.name, ".gate-failed")),
+    )
+    .map((entry) => {
+      const fullPath = path.join(evidenceBase, entry.name);
+      return { fullPath, mtimeMs: lstatSync(fullPath).mtimeMs };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  for (const stale of failedRuns.slice(keep)) {
+    rmSync(stale.fullPath, { recursive: true, force: true });
+  }
+}
+
+export function finalizeGateRunRoot(runRoot, failedNames) {
+  if (!runRoot) return null;
+  rmSync(path.join(runRoot, ".gate-active"), { force: true });
+  if (failedNames.length === 0) {
+    rmSync(runRoot, { recursive: true, force: true });
+    return null;
+  }
+  const failedMarker = path.join(runRoot, ".gate-failed");
+  if (!existsSync(failedMarker)) {
+    writeFileSync(
+      failedMarker,
+      JSON.stringify({
+        failedAt: new Date().toISOString(),
+        failedChecks: failedNames,
+      }),
+      { flag: "wx", mode: 0o600 },
+    );
+  }
+  return runRoot;
+}
+
+let gateRunRoot = "";
+
 async function main() {
   let manifest;
   try {
@@ -713,18 +1094,143 @@ async function main() {
     /^[0-9a-f]{64}$/.test(trustedHashes.contract),
     trustedHashes.contract,
   );
+  const moduleProbeNamesPinned =
+    JSON.stringify(contract.REQUIRED_TRANSPLANT_PROBE_TEST_NAMES) ===
+    JSON.stringify(PINNED_PROBE_TEST_NAMES);
+  req(
+    "trusted evaluator matches literal gate-owned probe test names",
+    moduleProbeNamesPinned,
+    `${PINNED_PROBE_TEST_NAMES.length} tests`,
+  );
+  req(
+    "resolved Vitest entrypoint and installed package trees are pinned",
+    [
+      trustedHashes.vitestEntrypoint,
+      trustedHashes.vitestPackageTree,
+      trustedHashes.vitestSupportTree,
+      trustedHashes.vitePackageTree,
+    ].every((hash) => /^[0-9a-f]{64}$/.test(hash)),
+  );
+
+  let TrustedLedger;
+  try {
+    const ledgerModule = await import(
+      `${pathToFileURL(path.join(TYPESCRIPT_ROOT, "dist", "flight-recorder", "ledger.js")).href}?trusted=${trustedHashes.compiledTree}`
+    );
+    TrustedLedger = ledgerModule.SQLiteFlightLedger;
+  } catch (error) {
+    req(
+      "trusted production Flight ledger loaded before scenarios",
+      false,
+      String(error),
+    );
+    return;
+  }
+  req(
+    "trusted production Flight ledger loaded before scenarios",
+    typeof TrustedLedger === "function",
+  );
 
   mkdirSync(evidenceBase, { recursive: true, mode: 0o700 });
+  pruneFailedGateRuns(evidenceBase);
   const runRoot = path.join(evidenceBase, `gate-${Date.now()}-${randomUUID()}`);
   mkdirSync(runRoot, { recursive: false, mode: 0o700 });
+  gateRunRoot = runRoot;
+  writeFileSync(
+    path.join(runRoot, ".gate-active"),
+    JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+    { flag: "wx", mode: 0o600 },
+  );
   const successDirectory = path.join(runRoot, "success");
   const missingDirectory = path.join(runRoot, "missing-python");
   const probeDirectory = path.join(runRoot, "independent-probe");
-  mkdirSync(successDirectory, { recursive: false, mode: 0o700 });
-  const successStartedEmpty = directoryIsEmpty(successDirectory);
+  const witnessDirectory = path.join(runRoot, "exact-command-witness");
+  const missingEvidence = [];
+  const skippedEvidence = [];
+  const phaseTracker = new GatePhaseTracker();
+  const probeNonce = randomUUID();
   const successNonce = randomUUID();
   const missingNonce = randomUUID();
 
+  const validFixture = inspectArtifact(manifest.fixture.bundledPath, {
+    missingEvidence,
+    label: "bundled valid fixture",
+  });
+  const invalidFixture = inspectArtifact(manifest.fixture.invalidBundledPath, {
+    missingEvidence,
+    label: "bundled invalid fixture",
+  });
+
+  mkdirSync(probeDirectory, { recursive: false, mode: 0o700 });
+  const probeStartedEmpty = directoryIsEmpty(probeDirectory);
+  const probeReportPath = path.join(probeDirectory, "vitest-report.json");
+  const probeOutputPath = path.join(probeDirectory, "observer-evidence.json");
+  const probeStateDirectory = path.join(probeDirectory, "state");
+  mkdirSync(probeStateDirectory, { recursive: false, mode: 0o700 });
+  phaseTracker.enter("independent-probe");
+  const probeRun = await runProcess(
+    process.execPath,
+    [
+      VITEST_ENTRYPOINT,
+      "run",
+      "src/__tests__/integration/live-organ-transplant.integration.test.ts",
+      "--reporter=json",
+      `--outputFile=${probeReportPath}`,
+    ],
+    {
+      cwd: TYPESCRIPT_ROOT,
+      environment: {
+        OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE: probeNonce,
+        OPENRAPPTER_TRANSPLANT_PROBE_OUTPUT: probeOutputPath,
+        OPENRAPPTER_TRANSPLANT_PROBE_STATE_DIRECTORY: probeStateDirectory,
+        OPENRAPPTER_HOME: path.join(probeDirectory, "home"),
+      },
+      timeoutMs: DEMO_HARD_DEADLINE_MS,
+    },
+  );
+  const probeReport = parseVitestReport(probeReportPath, missingEvidence);
+  const independentProbe = readProbeEvidence(
+    probeOutputPath,
+    probeNonce,
+    missingEvidence,
+  );
+  req(
+    "exact independent integration test ran before demo with machine-readable output",
+    probeReport.totalTests === PINNED_PROBE_TEST_NAMES.length &&
+      probeReport.exactTestNames,
+    `${probeReport.passedTests}/${probeReport.totalTests} passed`,
+  );
+  req(
+    "independent integration test has zero failures and zero skips",
+    probeRun.status === 0 &&
+      probeReport.failedTests === 0 &&
+      probeReport.skippedTests === 0 &&
+      probeReport.passedTests === PINNED_PROBE_TEST_NAMES.length,
+    `exit=${probeRun.status}, failed=${probeReport.failedTests}, skipped=${probeReport.skippedTests}`,
+  );
+  req(
+    "independent probe direct child and known process group settled",
+    processSettled(probeRun),
+    `pid=${probeRun.childPid}, exit=${probeRun.exitObserved}, close=${probeRun.closeObserved}, forced=${probeRun.forcedSettled}`,
+  );
+  const hashesAfterProbe = trustedFileHashes();
+  req(
+    "trusted judge and installed test runner trees are unchanged immediately after probe",
+    hashesMatch(trustedHashes, hashesAfterProbe),
+  );
+
+  mkdirSync(successDirectory, { recursive: false, mode: 0o700 });
+  const successStartedEmpty = directoryIsEmpty(successDirectory);
+  const runtimePidHandoffPath = path.join(
+    successDirectory,
+    manifest.artifacts.runtimePidHandoffFilename,
+  );
+  req(
+    "runtime PID handoff path is absent before exact command",
+    !existsSync(runtimePidHandoffPath),
+    runtimePidHandoffPath,
+  );
+  phaseTracker.enter("success-command");
   const successRun = await runProcess(
     manifest.command.executable,
     manifest.command.args,
@@ -733,6 +1239,8 @@ async function main() {
       environment: {
         [manifest.artifacts.directoryEnvironmentVariable]: successDirectory,
         [manifest.artifacts.nonceEnvironmentVariable]: successNonce,
+        [manifest.artifacts.runtimePidHandoffEnvironmentVariable]:
+          runtimePidHandoffPath,
         OPENRAPPTER_HOME: path.join(successDirectory, "home"),
       },
       timeoutMs: Math.min(
@@ -755,6 +1263,11 @@ async function main() {
     successRun.error?.message ?? `${successRun.elapsedMs}ms`,
   );
   req(
+    "success direct child and known process group settled",
+    processSettled(successRun),
+    `pid=${successRun.childPid}, exit=${successRun.exitObserved}, close=${successRun.closeObserved}, forced=${successRun.forcedSettled}`,
+  );
+  req(
     "literal success command exited zero",
     successRun.status === 0,
     `exit=${successRun.status}`,
@@ -767,8 +1280,6 @@ async function main() {
     successRecord.error || "one stdout record",
   );
 
-  const missingEvidence = [];
-  const skippedEvidence = [];
   if (successRecord.error) missingEvidence.push(successRecord.error);
   if (hasNonzeroSkips(`${successRun.stdout}\n${successRun.stderr}`)) {
     skippedEvidence.push("success command reported a nonzero skipped count");
@@ -830,107 +1341,30 @@ async function main() {
     label: "compiled runtime entrypoint",
   });
 
-  mkdirSync(probeDirectory, { recursive: false, mode: 0o700 });
-  const copiedDatabasePath = path.join(
-    probeDirectory,
-    "frozen-flight-recorder.db",
-  );
-  const copiedExportPath = path.join(
-    probeDirectory,
-    "frozen-flight-recorder.json",
-  );
-  if (
-    flightDatabase.exists &&
-    flightExport.exists &&
-    flightDatabase.path !== flightExport.path
-  ) {
-    copyFileSync(resolveReportedPath(flightDatabase.path), copiedDatabasePath);
-    copyFileSync(resolveReportedPath(flightExport.path), copiedExportPath);
-  } else {
-    writeFileSync(copiedDatabasePath, "missing-database\n", { mode: 0o600 });
-    writeFileSync(copiedExportPath, "{}\n", { mode: 0o600 });
-    missingEvidence.push(
-      "distinct Flight database/export could not be copied for independent reopen",
-    );
-  }
-  const flightProbeInput = path.join(probeDirectory, "flight-probe-input.json");
-  writeFileSync(
-    flightProbeInput,
-    JSON.stringify(
-      {
-        originalDatabasePath: databasePath || copiedDatabasePath,
-        originalExportPath: exportPath || copiedExportPath,
-        copiedDatabasePath,
-        copiedExportPath,
-        databaseSha256: flightDatabase.sha256 ?? "0".repeat(64),
-        exportSha256: flightExport.sha256 ?? "0".repeat(64),
-      },
-      null,
-      2,
-    ),
-    { mode: 0o600 },
-  );
-
-  const probeReportPath = path.join(probeDirectory, "vitest-report.json");
-  const probeOutputPath = path.join(probeDirectory, "observer-evidence.json");
-  const probeStateDirectory = path.join(probeDirectory, "state");
-  mkdirSync(probeStateDirectory, { recursive: false, mode: 0o700 });
-  const probeRun = await runProcess(
-    process.execPath,
-    [
-      VITEST_ENTRYPOINT,
-      "run",
-      "src/__tests__/integration/live-organ-transplant.integration.test.ts",
-      "--reporter=json",
-      `--outputFile=${probeReportPath}`,
-    ],
-    {
-      cwd: TYPESCRIPT_ROOT,
-      environment: {
-        OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE: successNonce,
-        OPENRAPPTER_TRANSPLANT_FLIGHT_PROBE_INPUT: flightProbeInput,
-        OPENRAPPTER_TRANSPLANT_PROBE_OUTPUT: probeOutputPath,
-        OPENRAPPTER_TRANSPLANT_PROBE_STATE_DIRECTORY: probeStateDirectory,
-        OPENRAPPTER_HOME: path.join(probeDirectory, "home"),
-      },
-      timeoutMs: DEMO_HARD_DEADLINE_MS,
-    },
-  );
-  const probeReport = parseVitestReport(probeReportPath, missingEvidence);
-  const independentProbe = readProbeEvidence(
-    probeOutputPath,
+  const runtimePidHandoff = inspectRuntimePidHandoff(
+    runtimePidHandoffPath,
     successNonce,
+    successDirectory,
+    successRun,
     missingEvidence,
   );
-  req(
-    "exact independent integration test ran with machine-readable output",
-    probeReport.totalTests === PINNED_PROBE_TEST_NAMES.length &&
-      probeReport.exactTestNames,
-    `${probeReport.passedTests}/${probeReport.totalTests} passed`,
-  );
-  req(
-    "independent integration test has zero failures and zero skips",
-    probeRun.status === 0 &&
-      probeReport.failedTests === 0 &&
-      probeReport.skippedTests === 0 &&
-      probeReport.passedTests === PINNED_PROBE_TEST_NAMES.length,
-    `exit=${probeRun.status}, failed=${probeReport.failedTests}, skipped=${probeReport.skippedTests}`,
-  );
-  const hashesAfterProbe = trustedFileHashes();
-  req(
-    "trusted gate, evaluator, observer, manifest, and command bytes unchanged immediately after probe",
-    hashesMatch(trustedHashes, hashesAfterProbe),
+  const exactCommandFlight = await reopenExactCommandFlight(
+    TrustedLedger,
+    flightDatabase,
+    flightExport,
+    witnessDirectory,
+    missingEvidence,
   );
 
-  let unchangedAfterProbe = false;
+  let unchangedAfterCausalRead = false;
   try {
-    unchangedAfterProbe = snapshotsEqual(
+    unchangedAfterCausalRead = snapshotsEqual(
       frozenSuccess,
       snapshotDirectory(successDirectory),
     );
   } catch (error) {
     missingEvidence.push(
-      `success evidence changed or became unreadable after probe: ${String(error)}`,
+      `success evidence changed or became unreadable after causal read: ${String(error)}`,
     );
   }
 
@@ -951,6 +1385,7 @@ async function main() {
       missingExecutableAbsentImmediatelyBefore,
     controlledMissingExecutable,
   );
+  phaseTracker.enter("missing-python-command");
   const missingPythonRun = await runProcess(
     manifest.command.executable,
     manifest.command.args,
@@ -976,6 +1411,11 @@ async function main() {
       !missingPythonRun.timedOut &&
       missingPythonRun.elapsedMs <= DEMO_HARD_DEADLINE_MS,
     missingPythonRun.error?.message ?? `${missingPythonRun.elapsedMs}ms`,
+  );
+  req(
+    "missing-Python direct child and known process group settled",
+    processSettled(missingPythonRun),
+    `pid=${missingPythonRun.childPid}, exit=${missingPythonRun.exitObserved}, close=${missingPythonRun.closeObserved}, forced=${missingPythonRun.forcedSettled}`,
   );
   req(
     "literal missing-Python command used the controlled nonzero exit",
@@ -1025,8 +1465,13 @@ async function main() {
   }
   req(
     "later scenarios did not replace frozen success evidence",
-    unchangedAfterProbe && unchangedAfterMissing,
+    unchangedAfterCausalRead && unchangedAfterMissing,
     frozenSuccess.inventorySha256,
+  );
+  req(
+    "gate executed probe, success, and missing-Python in literal order",
+    phaseTracker.complete(),
+    TRANSPLANT_GATE_PHASE_ORDER.join(" -> "),
   );
 
   const postHashes = existsSync(CONTRACT_PATH)
@@ -1051,33 +1496,40 @@ async function main() {
     successRecordCanonical: successCanonical,
     missingPythonRecordCanonical: missingCanonical,
     controlledMissingPythonExecutable: controlledMissingExecutable,
-    successScenario: {
-      nonce: successNonce,
-      evidenceDirectory: successDirectory,
-      startedEmpty: successStartedEmpty,
-      timedOut: successRun.timedOut,
-      elapsedMs: successRun.elapsedMs,
-    },
-    missingPythonScenario: {
-      nonce: missingNonce,
-      evidenceDirectory: missingDirectory,
-      startedEmpty:
-        missingStartedEmpty && missingDirectoryEmptyImmediatelyBefore,
-      timedOut: missingPythonRun.timedOut,
-      elapsedMs: missingPythonRun.elapsedMs,
-    },
+    probeScenario: scenarioObservation(
+      probeNonce,
+      probeDirectory,
+      probeStartedEmpty,
+      probeRun,
+    ),
+    successScenario: scenarioObservation(
+      successNonce,
+      successDirectory,
+      successStartedEmpty,
+      successRun,
+    ),
+    missingPythonScenario: scenarioObservation(
+      missingNonce,
+      missingDirectory,
+      missingStartedEmpty && missingDirectoryEmptyImmediatelyBefore,
+      missingPythonRun,
+    ),
     frozenSuccessEvidence: {
       captured: successFreezeCaptured,
       fileCount: frozenSuccess.fileCount,
       inventorySha256: frozenSuccess.inventorySha256,
-      unchangedAfterProbe,
+      unchangedAfterCausalRead,
       unchangedAfterMissingPython: unchangedAfterMissing,
     },
     artifacts: {
       runtimeEntrypoint,
       flightDatabase,
       flightExport,
+      runtimePidHandoff,
+      validFixture,
+      invalidFixture,
     },
+    exactCommandFlight,
     probeReport,
     independentProbe,
     missingEvidence,
@@ -1111,27 +1563,46 @@ async function main() {
   printFailureOutput("missing-Python command", missingPythonRun);
 }
 
-try {
-  await main();
-} catch (error) {
-  req("gate completed without crashing", false, String(error));
+async function runGateCli() {
+  try {
+    await main();
+  } catch (error) {
+    req("gate completed without crashing", false, String(error));
+  }
+
+  const failed = results.filter((entry) => !entry.pass);
+  const preservedEvidencePath = finalizeGateRunRoot(
+    gateRunRoot,
+    failed.map((entry) => entry.name),
+  );
+  gateRunRoot = preservedEvidencePath ?? "";
+  if (preservedEvidencePath) {
+    console.log(`\nPRESERVED FAILED GATE EVIDENCE: ${preservedEvidencePath}`);
+  }
+
+  console.log(`\n${"=".repeat(72)}`);
+  console.log(
+    failed.length === 0
+      ? `LIVE ORGAN TRANSPLANT ACCEPTED — ${results.length}/${results.length} pass`
+      : `LIVE ORGAN TRANSPLANT NOT ACCEPTED — ${failed.length} of ${results.length} failing`,
+  );
+  console.log("=".repeat(72));
+  console.log(
+    `${GATE_REPORT_PREFIX}${JSON.stringify({
+      schema: "openrappter-live-organ-transplant-gate/1.0",
+      pass: failed.length === 0,
+      total: results.length,
+      failed: failed.map((entry) => entry.name),
+      evidencePath: gateRunRoot || null,
+      checks: results,
+    })}`,
+  );
+  return failed.length === 0 ? 0 : 1;
 }
 
-const failed = results.filter((entry) => !entry.pass);
-console.log(`\n${"=".repeat(72)}`);
-console.log(
-  failed.length === 0
-    ? `LIVE ORGAN TRANSPLANT ACCEPTED — ${results.length}/${results.length} pass`
-    : `LIVE ORGAN TRANSPLANT NOT ACCEPTED — ${failed.length} of ${results.length} failing`,
-);
-console.log("=".repeat(72));
-console.log(
-  `${GATE_REPORT_PREFIX}${JSON.stringify({
-    schema: "openrappter-live-organ-transplant-gate/1.0",
-    pass: failed.length === 0,
-    total: results.length,
-    failed: failed.map((entry) => entry.name),
-    checks: results,
-  })}`,
-);
-process.exit(failed.length === 0 ? 0 : 1);
+const invokedDirectly =
+  typeof process.argv[1] === "string" &&
+  path.resolve(process.argv[1]) === path.resolve(GATE_PATH);
+if (invokedDirectly) {
+  process.exit(await runGateCli());
+}

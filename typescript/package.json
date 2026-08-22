@@ -24,6 +24,7 @@
     "predemo:transplant": "npm run build:server --silent",
     "demo:transplant": "node dist/demo/live-organ-transplant.js",
     "gate:transplant": "node ../tools/live-organ-transplant-gate.mjs",
+    "test:transplant:gate": "vitest run src/__tests__/integration/live-organ-transplant-contract.test.ts src/__tests__/integration/live-organ-transplant.mutation.test.ts src/__tests__/integration/live-organ-transplant-gate-orchestration.test.ts",
     "format": "prettier --write .",
     "prepack": "npm run build",
     "pack:locked": "node scripts/pack-locked.mjs",

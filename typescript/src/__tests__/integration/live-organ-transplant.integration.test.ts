@@ -16,6 +16,7 @@ import { AgentRegistry } from "../../agents/AgentRegistry.js";
 import { importAgentFile } from "../../agents/agent-import.js";
 import { PythonAgent } from "../../agents/PythonAgent.js";
 import {
+  REQUIRED_TRANSPLANT_CAUSAL_STEPS,
   TRANSPLANT_AGENT_NAME,
   TRANSPLANT_GATEWAY_MODULE,
   TRANSPLANT_INVALID_FIXTURE,
@@ -23,20 +24,22 @@ import {
   TRANSPLANT_PYTHON_BRIDGE_MODULE,
   TRANSPLANT_VALID_FIXTURE,
   canonicalJson,
+  evaluateTransplantCausalTrace,
   isLiveOrganTransplantManifest,
   type LiveOrganTransplantManifest,
   type TransplantExecutionEvidence,
   type TransplantIndependentProbeEvidence,
 } from "../../demo/live-organ-transplant-contract.js";
-import {
-  computeFlightEventHash,
-  verifyFlightEventHash,
-} from "../../flight-recorder/integrity.js";
+import { verifyFlightEventHash } from "../../flight-recorder/integrity.js";
 import { SQLiteFlightLedger } from "../../flight-recorder/ledger.js";
 import {
-  FLIGHT_EVENT_SCHEMA,
+  FlightRecorder,
+  setFlightRecorder,
+} from "../../flight-recorder/recorder.js";
+import {
   type FlightEvent,
   type FlightExport,
+  type FlightTraceContext,
 } from "../../flight-recorder/types.js";
 import { GatewayServer } from "../../gateway/server.js";
 
@@ -60,6 +63,8 @@ const MANIFEST_PATH = fileURLToPath(
 );
 
 let gateway: GatewayServer | null = null;
+let recorder: FlightRecorder | null = null;
+let previousRecorder: FlightRecorder | null = null;
 let stateDirectory = "";
 let setupError = "";
 const probe = emptyProbe();
@@ -161,6 +166,7 @@ function emptyProbe(): TransplantIndependentProbeEvidence {
       first: emptyExecution(),
       second: emptyExecution(),
     },
+    operationOrder: [],
     rejection: {
       rejectedBeforeCommit: false,
       committed: false,
@@ -185,6 +191,8 @@ function emptyProbe(): TransplantIndependentProbeEvidence {
       reopenedContentHashes: [],
       productionExportContentHashes: [],
       allContentHashesValid: false,
+      events: [],
+      causalStepIds: [],
     },
     provider: {
       manifestModelDependency: "",
@@ -228,103 +236,6 @@ function statIdentity(file: string): string {
     stat.mtimeNs,
     stat.ctimeNs,
   ].join(":");
-}
-
-function parseFlightProbeInput(inputPath: string): FlightProbeInput {
-  const value: unknown = JSON.parse(readFileSync(inputPath, "utf8"));
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("originalDatabasePath" in value) ||
-    !("originalExportPath" in value) ||
-    !("copiedDatabasePath" in value) ||
-    !("copiedExportPath" in value) ||
-    !("databaseSha256" in value) ||
-    !("exportSha256" in value)
-  ) {
-    throw new Error("Flight probe input is incomplete.");
-  }
-  const record = value as Record<string, unknown>;
-  for (const key of [
-    "originalDatabasePath",
-    "originalExportPath",
-    "copiedDatabasePath",
-    "copiedExportPath",
-    "databaseSha256",
-    "exportSha256",
-  ]) {
-    if (typeof record[key] !== "string" || record[key].length === 0) {
-      throw new Error(`Flight probe input ${key} must be a non-empty string.`);
-    }
-  }
-  return record as unknown as FlightProbeInput;
-}
-
-async function standaloneFlightProbeInput(
-  directory: string,
-): Promise<FlightProbeInput> {
-  const flightDirectory = path.join(directory, "standalone-flight");
-  mkdirSync(flightDirectory, { recursive: true, mode: 0o700 });
-  const databasePath = path.join(flightDirectory, "flight-recorder.db");
-  const exportPath = path.join(flightDirectory, "flight-recorder.json");
-  const ledger = new SQLiteFlightLedger({ databasePath });
-  const definitions: Array<[string, FlightEvent["status"]]> = [
-    ["demo.transplant.started", "started"],
-    ["demo.agent.import.accepted", "success"],
-    ["agent.execute.completed", "success"],
-    ["demo.agent.candidate.rejected", "decision"],
-    ["agent.execute.completed", "success"],
-    ["demo.transplant.completed", "success"],
-  ];
-  try {
-    await ledger.initialize();
-    for (const [index, [kind, status]] of definitions.entries()) {
-      const sequence = index + 1;
-      const body: Omit<FlightEvent, "contentHash"> = {
-        schema: FLIGHT_EVENT_SCHEMA,
-        id: `standalone-flight-event-${sequence}`,
-        sequence,
-        traceId: "standalone-transplant-trace",
-        parentId:
-          sequence === 1 ? null : `standalone-flight-event-${sequence - 1}`,
-        timestamp: new Date(
-          Date.UTC(2026, 7, 22, 1, 41, sequence),
-        ).toISOString(),
-        kind,
-        source: "live-organ-transplant-independent-observer",
-        status,
-        metadata: { sequence },
-      };
-      await ledger.append({
-        ...body,
-        contentHash: computeFlightEventHash(body),
-      });
-    }
-    const exported = await ledger.export();
-    writeFileSync(exportPath, canonicalJson(exported), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-  } finally {
-    await ledger.close();
-  }
-  return {
-    originalDatabasePath: databasePath,
-    originalExportPath: exportPath,
-    copiedDatabasePath: databasePath,
-    copiedExportPath: exportPath,
-    databaseSha256: sha256(readFileSync(databasePath)),
-    exportSha256: sha256(readFileSync(exportPath)),
-  };
-}
-
-async function resolveFlightProbeInput(
-  directory: string,
-): Promise<FlightProbeInput> {
-  const configured = process.env.OPENRAPPTER_TRANSPLANT_FLIGHT_PROBE_INPUT;
-  return configured
-    ? parseFlightProbeInput(configured)
-    : standaloneFlightProbeInput(directory);
 }
 
 function findDigest(
@@ -464,6 +375,8 @@ async function collectFlightEvidence(input: FlightProbeInput): Promise<void> {
       ...reopenedEvents,
       ...productionExport.events,
     ].every(verifyFlightEventHash),
+    events: reopenedEvents,
+    causalStepIds: [],
   };
   probe.provider.providerEventCount = reopenedEvents.filter(
     (event) =>
@@ -498,9 +411,19 @@ beforeAll(async () => {
     const builtinsDirectory = path.join(stateDirectory, "builtins");
     const agentsDirectory = path.join(stateDirectory, "agents");
     const gatewayDataDirectory = path.join(stateDirectory, "gateway");
+    const flightDirectory = path.join(stateDirectory, "flight");
     mkdirSync(builtinsDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(agentsDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(gatewayDataDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(flightDirectory, { recursive: true, mode: 0o700 });
+    const databasePath = path.join(flightDirectory, "flight-recorder.db");
+    const exportPath = path.join(flightDirectory, "flight-recorder.json");
+    recorder = new FlightRecorder({
+      databasePath,
+      privacy: { recordIO: true },
+    });
+    await recorder.initialize();
+    previousRecorder = setFlightRecorder(recorder);
 
     const registry = new AgentRegistry(builtinsDirectory, agentsDirectory);
     registryConstructorCount += 1;
@@ -516,93 +439,143 @@ beforeAll(async () => {
     const heldGatewayReference = gateway;
     let importerCalls = 0;
     const importerRegistryReferences: AgentRegistry[] = [];
+    let traceContext: FlightTraceContext | undefined;
     gateway.setAgentFilesRoot(agentsDirectory);
     gateway.setAgentImporter(async (filename, contents) => {
       importerCalls += 1;
       importerRegistryReferences.push(registry);
-      return importAgentFile(filename, contents, registry, {
-        dir: agentsDirectory,
-      });
+      if (!traceContext || !recorder) {
+        throw new Error("Probe importer requires the active causal trace.");
+      }
+      return recorder.withTraceContext(traceContext, () =>
+        importAgentFile(filename, contents, registry, {
+          dir: agentsDirectory,
+        }),
+      );
     });
     await gateway.start();
     const baseUrl = `http://127.0.0.1:${gateway.port}`;
+    const traceId = `probe-transplant-${randomUUID()}`;
 
-    const unauthenticated = await postImport(
-      baseUrl,
-      manifest.fixture.filename,
-      validFixture,
-    );
-    probe.gateway.unauthenticatedStatus = unauthenticated.status;
-    probe.gateway.unauthenticatedImporterCalls = importerCalls;
-    await unauthenticated.arrayBuffer();
+    await recorder.runTrace({ traceId }, async () => {
+      traceContext = recorder?.currentTrace();
+      if (!traceContext) {
+        throw new Error("FlightRecorder did not expose the active trace.");
+      }
+      await recorder?.record({
+        kind: "demo.transplant.started",
+        source: "live-organ-transplant-independent-observer",
+        status: "started",
+        metadata: { nonce: probe.nonce },
+      });
 
-    const accepted = await postImport(
-      baseUrl,
-      manifest.fixture.filename,
-      validFixture,
-      token,
-    );
-    probe.gateway.acceptedStatus = accepted.status;
-    await accepted.arrayBuffer();
-
-    const resolved = await registry.getAgent(TRANSPLANT_AGENT_NAME);
-    if (!(resolved instanceof PythonAgent)) {
-      throw new Error(
-        `Expected ${TRANSPLANT_AGENT_NAME} to resolve as PythonAgent; got ${resolved?.constructor.name ?? "missing"}.`,
+      const unauthenticated = await postImport(
+        baseUrl,
+        manifest.fixture.filename,
+        validFixture,
       );
+      probe.gateway.unauthenticatedStatus = unauthenticated.status;
+      probe.gateway.unauthenticatedImporterCalls = importerCalls;
+      await unauthenticated.arrayBuffer();
+
+      const accepted = await postImport(
+        baseUrl,
+        manifest.fixture.filename,
+        validFixture,
+        token,
+      );
+      probe.gateway.acceptedStatus = accepted.status;
+      await accepted.arrayBuffer();
+      probe.operationOrder.push("valid-import");
+
+      const resolved = await registry.getAgent(TRANSPLANT_AGENT_NAME);
+      if (!(resolved instanceof PythonAgent)) {
+        throw new Error(
+          `Expected ${TRANSPLANT_AGENT_NAME} to resolve as PythonAgent; got ${resolved?.constructor.name ?? "missing"}.`,
+        );
+      }
+      const heldAgentReference = resolved;
+      const target = resolved.sourceFile;
+      const sourceHashBefore = sha256(readFileSync(target));
+      probe.agent = {
+        className: resolved.constructor.name,
+        bridgeModule: TRANSPLANT_PYTHON_BRIDGE_MODULE,
+        sourceFile: target,
+        sourceSha256Before: sourceHashBefore,
+        sourceSha256After: sourceHashBefore,
+        objectReferenceStable: false,
+        registryReferenceStable: false,
+      };
+      probe.collections.agent = true;
+
+      probe.executions.first = await executePythonAgent(
+        heldAgentReference,
+        manifest.input,
+      );
+      probe.operationOrder.push("first-execution");
+      const targetStatBefore = statIdentity(target);
+
+      const rejected = await postImport(
+        baseUrl,
+        manifest.fixture.filename,
+        invalidFixture,
+        token,
+      );
+      probe.gateway.rejectedStatus = rejected.status;
+      await rejected.arrayBuffer();
+      probe.operationOrder.push("invalid-import");
+
+      probe.executions.second = await executePythonAgent(
+        heldAgentReference,
+        manifest.input,
+      );
+      probe.operationOrder.push("second-execution");
+      probe.collections.executions = true;
+
+      const afterAgent = await registry.getAgent(TRANSPLANT_AGENT_NAME);
+      const sourceHashAfter = sha256(readFileSync(target));
+      const targetStatAfter = statIdentity(target);
+      const invalidHash = sha256(invalidFixture);
+      const targetBytesUnchanged = sourceHashBefore === sourceHashAfter;
+      const targetStatUnchanged = targetStatBefore === targetStatAfter;
+      probe.agent.sourceSha256After = sourceHashAfter;
+      probe.agent.objectReferenceStable = afterAgent === heldAgentReference;
+      probe.agent.registryReferenceStable =
+        heldRegistryReference === registry &&
+        importerRegistryReferences.every((entry) => entry === registry);
+      probe.rejection = {
+        rejectedBeforeCommit:
+          rejected.status === 400 &&
+          targetBytesUnchanged &&
+          targetStatUnchanged,
+        committed: sourceHashAfter === invalidHash,
+        targetBytesUnchanged,
+        targetStatUnchanged,
+        candidateDiffersFromCommitted: invalidHash !== sourceHashBefore,
+      };
+      probe.collections.rejection = true;
+      probe.gateway.totalImporterCalls = importerCalls;
+
+      await recorder?.record({
+        kind: "demo.transplant.completed",
+        source: "live-organ-transplant-independent-observer",
+        status: "success",
+        metadata: { nonce: probe.nonce },
+      });
+    });
+
+    const flightExport = await recorder.export();
+    if (!flightExport) {
+      throw new Error("FlightRecorder did not produce the probe export.");
     }
-    const heldAgentReference = resolved;
-    const target = resolved.sourceFile;
-    const sourceHashBefore = sha256(readFileSync(target));
-    const targetStatBefore = statIdentity(target);
-    probe.agent = {
-      className: resolved.constructor.name,
-      bridgeModule: TRANSPLANT_PYTHON_BRIDGE_MODULE,
-      sourceFile: target,
-      sourceSha256Before: sourceHashBefore,
-      sourceSha256After: sourceHashBefore,
-      objectReferenceStable: false,
-      registryReferenceStable: false,
-    };
-    probe.collections.agent = true;
-
-    probe.executions.first = await executePythonAgent(resolved, manifest.input);
-    probe.executions.second = await executePythonAgent(
-      resolved,
-      manifest.input,
-    );
-    probe.collections.executions = true;
-
-    const rejected = await postImport(
-      baseUrl,
-      manifest.fixture.filename,
-      invalidFixture,
-      token,
-    );
-    probe.gateway.rejectedStatus = rejected.status;
-    await rejected.arrayBuffer();
-    probe.gateway.totalImporterCalls = importerCalls;
-
-    const afterAgent = await registry.getAgent(TRANSPLANT_AGENT_NAME);
-    const sourceHashAfter = sha256(readFileSync(target));
-    const targetStatAfter = statIdentity(target);
-    const invalidHash = sha256(invalidFixture);
-    const targetBytesUnchanged = sourceHashBefore === sourceHashAfter;
-    const targetStatUnchanged = targetStatBefore === targetStatAfter;
-    probe.agent.sourceSha256After = sourceHashAfter;
-    probe.agent.objectReferenceStable = afterAgent === heldAgentReference;
-    probe.agent.registryReferenceStable =
-      heldRegistryReference === registry &&
-      importerRegistryReferences.every((entry) => entry === registry);
-    probe.rejection = {
-      rejectedBeforeCommit:
-        rejected.status === 400 && targetBytesUnchanged && targetStatUnchanged,
-      committed: sourceHashAfter === invalidHash,
-      targetBytesUnchanged,
-      targetStatUnchanged,
-      candidateDiffersFromCommitted: invalidHash !== sourceHashBefore,
-    };
-    probe.collections.rejection = true;
+    writeFileSync(exportPath, canonicalJson(flightExport), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    setFlightRecorder(previousRecorder);
+    previousRecorder = null;
+    await recorder.close();
+    recorder = null;
 
     probe.gateway = {
       ...probe.gateway,
@@ -623,7 +596,24 @@ beforeAll(async () => {
     };
     probe.collections.process = true;
 
-    await collectFlightEvidence(await resolveFlightProbeInput(stateDirectory));
+    await collectFlightEvidence({
+      originalDatabasePath: databasePath,
+      originalExportPath: exportPath,
+      copiedDatabasePath: databasePath,
+      copiedExportPath: exportPath,
+      databaseSha256: sha256(readFileSync(databasePath)),
+      exportSha256: sha256(readFileSync(exportPath)),
+    });
+    const causal = evaluateTransplantCausalTrace(probe.flight.events, {
+      traceId,
+      nonce: probe.nonce,
+      runtimePid: process.pid,
+      validFixtureSha256: probe.fixtures.validSha256,
+      invalidFixtureSha256: probe.fixtures.invalidSha256,
+      agentName: TRANSPLANT_AGENT_NAME,
+      digest: manifest.expectedSha256,
+    });
+    probe.flight.causalStepIds = causal.semanticStepIds;
   } catch (error) {
     setupError =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -632,6 +622,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   probe.process.pidAfter = process.pid;
+  if (previousRecorder) {
+    setFlightRecorder(previousRecorder);
+    previousRecorder = null;
+  }
+  if (recorder) {
+    await recorder.close();
+    recorder = null;
+  }
   if (gateway) {
     await gateway.stop();
     gateway = null;
@@ -727,6 +725,12 @@ describe("live organ transplant independent observer", () => {
         digest: manifest.expectedSha256,
       },
     });
+    expect(evidence.operationOrder).toEqual([
+      "valid-import",
+      "first-execution",
+      "invalid-import",
+      "second-execution",
+    ]);
   });
 
   it("rejects the invalid replacement before committed bytes or live identity change", () => {
@@ -748,6 +752,7 @@ describe("live organ transplant independent observer", () => {
 
   it("reopens the database with the production ledger and exactly matches the production export", () => {
     const evidence = observed();
+    const manifest = loadManifest();
     expect(evidence.collections.flight).toBe(true);
     expect(evidence.flight).toMatchObject({
       pathsDistinct: true,
@@ -763,11 +768,21 @@ describe("live organ transplant independent observer", () => {
     expect(evidence.flight.productionExportEventIds).toEqual(
       evidence.flight.persistedEventIds,
     );
-    expect(evidence.flight.reopenedContentHashes).toEqual(
-      evidence.flight.persistedContentHashes,
-    );
     expect(evidence.flight.productionExportContentHashes).toEqual(
       evidence.flight.persistedContentHashes,
+    );
+    const causal = evaluateTransplantCausalTrace(evidence.flight.events, {
+      traceId: evidence.flight.events[0]?.traceId ?? "",
+      nonce: evidence.nonce,
+      runtimePid: evidence.process.pidBefore,
+      validFixtureSha256: evidence.fixtures.validSha256,
+      invalidFixtureSha256: evidence.fixtures.invalidSha256,
+      agentName: TRANSPLANT_AGENT_NAME,
+      digest: manifest.expectedSha256,
+    });
+    expect(causal.failures).toEqual([]);
+    expect(evidence.flight.causalStepIds).toEqual(
+      REQUIRED_TRANSPLANT_CAUSAL_STEPS.map((step) => step.id),
     );
   });
 

@@ -29,13 +29,67 @@ export const TRANSPLANT_VALID_FIXTURE =
 export const TRANSPLANT_INVALID_FIXTURE =
   "typescript/src/demo/fixtures/checksum_agent_invalid.py" as const;
 
-export const REQUIRED_TRANSPLANT_EVENT_KINDS = [
-  "demo.transplant.started",
-  "demo.agent.import.accepted",
-  "agent.execute.completed",
-  "demo.agent.candidate.rejected",
-  "demo.transplant.completed",
+export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
+  { id: "trace-started", kind: "trace.started", status: "started" },
+  {
+    id: "demo-started",
+    kind: "demo.transplant.started",
+    status: "started",
+  },
+  {
+    id: "valid-import-started",
+    kind: "agent.import.started",
+    status: "started",
+  },
+  {
+    id: "valid-import-completed",
+    kind: "agent.import.completed",
+    status: "success",
+  },
+  {
+    id: "first-execute-started",
+    kind: "agent.execute.started",
+    status: "started",
+  },
+  {
+    id: "first-execute-completed",
+    kind: "agent.execute.completed",
+    status: "success",
+  },
+  {
+    id: "invalid-import-started",
+    kind: "agent.import.started",
+    status: "started",
+  },
+  {
+    id: "invalid-import-failed",
+    kind: "agent.import.failed",
+    status: "error",
+  },
+  {
+    id: "second-execute-started",
+    kind: "agent.execute.started",
+    status: "started",
+  },
+  {
+    id: "second-execute-completed",
+    kind: "agent.execute.completed",
+    status: "success",
+  },
+  {
+    id: "demo-completed",
+    kind: "demo.transplant.completed",
+    status: "success",
+  },
+  {
+    id: "trace-completed",
+    kind: "trace.completed",
+    status: "success",
+  },
 ] as const;
+
+export type TransplantCausalStepId =
+  (typeof REQUIRED_TRANSPLANT_CAUSAL_STEPS)[number]["id"];
 
 export const REQUIRED_TRANSPLANT_PROBE_TEST_NAMES = [
   "live organ transplant independent observer hashes both bundled fixtures before importing either one",
@@ -60,6 +114,7 @@ export const REQUIRED_TRANSPLANT_CHECK_IDS = [
   "previous-generation-preserved",
   "deterministic-second-execution",
   "flight-recorder-integrity",
+  "exact-command-causal-trace",
   "no-provider-model-events",
   "loopback-gateway-requests",
   "unsandboxed-file-boundary",
@@ -121,6 +176,9 @@ export interface LiveOrganTransplantManifest {
     evidenceRoot: string;
     directoryEnvironmentVariable: "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY";
     nonceEnvironmentVariable: "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE";
+    runtimePidHandoffEnvironmentVariable: "OPENRAPPTER_TRANSPLANT_RUNTIME_PID_HANDOFF";
+    runtimePidHandoffFilename: string;
+    runtimePidHandoffOpenFlag: "wx";
   };
   claims: string[];
   forbiddenClaims: string[];
@@ -152,6 +210,7 @@ export interface TransplantHostEvidence {
   pidAfter: number;
   startIdentityBefore: string;
   startIdentityAfter: string;
+  runtimePidHandoffPath: string;
 }
 
 export type TransplantGatewayRequestPurpose =
@@ -225,6 +284,7 @@ export interface TransplantExecutionEvidence {
 export interface TransplantFlightRecorderEvidence {
   enabled: boolean;
   persisted: boolean;
+  traceId: string;
   database: TransplantArtifactDescriptor;
   export: TransplantArtifactDescriptor;
   exportSchema: "openrappter-flight-export/1.0";
@@ -303,8 +363,55 @@ export interface TransplantScenarioObservation {
   nonce: string;
   evidenceDirectory: string;
   startedEmpty: boolean;
+  childPid: number | null;
+  spawnObserved: boolean;
+  exitObserved: boolean;
+  closeObserved: boolean;
   timedOut: boolean;
+  forcedSettled: boolean;
+  groupTerminationAttempted: boolean;
+  groupTerminationCompleted: boolean;
+  pipesDestroyed: boolean;
   elapsedMs: number;
+}
+
+export interface TransplantRuntimePidHandoffObservation {
+  path: string;
+  exists: boolean;
+  sha256: string | null;
+  schema: string;
+  nonce: string;
+  pid: number | null;
+}
+
+export interface TransplantCausalTraceWitness {
+  databaseReopened: boolean;
+  productionExportValidated: boolean;
+  databaseEvents: FlightEvent[];
+  persistedExportEvents: FlightEvent[];
+  reopenedExportEvents: FlightEvent[];
+  validatorEvents: FlightEvent[];
+}
+
+export interface TransplantCausalTraceExpectations {
+  traceId: string;
+  nonce: string;
+  runtimePid: number;
+  validFixtureSha256: string;
+  invalidFixtureSha256: string;
+  agentName: typeof TRANSPLANT_AGENT_NAME;
+  digest: string;
+}
+
+export interface TransplantCausalTraceEvaluation {
+  pass: boolean;
+  failures: string[];
+  semanticStepIds: TransplantCausalStepId[];
+  semanticEventIds: string[];
+  traceId: string;
+  ownerPid: number | null;
+  firstDigest: string;
+  secondDigest: string;
 }
 
 export interface TransplantProbeReport {
@@ -370,6 +477,7 @@ export interface TransplantIndependentProbeEvidence {
     first: TransplantExecutionEvidence;
     second: TransplantExecutionEvidence;
   };
+  operationOrder: string[];
   rejection: {
     rejectedBeforeCommit: boolean;
     committed: boolean;
@@ -394,6 +502,8 @@ export interface TransplantIndependentProbeEvidence {
     reopenedContentHashes: string[];
     productionExportContentHashes: string[];
     allContentHashesValid: boolean;
+    events: FlightEvent[];
+    causalStepIds: string[];
   };
   provider: {
     manifestModelDependency: string;
@@ -411,20 +521,25 @@ export interface LiveOrganTransplantObservations {
   successRecordCanonical: boolean;
   missingPythonRecordCanonical: boolean;
   controlledMissingPythonExecutable: string;
+  probeScenario: TransplantScenarioObservation;
   successScenario: TransplantScenarioObservation;
   missingPythonScenario: TransplantScenarioObservation;
   frozenSuccessEvidence: {
     captured: boolean;
     fileCount: number;
     inventorySha256: string;
-    unchangedAfterProbe: boolean;
+    unchangedAfterCausalRead: boolean;
     unchangedAfterMissingPython: boolean;
   };
   artifacts: {
     runtimeEntrypoint: TransplantArtifactObservation;
     flightDatabase: TransplantArtifactObservation;
     flightExport: TransplantArtifactObservation;
+    runtimePidHandoff: TransplantRuntimePidHandoffObservation;
+    validFixture: TransplantArtifactObservation;
+    invalidFixture: TransplantArtifactObservation;
   };
+  exactCommandFlight: TransplantCausalTraceWitness;
   probeReport: TransplantProbeReport;
   independentProbe: TransplantIndependentProbeEvidence;
   missingEvidence: string[];
@@ -622,6 +737,9 @@ export function isLiveOrganTransplantManifest(
       "evidenceRoot",
       "directoryEnvironmentVariable",
       "nonceEnvironmentVariable",
+      "runtimePidHandoffEnvironmentVariable",
+      "runtimePidHandoffFilename",
+      "runtimePidHandoffOpenFlag",
     ]) &&
     typeof value.artifacts.evidenceRoot === "string" &&
     value.artifacts.evidenceRoot.length > 0 &&
@@ -629,11 +747,19 @@ export function isLiveOrganTransplantManifest(
       "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY" &&
     value.artifacts.nonceEnvironmentVariable ===
       "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE" &&
+    value.artifacts.runtimePidHandoffEnvironmentVariable ===
+      "OPENRAPPTER_TRANSPLANT_RUNTIME_PID_HANDOFF" &&
+    typeof value.artifacts.runtimePidHandoffFilename === "string" &&
+    /^[A-Za-z0-9._-]+$/.test(value.artifacts.runtimePidHandoffFilename) &&
+    value.artifacts.runtimePidHandoffOpenFlag === "wx" &&
     isStringArray(value.claims) &&
     value.claims.length > 0 &&
     isStringArray(value.forbiddenClaims) &&
     value.forbiddenClaims.includes("air-gap guarantees") &&
-    value.forbiddenClaims.includes("enforced egress controls")
+    value.forbiddenClaims.includes("enforced egress controls") &&
+    value.forbiddenClaims.includes("escaped-process prevention") &&
+    value.forbiddenClaims.includes("enforced process containment") &&
+    value.forbiddenClaims.includes("process containment guarantees")
   );
 }
 
@@ -694,13 +820,16 @@ function isHostEvidence(value: unknown): value is TransplantHostEvidence {
       "pidAfter",
       "startIdentityBefore",
       "startIdentityAfter",
+      "runtimePidHandoffPath",
     ]) &&
     isPositiveInteger(value.pidBefore) &&
     isPositiveInteger(value.pidAfter) &&
     typeof value.startIdentityBefore === "string" &&
     value.startIdentityBefore.length > 0 &&
     typeof value.startIdentityAfter === "string" &&
-    value.startIdentityAfter.length > 0
+    value.startIdentityAfter.length > 0 &&
+    typeof value.runtimePidHandoffPath === "string" &&
+    value.runtimePidHandoffPath.length > 0
   );
 }
 
@@ -888,6 +1017,7 @@ function isFlightRecorderEvidence(
     hasOnlyKeys(value, [
       "enabled",
       "persisted",
+      "traceId",
       "database",
       "export",
       "exportSchema",
@@ -897,6 +1027,8 @@ function isFlightRecorderEvidence(
     ]) &&
     typeof value.enabled === "boolean" &&
     typeof value.persisted === "boolean" &&
+    typeof value.traceId === "string" &&
+    value.traceId.length > 0 &&
     isArtifactDescriptor(value.database) &&
     isArtifactDescriptor(value.export) &&
     value.exportSchema === "openrappter-flight-export/1.0" &&
@@ -1048,7 +1180,15 @@ function isScenarioObservation(
       "nonce",
       "evidenceDirectory",
       "startedEmpty",
+      "childPid",
+      "spawnObserved",
+      "exitObserved",
+      "closeObserved",
       "timedOut",
+      "forcedSettled",
+      "groupTerminationAttempted",
+      "groupTerminationCompleted",
+      "pipesDestroyed",
       "elapsedMs",
     ]) &&
     typeof value.nonce === "string" &&
@@ -1056,8 +1196,64 @@ function isScenarioObservation(
     typeof value.evidenceDirectory === "string" &&
     value.evidenceDirectory.length > 0 &&
     typeof value.startedEmpty === "boolean" &&
+    (value.childPid === null || isPositiveInteger(value.childPid)) &&
+    typeof value.spawnObserved === "boolean" &&
+    typeof value.exitObserved === "boolean" &&
+    typeof value.closeObserved === "boolean" &&
     typeof value.timedOut === "boolean" &&
+    typeof value.forcedSettled === "boolean" &&
+    typeof value.groupTerminationAttempted === "boolean" &&
+    typeof value.groupTerminationCompleted === "boolean" &&
+    typeof value.pipesDestroyed === "boolean" &&
     isNonNegativeNumber(value.elapsedMs)
+  );
+}
+
+function isRuntimePidHandoffObservation(
+  value: unknown,
+): value is TransplantRuntimePidHandoffObservation {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      "path",
+      "exists",
+      "sha256",
+      "schema",
+      "nonce",
+      "pid",
+    ]) &&
+    typeof value.path === "string" &&
+    typeof value.exists === "boolean" &&
+    (value.sha256 === null || isSha256(value.sha256)) &&
+    typeof value.schema === "string" &&
+    typeof value.nonce === "string" &&
+    (value.pid === null || isPositiveInteger(value.pid))
+  );
+}
+
+function isCausalTraceWitness(
+  value: unknown,
+): value is TransplantCausalTraceWitness {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, [
+      "databaseReopened",
+      "productionExportValidated",
+      "databaseEvents",
+      "persistedExportEvents",
+      "reopenedExportEvents",
+      "validatorEvents",
+    ]) &&
+    typeof value.databaseReopened === "boolean" &&
+    typeof value.productionExportValidated === "boolean" &&
+    Array.isArray(value.databaseEvents) &&
+    value.databaseEvents.every(isFlightEventDisplayEvidence) &&
+    Array.isArray(value.persistedExportEvents) &&
+    value.persistedExportEvents.every(isFlightEventDisplayEvidence) &&
+    Array.isArray(value.reopenedExportEvents) &&
+    value.reopenedExportEvents.every(isFlightEventDisplayEvidence) &&
+    Array.isArray(value.validatorEvents) &&
+    value.validatorEvents.every(isFlightEventDisplayEvidence)
   );
 }
 
@@ -1117,6 +1313,7 @@ export function isTransplantIndependentProbeEvidence(
       "fixtures",
       "agent",
       "executions",
+      "operationOrder",
       "rejection",
       "flight",
       "provider",
@@ -1134,6 +1331,7 @@ export function isTransplantIndependentProbeEvidence(
   const fixtures = value.fixtures;
   const agent = value.agent;
   const executions = value.executions;
+  const operationOrder = value.operationOrder;
   const rejection = value.rejection;
   const flight = value.flight;
   const provider = value.provider;
@@ -1212,6 +1410,7 @@ export function isTransplantIndependentProbeEvidence(
     hasOnlyKeys(executions, ["first", "second"]) &&
     isExecutionEvidence(executions.first) &&
     isExecutionEvidence(executions.second) &&
+    isStringArray(operationOrder) &&
     isRecord(rejection) &&
     hasOnlyKeys(rejection, [
       "rejectedBeforeCommit",
@@ -1239,6 +1438,8 @@ export function isTransplantIndependentProbeEvidence(
       "reopenedContentHashes",
       "productionExportContentHashes",
       "allContentHashesValid",
+      "events",
+      "causalStepIds",
     ]) &&
     typeof flight.databasePath === "string" &&
     typeof flight.exportPath === "string" &&
@@ -1256,6 +1457,9 @@ export function isTransplantIndependentProbeEvidence(
     isStringArray(flight.reopenedContentHashes) &&
     isStringArray(flight.productionExportContentHashes) &&
     typeof flight.allContentHashesValid === "boolean" &&
+    Array.isArray(flight.events) &&
+    flight.events.every(isFlightEventDisplayEvidence) &&
+    isStringArray(flight.causalStepIds) &&
     isRecord(provider) &&
     hasOnlyKeys(provider, [
       "manifestModelDependency",
@@ -1282,10 +1486,12 @@ export function isLiveOrganTransplantObservations(
       "successRecordCanonical",
       "missingPythonRecordCanonical",
       "controlledMissingPythonExecutable",
+      "probeScenario",
       "successScenario",
       "missingPythonScenario",
       "frozenSuccessEvidence",
       "artifacts",
+      "exactCommandFlight",
       "probeReport",
       "independentProbe",
       "missingEvidence",
@@ -1301,6 +1507,7 @@ export function isLiveOrganTransplantObservations(
     typeof value.successRecordCanonical === "boolean" &&
     typeof value.missingPythonRecordCanonical === "boolean" &&
     typeof value.controlledMissingPythonExecutable === "string" &&
+    isScenarioObservation(value.probeScenario) &&
     isScenarioObservation(value.successScenario) &&
     isScenarioObservation(value.missingPythonScenario) &&
     isRecord(value.frozenSuccessEvidence) &&
@@ -1308,13 +1515,13 @@ export function isLiveOrganTransplantObservations(
       "captured",
       "fileCount",
       "inventorySha256",
-      "unchangedAfterProbe",
+      "unchangedAfterCausalRead",
       "unchangedAfterMissingPython",
     ]) &&
     typeof value.frozenSuccessEvidence.captured === "boolean" &&
     isNonNegativeInteger(value.frozenSuccessEvidence.fileCount) &&
     isSha256(value.frozenSuccessEvidence.inventorySha256) &&
-    typeof value.frozenSuccessEvidence.unchangedAfterProbe === "boolean" &&
+    typeof value.frozenSuccessEvidence.unchangedAfterCausalRead === "boolean" &&
     typeof value.frozenSuccessEvidence.unchangedAfterMissingPython ===
       "boolean" &&
     isRecord(value.artifacts) &&
@@ -1322,10 +1529,17 @@ export function isLiveOrganTransplantObservations(
       "runtimeEntrypoint",
       "flightDatabase",
       "flightExport",
+      "runtimePidHandoff",
+      "validFixture",
+      "invalidFixture",
     ]) &&
     isArtifactObservation(value.artifacts.runtimeEntrypoint) &&
     isArtifactObservation(value.artifacts.flightDatabase) &&
     isArtifactObservation(value.artifacts.flightExport) &&
+    isRuntimePidHandoffObservation(value.artifacts.runtimePidHandoff) &&
+    isArtifactObservation(value.artifacts.validFixture) &&
+    isArtifactObservation(value.artifacts.invalidFixture) &&
+    isCausalTraceWitness(value.exactCommandFlight) &&
     isProbeReport(value.probeReport) &&
     isTransplantIndependentProbeEvidence(value.independentProbe) &&
     isStringArray(value.missingEvidence) &&
@@ -1459,6 +1673,325 @@ function completeCollections(
   return Object.values(collections).every((entry) => entry === true);
 }
 
+function independentProbeFlightIsValid(
+  probe: TransplantIndependentProbeEvidence,
+): boolean {
+  return (
+    probe.flight.pathsDistinct &&
+    probe.flight.databasePath !== probe.flight.exportPath &&
+    probe.flight.databaseSha256 === probe.flight.expectedDatabaseSha256 &&
+    probe.flight.exportSha256 === probe.flight.expectedExportSha256 &&
+    probe.flight.reopenedQuerySucceeded &&
+    probe.flight.productionValidationPassed &&
+    probe.flight.allContentHashesValid &&
+    isDeepStrictEqual(
+      probe.flight.persistedEventIds,
+      probe.flight.reopenedEventIds,
+    ) &&
+    isDeepStrictEqual(
+      probe.flight.persistedEventIds,
+      probe.flight.productionExportEventIds,
+    ) &&
+    isDeepStrictEqual(
+      probe.flight.persistedContentHashes,
+      probe.flight.productionExportContentHashes,
+    ) &&
+    isDeepStrictEqual(
+      probe.flight.reopenedEventIds,
+      probe.flight.events.map((event) => event.id),
+    ) &&
+    isDeepStrictEqual(
+      probe.flight.reopenedContentHashes,
+      probe.flight.events.map((event) => event.contentHash),
+    )
+  );
+}
+
+function metadataString(event: FlightEvent | undefined, key: string): string {
+  const value = event?.metadata[key];
+  return typeof value === "string" ? value : "";
+}
+
+function metadataBoolean(
+  event: FlightEvent | undefined,
+  key: string,
+): boolean | null {
+  const value = event?.metadata[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function metadataNumber(
+  event: FlightEvent | undefined,
+  key: string,
+): number | null {
+  const value = event?.metadata[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function digestFromValue(value: unknown, depth = 0): string {
+  if (depth > 8) return "";
+  if (typeof value === "string") {
+    try {
+      return digestFromValue(JSON.parse(value), depth + 1);
+    } catch {
+      return "";
+    }
+  }
+  if (!isRecord(value)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const digest = digestFromValue(entry, depth + 1);
+        if (digest) return digest;
+      }
+    }
+    return "";
+  }
+  if (isSha256(value.digest)) return value.digest;
+  for (const nested of Object.values(value)) {
+    const digest = digestFromValue(nested, depth + 1);
+    if (digest) return digest;
+  }
+  return "";
+}
+
+export function evaluateTransplantCausalTrace(
+  events: readonly FlightEvent[],
+  expected: TransplantCausalTraceExpectations,
+): TransplantCausalTraceEvaluation {
+  const failures: string[] = [];
+  const fail = (condition: boolean, message: string): void => {
+    if (!condition) failures.push(message);
+  };
+  const orderedEvents = [...events];
+  const byKind = (kind: string): FlightEvent[] =>
+    orderedEvents.filter((event) => event.kind === kind);
+  const roots = byKind("trace.started");
+  const demoStarts = byKind("demo.transplant.started");
+  const importStarts = byKind("agent.import.started");
+  const importCompleted = byKind("agent.import.completed");
+  const executeStarts = byKind("agent.execute.started");
+  const executeCompleted = byKind("agent.execute.completed");
+  const importFailed = byKind("agent.import.failed");
+  const demoCompleted = byKind("demo.transplant.completed");
+  const traceCompleted = byKind("trace.completed");
+
+  fail(roots.length === 1, "expected exactly one trace.started");
+  fail(demoStarts.length === 1, "expected exactly one demo.transplant.started");
+  fail(importStarts.length === 2, "expected exactly two agent.import.started");
+  fail(
+    importCompleted.length === 1,
+    "expected exactly one agent.import.completed",
+  );
+  fail(
+    executeStarts.length === 2,
+    "expected exactly two agent.execute.started",
+  );
+  fail(
+    executeCompleted.length === 2,
+    "expected exactly two agent.execute.completed",
+  );
+  fail(importFailed.length === 1, "expected exactly one agent.import.failed");
+  fail(
+    demoCompleted.length === 1,
+    "expected exactly one demo.transplant.completed",
+  );
+  fail(traceCompleted.length === 1, "expected exactly one trace.completed");
+  fail(byKind("trace.failed").length === 0, "trace.failed is forbidden");
+
+  const validImportStarted = importStarts.find(
+    (event) =>
+      metadataString(event, "candidateSourceSha256") ===
+      expected.validFixtureSha256,
+  );
+  const invalidImportStarted = importStarts.find(
+    (event) =>
+      metadataString(event, "candidateSourceSha256") ===
+      expected.invalidFixtureSha256,
+  );
+  const validImportCompleted = importCompleted[0];
+  const invalidImportFailed = importFailed[0];
+  const firstExecuteStarted = executeStarts[0];
+  const secondExecuteStarted = executeStarts[1];
+  const firstExecuteCompleted = executeCompleted[0];
+  const secondExecuteCompleted = executeCompleted[1];
+  const root = roots[0];
+
+  const semantic: Array<{
+    id: TransplantCausalStepId;
+    event: FlightEvent | undefined;
+  }> = [
+    { id: "trace-started", event: root },
+    { id: "demo-started", event: demoStarts[0] },
+    { id: "valid-import-started", event: validImportStarted },
+    { id: "valid-import-completed", event: validImportCompleted },
+    { id: "first-execute-started", event: firstExecuteStarted },
+    { id: "first-execute-completed", event: firstExecuteCompleted },
+    { id: "invalid-import-started", event: invalidImportStarted },
+    { id: "invalid-import-failed", event: invalidImportFailed },
+    { id: "second-execute-started", event: secondExecuteStarted },
+    { id: "second-execute-completed", event: secondExecuteCompleted },
+    { id: "demo-completed", event: demoCompleted[0] },
+    { id: "trace-completed", event: traceCompleted[0] },
+  ];
+
+  fail(
+    semantic.every((entry) => entry.event !== undefined),
+    "one or more semantic events are missing",
+  );
+  for (const [index, step] of REQUIRED_TRANSPLANT_CAUSAL_STEPS.entries()) {
+    const event = semantic[index]?.event;
+    fail(event?.kind === step.kind, `${step.id} kind mismatch`);
+    fail(event?.status === step.status, `${step.id} status mismatch`);
+  }
+
+  const semanticIndexes = semantic.map(({ event }) =>
+    event ? orderedEvents.indexOf(event) : -1,
+  );
+  fail(
+    semanticIndexes.every(
+      (index, position) =>
+        index >= 0 &&
+        (position === 0 || index > semanticIndexes[position - 1]!),
+    ),
+    "semantic events are not in exact causal order",
+  );
+
+  const traceIds = new Set(orderedEvents.map((event) => event.traceId));
+  fail(traceIds.size === 1, "database contains more than one trace ID");
+  fail(
+    traceIds.size === 1 && traceIds.has(expected.traceId),
+    "trace ID does not match the exact-command result",
+  );
+  fail(
+    orderedEvents.every(
+      (event, index) =>
+        index === 0 || event.sequence > orderedEvents[index - 1]!.sequence,
+    ),
+    "event sequences are not strictly monotonic",
+  );
+  fail(
+    new Set(orderedEvents.map((event) => event.id)).size ===
+      orderedEvents.length,
+    "event IDs are not unique",
+  );
+  fail(
+    orderedEvents.every(verifyFlightEventHash),
+    "one or more database event hashes are invalid",
+  );
+
+  const earlierIds = new Set<string>();
+  let genericParentsValid = true;
+  for (const event of orderedEvents) {
+    if (event === root) {
+      genericParentsValid &&= event.parentId === null;
+    } else {
+      genericParentsValid &&=
+        event.parentId !== null && earlierIds.has(event.parentId);
+    }
+    earlierIds.add(event.id);
+  }
+  fail(genericParentsValid, "generic parent chain is broken");
+  const rootId = root?.id;
+  const requireRootParent = (event: FlightEvent | undefined): boolean =>
+    event?.parentId === rootId;
+  fail(
+    requireRootParent(demoStarts[0]) &&
+      requireRootParent(validImportStarted) &&
+      requireRootParent(firstExecuteStarted) &&
+      requireRootParent(invalidImportStarted) &&
+      requireRootParent(secondExecuteStarted) &&
+      requireRootParent(demoCompleted[0]) &&
+      requireRootParent(traceCompleted[0]),
+    "top-level semantic events must be children of trace.started",
+  );
+  fail(
+    validImportCompleted?.parentId === validImportStarted?.id,
+    "valid import completion is not parented by its start",
+  );
+  fail(
+    firstExecuteCompleted?.parentId === firstExecuteStarted?.id,
+    "first execution completion is not parented by its start",
+  );
+  fail(
+    invalidImportFailed?.parentId === invalidImportStarted?.id,
+    "invalid import failure is not parented by its start",
+  );
+  fail(
+    secondExecuteCompleted?.parentId === secondExecuteStarted?.id,
+    "second execution completion is not parented by its start",
+  );
+
+  const ownerPid = metadataNumber(root, "ownerPid");
+  fail(root?.parentId === null, "trace.started must be the root");
+  fail(root?.source === "runtime", "trace.started must come from runtime");
+  fail(ownerPid === expected.runtimePid, "trace ownerPid is not runtime PID");
+  fail(
+    metadataString(demoStarts[0], "nonce") === expected.nonce &&
+      metadataString(demoCompleted[0], "nonce") === expected.nonce,
+    "demo boundary nonce mismatch",
+  );
+  fail(
+    metadataString(validImportStarted, "candidateSourceSha256") ===
+      expected.validFixtureSha256,
+    "valid import start candidate hash mismatch",
+  );
+  fail(
+    metadataString(validImportCompleted, "candidateSourceSha256") ===
+      expected.validFixtureSha256 &&
+      metadataString(validImportCompleted, "activeSourceSha256") ===
+        expected.validFixtureSha256,
+    "valid import completion hash mismatch",
+  );
+  fail(
+    metadataString(validImportCompleted, "bridgeClass") === "PythonAgent",
+    "valid import completion bridgeClass mismatch",
+  );
+  fail(
+    metadataString(invalidImportStarted, "candidateSourceSha256") ===
+      expected.invalidFixtureSha256,
+    "invalid import start candidate hash mismatch",
+  );
+  fail(
+    metadataString(invalidImportFailed, "candidateSourceSha256") ===
+      expected.invalidFixtureSha256 &&
+      metadataString(invalidImportFailed, "activeSourceSha256") ===
+        expected.validFixtureSha256 &&
+      metadataBoolean(invalidImportFailed, "rejectedBeforeCommit") === true,
+    "invalid import failure did not preserve the active valid hash before commit",
+  );
+  fail(
+    [
+      validImportCompleted,
+      invalidImportFailed,
+      firstExecuteStarted,
+      firstExecuteCompleted,
+      secondExecuteStarted,
+      secondExecuteCompleted,
+    ].every((event) => event?.agentName === expected.agentName),
+    "semantic event agent name mismatch",
+  );
+  const firstDigest = digestFromValue(firstExecuteCompleted?.payload);
+  const secondDigest = digestFromValue(secondExecuteCompleted?.payload);
+  fail(firstDigest === expected.digest, "first execution digest mismatch");
+  fail(secondDigest === expected.digest, "second execution digest mismatch");
+  fail(firstDigest === secondDigest, "post-rejection digest changed");
+
+  return {
+    pass: failures.length === 0,
+    failures,
+    semanticStepIds: semantic
+      .filter((entry) => entry.event !== undefined)
+      .map((entry) => entry.id),
+    semanticEventIds: semantic.flatMap((entry) =>
+      entry.event ? [entry.event.id] : [],
+    ),
+    traceId: traceIds.size === 1 ? (orderedEvents[0]?.traceId ?? "") : "",
+    ownerPid,
+    firstDigest,
+    secondDigest,
+  };
+}
+
 function check(
   id: LiveOrganTransplantCheckId,
   pass: boolean,
@@ -1492,6 +2025,39 @@ export function evaluateLiveOrganTransplant(
   const invalidReplacement = result
     ? findGatewayRequest(result, "invalid-replacement")
     : undefined;
+  const exactCausal =
+    result &&
+    observations &&
+    observations.artifacts.runtimePidHandoff.pid !== null &&
+    observations.artifacts.validFixture.sha256 !== null &&
+    observations.artifacts.invalidFixture.sha256 !== null
+      ? evaluateTransplantCausalTrace(
+          observations.exactCommandFlight.databaseEvents,
+          {
+            traceId: result.flightRecorder.traceId,
+            nonce: observations.successScenario.nonce,
+            runtimePid: observations.artifacts.runtimePidHandoff.pid,
+            validFixtureSha256: observations.artifacts.validFixture.sha256,
+            invalidFixtureSha256: observations.artifacts.invalidFixture.sha256,
+            agentName: TRANSPLANT_AGENT_NAME,
+            digest: result.executions.first.output.digest,
+          },
+        )
+      : undefined;
+  const probeCausal =
+    probe &&
+    isSha256(probe.fixtures.validSha256) &&
+    isSha256(probe.fixtures.invalidSha256)
+      ? evaluateTransplantCausalTrace(probe.flight.events, {
+          traceId: probe.flight.events[0]?.traceId ?? "",
+          nonce: probe.nonce,
+          runtimePid: probe.process.pidBefore,
+          validFixtureSha256: probe.fixtures.validSha256,
+          invalidFixtureSha256: probe.fixtures.invalidSha256,
+          agentName: TRANSPLANT_AGENT_NAME,
+          digest: probe.executions.first.output.digest,
+        })
+      : undefined;
 
   const checks: LiveOrganTransplantCheck[] = [
     check(
@@ -1540,15 +2106,24 @@ export function evaluateLiveOrganTransplant(
           observations.missingPythonScenario.nonce &&
         missingPythonResult.scenario.evidenceDirectory ===
           observations.missingPythonScenario.evidenceDirectory &&
+        observations.probeScenario.startedEmpty &&
         observations.successScenario.startedEmpty &&
         observations.missingPythonScenario.startedEmpty &&
+        observations.probeScenario.nonce !==
+          observations.successScenario.nonce &&
+        observations.probeScenario.nonce !==
+          observations.missingPythonScenario.nonce &&
         observations.successScenario.nonce !==
           observations.missingPythonScenario.nonce &&
+        observations.probeScenario.evidenceDirectory !==
+          observations.successScenario.evidenceDirectory &&
+        observations.probeScenario.evidenceDirectory !==
+          observations.missingPythonScenario.evidenceDirectory &&
         observations.successScenario.evidenceDirectory !==
           observations.missingPythonScenario.evidenceDirectory &&
         observations.frozenSuccessEvidence.captured &&
         observations.frozenSuccessEvidence.fileCount > 0 &&
-        observations.frozenSuccessEvidence.unchangedAfterProbe &&
+        observations.frozenSuccessEvidence.unchangedAfterCausalRead &&
         observations.frozenSuccessEvidence.unchangedAfterMissingPython &&
         pathIsInside(
           result.flightRecorder.database.path,
@@ -1559,7 +2134,11 @@ export function evaluateLiveOrganTransplant(
           observations.successScenario.evidenceDirectory,
         ) &&
         result.flightRecorder.database.path !==
-          result.flightRecorder.export.path,
+          result.flightRecorder.export.path &&
+        pathIsInside(
+          observations.artifacts.runtimePidHandoff.path,
+          observations.successScenario.evidenceDirectory,
+        ),
       ),
       "unique empty scenario directories and nonces must remain isolated and frozen",
     ),
@@ -1567,15 +2146,28 @@ export function evaluateLiveOrganTransplant(
       "host-identity-preserved",
       Boolean(
         result &&
+        observations &&
         probe &&
         result.host.pidBefore === result.host.pidAfter &&
         result.host.startIdentityBefore === result.host.startIdentityAfter &&
+        observations.artifacts.runtimePidHandoff.exists &&
+        observations.artifacts.runtimePidHandoff.schema ===
+          "openrappter-runtime-pid/1.0" &&
+        observations.artifacts.runtimePidHandoff.nonce ===
+          observations.successScenario.nonce &&
+        observations.artifacts.runtimePidHandoff.pid ===
+          result.host.pidBefore &&
+        result.host.runtimePidHandoffPath ===
+          observations.artifacts.runtimePidHandoff.path &&
+        exactCausal?.ownerPid === result.host.pidBefore &&
+        observations.successScenario.childPid !== null &&
+        observations.successScenario.spawnObserved &&
         probe.process.pidBefore === probe.process.pidAfter &&
         probe.process.gatewayReferenceStable &&
         probe.process.registryReferenceStable &&
         probe.process.registryConstructorCount === 1,
       ),
-      "display PID/start identity and independently held server/registry references must stay stable",
+      "runtime result PID, O_EXCL handoff PID, reopened trace ownerPid, and held probe references must agree",
     ),
     check(
       "authenticated-http-import",
@@ -1704,7 +2296,13 @@ export function evaluateLiveOrganTransplant(
             TRANSPLANT_AGENT_NAME,
             probe.executions.second,
           ),
-        ),
+        ) &&
+        isDeepStrictEqual(probe.operationOrder, [
+          "valid-import",
+          "first-execution",
+          "invalid-import",
+          "second-execution",
+        ]),
       ),
       "actual PythonAgent and display evidence must produce the same deterministic core twice",
     ),
@@ -1713,18 +2311,17 @@ export function evaluateLiveOrganTransplant(
       Boolean(
         result &&
         observations &&
-        probe &&
         result.flightRecorder.enabled &&
         result.flightRecorder.persisted &&
         result.flightRecorder.database.path !==
           result.flightRecorder.export.path &&
         result.flightRecorder.eventCount ===
           result.flightRecorder.events.length &&
-        result.flightRecorder.events.length >= 6 &&
+        result.flightRecorder.eventCount ===
+          observations.exactCommandFlight.databaseEvents.length &&
+        result.flightRecorder.events.length >=
+          REQUIRED_TRANSPLANT_CAUSAL_STEPS.length &&
         result.flightRecorder.events.every(isFlightEventDisplayEvidence) &&
-        REQUIRED_TRANSPLANT_EVENT_KINDS.every((kind) =>
-          result.flightRecorder.events.some((event) => event.kind === kind),
-        ) &&
         artifactMatches(
           result.flightRecorder.database,
           observations.artifacts.flightDatabase,
@@ -1733,41 +2330,71 @@ export function evaluateLiveOrganTransplant(
           result.flightRecorder.export,
           observations.artifacts.flightExport,
         ) &&
-        probe.flight.pathsDistinct &&
-        probe.flight.databasePath !== probe.flight.exportPath &&
-        probe.flight.databasePath === result.flightRecorder.database.path &&
-        probe.flight.exportPath === result.flightRecorder.export.path &&
-        probe.flight.databaseSha256 === probe.flight.expectedDatabaseSha256 &&
-        probe.flight.exportSha256 === probe.flight.expectedExportSha256 &&
-        probe.flight.reopenedQuerySucceeded &&
-        probe.flight.productionValidationPassed &&
-        probe.flight.allContentHashesValid &&
+        observations.exactCommandFlight.databaseReopened &&
+        observations.exactCommandFlight.productionExportValidated &&
         isDeepStrictEqual(
-          result.flightRecorder.events.map((event) => event.id),
-          probe.flight.persistedEventIds,
+          result.flightRecorder.events,
+          observations.exactCommandFlight.databaseEvents,
         ) &&
         isDeepStrictEqual(
-          result.flightRecorder.events.map((event) => event.contentHash),
-          probe.flight.persistedContentHashes,
+          observations.exactCommandFlight.persistedExportEvents,
+          observations.exactCommandFlight.reopenedExportEvents,
         ) &&
         isDeepStrictEqual(
-          probe.flight.persistedEventIds,
-          probe.flight.reopenedEventIds,
+          observations.exactCommandFlight.persistedExportEvents,
+          observations.exactCommandFlight.validatorEvents,
         ) &&
         isDeepStrictEqual(
-          probe.flight.persistedEventIds,
-          probe.flight.productionExportEventIds,
+          observations.exactCommandFlight.databaseEvents.map(
+            (event) => event.id,
+          ),
+          observations.exactCommandFlight.persistedExportEvents.map(
+            (event) => event.id,
+          ),
         ) &&
-        isDeepStrictEqual(
-          probe.flight.persistedContentHashes,
-          probe.flight.reopenedContentHashes,
+        observations.exactCommandFlight.databaseEvents.every(
+          verifyFlightEventHash,
         ) &&
-        isDeepStrictEqual(
-          probe.flight.persistedContentHashes,
-          probe.flight.productionExportContentHashes,
+        observations.exactCommandFlight.persistedExportEvents.every(
+          verifyFlightEventHash,
         ),
       ),
-      "production ledger reopen, validator import, IDs, hashes, and distinct export must agree exactly",
+      "the exact command database must reopen and its production export must validate with exact rows, IDs, and hashes",
+    ),
+    check(
+      "exact-command-causal-trace",
+      Boolean(
+        result &&
+        observations &&
+        exactCausal?.pass &&
+        exactCausal.traceId === result.flightRecorder.traceId &&
+        exactCausal.ownerPid === result.host.pidBefore &&
+        exactCausal.firstDigest === result.executions.first.output.digest &&
+        exactCausal.secondDigest === result.executions.second.output.digest &&
+        observations.artifacts.validFixture.sha256 ===
+          result.imports.accepted.candidateSourceSha256 &&
+        observations.artifacts.invalidFixture.sha256 ===
+          result.imports.rejected.candidateSourceSha256 &&
+        result.agent.sourceSha256Before ===
+          observations.artifacts.validFixture.sha256 &&
+        result.agent.sourceSha256After ===
+          observations.artifacts.validFixture.sha256 &&
+        result.imports.rejected.rejectedBeforeCommit &&
+        result.imports.rejected.committed === false &&
+        result.gateway.requests.find(
+          (request) => request.purpose === "valid-import",
+        )?.status === 200 &&
+        result.gateway.requests.find(
+          (request) => request.purpose === "invalid-replacement",
+        )?.status === 400 &&
+        result.agent.name === TRANSPLANT_AGENT_NAME &&
+        result.agent.bridgeClass === "PythonAgent" &&
+        result.providerUsage.providerCalls === 0 &&
+        result.providerUsage.modelCalls === 0,
+      ),
+      exactCausal?.pass
+        ? "exact command claims are causally bound to one reopened runtime trace"
+        : `exact command causal trace failed: ${exactCausal?.failures[0] ?? "witness unavailable"}`,
     ),
     check(
       "no-provider-model-events",
@@ -1782,6 +2409,20 @@ export function evaluateLiveOrganTransplant(
         missingPythonResult.providerCalls === 0 &&
         missingPythonResult.modelCalls === 0 &&
         result.flightRecorder.events.every(
+          (event) =>
+            event.providerId === undefined &&
+            event.model === undefined &&
+            !event.kind.startsWith("provider.") &&
+            !event.kind.startsWith("model."),
+        ) &&
+        observations.exactCommandFlight.databaseEvents.every(
+          (event) =>
+            event.providerId === undefined &&
+            event.model === undefined &&
+            !event.kind.startsWith("provider.") &&
+            !event.kind.startsWith("model."),
+        ) &&
+        probe.flight.events.every(
           (event) =>
             event.providerId === undefined &&
             event.model === undefined &&
@@ -1835,8 +2476,24 @@ export function evaluateLiveOrganTransplant(
         missingPythonResult.elapsedMs <= 30_000 &&
         observations.successScenario.elapsedMs <= 30_000 &&
         observations.missingPythonScenario.elapsedMs <= 30_000 &&
+        observations.probeScenario.elapsedMs <= 30_000 &&
         !observations.successScenario.timedOut &&
-        !observations.missingPythonScenario.timedOut,
+        !observations.missingPythonScenario.timedOut &&
+        !observations.probeScenario.timedOut &&
+        [
+          observations.probeScenario,
+          observations.successScenario,
+          observations.missingPythonScenario,
+        ].every(
+          (scenario) =>
+            scenario.childPid !== null &&
+            scenario.spawnObserved &&
+            scenario.exitObserved &&
+            (scenario.closeObserved || scenario.forcedSettled) &&
+            scenario.groupTerminationAttempted &&
+            scenario.groupTerminationCompleted &&
+            scenario.pipesDestroyed,
+        ),
       ),
       "independent wall clock and all display timings must stay within 30 seconds",
     ),
@@ -1891,7 +2548,21 @@ export function evaluateLiveOrganTransplant(
         observations.skippedEvidence.length === 0 &&
         exactProbeReport(observations.probeReport) &&
         completeCollections(probe.collections) &&
-        probe.nonce === observations.successScenario.nonce,
+        independentProbeFlightIsValid(probe) &&
+        pathIsInside(
+          probe.flight.databasePath,
+          observations.probeScenario.evidenceDirectory,
+        ) &&
+        pathIsInside(
+          probe.flight.exportPath,
+          observations.probeScenario.evidenceDirectory,
+        ) &&
+        probe.nonce === observations.probeScenario.nonce &&
+        probeCausal?.pass &&
+        isDeepStrictEqual(
+          probe.flight.causalStepIds,
+          REQUIRED_TRANSPLANT_CAUSAL_STEPS.map((step) => step.id),
+        ),
       ),
       "all literal probe tests and every evidence collection must pass with zero skips",
     ),
@@ -1916,7 +2587,15 @@ export function evaluateLiveOrganTransplant(
         probe.fixtures.manifestValidSha256 === manifest.fixture.sourceSha256 &&
         probe.fixtures.manifestInvalidSha256 ===
           manifest.fixture.invalidSourceSha256 &&
-        probe.agent.sourceSha256Before === manifest.fixture.sourceSha256,
+        probe.agent.sourceSha256Before === manifest.fixture.sourceSha256 &&
+        observations.artifacts.validFixture.path ===
+          manifest.fixture.bundledPath &&
+        observations.artifacts.invalidFixture.path ===
+          manifest.fixture.invalidBundledPath &&
+        observations.artifacts.validFixture.sha256 ===
+          manifest.fixture.sourceSha256 &&
+        observations.artifacts.invalidFixture.sha256 ===
+          manifest.fixture.invalidSourceSha256,
       ),
       "observer must hash both literal bundled fixtures and link them to accepted/rejected bytes",
     ),

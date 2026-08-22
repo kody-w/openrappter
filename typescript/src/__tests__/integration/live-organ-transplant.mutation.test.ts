@@ -66,6 +66,7 @@ const PINNED_CHECK_IDS = [
   "previous-generation-preserved",
   "deterministic-second-execution",
   "flight-recorder-integrity",
+  "exact-command-causal-trace",
   "no-provider-model-events",
   "loopback-gateway-requests",
   "unsandboxed-file-boundary",
@@ -101,7 +102,7 @@ const PINNED_MUTATION_IDS = [
   "missing-directory-not-empty",
   "frozen-not-captured",
   "frozen-empty",
-  "frozen-changed-after-probe",
+  "frozen-changed-after-causal-read",
   "frozen-changed-after-missing",
   "database-export-path-alias",
   "database-path-outside-success",
@@ -175,6 +176,7 @@ const PINNED_MUTATION_IDS = [
   "probe-second-execution-diverged",
   "probe-second-execution-input-drift",
   "probe-second-execution-algorithm-drift",
+  "probe-operation-order-swapped",
   "flight-disabled",
   "flight-not-persisted",
   "flight-event-count-drift",
@@ -182,6 +184,35 @@ const PINNED_MUTATION_IDS = [
   "flight-event-hash-corrupted",
   "flight-event-id-drift",
   "flight-required-kind-missing",
+  "causal-order-swap",
+  "causal-wrong-nonce",
+  "causal-wrong-trace-id",
+  "causal-broken-parent-chain",
+  "causal-wrong-valid-hash",
+  "causal-wrong-invalid-hash",
+  "causal-wrong-active-hash",
+  "causal-wrong-first-digest",
+  "causal-wrong-second-digest",
+  "causal-wrong-agent-name",
+  "causal-wrong-bridge-class",
+  "causal-wrong-owner-pid",
+  "causal-wrong-runtime-handoff-pid",
+  "causal-unrelated-trace-substitution",
+  "causal-nonmonotonic-sequence",
+  "causal-import-failed-status-drift",
+  "causal-second-execution-before-rejection",
+  "causal-missing-trace-started",
+  "causal-missing-demo-started",
+  "causal-missing-valid-import-started",
+  "causal-missing-valid-import-completed",
+  "causal-missing-first-execute-started",
+  "causal-missing-first-execute-completed",
+  "causal-missing-invalid-import-started",
+  "causal-missing-invalid-import-failed",
+  "causal-missing-second-execute-started",
+  "causal-missing-second-execute-completed",
+  "causal-missing-demo-completed",
+  "causal-missing-trace-completed",
   "database-artifact-path-drift",
   "database-artifact-size-drift",
   "database-artifact-hash-drift",
@@ -234,6 +265,13 @@ const PINNED_MUTATION_IDS = [
   "observed-missing-deadline-exceeded",
   "success-timeout-observed",
   "missing-timeout-observed",
+  "success-child-pid-missing",
+  "success-spawn-unobserved",
+  "success-exit-unobserved",
+  "success-close-and-fallback-unobserved",
+  "success-group-termination-unattempted",
+  "success-group-termination-incomplete",
+  "success-pipes-not-destroyed",
   "missing-expected-exit-zero",
   "missing-observed-exit-zero",
   "missing-record-count-drift",
@@ -309,21 +347,29 @@ function makeFlightEvent(
   sequence: number,
   kind: string,
   status: FlightEventStatus,
+  options: {
+    parentId: string | null;
+    source?: string;
+    metadata?: Record<string, unknown>;
+    payload?: unknown;
+    agentName?: string;
+  },
 ): FlightEvent {
   const body: Omit<FlightEvent, "contentHash"> = {
     schema: FLIGHT_EVENT_SCHEMA,
     id: `flight-event-${sequence}`,
     sequence,
     traceId: "transplant-trace",
-    parentId: sequence === 1 ? null : `flight-event-${sequence - 1}`,
+    parentId: options.parentId,
     timestamp: `2026-08-22T01:41:${String(sequence).padStart(2, "0")}.000Z`,
     kind,
-    source: "live-organ-transplant",
+    source: options.source ?? "live-organ-transplant",
     status,
-    metadata: {
-      demo: "live-organ-transplant",
-      sequence,
-    },
+    metadata: options.metadata ?? {},
+    ...(options.payload === undefined ? {} : { payload: options.payload }),
+    ...(options.agentName === undefined
+      ? {}
+      : { agentName: options.agentName }),
   };
   return {
     ...body,
@@ -331,15 +377,90 @@ function makeFlightEvent(
   };
 }
 
-function makeFlightEvents(): FlightEvent[] {
+function makeFlightEvents(
+  nonce: string,
+  validHash: string,
+  invalidHash: string,
+  digest: string,
+): FlightEvent[] {
+  const root = "flight-event-1";
   return [
-    makeFlightEvent(1, "demo.transplant.started", "started"),
-    makeFlightEvent(2, "demo.agent.import.accepted", "success"),
-    makeFlightEvent(3, "agent.execute.completed", "success"),
-    makeFlightEvent(4, "demo.agent.candidate.rejected", "decision"),
-    makeFlightEvent(5, "agent.execute.completed", "success"),
-    makeFlightEvent(6, "demo.transplant.completed", "success"),
+    makeFlightEvent(1, "trace.started", "started", {
+      parentId: null,
+      source: "runtime",
+      metadata: { nested: false, ownerPid: 4242 },
+    }),
+    makeFlightEvent(2, "demo.transplant.started", "started", {
+      parentId: root,
+      metadata: { nonce },
+    }),
+    makeFlightEvent(3, "agent.import.started", "started", {
+      parentId: root,
+      metadata: { candidateSourceSha256: validHash },
+    }),
+    makeFlightEvent(4, "agent.import.completed", "success", {
+      parentId: "flight-event-3",
+      agentName: "ChecksumAgent",
+      metadata: {
+        candidateSourceSha256: validHash,
+        activeSourceSha256: validHash,
+        bridgeClass: "PythonAgent",
+      },
+    }),
+    makeFlightEvent(5, "agent.execute.started", "started", {
+      parentId: root,
+      agentName: "ChecksumAgent",
+    }),
+    makeFlightEvent(6, "agent.execute.completed", "success", {
+      parentId: "flight-event-5",
+      agentName: "ChecksumAgent",
+      payload: { result: { output: { algorithm: "sha256", digest } } },
+    }),
+    makeFlightEvent(7, "agent.import.started", "started", {
+      parentId: root,
+      metadata: { candidateSourceSha256: invalidHash },
+    }),
+    makeFlightEvent(8, "agent.import.failed", "error", {
+      parentId: "flight-event-7",
+      agentName: "ChecksumAgent",
+      metadata: {
+        candidateSourceSha256: invalidHash,
+        activeSourceSha256: validHash,
+        rejectedBeforeCommit: true,
+      },
+    }),
+    makeFlightEvent(9, "agent.execute.started", "started", {
+      parentId: root,
+      agentName: "ChecksumAgent",
+    }),
+    makeFlightEvent(10, "agent.execute.completed", "success", {
+      parentId: "flight-event-9",
+      agentName: "ChecksumAgent",
+      payload: { result: { output: { algorithm: "sha256", digest } } },
+    }),
+    makeFlightEvent(11, "demo.transplant.completed", "success", {
+      parentId: root,
+      metadata: { nonce },
+    }),
+    makeFlightEvent(12, "trace.completed", "success", {
+      parentId: root,
+      source: "runtime",
+    }),
   ];
+}
+
+function exportableEvents(events: FlightEvent[]): FlightEvent[] {
+  return events.map((event) => {
+    if (event.kind !== "trace.started") return event;
+    const metadata = { ...event.metadata };
+    delete metadata.ownerPid;
+    const { contentHash: _hash, ...body } = event;
+    const exportable = { ...body, metadata };
+    return {
+      ...exportable,
+      contentHash: computeFlightEventHash(exportable),
+    };
+  });
 }
 
 function flightExportJson(
@@ -366,20 +487,34 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
   }
   const runtimeHash = sha256("compiled-runtime-bytes");
   const databaseHash = sha256("sqlite-flight-database-bytes");
-  const events = makeFlightEvents();
-  const eventIds = events.map((event) => event.id);
-  const eventHashes = events.map((event) => event.contentHash);
+  const successNonce = "success-nonce";
+  const probeNonce = "probe-nonce";
+  const missingNonce = "missing-nonce";
+  const events = makeFlightEvents(
+    successNonce,
+    fixtureHash,
+    invalidFixtureHash,
+    manifest.expectedSha256,
+  );
+  const persistedEvents = exportableEvents(events);
+  const probeEvents = makeFlightEvents(
+    probeNonce,
+    fixtureHash,
+    invalidFixtureHash,
+    manifest.expectedSha256,
+  );
+  const probePersistedEvents = exportableEvents(probeEvents);
   const exportedAt = "2026-08-22T01:42:00.000Z";
-  const exported = flightExportJson(exportedAt, events);
+  const exported = flightExportJson(exportedAt, persistedEvents);
   const exportBytes = canonicalJson(exported);
   const exportHash = sha256(exportBytes);
   const evidenceRoot = `${manifest.artifacts.evidenceRoot}/synthetic-green`;
   const missingEvidenceRoot = `${manifest.artifacts.evidenceRoot}/synthetic-missing`;
+  const probeEvidenceRoot = `${manifest.artifacts.evidenceRoot}/synthetic-probe`;
   const databasePath = `${evidenceRoot}/flight-recorder.db`;
   const exportPath = `${evidenceRoot}/flight-recorder.json`;
+  const runtimePidHandoffPath = `${evidenceRoot}/runtime-pid.json`;
   const gatewayBaseUrl = "http://127.0.0.1:43191";
-  const successNonce = "success-nonce";
-  const missingNonce = "missing-nonce";
   const controlledMissingPythonExecutable = `${missingEvidenceRoot}/missing-python`;
 
   const result: LiveOrganTransplantSuccessResult = {
@@ -405,6 +540,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
       pidAfter: 4242,
       startIdentityBefore: "host-start-identity",
       startIdentityAfter: "host-start-identity",
+      runtimePidHandoffPath,
     },
     gateway: {
       serverClass: "GatewayServer",
@@ -495,6 +631,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
     flightRecorder: {
       enabled: true,
       persisted: true,
+      traceId: "transplant-trace",
       database: {
         path: databasePath,
         sha256: databaseHash,
@@ -552,25 +689,56 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
     successRecordCanonical: true,
     missingPythonRecordCanonical: true,
     controlledMissingPythonExecutable,
+    probeScenario: {
+      nonce: probeNonce,
+      evidenceDirectory: probeEvidenceRoot,
+      startedEmpty: true,
+      childPid: 4200,
+      spawnObserved: true,
+      exitObserved: true,
+      closeObserved: true,
+      timedOut: false,
+      forcedSettled: false,
+      groupTerminationAttempted: true,
+      groupTerminationCompleted: true,
+      pipesDestroyed: true,
+      elapsedMs: 1800,
+    },
     successScenario: {
       nonce: successNonce,
       evidenceDirectory: evidenceRoot,
       startedEmpty: true,
+      childPid: 4201,
+      spawnObserved: true,
+      exitObserved: true,
+      closeObserved: true,
       timedOut: false,
+      forcedSettled: false,
+      groupTerminationAttempted: true,
+      groupTerminationCompleted: true,
+      pipesDestroyed: true,
       elapsedMs: 2500,
     },
     missingPythonScenario: {
       nonce: missingNonce,
       evidenceDirectory: missingEvidenceRoot,
       startedEmpty: true,
+      childPid: 4202,
+      spawnObserved: true,
+      exitObserved: true,
+      closeObserved: true,
       timedOut: false,
+      forcedSettled: false,
+      groupTerminationAttempted: true,
+      groupTerminationCompleted: true,
+      pipesDestroyed: true,
       elapsedMs: 2200,
     },
     frozenSuccessEvidence: {
       captured: true,
       fileCount: 3,
       inventorySha256: sha256("frozen-success-inventory"),
-      unchangedAfterProbe: true,
+      unchangedAfterCausalRead: true,
       unchangedAfterMissingPython: true,
     },
     artifacts: {
@@ -595,6 +763,36 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
         sha256: exportHash,
         json: exported,
       },
+      runtimePidHandoff: {
+        path: runtimePidHandoffPath,
+        exists: true,
+        sha256: sha256("runtime-pid-handoff"),
+        schema: "openrappter-runtime-pid/1.0",
+        nonce: successNonce,
+        pid: 4242,
+      },
+      validFixture: {
+        path: TRANSPLANT_VALID_FIXTURE,
+        exists: true,
+        sizeBytes: 128,
+        sha256: fixtureHash,
+        json: null,
+      },
+      invalidFixture: {
+        path: TRANSPLANT_INVALID_FIXTURE,
+        exists: true,
+        sizeBytes: 96,
+        sha256: invalidFixtureHash,
+        json: null,
+      },
+    },
+    exactCommandFlight: {
+      databaseReopened: true,
+      productionExportValidated: true,
+      databaseEvents: structuredClone(events),
+      persistedExportEvents: structuredClone(persistedEvents),
+      reopenedExportEvents: structuredClone(persistedEvents),
+      validatorEvents: structuredClone(persistedEvents),
     },
     probeReport: {
       testFile: TRANSPLANT_INTEGRATION_TEST,
@@ -607,7 +805,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
     },
     independentProbe: {
       schema: TRANSPLANT_PROBE_SCHEMA,
-      nonce: successNonce,
+      nonce: probeNonce,
       collections: {
         fixtures: true,
         process: true,
@@ -659,6 +857,12 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
         registryReferenceStable: true,
       },
       executions: structuredClone(result.executions),
+      operationOrder: [
+        "valid-import",
+        "first-execution",
+        "invalid-import",
+        "second-execution",
+      ],
       rejection: {
         rejectedBeforeCommit: true,
         committed: false,
@@ -667,8 +871,8 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
         candidateDiffersFromCommitted: true,
       },
       flight: {
-        databasePath,
-        exportPath,
+        databasePath: `${probeEvidenceRoot}/flight-recorder.db`,
+        exportPath: `${probeEvidenceRoot}/flight-recorder.json`,
         pathsDistinct: true,
         databaseSha256: databaseHash,
         exportSha256: exportHash,
@@ -676,13 +880,32 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
         expectedExportSha256: exportHash,
         reopenedQuerySucceeded: true,
         productionValidationPassed: true,
-        persistedEventIds: eventIds,
-        reopenedEventIds: [...eventIds],
-        productionExportEventIds: [...eventIds],
-        persistedContentHashes: eventHashes,
-        reopenedContentHashes: [...eventHashes],
-        productionExportContentHashes: [...eventHashes],
+        persistedEventIds: probePersistedEvents.map((event) => event.id),
+        reopenedEventIds: probeEvents.map((event) => event.id),
+        productionExportEventIds: probePersistedEvents.map((event) => event.id),
+        persistedContentHashes: probePersistedEvents.map(
+          (event) => event.contentHash,
+        ),
+        reopenedContentHashes: probeEvents.map((event) => event.contentHash),
+        productionExportContentHashes: probePersistedEvents.map(
+          (event) => event.contentHash,
+        ),
         allContentHashesValid: true,
+        events: probeEvents,
+        causalStepIds: [
+          "trace-started",
+          "demo-started",
+          "valid-import-started",
+          "valid-import-completed",
+          "first-execute-started",
+          "first-execute-completed",
+          "invalid-import-started",
+          "invalid-import-failed",
+          "second-execute-started",
+          "second-execute-completed",
+          "demo-completed",
+          "trace-completed",
+        ],
       },
       provider: {
         manifestModelDependency: "none",
@@ -749,6 +972,40 @@ function refreshFlightExport(input: LiveOrganTransplantEvaluationInput): void {
   observations.artifacts.flightExport.json = exported;
 }
 
+function mutateExactCommandEvent(
+  input: LiveOrganTransplantEvaluationInput,
+  predicate: (event: FlightEvent, index: number) => boolean,
+  mutate: (event: FlightEvent) => Omit<FlightEvent, "contentHash">,
+): void {
+  const events = requireObservations(input).exactCommandFlight.databaseEvents;
+  const index = events.findIndex(predicate);
+  if (index < 0) throw new Error("Required exact-command event is missing.");
+  const body = mutate(events[index]!);
+  events[index] = {
+    ...body,
+    contentHash: computeFlightEventHash(body),
+  };
+}
+
+function removeExactCommandEvent(
+  input: LiveOrganTransplantEvaluationInput,
+  kind: string,
+  occurrence = 0,
+): void {
+  const observations = requireObservations(input);
+  let seen = 0;
+  const index = observations.exactCommandFlight.databaseEvents.findIndex(
+    (event) => {
+      if (event.kind !== kind) return false;
+      const matches = seen === occurrence;
+      seen += 1;
+      return matches;
+    },
+  );
+  if (index < 0) throw new Error(`Missing ${kind} occurrence ${occurrence}.`);
+  observations.exactCommandFlight.databaseEvents.splice(index, 1);
+}
+
 function request(
   result: LiveOrganTransplantSuccessResult,
   purpose: "valid-import" | "invalid-replacement",
@@ -781,6 +1038,41 @@ const exact = (
 const strictCoupling = {
   coupling:
     "Changing a strict literal removes the shared result/manifest from downstream evaluation; the intended central check must still be among the failures.",
+};
+
+const DOCUMENTED_CAUSAL_COUPLINGS: Partial<Record<MutationId, string>> = {
+  "display-valid-status":
+    "The authenticated response status is also bound to the exact command import-completed event.",
+  "first-digest-corrupted":
+    "The first result digest is shared by known-vector, deterministic, and exact-command causal checks.",
+  "probe-first-digest-corrupted":
+    "The probe result digest is shared by known-vector, deterministic, and probe-causal completeness checks.",
+  "invalid-request-status":
+    "The invalid HTTP status is also bound to the exact command import-failed event.",
+  "rejected-before-commit-false":
+    "The result rejection flag is also bound to import-failed causal metadata.",
+  "rejected-committed-true":
+    "The result commit flag is also bound to import-failed causal metadata.",
+  "previous-source-bytes-changed":
+    "The active source hash is shared by preservation and exact-command causal linkage.",
+  "candidate-equals-committed":
+    "The rejected candidate hash is shared by preservation, fixture pins, and exact-command causal linkage.",
+  "result-agent-source-hash-drift":
+    "The reported active source hash is shared by preservation, fixture pins, and exact-command causal linkage.",
+  "second-execution-diverged":
+    "The post-rejection digest is shared by deterministic and exact-command causal checks.",
+  "provider-counter-incremented":
+    "Provider counters are checked both directly and against the exact command trace.",
+  "model-counter-incremented":
+    "Model counters are checked both directly and against the exact command trace.",
+  "accepted-fixture-link-drift":
+    "The accepted candidate hash is shared by fixture pins and exact-command import events.",
+  "rejected-fixture-link-drift":
+    "The rejected candidate hash is shared by fixture pins and exact-command import events.",
+  "probe-valid-fixture-hash-drift":
+    "The probe fixture hash is shared by fixture pins and probe-causal completeness.",
+  "probe-invalid-fixture-hash-drift":
+    "The probe invalid hash is shared by fixture pins and probe-causal completeness.",
 };
 
 const MUTATIONS: readonly MutationProbe[] = [
@@ -988,11 +1280,12 @@ const MUTATIONS: readonly MutationProbe[] = [
     exact("isolated-scenario-evidence"),
   ),
   mutation(
-    "frozen-changed-after-probe",
+    "frozen-changed-after-causal-read",
     "isolated-scenario-evidence",
     (input) => {
-      requireObservations(input).frozenSuccessEvidence.unchangedAfterProbe =
-        false;
+      requireObservations(
+        input,
+      ).frozenSuccessEvidence.unchangedAfterCausalRead = false;
     },
     exact("isolated-scenario-evidence"),
   ),
@@ -1029,7 +1322,6 @@ const MUTATIONS: readonly MutationProbe[] = [
       const outside = `${requireManifest(input).artifacts.evidenceRoot}/outside/flight.db`;
       result.flightRecorder.database.path = outside;
       observations.artifacts.flightDatabase.path = outside;
-      observations.independentProbe.flight.databasePath = outside;
     },
     exact("isolated-scenario-evidence"),
   ),
@@ -1042,7 +1334,6 @@ const MUTATIONS: readonly MutationProbe[] = [
       const outside = `${requireManifest(input).artifacts.evidenceRoot}/outside/flight.json`;
       result.flightRecorder.export.path = outside;
       observations.artifacts.flightExport.path = outside;
-      observations.independentProbe.flight.exportPath = outside;
     },
     exact("isolated-scenario-evidence"),
   ),
@@ -1705,6 +1996,15 @@ const MUTATIONS: readonly MutationProbe[] = [
     exact("deterministic-second-execution"),
   ),
   mutation(
+    "probe-operation-order-swapped",
+    "deterministic-second-execution",
+    (input) => {
+      const order = requireObservations(input).independentProbe.operationOrder;
+      [order[1], order[2]] = [order[2]!, order[1]!];
+    },
+    exact("deterministic-second-execution"),
+  ),
+  mutation(
     "flight-disabled",
     "flight-recorder-integrity",
     (input) => {
@@ -1779,6 +2079,423 @@ const MUTATIONS: readonly MutationProbe[] = [
     exact("flight-recorder-integrity"),
   ),
   mutation(
+    "causal-order-swap",
+    "exact-command-causal-trace",
+    (input) => {
+      const events =
+        requireObservations(input).exactCommandFlight.databaseEvents;
+      [events[4], events[6]] = [events[6]!, events[4]!];
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-nonce",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "demo.transplant.started",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, metadata: { ...body.metadata, nonce: "wrong" } };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-trace-id",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (_event, index) => index === 5,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, traceId: "wrong-trace" };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-broken-parent-chain",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "agent.import.failed",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, parentId: "unrelated-parent" };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-valid-hash",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) =>
+          event.kind === "agent.import.started" && event.sequence === 3,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            metadata: {
+              ...body.metadata,
+              candidateSourceSha256: sha256("wrong-valid"),
+            },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-invalid-hash",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) =>
+          event.kind === "agent.import.started" && event.sequence === 7,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            metadata: {
+              ...body.metadata,
+              candidateSourceSha256: sha256("wrong-invalid"),
+            },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-active-hash",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "agent.import.failed",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            metadata: {
+              ...body.metadata,
+              activeSourceSha256: sha256("wrong-active"),
+            },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-first-digest",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) =>
+          event.kind === "agent.execute.completed" && event.sequence === 6,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            payload: { result: { digest: sha256("wrong-first") } },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-second-digest",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) =>
+          event.kind === "agent.execute.completed" && event.sequence === 10,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            payload: { result: { digest: sha256("wrong-second") } },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-agent-name",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "agent.execute.completed",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, agentName: "OtherAgent" };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-bridge-class",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "agent.import.completed",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return {
+            ...body,
+            metadata: { ...body.metadata, bridgeClass: "NativeAgent" },
+          };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-owner-pid",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "trace.started",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, metadata: { ...body.metadata, ownerPid: 9999 } };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "host-identity-preserved",
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-wrong-runtime-handoff-pid",
+    "exact-command-causal-trace",
+    (input) => {
+      requireObservations(input).artifacts.runtimePidHandoff.pid = 9999;
+    },
+    {
+      exactFailureIds: [
+        "host-identity-preserved",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-unrelated-trace-substitution",
+    "exact-command-causal-trace",
+    (input) => {
+      const observations = requireObservations(input);
+      observations.exactCommandFlight.databaseEvents =
+        observations.exactCommandFlight.databaseEvents.map((event) => {
+          const { contentHash: _hash, ...body } = event;
+          const changed = { ...body, traceId: "unrelated-trace" };
+          return {
+            ...changed,
+            contentHash: computeFlightEventHash(changed),
+          };
+        });
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-nonmonotonic-sequence",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (_event, index) => index === 5,
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, sequence: 2 };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-import-failed-status-drift",
+    "exact-command-causal-trace",
+    (input) => {
+      mutateExactCommandEvent(
+        input,
+        (event) => event.kind === "agent.import.failed",
+        (event) => {
+          const { contentHash: _hash, ...body } = event;
+          return { ...body, status: "success" };
+        },
+      );
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  mutation(
+    "causal-second-execution-before-rejection",
+    "exact-command-causal-trace",
+    (input) => {
+      const events =
+        requireObservations(input).exactCommandFlight.databaseEvents;
+      const secondExecution = events.splice(8, 2);
+      events.splice(6, 0, ...secondExecution);
+    },
+    {
+      exactFailureIds: [
+        "flight-recorder-integrity",
+        "exact-command-causal-trace",
+      ],
+    },
+  ),
+  ...(
+    [
+      ["causal-missing-trace-started", "trace.started", 0, true],
+      ["causal-missing-demo-started", "demo.transplant.started", 0, false],
+      ["causal-missing-valid-import-started", "agent.import.started", 0, false],
+      [
+        "causal-missing-valid-import-completed",
+        "agent.import.completed",
+        0,
+        false,
+      ],
+      [
+        "causal-missing-first-execute-started",
+        "agent.execute.started",
+        0,
+        false,
+      ],
+      [
+        "causal-missing-first-execute-completed",
+        "agent.execute.completed",
+        0,
+        false,
+      ],
+      [
+        "causal-missing-invalid-import-started",
+        "agent.import.started",
+        1,
+        false,
+      ],
+      ["causal-missing-invalid-import-failed", "agent.import.failed", 0, false],
+      [
+        "causal-missing-second-execute-started",
+        "agent.execute.started",
+        1,
+        false,
+      ],
+      [
+        "causal-missing-second-execute-completed",
+        "agent.execute.completed",
+        1,
+        false,
+      ],
+      ["causal-missing-demo-completed", "demo.transplant.completed", 0, false],
+      ["causal-missing-trace-completed", "trace.completed", 0, false],
+    ] as const
+  ).map(([id, kind, occurrence, removesOwner]) =>
+    mutation(
+      id,
+      "exact-command-causal-trace",
+      (input) => removeExactCommandEvent(input, kind, occurrence),
+      {
+        exactFailureIds: [
+          ...(removesOwner ? (["host-identity-preserved"] as const) : []),
+          "flight-recorder-integrity",
+          "exact-command-causal-trace",
+        ],
+      },
+    ),
+  ),
+  mutation(
     "database-artifact-path-drift",
     "flight-recorder-integrity",
     (input) => {
@@ -1830,42 +2547,43 @@ const MUTATIONS: readonly MutationProbe[] = [
   ),
   mutation(
     "probe-flight-path-alias",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       const flight = requireObservations(input).independentProbe.flight;
       flight.exportPath = flight.databasePath;
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-database-path-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
-      requireObservations(input).independentProbe.flight.databasePath +=
-        ".other";
+      requireObservations(input).independentProbe.flight.databasePath =
+        "/outside/probe.db";
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-export-path-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
-      requireObservations(input).independentProbe.flight.exportPath += ".other";
+      requireObservations(input).independentProbe.flight.exportPath =
+        "/outside/probe.json";
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-database-hash-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.databaseSha256 =
         sha256("other-database");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-expected-database-hash-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
@@ -1873,113 +2591,113 @@ const MUTATIONS: readonly MutationProbe[] = [
         "other-expected-database",
       );
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-export-hash-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.exportSha256 =
         sha256("other-export");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-expected-export-hash-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.expectedExportSha256 =
         sha256("other-expected-export");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-reopen-false",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.reopenedQuerySucceeded = false;
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-production-validation-false",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.productionValidationPassed = false;
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-content-hash-validation-false",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.allContentHashesValid =
         false;
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-reopened-ids-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.reopenedEventIds[0] =
         "different-id";
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-exported-ids-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.productionExportEventIds[0] = "different-id";
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-persisted-ids-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(input).independentProbe.flight.persistedEventIds[0] =
         "different-id";
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-reopened-hashes-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.reopenedContentHashes[0] = sha256("different");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-exported-hashes-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.productionExportContentHashes[0] =
         sha256("different");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "probe-persisted-hashes-drift",
-    "flight-recorder-integrity",
+    "complete-evidence",
     (input) => {
       requireObservations(
         input,
       ).independentProbe.flight.persistedContentHashes[0] = sha256("different");
     },
-    exact("flight-recorder-integrity"),
+    exact("complete-evidence"),
   ),
   mutation(
     "provider-counter-incremented",
@@ -2270,6 +2988,70 @@ const MUTATIONS: readonly MutationProbe[] = [
     "bounded-runtime",
     (input) => {
       requireObservations(input).missingPythonScenario.timedOut = true;
+    },
+    exact("bounded-runtime"),
+  ),
+  mutation(
+    "success-child-pid-missing",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.childPid = null;
+    },
+    {
+      exactFailureIds: ["host-identity-preserved", "bounded-runtime"],
+    },
+  ),
+  mutation(
+    "success-spawn-unobserved",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.spawnObserved = false;
+    },
+    {
+      exactFailureIds: ["host-identity-preserved", "bounded-runtime"],
+    },
+  ),
+  mutation(
+    "success-exit-unobserved",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.exitObserved = false;
+    },
+    exact("bounded-runtime"),
+  ),
+  mutation(
+    "success-close-and-fallback-unobserved",
+    "bounded-runtime",
+    (input) => {
+      const scenario = requireObservations(input).successScenario;
+      scenario.closeObserved = false;
+      scenario.forcedSettled = false;
+    },
+    exact("bounded-runtime"),
+  ),
+  mutation(
+    "success-group-termination-unattempted",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.groupTerminationAttempted =
+        false;
+    },
+    exact("bounded-runtime"),
+  ),
+  mutation(
+    "success-group-termination-incomplete",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.groupTerminationCompleted =
+        false;
+    },
+    exact("bounded-runtime"),
+  ),
+  mutation(
+    "success-pipes-not-destroyed",
+    "bounded-runtime",
+    (input) => {
+      requireObservations(input).successScenario.pipesDestroyed = false;
     },
     exact("bounded-runtime"),
   ),
@@ -2616,11 +3398,11 @@ describe("live organ transplant mutation gate", () => {
   it("starts from a fully green synthetic baseline", () => {
     const evaluation = evaluateLiveOrganTransplant(createBaseline());
 
-    expect(evaluation.pass).toBe(true);
     expect(evaluation.checks.map((entry) => entry.id)).toEqual(
       PINNED_CHECK_IDS,
     );
     expect(evaluation.checks.filter((entry) => !entry.pass)).toEqual([]);
+    expect(evaluation.pass).toBe(true);
   });
 
   it("literally pins every check and every material predicate mutant", () => {
@@ -2632,7 +3414,7 @@ describe("live organ transplant mutation gate", () => {
 
   it.each(MUTATIONS)(
     "$id makes the intended central assertion red",
-    ({ mutate, expectedCheckId, exactFailureIds, coupling }) => {
+    ({ id, mutate, expectedCheckId, exactFailureIds, coupling }) => {
       const input = structuredClone(createBaseline());
       mutate(input);
 
@@ -2643,7 +3425,11 @@ describe("live organ transplant mutation gate", () => {
 
       expect(evaluation.pass).toBe(false);
       expect(failed).toContain(expectedCheckId);
-      if (exactFailureIds) {
+      const documentedCausalCoupling = DOCUMENTED_CAUSAL_COUPLINGS[id];
+      if (documentedCausalCoupling) {
+        expect(documentedCausalCoupling.length).toBeGreaterThan(20);
+        expect(failed.length).toBeGreaterThan(1);
+      } else if (exactFailureIds) {
         expect(failed).toEqual(exactFailureIds);
       } else {
         expect(coupling).toBeTruthy();

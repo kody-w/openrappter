@@ -37,13 +37,16 @@
   "artifacts": {
     "evidenceRoot": ".test-scratch/live-organ-transplant",
     "directoryEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY",
-    "nonceEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE"
+    "nonceEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE",
+    "runtimePidHandoffEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_RUNTIME_PID_HANDOFF",
+    "runtimePidHandoffFilename": "runtime-pid.json",
+    "runtimePidHandoffOpenFlag": "wx"
   },
   "claims": [
     "An authenticated loopback POST to the production /agents/import route registers a bundled Python-backed ChecksumAgent in the live AgentRegistry.",
     "The same TypeScript host process and AgentRegistry resolve both deterministic executions.",
     "A contract-invalid candidate is rejected before commit and the previous generation's source bytes and live registry object remain active.",
-    "A gate-owned observer reopens persisted Flight Recorder evidence through production ledger APIs and verifies exact exported IDs and hashes.",
+    "The gate reopens the exact command's single causal Flight trace through production ledger APIs and binds its owner PID, nonce, fixture hashes, import outcomes, execution digests, IDs, parents, and export hashes.",
     "Python execution is not sandboxed and the preservation boundary is file-only."
   ],
   "forbiddenClaims": [
@@ -54,6 +57,9 @@
     "replay guarantees",
     "air-gap guarantees",
     "enforced egress controls",
+    "escaped-process prevention",
+    "enforced process containment",
+    "process containment guarantees",
     "Python sandboxing",
     "arbitrary-Python safety"
   ]

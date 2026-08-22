@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   REQUIRED_TRANSPLANT_CHECK_IDS,
+  REQUIRED_TRANSPLANT_CAUSAL_STEPS,
   REQUIRED_TRANSPLANT_PROBE_TEST_NAMES,
   TRANSPLANT_RESULT_PREFIX,
   TRANSPLANT_RESULT_SCHEMA,
@@ -75,6 +76,7 @@ const PINNED_CHECK_IDS = [
   "previous-generation-preserved",
   "deterministic-second-execution",
   "flight-recorder-integrity",
+  "exact-command-causal-trace",
   "no-provider-model-events",
   "loopback-gateway-requests",
   "unsandboxed-file-boundary",
@@ -94,6 +96,21 @@ const PINNED_PROBE_TEST_NAMES = [
   "live organ transplant independent observer rejects the invalid replacement before committed bytes or live identity change",
   "live organ transplant independent observer reopens the database with the production ledger and exactly matches the production export",
   "live organ transplant independent observer observes loopback gateway requests and no provider or model activity",
+] as const;
+
+const PINNED_CAUSAL_STEP_IDS = [
+  "trace-started",
+  "demo-started",
+  "valid-import-started",
+  "valid-import-completed",
+  "first-execute-started",
+  "first-execute-completed",
+  "invalid-import-started",
+  "invalid-import-failed",
+  "second-execute-started",
+  "second-execute-completed",
+  "demo-completed",
+  "trace-completed",
 ] as const;
 
 function controlledMissingPythonResult(): LiveOrganTransplantMissingPythonResult {
@@ -143,6 +160,7 @@ describe("live organ transplant manifest", () => {
       demoMaxElapsedMs: 30_000,
     });
     expect(manifestJson.missingPython.expectedExitCode).toBe(69);
+    expect(manifestJson.artifacts.runtimePidHandoffOpenFlag).toBe("wx");
   });
 
   it("keeps the literal command identical to the package scripts", () => {
@@ -160,6 +178,9 @@ describe("live organ transplant manifest", () => {
     );
     expect(packageScripts["gate:transplant"]).toBe(
       "node ../tools/live-organ-transplant-gate.mjs",
+    );
+    expect(packageScripts["test:transplant:gate"]).toContain(
+      "live-organ-transplant-gate-orchestration.test.ts",
     );
   });
 
@@ -189,6 +210,9 @@ describe("live organ transplant manifest", () => {
       "replay guarantees",
       "air-gap guarantees",
       "enforced egress controls",
+      "escaped-process prevention",
+      "enforced process containment",
+      "process containment guarantees",
       "Python sandboxing",
       "arbitrary-Python safety",
     ]);
@@ -266,6 +290,9 @@ describe("live organ transplant evaluator surface", () => {
     expect(REQUIRED_TRANSPLANT_CHECK_IDS).toEqual(PINNED_CHECK_IDS);
     expect(REQUIRED_TRANSPLANT_PROBE_TEST_NAMES).toEqual(
       PINNED_PROBE_TEST_NAMES,
+    );
+    expect(REQUIRED_TRANSPLANT_CAUSAL_STEPS.map((step) => step.id)).toEqual(
+      PINNED_CAUSAL_STEP_IDS,
     );
 
     const evaluation = evaluateLiveOrganTransplant({

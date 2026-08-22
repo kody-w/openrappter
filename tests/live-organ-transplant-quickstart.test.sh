@@ -247,6 +247,14 @@ else
 fi
 assert_contains "$readme_source" '[![Node.js 20.9+]' \
   "README advertises the package engine minimum"
+scoped_data_copy='**No extra API keys. No new accounts. No additional monthly bills. Memory and config stay local; prompts and context follow your configured model/provider.**'
+assert_contains "$readme_source" "$scoped_data_copy" \
+  "README pins the mode-scoped data promise"
+if [[ "$readme_source" != *"Your data stays local."* ]]; then
+  pass "README does not make the absolute local-data claim"
+else
+  fail "README does not make the absolute local-data claim"
+fi
 
 fresh_clone_command='```bash
 git clone https://github.com/kody-w/openrappter.git

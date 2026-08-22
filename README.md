@@ -4,7 +4,7 @@
 
 ### AI agents powered by your existing GitHub Copilot subscription
 
-**No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
+**No extra API keys. No new accounts. No additional monthly bills. Memory and config stay local; prompts and context follow your configured model/provider.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)

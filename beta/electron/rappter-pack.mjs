@@ -14,6 +14,8 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { exactRapp1Success } from "./rapp1-chat-envelope.mjs";
+
 export const RAPPTER_PACK_CONFIG_SCHEMA = "rappter-pack/1.0";
 export const RAPPTER_PACK_MATRIX_SCHEMA = "rappter-pack-matrix/1.0";
 export const RAPPTER_PACK_REPORT_SCHEMA = "rappter-pack-report/1.0";
@@ -35,11 +37,45 @@ const CHAT_ENVELOPE_TYPES = new Map([
   ["content", "string"],
   ["session_id", "string"],
   ["sessionId", "string"],
-  ["agent_logs", "string"],
+  ["agent_logs", "string[]"],
   ["voice_mode", "boolean"],
   ["model", "string"],
   ["requested_model", "string"],
 ]);
+
+function chatEnvelopeFieldMatches(field, value) {
+  const expected = CHAT_ENVELOPE_TYPES.get(field);
+  if (expected === "string[]") {
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+  }
+  if (field === "session_id") {
+    return typeof value === "string" && value.length > 0;
+  }
+  return typeof value === expected;
+}
+
+function chatEnvelopeDifferences(envelope, requiredFields) {
+  const differences = [];
+  if (!requiredFields.length) return differences;
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return ["missing observed /chat envelope"];
+  }
+  for (const field of requiredFields) {
+    if (!Object.hasOwn(envelope, field)) {
+      differences.push(`missing /chat envelope field ${field}`);
+    } else if (
+      CHAT_ENVELOPE_TYPES.has(field)
+      && !chatEnvelopeFieldMatches(field, envelope[field])
+    ) {
+      differences.push(
+        `/chat envelope field ${field} must be ${
+          CHAT_ENVELOPE_TYPES.get(field)
+        }`,
+      );
+    }
+  }
+  return differences;
+}
 
 function privateDirectory(directory) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -363,11 +399,12 @@ export function evaluatePackExpectation(result, expectedValue) {
   if (result?.refused === true) {
     differences.push("node returned an HTTP refusal");
   }
-  if (
-    Number.isInteger(result?.http_status)
-    && (result.http_status < 200 || result.http_status >= 300)
-  ) {
-    differences.push(`/chat returned HTTP ${result.http_status}`);
+  if (!Number.isInteger(result?.http_status) || result.http_status !== 200) {
+    differences.push(
+      `/chat requires HTTP 200; observed ${
+        Number.isInteger(result?.http_status) ? result.http_status : "missing-or-invalid"
+      }`,
+    );
   }
   const duration = Number(result?.duration_ms);
   if (!Number.isFinite(duration) || duration < 0) {
@@ -379,26 +416,10 @@ export function evaluatePackExpectation(result, expectedValue) {
   for (const needle of expected.excludes) {
     if (response.includes(needle)) differences.push(`contained excluded text ${needle}`);
   }
-  if (expected.required_envelope_fields.length) {
-    if (!result?.envelope || typeof result.envelope !== "object") {
-      differences.push("missing observed /chat envelope");
-    } else {
-      for (const field of expected.required_envelope_fields) {
-        if (!Object.hasOwn(result.envelope, field)) {
-          differences.push(`missing /chat envelope field ${field}`);
-        } else if (
-          CHAT_ENVELOPE_TYPES.has(field)
-          && typeof result.envelope[field] !== CHAT_ENVELOPE_TYPES.get(field)
-        ) {
-          differences.push(
-            `/chat envelope field ${field} must be ${
-              CHAT_ENVELOPE_TYPES.get(field)
-            }`,
-          );
-        }
-      }
-    }
-  }
+  differences.push(...chatEnvelopeDifferences(
+    result?.envelope,
+    expected.required_envelope_fields,
+  ));
   if (
     expected.max_duration_ms !== undefined
     && duration > expected.max_duration_ms
@@ -450,7 +471,7 @@ function normalizedResult(node, result, expected) {
   };
 }
 
-function normalizedRelayIntermediate(node, result, maxDurationMs) {
+function normalizedRelayIntermediate(node, result, expected) {
   const rawDuration = Number(result?.duration_ms);
   const duration = Number.isFinite(rawDuration) && rawDuration >= 0
     ? rawDuration
@@ -458,9 +479,24 @@ function normalizedRelayIntermediate(node, result, maxDurationMs) {
   const differences = [];
   if (result?.ok !== true) differences.push("transport or node did not return success");
   if (result?.refused === true) differences.push("node returned an HTTP refusal");
+  if (!Number.isInteger(result?.http_status) || result.http_status !== 200) {
+    differences.push(
+      `/chat requires HTTP 200; observed ${
+        Number.isInteger(result?.http_status) ? result.http_status : "missing-or-invalid"
+      }`,
+    );
+  }
   if (duration === null) differences.push("node returned an invalid duration");
-  if (maxDurationMs !== undefined && duration !== null && duration > maxDurationMs) {
-    differences.push(`duration ${duration}ms exceeded ${maxDurationMs}ms`);
+  differences.push(...chatEnvelopeDifferences(
+    result?.envelope,
+    expected.required_envelope_fields,
+  ));
+  if (
+    expected.max_duration_ms !== undefined
+    && duration !== null
+    && duration > expected.max_duration_ms
+  ) {
+    differences.push(`duration ${duration}ms exceeded ${expected.max_duration_ms}ms`);
   }
   return {
     node_id: node.id,
@@ -632,7 +668,7 @@ export async function runPackMatrix({
             : normalizedRelayIntermediate(
                 node,
                 result,
-                entry.expected.max_duration_ms,
+                entry.expected,
               );
           results.push({
             ...normalized,
@@ -802,8 +838,8 @@ export async function runPackMatrix({
     wire: {
       method: "POST",
       path: "/chat",
-      adapter: "none",
-      upstream_contract: "preserved",
+      adapter: "legacy-success-envelope-to-rapp1",
+      upstream_contract: "normalized",
       neighborhood_protocol: "not-claimed",
     },
     pack_id: config.pack_id,
@@ -1021,10 +1057,12 @@ export async function dispatchPackNode(nodeValue, request, {
         ...(secret ? { "X-Brainstem-Secret": secret } : {}),
       },
       ...(request.action === "health" ? {} : {
-        body: JSON.stringify({
-          user_input: request.prompt,
-          conversation_history: [],
-        }),
+        body: JSON.stringify(node.kind === "openrappter"
+          ? { user_input: request.prompt }
+          : {
+              user_input: request.prompt,
+              conversation_history: [],
+            }),
       }),
       signal: signal
         ? AbortSignal.any([signal, timeoutSignal])
@@ -1037,9 +1075,16 @@ export async function dispatchPackNode(nodeValue, request, {
     } catch {
       // A non-JSON HTTP refusal remains a refusal with its body retained.
     }
-    const envelope = body && typeof body === "object" && !Array.isArray(body)
+    let envelope = body && typeof body === "object" && !Array.isArray(body)
       ? body
       : null;
+    if (request.action === "chat" && response.ok && envelope) {
+      try {
+        envelope = exactRapp1Success(envelope);
+      } catch {
+        // Keep malformed success evidence so the expectation gate can reject it.
+      }
+    }
     return {
       ok: true,
       response: request.action === "health"

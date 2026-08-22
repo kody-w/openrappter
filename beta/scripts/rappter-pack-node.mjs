@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { exactRapp1Success } from "../electron/rapp1-chat-envelope.mjs";
+
 export const MAX_PACK_NODE_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 async function boundedText(response) {
@@ -36,9 +38,16 @@ export async function packNodeResponse(response, action) {
   } catch {
     // Preserve non-JSON refusals as bounded text evidence.
   }
-  const envelope = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+  let envelope = parsed && typeof parsed === "object" && !Array.isArray(parsed)
     ? parsed
     : null;
+  if (action === "chat" && response.ok && envelope) {
+    try {
+      envelope = exactRapp1Success(envelope);
+    } catch {
+      // Keep malformed success evidence so the expectation gate can reject it.
+    }
+  }
   return {
     ok: true,
     response: action === "health"
@@ -127,7 +136,6 @@ async function openRappter(request) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       user_input: request.prompt,
-      conversation_history: [],
     }),
     signal: AbortSignal.timeout(5 * 60 * 1000),
   });

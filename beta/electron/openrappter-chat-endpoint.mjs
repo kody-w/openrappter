@@ -11,6 +11,8 @@ import {
 import http from "node:http";
 import path from "node:path";
 
+import { exactRapp1Success } from "./rapp1-chat-envelope.mjs";
+
 export const OPENRAPPTER_CHAT_ENDPOINT_SCHEMA = "openrappter-chat-endpoint/1.0";
 export const OPENRAPPTER_CONTROL_PATH = "/__openrappter/control";
 const MAX_CHAT_BYTES = 1024 * 1024;
@@ -56,6 +58,33 @@ function removeOwnedMetadata(file, token) {
 function jsonError(response, status, code) {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify({ error: { code, step: null } }));
+}
+
+function exactChatRequest(bytes) {
+  const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const value = JSON.parse(source);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("invalid request");
+  }
+  if (typeof value.user_input !== "string" || !value.user_input.trim()) {
+    throw new Error("invalid user_input");
+  }
+  const request = { user_input: value.user_input };
+  for (const key of ["session_id", "idempotency_key"]) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== "string" || !value[key]) {
+        throw new Error(`invalid ${key}`);
+      }
+      request[key] = value[key];
+    }
+  }
+  return Buffer.from(JSON.stringify(request));
+}
+
+function exactChatSuccess(bytes) {
+  const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const value = JSON.parse(source);
+  return Buffer.from(JSON.stringify(exactRapp1Success(value)));
 }
 
 export async function startOpenRappterChatEndpoint({
@@ -172,6 +201,13 @@ export async function startOpenRappterChatEndpoint({
     request.on("end", () => {
       if (size > MAX_CHAT_BYTES || response.writableEnded) return;
       void (async () => {
+        let exactRequest;
+        try {
+          exactRequest = exactChatRequest(Buffer.concat(chunks));
+        } catch {
+          jsonError(response, 422, "invalid-request-envelope");
+          return;
+        }
         let target;
         try {
           target = loopbackTarget(resolveTarget());
@@ -187,13 +223,28 @@ export async function startOpenRappterChatEndpoint({
           const upstream = await fetchImpl(`${target}/chat`, {
             method: "POST",
             headers: {
-              "content-type": request.headers["content-type"]
-                || "application/json",
+              "content-type": "application/json",
             },
-            body: Buffer.concat(chunks),
+            body: exactRequest,
             signal: AbortSignal.timeout(5 * 60 * 1000),
           });
           const bytes = Buffer.from(await upstream.arrayBuffer());
+          if (upstream.ok) {
+            if (upstream.status !== 200) {
+              jsonError(response, 502, "invalid-upstream-envelope");
+              return;
+            }
+            let exactSuccess;
+            try {
+              exactSuccess = exactChatSuccess(bytes);
+            } catch {
+              jsonError(response, 502, "invalid-upstream-envelope");
+              return;
+            }
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(exactSuccess);
+            return;
+          }
           response.writeHead(upstream.status, {
             "content-type": upstream.headers.get("content-type")
               || "application/json",

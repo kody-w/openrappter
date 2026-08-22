@@ -28,7 +28,6 @@ async function chat(metadata, prompt) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       user_input: prompt,
-      conversation_history: [],
     }),
   });
   assert.equal(response.status, 200);

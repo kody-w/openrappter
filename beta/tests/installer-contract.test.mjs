@@ -115,7 +115,7 @@ test("OpenRappter is the primary customer-facing application identity", () => {
     [{ provider: "github", owner: "kody-w", repo: "openrappter" }],
     "electron-builder needs somewhere to publish, or a release can only be made by hand",
   );
-  assert.equal(packageJson.version, "0.1.0-beta.9");
+  assert.equal(packageJson.version, "0.1.0-beta.10");
   assert.equal(readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim(), packageJson.version);
   for (const installer of [unix, windows]) {
     assert.match(installer, /openrappter-app/);
@@ -195,7 +195,7 @@ test("released beta installs can pin the launcher and runtime to one commit", ()
     assert.match(installer, /BOOTSTRAP_SHA256/);
   }
   assert.match(unix, /RELEASE_TAG="brainstem-beta-v\$release_version"/);
-  assert.match(windows, /set "FRONTIER_VERSION=0\.1\.0-beta\.9"/);
+  assert.match(windows, /set "FRONTIER_VERSION=0\.1\.0-beta\.10"/);
   assert.match(windows, /set "RELEASE_TAG=brainstem-beta-v%FRONTIER_VERSION%"/);
   assert.match(unix, /BRAINSTEM_REPO_REF="\$runtime_ref"/);
   assert.match(unix, /git -C "\$BRAINSTEM_HOME\/src" rev-parse HEAD/);

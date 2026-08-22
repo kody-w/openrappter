@@ -16,14 +16,11 @@ jobs:
   cold-transplant:
     name: Cold transplant (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-    defaults:
-      run:
-        working-directory: typescript
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,76 +30,68 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Measure cold npm ci
-        id: install
+      - name: Prepare empty npm cache (excluded from measured user flow)
+        shell: bash
         run: |
-          cache="$RUNNER_TEMP/openrappter-transplant-npm-cache"
-          rm -rf "$cache"
-          started="$(python -c 'import time; print(time.monotonic_ns())')"
-          npm ci --cache "$cache" --prefer-online
-          finished="$(python -c 'import time; print(time.monotonic_ns())')"
-          duration_ms=$(((finished - started) / 1000000))
-          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
-          echo "cold npm ci: ${duration_ms}ms"
+          cold_cache="$RUNNER_TEMP/openrappter-transplant-npm-cache"
+          rm -rf "$cold_cache"
+          mkdir -p "$cold_cache"
+          echo "NPM_CONFIG_CACHE=$cold_cache" >> "$GITHUB_ENV"
 
-      - name: Measure build
-        id: build
-        run: |
-          started="$(python -c 'import time; print(time.monotonic_ns())')"
-          npm run build
-          finished="$(python -c 'import time; print(time.monotonic_ns())')"
-          duration_ms=$(((finished - started) / 1000000))
-          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
-          echo "build: ${duration_ms}ms"
-
-      - name: Measure accepted gate runtime
-        id: gate
+      - name: Measure exact cold quickstart (prerequisites excluded)
+        id: quickstart
+        timeout-minutes: 6
+        shell: bash
         run: |
           started="$(python -c 'import time; print(time.monotonic_ns())')"
           set +e
-          npm run gate:transplant 2>&1 | tee live-organ-transplant-gate.log
-          gate_status=${PIPESTATUS[0]}
+          {
+            ./quickstart.sh --demo live-organ-transplant
+          } 2>&1 | tee "$RUNNER_TEMP/live-organ-transplant-cold.log"
+          pipeline_status=("${PIPESTATUS[@]}")
           set -e
           finished="$(python -c 'import time; print(time.monotonic_ns())')"
-          duration_ms=$(((finished - started) / 1000000))
-          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
-          echo "accepted gate runtime: ${duration_ms}ms"
-          exit "$gate_status"
+          elapsed_ms=$(((finished - started) / 1000000))
+          quickstart_status="${pipeline_status[0]:-1}"
+          tee_status="${pipeline_status[1]:-1}"
+          printf '{"schema":"openrappter-transplant-cold-timing/1.0","command":"./quickstart.sh --demo live-organ-transplant","runner":"%s","elapsedMs":%s,"budgetMs":300000,"exitCode":%s,"prerequisitesExcluded":true,"emptyNpmCache":true}\n' \
+            "${{ matrix.os }}" "$elapsed_ms" "$quickstart_status" \
+            > "$RUNNER_TEMP/live-organ-transplant-cold-timing.json"
+          echo "Exact cold quickstart (prerequisites excluded): ${elapsed_ms}ms"
 
-      - name: Enforce five-minute cold-path budget
-        if: ${{ always() && steps.install.outcome == 'success' && steps.build.outcome == 'success' && steps.gate.outcome != 'skipped' }}
-        run: |
-          install_ms=${{ steps.install.outputs.duration_ms }}
-          build_ms=${{ steps.build.outputs.duration_ms }}
-          runtime_ms=${{ steps.gate.outputs.duration_ms }}
-          total_ms=$((install_ms + build_ms + runtime_ms))
-          printf '{"schema":"openrappter-transplant-cold-timing/1.0","npmCiMs":%s,"buildMs":%s,"runtimeMs":%s,"totalMs":%s,"budgetMs":300000}\n' \
-            "$install_ms" "$build_ms" "$runtime_ms" "$total_ms" \
-            > live-organ-transplant-cold-timings.json
-          {
-            echo "### Live Organ Transplant cold path"
-            echo
-            echo "| Phase | Duration |"
-            echo "| --- | ---: |"
-            echo "| npm ci | ${install_ms} ms |"
-            echo "| build | ${build_ms} ms |"
-            echo "| accepted gate runtime | ${runtime_ms} ms |"
-            echo "| **total** | **${total_ms} ms** |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if ((total_ms > 300000)); then
-            echo "::error::cold install + build + gate took ${total_ms}ms (budget: 300000ms)"
-            exit 1
+          final_status="$quickstart_status"
+          if ((tee_status != 0)); then
+            echo "::error::cold quickstart log capture failed with exit $tee_status"
+            final_status="$tee_status"
           fi
+          if ((elapsed_ms > 300000)); then
+            echo "::error::exact cold quickstart took ${elapsed_ms}ms (budget: 300000ms)"
+            final_status=1
+          fi
+          exit "$final_status"
 
-      - name: Upload deterministic failure evidence
-        if: failure()
+      - name: Run deep accepted gate
+        if: ${{ !cancelled() }}
+        working-directory: typescript
+        run: npm run gate:transplant
+
+      - name: Upload failure or cancellation evidence
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: live-organ-transplant-cold-failure-${{ matrix.os }}
           path: |
-            typescript/live-organ-transplant-cold-timings.json
-            typescript/live-organ-transplant-gate.log
+            ${{ runner.temp }}/live-organ-transplant-cold.log
             .test-scratch/live-organ-transplant
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
+
+      - name: Upload cold timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-organ-transplant-cold-timing-${{ matrix.os }}
+          path: ${{ runner.temp }}/live-organ-transplant-cold-timing.json
+          if-no-files-found: error
+          retention-days: 30

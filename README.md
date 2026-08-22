@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
+[![Node.js 20.9+](https://img.shields.io/badge/Node.js-20.9+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
@@ -21,6 +21,22 @@
 ---
 
 </div>
+
+## See a Live Organ Transplant
+
+A running TypeScript host registers a Python-backed `ChecksumAgent` without a host PID change, invokes it, rejects a broken candidate before commit, proves the previous generation still works, and emits a verified receipt.
+The deterministic demo uses one terminal and requires no API keys or model
+authentication.
+
+```bash
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter
+./quickstart.sh --demo live-organ-transplant
+```
+
+> **Security warning:** Python agents are executable code that run as the logged-in OS user. They have that user's filesystem, network, environment, and subprocess authority. They are not sandboxed. Subprocess crash isolation is not a security boundary. Preservation is file-only and cannot undo external side effects.
+>
+> **Platforms:** The initial demo supports macOS, Linux, and WSL. Native Windows is deferred.
 
 ## Install in One Line
 

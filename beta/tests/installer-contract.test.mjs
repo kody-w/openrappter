@@ -171,6 +171,20 @@ test("installed estate tools preserve child paths and default only missing value
     hatchBlock,
     /^export (?:OPENRAPPTER_HOME|BRAINSTEM_HOME)=/m,
   );
+  assert.doesNotMatch(unix, /\$BRAINSTEM_(?:RUNTIME_DIR|PYTHON)/);
+  assert.doesNotMatch(windows, /%(?:BRAINSTEM_RUNTIME_DIR|PYTHON_EXE)%/);
+  assert.match(
+    unix,
+    /BRAINSTEM_BETA_SOURCE_DIR:=\\\$\{BRAINSTEM_HOME\}\/src\/rapp_brainstem/,
+  );
+  assert.match(
+    windows,
+    /BRAINSTEM_BETA_SOURCE_DIR=%%BRAINSTEM_HOME%%\\src\\rapp_brainstem/,
+  );
+  assert.match(
+    windows,
+    /BRAINSTEM_BETA_PYTHON=%%BRAINSTEM_HOME%%\\venv\\Scripts\\python\.exe/,
+  );
 });
 
 test("released beta installs can pin the launcher and runtime to one commit", () => {

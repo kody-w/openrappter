@@ -429,7 +429,7 @@ set "TILE_LAUNCHER=%BETA_HOME%\openrappter-tile.cmd"
 > "%TILE_LAUNCHER%" echo @echo off
 >>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
 >>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_HOME set "BRAINSTEM_BETA_HOME=%BETA_HOME%"
->>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
+>>"%TILE_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%%BRAINSTEM_HOME%%\src\rapp_brainstem"
 >>"%TILE_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-tile.mjs" %%*
 copy /y "%TILE_LAUNCHER%" "%USER_BIN%\openrappter-tile.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%TILE_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-tile.cmd" >nul
@@ -456,9 +456,9 @@ set "HATCH_LAUNCHER=%BETA_HOME%\openrappter-hatch.cmd"
 > "%HATCH_LAUNCHER%" echo @echo off
 >>"%HATCH_LAUNCHER%" echo if not defined OPENRAPPTER_HOME set "OPENRAPPTER_HOME=%OPENRAPPTER_HOME%"
 >>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_HOME set "BRAINSTEM_HOME=%BRAINSTEM_HOME%"
->>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%BRAINSTEM_RUNTIME_DIR%"
->>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_PYTHON set "BRAINSTEM_BETA_PYTHON=%PYTHON_EXE%"
->>"%HATCH_LAUNCHER%" echo if not defined RAPPTER_PACK_CONFIG set "RAPPTER_PACK_CONFIG=%OPENRAPPTER_HOME%\pack.json"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_SOURCE_DIR set "BRAINSTEM_BETA_SOURCE_DIR=%%BRAINSTEM_HOME%%\src\rapp_brainstem"
+>>"%HATCH_LAUNCHER%" echo if not defined BRAINSTEM_BETA_PYTHON set "BRAINSTEM_BETA_PYTHON=%%BRAINSTEM_HOME%%\venv\Scripts\python.exe"
+>>"%HATCH_LAUNCHER%" echo if not defined RAPPTER_PACK_CONFIG set "RAPPTER_PACK_CONFIG=%%OPENRAPPTER_HOME%%\pack.json"
 >>"%HATCH_LAUNCHER%" echo "%NODE_DIR%\node.exe" "%BETA_SOURCE%\beta\scripts\openrappter-hatch.mjs" %%*
 copy /y "%HATCH_LAUNCHER%" "%USER_BIN%\openrappter-hatch.cmd" >nul
 if exist "%LOCALAPPDATA%\Microsoft\WindowsApps" copy /y "%HATCH_LAUNCHER%" "%LOCALAPPDATA%\Microsoft\WindowsApps\openrappter-hatch.cmd" >nul

@@ -418,7 +418,9 @@ install_desktop_dependencies() {
         run_with_heartbeat "Installing Electron runtime" \
             "$node_dir/bin/node" node_modules/electron/install.js
         "$node_dir/bin/npm" run check
-        BRAINSTEM_BETA_RUNTIME_DIR="$BRAINSTEM_HOME/src/rapp_brainstem" \
+            export BRAINSTEM_HOME
+            export BRAINSTEM_BETA_PYTHON="$BRAINSTEM_HOME/venv/bin/python"
+            export BRAINSTEM_BETA_RUNTIME_DIR="$BRAINSTEM_HOME/src/rapp_brainstem"
             "$node_dir/bin/npm" test
     )
 }

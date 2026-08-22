@@ -351,6 +351,7 @@ if errorlevel 1 goto :fail
 call "%NODE_DIR%\npm.cmd" run check
 if errorlevel 1 goto :fail
 set "BRAINSTEM_BETA_RUNTIME_DIR=%BRAINSTEM_HOME%\src\rapp_brainstem"
+set "BRAINSTEM_BETA_PYTHON=%BRAINSTEM_HOME%\venv\Scripts\python.exe"
 call "%NODE_DIR%\npm.cmd" test
 if errorlevel 1 goto :fail
 popd

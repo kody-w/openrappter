@@ -118,6 +118,7 @@
         <!-- Desktop links -->
         <div class="hidden md:flex items-center gap-8 text-sm text-[#a1a1aa]">
           <a href="#how-it-works" class="hover:text-[#fafafa] transition-colors duration-200">How It Works</a>
+          <a href="#flagship" class="hover:text-[#fafafa] transition-colors duration-200">Flagship Demo</a>
           <a href="#features" class="hover:text-[#fafafa] transition-colors duration-200">Features</a>
           <a href="#agents" class="hover:text-[#fafafa] transition-colors duration-200">Agents</a>
           <a href="#pricing" class="hover:text-[#fafafa] transition-colors duration-200">Pricing</a>
@@ -149,6 +150,7 @@
     <div id="mobileMenu" class="hidden md:hidden border-t border-[#27272a] bg-[#09090b]/95 backdrop-blur-xl">
       <div class="px-4 py-4 space-y-3">
         <a href="#how-it-works" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">How It Works</a>
+        <a href="#flagship" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Flagship Demo</a>
         <a href="#features" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Features</a>
         <a href="#agents" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Agents</a>
         <a href="#pricing" class="block text-[#a1a1aa] hover:text-[#fafafa] transition-colors duration-200">Pricing</a>
@@ -194,7 +196,7 @@
 
       <!-- Trust line -->
       <p class="text-sm text-[#71717a] mb-4">
-        Free &amp; open source&ensp;•&ensp;Your data stays on your device&ensp;•&ensp;No accounts required
+        Apache-2.0 open source&ensp;•&ensp;Local memory and config&ensp;•&ensp;Model traffic follows your selected mode
       </p>
 
       <!-- Newsletter -->
@@ -202,6 +204,63 @@
         Get updates →
         <span class="text-[#71717a]">rappter.beehiiv.com</span>
       </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ FLAGSHIP + TRUST MATRIX ═══════════════════ -->
+  <section id="flagship" class="py-24 sm:py-32 relative border-y border-[#27272a] bg-[#111113]">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="max-w-3xl mb-10 fade-in">
+        <p class="text-sm font-mono text-[#10b981] tracking-widest uppercase mb-3">Flagship deterministic proof</p>
+        <h2 class="text-3xl sm:text-4xl font-bold mb-4">See a Live Organ Transplant</h2>
+        <p class="text-[#a1a1aa] text-lg leading-relaxed">Prove in one command that a running TypeScript host can register and invoke a Python-backed agent without restarting, reject a broken replacement, preserve the working generation, and emit a verified receipt.</p>
+      </div>
+
+      <div class="fade-in rounded-2xl border border-[#10b981]/30 bg-[#09090b] p-6 sm:p-8 mb-12">
+        <div class="font-mono text-sm text-[#71717a] mb-2">macOS, Linux, and WSL · Node.js &gt;=20.9 · Python &gt;=3.10 · native Windows deferred</div>
+        <code class="block overflow-x-auto rounded-xl bg-[#18181b] px-5 py-4 text-[#fafafa]">./quickstart.sh --demo live-organ-transplant</code>
+        <p class="mt-5 text-sm leading-6 text-[#fcd34d]"><strong>Authority warning:</strong> The demo makes no model/provider calls and binds its gateway to loopback, but compatibility inspection and every agent invocation execute Python with the logged-in OS user's filesystem, network, environment, and subprocess authority. Loopback is not an OS egress boundary; this is not a no-egress claim.</p>
+        <a href="https://github.com/kody-w/openrappter#see-a-live-organ-transplant" class="mt-5 inline-flex text-sm font-semibold text-[#10b981] hover:text-[#34d399]">Read the README proof and evidence details →</a>
+      </div>
+
+      <div id="trust-matrix" class="fade-in">
+        <div class="mb-6">
+          <h3 class="text-2xl font-bold mb-2">Three modes, three explicit data paths</h3>
+          <p class="text-[#a1a1aa]">“Local-first” describes stored memory and configuration, not every configured network path.</p>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-[#27272a]">
+          <table class="w-full min-w-[800px] text-sm">
+            <thead>
+              <tr class="border-b border-[#27272a] bg-[#09090b]">
+                <th class="text-left px-5 py-4 font-semibold text-[#fafafa]">Mode</th>
+                <th class="text-left px-5 py-4 font-semibold text-[#fafafa]">Model/provider traffic</th>
+                <th class="text-left px-5 py-4 font-semibold text-[#fafafa]">Local state and execution boundary</th>
+                <th class="text-left px-5 py-4 font-semibold text-[#fafafa]">Account/auth</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-[#27272a] text-[#a1a1aa]">
+              <tr>
+                <td class="px-5 py-4 align-top font-semibold text-[#10b981]">Live Organ Transplant demo</td>
+                <td class="px-5 py-4 align-top">No model/provider calls. The proof is deterministic and records zero model/provider activity.</td>
+                <td class="px-5 py-4 align-top">The gateway is loopback-only. Python still runs with logged-in user authority. No OS egress claim is made.</td>
+                <td class="px-5 py-4 align-top">No model account or provider authentication.</td>
+              </tr>
+              <tr>
+                <td class="px-5 py-4 align-top font-semibold text-[#10b981]">Local model mode</td>
+                <td class="px-5 py-4 align-top">Model traffic stays on the configured local endpoint.</td>
+                <td class="px-5 py-4 align-top">Memory and config files remain local. Channels, web tools, downloads, updates, and other enabled integrations may use their own network paths.</td>
+                <td class="px-5 py-4 align-top">No cloud-model account; the selected local endpoint may require setup.</td>
+              </tr>
+              <tr>
+                <td class="px-5 py-4 align-top font-semibold text-[#10b981]">GitHub Copilot / cloud mode</td>
+                <td class="px-5 py-4 align-top">Prompts are sent to, and model outputs are returned by, the selected provider.</td>
+                <td class="px-5 py-4 align-top">Memory and config files remain local, but context selected from them may be included in provider prompts. Enabled integrations have separate data paths.</td>
+                <td class="px-5 py-4 align-top">GitHub account with Copilot access and authentication required for Copilot mode.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -310,8 +369,8 @@
         <!-- Card 7 -->
         <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.3s;">
           <div class="text-3xl mb-4">🏠</div>
-          <h3 class="font-bold mb-2">Your Data, Your Device</h3>
-          <p class="text-sm text-[#a1a1aa] leading-relaxed">Nothing leaves your machine. No cloud. No accounts. Truly private.</p>
+          <h3 class="font-bold mb-2">Local State, Explicit Routing</h3>
+          <p class="text-sm text-[#a1a1aa] leading-relaxed">Memory and config stay local. Model and integration traffic follows the mode and tools you configure.</p>
         </div>
         <!-- Card 8 -->
         <div class="fade-in card-hover rounded-xl bg-[#111113] p-6" style="transition-delay: 0.35s;">
@@ -411,7 +470,7 @@
         </div>
         <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
           <div class="text-xs font-mono text-[#10b981] mb-2">🏠 Local-First</div>
-          <p class="text-sm text-[#a1a1aa]">Everything runs on your machine. Your data never leaves. Works offline with local models.</p>
+          <p class="text-sm text-[#a1a1aa]">Stored memory and config remain local. Local-model traffic stays on its configured endpoint; cloud and integration traffic follows their configured services.</p>
         </div>
         <div class="fade-in card-hover rounded-xl bg-[#111113] p-5">
           <div class="text-xs font-mono text-[#10b981] mb-2">🧠 Persistent Memory</div>
@@ -485,7 +544,7 @@
           </div>
           <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
             <span class="text-xl mt-0.5">🐚</span>
-            <div><div class="font-mono text-sm font-semibold">ShellAgent</div><p class="text-xs text-[#71717a] mt-1">Executes system commands safely with sandboxing.</p></div>
+            <div><div class="font-mono text-sm font-semibold">ShellAgent</div><p class="text-xs text-[#71717a] mt-1">When permitted, system commands run as the logged-in user; approval and logging do not sandbox them.</p></div>
           </div>
           <div class="card-hover rounded-lg bg-[#111113] p-4 flex items-start gap-3">
             <span class="text-xl mt-0.5">🧠</span>
@@ -612,7 +671,7 @@
             </tr>
             <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
               <td class="px-5 py-3">Privacy</td>
-              <td class="px-5 py-3 text-center comparison-check">100% local</td>
+              <td class="px-5 py-3 text-center comparison-partial"><a href="#trust-matrix" class="hover:text-[#fafafa]">Mode-dependent</a></td>
               <td class="px-5 py-3 text-center comparison-x">Cloud only</td>
               <td class="px-5 py-3 text-center comparison-partial">Depends</td>
             </tr>
@@ -635,10 +694,10 @@
               <td class="px-5 py-3 text-center comparison-x">DIY</td>
             </tr>
             <tr class="bg-[#09090b] hover:bg-[#111113] transition-colors duration-200">
-              <td class="px-5 py-3">Open Source</td>
-              <td class="px-5 py-3 text-center comparison-check">MIT</td>
+              <td class="px-5 py-3">Project License</td>
+              <td class="px-5 py-3 text-center comparison-check">Apache-2.0</td>
               <td class="px-5 py-3 text-center comparison-partial">Partial</td>
-              <td class="px-5 py-3 text-center comparison-check">MIT</td>
+              <td class="px-5 py-3 text-center comparison-partial">See project</td>
             </tr>
             <tr class="bg-[#0a0a0c] hover:bg-[#111113] transition-colors duration-200">
               <td class="px-5 py-3">Community Hub</td>
@@ -719,7 +778,7 @@
             <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Full agent framework</li>
             <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> 34 built-in agents</li>
             <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Community support</li>
-            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> MIT License</li>
+            <li class="flex items-center gap-2"><span class="text-[#10b981]">✓</span> Apache-2.0 License</li>
           </ul>
           <a href="https://github.com/kody-w/openrappter/releases?q=bar" class="block text-center px-5 py-2.5 border border-[#27272a] text-[#fafafa] text-sm font-semibold rounded-xl hover:border-[#10b981] hover:text-[#10b981] transition-all duration-200">
             Download Free
@@ -763,10 +822,10 @@
         <div class="fade-in card-hover rounded-2xl bg-[#111113] p-6 flex flex-col" style="transition-delay: 0.15s; border-color: #eab30850;">
           <div class="text-xs font-mono text-[#eab308] tracking-widest uppercase mb-3">Own Your AI</div>
           <h3 class="text-xl font-bold mb-1">Total Ownership</h3>
-          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Hardware + software yours. Complete data sovereignty.</p>
+          <p class="text-sm text-[#a1a1aa] mb-6 leading-relaxed">Hardware + software yours. Data paths configured to your requirements.</p>
           <ul class="text-sm text-[#a1a1aa] space-y-2 mb-8 flex-1">
             <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Hardware included</li>
-            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Complete data sovereignty</li>
+            <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Documented model and integration boundaries</li>
             <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Stop paying, keep everything</li>
             <li class="flex items-center gap-2"><span class="text-[#eab308]">✓</span> Everything in White Glove</li>
           </ul>
@@ -807,7 +866,7 @@
               <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
             <div class="faq-answer">
-              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">Yes. Everything runs locally on your machine. No data is sent to any cloud service. If you use local models (Ollama), nothing ever leaves your device. Even with cloud LLM providers, your memory stays on-device.</p>
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">It depends on the mode. Live Organ Transplant makes no model/provider calls, but its Python code has logged-in user authority and loopback is not an egress control. Local-model traffic stays on the configured local endpoint while other integrations may vary. Copilot/cloud mode sends prompts to and receives model outputs from the provider; local memory and config files remain on-device, although selected context may be included in prompts. Copilot mode requires GitHub/Copilot account authentication.</p>
             </div>
           </div>
 
@@ -817,7 +876,7 @@
               <svg class="w-4 h-4 text-[#71717a] transition-transform duration-200 faq-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
             <div class="faq-answer">
-              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">You keep everything. The software, the data, the agents — it's all on your machine. The Community edition is free and open source forever. Paid tiers add support and customization, not lock-in.</p>
+              <p class="px-5 pb-4 text-sm text-[#a1a1aa] leading-relaxed">You keep the locally stored software, memory, config, and agent files under the Apache-2.0 license. Provider accounts, subscriptions, and external integrations remain subject to their own terms. Paid tiers add support and customization, not a different open-source license.</p>
             </div>
           </div>
 
@@ -889,7 +948,7 @@
           <div class="flex items-center gap-2 text-lg font-bold mb-3">
             <span>🦖</span> openrappter
           </div>
-          <p class="text-sm text-[#71717a] leading-relaxed">Your AI that becomes you. Free, open source, and private by default.</p>
+          <p class="text-sm text-[#71717a] leading-relaxed">Your AI that becomes you, with local state and explicit model and execution boundaries.</p>
         </div>
 
         <!-- Product -->
@@ -927,8 +986,9 @@
 
       <div class="pt-8 border-t border-[#27272a] flex flex-col sm:flex-row items-center justify-between gap-4">
         <p class="text-xs text-[#71717a]">Built with 🦖 by Kody W &ensp;•&ensp; © 2026</p>
-        <p class="text-xs text-[#71717a]">Free &amp; open source under MIT License</p>
+        <p class="text-xs text-[#71717a]">Free &amp; open source under the Apache-2.0 License</p>
       </div>
+      <p class="mt-4 text-center text-xs text-[#52525b]">GitHub and GitHub Copilot are trademarks of GitHub, Inc.; other third-party names belong to their respective owners. OpenRappter is an independent project and is not endorsed by GitHub.</p>
     </div>
   </footer>
 

@@ -65,6 +65,7 @@ STAGED="$STAGE_DIR/$(date +%s)-$$-$(basename "$SOURCE")"
 
 # Invoked by the trap below, which shellcheck does not trace.
 # shellcheck disable=SC2317
+# shellcheck disable=SC2329
 cleanup() { rm -f "$STAGED"; }
 trap cleanup EXIT
 

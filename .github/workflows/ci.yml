@@ -74,6 +74,95 @@ jobs:
       - name: Skip budget
         run: node ../tools/skip-budget.mjs "$RUNNER_TEMP/vitest.json"
 
+  # Exercise the documented clean-checkout journey at both runtime floors and
+  # current runtimes without duplicating the full suite on macOS.
+  flagship-transplant:
+    name: Live Organ Transplant (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-floor
+            os: ubuntu-latest
+            node-version: '20.9.0'
+            python-version: '3.10'
+          - name: ubuntu-current
+            os: ubuntu-latest
+            node-version: '22'
+            python-version: '3.12'
+          - name: macos-current
+            os: macos-latest
+            node-version: '22'
+            python-version: '3.12'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run exact quickstart (checkout/runtime setup excluded)
+        id: quickstart
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          started="$(python -c 'import time; print(time.monotonic_ns())')"
+          set +e
+          {
+            ./quickstart.sh --demo live-organ-transplant
+          } 2>&1 | tee "$RUNNER_TEMP/live-organ-transplant-quickstart.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          finished="$(python -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(((finished - started) / 1000000))
+          quickstart_status="${pipeline_status[0]:-1}"
+          tee_status="${pipeline_status[1]:-1}"
+          printf '{"schema":"openrappter-transplant-quickstart-timing/1.0","command":"./quickstart.sh --demo live-organ-transplant","runner":"%s","node":"%s","python":"%s","elapsedMs":%s,"budgetMs":300000,"exitCode":%s,"checkoutAndRuntimeSetupExcluded":true}\n' \
+            "${{ matrix.name }}" "${{ matrix.node-version }}" "${{ matrix.python-version }}" \
+            "$elapsed_ms" "$quickstart_status" \
+            > "$RUNNER_TEMP/live-organ-transplant-quickstart-timing.json"
+          echo "Exact quickstart (checkout/runtime setup excluded): ${elapsed_ms}ms"
+
+          final_status="$quickstart_status"
+          if ((tee_status != 0)); then
+            echo "::error::quickstart log capture failed with exit $tee_status"
+            final_status="$tee_status"
+          fi
+          if ((elapsed_ms > 300000)); then
+            echo "::error::exact quickstart took ${elapsed_ms}ms (budget: 300000ms)"
+            final_status=1
+          fi
+          exit "$final_status"
+
+      - name: Upload quickstart timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-organ-transplant-quickstart-timing-${{ matrix.name }}
+          path: ${{ runner.temp }}/live-organ-transplant-quickstart-timing.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify flagship workflow contract
+        if: ${{ !cancelled() }}
+        run: python -B -m unittest tests/test_live_organ_transplant_workflow.py
+      - name: Verify exact quickstart shell contract
+        if: ${{ !cancelled() }}
+        run: bash tests/live-organ-transplant-quickstart.test.sh
+      - name: Verify transplant trust boundary
+        if: ${{ !cancelled() }}
+        run: bash tests/test_transplant_trust_boundary.sh
+      - name: Run accepted transplant gate
+        if: ${{ !cancelled() }}
+        working-directory: typescript
+        run: npm run gate:transplant
+
   # Dedicated gate for the dashboard UI surface (typescript/ui) — a separate
   # npm project (own lockfile/deps) that the generic `typescript` job above
   # never installs or builds.

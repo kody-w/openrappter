@@ -1,0 +1,68 @@
+{
+  "schema": "openrappter-live-organ-transplant-manifest/1.0",
+  "version": 1,
+  "demo": "live-organ-transplant",
+  "supportedPlatforms": ["darwin", "linux"],
+  "command": {
+    "executable": "npm",
+    "args": ["run", "demo:transplant", "--silent"],
+    "display": "npm run demo:transplant --silent",
+    "workingDirectory": "typescript"
+  },
+  "input": "openrappter-live-organ-transplant",
+  "expectedSha256": "ab3db6c3d9a297c36792a96bb5d1c14e4de1b2d340467a1e35c6bae02095d033",
+  "fixture": {
+    "filename": "checksum_agent.py",
+    "bundledPath": "typescript/src/demo/fixtures/checksum_agent.py",
+    "invalidBundledPath": "typescript/src/demo/fixtures/checksum_agent_invalid.py",
+    "sourceSha256": "7a060eb2fad9a6aaa16678ad050d6fb4f39a977745d02d7215a5f214b1890318",
+    "invalidSourceSha256": "53eee48a3b4ba4ce2573fe19a452b36e3917ffc68a50d08af3ae0e38a9f3d463",
+    "todo": "Fixture SHA-256 pins are populated from the final bundled fixture bytes."
+  },
+  "dependencies": {
+    "node": ">=20.9.0",
+    "python": ">=3.10",
+    "model": "none",
+    "loopbackGateway": true
+  },
+  "runtimeLimits": {
+    "commandTimeoutMs": 30000,
+    "missingPythonTimeoutMs": 30000,
+    "demoMaxElapsedMs": 30000
+  },
+  "missingPython": {
+    "environmentVariable": "OPENRAPPTER_PYTHON",
+    "executableBasename": "missing-python",
+    "expectedExitCode": 69
+  },
+  "artifacts": {
+    "evidenceRoot": ".test-scratch/live-organ-transplant",
+    "directoryEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_EVIDENCE_DIRECTORY",
+    "nonceEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_SCENARIO_NONCE",
+    "runtimePidHandoffEnvironmentVariable": "OPENRAPPTER_TRANSPLANT_RUNTIME_PID_HANDOFF",
+    "runtimePidHandoffFilename": "runtime-pid.json",
+    "runtimePidHandoffOpenFlag": "wx"
+  },
+  "claims": [
+    "An authenticated loopback POST to the production /agents/import route registers a bundled Python-backed ChecksumAgent in the live AgentRegistry.",
+    "The same TypeScript host process and AgentRegistry resolve both deterministic executions.",
+    "A contract-invalid candidate is rejected before commit and the previous generation's source bytes and live registry object remain active.",
+    "The gate reopens the exact command's single causal Flight trace through production ledger APIs and binds its owner PID, nonce, fixture hashes, import outcomes, execution digests, IDs, parents, and export hashes.",
+    "Python execution is not sandboxed and the preservation boundary is file-only."
+  ],
+  "forbiddenClaims": [
+    "in-process Python execution",
+    "post-commit restoration terminology for candidate rejection",
+    "zero-downtime guarantees",
+    "crash-recovery guarantees",
+    "replay guarantees",
+    "air-gap guarantees",
+    "enforced egress controls",
+    "escaped-process prevention",
+    "enforced process containment",
+    "process containment guarantees",
+    "native Windows support",
+    "Python sandboxing",
+    "arbitrary-Python safety"
+  ]
+}

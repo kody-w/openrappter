@@ -38,6 +38,8 @@ import {
   collectUsageStats,
 } from './usage.js';
 import { getFlightRecorder } from '../flight-recorder/recorder.js';
+import type { FlightEvent } from '../flight-recorder/types.js';
+import { processMatchesIncarnation } from '../flight-recorder/process-owner.js';
 import {
   listAgentFiles,
   readAgentFile,
@@ -171,6 +173,419 @@ const FRAME_RATE_LIMIT_MAX_FRAMES = 120;
 const FRAME_RATE_LIMITED_METHODS = new Set(['zen.publish']);
 const PROTOCOL_VERSION = 3;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const MAX_AGENT_IMPORT_PROVENANCE_ID_LENGTH = 128;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/u;
+const AGENT_IMPORT_PROVENANCE_FIELDS = [
+  'scenarioNonce',
+  'requestId',
+  'traceId',
+] as const;
+
+interface AgentImportProvenance {
+  traceId: string;
+  scenarioNonce: string;
+  requestId: string;
+  candidateSourceSha256: string;
+  gatewayParentEventId: string;
+}
+
+interface CurrentAgentImportResult {
+  status: 'ok' | 'error';
+  learned?: { name: string; description: string }[];
+  file?: string;
+  error?: string;
+  replaced?: boolean;
+  committed?: boolean;
+  rejectedBeforeCommit?: boolean;
+  candidateSourceSha256?: string;
+  activeSourceSha256?: string;
+  activeGeneration?: 'present' | 'absent' | 'unknown';
+  errorCode?: string;
+  commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
+  retrySafe?: boolean;
+  warning?: string;
+}
+
+interface AgentImportRuntimeBoundary {
+  withAgentImportProvenance?: <T>(
+    provenance: AgentImportProvenance,
+    operation: () => Promise<T>,
+  ) => Promise<T>;
+}
+
+type ParsedAgentImportProvenance =
+  | { kind: 'legacy' }
+  | { kind: 'invalid'; error: string }
+  | {
+      kind: 'provenance';
+      value: Pick<
+        AgentImportProvenance,
+        'traceId' | 'scenarioNonce' | 'requestId'
+      >;
+    };
+
+function parseAgentImportProvenance(
+  body: unknown,
+): ParsedAgentImportProvenance {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { kind: 'legacy' };
+  }
+  const record = body as Record<string, unknown>;
+  const present = AGENT_IMPORT_PROVENANCE_FIELDS.filter((field) =>
+    Object.prototype.hasOwnProperty.call(record, field),
+  );
+  if (present.length === 0) return { kind: 'legacy' };
+  if (present.length !== AGENT_IMPORT_PROVENANCE_FIELDS.length) {
+    return {
+      kind: 'invalid',
+      error:
+        'Import provenance requires scenarioNonce, requestId, and traceId together.',
+    };
+  }
+
+  const values: Partial<
+    Pick<AgentImportProvenance, 'traceId' | 'scenarioNonce' | 'requestId'>
+  > = {};
+  for (const field of AGENT_IMPORT_PROVENANCE_FIELDS) {
+    const value = record[field];
+    if (
+      typeof value !== 'string'
+      || value.length === 0
+      || value.length > MAX_AGENT_IMPORT_PROVENANCE_ID_LENGTH
+      || value.trim() !== value
+      || CONTROL_CHARACTER.test(value)
+    ) {
+      return {
+        kind: 'invalid',
+        error:
+          `${field} must be a non-empty identifier of at most `
+          + `${MAX_AGENT_IMPORT_PROVENANCE_ID_LENGTH} characters with no `
+          + 'leading or trailing whitespace or control characters.',
+      };
+    }
+    values[field] = value;
+  }
+
+  return {
+    kind: 'provenance',
+    value: {
+      scenarioNonce: values.scenarioNonce!,
+      requestId: values.requestId!,
+      traceId: values.traceId!,
+    },
+  };
+}
+
+function isLoopbackRemoteAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const normalized = address.toLowerCase().split('%', 1)[0];
+  return (
+    normalized === '::1'
+    || normalized.startsWith('127.')
+    || normalized.startsWith('::ffff:127.')
+  );
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
+}
+
+type ActiveImportTraceValidation =
+  | { ok: true; root: FlightEvent }
+  | { ok: false; error: string };
+
+function validateActiveImportTrace(
+  events: readonly FlightEvent[],
+  scenarioNonce: string,
+): ActiveImportTraceValidation {
+  const roots = events.filter((event) =>
+    event.kind === 'trace.started' && event.parentId === null,
+  );
+  if (roots.length !== 1) {
+    return {
+      ok: false,
+      error: roots.length === 0
+        ? 'No root trace.started event exists for the supplied traceId.'
+        : 'The supplied traceId has more than one root trace.started event.',
+    };
+  }
+
+  const root = roots[0];
+  if (root.source !== 'runtime' || root.status !== 'started') {
+    return {
+      ok: false,
+      error: 'The supplied traceId does not identify a runtime trace root.',
+    };
+  }
+  const ownerPid = root.metadata.ownerPid;
+  const ownerIncarnation = root.metadata.ownerIncarnation;
+  if (
+    typeof ownerPid !== 'number'
+    || !Number.isSafeInteger(ownerPid)
+    || ownerPid <= 0
+    || ownerPid !== process.pid
+    || typeof ownerIncarnation !== 'string'
+    || ownerIncarnation.length === 0
+    || !processMatchesIncarnation(ownerPid, ownerIncarnation)
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId is not owned by this runtime process.',
+    };
+  }
+  if (
+    events.some((event) =>
+      event.kind === 'trace.completed' || event.kind === 'trace.failed',
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId is no longer active.',
+    };
+  }
+
+  const boundaries = events.filter((event) =>
+    event.kind === 'demo.transplant.started' && event.parentId === root.id,
+  );
+  if (boundaries.length !== 1) {
+    return {
+      ok: false,
+      error:
+        'The supplied traceId must contain exactly one active transplant scenario boundary.',
+    };
+  }
+  const boundary = boundaries[0];
+  if (
+    boundary.source !== 'live-organ-transplant'
+    || boundary.status !== 'started'
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId has an invalid transplant scenario boundary.',
+    };
+  }
+  if (boundary.metadata.nonce !== scenarioNonce) {
+    return {
+      ok: false,
+      error: 'The supplied scenarioNonce does not match the active trace.',
+    };
+  }
+  if (
+    events.some((event) =>
+      (
+        event.kind === 'demo.transplant.completed'
+        || event.kind === 'demo.transplant.failed'
+      )
+      && event.parentId === root.id,
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied transplant scenario is no longer active.',
+    };
+  }
+  return { ok: true, root };
+}
+
+type ValidatedAgentImportEvidence =
+  | { kind: 'accepted'; activeSourceSha256: string }
+  | {
+      kind: 'precommit-rejection';
+      activeGeneration: 'present' | 'absent';
+      activeSourceSha256?: string;
+    }
+  | {
+      kind: 'restored';
+      activeGeneration: 'present' | 'absent';
+      activeSourceSha256?: string;
+      errorCode: string;
+    }
+  | {
+      kind: 'committed-warning';
+      activeSourceSha256: string;
+      errorCode: string;
+      warning: string;
+    }
+  | {
+      kind: 'recovery-required';
+      activeGeneration: 'present' | 'absent' | 'unknown';
+      activeSourceSha256?: string;
+      committed: boolean;
+      errorCode: string;
+    }
+  | { kind: 'incomplete' };
+
+type ValidatedActiveGeneration =
+  | { state: 'present'; activeSourceSha256: string }
+  | { state: 'absent' }
+  | { state: 'unknown'; activeSourceSha256?: string };
+
+function validateActiveGeneration(
+  machine: Partial<CurrentAgentImportResult>,
+): ValidatedActiveGeneration | undefined {
+  if (machine.activeGeneration === 'present') {
+    return isSha256(machine.activeSourceSha256)
+      ? {
+          state: 'present',
+          activeSourceSha256: machine.activeSourceSha256,
+        }
+      : undefined;
+  }
+  if (machine.activeGeneration === 'absent') {
+    return machine.activeSourceSha256 === undefined
+      ? { state: 'absent' }
+      : undefined;
+  }
+  if (machine.activeGeneration === 'unknown') {
+    return machine.activeSourceSha256 === undefined
+      ? { state: 'unknown' }
+      : isSha256(machine.activeSourceSha256)
+        ? {
+            state: 'unknown',
+            activeSourceSha256: machine.activeSourceSha256,
+          }
+        : undefined;
+  }
+  return undefined;
+}
+
+function validateAgentImportEvidence(
+  result: unknown,
+  candidateSourceSha256: string,
+): ValidatedAgentImportEvidence {
+  if (
+    typeof result !== 'object'
+    || result === null
+    || Array.isArray(result)
+  ) {
+    return { kind: 'incomplete' };
+  }
+  const machine = result as Partial<CurrentAgentImportResult>;
+  if (machine.candidateSourceSha256 !== candidateSourceSha256) {
+    return { kind: 'incomplete' };
+  }
+  const activeGeneration = validateActiveGeneration(machine);
+  if (!activeGeneration) return { kind: 'incomplete' };
+  const errorCode =
+    typeof machine.errorCode === 'string'
+    && machine.errorCode.trim().length > 0
+      ? machine.errorCode
+      : undefined;
+  const warning =
+    typeof machine.warning === 'string'
+    && machine.warning.trim().length > 0
+      ? machine.warning
+      : undefined;
+  if (
+    machine.status === 'ok'
+    && machine.committed === true
+    && activeGeneration.state === 'present'
+    && activeGeneration.activeSourceSha256 === candidateSourceSha256
+    && machine.rejectedBeforeCommit === false
+    && machine.commitState === 'committed'
+    && machine.retrySafe === false
+  ) {
+    if (warning !== undefined && errorCode !== undefined) {
+      return {
+        kind: 'committed-warning',
+        activeSourceSha256: activeGeneration.activeSourceSha256,
+        errorCode,
+        warning,
+      };
+    }
+    if (machine.warning !== undefined || machine.errorCode !== undefined) {
+      return { kind: 'incomplete' };
+    }
+    return {
+      kind: 'accepted',
+      activeSourceSha256: activeGeneration.activeSourceSha256,
+    };
+  }
+  if (
+    machine.status === 'error'
+    && machine.committed === false
+    && machine.rejectedBeforeCommit === true
+    && errorCode !== undefined
+    && machine.commitState === 'not-committed'
+    && machine.retrySafe === true
+    && machine.warning === undefined
+    && activeGeneration.state !== 'unknown'
+  ) {
+    return {
+      kind: 'precommit-rejection',
+      activeGeneration: activeGeneration.state,
+      ...(activeGeneration.state === 'absent'
+        ? {}
+        : {
+            activeSourceSha256:
+              activeGeneration.activeSourceSha256,
+          }),
+    };
+  }
+  if (
+    machine.status === 'error'
+    && machine.committed === false
+    && machine.rejectedBeforeCommit === false
+    && errorCode !== undefined
+    && machine.commitState === 'restored'
+    && machine.retrySafe === true
+    && machine.warning === undefined
+    && activeGeneration.state !== 'unknown'
+  ) {
+    return {
+      kind: 'restored',
+      activeGeneration: activeGeneration.state,
+      ...(activeGeneration.state === 'absent'
+        ? {}
+        : {
+            activeSourceSha256:
+              activeGeneration.activeSourceSha256,
+          }),
+      errorCode,
+    };
+  }
+  if (
+    machine.status === 'error'
+    && typeof machine.committed === 'boolean'
+    && machine.rejectedBeforeCommit === false
+    && errorCode !== undefined
+    && machine.commitState === 'unknown'
+    && machine.retrySafe === false
+    && machine.warning === undefined
+  ) {
+    return {
+      kind: 'recovery-required',
+      activeGeneration: activeGeneration.state,
+      ...('activeSourceSha256' in activeGeneration
+        && activeGeneration.activeSourceSha256 !== undefined
+        ? { activeSourceSha256: activeGeneration.activeSourceSha256 }
+        : {}),
+      committed: machine.committed,
+      errorCode,
+    };
+  }
+  return { kind: 'incomplete' };
+}
+
+function isJsonSerializable(value: unknown): boolean {
+  try {
+    return JSON.stringify(value) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+async function runWithAgentImportProvenance<T>(
+  provenance: AgentImportProvenance,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const runtime = await import('../agents/agent-import.js') as unknown as
+    AgentImportRuntimeBoundary;
+  if (typeof runtime.withAgentImportProvenance !== 'function') {
+    throw new Error('Agent import provenance runtime is unavailable.');
+  }
+  return runtime.withAgentImportProvenance(provenance, operation);
+}
 
 /**
  * ExecSafety's audit vocabulary → the macOS Bar's `ApprovalStatus` enum, which
@@ -527,13 +942,10 @@ export class GatewayServer {
    * registry; a gateway that wrote files without reaching that registry would be
    * able to report success for an agent that is not actually usable.
    */
-  private agentImporter?: (filename: string, contents: Buffer) => Promise<{
-    status: 'ok' | 'error';
-    learned?: { name: string; description: string }[];
-    file?: string;
-    error?: string;
-    replaced?: boolean;
-  }>;
+  private agentImporter?: (
+    filename: string,
+    contents: Buffer,
+  ) => Promise<CurrentAgentImportResult>;
 
   setAgentImporter(fn: NonNullable<GatewayServer['agentImporter']>): void {
     this.agentImporter = fn;
@@ -1393,6 +1805,7 @@ export class GatewayServer {
               res.end(JSON.stringify({ status: 'error', error: 'This daemon cannot install agents.' }));
               return;
             }
+            const importer = this.agentImporter;
             const filename = typeof parsed.filename === 'string' ? parsed.filename : '';
             const contents = typeof parsed.contents === 'string' ? parsed.contents : '';
             if (!filename || !contents) {
@@ -1400,22 +1813,367 @@ export class GatewayServer {
               res.end(JSON.stringify({ status: 'error', error: 'filename and contents are required' }));
               return;
             }
-            const result = await this.agentImporter(filename, Buffer.from(contents, 'utf-8'));
-            // `agentImporter` is injected through the public `setAgentImporter`,
-            // so its return value is caller-supplied and may not be
-            // serialisable. Writing the head first and serialising second threw
-            // after the response was committed, the outer catch wrote a second
-            // head, and Node ended the process on ERR_HTTP_HEADERS_SENT -- the
-            // same shape as /readyz and /rpc.
-            writeJsonResponse(
-              res,
-              result.status === 'ok' ? 200 : 400,
-              result,
-              corsHeaders,
-              { status: 'error', error: 'Import result could not be serialised' },
-              // 503, matching this route's own "cannot install agents": the
-              // importer did not produce a usable answer.
-              503,
+
+            const provenance = parseAgentImportProvenance(parsed);
+            if (provenance.kind === 'invalid') {
+              writeJsonResponse(
+                res,
+                400,
+                { status: 'error', error: provenance.error },
+                corsHeaders,
+              );
+              return;
+            }
+
+            const sourceBytes = Buffer.from(contents, 'utf-8');
+            if (provenance.kind === 'legacy') {
+              const result = await importer(filename, sourceBytes);
+              // `agentImporter` is injected through the public `setAgentImporter`,
+              // so its return value is caller-supplied and may not be
+              // serialisable. Writing the head first and serialising second threw
+              // after the response was committed, the outer catch wrote a second
+              // head, and Node ended the process on ERR_HTTP_HEADERS_SENT -- the
+              // same shape as /readyz and /rpc.
+              writeJsonResponse(
+                res,
+                result.status === 'ok' ? 200 : 400,
+                result,
+                corsHeaders,
+                { status: 'error', error: 'Import result could not be serialised' },
+                // 503, matching this route's own "cannot install agents": the
+                // importer did not produce a usable answer.
+                503,
+              );
+              return;
+            }
+
+            if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+              writeJsonResponse(
+                res,
+                400,
+                {
+                  status: 'error',
+                  error: 'Import provenance is accepted only from a loopback request.',
+                },
+                corsHeaders,
+              );
+              return;
+            }
+
+            const recorder = getFlightRecorder();
+            const recorderHealth = await recorder.health();
+            if (!recorderHealth.enabled || !recorderHealth.initialized) {
+              writeJsonResponse(
+                res,
+                400,
+                {
+                  status: 'error',
+                  error: 'Import provenance requires an available Flight Recorder trace.',
+                },
+                corsHeaders,
+              );
+              return;
+            }
+
+            let traceEvents: FlightEvent[];
+            try {
+              traceEvents = await recorder.query({
+                traceId: provenance.value.traceId,
+                order: 'asc',
+              });
+            } catch {
+              writeJsonResponse(
+                res,
+                400,
+                {
+                  status: 'error',
+                  error: 'The supplied traceId could not be resolved by the Flight Recorder.',
+                },
+                corsHeaders,
+              );
+              return;
+            }
+            const activeTrace = validateActiveImportTrace(
+              traceEvents,
+              provenance.value.scenarioNonce,
+            );
+            if (!activeTrace.ok) {
+              writeJsonResponse(
+                res,
+                400,
+                {
+                  status: 'error',
+                  error: activeTrace.error,
+                },
+                corsHeaders,
+              );
+              return;
+            }
+
+            const root = activeTrace.root;
+            const candidateSourceSha256 = createHash('sha256')
+              .update(sourceBytes)
+              .digest('hex');
+            const authMode = this.config.auth?.mode ?? 'none';
+            await recorder.withTraceContext(
+              { traceId: provenance.value.traceId, parentId: root.id },
+              async () => {
+                const started = await recorder.record({
+                  kind: 'gateway.agent.import.started',
+                  source: 'gateway',
+                  status: 'started',
+                  parentId: root.id,
+                  metadata: {
+                    method: 'POST',
+                    path: '/agents/import',
+                    authenticated: true,
+                    authMode,
+                    filename,
+                    nonce: provenance.value.scenarioNonce,
+                    requestId: provenance.value.requestId,
+                    candidateSourceSha256,
+                  },
+                });
+                if (!started) {
+                  writeJsonResponse(
+                    res,
+                    503,
+                    {
+                      status: 'error',
+                      error: 'Flight Recorder could not start import provenance.',
+                    },
+                    corsHeaders,
+                  );
+                  return;
+                }
+
+                let result: CurrentAgentImportResult;
+                try {
+                  result = await recorder.withParent(started.id, () =>
+                    runWithAgentImportProvenance(
+                      {
+                        traceId: provenance.value.traceId,
+                        scenarioNonce: provenance.value.scenarioNonce,
+                        requestId: provenance.value.requestId,
+                        candidateSourceSha256,
+                        gatewayParentEventId: started.id,
+                      },
+                      () => importer(filename, sourceBytes),
+                    ),
+                  );
+                } catch {
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus: 500,
+                        responseStatus: 'error',
+                        candidateSourceSha256,
+                      },
+                    }),
+                  );
+                  writeJsonResponse(
+                    res,
+                    500,
+                    { status: 'error', error: 'Agent import failed unexpectedly.' },
+                    corsHeaders,
+                  );
+                  return;
+                }
+
+                const evidence = validateAgentImportEvidence(
+                  result,
+                  candidateSourceSha256,
+                );
+                if (evidence.kind === 'incomplete') {
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus: 503,
+                        responseStatus: 'error',
+                        evidenceIncomplete: true,
+                        candidateSourceSha256,
+                      },
+                    }),
+                  );
+                  writeJsonResponse(
+                    res,
+                    503,
+                    {
+                      status: 'error',
+                      error:
+                        'Agent import result lacked complete, consistent provenance evidence.',
+                    },
+                    corsHeaders,
+                  );
+                  return;
+                }
+
+                if (!isJsonSerializable(result)) {
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus: 503,
+                        responseStatus: 'error',
+                        candidateSourceSha256,
+                      },
+                    }),
+                  );
+                  writeJsonResponse(
+                    res,
+                    503,
+                    {
+                      status: 'error',
+                      error: 'Import result could not be serialised',
+                    },
+                    corsHeaders,
+                  );
+                  return;
+                }
+
+                let httpStatus: number;
+                if (evidence.kind === 'accepted') {
+                  httpStatus = 200;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.completed',
+                      source: 'gateway',
+                      status: 'success',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'ok',
+                        committed: true,
+                        candidateSourceSha256,
+                      },
+                    }),
+                  );
+                } else if (evidence.kind === 'precommit-rejection') {
+                  httpStatus = 400;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'error',
+                        committed: false,
+                        rejectedBeforeCommit: true,
+                        candidateSourceSha256,
+                        ...(evidence.activeGeneration === 'absent'
+                          ? { activeGeneration: 'absent' }
+                          : {}),
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
+                      },
+                    }),
+                  );
+                } else if (evidence.kind === 'restored') {
+                  httpStatus = 409;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'error',
+                        committed: false,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeGeneration: evidence.activeGeneration,
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
+                        commitState: 'restored',
+                        retrySafe: true,
+                        errorCode: evidence.errorCode,
+                      },
+                    }),
+                  );
+                } else if (evidence.kind === 'committed-warning') {
+                  httpStatus = 200;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.completed',
+                      source: 'gateway',
+                      status: 'success',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'ok',
+                        committed: true,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeSourceSha256: evidence.activeSourceSha256,
+                        activeGeneration: 'present',
+                        commitState: 'committed',
+                        retrySafe: false,
+                        warning: evidence.warning,
+                        errorCode: evidence.errorCode,
+                      },
+                    }),
+                  );
+                } else {
+                  httpStatus = 500;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'error',
+                        committed: evidence.committed,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeGeneration: evidence.activeGeneration,
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
+                        commitState: 'unknown',
+                        retrySafe: false,
+                        errorCode: evidence.errorCode,
+                        recoveryRequired: true,
+                      },
+                    }),
+                  );
+                }
+
+                writeJsonResponse(
+                  res,
+                  httpStatus,
+                  result,
+                  corsHeaders,
+                  { status: 'error', error: 'Import result could not be serialised' },
+                  503,
+                );
+              },
             );
             return;
           }

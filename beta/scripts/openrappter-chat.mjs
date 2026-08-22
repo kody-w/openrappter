@@ -76,7 +76,6 @@ async function main() {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       user_input: prompt,
-      conversation_history: [],
     }),
     signal: AbortSignal.timeout(5 * 60 * 1000),
   });

@@ -177,7 +177,7 @@ test("private HTTP reads its Brainstem secret from an environment reference", as
         observed = options;
         return new Response(JSON.stringify({
           response: "SECRET_OK",
-          agent_logs: [],
+          agent_logs: "[Brainstem] proof",
           session_id: "s",
         }), {
           status: 200,
@@ -186,10 +186,72 @@ test("private HTTP reads its Brainstem secret from an environment reference", as
       },
     });
     assert.equal(observed.headers["X-Brainstem-Secret"], "test-secret");
+    assert.deepEqual(JSON.parse(observed.body), {
+      user_input: "hello",
+      conversation_history: [],
+    });
     assert.equal(result.response, "SECRET_OK");
+    assert.deepEqual(result.envelope.agent_logs, ["[Brainstem] proof"]);
+    assert.equal(evaluatePackExpectation(result, {
+      contains: ["SECRET_OK"],
+      required_envelope_fields: ["response", "agent_logs", "session_id"],
+    }).pass, true);
   } finally {
     delete process.env.RAPPTER_PACK_TEST_SECRET;
   }
+});
+
+test("local and SSH adapters normalize legacy Brainstem logs at the boundary", async () => {
+  const result = await packNodeResponse(
+    new Response(JSON.stringify({
+      response: "LOCAL_OK",
+      agent_logs: "[Brainstem] local proof",
+      session_id: "session-local",
+      model: "legacy-extra",
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+    "chat",
+  );
+  assert.deepEqual(result.envelope, {
+    response: "LOCAL_OK",
+    agent_logs: ["[Brainstem] local proof"],
+    session_id: "session-local",
+  });
+});
+
+test("HTTP OpenRappter uses the exact RAPP/1 request and success envelope", async () => {
+  let observed;
+  const result = await dispatchPackNode({
+    id: "local-openrappter",
+    machine: "this-mac",
+    kind: "openrappter",
+    capabilities: ["chat", "rapp1"],
+    transport: { kind: "http", url: "http://127.0.0.1:61500" },
+  }, {
+    action: "chat",
+    case_id: "exact-rapp1",
+    prompt: "hello",
+  }, {
+    fetchImpl: async (_url, options) => {
+      observed = options;
+      return new Response(JSON.stringify({
+        response: "EXACT_OK",
+        agent_logs: ["proof"],
+        session_id: "session-exact",
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(JSON.parse(observed.body), { user_input: "hello" });
+  assert.equal(evaluatePackExpectation(result, {
+    contains: ["EXACT_OK"],
+    required_envelope_fields: ["response", "agent_logs", "session_id"],
+  }).pass, true);
 });
 
 test("HTTP refusals and non-JSON bodies remain refusals", async () => {
@@ -359,6 +421,7 @@ test("expectations report observed versus expected without model judgement", () 
     ok: true,
     response: "artifact DELIVERABLE_OK",
     duration_ms: 20,
+    http_status: 200,
   }, {
     contains: ["DELIVERABLE_OK"],
     excludes: ["ERROR"],
@@ -368,6 +431,7 @@ test("expectations report observed versus expected without model judgement", () 
     ok: true,
     response: "fast but incomplete",
     duration_ms: 5,
+    http_status: 200,
   }, {
     contains: ["DELIVERABLE_OK"],
     max_duration_ms: 30,
@@ -375,7 +439,7 @@ test("expectations report observed versus expected without model judgement", () 
   assert.equal(failed.pass, false);
   assert.match(failed.differences.join(" "), /DELIVERABLE_OK/);
   const missingEnvelope = evaluatePackExpectation(
-    { ok: true, response: "PACK_CONTRACT_OK", duration_ms: 1 },
+    { ok: true, response: "PACK_CONTRACT_OK", duration_ms: 1, http_status: 200 },
     {
       contains: ["PACK_CONTRACT_OK"],
       required_envelope_fields: ["response", "agent_logs", "session_id"],
@@ -387,9 +451,10 @@ test("expectations report observed versus expected without model judgement", () 
     ok: true,
     response: "PACK_CONTRACT_OK",
     duration_ms: 1,
+    http_status: 200,
     envelope: {
       response: "PACK_CONTRACT_OK",
-      agent_logs: [],
+      agent_logs: [42],
       session_id: 7,
       extra: true,
     },
@@ -400,8 +465,58 @@ test("expectations report observed versus expected without model judgement", () 
   assert.equal(malformedEnvelope.pass, false);
   assert.match(
     malformedEnvelope.differences.join(" "),
-    /agent_logs must be string|session_id must be string/,
+    /agent_logs must be string\[\]|session_id must be string/,
   );
+  const emptySession = evaluatePackExpectation({
+    ok: true,
+    response: "PACK_CONTRACT_OK",
+    duration_ms: 1,
+    http_status: 200,
+    envelope: {
+      response: "PACK_CONTRACT_OK",
+      agent_logs: [],
+      session_id: "",
+    },
+  }, {
+    contains: ["PACK_CONTRACT_OK"],
+    required_envelope_fields: ["response", "agent_logs", "session_id"],
+  });
+  assert.equal(emptySession.pass, false);
+  assert.match(emptySession.differences.join(" "), /session_id/);
+  const wrongSuccessStatus = evaluatePackExpectation({
+    ok: true,
+    response: "PACK_CONTRACT_OK",
+    duration_ms: 1,
+    http_status: 201,
+    envelope: {
+      response: "PACK_CONTRACT_OK",
+      agent_logs: [],
+      session_id: "session",
+    },
+  }, {
+    contains: ["PACK_CONTRACT_OK"],
+    required_envelope_fields: ["response", "agent_logs", "session_id"],
+  });
+  assert.equal(wrongSuccessStatus.pass, false);
+  assert.match(wrongSuccessStatus.differences.join(" "), /HTTP 200.*201/);
+  for (const status of [undefined, "200"]) {
+    const incompleteStatus = evaluatePackExpectation({
+      ok: true,
+      response: "PACK_CONTRACT_OK",
+      duration_ms: 1,
+      ...(status === undefined ? {} : { http_status: status }),
+      envelope: {
+        response: "PACK_CONTRACT_OK",
+        agent_logs: [],
+        session_id: "session",
+      },
+    }, {
+      contains: ["PACK_CONTRACT_OK"],
+      required_envelope_fields: ["response", "agent_logs", "session_id"],
+    });
+    assert.equal(incompleteStatus.pass, false);
+    assert.match(incompleteStatus.differences.join(" "), /missing-or-invalid/);
+  }
   assert.throws(
     () => evaluatePackExpectation(
       { ok: true, response: "anything", duration_ms: 1 },
@@ -425,15 +540,15 @@ test("race elects the first valid deliverable, not the first response", async ()
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       return request.case_id === "first-valid-deliverable-wins"
-        ? { ok: true, response: "finished first but incomplete", duration_ms: 5 }
-        : { ok: true, response: "PACK_CONTRACT_OK from OpenRappter", duration_ms: 15 };
+        ? { ok: true, response: "finished first but incomplete", duration_ms: 5, http_status: 200 }
+        : { ok: true, response: "PACK_CONTRACT_OK from OpenRappter", duration_ms: 15, http_status: 200 };
     }
     if (request.case_id === "first-valid-deliverable-wins") {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return request.case_id === "first-valid-deliverable-wins"
-      ? { ok: true, response: "artifact DELIVERABLE_OK", duration_ms: 20 }
-      : { ok: true, response: "PACK_CONTRACT_OK from Brainstem", duration_ms: 10 };
+      ? { ok: true, response: "artifact DELIVERABLE_OK", duration_ms: 20, http_status: 200 }
+      : { ok: true, response: "PACK_CONTRACT_OK from Brainstem", duration_ms: 10, http_status: 200 };
   };
   const report = await runPackMatrix({
     config: config(),
@@ -446,8 +561,8 @@ test("race elects the first valid deliverable, not the first response", async ()
   assert.deepEqual(report.wire, {
     method: "POST",
     path: "/chat",
-    adapter: "none",
-    upstream_contract: "preserved",
+    adapter: "legacy-success-envelope-to-rapp1",
+    upstream_contract: "normalized",
     neighborhood_protocol: "not-claimed",
   });
   assert.equal(report.summary.pass, 2);
@@ -469,10 +584,10 @@ test("race order is observed by the controller, never trusted from remote durati
     dispatch: async (node) => {
       if (node.id === "brainstem-one") {
         await new Promise((resolve) => setTimeout(resolve, 5));
-        return { ok: true, response: "1. x 2. y 3. z DELIVERABLE_OK", duration_ms: 999 };
+        return { ok: true, response: "1. x 2. y 3. z DELIVERABLE_OK", duration_ms: 999, http_status: 200 };
       }
       await new Promise((resolve) => setTimeout(resolve, 40));
-      return { ok: true, response: "1. x 2. y 3. z DELIVERABLE_OK", duration_ms: 1 };
+      return { ok: true, response: "1. x 2. y 3. z DELIVERABLE_OK", duration_ms: 1, http_status: 200 };
     },
   });
   const race = report.cases[0];
@@ -502,6 +617,7 @@ test("race winner remains first-settled when acceptance requires two valid resul
           ok: true,
           response: "DELIVERABLE_OK",
           duration_ms: 999,
+          http_status: 200,
         };
       }
       await new Promise((resolve) => setTimeout(resolve, 35));
@@ -509,6 +625,7 @@ test("race winner remains first-settled when acceptance requires two valid resul
         ok: true,
         response: "DELIVERABLE_OK",
         duration_ms: 1,
+        http_status: 200,
       };
     },
   });
@@ -535,6 +652,7 @@ test("race returns after acceptance and aborts hanging losers", async () => {
           ok: true,
           response: "DELIVERABLE_OK",
           duration_ms: 10,
+          http_status: 200,
         };
       }
       return new Promise((_resolve, reject) => {
@@ -570,7 +688,7 @@ test("report digest binds every deterministic acceptance input", async () => {
       duration_ms: 10,
       envelope: {
         response: "PACK_CONTRACT_OK",
-        agent_logs: "",
+        agent_logs: [],
         session_id: "s",
       },
       http_status: 200,
@@ -639,8 +757,8 @@ test("Brainstem and OpenRappter collaborate as /chat neighbors", async () => {
     dispatch: async (node, request) => {
       calls.push({ node: node.id, prompt: request.prompt });
       return node.kind === "brainstem"
-        ? { ok: true, response: "test the exact wire BRAINSTEM_HANDOFF", duration_ms: 10 }
-        : { ok: true, response: "test exact wire plus failure isolation NEIGHBOR_COLLAB_OK", duration_ms: 20 };
+        ? { ok: true, response: "test the exact wire BRAINSTEM_HANDOFF", duration_ms: 10, http_status: 200 }
+        : { ok: true, response: "test exact wire plus failure isolation NEIGHBOR_COLLAB_OK", duration_ms: 20, http_status: 200 };
     },
   });
   assert.deepEqual(calls.map((call) => call.node), [
@@ -660,6 +778,78 @@ test("Brainstem and OpenRappter collaborate as /chat neighbors", async () => {
   );
 });
 
+test("relay intermediates must satisfy the declared envelope contract", async () => {
+  const relayMatrix = {
+    schema: RAPPTER_PACK_MATRIX_SCHEMA,
+    name: "strict relay",
+    cases: [{
+      id: "strict-relay",
+      action: "chat",
+      mode: "relay",
+      candidates: ["brainstem-one", "openrappter-two", "offline-three"],
+      prompt: "handoff",
+      handoff_prompt: "{{previous}}",
+      expected: {
+        contains: ["FINAL_OK"],
+        required_envelope_fields: ["response", "agent_logs", "session_id"],
+        max_duration_ms: 5_000,
+        min_passing: 1,
+      },
+    }],
+  };
+  const report = await runPackMatrix({
+    config: config(),
+    matrix: relayMatrix,
+    dispatch: async (node) => {
+      if (node.id === "brainstem-one") {
+        return {
+          ok: true,
+          response: "handoff",
+          duration_ms: 10,
+          http_status: 200,
+          envelope: { response: "handoff", agent_logs: [42], session_id: "" },
+        };
+      }
+      if (node.id === "openrappter-two") {
+        return {
+          ok: true,
+          response: "second handoff",
+          duration_ms: 10,
+          http_status: 201,
+          envelope: {
+            response: "second handoff",
+            agent_logs: [],
+            session_id: "session-second",
+          },
+        };
+      }
+      return {
+          ok: true,
+          response: "FINAL_OK",
+          duration_ms: 10,
+          http_status: 200,
+          envelope: {
+            response: "FINAL_OK",
+            agent_logs: [],
+            session_id: "session-final",
+          },
+        };
+    },
+  });
+
+  assert.equal(report.cases[0].pass, false);
+  assert.equal(report.cases[0].results[0].accepted, false);
+  assert.equal(report.cases[0].results[1].accepted, false);
+  assert.match(
+    report.cases[0].results[0].differences.join(" "),
+    /agent_logs|session_id/,
+  );
+  assert.match(
+    report.cases[0].results[1].differences.join(" "),
+    /HTTP 200.*201/,
+  );
+});
+
 test("continuous loop persists private reports and preserves every observed delta", async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "rappter-pack-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -676,6 +866,7 @@ test("continuous loop persists private reports and preserves every observed delt
         ? `DELIVERABLE_OK iteration ${iteration}`
         : `PACK_CONTRACT_OK iteration ${iteration}`,
       duration_ms: 10,
+      http_status: 200,
     }),
     onIteration: (report) => {
       writePackReport(home, report);

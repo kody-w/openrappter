@@ -129,13 +129,13 @@ def run(config=None, ctx=None):
     elif wire != {
         "method": "POST",
         "path": "/chat",
-        "adapter": "none",
-        "upstream_contract": "preserved",
+        "adapter": "legacy-success-envelope-to-rapp1",
+        "upstream_contract": "normalized",
         "neighborhood_protocol": "not-claimed",
     }:
         results.append(c["fail"](
             "pack_matrix_expected",
-            "report does not declare the transparent /chat wire honestly"))
+            "report does not declare the /chat normalization adapter honestly"))
     elif not isinstance(cases, list) or not cases:
         results.append(c["fail"](
             "pack_matrix_expected", "report carries no matrix cases"))
@@ -183,8 +183,8 @@ def prove():
             "wire": {
                 "method": "POST",
                 "path": "/chat",
-                "adapter": "none",
-                "upstream_contract": "preserved",
+                "adapter": "legacy-success-envelope-to-rapp1",
+                "upstream_contract": "normalized",
                 "neighborhood_protocol": "not-claimed",
             },
             "nodes": [
@@ -244,7 +244,7 @@ def prove():
                         "evidence": [],
                         "envelope": {
                             "response": response,
-                            "agent_logs": "",
+                            "agent_logs": [],
                             "session_id": "brainstem-session",
                         },
                         "outcome": "accepted",
@@ -267,7 +267,7 @@ def prove():
                         "evidence": [],
                         "envelope": {
                             "response": response,
-                            "agent_logs": "",
+                            "agent_logs": [],
                             "session_id": "openrappter-session",
                         },
                         "outcome": "accepted" if transport_ok else "failed",
@@ -334,6 +334,11 @@ def prove():
             "accepted": False,
             "differences": ["/chat returned HTTP 405"],
         }),
+        lambda value: value["cases"][0]["results"][0].update({
+            "http_status": 201,
+            "accepted": False,
+            "differences": ["/chat returned HTTP 201"],
+        }),
     ]:
         changed = deepcopy(report())
         mutate(changed)
@@ -363,6 +368,61 @@ def prove():
         "read_json": lambda _: report(response="WRONG"),
     })
     assert not _by_id(failed, "pack_matrix_expected")["ok"], failed
+
+    assert not _relay_intermediate_satisfies({
+        "transport_ok": True,
+        "refused": False,
+        "http_status": 200,
+        "duration_ms": 10,
+        "envelope": {
+            "response": "handoff",
+            "agent_logs": [42],
+            "session_id": "",
+        },
+    }, {
+        "required_envelope_fields": [
+            "response", "agent_logs", "session_id"],
+        "max_duration_ms": 1000,
+    })
+    assert not _relay_intermediate_satisfies({
+        "transport_ok": True,
+        "refused": False,
+        "http_status": 201,
+        "duration_ms": 10,
+        "envelope": {
+            "response": "handoff",
+            "agent_logs": [],
+            "session_id": "session",
+        },
+    }, {
+        "required_envelope_fields": [
+            "response", "agent_logs", "session_id"],
+        "max_duration_ms": 1000,
+    })
+    for invalid_status in (None, "200"):
+        invalid_result = {
+            "transport_ok": True,
+            "refused": False,
+            "duration_ms": 10,
+            "envelope": {
+                "response": "OK",
+                "agent_logs": [],
+                "session_id": "session",
+            },
+        }
+        if invalid_status is not None:
+            invalid_result["http_status"] = invalid_status
+        expected = {
+            "contains": ["OK"],
+            "excludes": [],
+            "required_envelope_fields": [
+                "response", "agent_logs", "session_id"],
+            "max_duration_ms": 1000,
+            "min_passing": 1,
+        }
+        assert not _result_satisfies(invalid_result, expected)
+        assert not _relay_intermediate_satisfies(
+            invalid_result, expected)
 
     # A producer cannot keep a frozen output green by refreshing created_at.
     state.clear()
@@ -504,26 +564,7 @@ def _digest_evidence_value(value, depth=0):
     raise ValueError("Pack evidence JSON contains an unsupported value")
 
 
-def _result_satisfies(result, expected):
-    if result.get("transport_ok") is not True:
-        return False
-    if result.get("refused") is not False:
-        return False
-    status = result.get("http_status")
-    if status is not None and (
-        not isinstance(status, int)
-        or isinstance(status, bool)
-        or status < 200
-        or status >= 300
-    ):
-        return False
-    response = str(result.get("response") or "")
-    if any(str(value) not in response for value in expected.get("contains") or []):
-        return False
-    if any(str(value) in response for value in expected.get("excludes") or []):
-        return False
-    envelope = result.get("envelope")
-    required = expected.get("required_envelope_fields") or []
+def _envelope_satisfies(envelope, required):
     if required and not isinstance(envelope, dict):
         return False
     if any(field not in envelope for field in required):
@@ -535,7 +576,7 @@ def _result_satisfies(result, expected):
         "content": str,
         "session_id": str,
         "sessionId": str,
-        "agent_logs": str,
+        "agent_logs": list,
         "voice_mode": bool,
         "model": str,
         "requested_model": str,
@@ -545,6 +586,37 @@ def _result_satisfies(result, expected):
         and not isinstance(envelope[field], known_types[field])
         for field in required
     ):
+        return False
+    if (
+        "agent_logs" in required
+        and any(not isinstance(entry, str) for entry in envelope["agent_logs"])
+    ):
+        return False
+    if "session_id" in required and not envelope["session_id"]:
+        return False
+    return True
+
+
+def _result_satisfies(result, expected):
+    if result.get("transport_ok") is not True:
+        return False
+    if result.get("refused") is not False:
+        return False
+    status = result.get("http_status")
+    if (
+        not isinstance(status, int)
+        or isinstance(status, bool)
+        or status != 200
+    ):
+        return False
+    response = str(result.get("response") or "")
+    if any(str(value) not in response for value in expected.get("contains") or []):
+        return False
+    if any(str(value) in response for value in expected.get("excludes") or []):
+        return False
+    if not _envelope_satisfies(
+            result.get("envelope"),
+            expected.get("required_envelope_fields") or []):
         return False
     maximum = expected.get("max_duration_ms")
     duration = result.get("duration_ms")
@@ -656,11 +728,10 @@ def _relay_intermediate_satisfies(result, expected):
     if result.get("refused") is not False:
         return False
     status = result.get("http_status")
-    if status is not None and (
+    if (
         not isinstance(status, int)
         or isinstance(status, bool)
-        or status < 200
-        or status >= 300
+        or status != 200
     ):
         return False
     duration = result.get("duration_ms")
@@ -669,6 +740,10 @@ def _relay_intermediate_satisfies(result, expected):
         or isinstance(duration, bool)
         or duration < 0
     ):
+        return False
+    if not _envelope_satisfies(
+            result.get("envelope"),
+            expected.get("required_envelope_fields") or []):
         return False
     maximum = expected.get("max_duration_ms")
     return maximum is None or duration <= maximum

@@ -17,7 +17,7 @@ openrappter is a dual-runtime (Python + TypeScript) AI agent framework. It uses 
 
 | Requirement | Check Command | Notes |
 |---|---|---|
-| Node.js 18+ | `node --version` | TypeScript runtime |
+| Node.js >=20.9 | `node --version` | TypeScript runtime |
 | Python 3.10+ | `python3 --version` | Python runtime |
 | GitHub Copilot CLI | `copilot --version` | Required — provides AI-powered routing via the Copilot SDK. |
 
@@ -77,6 +77,10 @@ fill the intent field, and verify the value.
 Supported operations are `snapshot`, `navigate`, `click`, `input`, `select`,
 `scroll`, `wait`, and approval-gated `install_agent`. Hot-loaded agents can
 return `ui_commands` using the same non-install operations.
+
+> **Execution boundary:** `sandbox: true` protects the Electron renderer only.
+> Approved shell commands and installed or hot-loaded agent code execute
+> outside that renderer sandbox with the logged-in OS user's authority.
 
 Local model bootstrapping is opt-in:
 
@@ -279,8 +283,8 @@ python3 -m openrappter.cli [options]  # Direct
 |---|---|---|
 | **ManageMemory** | `ManageMemory` | Stores important information to memory for future reference. Accepts `content`, `importance`, `memory_type`, `tags`. |
 | **ContextMemory** | `ContextMemory` | Recalls and provides context based on stored memories of past interactions. |
-| **Shell** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
-| **LearnNew** | `LearnNew` | Creates new agents from natural language descriptions. Generates code, writes to `agents/`, and hot-loads. |
+| **Shell** | `Shell` | Executes shell commands and file operations with the logged-in OS user's authority. Actions: `bash`, `read`, `write`, `list`. |
+| **LearnNew** | `LearnNew` | Creates executable agents from natural language descriptions, writes them to `agents/`, may install dependencies, and hot-loads them. |
 
 ### TypeScript Runtime (3 agents)
 
@@ -288,7 +292,7 @@ python3 -m openrappter.cli [options]  # Direct
 |---|---|---|
 | **Assistant** | `Assistant` | Copilot SDK-powered orchestrator that routes user queries to agents via tool calling. |
 | **MemoryAgent** | `Memory` | Stores and recalls facts in persistent memory. Actions: `remember`, `recall`, `list`, `forget`. |
-| **ShellAgent** | `Shell` | Executes shell commands and file operations. Actions: `bash`, `read`, `write`, `list`. |
+| **ShellAgent** | `Shell` | Executes shell commands and file operations with the logged-in OS user's authority. Actions: `bash`, `read`, `write`, `list`. |
 
 ### Using Agents
 
@@ -380,7 +384,17 @@ export class MyAgent extends BasicAgent {
 }
 ```
 
-After creating, rebuild TypeScript (`npm run build`) — Python agents are hot-loaded automatically.
+After creating, rebuild TypeScript (`npm run build`) — Python agents are
+hot-loaded automatically.
+
+> **Python hot-load warning:** Auto-discovery is code execution. Compatibility
+> inspection launches Python, imports the file, and constructs each discovered
+> agent class. Each invocation launches a fresh Python process. Agent code can
+> access the filesystem, network, environment, and subprocesses with the
+> logged-in OS user's authority. The subprocess provides crash and time
+> isolation only, not a security boundary. If registration fails, preserving
+> or restoring file bytes cannot undo side effects from import, construction,
+> dependency installation, or invocation.
 
 ### Agent Contract Rules
 
@@ -398,6 +412,12 @@ The `LearnNew` agent can create agents from natural language:
 openrappter --exec LearnNew "create an agent that fetches weather data"
 # Generates code, writes to agents/, hot-loads, installs dependencies if needed
 ```
+
+> **Runtime-generation warning:** Treat generated source and inferred
+> dependencies as untrusted executable code. Review both before use and treat
+> dependency installation as a separate supply-chain decision; generation,
+> installation, and hot-load are not sandboxed and do not establish signing,
+> provenance, or safety.
 
 ---
 
@@ -559,6 +579,11 @@ openrappter clawhub list
 ```
 
 Installed skills are loaded from `~/.openrappter/skills/` and prefixed with `skill:` in the agent registry.
+
+> **Install warning:** A registry listing is not a provenance or safety
+> guarantee. Review installed agent or skill source and dependencies; executable
+> code and scripts run with the logged-in OS user's authority unless you apply
+> an external OS sandbox.
 
 ---
 
@@ -722,7 +747,7 @@ Config files support `${VAR_NAME}` environment variable substitution. All schema
 | Section | Purpose |
 |---|---|
 | `models` | AI model provider configuration (copilot, anthropic, openai, ollama, gemini, bedrock) |
-| `agents` | Agent-specific settings, workspaces, sandbox options |
+| `agents` | Agent-specific settings and workspaces; no supported general execution sandbox is provided |
 | `channels` | Enable/configure messaging channels (iMessage, Slack, Discord, Telegram, etc.) |
 | `gateway` | WebSocket server settings (port, bind, auth) |
 | `memory` | Memory provider and chunking settings |
@@ -770,7 +795,7 @@ openrappter rappterhub install author/agent
 **Agent Notes:**
 - Both runtimes can be installed independently — pick the user's preferred language
 - TypeScript must be rebuilt after adding new agents (`npm run build`)
-- Python agents are hot-loaded automatically
+- Python agents are hot-loaded automatically; review the execution warning in Section 8 before adding a file
 - All agent data is local-first in `~/.openrappter/`
 - Copilot provides cloud AI inference — no separate API keys needed
 - This skill should complete in under 5 minutes

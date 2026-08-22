@@ -229,7 +229,10 @@ export class AgentRegistry {
           // A re-dropped file must replace its own agent rather than being
           // ignored as a duplicate, or editing an agent would never take.
           const existing = this.agents.get(descriptor.name);
-          const isOurs = existing instanceof PythonAgent && existing.sourceFile === filePath;
+          const isOurs =
+            existing instanceof PythonAgent &&
+            canonicalAgentSourcePath(existing.sourceFile) ===
+              canonicalAgentSourcePath(filePath);
           if (existing && !isOurs) continue;
           this.agents.set(descriptor.name, new PythonAgent(filePath, descriptor));
         }

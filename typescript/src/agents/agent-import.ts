@@ -52,6 +52,8 @@ export type AgentImportCommitState =
   | "restored"
   | "unknown";
 
+export type AgentImportActiveGeneration = "present" | "absent" | "unknown";
+
 export interface ImportResult {
   status: "ok" | "error";
   /** What the organism can now do — the capability names, not the filename. */
@@ -73,6 +75,8 @@ export interface ImportResult {
   retrySafe: boolean;
   /** Non-secret operator guidance for a successful commit needing cleanup. */
   warning?: string;
+  /** Whether a readable active source generation exists after this operation. */
+  activeGeneration: AgentImportActiveGeneration;
 }
 
 type ImportRegistry = Pick<AgentRegistry, "reloadUserAgents" | "getAllAgents">;
@@ -106,6 +110,11 @@ interface PreviousGeneration {
   sourceSha256?: string;
   owned: Map<string, BasicAgent>;
 }
+
+type ActiveGenerationFields =
+  | { activeGeneration: "present"; activeSourceSha256: string }
+  | { activeGeneration: "absent"; activeSourceSha256?: never }
+  | { activeGeneration: "unknown"; activeSourceSha256?: string };
 
 /** Base-class filenames that are scaffolding, not capabilities. */
 const PROTECTED = new Set([
@@ -173,6 +182,49 @@ async function readIfExists(file: string): Promise<Buffer | null> {
   }
 }
 
+function knownActiveGeneration(
+  sourceSha256: string | undefined,
+): ActiveGenerationFields {
+  return sourceSha256 === undefined
+    ? { activeGeneration: "absent" }
+    : {
+        activeGeneration: "present",
+        activeSourceSha256: sourceSha256,
+      };
+}
+
+async function observeActiveGeneration(
+  target: string,
+): Promise<ActiveGenerationFields> {
+  try {
+    const stat = await fs.lstat(target);
+    if (!stat.isFile()) return { activeGeneration: "unknown" };
+    return {
+      activeGeneration: "present",
+      activeSourceSha256: sha256(await fs.readFile(target)),
+    };
+  } catch (error) {
+    if (systemErrorCode(error) === "ENOENT") {
+      return { activeGeneration: "absent" };
+    }
+    return { activeGeneration: "unknown" };
+  }
+}
+
+async function invalidImportTargetReason(
+  target: string,
+): Promise<string | undefined> {
+  try {
+    const stat = await fs.lstat(target);
+    if (stat.isSymbolicLink()) return "a symbolic link";
+    if (!stat.isFile()) return "not a regular file";
+    return undefined;
+  } catch (error) {
+    if (systemErrorCode(error) === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 function sameFilePath(left: string, right: string): boolean {
   return canonicalAgentSourcePath(left) === canonicalAgentSourcePath(right);
 }
@@ -198,17 +250,18 @@ function uniqueAgentNames(agents: CandidateAgent[]): string[] {
   return [...new Set(agents.map((agent) => agent.name))];
 }
 
-function failureOutcome(options: {
-  candidateSourceSha256: string;
-  error: string;
-  errorCode: string;
-  rejectedBeforeCommit: boolean;
-  committed?: boolean;
-  activeSourceSha256?: string;
-  agentName?: string;
-  commitState?: AgentImportCommitState;
-  retrySafe?: boolean;
-}): ImportOutcome {
+function failureOutcome(
+  options: {
+    candidateSourceSha256: string;
+    error: string;
+    errorCode: string;
+    rejectedBeforeCommit: boolean;
+    committed?: boolean;
+    agentName?: string;
+    commitState?: AgentImportCommitState;
+    retrySafe?: boolean;
+  } & ActiveGenerationFields,
+): ImportOutcome {
   const commitState =
     options.commitState ??
     (options.rejectedBeforeCommit
@@ -227,6 +280,7 @@ function failureOutcome(options: {
       commitState,
       retrySafe,
       candidateSourceSha256: options.candidateSourceSha256,
+      activeGeneration: options.activeGeneration,
       ...(options.activeSourceSha256 === undefined
         ? {}
         : { activeSourceSha256: options.activeSourceSha256 }),
@@ -256,6 +310,7 @@ function committedOutcome(options: {
       retrySafe: false,
       candidateSourceSha256: options.candidateSourceSha256,
       activeSourceSha256: options.candidateSourceSha256,
+      activeGeneration: "present",
       learned: options.candidate.agents.map(({ name, description }) => ({
         name,
         description,
@@ -403,7 +458,7 @@ async function rejectBeforeCommit(options: {
   if (cleanupFailures.length > 0) {
     return failureOutcome({
       candidateSourceSha256: options.candidateSourceSha256,
-      activeSourceSha256: options.activeSourceSha256,
+      ...knownActiveGeneration(options.activeSourceSha256),
       agentName: options.agentName,
       errorCode: "IMPORT_STAGE_CLEANUP_FAILED",
       rejectedBeforeCommit: true,
@@ -413,7 +468,7 @@ async function rejectBeforeCommit(options: {
 
   return failureOutcome({
     candidateSourceSha256: options.candidateSourceSha256,
-    activeSourceSha256: options.activeSourceSha256,
+    ...knownActiveGeneration(options.activeSourceSha256),
     agentName: options.agentName,
     errorCode: options.errorCode,
     rejectedBeforeCommit: true,
@@ -789,17 +844,21 @@ async function rollbackCommittedCandidate(options: {
   }
 
   if (rollbackFailures.length > 0) {
+    const activeGeneration = diskRestored
+      ? knownActiveGeneration(options.previous.sourceSha256)
+      : await observeActiveGeneration(options.target);
+    const candidateStillActive =
+      activeGeneration.activeGeneration === "present" &&
+      activeGeneration.activeSourceSha256 === options.candidateSourceSha256;
     return failureOutcome({
       candidateSourceSha256: options.candidateSourceSha256,
-      activeSourceSha256: diskRestored
-        ? options.previous.sourceSha256
-        : options.candidateSourceSha256,
+      ...activeGeneration,
       agentName:
         options.previous.owned.keys().next().value ??
         options.candidate.agents[0]?.name,
       errorCode: "IMPORT_ROLLBACK_FAILED",
       rejectedBeforeCommit: false,
-      committed: !diskRestored,
+      committed: candidateStillActive,
       commitState: "unknown",
       retrySafe: false,
       error:
@@ -810,7 +869,7 @@ async function rollbackCommittedCandidate(options: {
 
   return failureOutcome({
     candidateSourceSha256: options.candidateSourceSha256,
-    activeSourceSha256: options.previous.sourceSha256,
+    ...knownActiveGeneration(options.previous.sourceSha256),
     agentName:
       options.previous.owned.keys().next().value ??
       options.candidate.agents[0]?.name,
@@ -989,6 +1048,19 @@ async function performLockedImport(options: {
   registry: ImportRegistry;
   target: string;
 }): Promise<ImportOutcome> {
+  const invalidTargetReason = await invalidImportTargetReason(options.target);
+  if (invalidTargetReason) {
+    return failureOutcome({
+      candidateSourceSha256: options.candidateSourceSha256,
+      activeGeneration: "absent",
+      errorCode: "IMPORT_INVALID_TARGET_TYPE",
+      rejectedBeforeCommit: true,
+      error:
+        `${options.filename} cannot be imported because its target is ` +
+        `${invalidTargetReason}.`,
+    });
+  }
+
   const live = await options.registry.getAllAgents();
   const registrySnapshot = new Map(live);
   const previousResult = await previousGeneration(
@@ -999,6 +1071,7 @@ async function performLockedImport(options: {
   if (!previousResult.ok) {
     return failureOutcome({
       candidateSourceSha256: options.candidateSourceSha256,
+      activeGeneration: "present",
       activeSourceSha256: sha256(previousResult.bytes),
       errorCode: "IMPORT_EXISTING_GENERATION_UNVERIFIABLE",
       rejectedBeforeCommit: true,
@@ -1013,7 +1086,7 @@ async function performLockedImport(options: {
   if (options.contents.length === 0) {
     return failureOutcome({
       candidateSourceSha256: options.candidateSourceSha256,
-      activeSourceSha256: previous.sourceSha256,
+      ...knownActiveGeneration(previous.sourceSha256),
       agentName: preservedAgentName,
       errorCode: "IMPORT_EMPTY_FILE",
       rejectedBeforeCommit: true,
@@ -1172,6 +1245,7 @@ async function recordImportTerminal(
     ...(result.activeSourceSha256 === undefined
       ? {}
       : { activeSourceSha256: result.activeSourceSha256 }),
+    activeGeneration: result.activeGeneration,
     commitState: result.commitState,
     retrySafe: result.retrySafe,
   };
@@ -1249,6 +1323,7 @@ export async function importAgentFile(
   if (!name.endsWith(".py") && !name.endsWith(".js")) {
     outcome = failureOutcome({
       candidateSourceSha256,
+      activeGeneration: "absent",
       errorCode: "IMPORT_UNSUPPORTED_EXTENSION",
       rejectedBeforeCommit: true,
       error: `${name} is not an agent — only .py and .js files can be installed.`,
@@ -1256,6 +1331,7 @@ export async function importAgentFile(
   } else if (PROTECTED.has(name)) {
     outcome = failureOutcome({
       candidateSourceSha256,
+      activeGeneration: "absent",
       errorCode: "IMPORT_PROTECTED_FILE",
       rejectedBeforeCommit: true,
       error: `${name} is shared scaffolding, not a capability, and cannot be replaced.`,
@@ -1263,6 +1339,7 @@ export async function importAgentFile(
   } else if (name.endsWith(".js") && !name.endsWith("_agent.js")) {
     outcome = failureOutcome({
       candidateSourceSha256,
+      activeGeneration: "absent",
       errorCode: "IMPORT_INVALID_JAVASCRIPT_FILENAME",
       rejectedBeforeCommit: true,
       error:
@@ -1272,10 +1349,8 @@ export async function importAgentFile(
   } else {
     try {
       await fs.mkdir(dir, { recursive: true });
-      const target = path.resolve(dir, name);
-      const resolvedDirectory = await fs.realpath(path.dirname(target));
-      const lockTarget = path.join(resolvedDirectory, path.basename(target));
-      outcome = await withTargetLock(lockTarget, () =>
+      const target = canonicalAgentSourcePath(path.resolve(dir, name));
+      outcome = await withTargetLock(target, () =>
         withRegistryLock(registry, () =>
           performLockedImport({
             filename: name,
@@ -1290,6 +1365,7 @@ export async function importAgentFile(
     } catch (error) {
       outcome = failureOutcome({
         candidateSourceSha256,
+        activeGeneration: "unknown",
         errorCode: "IMPORT_TRANSACTION_FAILED",
         rejectedBeforeCommit: true,
         error: `${name} could not be imported (${errorDescription(error)}).`,

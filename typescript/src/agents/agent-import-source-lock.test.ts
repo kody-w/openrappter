@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  canonicalAgentSourcePath,
   withAgentSourceReadLock,
   withAgentSourceWriteLock,
 } from "./BasicAgent.js";
@@ -21,6 +22,65 @@ afterEach(async () => {
 });
 
 describe("per-source read/write fencing", () => {
+  it("collapses existing case aliases when the filesystem aliases them", async () => {
+    const mixedCase = path.join(dir, "MiXeD_Source.py");
+    const alternateCase = path.join(dir, "mixed_source.py");
+    await fs.writeFile(mixedCase, "source", { mode: 0o600 });
+    const aliases = await fs
+      .lstat(alternateCase)
+      .then(() => true)
+      .catch(() => false);
+
+    expect(
+      canonicalAgentSourcePath(mixedCase) ===
+        canonicalAgentSourcePath(alternateCase),
+    ).toBe(aliases);
+
+    let releaseFirst = (): void => {};
+    let signalFirst = (): void => {};
+    const firstEntered = new Promise<void>((resolve) => {
+      signalFirst = resolve;
+    });
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = withAgentSourceWriteLock(mixedCase, async () => {
+      signalFirst();
+      await firstGate;
+      return "mixed complete";
+    });
+    await firstEntered;
+
+    let alternateSettled = false;
+    const alternate = withAgentSourceWriteLock(alternateCase, async () => {
+      alternateSettled = true;
+      return "alternate complete";
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(alternateSettled).toBe(!aliases);
+
+    releaseFirst();
+    await expect(first).resolves.toBe("mixed complete");
+    await expect(alternate).resolves.toBe("alternate complete");
+  });
+
+  it("collapses existing Unicode normalization aliases when the filesystem aliases them", async () => {
+    const composed = path.join(dir, "Caf\u00e9_Source.py");
+    const decomposed = path.join(dir, "Cafe\u0301_Source.py");
+    await fs.writeFile(composed, "source", { mode: 0o600 });
+    const aliases = await fs
+      .lstat(decomposed)
+      .then(() => true)
+      .catch(() => false);
+
+    expect(
+      canonicalAgentSourcePath(composed) ===
+        canonicalAgentSourcePath(decomposed),
+    ).toBe(aliases);
+  });
+
   it("does not serialize writers for different source paths", async () => {
     const firstSource = path.join(dir, "first_agent.py");
     const secondSource = path.join(dir, "second_agent.py");

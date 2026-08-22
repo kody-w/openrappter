@@ -9,11 +9,8 @@ import {
   FlightRecorder,
   setFlightRecorder,
 } from "../flight-recorder/recorder.js";
-import {
-  AgentRegistry,
-  canonicalAgentSourcePath,
-} from "./AgentRegistry.js";
-import { BasicAgent } from "./BasicAgent.js";
+import { AgentRegistry } from "./AgentRegistry.js";
+import { BasicAgent, canonicalAgentSourcePath } from "./BasicAgent.js";
 import { importAgentFile, withAgentImportProvenance } from "./agent-import.js";
 
 type ImportResultValue = Awaited<ReturnType<typeof importAgentFile>>;
@@ -269,6 +266,7 @@ describe("transactional replacement", () => {
       rejectedBeforeCommit: true,
       commitState: "not-committed",
       retrySafe: true,
+      activeGeneration: "present",
       candidateSourceSha256: digest(invalid),
       activeSourceSha256: digest(original),
       errorCode: "IMPORT_CANDIDATE_INVALID",
@@ -308,6 +306,7 @@ describe("transactional replacement", () => {
       rejectedBeforeCommit: false,
       commitState: "restored",
       retrySafe: true,
+      activeGeneration: "present",
       errorCode: "IMPORT_ACTIVATION_FAILED",
       activeSourceSha256: digest(original),
     });
@@ -338,8 +337,10 @@ describe("transactional replacement", () => {
       rejectedBeforeCommit: false,
       commitState: "restored",
       retrySafe: true,
+      activeGeneration: "absent",
       errorCode: "IMPORT_REGISTRY_VERIFICATION_FAILED",
     });
+    expect(result.activeSourceSha256).toBeUndefined();
     await expect(
       fs.access(path.join(dir, "missing_agent.py")),
     ).rejects.toThrow();
@@ -428,6 +429,47 @@ describe("transactional replacement", () => {
     ).toBeUndefined();
     expect(await transactionArtifacts()).toEqual([]);
   });
+
+  it("rejects a symlink target without touching the linked file", async () => {
+    await registry.getAllAgents();
+    const externalDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "agent-import-external-"),
+    );
+    const external = path.join(externalDir, "external.py");
+    const externalBytes = Buffer.from("external bytes must stay unchanged\n");
+    const target = path.join(dir, "linked_agent.py");
+    await fs.writeFile(external, externalBytes, { mode: 0o600 });
+    await fs.symlink(external, target);
+    const externalIdentity = await statIdentity(external);
+
+    try {
+      const result = await importAgentFile(
+        "linked_agent.py",
+        pythonAgent("LinkedAgent", "Linked", "must not install"),
+        registry,
+        { dir },
+      );
+
+      expect(result).toMatchObject({
+        status: "error",
+        committed: false,
+        rejectedBeforeCommit: true,
+        commitState: "not-committed",
+        retrySafe: true,
+        activeGeneration: "absent",
+        errorCode: "IMPORT_INVALID_TARGET_TYPE",
+      });
+      expect(result.activeSourceSha256).toBeUndefined();
+      expect((await fs.lstat(target)).isSymbolicLink()).toBe(true);
+      expect(await fs.readlink(target)).toBe(external);
+      expect(await fs.readFile(external)).toEqual(externalBytes);
+      expect(await statIdentity(external)).toBe(externalIdentity);
+      expect(await registry.getAgent("Linked")).toBeUndefined();
+      expect(await transactionArtifacts()).toEqual([]);
+    } finally {
+      await fs.rm(externalDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("live reader fencing and gapless activation", () => {
@@ -482,6 +524,7 @@ describe("live reader fencing and gapless activation", () => {
       rejectedBeforeCommit: false,
       commitState: "restored",
       retrySafe: true,
+      activeGeneration: "present",
       errorCode: "IMPORT_ACTIVATION_FAILED",
     });
     if (!execution) throw new Error("held execution was not started");
@@ -545,6 +588,7 @@ describe("live reader fencing and gapless activation", () => {
       committed: true,
       commitState: "committed",
       retrySafe: false,
+      activeGeneration: "present",
     });
     if (!execution) throw new Error("held execution was not started");
     expect(await execution).toContain("committed generation after success");
@@ -589,6 +633,7 @@ describe("explicit commit states", () => {
       committed: true,
       commitState: "committed",
       retrySafe: false,
+      activeGeneration: "present",
       errorCode: "IMPORT_POST_COMMIT_CLEANUP_FAILED",
       activeSourceSha256: digest(candidate),
     });
@@ -646,6 +691,7 @@ describe("explicit commit states", () => {
       rejectedBeforeCommit: false,
       commitState: "unknown",
       retrySafe: false,
+      activeGeneration: "present",
       errorCode: "IMPORT_ROLLBACK_FAILED",
       activeSourceSha256: digest(candidate),
     });
@@ -709,6 +755,7 @@ describe("explicit commit states", () => {
       rejectedBeforeCommit: false,
       commitState: "unknown",
       retrySafe: false,
+      activeGeneration: "present",
       errorCode: "IMPORT_ROLLBACK_FAILED",
       activeSourceSha256: digest(original),
     });
@@ -720,6 +767,93 @@ describe("explicit commit states", () => {
 });
 
 describe("target and registry serialization", () => {
+  it("keeps concurrent alternate-case imports coherent on either filesystem model", async () => {
+    const mixedName = "MiXeD_Case_agent.py";
+    const alternateName = mixedName.toLowerCase();
+    const mixedPath = path.join(dir, mixedName);
+    const alternatePath = path.join(dir, alternateName);
+    await importAgentFile(
+      mixedName,
+      pythonAgent(
+        "OriginalCaseAgent",
+        "OriginalCase",
+        "original mixed-case generation",
+      ),
+      registry,
+      { dir },
+    );
+    const aliases = await fs
+      .lstat(alternatePath)
+      .then(() => true)
+      .catch(() => false);
+    expect(
+      canonicalAgentSourcePath(mixedPath) ===
+        canonicalAgentSourcePath(alternatePath),
+    ).toBe(aliases);
+
+    let ready = 0;
+    let release = (): void => {};
+    const together = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const concurrentImport = async (
+      filename: string,
+      className: string,
+      agentName: string,
+      description: string,
+    ): Promise<ImportResultValue> => {
+      ready += 1;
+      if (ready === 2) release();
+      await together;
+      return importAgentFile(
+        filename,
+        pythonAgent(className, agentName, description),
+        registry,
+        { dir },
+      );
+    };
+    const results = await Promise.all([
+      concurrentImport(
+        mixedName,
+        "MixedUpperAgent",
+        "MixedUpper",
+        "mixed upper generation",
+      ),
+      concurrentImport(
+        alternateName,
+        "MixedLowerAgent",
+        "MixedLower",
+        "mixed lower generation",
+      ),
+    ]);
+    expect(results.every((result) => result.status === "ok")).toBe(true);
+    expect(await registry.getAgent("OriginalCase")).toBeUndefined();
+
+    const upper = await registry.getAgent("MixedUpper");
+    const lower = await registry.getAgent("MixedLower");
+    if (aliases) {
+      expect([upper, lower].filter(Boolean)).toHaveLength(1);
+      const active = upper ?? lower;
+      expect(await active!.perform({})).toMatch(
+        /mixed (upper|lower) generation/,
+      );
+      expect(
+        (await fs.readdir(dir)).filter(
+          (entry) => entry.toLowerCase() === alternateName,
+        ),
+      ).toHaveLength(1);
+    } else {
+      expect(upper).toBeDefined();
+      expect(lower).toBeDefined();
+      expect(await upper!.perform({})).toContain("mixed upper generation");
+      expect(await lower!.perform({})).toContain("mixed lower generation");
+      expect(canonicalAgentSourcePath(mixedPath)).not.toBe(
+        canonicalAgentSourcePath(alternatePath),
+      );
+    }
+    expect(await transactionArtifacts()).toEqual([]);
+  }, 60_000);
+
   it("does not overlap candidate validation for one resolved target", async () => {
     const marker = path.join(dir, "same-target.log");
     const [first, second] = await Promise.all([
@@ -1020,6 +1154,7 @@ describe("causal import events", () => {
           activeSourceSha256: digest(valid),
           bridgeClass: "PythonAgent",
           committed: true,
+          activeGeneration: "present",
           commitState: "committed",
           retrySafe: false,
         },
@@ -1043,6 +1178,7 @@ describe("causal import events", () => {
           candidateSourceSha256: digest(invalid),
           activeSourceSha256: digest(valid),
           rejectedBeforeCommit: true,
+          activeGeneration: "present",
           commitState: "not-committed",
           retrySafe: true,
         },

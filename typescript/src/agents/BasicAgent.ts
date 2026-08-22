@@ -28,7 +28,7 @@
 
 import { createHash } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
 import {
   ensureFlightRecorderFromEnv,
@@ -75,14 +75,25 @@ interface AgentSourceLockState {
 const agentSourceLocks = new Map<string, AgentSourceLockState>();
 
 /**
- * Canonicalize the containing directory while preserving the stable leaf path.
- *
- * Resolving the complete file would follow a symlink and could change the lock
- * key when an atomic rename replaces that symlink. The parent-plus-leaf identity
- * remains stable across generations.
+ * Existing regular files resolve completely so case/normalization aliases use
+ * one identity. A missing leaf keeps the requested name under its real parent.
+ * Symlinks and non-regular leaves are deliberately not followed; import rejects
+ * those targets before staging.
  */
 export function canonicalAgentSourcePath(file: string): string {
   const absolute = path.resolve(file);
+  try {
+    if (lstatSync(absolute).isFile()) {
+      return realpathSync.native(absolute);
+    }
+  } catch (error) {
+    if (
+      !(error instanceof Error && "code" in error && error.code === "ENOENT")
+    ) {
+      throw error;
+    }
+  }
+
   const parent = path.dirname(absolute);
   try {
     return path.join(realpathSync.native(parent), path.basename(absolute));
@@ -142,10 +153,7 @@ function grantAgentSourceWriter(
   waiter.grant(sourceReleaseFor(key, state, "write"));
 }
 
-function drainAgentSourceLock(
-  key: string,
-  state: AgentSourceLockState,
-): void {
+function drainAgentSourceLock(key: string, state: AgentSourceLockState): void {
   if (state.writer) return;
 
   if (state.readers > 0) {
@@ -294,9 +302,7 @@ export abstract class BasicAgent {
             // Non-JSON output remains a sanitized string.
           }
           await recorder.record({
-            kind: failed
-              ? "agent.execute.failed"
-              : "agent.execute.completed",
+            kind: failed ? "agent.execute.failed" : "agent.execute.completed",
             source: "basic-agent",
             status: failed ? "error" : "success",
             agentName: this.name,

@@ -74,6 +74,37 @@ jobs:
       - name: Skip budget
         run: node ../tools/skip-budget.mjs "$RUNNER_TEMP/vitest.json"
 
+  # The flagship proof supports native Linux and macOS. Keep it out of the
+  # full-suite matrix so adding macOS does not duplicate that suite's cost.
+  flagship-transplant:
+    name: Live Organ Transplant (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify flagship workflow contract
+        working-directory: ${{ github.workspace }}
+        run: python -m unittest tests/test_live_organ_transplant_workflow.py
+      - run: npm ci
+      - run: npm run build
+      - name: Run accepted transplant gate
+        run: npm run gate:transplant
+
   # Dedicated gate for the dashboard UI surface (typescript/ui) — a separate
   # npm project (own lockfile/deps) that the generic `typescript` job above
   # never installs or builds.

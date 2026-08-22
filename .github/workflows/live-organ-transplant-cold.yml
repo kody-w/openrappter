@@ -1,0 +1,108 @@
+name: Live Organ Transplant Cold Path
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-organ-transplant-cold-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cold-transplant:
+    name: Cold transplant (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Measure cold npm ci
+        id: install
+        run: |
+          cache="$RUNNER_TEMP/openrappter-transplant-npm-cache"
+          rm -rf "$cache"
+          started="$(python -c 'import time; print(time.monotonic_ns())')"
+          npm ci --cache "$cache" --prefer-online
+          finished="$(python -c 'import time; print(time.monotonic_ns())')"
+          duration_ms=$(((finished - started) / 1000000))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "cold npm ci: ${duration_ms}ms"
+
+      - name: Measure build
+        id: build
+        run: |
+          started="$(python -c 'import time; print(time.monotonic_ns())')"
+          npm run build
+          finished="$(python -c 'import time; print(time.monotonic_ns())')"
+          duration_ms=$(((finished - started) / 1000000))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "build: ${duration_ms}ms"
+
+      - name: Measure accepted gate runtime
+        id: gate
+        run: |
+          started="$(python -c 'import time; print(time.monotonic_ns())')"
+          set +e
+          npm run gate:transplant 2>&1 | tee live-organ-transplant-gate.log
+          gate_status=${PIPESTATUS[0]}
+          set -e
+          finished="$(python -c 'import time; print(time.monotonic_ns())')"
+          duration_ms=$(((finished - started) / 1000000))
+          echo "duration_ms=$duration_ms" >> "$GITHUB_OUTPUT"
+          echo "accepted gate runtime: ${duration_ms}ms"
+          exit "$gate_status"
+
+      - name: Enforce five-minute cold-path budget
+        if: ${{ always() && steps.install.outcome == 'success' && steps.build.outcome == 'success' && steps.gate.outcome != 'skipped' }}
+        run: |
+          install_ms=${{ steps.install.outputs.duration_ms }}
+          build_ms=${{ steps.build.outputs.duration_ms }}
+          runtime_ms=${{ steps.gate.outputs.duration_ms }}
+          total_ms=$((install_ms + build_ms + runtime_ms))
+          printf '{"schema":"openrappter-transplant-cold-timing/1.0","npmCiMs":%s,"buildMs":%s,"runtimeMs":%s,"totalMs":%s,"budgetMs":300000}\n' \
+            "$install_ms" "$build_ms" "$runtime_ms" "$total_ms" \
+            > live-organ-transplant-cold-timings.json
+          {
+            echo "### Live Organ Transplant cold path"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| npm ci | ${install_ms} ms |"
+            echo "| build | ${build_ms} ms |"
+            echo "| accepted gate runtime | ${runtime_ms} ms |"
+            echo "| **total** | **${total_ms} ms** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if ((total_ms > 300000)); then
+            echo "::error::cold install + build + gate took ${total_ms}ms (budget: 300000ms)"
+            exit 1
+          fi
+
+      - name: Upload deterministic failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-organ-transplant-cold-failure-${{ matrix.os }}
+          path: |
+            typescript/live-organ-transplant-cold-timings.json
+            typescript/live-organ-transplant-gate.log
+            .test-scratch/live-organ-transplant
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7

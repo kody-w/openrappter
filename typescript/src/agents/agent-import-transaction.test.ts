@@ -9,7 +9,10 @@ import {
   FlightRecorder,
   setFlightRecorder,
 } from "../flight-recorder/recorder.js";
-import { AgentRegistry } from "./AgentRegistry.js";
+import {
+  AgentRegistry,
+  canonicalAgentSourcePath,
+} from "./AgentRegistry.js";
 import { BasicAgent } from "./BasicAgent.js";
 import { importAgentFile, withAgentImportProvenance } from "./agent-import.js";
 
@@ -283,7 +286,7 @@ describe("transactional replacement", () => {
     const original = await registry.getAgent("Factory");
     expect(original).toBeDefined();
     expect(Object.getOwnPropertyDescriptor(original!, "sourceFile")).toEqual({
-      value: path.resolve(target),
+      value: canonicalAgentSourcePath(target),
       enumerable: false,
       writable: false,
       configurable: false,
@@ -306,7 +309,7 @@ describe("transactional replacement", () => {
     expect(active?.metadata.description).toBe("factory version two");
     expect(await active!.perform({})).toContain("factory version two");
     expect(Object.getOwnPropertyDescriptor(active!, "sourceFile")).toEqual({
-      value: path.resolve(target),
+      value: canonicalAgentSourcePath(target),
       enumerable: false,
       writable: false,
       configurable: false,

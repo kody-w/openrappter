@@ -71,7 +71,7 @@ paths_overlap() {
     path_within "$1" "$2" || path_within "$2" "$1"
 }
 
-CANONICAL_HOME="$(canonical_future_directory "$HOME")" || {
+canonical_future_directory "$HOME" >/dev/null || {
     echo "[X] Refusing species driftback: HOME is not a safe directory path." >&2
     exit 1
 }
@@ -104,7 +104,6 @@ fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
@@ -129,7 +128,7 @@ run_with_heartbeat() {
             0) glyph='|' ;;
             1) glyph='/' ;;
             2) glyph='-' ;;
-            *) glyph='\' ;;
+            *) glyph="\\" ;;
         esac
         printf "\r  [%s] %s (%ss)" "$glyph" "$label" "$((SECONDS - started))"
         frame=$(( (frame + 1) % 4 ))

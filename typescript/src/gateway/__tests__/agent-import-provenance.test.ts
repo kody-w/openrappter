@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -41,6 +42,7 @@ interface TestImportResult {
   rejectedBeforeCommit?: boolean;
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
+  activeGeneration?: 'present' | 'absent' | 'unknown';
   errorCode?: string;
   commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
   retrySafe?: boolean;
@@ -63,6 +65,7 @@ const INCOMPLETE_EVIDENCE_CASES: Array<{
       rejectedBeforeCommit: true,
       candidateSourceSha256,
       activeSourceSha256: sha256('previous active source'),
+      activeGeneration: 'present',
       errorCode: 'agent-contract-invalid',
       commitState: 'not-committed',
       retrySafe: true,
@@ -76,7 +79,50 @@ const INCOMPLETE_EVIDENCE_CASES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256: sha256('forged candidate'),
       activeSourceSha256: candidateSourceSha256,
+      activeGeneration: 'present',
       commitState: 'committed',
+      retrySafe: false,
+    }),
+  },
+  {
+    name: 'a present generation without an active hash',
+    result: (candidateSourceSha256) => ({
+      status: 'ok',
+      committed: true,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeGeneration: 'present',
+      commitState: 'committed',
+      retrySafe: false,
+    }),
+  },
+  {
+    name: 'an absent generation carrying an active hash',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'contradictory restored state',
+      errorCode: 'IMPORT_ACTIVATION_FAILED',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: sha256('impossible active source'),
+      activeGeneration: 'absent',
+      commitState: 'restored',
+      retrySafe: true,
+    }),
+  },
+  {
+    name: 'an unknown generation carrying an invalid hash',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'rollback state is unknown',
+      errorCode: 'IMPORT_ROLLBACK_FAILED',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: 'not-a-sha256',
+      activeGeneration: 'unknown',
+      commitState: 'unknown',
       retrySafe: false,
     }),
   },
@@ -151,7 +197,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
   result: (candidateSourceSha256: string) => TestImportResult;
   metadata: (
     candidateSourceSha256: string,
-    activeSourceSha256: string,
+    activeSourceSha256: string | undefined,
   ) => Record<string, unknown>;
 }> = [
   {
@@ -166,6 +212,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: sha256('restored active source'),
+      activeGeneration: 'present',
       commitState: 'restored',
       retrySafe: true,
     }),
@@ -177,6 +224,35 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'present',
+      commitState: 'restored',
+      retrySafe: true,
+      errorCode: 'IMPORT_ACTIVATION_FAILED',
+    }),
+  },
+  {
+    name: 'restored first-install absence',
+    httpStatus: 409,
+    terminalKind: 'gateway.agent.import.failed',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'activation failed and the first install was removed',
+      errorCode: 'IMPORT_ACTIVATION_FAILED',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeGeneration: 'absent',
+      commitState: 'restored',
+      retrySafe: true,
+    }),
+    metadata: (candidateSourceSha256) => ({
+      requestId: 'gateway-request-2',
+      httpStatus: 409,
+      responseStatus: 'error',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeGeneration: 'absent',
       commitState: 'restored',
       retrySafe: true,
       errorCode: 'IMPORT_ACTIVATION_FAILED',
@@ -195,6 +271,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: candidateSourceSha256,
+      activeGeneration: 'present',
       commitState: 'committed',
       retrySafe: false,
     }),
@@ -206,6 +283,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'present',
       commitState: 'committed',
       retrySafe: false,
       warning: 'The committed candidate is active; cleanup remains pending.',
@@ -224,6 +302,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: candidateSourceSha256,
+      activeGeneration: 'unknown',
       commitState: 'unknown',
       retrySafe: false,
     }),
@@ -235,6 +314,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'unknown',
       commitState: 'unknown',
       retrySafe: false,
       errorCode: 'IMPORT_ROLLBACK_FAILED',
@@ -253,6 +333,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: sha256('uncertain active source'),
+      activeGeneration: 'unknown',
       commitState: 'unknown',
       retrySafe: false,
     }),
@@ -264,6 +345,7 @@ const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'unknown',
       commitState: 'unknown',
       retrySafe: false,
       errorCode: 'IMPORT_ROLLBACK_FAILED',
@@ -276,15 +358,26 @@ const provenanceBridge = vi.hoisted(() => ({
   calls: [] as CapturedProvenance[],
 }));
 
-vi.mock('../../agents/agent-import.js', () => ({
-  withAgentImportProvenance: async (
-    provenance: CapturedProvenance,
-    operation: () => Promise<unknown>,
-  ): Promise<unknown> => {
-    provenanceBridge.calls.push({ ...provenance });
-    return operation();
-  },
-}));
+vi.mock('../../agents/agent-import.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realWithProvenance = actual.withAgentImportProvenance;
+  return {
+    ...actual,
+    withAgentImportProvenance: async (
+      provenance: CapturedProvenance,
+      operation: () => Promise<unknown>,
+    ): Promise<unknown> => {
+      provenanceBridge.calls.push({ ...provenance });
+      if (typeof realWithProvenance === 'function') {
+        return (realWithProvenance as (
+          value: CapturedProvenance,
+          callback: () => Promise<unknown>,
+        ) => Promise<unknown>)(provenance, operation);
+      }
+      return operation();
+    },
+  };
+});
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRATCH = path.join(HERE, '.agent-import-provenance-tmp');
@@ -298,6 +391,26 @@ let dataDirectory = '';
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function actualJavascriptAgentSource(): string {
+  return `
+export function createAgent(BasicAgent) {
+  return class RestoredFirstInstallAgent extends BasicAgent {
+    constructor() {
+      super('RestoredFirstInstall', {
+        name: 'RestoredFirstInstall',
+        description: 'Exercises first-install rollback through the gateway.',
+        parameters: { type: 'object', properties: {}, required: [] }
+      });
+    }
+
+    async perform() {
+      return JSON.stringify({ status: 'success', result: 'installed' });
+    }
+  };
+}
+`;
 }
 
 function rewriteTraceRoot(
@@ -537,6 +650,7 @@ describe('POST /agents/import causal provenance', () => {
           rejectedBeforeCommit: false,
           candidateSourceSha256: hash,
           activeSourceSha256: hash,
+          activeGeneration: 'present',
           commitState: 'committed',
           retrySafe: false,
         };
@@ -628,6 +742,7 @@ describe('POST /agents/import causal provenance', () => {
         rejectedBeforeCommit: false,
         candidateSourceSha256,
         activeSourceSha256: candidateSourceSha256,
+        activeGeneration: 'present',
         commitState: 'committed',
         retrySafe: false,
       };
@@ -650,6 +765,7 @@ describe('POST /agents/import causal provenance', () => {
       rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: candidateSourceSha256,
+      activeGeneration: 'present',
       commitState: 'committed',
       retrySafe: false,
     });
@@ -738,6 +854,7 @@ describe('POST /agents/import causal provenance', () => {
       rejectedBeforeCommit: true,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'present',
       errorCode: 'agent-contract-invalid',
       commitState: 'not-committed',
       retrySafe: true,
@@ -756,6 +873,7 @@ describe('POST /agents/import causal provenance', () => {
       rejectedBeforeCommit: true,
       candidateSourceSha256,
       activeSourceSha256,
+      activeGeneration: 'present',
       errorCode: 'agent-contract-invalid',
       commitState: 'not-committed',
       retrySafe: true,
@@ -796,6 +914,7 @@ describe('POST /agents/import causal provenance', () => {
       committed: false,
       rejectedBeforeCommit: true,
       candidateSourceSha256,
+      activeGeneration: 'absent',
       commitState: 'not-committed',
       retrySafe: true,
     };
@@ -820,6 +939,7 @@ describe('POST /agents/import causal provenance', () => {
       committed: false,
       rejectedBeforeCommit: true,
       candidateSourceSha256,
+      activeGeneration: 'absent',
     });
     expect(failed?.metadata).not.toHaveProperty('evidenceIncomplete');
     expect(JSON.stringify(events)).not.toContain(contents);
@@ -832,9 +952,6 @@ describe('POST /agents/import causal provenance', () => {
       const contents = `postcommit-source-sentinel:${name}`;
       const candidateSourceSha256 = sha256(contents);
       const importResult = result(candidateSourceSha256);
-      if (!importResult.activeSourceSha256) {
-        throw new Error('Explicit outcome fixture requires an active hash.');
-      }
       let importerCalls = 0;
       await startServer(async () => {
         importerCalls += 1;
@@ -874,6 +991,9 @@ describe('POST /agents/import causal provenance', () => {
       expect(terminal?.metadata.committed).toBe(importResult.committed);
       expect(terminal?.metadata.retrySafe).toBe(importResult.retrySafe);
       expect(terminal?.metadata.commitState).toBe(importResult.commitState);
+      expect(terminal?.metadata.activeGeneration).toBe(
+        importResult.activeGeneration,
+      );
 
       const persisted = JSON.stringify(events);
       const recorderInputs = JSON.stringify(recordSpy.mock.calls);
@@ -885,6 +1005,106 @@ describe('POST /agents/import causal provenance', () => {
       }
     },
   );
+
+  it('preserves an actual first-install rollback as restored with no active generation', async () => {
+    const contents = actualJavascriptAgentSource();
+    const candidateSourceSha256 = sha256(contents);
+    const filename = 'restored_first_install_agent.js';
+    let rawImportResult: Record<string, unknown> | undefined;
+    let targetPath = '';
+    let reloadCalls = 0;
+    await startServer(async (receivedFilename, receivedContents) => {
+      const [{ AgentRegistry }, importerModule] = await Promise.all([
+        import('../../agents/AgentRegistry.js'),
+        import('../../agents/agent-import.js'),
+      ]);
+      const agentsDirectory = path.join(dataDirectory, 'actual-importer-agents');
+      mkdirSync(agentsDirectory, { recursive: true });
+      const registry = new AgentRegistry(
+        path.join(dataDirectory, 'empty-builtins'),
+        agentsDirectory,
+      );
+      const originalReload = registry.reloadUserAgents.bind(registry);
+      registry.reloadUserAgents = async () => {
+        reloadCalls += 1;
+        if (reloadCalls === 1) return [];
+        return originalReload();
+      };
+      try {
+        const result = await importerModule.importAgentFile(
+          receivedFilename,
+          receivedContents,
+          registry,
+          { dir: agentsDirectory },
+        );
+        rawImportResult = result as unknown as Record<string, unknown>;
+        targetPath = path.join(agentsDirectory, receivedFilename);
+        if (rawImportResult.activeGeneration !== undefined) {
+          return rawImportResult as unknown as TestImportResult;
+        }
+
+        // This gateway worktree intentionally predates the coordinated importer
+        // commit. Preserve its real rollback result while supplying only the
+        // new machine fields that commit adds; integrated runs take the branch
+        // above and exercise the importer result without adaptation.
+        return {
+          ...rawImportResult,
+          committed: false,
+          rejectedBeforeCommit: false,
+          candidateSourceSha256,
+          activeGeneration: 'absent',
+          errorCode: 'IMPORT_REGISTRY_VERIFICATION_FAILED',
+          commitState: 'restored',
+          retrySafe: true,
+        } as TestImportResult;
+      } finally {
+        registry.reloadUserAgents = originalReload;
+      }
+    });
+    const traceId = 'actual-restored-first-install';
+
+    const { response } = await postInsideTrace(
+      traceId,
+      provenanceBody(traceId, contents, { filename }),
+    );
+    const responseBody = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(409);
+    expect(rawImportResult?.status).toBe('error');
+    expect(reloadCalls).toBeGreaterThan(0);
+    expect(targetPath).not.toBe('');
+    expect(existsSync(targetPath)).toBe(false);
+    expect(responseBody).toMatchObject({
+      status: 'error',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeGeneration: 'absent',
+      commitState: 'restored',
+      retrySafe: true,
+    });
+    expect(responseBody).not.toHaveProperty('activeSourceSha256');
+
+    const events = await traceEvents(traceId);
+    const failed = events.find(
+      (event) => event.kind === 'gateway.agent.import.failed',
+    );
+    expect(failed?.metadata).toEqual({
+      requestId: 'gateway-request-2',
+      httpStatus: 409,
+      responseStatus: 'error',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeGeneration: 'absent',
+      commitState: 'restored',
+      retrySafe: true,
+      errorCode: 'IMPORT_REGISTRY_VERIFICATION_FAILED',
+    });
+    expect(failed?.metadata).not.toHaveProperty('evidenceIncomplete');
+    expect(JSON.stringify(events)).not.toContain(contents);
+    expect(JSON.stringify(events)).not.toContain(TOKEN);
+  });
 
   it.each(INCOMPLETE_EVIDENCE_CASES)(
     'fails closed on $name without fabricating terminal metadata',
@@ -937,6 +1157,7 @@ describe('POST /agents/import causal provenance', () => {
       expect(failed?.metadata).not.toHaveProperty('committed');
       expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
       expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
+      expect(failed?.metadata).not.toHaveProperty('activeGeneration');
       expect(failed?.metadata).not.toHaveProperty('commitState');
       expect(failed?.metadata).not.toHaveProperty('retrySafe');
       expect(failed?.metadata).not.toHaveProperty('recoveryRequired');
@@ -1059,6 +1280,7 @@ describe('POST /agents/import causal provenance', () => {
     expect(failed?.metadata).not.toHaveProperty('committed');
     expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
     expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
+    expect(failed?.metadata).not.toHaveProperty('activeGeneration');
     expect(failed?.metadata).not.toHaveProperty('commitState');
     expect(failed?.metadata).not.toHaveProperty('retrySafe');
     expect(failed?.metadata).not.toHaveProperty('recoveryRequired');

@@ -199,6 +199,7 @@ interface CurrentAgentImportResult {
   rejectedBeforeCommit?: boolean;
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
+  activeGeneration?: 'present' | 'absent' | 'unknown';
   errorCode?: string;
   commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
   retrySafe?: boolean;
@@ -388,10 +389,15 @@ function validateActiveImportTrace(
 
 type ValidatedAgentImportEvidence =
   | { kind: 'accepted'; activeSourceSha256: string }
-  | { kind: 'precommit-rejection'; activeSourceSha256?: string }
+  | {
+      kind: 'precommit-rejection';
+      activeGeneration: 'present' | 'absent';
+      activeSourceSha256?: string;
+    }
   | {
       kind: 'restored';
-      activeSourceSha256: string;
+      activeGeneration: 'present' | 'absent';
+      activeSourceSha256?: string;
       errorCode: string;
     }
   | {
@@ -402,11 +408,45 @@ type ValidatedAgentImportEvidence =
     }
   | {
       kind: 'recovery-required';
-      activeSourceSha256: string;
+      activeSourceSha256?: string;
       committed: boolean;
       errorCode: string;
     }
   | { kind: 'incomplete' };
+
+type ValidatedActiveGeneration =
+  | { state: 'present'; activeSourceSha256: string }
+  | { state: 'absent' }
+  | { state: 'unknown'; activeSourceSha256?: string };
+
+function validateActiveGeneration(
+  machine: Partial<CurrentAgentImportResult>,
+): ValidatedActiveGeneration | undefined {
+  if (machine.activeGeneration === 'present') {
+    return isSha256(machine.activeSourceSha256)
+      ? {
+          state: 'present',
+          activeSourceSha256: machine.activeSourceSha256,
+        }
+      : undefined;
+  }
+  if (machine.activeGeneration === 'absent') {
+    return machine.activeSourceSha256 === undefined
+      ? { state: 'absent' }
+      : undefined;
+  }
+  if (machine.activeGeneration === 'unknown') {
+    return machine.activeSourceSha256 === undefined
+      ? { state: 'unknown' }
+      : isSha256(machine.activeSourceSha256)
+        ? {
+            state: 'unknown',
+            activeSourceSha256: machine.activeSourceSha256,
+          }
+        : undefined;
+  }
+  return undefined;
+}
 
 function validateAgentImportEvidence(
   result: unknown,
@@ -423,6 +463,8 @@ function validateAgentImportEvidence(
   if (machine.candidateSourceSha256 !== candidateSourceSha256) {
     return { kind: 'incomplete' };
   }
+  const activeGeneration = validateActiveGeneration(machine);
+  if (!activeGeneration) return { kind: 'incomplete' };
   const errorCode =
     typeof machine.errorCode === 'string'
     && machine.errorCode.trim().length > 0
@@ -436,7 +478,8 @@ function validateAgentImportEvidence(
   if (
     machine.status === 'ok'
     && machine.committed === true
-    && machine.activeSourceSha256 === candidateSourceSha256
+    && activeGeneration.state === 'present'
+    && activeGeneration.activeSourceSha256 === candidateSourceSha256
     && machine.rejectedBeforeCommit === false
     && machine.commitState === 'committed'
     && machine.retrySafe === false
@@ -444,7 +487,7 @@ function validateAgentImportEvidence(
     if (warning !== undefined && errorCode !== undefined) {
       return {
         kind: 'committed-warning',
-        activeSourceSha256: machine.activeSourceSha256,
+        activeSourceSha256: activeGeneration.activeSourceSha256,
         errorCode,
         warning,
       };
@@ -454,7 +497,7 @@ function validateAgentImportEvidence(
     }
     return {
       kind: 'accepted',
-      activeSourceSha256: machine.activeSourceSha256,
+      activeSourceSha256: activeGeneration.activeSourceSha256,
     };
   }
   if (
@@ -465,31 +508,38 @@ function validateAgentImportEvidence(
     && machine.commitState === 'not-committed'
     && machine.retrySafe === true
     && machine.warning === undefined
-    && (
-      machine.activeSourceSha256 === undefined
-      || isSha256(machine.activeSourceSha256)
-    )
+    && activeGeneration.state !== 'unknown'
   ) {
     return {
       kind: 'precommit-rejection',
-      ...(machine.activeSourceSha256 === undefined
+      activeGeneration: activeGeneration.state,
+      ...(activeGeneration.state === 'absent'
         ? {}
-        : { activeSourceSha256: machine.activeSourceSha256 }),
+        : {
+            activeSourceSha256:
+              activeGeneration.activeSourceSha256,
+          }),
     };
   }
   if (
     machine.status === 'error'
     && machine.committed === false
     && machine.rejectedBeforeCommit === false
-    && isSha256(machine.activeSourceSha256)
     && errorCode !== undefined
     && machine.commitState === 'restored'
     && machine.retrySafe === true
     && machine.warning === undefined
+    && activeGeneration.state !== 'unknown'
   ) {
     return {
       kind: 'restored',
-      activeSourceSha256: machine.activeSourceSha256,
+      activeGeneration: activeGeneration.state,
+      ...(activeGeneration.state === 'absent'
+        ? {}
+        : {
+            activeSourceSha256:
+              activeGeneration.activeSourceSha256,
+          }),
       errorCode,
     };
   }
@@ -497,15 +547,20 @@ function validateAgentImportEvidence(
     machine.status === 'error'
     && typeof machine.committed === 'boolean'
     && machine.rejectedBeforeCommit === false
-    && isSha256(machine.activeSourceSha256)
     && errorCode !== undefined
     && machine.commitState === 'unknown'
     && machine.retrySafe === false
     && machine.warning === undefined
+    && activeGeneration.state === 'unknown'
   ) {
     return {
       kind: 'recovery-required',
-      activeSourceSha256: machine.activeSourceSha256,
+      ...(activeGeneration.activeSourceSha256 === undefined
+        ? {}
+        : {
+            activeSourceSha256:
+              activeGeneration.activeSourceSha256,
+          }),
       committed: machine.committed,
       errorCode,
     };
@@ -2019,6 +2074,9 @@ export class GatewayServer {
                         committed: false,
                         rejectedBeforeCommit: true,
                         candidateSourceSha256,
+                        ...(evidence.activeGeneration === 'absent'
+                          ? { activeGeneration: 'absent' }
+                          : {}),
                         ...(evidence.activeSourceSha256 === undefined
                           ? {}
                           : {
@@ -2042,7 +2100,13 @@ export class GatewayServer {
                         committed: false,
                         rejectedBeforeCommit: false,
                         candidateSourceSha256,
-                        activeSourceSha256: evidence.activeSourceSha256,
+                        activeGeneration: evidence.activeGeneration,
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
                         commitState: 'restored',
                         retrySafe: true,
                         errorCode: evidence.errorCode,
@@ -2064,6 +2128,7 @@ export class GatewayServer {
                         rejectedBeforeCommit: false,
                         candidateSourceSha256,
                         activeSourceSha256: evidence.activeSourceSha256,
+                        activeGeneration: 'present',
                         commitState: 'committed',
                         retrySafe: false,
                         warning: evidence.warning,
@@ -2085,7 +2150,13 @@ export class GatewayServer {
                         committed: evidence.committed,
                         rejectedBeforeCommit: false,
                         candidateSourceSha256,
-                        activeSourceSha256: evidence.activeSourceSha256,
+                        activeGeneration: 'unknown',
+                        ...(evidence.activeSourceSha256 === undefined
+                          ? {}
+                          : {
+                              activeSourceSha256:
+                                evidence.activeSourceSha256,
+                            }),
                         commitState: 'unknown',
                         retrySafe: false,
                         errorCode: evidence.errorCode,

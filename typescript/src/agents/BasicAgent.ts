@@ -28,6 +28,8 @@
 
 import { createHash } from "crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { realpathSync } from "node:fs";
+import path from "node:path";
 import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
@@ -55,6 +57,170 @@ import type {
   SloshDebugHandler,
   SignalCategory,
 } from "./types.js";
+
+type AgentSourceAccessMode = "read" | "write";
+type AgentSourceRelease = () => void;
+
+interface AgentSourceWaiter {
+  mode: AgentSourceAccessMode;
+  grant: (release: AgentSourceRelease) => void;
+}
+
+interface AgentSourceLockState {
+  readers: number;
+  writer: boolean;
+  queue: AgentSourceWaiter[];
+}
+
+const agentSourceLocks = new Map<string, AgentSourceLockState>();
+
+/**
+ * Canonicalize the containing directory while preserving the stable leaf path.
+ *
+ * Resolving the complete file would follow a symlink and could change the lock
+ * key when an atomic rename replaces that symlink. The parent-plus-leaf identity
+ * remains stable across generations.
+ */
+export function canonicalAgentSourcePath(file: string): string {
+  const absolute = path.resolve(file);
+  const parent = path.dirname(absolute);
+  try {
+    return path.join(realpathSync.native(parent), path.basename(absolute));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return absolute;
+    }
+    throw error;
+  }
+}
+
+function sourceLockStateFor(key: string): AgentSourceLockState {
+  const existing = agentSourceLocks.get(key);
+  if (existing) return existing;
+  const created: AgentSourceLockState = {
+    readers: 0,
+    writer: false,
+    queue: [],
+  };
+  agentSourceLocks.set(key, created);
+  return created;
+}
+
+function sourceReleaseFor(
+  key: string,
+  state: AgentSourceLockState,
+  mode: AgentSourceAccessMode,
+): AgentSourceRelease {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (mode === "read") {
+      state.readers -= 1;
+    } else {
+      state.writer = false;
+    }
+    drainAgentSourceLock(key, state);
+  };
+}
+
+function grantAgentSourceReader(
+  key: string,
+  state: AgentSourceLockState,
+  waiter: AgentSourceWaiter,
+): void {
+  state.readers += 1;
+  waiter.grant(sourceReleaseFor(key, state, "read"));
+}
+
+function grantAgentSourceWriter(
+  key: string,
+  state: AgentSourceLockState,
+  waiter: AgentSourceWaiter,
+): void {
+  state.writer = true;
+  waiter.grant(sourceReleaseFor(key, state, "write"));
+}
+
+function drainAgentSourceLock(
+  key: string,
+  state: AgentSourceLockState,
+): void {
+  if (state.writer) return;
+
+  if (state.readers > 0) {
+    while (state.queue[0]?.mode === "read") {
+      const reader = state.queue.shift();
+      if (!reader) break;
+      grantAgentSourceReader(key, state, reader);
+    }
+    return;
+  }
+
+  const first = state.queue.shift();
+  if (!first) {
+    if (agentSourceLocks.get(key) === state) agentSourceLocks.delete(key);
+    return;
+  }
+  if (first.mode === "write") {
+    grantAgentSourceWriter(key, state, first);
+    return;
+  }
+
+  grantAgentSourceReader(key, state, first);
+  while (state.queue[0]?.mode === "read") {
+    const reader = state.queue.shift();
+    if (!reader) break;
+    grantAgentSourceReader(key, state, reader);
+  }
+}
+
+function acquireAgentSourceLock(
+  file: string,
+  mode: AgentSourceAccessMode,
+): Promise<AgentSourceRelease> {
+  const key = canonicalAgentSourcePath(file);
+  const state = sourceLockStateFor(key);
+  return new Promise((grant) => {
+    state.queue.push({ mode, grant });
+    drainAgentSourceLock(key, state);
+  });
+}
+
+async function withAgentSourceLock<T>(
+  file: string,
+  mode: AgentSourceAccessMode,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const release = await acquireAgentSourceLock(file, mode);
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Run a live source-path reader concurrently with other readers unless a
+ * writer is already queued.
+ */
+export function withAgentSourceReadLock<T>(
+  file: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withAgentSourceLock(file, "read", operation);
+}
+
+/**
+ * Run an atomic source generation change after current readers complete,
+ * excluding later readers until the generation is stable.
+ */
+export function withAgentSourceWriteLock<T>(
+  file: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withAgentSourceLock(file, "write", operation);
+}
 
 export abstract class BasicAgent {
   name: string;

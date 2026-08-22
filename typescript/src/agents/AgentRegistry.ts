@@ -9,9 +9,8 @@ import { openrappterPath } from '../infra/openrappter-home.js';
 import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { BasicAgent } from './BasicAgent.js';
+import { BasicAgent, canonicalAgentSourcePath } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
-import { canonicalAgentSourcePath } from './source-lock.js';
 import type { AgentInfo } from './types.js';
 import { logger } from '../logging/logger.js';
 import { RESERVED_AGENT_DIRS, isReservedAgentPath } from './reserved-paths.js';
@@ -56,7 +55,7 @@ async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
 
 const registryLog = logger.child('agents');
 
-export { canonicalAgentSourcePath } from './source-lock.js';
+export { canonicalAgentSourcePath } from './BasicAgent.js';
 
 /**
  * Attribute a generated JavaScript agent to the file that produced it.

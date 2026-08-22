@@ -4,8 +4,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import {
+  withAgentSourceReadLock,
+  withAgentSourceWriteLock,
+} from "./BasicAgent.js";
 import { PythonAgent } from "./PythonAgent.js";
-import { withSourceReadLock, withSourceWriteLock } from "./source-lock.js";
 
 let dir = "";
 
@@ -33,7 +36,7 @@ describe("per-source read/write fencing", () => {
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const first = withSourceWriteLock(firstSource, async () => {
+    const first = withAgentSourceWriteLock(firstSource, async () => {
       signalFirst();
       await firstGate;
       return "first complete";
@@ -41,7 +44,7 @@ describe("per-source read/write fencing", () => {
 
     await firstEntered;
     await expect(
-      withSourceWriteLock(secondSource, async () => "second complete"),
+      withAgentSourceWriteLock(secondSource, async () => "second complete"),
     ).resolves.toBe("second complete");
     releaseFirst();
     await expect(first).resolves.toBe("first complete");
@@ -52,21 +55,21 @@ describe("per-source read/write fencing", () => {
     await fs.writeFile(source, "source", { mode: 0o600 });
 
     await expect(
-      withSourceReadLock(source, async () => {
+      withAgentSourceReadLock(source, async () => {
         throw new Error("reader failed");
       }),
     ).rejects.toThrow("reader failed");
     await expect(
-      withSourceWriteLock(source, async () => "writer acquired"),
+      withAgentSourceWriteLock(source, async () => "writer acquired"),
     ).resolves.toBe("writer acquired");
 
     await expect(
-      withSourceWriteLock(source, async () => {
+      withAgentSourceWriteLock(source, async () => {
         throw new Error("writer failed");
       }),
     ).rejects.toThrow("writer failed");
     await expect(
-      withSourceReadLock(source, async () => "reader reacquired"),
+      withAgentSourceReadLock(source, async () => "reader reacquired"),
     ).resolves.toBe("reader reacquired");
   });
 
@@ -108,7 +111,7 @@ class SlowAgent(BasicAgent):
     try {
       await expect(
         Promise.race([
-          withSourceWriteLock(source, async () => "writer acquired"),
+          withAgentSourceWriteLock(source, async () => "writer acquired"),
           new Promise<string>((_resolve, reject) => {
             timeout = setTimeout(() => {
               reject(new Error("writer remained blocked after timeout"));

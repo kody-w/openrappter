@@ -22,12 +22,12 @@ import {
 import type { FlightEvent } from "../flight-recorder/types.js";
 import { openrappterPath } from "../infra/openrappter-home.js";
 import { markAgentSourceFile, type AgentRegistry } from "./AgentRegistry.js";
-import { BasicAgent } from "./BasicAgent.js";
-import { PythonAgent, runnerPath } from "./PythonAgent.js";
 import {
+  BasicAgent,
   canonicalAgentSourcePath,
-  withSourceWriteLock,
-} from "./source-lock.js";
+  withAgentSourceWriteLock,
+} from "./BasicAgent.js";
+import { PythonAgent, runnerPath } from "./PythonAgent.js";
 
 export interface AgentImportProvenance {
   traceId: string;
@@ -1101,7 +1101,7 @@ async function performLockedImport(options: {
     });
   }
 
-  return withSourceWriteLock(options.target, async () => {
+  return withAgentSourceWriteLock(options.target, async () => {
     let committed = false;
     try {
       await fs.rename(stage, options.target);

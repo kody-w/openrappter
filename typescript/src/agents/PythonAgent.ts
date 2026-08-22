@@ -17,8 +17,7 @@ import { spawn } from 'child_process';
 import { existsSync } from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { BasicAgent } from './BasicAgent.js';
-import { withSourceReadLock } from './source-lock.js';
+import { BasicAgent, withAgentSourceReadLock } from './BasicAgent.js';
 import type { AgentMetadata } from './types.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -207,7 +206,7 @@ export class PythonAgent extends BasicAgent {
   get sourceFile(): string { return this.file; }
 
   async perform(kwargs: Record<string, unknown>): Promise<string> {
-    return withSourceReadLock(this.file, async () => {
+    return withAgentSourceReadLock(this.file, async () => {
       const { stdout, stderr, code } = await runPython(
         [runnerPath(), 'run', this.file, this.agentName],
         JSON.stringify(kwargs ?? {}),

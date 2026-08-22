@@ -37,6 +37,11 @@ export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
     status: "started",
   },
   {
+    id: "valid-gateway-started",
+    kind: "gateway.agent.import.started",
+    status: "started",
+  },
+  {
     id: "valid-import-started",
     kind: "agent.import.started",
     status: "started",
@@ -44,6 +49,11 @@ export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
   {
     id: "valid-import-completed",
     kind: "agent.import.completed",
+    status: "success",
+  },
+  {
+    id: "valid-gateway-completed",
+    kind: "gateway.agent.import.completed",
     status: "success",
   },
   {
@@ -57,6 +67,11 @@ export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
     status: "success",
   },
   {
+    id: "invalid-gateway-started",
+    kind: "gateway.agent.import.started",
+    status: "started",
+  },
+  {
     id: "invalid-import-started",
     kind: "agent.import.started",
     status: "started",
@@ -64,6 +79,11 @@ export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
   {
     id: "invalid-import-failed",
     kind: "agent.import.failed",
+    status: "error",
+  },
+  {
+    id: "invalid-gateway-failed",
+    kind: "gateway.agent.import.failed",
     status: "error",
   },
   {
@@ -140,6 +160,7 @@ export interface LiveOrganTransplantManifest {
   schema: typeof TRANSPLANT_MANIFEST_SCHEMA;
   version: number;
   demo: typeof TRANSPLANT_DEMO_ID;
+  supportedPlatforms: ["darwin", "linux"];
   command: {
     executable: string;
     args: string[];
@@ -226,6 +247,10 @@ export interface TransplantGatewayRequestEvidence {
   status: number;
   authenticated: boolean;
   authorization: string;
+  requestId: string;
+  scenarioNonce: string;
+  filename: string;
+  candidateSourceSha256: string;
 }
 
 export interface TransplantGatewayEvidence {
@@ -372,6 +397,15 @@ export interface TransplantScenarioObservation {
   groupTerminationAttempted: boolean;
   groupTerminationCompleted: boolean;
   pipesDestroyed: boolean;
+  runtimePid: number | null;
+  runtimePidObservedWhileAlive: boolean;
+  runtimeAliveAtObservation: boolean;
+  runtimePgid: number | null;
+  runtimeGroupMatches: boolean;
+  runtimeAncestryMatches: boolean;
+  runtimeObservedAtMs: number | null;
+  startedAtMs: number;
+  finishedAtMs: number;
   elapsedMs: number;
 }
 
@@ -399,6 +433,7 @@ export interface TransplantCausalTraceExpectations {
   runtimePid: number;
   validFixtureSha256: string;
   invalidFixtureSha256: string;
+  filename: string;
   agentName: typeof TRANSPLANT_AGENT_NAME;
   digest: string;
 }
@@ -412,6 +447,8 @@ export interface TransplantCausalTraceEvaluation {
   ownerPid: number | null;
   firstDigest: string;
   secondDigest: string;
+  validRequestId: string;
+  invalidRequestId: string;
 }
 
 export interface TransplantProbeReport {
@@ -665,6 +702,7 @@ export function isLiveOrganTransplantManifest(
       "schema",
       "version",
       "demo",
+      "supportedPlatforms",
       "command",
       "input",
       "expectedSha256",
@@ -679,6 +717,8 @@ export function isLiveOrganTransplantManifest(
     value.schema === TRANSPLANT_MANIFEST_SCHEMA &&
     value.version === 1 &&
     value.demo === TRANSPLANT_DEMO_ID &&
+    Array.isArray(value.supportedPlatforms) &&
+    isDeepStrictEqual(value.supportedPlatforms, ["darwin", "linux"]) &&
     isManifestCommand(value.command) &&
     typeof value.input === "string" &&
     value.input.length > 0 &&
@@ -759,6 +799,7 @@ export function isLiveOrganTransplantManifest(
     value.forbiddenClaims.includes("enforced egress controls") &&
     value.forbiddenClaims.includes("escaped-process prevention") &&
     value.forbiddenClaims.includes("enforced process containment") &&
+    value.forbiddenClaims.includes("native Windows support") &&
     value.forbiddenClaims.includes("process containment guarantees")
   );
 }
@@ -847,6 +888,10 @@ function isGatewayRequestEvidence(
       "status",
       "authenticated",
       "authorization",
+      "requestId",
+      "scenarioNonce",
+      "filename",
+      "candidateSourceSha256",
     ]) &&
     (value.purpose === "valid-import" ||
       value.purpose === "invalid-replacement") &&
@@ -856,7 +901,14 @@ function isGatewayRequestEvidence(
     typeof value.path === "string" &&
     isNonNegativeInteger(value.status) &&
     typeof value.authenticated === "boolean" &&
-    typeof value.authorization === "string"
+    typeof value.authorization === "string" &&
+    typeof value.requestId === "string" &&
+    value.requestId.length > 0 &&
+    typeof value.scenarioNonce === "string" &&
+    value.scenarioNonce.length > 0 &&
+    typeof value.filename === "string" &&
+    value.filename.length > 0 &&
+    isSha256(value.candidateSourceSha256)
   );
 }
 
@@ -1189,6 +1241,15 @@ function isScenarioObservation(
       "groupTerminationAttempted",
       "groupTerminationCompleted",
       "pipesDestroyed",
+      "runtimePid",
+      "runtimePidObservedWhileAlive",
+      "runtimeAliveAtObservation",
+      "runtimePgid",
+      "runtimeGroupMatches",
+      "runtimeAncestryMatches",
+      "runtimeObservedAtMs",
+      "startedAtMs",
+      "finishedAtMs",
       "elapsedMs",
     ]) &&
     typeof value.nonce === "string" &&
@@ -1205,6 +1266,17 @@ function isScenarioObservation(
     typeof value.groupTerminationAttempted === "boolean" &&
     typeof value.groupTerminationCompleted === "boolean" &&
     typeof value.pipesDestroyed === "boolean" &&
+    (value.runtimePid === null || isPositiveInteger(value.runtimePid)) &&
+    typeof value.runtimePidObservedWhileAlive === "boolean" &&
+    typeof value.runtimeAliveAtObservation === "boolean" &&
+    (value.runtimePgid === null || isPositiveInteger(value.runtimePgid)) &&
+    typeof value.runtimeGroupMatches === "boolean" &&
+    typeof value.runtimeAncestryMatches === "boolean" &&
+    (value.runtimeObservedAtMs === null ||
+      isNonNegativeNumber(value.runtimeObservedAtMs)) &&
+    isNonNegativeNumber(value.startedAtMs) &&
+    isNonNegativeNumber(value.finishedAtMs) &&
+    value.finishedAtMs >= value.startedAtMs &&
     isNonNegativeNumber(value.elapsedMs)
   );
 }
@@ -1728,30 +1800,32 @@ function metadataNumber(
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
-function digestFromValue(value: unknown, depth = 0): string {
-  if (depth > 8) return "";
-  if (typeof value === "string") {
-    try {
-      return digestFromValue(JSON.parse(value), depth + 1);
-    } catch {
-      return "";
-    }
+function canonicalExecutionOutput(
+  event: FlightEvent | undefined,
+  agentName: string,
+): { algorithm: string; digest: string } | null {
+  if (
+    !event ||
+    event.kind !== "agent.execute.completed" ||
+    event.source !== "basic-agent" ||
+    event.status !== "success" ||
+    event.agentName !== agentName ||
+    !isRecord(event.payload) ||
+    !hasOnlyKeys(event.payload, ["result"]) ||
+    !isRecord(event.payload.result) ||
+    !hasOnlyKeys(event.payload.result, ["status", "output"]) ||
+    event.payload.result.status !== "success" ||
+    !isRecord(event.payload.result.output) ||
+    !hasOnlyKeys(event.payload.result.output, ["algorithm", "digest"]) ||
+    event.payload.result.output.algorithm !== "sha256" ||
+    !isSha256(event.payload.result.output.digest)
+  ) {
+    return null;
   }
-  if (!isRecord(value)) {
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        const digest = digestFromValue(entry, depth + 1);
-        if (digest) return digest;
-      }
-    }
-    return "";
-  }
-  if (isSha256(value.digest)) return value.digest;
-  for (const nested of Object.values(value)) {
-    const digest = digestFromValue(nested, depth + 1);
-    if (digest) return digest;
-  }
-  return "";
+  return {
+    algorithm: event.payload.result.output.algorithm,
+    digest: event.payload.result.output.digest,
+  };
 }
 
 export function evaluateTransplantCausalTrace(
@@ -1767,6 +1841,9 @@ export function evaluateTransplantCausalTrace(
     orderedEvents.filter((event) => event.kind === kind);
   const roots = byKind("trace.started");
   const demoStarts = byKind("demo.transplant.started");
+  const gatewayStarts = byKind("gateway.agent.import.started");
+  const gatewayCompleted = byKind("gateway.agent.import.completed");
+  const gatewayFailed = byKind("gateway.agent.import.failed");
   const importStarts = byKind("agent.import.started");
   const importCompleted = byKind("agent.import.completed");
   const executeStarts = byKind("agent.execute.started");
@@ -1777,6 +1854,18 @@ export function evaluateTransplantCausalTrace(
 
   fail(roots.length === 1, "expected exactly one trace.started");
   fail(demoStarts.length === 1, "expected exactly one demo.transplant.started");
+  fail(
+    gatewayStarts.length === 2,
+    "expected exactly two gateway.agent.import.started",
+  );
+  fail(
+    gatewayCompleted.length === 1,
+    "expected exactly one gateway.agent.import.completed",
+  );
+  fail(
+    gatewayFailed.length === 1,
+    "expected exactly one gateway.agent.import.failed",
+  );
   fail(importStarts.length === 2, "expected exactly two agent.import.started");
   fail(
     importCompleted.length === 1,
@@ -1796,13 +1885,41 @@ export function evaluateTransplantCausalTrace(
     "expected exactly one demo.transplant.completed",
   );
   fail(traceCompleted.length === 1, "expected exactly one trace.completed");
-  fail(byKind("trace.failed").length === 0, "trace.failed is forbidden");
+  const forbiddenFailureKinds = [
+    "trace.failed",
+    "agent.execute.failed",
+    "demo.transplant.failed",
+    "recorder.error",
+  ];
+  fail(
+    forbiddenFailureKinds.every((kind) => byKind(kind).length === 0),
+    "unexpected terminal/recorder failure event is forbidden",
+  );
+  const errorEvents = orderedEvents.filter((event) => event.status === "error");
+  fail(
+    errorEvents.length === 2 &&
+      errorEvents.some((event) => event.kind === "agent.import.failed") &&
+      errorEvents.some((event) => event.kind === "gateway.agent.import.failed"),
+    "only the deliberate importer and gateway rejection may have error status",
+  );
 
+  const validGatewayStarted = gatewayStarts.find(
+    (event) =>
+      metadataString(event, "candidateSourceSha256") ===
+      expected.validFixtureSha256,
+  );
+  const invalidGatewayStarted = gatewayStarts.find(
+    (event) =>
+      metadataString(event, "candidateSourceSha256") ===
+      expected.invalidFixtureSha256,
+  );
   const validImportStarted = importStarts.find(
     (event) =>
       metadataString(event, "candidateSourceSha256") ===
       expected.validFixtureSha256,
   );
+  const validGatewayCompleted = gatewayCompleted[0];
+  const invalidGatewayFailed = gatewayFailed[0];
   const invalidImportStarted = importStarts.find(
     (event) =>
       metadataString(event, "candidateSourceSha256") ===
@@ -1822,12 +1939,16 @@ export function evaluateTransplantCausalTrace(
   }> = [
     { id: "trace-started", event: root },
     { id: "demo-started", event: demoStarts[0] },
+    { id: "valid-gateway-started", event: validGatewayStarted },
     { id: "valid-import-started", event: validImportStarted },
     { id: "valid-import-completed", event: validImportCompleted },
+    { id: "valid-gateway-completed", event: validGatewayCompleted },
     { id: "first-execute-started", event: firstExecuteStarted },
     { id: "first-execute-completed", event: firstExecuteCompleted },
+    { id: "invalid-gateway-started", event: invalidGatewayStarted },
     { id: "invalid-import-started", event: invalidImportStarted },
     { id: "invalid-import-failed", event: invalidImportFailed },
+    { id: "invalid-gateway-failed", event: invalidGatewayFailed },
     { id: "second-execute-started", event: secondExecuteStarted },
     { id: "second-execute-completed", event: secondExecuteCompleted },
     { id: "demo-completed", event: demoCompleted[0] },
@@ -1896,13 +2017,18 @@ export function evaluateTransplantCausalTrace(
     event?.parentId === rootId;
   fail(
     requireRootParent(demoStarts[0]) &&
-      requireRootParent(validImportStarted) &&
+      requireRootParent(validGatewayStarted) &&
       requireRootParent(firstExecuteStarted) &&
-      requireRootParent(invalidImportStarted) &&
+      requireRootParent(invalidGatewayStarted) &&
       requireRootParent(secondExecuteStarted) &&
       requireRootParent(demoCompleted[0]) &&
       requireRootParent(traceCompleted[0]),
     "top-level semantic events must be children of trace.started",
+  );
+  fail(
+    validImportStarted?.parentId === validGatewayStarted?.id &&
+      invalidImportStarted?.parentId === invalidGatewayStarted?.id,
+    "import starts must be children of their gateway request starts",
   );
   fail(
     validImportCompleted?.parentId === validImportStarted?.id,
@@ -1917,6 +2043,11 @@ export function evaluateTransplantCausalTrace(
     "invalid import failure is not parented by its start",
   );
   fail(
+    validGatewayCompleted?.parentId === validGatewayStarted?.id &&
+      invalidGatewayFailed?.parentId === invalidGatewayStarted?.id,
+    "gateway terminals must be children of their request starts",
+  );
+  fail(
     secondExecuteCompleted?.parentId === secondExecuteStarted?.id,
     "second execution completion is not parented by its start",
   );
@@ -1929,6 +2060,62 @@ export function evaluateTransplantCausalTrace(
     metadataString(demoStarts[0], "nonce") === expected.nonce &&
       metadataString(demoCompleted[0], "nonce") === expected.nonce,
     "demo boundary nonce mismatch",
+  );
+  const validRequestId = metadataString(validGatewayStarted, "requestId");
+  const invalidRequestId = metadataString(invalidGatewayStarted, "requestId");
+  fail(
+    validRequestId.length > 0 &&
+      invalidRequestId.length > 0 &&
+      validRequestId !== invalidRequestId,
+    "gateway request IDs must be present and unique",
+  );
+  fail(
+    [validGatewayStarted, invalidGatewayStarted].every(
+      (event) =>
+        event?.source === "gateway" &&
+        metadataString(event, "method") === "POST" &&
+        metadataString(event, "path") === "/agents/import" &&
+        metadataBoolean(event, "authenticated") === true &&
+        metadataString(event, "authMode") === "token" &&
+        metadataString(event, "filename") === expected.filename &&
+        metadataString(event, "nonce") === expected.nonce,
+    ),
+    "gateway request start route/auth/filename/nonce provenance mismatch",
+  );
+  fail(
+    metadataString(validGatewayStarted, "candidateSourceSha256") ===
+      expected.validFixtureSha256 &&
+      metadataString(invalidGatewayStarted, "candidateSourceSha256") ===
+        expected.invalidFixtureSha256,
+    "gateway request start candidate hash mismatch",
+  );
+  fail(
+    metadataString(validGatewayCompleted, "requestId") === validRequestId &&
+      metadataNumber(validGatewayCompleted, "httpStatus") === 200 &&
+      metadataString(validGatewayCompleted, "responseStatus") === "ok" &&
+      metadataBoolean(validGatewayCompleted, "committed") === true &&
+      metadataString(validGatewayCompleted, "candidateSourceSha256") ===
+        expected.validFixtureSha256,
+    "valid gateway terminal provenance mismatch",
+  );
+  fail(
+    metadataString(invalidGatewayFailed, "requestId") === invalidRequestId &&
+      metadataNumber(invalidGatewayFailed, "httpStatus") === 400 &&
+      metadataString(invalidGatewayFailed, "responseStatus") === "error" &&
+      metadataBoolean(invalidGatewayFailed, "committed") === false &&
+      metadataBoolean(invalidGatewayFailed, "rejectedBeforeCommit") === true &&
+      metadataString(invalidGatewayFailed, "candidateSourceSha256") ===
+        expected.invalidFixtureSha256 &&
+      metadataString(invalidGatewayFailed, "activeSourceSha256") ===
+        expected.validFixtureSha256,
+    "invalid gateway terminal provenance mismatch",
+  );
+  fail(
+    metadataString(validImportStarted, "requestId") === validRequestId &&
+      metadataString(validImportCompleted, "requestId") === validRequestId &&
+      metadataString(invalidImportStarted, "requestId") === invalidRequestId &&
+      metadataString(invalidImportFailed, "requestId") === invalidRequestId,
+    "gateway/importer request-ID linkage mismatch",
   );
   fail(
     metadataString(validImportStarted, "candidateSourceSha256") ===
@@ -1970,8 +2157,20 @@ export function evaluateTransplantCausalTrace(
     ].every((event) => event?.agentName === expected.agentName),
     "semantic event agent name mismatch",
   );
-  const firstDigest = digestFromValue(firstExecuteCompleted?.payload);
-  const secondDigest = digestFromValue(secondExecuteCompleted?.payload);
+  const firstOutput = canonicalExecutionOutput(
+    firstExecuteCompleted,
+    expected.agentName,
+  );
+  const secondOutput = canonicalExecutionOutput(
+    secondExecuteCompleted,
+    expected.agentName,
+  );
+  const firstDigest = firstOutput?.digest ?? "";
+  const secondDigest = secondOutput?.digest ?? "";
+  fail(
+    firstOutput?.algorithm === "sha256" && secondOutput?.algorithm === "sha256",
+    "execution completion payload/source shape is not canonical",
+  );
   fail(firstDigest === expected.digest, "first execution digest mismatch");
   fail(secondDigest === expected.digest, "second execution digest mismatch");
   fail(firstDigest === secondDigest, "post-rejection digest changed");
@@ -1989,6 +2188,8 @@ export function evaluateTransplantCausalTrace(
     ownerPid,
     firstDigest,
     secondDigest,
+    validRequestId,
+    invalidRequestId,
   };
 }
 
@@ -2028,7 +2229,7 @@ export function evaluateLiveOrganTransplant(
   const exactCausal =
     result &&
     observations &&
-    observations.artifacts.runtimePidHandoff.pid !== null &&
+    observations.successScenario.runtimePid !== null &&
     observations.artifacts.validFixture.sha256 !== null &&
     observations.artifacts.invalidFixture.sha256 !== null
       ? evaluateTransplantCausalTrace(
@@ -2036,9 +2237,10 @@ export function evaluateLiveOrganTransplant(
           {
             traceId: result.flightRecorder.traceId,
             nonce: observations.successScenario.nonce,
-            runtimePid: observations.artifacts.runtimePidHandoff.pid,
+            runtimePid: observations.successScenario.runtimePid,
             validFixtureSha256: observations.artifacts.validFixture.sha256,
             invalidFixtureSha256: observations.artifacts.invalidFixture.sha256,
+            filename: result.agent.filename,
             agentName: TRANSPLANT_AGENT_NAME,
             digest: result.executions.first.output.digest,
           },
@@ -2054,6 +2256,7 @@ export function evaluateLiveOrganTransplant(
           runtimePid: probe.process.pidBefore,
           validFixtureSha256: probe.fixtures.validSha256,
           invalidFixtureSha256: probe.fixtures.invalidSha256,
+          filename: "checksum_agent.py",
           agentName: TRANSPLANT_AGENT_NAME,
           digest: probe.executions.first.output.digest,
         })
@@ -2157,6 +2360,17 @@ export function evaluateLiveOrganTransplant(
           observations.successScenario.nonce &&
         observations.artifacts.runtimePidHandoff.pid ===
           result.host.pidBefore &&
+        observations.successScenario.runtimePid === result.host.pidBefore &&
+        observations.successScenario.runtimePidObservedWhileAlive &&
+        observations.successScenario.runtimeAliveAtObservation &&
+        observations.successScenario.runtimePgid !== null &&
+        (observations.successScenario.runtimeGroupMatches ||
+          observations.successScenario.runtimeAncestryMatches) &&
+        observations.successScenario.runtimeObservedAtMs !== null &&
+        observations.successScenario.runtimeObservedAtMs >=
+          observations.successScenario.startedAtMs &&
+        observations.successScenario.runtimeObservedAtMs <=
+          observations.successScenario.finishedAtMs &&
         result.host.runtimePidHandoffPath ===
           observations.artifacts.runtimePidHandoff.path &&
         exactCausal?.ownerPid === result.host.pidBefore &&
@@ -2184,6 +2398,11 @@ export function evaluateLiveOrganTransplant(
         validImport.method === "POST" &&
         validImport.path === "/agents/import" &&
         validImport.status === 200 &&
+        validImport.scenarioNonce === result.scenario.nonce &&
+        validImport.filename === result.agent.filename &&
+        validImport.candidateSourceSha256 ===
+          result.imports.accepted.candidateSourceSha256 &&
+        validImport.requestId.length > 0 &&
         result.imports.accepted.httpStatus === 200 &&
         result.imports.accepted.responseStatus === "ok" &&
         result.imports.accepted.committed &&
@@ -2239,6 +2458,12 @@ export function evaluateLiveOrganTransplant(
         invalidReplacement.authorization === "bearer-token" &&
         invalidReplacement.method === "POST" &&
         invalidReplacement.path === "/agents/import" &&
+        invalidReplacement.scenarioNonce === result.scenario.nonce &&
+        invalidReplacement.filename === result.agent.filename &&
+        invalidReplacement.candidateSourceSha256 ===
+          result.imports.rejected.candidateSourceSha256 &&
+        invalidReplacement.requestId.length > 0 &&
+        invalidReplacement.requestId !== validImport?.requestId &&
         result.imports.rejected.httpStatus === 400 &&
         result.imports.rejected.responseStatus === "error" &&
         result.imports.rejected.rejectedBeforeCommit &&
@@ -2371,6 +2596,8 @@ export function evaluateLiveOrganTransplant(
         exactCausal.ownerPid === result.host.pidBefore &&
         exactCausal.firstDigest === result.executions.first.output.digest &&
         exactCausal.secondDigest === result.executions.second.output.digest &&
+        exactCausal.validRequestId === validImport?.requestId &&
+        exactCausal.invalidRequestId === invalidReplacement?.requestId &&
         observations.artifacts.validFixture.sha256 ===
           result.imports.accepted.candidateSourceSha256 &&
         observations.artifacts.invalidFixture.sha256 ===

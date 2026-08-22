@@ -24,6 +24,11 @@ interface ProcessObservation {
   groupTerminationAttempted: boolean;
   groupTerminationCompleted: boolean;
   pipesDestroyed: boolean;
+  runtimePid: number | null;
+  runtimePidObservedWhileAlive: boolean;
+  runtimeAliveAtObservation: boolean;
+  runtimePgid: number | null;
+  runtimeGroupMatches: boolean;
   error: Error | null;
 }
 
@@ -43,6 +48,8 @@ interface GateModule {
       settleGraceMs?: number;
       hardFallbackMs?: number;
       terminateTree?: () => Promise<never>;
+      runtimePidHandoffPath?: string;
+      runtimePidNonce?: string;
     },
   ): Promise<ProcessObservation>;
   finalizeGateRunRoot(runRoot: string, failedNames: string[]): string | null;
@@ -85,6 +92,19 @@ describe("live organ transplant gate orchestration", () => {
     tracker.enter("success-command");
     tracker.enter("missing-python-command");
     expect(tracker.complete()).toBe(true);
+  });
+
+  it("fails unsupported platforms before spawn and contains no native Windows runner", () => {
+    const source = readFileSync(GATE_PATH, "utf8");
+    expect(source).not.toContain("taskkill");
+    expect(source).not.toContain('process.platform === "win32"');
+    expect(source).not.toContain("npm.cmd");
+    expect(source.indexOf("if (!platformSupported) return;")).toBeGreaterThan(
+      0,
+    );
+    expect(source.indexOf("if (!platformSupported) return;")).toBeLessThan(
+      source.indexOf("const buildRun = await runProcess"),
+    );
   });
 
   it("settles inherited pipes and the known process group after direct-child exit", async () => {
@@ -137,6 +157,50 @@ describe("live organ transplant gate orchestration", () => {
     expect(observation.groupTerminationAttempted).toBe(true);
     expect(observation.pipesDestroyed).toBe(true);
     expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("observes the runtime PID handoff alive in the detached process group", async () => {
+    const scratchBase = path.resolve(
+      path.dirname(GATE_PATH),
+      "..",
+      ".test-scratch",
+      "runtime-observation",
+    );
+    mkdirSync(scratchBase, { recursive: true, mode: 0o700 });
+    const handoffPath = path.join(scratchBase, "runtime-pid.json");
+    const nonce = "runtime-observation-nonce";
+    try {
+      const source = [
+        "const fs = require('node:fs');",
+        `fs.writeFileSync(${JSON.stringify(handoffPath)},`,
+        `  JSON.stringify({schema:'openrappter-runtime-pid/1.0',nonce:${JSON.stringify(nonce)},pid:process.pid}),`,
+        "  {flag:'wx',mode:0o600});",
+        "setTimeout(() => process.exit(0), 200);",
+      ].join("\n");
+      const observation = await gate.runProcess(
+        process.execPath,
+        ["-e", source],
+        {
+          cwd: process.cwd(),
+          environment: {},
+          timeoutMs: 2_000,
+          runtimePidHandoffPath: handoffPath,
+          runtimePidNonce: nonce,
+        },
+      );
+      expect(observation.runtimePid).toBe(observation.childPid);
+      expect(observation.runtimePidObservedWhileAlive).toBe(true);
+      expect(observation.runtimeAliveAtObservation).toBe(true);
+      expect(observation.runtimePgid).toBe(observation.childPid);
+      expect(observation.runtimeGroupMatches).toBe(true);
+    } finally {
+      rmSync(scratchBase, { recursive: true, force: true });
+      try {
+        rmdirSync(path.dirname(scratchBase));
+      } catch {
+        // Other tests may still own siblings in the shared scratch parent.
+      }
+    }
   });
 
   it("removes successful run roots and preserves marked failure evidence", () => {

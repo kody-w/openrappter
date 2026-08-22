@@ -101,12 +101,16 @@ const PINNED_PROBE_TEST_NAMES = [
 const PINNED_CAUSAL_STEP_IDS = [
   "trace-started",
   "demo-started",
+  "valid-gateway-started",
   "valid-import-started",
   "valid-import-completed",
+  "valid-gateway-completed",
   "first-execute-started",
   "first-execute-completed",
+  "invalid-gateway-started",
   "invalid-import-started",
   "invalid-import-failed",
+  "invalid-gateway-failed",
   "second-execute-started",
   "second-execute-completed",
   "demo-completed",
@@ -145,6 +149,13 @@ describe("live organ transplant manifest", () => {
       "openrappter-live-organ-transplant-manifest/1.0",
     );
     expect(manifestJson.version).toBe(1);
+    expect(manifestJson.supportedPlatforms).toEqual(["darwin", "linux"]);
+    expect(
+      isLiveOrganTransplantManifest({
+        ...manifestJson,
+        supportedPlatforms: ["win32"],
+      }),
+    ).toBe(false);
     expect(createHash("sha256").update(manifestJson.input).digest("hex")).toBe(
       manifestJson.expectedSha256,
     );
@@ -213,6 +224,7 @@ describe("live organ transplant manifest", () => {
       "escaped-process prevention",
       "enforced process containment",
       "process containment guarantees",
+      "native Windows support",
       "Python sandboxing",
       "arbitrary-Python safety",
     ]);

@@ -44,6 +44,7 @@ import {
 import { GatewayServer } from "../../gateway/server.js";
 
 interface FlightProbeInput {
+  traceId: string;
   originalDatabasePath: string;
   originalExportPath: string;
   copiedDatabasePath: string;
@@ -293,6 +294,11 @@ async function postImport(
   baseUrl: string,
   filename: string,
   contents: Buffer,
+  provenance: {
+    nonce: string;
+    requestId: string;
+    traceId: string;
+  },
   token?: string,
 ): Promise<Response> {
   probe.gateway.requestUrls.push(`${baseUrl}/agents/import`);
@@ -305,6 +311,9 @@ async function postImport(
     body: JSON.stringify({
       filename,
       contents: contents.toString("utf8"),
+      scenarioNonce: provenance.nonce,
+      requestId: provenance.requestId,
+      traceId: provenance.traceId,
     }),
   });
 }
@@ -331,13 +340,24 @@ async function collectFlightEvidence(input: FlightProbeInput): Promise<void> {
 
   try {
     await reopened.initialize();
-    reopenedEvents = await reopened.query({ limit: 10_000 });
-    productionExport = await reopened.export();
-    probe.flight.reopenedQuerySucceeded = true;
+    const allEvents = await reopened.query({ limit: 10_000 });
+    reopenedEvents = await reopened.query({
+      traceId: input.traceId,
+      order: "asc",
+      limit: 10_000,
+    });
+    productionExport = await reopened.export({ traceId: input.traceId });
+    probe.flight.reopenedQuerySucceeded =
+      allEvents.length === reopenedEvents.length &&
+      allEvents.every((event) => event.traceId === input.traceId);
 
     await validator.initialize();
     const imported = await validator.import(savedExport as FlightExport);
-    validatedEvents = await validator.query({ limit: 10_000 });
+    validatedEvents = await validator.query({
+      traceId: input.traceId,
+      order: "asc",
+      limit: 10_000,
+    });
     probe.flight.productionValidationPassed =
       imported === validatedEvents.length;
   } finally {
@@ -423,7 +443,6 @@ beforeAll(async () => {
       privacy: { recordIO: true },
     });
     await recorder.initialize();
-    previousRecorder = setFlightRecorder(recorder);
 
     const registry = new AgentRegistry(builtinsDirectory, agentsDirectory);
     registryConstructorCount += 1;
@@ -456,6 +475,22 @@ beforeAll(async () => {
     await gateway.start();
     const baseUrl = `http://127.0.0.1:${gateway.port}`;
     const traceId = `probe-transplant-${randomUUID()}`;
+    const validRequestId = `valid-${randomUUID()}`;
+    const invalidRequestId = `invalid-${randomUUID()}`;
+    const unauthenticated = await postImport(
+      baseUrl,
+      manifest.fixture.filename,
+      validFixture,
+      {
+        nonce: "unauthenticated-control",
+        requestId: `control-${randomUUID()}`,
+        traceId: `control-${randomUUID()}`,
+      },
+    );
+    probe.gateway.unauthenticatedStatus = unauthenticated.status;
+    probe.gateway.unauthenticatedImporterCalls = importerCalls;
+    await unauthenticated.arrayBuffer();
+    previousRecorder = setFlightRecorder(recorder);
 
     await recorder.runTrace({ traceId }, async () => {
       traceContext = recorder?.currentTrace();
@@ -469,19 +504,15 @@ beforeAll(async () => {
         metadata: { nonce: probe.nonce },
       });
 
-      const unauthenticated = await postImport(
-        baseUrl,
-        manifest.fixture.filename,
-        validFixture,
-      );
-      probe.gateway.unauthenticatedStatus = unauthenticated.status;
-      probe.gateway.unauthenticatedImporterCalls = importerCalls;
-      await unauthenticated.arrayBuffer();
-
       const accepted = await postImport(
         baseUrl,
         manifest.fixture.filename,
         validFixture,
+        {
+          nonce: probe.nonce,
+          requestId: validRequestId,
+          traceId,
+        },
         token,
       );
       probe.gateway.acceptedStatus = accepted.status;
@@ -519,6 +550,11 @@ beforeAll(async () => {
         baseUrl,
         manifest.fixture.filename,
         invalidFixture,
+        {
+          nonce: probe.nonce,
+          requestId: invalidRequestId,
+          traceId,
+        },
         token,
       );
       probe.gateway.rejectedStatus = rejected.status;
@@ -597,6 +633,7 @@ beforeAll(async () => {
     probe.collections.process = true;
 
     await collectFlightEvidence({
+      traceId,
       originalDatabasePath: databasePath,
       originalExportPath: exportPath,
       copiedDatabasePath: databasePath,
@@ -610,6 +647,7 @@ beforeAll(async () => {
       runtimePid: process.pid,
       validFixtureSha256: probe.fixtures.validSha256,
       invalidFixtureSha256: probe.fixtures.invalidSha256,
+      filename: manifest.fixture.filename,
       agentName: TRANSPLANT_AGENT_NAME,
       digest: manifest.expectedSha256,
     });
@@ -777,6 +815,7 @@ describe("live organ transplant independent observer", () => {
       runtimePid: evidence.process.pidBefore,
       validFixtureSha256: evidence.fixtures.validSha256,
       invalidFixtureSha256: evidence.fixtures.invalidSha256,
+      filename: manifest.fixture.filename,
       agentName: TRANSPLANT_AGENT_NAME,
       digest: manifest.expectedSha256,
     });

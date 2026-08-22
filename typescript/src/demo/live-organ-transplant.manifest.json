@@ -2,6 +2,7 @@
   "schema": "openrappter-live-organ-transplant-manifest/1.0",
   "version": 1,
   "demo": "live-organ-transplant",
+  "supportedPlatforms": ["darwin", "linux"],
   "command": {
     "executable": "npm",
     "args": ["run", "demo:transplant", "--silent"],
@@ -60,6 +61,7 @@
     "escaped-process prevention",
     "enforced process containment",
     "process containment guarantees",
+    "native Windows support",
     "Python sandboxing",
     "arbitrary-Python safety"
   ]

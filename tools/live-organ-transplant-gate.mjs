@@ -23,7 +23,6 @@ const DEMO_HARD_DEADLINE_MS = 30_000;
 const BUILD_HARD_DEADLINE_MS = 120_000;
 const MAX_CAPTURE_BYTES = 10 * 1024 * 1024;
 const TERMINATION_GRACE_MS = 250;
-const WINDOWS_TASKKILL_DEADLINE_MS = 1_000;
 const CLOSE_SETTLEMENT_GRACE_MS = 250;
 const HARD_SETTLEMENT_FALLBACK_MS = 2_000;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -220,6 +219,9 @@ function readManifest() {
   const parsed = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
   if (
     !isRecord(parsed) ||
+    !Array.isArray(parsed.supportedPlatforms) ||
+    JSON.stringify(parsed.supportedPlatforms) !==
+      JSON.stringify(["darwin", "linux"]) ||
     !isRecord(parsed.command) ||
     typeof parsed.command.executable !== "string" ||
     !Array.isArray(parsed.command.args) ||
@@ -280,32 +282,6 @@ function directoryIsEmpty(directory) {
 
 async function terminateSpecificTree(child) {
   if (typeof child.pid !== "number") return false;
-  if (process.platform === "win32") {
-    return new Promise((resolve) => {
-      const killer = spawn(
-        "taskkill",
-        ["/PID", String(child.pid), "/T", "/F"],
-        { shell: false, windowsHide: true, stdio: "ignore" },
-      );
-      let settled = false;
-      const finish = (completed) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(completed);
-      };
-      const timer = setTimeout(() => {
-        try {
-          killer.kill("SIGKILL");
-        } catch {
-          // The targeted taskkill process already exited.
-        }
-        finish(false);
-      }, WINDOWS_TASKKILL_DEADLINE_MS);
-      killer.once("error", () => finish(false));
-      killer.once("close", () => finish(true));
-    });
-  }
   try {
     process.kill(-child.pid, "SIGTERM");
   } catch {
@@ -328,6 +304,114 @@ async function terminateSpecificTree(child) {
   return true;
 }
 
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function linuxProcessIdentity(pid) {
+  try {
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = raw
+      .slice(raw.lastIndexOf(")") + 2)
+      .trim()
+      .split(/\s+/);
+    return {
+      pid,
+      ppid: Number(fields[1]),
+      pgid: Number(fields[2]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function darwinProcessIdentity(pid) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      "ps",
+      ["-o", "pid=", "-o", "ppid=", "-o", "pgid=", "-p", String(pid)],
+      { shell: false, stdio: ["ignore", "pipe", "ignore"] },
+    );
+    let output = "";
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The bounded ps observation already exited.
+      }
+      finish(null);
+    }, 500);
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    child.once("error", () => finish(null));
+    child.once("close", () => {
+      const fields = output.trim().split(/\s+/).map(Number);
+      finish(
+        fields.length === 3 && fields.every(Number.isInteger)
+          ? { pid: fields[0], ppid: fields[1], pgid: fields[2] }
+          : null,
+      );
+    });
+  });
+}
+
+async function processIdentity(pid) {
+  return process.platform === "linux"
+    ? linuxProcessIdentity(pid)
+    : darwinProcessIdentity(pid);
+}
+
+async function observeRuntimeRelationship(runtimePid, directChildPid) {
+  const observedAtMs = Date.now();
+  const alive = processIsAlive(runtimePid);
+  const identity = alive ? await processIdentity(runtimePid) : null;
+  let ancestryMatches = false;
+  let cursor = identity;
+  const visited = new Set();
+  const ancestryDeadline = Date.now() + 750;
+  for (
+    let depth = 0;
+    cursor && depth < 64 && Date.now() < ancestryDeadline;
+    depth += 1
+  ) {
+    if (cursor.pid === directChildPid || cursor.ppid === directChildPid) {
+      ancestryMatches = true;
+      break;
+    }
+    if (
+      cursor.ppid <= 1 ||
+      cursor.ppid === cursor.pid ||
+      visited.has(cursor.ppid)
+    ) {
+      break;
+    }
+    visited.add(cursor.ppid);
+    cursor = await processIdentity(cursor.ppid);
+  }
+  return {
+    runtimePid,
+    runtimePidObservedWhileAlive: alive && identity !== null,
+    runtimeAliveAtObservation: alive,
+    runtimePgid: identity?.pgid ?? null,
+    runtimeGroupMatches: identity?.pgid === directChildPid,
+    runtimeAncestryMatches: ancestryMatches,
+    runtimeObservedAtMs: observedAtMs,
+  };
+}
+
 export function runProcess(executable, args, options) {
   return new Promise((resolve) => {
     const started = performance.now();
@@ -341,7 +425,6 @@ export function runProcess(executable, args, options) {
       },
       detached: true,
       shell: false,
-      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -362,6 +445,48 @@ export function runProcess(executable, args, options) {
     let finished = false;
     let terminationPromise = null;
     let settleTimer = null;
+    let handoffPollTimer = null;
+    let runtimeObservationPromise = null;
+    let runtimeObservation = {
+      runtimePid: null,
+      runtimePidObservedWhileAlive: false,
+      runtimeAliveAtObservation: false,
+      runtimePgid: null,
+      runtimeGroupMatches: false,
+      runtimeAncestryMatches: false,
+      runtimeObservedAtMs: null,
+    };
+
+    const pollRuntimeHandoff = () => {
+      if (
+        runtimeObservationPromise ||
+        !options.runtimePidHandoffPath ||
+        typeof child.pid !== "number"
+      ) {
+        return;
+      }
+      try {
+        const handoff = JSON.parse(
+          readFileSync(options.runtimePidHandoffPath, "utf8"),
+        );
+        if (
+          handoff.schema !== "openrappter-runtime-pid/1.0" ||
+          handoff.nonce !== options.runtimePidNonce ||
+          !Number.isInteger(handoff.pid) ||
+          handoff.pid <= 0
+        ) {
+          return;
+        }
+        runtimeObservationPromise = observeRuntimeRelationship(
+          handoff.pid,
+          child.pid,
+        ).then((observation) => {
+          runtimeObservation = observation;
+        });
+      } catch {
+        // The O_EXCL handoff may not exist or may still be mid-write.
+      }
+    };
 
     const destroyInheritedPipes = () => {
       if (pipesDestroyed) return;
@@ -376,35 +501,46 @@ export function runProcess(executable, args, options) {
       forcedSettled ||= forced;
       clearTimeout(timeoutTimer);
       clearTimeout(absoluteFallbackTimer);
+      if (handoffPollTimer) clearInterval(handoffPollTimer);
       if (settleTimer) clearTimeout(settleTimer);
-      resolve({
-        childPid: typeof child.pid === "number" ? child.pid : null,
-        status: typeof exitCode === "number" ? exitCode : null,
-        signal: exitSignal,
-        stdout,
-        stderr,
-        elapsedMs: Math.ceil(performance.now() - started),
-        startedAtMs,
-        finishedAtMs: Date.now(),
-        spawnObserved,
-        exitObserved,
-        closeObserved,
-        timedOut,
-        forcedSettled,
-        groupTerminationAttempted,
-        groupTerminationCompleted,
-        pipesDestroyed,
-        captureExceeded,
-        error:
-          spawnError ??
-          (timedOut
-            ? new Error(`timed out after ${options.timeoutMs}ms`)
-            : captureExceeded
-              ? new Error(`captured more than ${MAX_CAPTURE_BYTES} bytes`)
-              : forced
-                ? new Error("hard process settlement fallback was required")
-                : null),
-      });
+      pollRuntimeHandoff();
+      void (async () => {
+        if (runtimeObservationPromise) {
+          await Promise.race([
+            runtimeObservationPromise,
+            new Promise((settle) => setTimeout(settle, 1_000)),
+          ]);
+        }
+        resolve({
+          childPid: typeof child.pid === "number" ? child.pid : null,
+          status: typeof exitCode === "number" ? exitCode : null,
+          signal: exitSignal,
+          stdout,
+          stderr,
+          elapsedMs: Math.ceil(performance.now() - started),
+          startedAtMs,
+          finishedAtMs: Date.now(),
+          spawnObserved,
+          exitObserved,
+          closeObserved,
+          timedOut,
+          forcedSettled,
+          groupTerminationAttempted,
+          groupTerminationCompleted,
+          pipesDestroyed,
+          captureExceeded,
+          ...runtimeObservation,
+          error:
+            spawnError ??
+            (timedOut
+              ? new Error(`timed out after ${options.timeoutMs}ms`)
+              : captureExceeded
+                ? new Error(`captured more than ${MAX_CAPTURE_BYTES} bytes`)
+                : forced
+                  ? new Error("hard process settlement fallback was required")
+                  : null),
+        });
+      })();
     };
 
     const beginSettlement = (reason) => {
@@ -452,6 +588,7 @@ export function runProcess(executable, args, options) {
     });
     child.once("spawn", () => {
       spawnObserved = true;
+      pollRuntimeHandoff();
     });
     child.once("error", (error) => {
       spawnError = error;
@@ -484,6 +621,9 @@ export function runProcess(executable, args, options) {
       options.timeoutMs +
         (options.hardFallbackMs ?? HARD_SETTLEMENT_FALLBACK_MS),
     );
+    if (options.runtimePidHandoffPath) {
+      handoffPollTimer = setInterval(pollRuntimeHandoff, 10);
+    }
   });
 }
 
@@ -828,6 +968,15 @@ function scenarioObservation(nonce, evidenceDirectory, startedEmpty, run) {
     groupTerminationAttempted: run.groupTerminationAttempted,
     groupTerminationCompleted: run.groupTerminationCompleted,
     pipesDestroyed: run.pipesDestroyed,
+    runtimePid: run.runtimePid,
+    runtimePidObservedWhileAlive: run.runtimePidObservedWhileAlive,
+    runtimeAliveAtObservation: run.runtimeAliveAtObservation,
+    runtimePgid: run.runtimePgid,
+    runtimeGroupMatches: run.runtimeGroupMatches,
+    runtimeAncestryMatches: run.runtimeAncestryMatches,
+    runtimeObservedAtMs: run.runtimeObservedAtMs,
+    startedAtMs: run.startedAtMs,
+    finishedAtMs: run.finishedAtMs,
     elapsedMs: run.elapsedMs,
   };
 }
@@ -912,6 +1061,7 @@ async function reopenExactCommandFlight(
   Ledger,
   databaseObservation,
   exportObservation,
+  traceId,
   witnessDirectory,
   missingEvidence,
 ) {
@@ -943,16 +1093,24 @@ async function reopenExactCommandFlight(
   const validator = new Ledger({ inMemory: true });
   try {
     await reopened.initialize();
-    const databaseEvents = await reopened.query({ limit: 10_000 });
-    const reopenedExport = await reopened.export();
+    const allEvents = await reopened.query({ limit: 10_000 });
+    const databaseEvents = traceId
+      ? await reopened.query({ traceId, order: "asc", limit: 10_000 })
+      : [];
+    const reopenedExport = await reopened.export(traceId ? { traceId } : {});
     await validator.initialize();
     const imported = await validator.import(persisted);
-    const validatorEvents = await validator.query({ limit: 10_000 });
+    const validatorEvents = traceId
+      ? await validator.query({ traceId, order: "asc", limit: 10_000 })
+      : [];
     const persistedEvents = Array.isArray(persisted.events)
       ? persisted.events
       : [];
     return {
-      databaseReopened: true,
+      databaseReopened:
+        traceId.length > 0 &&
+        allEvents.length === databaseEvents.length &&
+        allEvents.every((event) => event.traceId === traceId),
       productionExportValidated:
         imported === validatorEvents.length &&
         JSON.stringify(persistedEvents) === JSON.stringify(validatorEvents) &&
@@ -1023,6 +1181,17 @@ async function main() {
     req("manifest is readable and structurally runnable", false, String(error));
     return;
   }
+  const platformSupported = manifest.supportedPlatforms.includes(
+    process.platform,
+  );
+  req(
+    "host platform is supported",
+    platformSupported,
+    platformSupported
+      ? `${process.platform} (macOS/Linux/WSL scope)`
+      : `${process.platform} is unsupported; native Windows is deferred`,
+  );
+  if (!platformSupported) return;
 
   const workingDirectory = resolveInsideRoot(manifest.command.workingDirectory);
   const evidenceBase = resolveInsideRoot(manifest.artifacts.evidenceRoot);
@@ -1247,6 +1416,8 @@ async function main() {
         manifest.runtimeLimits.demoMaxElapsedMs,
         DEMO_HARD_DEADLINE_MS,
       ),
+      runtimePidHandoffPath,
+      runtimePidNonce: successNonce,
     },
   );
   const successRecord = parseRecord(successRun);
@@ -1322,6 +1493,10 @@ async function main() {
     "export",
     "path",
   ]);
+  const resultTraceId = nestedString(successRecord.value, [
+    "flightRecorder",
+    "traceId",
+  ]);
   const flightDatabase = inspectArtifact(databasePath, {
     allowedRoot: successDirectory,
     missingEvidence,
@@ -1352,6 +1527,7 @@ async function main() {
     TrustedLedger,
     flightDatabase,
     flightExport,
+    resultTraceId,
     witnessDirectory,
     missingEvidence,
   );

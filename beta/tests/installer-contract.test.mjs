@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -446,3 +446,43 @@ test("the kernel bootstrap URL is not the Frontier's URL", () => {
   );
 });
 
+
+// Added 2026-08-21 after a real install printed
+//   install.sh: line 489: CYAN: unbound variable
+// while a person was choosing how to install. The installer runs under
+// `set -euo pipefail`, so a colour name that is referenced and never defined is
+// not a cosmetic slip — it is an error message in the first five minutes of
+// someone's first impression, and `bash -n` does not catch it because the
+// syntax is fine.
+test("the installer references no variable it never defines", () => {
+  // The ROOT installer, not beta/install.sh. `read()` above resolves inside
+  // beta/, and the first version of this test used it and therefore checked a
+  // different file — passing happily while the bug it was written for sat
+  // untouched. Verified by reintroducing the fault and watching this fail.
+  const rootInstaller = new URL("../../install.sh", import.meta.url);
+  if (!existsSync(rootInstaller)) return; // an installed sparse checkout has no root installer
+  const source = readFileSync(rootInstaller, "utf8");
+
+  const defined = new Set([...source.matchAll(/^([A-Z][A-Z_0-9]*)=/gm)].map((m) => m[1]));
+  const used = new Set([...source.matchAll(/\$\{([A-Z][A-Z_0-9]{2,})\}/g)].map((m) => m[1]));
+  // ${VAR:-default} and ${VAR-default} supply their own fallback, so they are
+  // safe under set -u however the environment arrives.
+  const guarded = new Set([...source.matchAll(/\$\{([A-Z][A-Z_0-9]{2,})[:-]/g)].map((m) => m[1]));
+  // Names the shell or the environment provides.
+  const ambient = new Set([
+    "HOME", "PATH", "TMPDIR", "USER", "SHELL", "PWD", "LANG", "OSTYPE", "BASH_SOURCE",
+    "PIPESTATUS", "RANDOM", "EUID", "IFS", "TERM", "SUDO_USER", "GITHUB_TOKEN", "CI",
+  ]);
+
+  const unbound = [...used].filter((name) => (
+    !defined.has(name) && !guarded.has(name) && !ambient.has(name)
+  )).sort();
+
+  assert.deepEqual(
+    unbound,
+    [],
+    "these are referenced with ${...} but never assigned, and the installer runs under "
+      + "set -u, so each one aborts or prints an error the moment its line is reached. "
+      + "Either define it, or give it a default with ${NAME:-}.",
+  );
+});

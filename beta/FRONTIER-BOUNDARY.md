@@ -29,6 +29,32 @@ contributor needs the product direction before touching the Frontier. `CLAUDE.md
 document, not a mainline surface, and the boundary test scopes itself to exactly that list
 (`beta/tests/frontier-boundary.test.mjs`: `index.html`, `README.md`, `docs/*`).
 
+## Graduation in this distribution (2026-08-21)
+
+**The beta page is deliberately linked from the mainline here, and that is a change from the rule
+above.** It is recorded rather than quietly made, because the test that enforced the boundary was
+changed in the same commit — which is exactly the graduation record this document asks for.
+
+**Why the boundary loosens in this repository and not upstream.** The rule exists to protect a
+*Microsoft-facing* library: its landing page, guide and catalog are what a customer of that product
+sees, and exploratory work advertised there reads as unfinished product. This distribution has no
+such mainline. Its landing page, its README and its documentation are the Frontier's own, and the
+beta is not a distraction from the product — increasingly it is the product.
+
+**What still holds, unchanged:**
+
+- Everything the Frontier owns still lives under `beta/`. Nothing moved.
+- `docs/beta/` is the published surface, and its library files are checked byte-for-byte against
+  `beta/electron/` by `beta/tests/beta-page-parity.test.mjs`. A page that drifts from what ships
+  fails the build.
+- Fast movement still must not gate production: the Frontier suites run in their own workflow.
+- Upstream, where the boundary was written, it is untouched. This is a statement about this
+  distribution only.
+
+**What changed concretely:** three navigation links and a README section point at `docs/beta/`, and
+`frontier-boundary.test.mjs` now permits a link to the published beta page while still refusing a
+link into the `beta/` source tree.
+
 ## Why
 
 1. **The library must stay boring.** It is the Microsoft-facing product; its landing page, guide and

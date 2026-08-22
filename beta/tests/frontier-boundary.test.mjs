@@ -25,13 +25,28 @@ function mainlinePages() {
 // A link INTO the Frontier: an href/src/markdown target that resolves under beta/,
 // or a raw GitHub URL that walks into it. The English word "beta" is not a link —
 // the landing page legitimately says the project is in beta — so only paths count.
-const FRONTIER_LINK = /(?:href|src)\s*=\s*["'](?:\.{0,2}\/)*beta\/|\]\((?:\.{0,2}\/)*beta\/|githubusercontent\.com\/[^"'\s]*\/beta\/|github\.io\/[^"'\s]*\/beta\//i;
+// CHANGED 2026-08-21, deliberately, as the graduation record this test asks for.
+// See "Graduation in this distribution" in beta/FRONTIER-BOUNDARY.md.
+//
+// The boundary exists to keep exploratory work out of a MICROSOFT-FACING library.
+// This distribution has no such mainline — its landing page and README are the
+// Frontier's own — so the published beta page may be linked from them.
+//
+// What is still refused is a link into the beta/ SOURCE tree. Pointing a reader
+// at docs/beta/ sends them to a published, parity-checked page; pointing them at
+// beta/ sends them into a working tree that changes hourly, which is the failure
+// this test was written for and still catches.
+const FRONTIER_LINK = /(?:href|src)\s*=\s*["'](?:\.{0,2}\/)*beta\/(?!\s*")|\]\((?:\.{0,2}\/)*beta\/|githubusercontent\.com\/[^"'\s]*\/beta\/|github\.io\/[^"'\s]*\/beta\/(?!\s*\))/i;
+
+/** A link to the PUBLISHED page, which is allowed here. Not a link into beta/. */
+const PUBLISHED_BETA = /(?:href\s*=\s*["']beta\/["']|github\.io\/openrappter\/beta\/)/i;
 
 test("no mainline page links into the Frontier", () => {
   const offenders = [];
   for (const page of mainlinePages()) {
     const body = readFileSync(path.join(repositoryRoot, page), "utf8");
     for (const [index, line] of body.split("\n").entries()) {
+      if (PUBLISHED_BETA.test(line)) continue;
       if (FRONTIER_LINK.test(line)) {
         offenders.push(`${page}:${index + 1}: ${line.trim().slice(0, 120)}`);
       }

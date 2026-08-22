@@ -90,7 +90,9 @@ test("the Electron container is a private durable data manifest", (t) => {
   assert.equal(first.manifest.container, "electron-app");
   assert.equal(first.manifest.durability, "data-defined");
   assert.equal(second.manifest.created_at, first.manifest.created_at);
-  assert.equal(statSync(first.file).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(statSync(first.file).mode & 0o777, 0o600);
+  }
 });
 
 test("one estate manifests multiple residents and rejects foreign neighborhoods", (t) => {

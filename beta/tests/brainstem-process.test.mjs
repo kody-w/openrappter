@@ -169,7 +169,9 @@ test("health wait returns the first valid response", async () => {
 
 test("owned health identifies authenticated source directly or unauthenticated source by soul", () => {
   const source = path.join(tmpdir(), "owned-health-source");
-  const expected = path.resolve(source);
+  const expected = process.platform === "win32"
+    ? path.resolve(source).toLowerCase()
+    : path.resolve(source);
   assert.equal(
     healthSourceDirectory({
       status: "ok",

@@ -92,7 +92,9 @@ test("hatching OpenRappter creates a separate fully built-out twin", async (t) =
   const twinToken = path.join(twin.brainstem_dir, ".copilot_token");
   const parentToken = path.join(root, "runtime", ".copilot_token");
   assert.equal(fs.readFileSync(twinToken, "utf8"), "token");
-  assert.equal(fs.statSync(twinToken).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(twinToken).mode & 0o777, 0o600);
+  }
   assert.notEqual(fs.statSync(twinToken).ino, fs.statSync(parentToken).ino);
   assert.equal(fs.existsSync(path.join(twin.brainstem_dir, ".brainstem_data")), false);
   assert.equal(fs.existsSync(path.join(twin.brainstem_dir, "agents", "__pycache__")), false);
@@ -118,7 +120,9 @@ test("hatching OpenRappter creates a separate fully built-out twin", async (t) =
     twin.instance_rappid,
     "identity agent, hatch metadata, and self tile share one authority",
   );
-  assert.equal(fs.statSync(twin.metadata_path).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(twin.metadata_path).mode & 0o777, 0o600);
+  }
   assert.notEqual(twin.python, parentPython);
   assert.notEqual(fs.statSync(twin.python).ino, fs.statSync(parentPython).ino);
   fs.writeFileSync(twin.python, "twin python\n");

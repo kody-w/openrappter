@@ -295,9 +295,11 @@ test("exports and backups are private and collision-safe", (t) => {
   store.exportTile(exported);
   const first = store.backup();
   const second = store.backup();
-  assert.equal(fs.statSync(exported).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(first).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(second).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(exported).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(first).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(second).mode & 0o777, 0o600);
+  }
   assert.notEqual(first, second, "two backups in one millisecond need distinct paths");
   assert.deepEqual(store.listBackups(), [second, first]);
 });

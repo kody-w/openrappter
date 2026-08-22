@@ -112,7 +112,9 @@ test("the application and installers enforce species isolation", () => {
   assert.match(windows, /ReparsePoint/);
 });
 
-test("the Unix installer rejects lexical and symlink drift before writes", (t) => {
+test("the Unix installer rejects lexical and symlink drift before writes", {
+  skip: process.platform === "win32",
+}, (t) => {
   const root = path.resolve(import.meta.dirname, "..");
   const installer = path.join(root, "install.sh");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "species-installer-"));

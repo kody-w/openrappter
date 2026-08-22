@@ -75,7 +75,9 @@ test("OpenRappter exposes the exact Brainstem POST /chat wire", async (t) => {
   assert.equal(metadata.schema, OPENRAPPTER_CHAT_ENDPOINT_SCHEMA);
   assert.equal(metadata.url, endpoint.url);
   assert.equal(metadata.neighborhood_id, "openrappter:alpha");
-  assert.equal(fs.statSync(endpoint.metadataPath).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(endpoint.metadataPath).mode & 0o777, 0o600);
+  }
   const health = await fetch(`${new URL(endpoint.url).origin}/health`);
   assert.equal(health.status, 200);
   assert.equal((await health.json()).status, "ready");

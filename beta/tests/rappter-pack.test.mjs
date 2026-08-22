@@ -119,7 +119,7 @@ test("pack config is machine-agnostic, typed, and rejects unsafe transport", () 
   };
   assert.equal(
     validatePackConfig(localHome).nodes[1].transport.home,
-    "/tmp/openrappter-two",
+    path.resolve("/tmp/openrappter-two"),
   );
 
   const inlineSecret = config();
@@ -693,7 +693,9 @@ test("continuous loop persists private reports and preserves every observed delt
   ]));
   for (const file of files) {
     const full = path.join(home, "pack", "runs", file);
-    assert.equal(fs.statSync(full).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal(fs.statSync(full).mode & 0o777, 0o600);
+    }
     const report = JSON.parse(fs.readFileSync(full, "utf8"));
     assert.deepEqual(report, byCreatedAt.get(report.created_at));
     for (const entry of report.cases) {

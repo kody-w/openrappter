@@ -30,7 +30,6 @@ BETA_LAUNCHER_PATH=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
@@ -55,7 +54,7 @@ run_with_heartbeat() {
             0) glyph='|' ;;
             1) glyph='/' ;;
             2) glyph='-' ;;
-            *) glyph='\' ;;
+            *) glyph="\\" ;;
         esac
         printf "\r  [%s] %s (%ss)" "$glyph" "$label" "$((SECONDS - started))"
         frame=$(( (frame + 1) % 4 ))

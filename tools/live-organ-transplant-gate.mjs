@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const RESULT_PREFIX = "OPENRAPPTER_TRANSPLANT_RESULT=";
 const GATE_REPORT_PREFIX = "OPENRAPPTER_TRANSPLANT_GATE_REPORT=";
@@ -1151,9 +1152,8 @@ async function reopenExactCommandFlight(
       productionExportValidated:
         imported === validatorEvents.length &&
         validatorTotalCount === validatorEvents.length &&
-        JSON.stringify(persistedEvents) === JSON.stringify(validatorEvents) &&
-        JSON.stringify(persistedEvents) ===
-          JSON.stringify(reopenedExport.events),
+        isDeepStrictEqual(persistedEvents, validatorEvents) &&
+        isDeepStrictEqual(persistedEvents, reopenedExport.events),
       databaseTotalCount,
       relevantEventCount: databaseEvents.length,
       exportEventCount: persistedEvents.length,

@@ -1008,6 +1008,7 @@ export async function runLiveOrganTransplant(): Promise<LiveOrganTransplantRunOu
   let recorderInstalled = false;
   let traceEvidence: TraceEvidence | undefined;
   let flightExport: FlightExport | undefined;
+  let recordedEvents: FlightEvent[] | undefined;
   let primaryFailure: unknown;
   let pythonEnvironmentInstalled = false;
 
@@ -1066,12 +1067,11 @@ export async function runLiveOrganTransplant(): Promise<LiveOrganTransplantRunOu
       invalidHash: fixtures.invalidHash,
       identities,
     });
-    flightExport = await recorder.exportTrace(traceId) ?? undefined;
-    if (!flightExport) {
-      throw new Error("Flight Recorder did not export the transplant trace.");
-    }
-    assertNoProviderOrModelEvents(flightExport.events);
-    const causal = evaluateTransplantCausalTrace(flightExport.events, {
+    recordedEvents = await recorder.query({
+      traceId,
+      order: "asc",
+    });
+    const causal = evaluateTransplantCausalTrace(recordedEvents, {
       traceId,
       nonce: scenario.nonce,
       runtimePid: process.pid,
@@ -1083,9 +1083,16 @@ export async function runLiveOrganTransplant(): Promise<LiveOrganTransplantRunOu
     });
     if (!causal.pass) {
       throw new Error(
-        `Production causal trace failed: ${causal.failures.join("; ")}`,
+        `Production causal trace failed: ${causal.failures.join("; ")} `
+        + `(trace owner PID ${causal.ownerPid ?? "missing"}, `
+        + `runtime PID ${process.pid})`,
       );
     }
+    flightExport = await recorder.exportTrace(traceId) ?? undefined;
+    if (!flightExport) {
+      throw new Error("Flight Recorder did not export the transplant trace.");
+    }
+    assertNoProviderOrModelEvents(flightExport.events);
     const exportJson = canonicalJson(flightExport);
     if (exportJson.includes(token)) {
       throw new Error("Gateway credential appeared in the Flight export.");
@@ -1139,7 +1146,7 @@ export async function runLiveOrganTransplant(): Promise<LiveOrganTransplantRunOu
     }
   }
 
-  if (!traceEvidence || !flightExport) {
+  if (!traceEvidence || !flightExport || !recordedEvents) {
     throw new Error("Live organ transplant evidence was not completed.");
   }
   chmodSync(databasePath, PRIVATE_FILE_MODE);
@@ -1266,8 +1273,8 @@ export async function runLiveOrganTransplant(): Promise<LiveOrganTransplantRunOu
       export: exportArtifact,
       exportSchema: flightExport.schema,
       exportedAt: flightExport.exportedAt,
-      eventCount: flightExport.events.length,
-      events: flightExport.events,
+      eventCount: recordedEvents.length,
+      events: recordedEvents,
     },
     providerUsage: {
       providerCalls: 0,

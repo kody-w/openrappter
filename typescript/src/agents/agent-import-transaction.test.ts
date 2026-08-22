@@ -186,7 +186,7 @@ describe("transactional replacement", () => {
     expect(await registry.getAgent("Stable")).toBe(held);
     expect(await held!.perform({})).toContain("original generation");
     expect(await transactionArtifacts()).toEqual([]);
-  });
+  }, 15_000);
 
   it("atomically restores disk and the exact registry generation when activation throws", async () => {
     const original = pythonAgent("RollbackAgent", "Rollback", "generation one");

@@ -195,18 +195,40 @@ describe("live organ transplant manifest", () => {
     );
   });
 
-  it("exposes both deliberately failing fixture hash pins", () => {
+  it("pins both bundled fixtures to their exact reviewed bytes", () => {
     expect(manifestJson.fixture.bundledPath).toBe(
       "typescript/src/demo/fixtures/checksum_agent.py",
     );
     expect(manifestJson.fixture.invalidBundledPath).toBe(
       "typescript/src/demo/fixtures/checksum_agent_invalid.py",
     );
-    expect(manifestJson.fixture.sourceSha256).toBeNull();
-    expect(manifestJson.fixture.invalidSourceSha256).toBeNull();
-    expect(manifestJson.fixture.todo).toMatch(
-      /TODO\(runtime-builder\).*SHA-256.*deliberately fails/i,
+    const validHash = createHash("sha256")
+      .update(
+        readFileSync(
+          new URL("../../demo/fixtures/checksum_agent.py", import.meta.url),
+        ),
+      )
+      .digest("hex");
+    const invalidHash = createHash("sha256")
+      .update(
+        readFileSync(
+          new URL(
+            "../../demo/fixtures/checksum_agent_invalid.py",
+            import.meta.url,
+          ),
+        ),
+      )
+      .digest("hex");
+
+    expect(manifestJson.fixture.sourceSha256).toBe(
+      "7a060eb2fad9a6aaa16678ad050d6fb4f39a977745d02d7215a5f214b1890318",
     );
+    expect(manifestJson.fixture.invalidSourceSha256).toBe(
+      "53eee48a3b4ba4ce2573fe19a452b36e3917ffc68a50d08af3ae0e38a9f3d463",
+    );
+    expect(manifestJson.fixture.sourceSha256).toBe(validHash);
+    expect(manifestJson.fixture.invalidSourceSha256).toBe(invalidHash);
+    expect(manifestJson.fixture.todo).not.toMatch(/TODO|deliberately fails/i);
   });
 
   it("states the unsandboxed boundary without overstating the demo", () => {

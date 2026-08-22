@@ -39,7 +39,6 @@ import {
 } from './usage.js';
 import { getFlightRecorder } from '../flight-recorder/recorder.js';
 import type { FlightEvent } from '../flight-recorder/types.js';
-import type { ImportResult as CurrentAgentImportResult } from '../agents/agent-import.js';
 import {
   listAgentFiles,
   readAgentFile,
@@ -187,6 +186,14 @@ interface AgentImportProvenance {
   requestId: string;
   candidateSourceSha256: string;
   gatewayParentEventId: string;
+}
+
+interface CurrentAgentImportResult {
+  status: 'ok' | 'error';
+  learned?: { name: string; description: string }[];
+  file?: string;
+  error?: string;
+  replaced?: boolean;
 }
 
 interface GatewayAgentImportResult extends CurrentAgentImportResult {

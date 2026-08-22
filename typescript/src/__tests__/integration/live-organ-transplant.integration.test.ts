@@ -18,6 +18,7 @@ import { PythonAgent } from "../../agents/PythonAgent.js";
 import {
   REQUIRED_TRANSPLANT_CAUSAL_STEPS,
   TRANSPLANT_AGENT_NAME,
+  TRANSPLANT_DEMO_ID,
   TRANSPLANT_GATEWAY_MODULE,
   TRANSPLANT_INVALID_FIXTURE,
   TRANSPLANT_PROBE_SCHEMA,
@@ -513,7 +514,7 @@ beforeAll(async () => {
       }
       await recorder?.record({
         kind: "demo.transplant.started",
-        source: "live-organ-transplant-independent-observer",
+        source: TRANSPLANT_DEMO_ID,
         status: "started",
         metadata: { nonce: probe.nonce },
       });
@@ -608,7 +609,7 @@ beforeAll(async () => {
 
       await recorder?.record({
         kind: "demo.transplant.completed",
-        source: "live-organ-transplant-independent-observer",
+        source: TRANSPLANT_DEMO_ID,
         status: "success",
         metadata: { nonce: probe.nonce },
       });

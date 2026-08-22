@@ -1,7 +1,7 @@
 {
   "name": "openrappter",
   "version": "1.13.0",
-  "description": "\ud83e\udd96 Local-first AI agent powered by GitHub Copilot SDK \u2014 no API keys required",
+  "description": "🦖 Local-first AI agent powered by GitHub Copilot SDK — no API keys required",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -78,6 +78,8 @@
   "devDependencies": {
     "@types/jsdom": "^27.0.0",
     "@types/node": "^20.0.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "eslint": "^9.0.0",
     "jsdom": "^27.4.0",
     "prettier": "^3.2.0",

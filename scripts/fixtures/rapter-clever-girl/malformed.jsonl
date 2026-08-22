@@ -1,0 +1,6 @@
+{"sessionId":"malformed-valid-01","timestamp":"2026-07-10T09:00:00.000Z","role":"user","text":"Describe a fictional brass telescope."}
+this is not json
+{"sessionId":"malformed-valid-02","timestamp":"2026-07-11T09:00:00.000Z","role":"user","text":"List two imaginary cloud names."}
+{"sessionId":"malformed-missing-text","timestamp":"2026-07-11T09:05:00.000Z","role":"user"}
+{"sessionId":"malformed-truncated","timestamp":"2026-07-12T09:00:00.000Z","role":"user","text":"unterminated"
+{"sessionId":"malformed-valid-03","timestamp":"2026-07-12T10:00:00.000Z","role":"user","text":"Invent a harmless name for a paper kite."}

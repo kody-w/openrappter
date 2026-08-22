@@ -1,0 +1,24 @@
+{
+  "schema": "openrappter-flight-export/1.0",
+  "events": [
+    {
+      "sessionId": "partial-flight-valid",
+      "timestamp": "2026-07-10T09:00:00.000Z",
+      "kind": "agent.execute.started",
+      "status": "started",
+      "payload": {
+        "role": "user",
+        "content": "Inspect this fictional delivery workflow."
+      }
+    },
+    {
+      "sessionId": "partial-flight-unsupported",
+      "timestamp": "2026-07-10T10:00:00.000Z",
+      "kind": "agent.execute.started",
+      "payload": {
+        "role": "user",
+        "content": "This row intentionally lacks the required adapter discriminator."
+      }
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+{"timestamp":"2026-07-10T08:59:00.000Z","type":"session_meta","payload":{"id":"partial-codex-valid","originator":"codex_cli_rs"}}
+{"timestamp":"2026-07-10T09:00:00.000Z","type":"event_msg","payload":{"type":"user_message","message":"Inspect this fictional setup repair."}}
+{"timestamp":"2026-07-10T10:00:00.000Z","type":"event_msg"}
+{"timestamp":

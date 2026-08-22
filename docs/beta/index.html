@@ -58,6 +58,19 @@
   footer{margin-top:44px;padding-top:22px;border-top:1px solid var(--edge);
     color:var(--faint);font:400 12.5px/1.7 var(--mono)}
   a{color:var(--accent)}
+  .install{margin:26px 0 0;background:var(--panel);border:1px solid var(--edge);border-radius:3px;padding:18px 20px}
+  .install h2{margin:0 0 4px;font:600 17px/1.3 var(--sans)}
+  .install p{margin:0 0 14px;color:var(--muted);font-size:14.5px;max-width:62ch}
+  .os{display:flex;gap:7px;margin:0 0 10px}
+  .os button{padding:6px 13px;font:500 12.5px/1 var(--sans)}
+  .os button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#08100f}
+  .cmd{display:flex;align-items:stretch;gap:0;border:1px solid var(--edge-2);border-radius:3px;overflow:hidden}
+  .cmd code{flex:1;padding:13px 15px;background:#0b0e10;font:400 12.5px/1.5 var(--mono);
+    color:var(--ink);overflow-x:auto;white-space:nowrap}
+  .cmd button{border:0;border-left:1px solid var(--edge-2);border-radius:0;padding:0 17px;
+    font:500 12px/1 var(--sans);white-space:nowrap}
+  .after{margin:12px 0 0;color:var(--faint);font-size:13.5px}
+
 </style>
 </head>
 <body>
@@ -76,6 +89,23 @@
   synchronously and Web Crypto does not. A test fails the build if this copy ever drifts from
   the shipped one.</div>
 </header>
+
+
+<div class="install">
+  <h2>Start openrappter on your machine</h2>
+  <p>This page shows the method. The one-liner installs and launches the desktop application, which
+  runs the same code against your own lines instead of a fixture.</p>
+  <div class="os" role="tablist" aria-label="Operating system">
+    <button role="tab" id="tab-unix" aria-selected="true">macOS &amp; Linux</button>
+    <button role="tab" id="tab-win" aria-selected="false">Windows</button>
+  </div>
+  <div class="cmd">
+    <code id="cmd">curl -fsSL https://raw.githubusercontent.com/kody-w/openrappter/main/beta/install.sh | bash</code>
+    <button id="copy">Copy</button>
+  </div>
+  <p class="after" id="after">Installs a pinned Node runtime of its own, so a machine with no
+  developer tools works. Nothing is installed system-wide.</p>
+</div>
 
 <h2><span class="n">01</span>What the two sides hold</h2>
 <p class="sub">Your line is what this device lived through. The commons is the same situation
@@ -251,6 +281,40 @@ document.getElementById("restore").onclick = () => {
     `<span class="dim">Nothing was unwritten. An earlier generation was elected as live, and the ` +
     `restore is itself part of the record — that is why there can be no un-merge and still a way back.</span>`
   );
+};
+
+
+const UNIX = "curl -fsSL https://raw.githubusercontent.com/kody-w/openrappter/main/beta/install.sh | bash";
+const WIN = "curl.exe -fsSL https://raw.githubusercontent.com/kody-w/openrappter/main/beta/install.cmd -o %TEMP%\\openrappter.cmd && %TEMP%\\openrappter.cmd";
+const cmdEl = document.getElementById("cmd");
+const tabUnix = document.getElementById("tab-unix");
+const tabWin = document.getElementById("tab-win");
+function pick(which) {
+  const unix = which === "unix";
+  cmdEl.textContent = unix ? UNIX : WIN;
+  tabUnix.setAttribute("aria-selected", String(unix));
+  tabWin.setAttribute("aria-selected", String(!unix));
+  document.getElementById("copy").textContent = "Copy";
+}
+tabUnix.onclick = () => pick("unix");
+tabWin.onclick = () => pick("win");
+// Offer the command for the machine the visitor is actually on.
+if (/Win/i.test(navigator.platform || navigator.userAgent)) pick("win");
+document.getElementById("copy").onclick = async () => {
+  const button = document.getElementById("copy");
+  try {
+    await navigator.clipboard.writeText(cmdEl.textContent);
+    button.textContent = "Copied";
+    setTimeout(() => { button.textContent = "Copy"; }, 1600);
+  } catch {
+    // Clipboard access can be refused; say so rather than pretending it worked.
+    const range = document.createRange();
+    range.selectNodeContents(cmdEl);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    button.textContent = "Selected — press copy";
+  }
 };
 
 document.getElementById("reset").onclick = reset;

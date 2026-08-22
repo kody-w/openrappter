@@ -15,9 +15,9 @@
     "filename": "checksum_agent.py",
     "bundledPath": "typescript/src/demo/fixtures/checksum_agent.py",
     "invalidBundledPath": "typescript/src/demo/fixtures/checksum_agent_invalid.py",
-    "sourceSha256": null,
-    "invalidSourceSha256": null,
-    "todo": "TODO(runtime-builder): replace both nulls with SHA-256 hashes of the final bundled fixture bytes; the acceptance evaluator deliberately fails until both pins are real."
+    "sourceSha256": "7a060eb2fad9a6aaa16678ad050d6fb4f39a977745d02d7215a5f214b1890318",
+    "invalidSourceSha256": "53eee48a3b4ba4ce2573fe19a452b36e3917ffc68a50d08af3ae0e38a9f3d463",
+    "todo": "Fixture SHA-256 pins are populated from the final bundled fixture bytes."
   },
   "dependencies": {
     "node": ">=20.9.0",

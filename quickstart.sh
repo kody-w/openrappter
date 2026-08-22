@@ -94,10 +94,6 @@ require_transplant_platform() {
   esac
 }
 
-dependencies_ready() {
-  [ -d node_modules ] && npm ls --depth=0 --ignore-scripts >/dev/null 2>&1
-}
-
 demo=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -129,10 +125,8 @@ if [ "$demo" = "live-organ-transplant" ]; then
   require_transplant_platform
   require_transplant_python
 
-  if ! dependencies_ready; then
-    echo "Installing locked dependencies for Live Organ Transplant..."
-    npm ci --no-audit --no-fund
-  fi
+  echo "Reconstructing locked dependencies for Live Organ Transplant..."
+  npm ci --no-audit --no-fund
 
   npm run demo:transplant --silent
   exit $?

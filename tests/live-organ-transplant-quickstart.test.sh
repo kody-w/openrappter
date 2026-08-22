@@ -6,6 +6,8 @@ set -o pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 QUICKSTART="$ROOT/quickstart.sh"
 README="$ROOT/README.md"
+PACKAGE_JSON="$ROOT/typescript/package.json"
+REAL_NODE="$(command -v node)"
 WORK="$ROOT/tests/.live-organ-transplant-quickstart-$$"
 
 trap 'rm -rf "$WORK"' EXIT
@@ -88,19 +90,64 @@ EOF
 } >>"$MOCK_CALL_LOG"
 
 case "${1:-}" in
-  ls)
-    exit "${MOCK_NPM_LS_STATUS:-0}"
-    ;;
   ci)
-    exit "${MOCK_NPM_CI_STATUS:-0}"
+    if [ "$#" -ne 3 ] ||
+      [ "${2:-}" != "--no-audit" ] ||
+      [ "${3:-}" != "--no-fund" ]; then
+      printf 'unexpected npm ci arguments\n' >&2
+      exit 64
+    fi
+    if [ "${MOCK_NPM_CI_STATUS:-0}" -ne 0 ]; then
+      exit "$MOCK_NPM_CI_STATUS"
+    fi
+    rm -rf node_modules
+    mkdir -p node_modules
+    printf 'added locked dependencies\n'
+    exit 0
+    ;;
+  install)
+    if [ "$#" -ne 2 ] || [ "${2:-}" != "--silent" ]; then
+      printf 'unexpected legacy npm install arguments\n' >&2
+      exit 64
+    fi
+    exit 0
     ;;
   run)
-    if [ "${2:-}" = "demo:transplant" ]; then
-      exit "${MOCK_DEMO_STATUS:-0}"
+    if [ "$#" -ne 3 ] ||
+      [ "${2:-}" != "demo:transplant" ] ||
+      [ "${3:-}" != "--silent" ]; then
+      printf 'unexpected npm run command\n' >&2
+      exit 64
     fi
+    package_script="$(
+      "$MOCK_REAL_NODE" -e \
+        'const fs=require("node:fs");const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(p.scripts?.["demo:transplant"] ?? "");' \
+        "$MOCK_PACKAGE_JSON"
+    )" || exit 64
+    if [ "$package_script" != "$MOCK_EXPECTED_PACKAGE_SCRIPT" ]; then
+      printf 'demo:transplant package script is missing or changed\n' >&2
+      exit 64
+    fi
+    if [ "${MOCK_DEMO_STATUS:-0}" -ne 0 ]; then
+      exit "$MOCK_DEMO_STATUS"
+    fi
+    cat <<TRANSCRIPT
+[1/6] DONOR VERIFIED — checksum_agent.py matches its pinned SHA-256 source.
+[2/6] THEATER ONLINE — authenticated loopback GatewayServer listening on 127.0.0.1:43117.
+[3/6] TRANSPLANT ACCEPTED — ChecksumAgent is live through the production PythonAgent bridge.
+[4/6] FIRST PULSE — sha256("openrappter-live-organ-transplant") = ab3db6c3d9a297c36792a96bb5d1c14e4de1b2d340467a1e35c6bae02095d033.
+[5/6] REJECTION TEST — the invalid candidate was refused before commit; the held PythonAgent produced ab3db6c3d9a297c36792a96bb5d1c14e4de1b2d340467a1e35c6bae02095d033.
+[6/6] FLIGHT SEALED — 16 events persisted under trace transplant-offline-test.
+AUTHORITY NOTICE: Python executes as the logged-in OS user with filesystem/network/environment/subprocess authority. The subprocess is NOT a sandbox. File preservation cannot undo external side effects.
+OPENRAPPTER_TRANSPLANT_RESULT={"schema":"openrappter-live-organ-transplant-result/1.0","status":"success","scenario":{"evidenceDirectory":"$MOCK_EVIDENCE_DIRECTORY"},"flightRecorder":{"traceId":"transplant-offline-test","database":{"path":"$MOCK_EVIDENCE_DIRECTORY/flight-recorder.db"},"export":{"path":"$MOCK_EVIDENCE_DIRECTORY/flight-recorder.export.json"}}}
+TRANSCRIPT
+    exit 0
+    ;;
+  *)
+    printf 'unexpected npm subcommand: %s\n' "${1:-missing}" >&2
+    exit 64
     ;;
 esac
-exit 0
 EOF
 
   cat >"$fixture/bin/npx" <<'EOF'
@@ -126,6 +173,7 @@ new_fixture() {
   CALL_LOG="$FIXTURE/calls.log"
   mkdir -p "$FIXTURE/bin" "$FIXTURE/typescript"
   cp "$QUICKSTART" "$FIXTURE/quickstart.sh"
+  cp "$PACKAGE_JSON" "$FIXTURE/typescript/package.json"
   : >"$CALL_LOG"
   write_mocks "$FIXTURE"
 
@@ -134,10 +182,10 @@ new_fixture() {
   PYTHON_VERSION="3.10.0"
   PYTHON_STATUS=0
   UNAME_VALUE="Linux"
-  NPM_LS_STATUS=0
   NPM_CI_STATUS=0
   DEMO_STATUS=0
   NPX_STATUS=0
+  EVIDENCE_DIRECTORY="$FIXTURE/evidence/live-organ-transplant-test"
 }
 
 run_fixture() {
@@ -151,10 +199,13 @@ run_fixture() {
         MOCK_PYTHON_VERSION="$PYTHON_VERSION" \
         MOCK_PYTHON_STATUS="$PYTHON_STATUS" \
         MOCK_UNAME="$UNAME_VALUE" \
-        MOCK_NPM_LS_STATUS="$NPM_LS_STATUS" \
         MOCK_NPM_CI_STATUS="$NPM_CI_STATUS" \
         MOCK_DEMO_STATUS="$DEMO_STATUS" \
         MOCK_NPX_STATUS="$NPX_STATUS" \
+        MOCK_REAL_NODE="$REAL_NODE" \
+        MOCK_PACKAGE_JSON="$FIXTURE/typescript/package.json" \
+        MOCK_EXPECTED_PACKAGE_SCRIPT="$PACKAGE_DEMO_SCRIPT" \
+        MOCK_EVIDENCE_DIRECTORY="$EVIDENCE_DIRECTORY" \
         ./quickstart.sh "$@" 2>&1
   )"
   RUN_STATUS=$?
@@ -171,11 +222,29 @@ fi
 
 quickstart_source="$(cat "$QUICKSTART")"
 readme_source="$(cat "$README")"
+PACKAGE_DEMO_SCRIPT=""
+
+if [ -n "$REAL_NODE" ] &&
+  PACKAGE_DEMO_SCRIPT="$(
+    "$REAL_NODE" -e \
+      'const fs=require("node:fs");const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(p.scripts?.["demo:transplant"] ?? "");' \
+      "$PACKAGE_JSON"
+  )"; then
+  assert_eq "$PACKAGE_DEMO_SCRIPT" "node dist/demo/live-organ-transplant.js" \
+    "typescript/package.json defines the canonical demo:transplant script"
+else
+  fail "typescript/package.json defines the canonical demo:transplant script"
+fi
 
 assert_contains "$quickstart_source" 'npm ci --no-audit --no-fund' \
   "launcher pins the lock-strict install command"
 assert_contains "$quickstart_source" 'npm run demo:transplant --silent' \
   "launcher pins the canonical transplant command"
+if [[ "$quickstart_source" != *"npm ls"* ]]; then
+  pass "launcher has no dependency-readiness shortcut"
+else
+  fail "launcher has no dependency-readiness shortcut"
+fi
 assert_contains "$readme_source" '[![Node.js 20.9+]' \
   "README advertises the package engine minimum"
 
@@ -193,16 +262,38 @@ assert_contains "$readme_source" "$security_warning" \
   "README pins the complete executable-code warning"
 assert_contains "$readme_source" "$platform_copy" \
   "README pins supported platforms and Windows deferral"
-assert_contains "$readme_source" 'registers a Python-backed `ChecksumAgent`' \
-  "README names the Python-backed agent outcome"
-assert_contains "$readme_source" 'host PID change, invokes it' \
-  "README states host PID continuity"
-assert_contains "$readme_source" 'rejects a broken candidate before commit' \
+assert_contains "$readme_source" \
+  'Upgrade a running agent without restarting its TypeScript host.' \
+  "README leads with the running-agent benefit"
+assert_contains "$readme_source" 'rejects that candidate before commit' \
   "README states pre-commit rejection"
-assert_contains "$readme_source" 'proves the previous generation still works' \
-  "README states preservation proof"
-assert_contains "$readme_source" 'emits a verified receipt' \
+assert_contains "$readme_source" 'last-known-good capability to answer again' \
+  "README states the last-known-good capability proof"
+assert_contains "$readme_source" 'The host PID stays the same' \
+  "README states host PID continuity"
+assert_contains "$readme_source" 'run leaves a verifiable receipt' \
   "README states receipt verification"
+assert_contains "$readme_source" \
+  'lockfile-exact demo with a SHA-256-pinned donor' \
+  "README scopes deterministic behavior to locked inputs"
+assert_contains "$readme_source" \
+  'Node.js 20.9.0 or newer and Python 3.10 or newer must already' \
+  "README states installed runtime prerequisites"
+assert_contains "$readme_source" \
+  'Installing Node or Python is outside that timing' \
+  "README excludes prerequisite installation from runtime timing"
+assert_contains "$readme_source" '[1/6] DONOR VERIFIED' \
+  "README includes the six-beat transcript"
+assert_contains "$readme_source" '[6/6] FLIGHT SEALED' \
+  "README transcript ends with persisted Flight proof"
+assert_contains "$readme_source" \
+  '~/.openrappter/demo-runs/live-organ-transplant/<timestamp>-<nonce>/' \
+  "README identifies the default evidence directory"
+for artifact in receipt.txt receipt.json transcript.txt flight-recorder.db \
+  flight-recorder.export.json runtime-pid.json; do
+  assert_contains "$readme_source" "\`$artifact\`" \
+    "README identifies $artifact"
+done
 
 transplant_heading_line="$(grep -nF '## See a Live Organ Transplant' "$README" | cut -d: -f1)"
 install_heading_line="$(grep -nF '## Install in One Line' "$README" | cut -d: -f1)"
@@ -226,20 +317,48 @@ assert_eq "$RUN_STATUS" "0" "transplant succeeds when dependencies are absent"
 assert_eq "$RUN_CALLS" $'npm <ci> <--no-audit> <--no-fund>\nnpm <run> <demo:transplant> <--silent>' \
   "absent dependencies trigger npm ci before the canonical demo"
 
-new_fixture "dependencies-ready"
-mkdir -p "$FIXTURE/typescript/node_modules"
-run_fixture --demo live-organ-transplant
-assert_eq "$RUN_STATUS" "0" "transplant succeeds when dependencies are ready"
-assert_eq "$RUN_CALLS" $'npm <ls> <--depth=0> <--ignore-scripts>\nnpm <run> <demo:transplant> <--silent>' \
-  "ready dependencies skip npm ci"
+for milestone in \
+  '[1/6] DONOR VERIFIED' \
+  '[2/6] THEATER ONLINE' \
+  '[3/6] TRANSPLANT ACCEPTED' \
+  '[4/6] FIRST PULSE' \
+  '[5/6] REJECTION TEST' \
+  '[6/6] FLIGHT SEALED'; do
+  assert_contains "$RUN_OUTPUT" "$milestone" \
+    "success output contains $milestone"
+done
+authority_notice='AUTHORITY NOTICE: Python executes as the logged-in OS user with filesystem/network/environment/subprocess authority. The subprocess is NOT a sandbox. File preservation cannot undo external side effects.'
+assert_contains "$RUN_OUTPUT" "$authority_notice" \
+  "success output contains the runtime authority warning"
+assert_contains "$RUN_OUTPUT" 'OPENRAPPTER_TRANSPLANT_RESULT=' \
+  "success output contains the canonical receipt record"
+assert_contains "$RUN_OUTPUT" \
+  "\"evidenceDirectory\":\"$EVIDENCE_DIRECTORY\"" \
+  "success output exposes the inspectable receipt directory"
+assert_contains "$RUN_OUTPUT" 'flight-recorder.db' \
+  "success output identifies the Flight database"
+assert_contains "$RUN_OUTPUT" 'flight-recorder.export.json' \
+  "success output identifies the Flight export"
 
-new_fixture "dependencies-not-ready"
-mkdir -p "$FIXTURE/typescript/node_modules"
-NPM_LS_STATUS=1
+new_fixture "dependencies-populated-valid"
+mkdir -p "$FIXTURE/typescript/node_modules/.bin"
+printf '{"lockfileVersion":3}\n' \
+  >"$FIXTURE/typescript/node_modules/.package-lock.json"
+printf '#!/usr/bin/env bash\nexit 0\n' \
+  >"$FIXTURE/typescript/node_modules/.bin/tsx"
+chmod +x "$FIXTURE/typescript/node_modules/.bin/tsx"
 run_fixture --demo live-organ-transplant
-assert_eq "$RUN_STATUS" "0" "transplant repairs dependencies that are not ready"
-assert_eq "$RUN_CALLS" $'npm <ls> <--depth=0> <--ignore-scripts>\nnpm <ci> <--no-audit> <--no-fund>\nnpm <run> <demo:transplant> <--silent>' \
-  "not-ready dependencies trigger lock-strict npm ci"
+assert_eq "$RUN_STATUS" "0" \
+  "transplant succeeds with a populated valid dependency tree"
+assert_eq "$RUN_CALLS" $'npm <ci> <--no-audit> <--no-fund>\nnpm <run> <demo:transplant> <--silent>' \
+  "populated valid dependencies are still reconstructed with npm ci"
+
+new_fixture "install-exit-status"
+NPM_CI_STATUS=23
+run_fixture --demo live-organ-transplant
+assert_eq "$RUN_STATUS" "23" "lockfile install exit status propagates"
+assert_eq "$RUN_CALLS" 'npm <ci> <--no-audit> <--no-fund>' \
+  "failed npm ci prevents the demo command"
 
 new_fixture "exit-status"
 mkdir -p "$FIXTURE/typescript/node_modules"

@@ -70,6 +70,9 @@ test("the Electron shell visibly binds one dock creature to one neighborhood", (
   assert.match(hatchProof, /command\("hatch"\)/);
   assert.match(hatchProof, /command\("stop"\)/);
   assert.match(packageGate, /package-hatch-proof\.mjs/);
+  assert.match(packageGate, /newestPackagedSourceMtime/);
+  assert.match(packageGate, /manifest\.build\?\.files/);
+  assert.match(packageGate, /entry\.startsWith\("node_modules\/"\)/);
 });
 
 test("the Electron container is a private durable data manifest", (t) => {

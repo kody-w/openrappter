@@ -112,7 +112,7 @@ function findNamed(root, name) {
   return null;
 }
 
-function newestSourceMtime(directory) {
+function newestPathMtime(directory) {
   let newest = 0;
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (["node_modules", "release"].includes(entry.name)) continue;
@@ -120,11 +120,36 @@ function newestSourceMtime(directory) {
     newest = Math.max(
       newest,
       entry.isDirectory()
-        ? newestSourceMtime(filePath)
+        ? newestPathMtime(filePath)
         : statSync(filePath).mtimeMs,
     );
   }
   return newest;
+}
+
+function newestPackagedSourceMtime() {
+  const manifest = JSON.parse(
+    readFileSync(path.join(betaDir, "package.json"), "utf8"),
+  );
+  const candidates = new Set([
+    "package.json",
+    "VERSION",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "build",
+    manifest.build?.afterPack,
+  ].filter(Boolean));
+  for (const entry of manifest.build?.files || []) {
+    if (entry.startsWith("node_modules/")) continue;
+    candidates.add(entry.endsWith("/**") ? entry.slice(0, -3) : entry);
+  }
+  return Math.max(...[...candidates].map((relative) => {
+    const candidate = path.join(betaDir, relative);
+    if (!existsSync(candidate)) return 0;
+    return statSync(candidate).isDirectory()
+      ? newestPathMtime(candidate)
+      : statSync(candidate).mtimeMs;
+  }));
 }
 
 function executableCheck(label, filePath) {
@@ -198,7 +223,7 @@ function main() {
   if (existsSync(asarPath)) {
     requirement(
       "packaged app is newer than beta source",
-      statSync(asarPath).mtimeMs >= newestSourceMtime(betaDir),
+      statSync(asarPath).mtimeMs >= newestPackagedSourceMtime(),
       new Date(statSync(asarPath).mtimeMs).toISOString(),
     );
     for (const relative of criticalSources) {

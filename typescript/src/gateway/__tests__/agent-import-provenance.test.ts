@@ -393,23 +393,22 @@ function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function actualJavascriptAgentSource(): string {
+function actualPythonAgentSource(): string {
   return `
-export function createAgent(BasicAgent) {
-  return class RestoredFirstInstallAgent extends BasicAgent {
-    constructor() {
-      super('RestoredFirstInstall', {
-        name: 'RestoredFirstInstall',
-        description: 'Exercises first-install rollback through the gateway.',
-        parameters: { type: 'object', properties: {}, required: [] }
-      });
-    }
+from agents.basic_agent import BasicAgent
 
-    async perform() {
-      return JSON.stringify({ status: 'success', result: 'installed' });
-    }
-  };
-}
+class RestoredFirstInstallAgent(BasicAgent):
+    def __init__(self):
+        self.name = "RestoredFirstInstall"
+        self.metadata = {
+            "name": self.name,
+            "description": "Exercises first-install rollback through the gateway.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        }
+        super().__init__(name=self.name, metadata=self.metadata)
+
+    def perform(self, **kwargs):
+        return '{"status":"success","result":"installed"}'
 `;
 }
 
@@ -1007,9 +1006,9 @@ describe('POST /agents/import causal provenance', () => {
   );
 
   it('preserves an actual first-install rollback as restored with no active generation', async () => {
-    const contents = actualJavascriptAgentSource();
+    const contents = actualPythonAgentSource();
     const candidateSourceSha256 = sha256(contents);
-    const filename = 'restored_first_install_agent.js';
+    const filename = 'restored_first_install_agent.py';
     let rawImportResult: Record<string, unknown> | undefined;
     let targetPath = '';
     let reloadCalls = 0;

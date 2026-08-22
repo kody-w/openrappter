@@ -35,7 +35,8 @@ tags_via_git() {
 tag=$(
     api_get "$api/releases?per_page=30" 2>/dev/null \
         | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(brainstem-beta-v[^"]*\)".*/\1/p' \
-        | head -n 1 || true
+        | sort -V \
+        | tail -n 1 || true
 )
 if [ -z "$tag" ]; then
     echo "GitHub API did not answer (rate limit or network); resolving the release tag with git..." >&2

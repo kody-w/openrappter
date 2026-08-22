@@ -115,7 +115,7 @@ test("OpenRappter is the primary customer-facing application identity", () => {
     [{ provider: "github", owner: "kody-w", repo: "openrappter" }],
     "electron-builder needs somewhere to publish, or a release can only be made by hand",
   );
-  assert.equal(packageJson.version, "0.1.0-beta.7");
+  assert.equal(packageJson.version, "0.1.0-beta.8");
   assert.equal(readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim(), packageJson.version);
   for (const installer of [unix, windows]) {
     assert.match(installer, /openrappter-app/);

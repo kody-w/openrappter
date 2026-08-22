@@ -21,13 +21,13 @@ import {
 } from "../flight-recorder/recorder.js";
 import type { FlightEvent } from "../flight-recorder/types.js";
 import { openrappterPath } from "../infra/openrappter-home.js";
-import {
-  canonicalAgentSourcePath,
-  markAgentSourceFile,
-  type AgentRegistry,
-} from "./AgentRegistry.js";
+import { markAgentSourceFile, type AgentRegistry } from "./AgentRegistry.js";
 import { BasicAgent } from "./BasicAgent.js";
 import { PythonAgent, runnerPath } from "./PythonAgent.js";
+import {
+  canonicalAgentSourcePath,
+  withSourceWriteLock,
+} from "./source-lock.js";
 
 export interface AgentImportProvenance {
   traceId: string;
@@ -46,6 +46,12 @@ export function withAgentImportProvenance<T>(
   return provenanceStorage.run({ ...provenance }, operation);
 }
 
+export type AgentImportCommitState =
+  | "not-committed"
+  | "committed"
+  | "restored"
+  | "unknown";
+
 export interface ImportResult {
   status: "ok" | "error";
   /** What the organism can now do — the capability names, not the filename. */
@@ -61,12 +67,15 @@ export interface ImportResult {
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
+  /** Durable candidate disposition; use with `retrySafe`, not `status` alone. */
+  commitState: AgentImportCommitState;
+  /** True only when submitting the same candidate again cannot overwrite a commit. */
+  retrySafe: boolean;
+  /** Non-secret operator guidance for a successful commit needing cleanup. */
+  warning?: string;
 }
 
-type ImportRegistry = Pick<
-  AgentRegistry,
-  "reloadUserAgents" | "forget" | "getAllAgents"
->;
+type ImportRegistry = Pick<AgentRegistry, "reloadUserAgents" | "getAllAgents">;
 
 interface CandidateAgent {
   name: string;
@@ -197,7 +206,17 @@ function failureOutcome(options: {
   committed?: boolean;
   activeSourceSha256?: string;
   agentName?: string;
+  commitState?: AgentImportCommitState;
+  retrySafe?: boolean;
 }): ImportOutcome {
+  const commitState =
+    options.commitState ??
+    (options.rejectedBeforeCommit
+      ? "not-committed"
+      : options.committed
+        ? "committed"
+        : "unknown");
+  const retrySafe = options.retrySafe ?? options.rejectedBeforeCommit;
   return {
     result: {
       status: "error",
@@ -205,6 +224,8 @@ function failureOutcome(options: {
       errorCode: options.errorCode,
       committed: options.committed ?? false,
       rejectedBeforeCommit: options.rejectedBeforeCommit,
+      commitState,
+      retrySafe,
       candidateSourceSha256: options.candidateSourceSha256,
       ...(options.activeSourceSha256 === undefined
         ? {}
@@ -213,6 +234,39 @@ function failureOutcome(options: {
     ...(options.agentName === undefined
       ? {}
       : { agentName: options.agentName }),
+  };
+}
+
+function committedOutcome(options: {
+  candidate: CandidateValidation;
+  candidateSourceSha256: string;
+  filename: string;
+  previous: PreviousGeneration;
+  warning?: string;
+  errorCode?: string;
+}): ImportOutcome {
+  return {
+    result: {
+      status: "ok",
+      file: options.filename,
+      replaced: options.previous.owned.size > 0,
+      committed: true,
+      rejectedBeforeCommit: false,
+      commitState: "committed",
+      retrySafe: false,
+      candidateSourceSha256: options.candidateSourceSha256,
+      activeSourceSha256: options.candidateSourceSha256,
+      learned: options.candidate.agents.map(({ name, description }) => ({
+        name,
+        description,
+      })),
+      ...(options.warning === undefined ? {} : { warning: options.warning }),
+      ...(options.errorCode === undefined
+        ? {}
+        : { errorCode: options.errorCode }),
+    },
+    agentName: options.candidate.agents[0]?.name,
+    bridgeClass: options.candidate.bridgeClass,
   };
 }
 
@@ -629,7 +683,6 @@ function verifyActivatedRegistry(options: {
   javascript: boolean;
 }): string[] {
   const failures: string[] = [];
-  const candidateNames = new Set(uniqueAgentNames(options.candidate.agents));
 
   for (const descriptor of options.candidate.agents) {
     const active = options.after.get(descriptor.name);
@@ -666,40 +719,30 @@ function verifyActivatedRegistry(options: {
     }
   }
 
-  for (const oldName of options.previous.owned.keys()) {
-    if (!candidateNames.has(oldName) && options.after.has(oldName)) {
-      failures.push(`${oldName} remained after disappearing from the file`);
-    }
-  }
   return failures;
 }
 
 async function restoreRegistryGeneration(options: {
   registry: ImportRegistry;
-  previous: PreviousGeneration;
-  candidateNames: string[];
+  snapshot: Map<string, BasicAgent>;
 }): Promise<string[]> {
-  const names = new Set([
-    ...options.previous.owned.keys(),
-    ...options.candidateNames,
-  ]);
   const failures: string[] = [];
 
   try {
-    for (const name of names) options.registry.forget(name);
     const live = await options.registry.getAllAgents();
-    for (const [name, agent] of options.previous.owned) {
+    // One synchronous map mutation restores the exact namespace snapshot; no
+    // registry reader can observe the clear and repopulation between turns.
+    live.clear();
+    for (const [name, agent] of options.snapshot) {
       live.set(name, agent);
     }
 
-    for (const [name, agent] of options.previous.owned) {
+    if (live.size !== options.snapshot.size) {
+      failures.push("registry size did not recover its previous snapshot");
+    }
+    for (const [name, agent] of options.snapshot) {
       if (live.get(name) !== agent) {
         failures.push(`${name} did not recover its previous live object`);
-      }
-    }
-    for (const name of options.candidateNames) {
-      if (!options.previous.owned.has(name) && live.has(name)) {
-        failures.push(`${name} remained live after rollback`);
       }
     }
   } catch (error) {
@@ -717,6 +760,7 @@ async function rollbackCommittedCandidate(options: {
   candidateSourceSha256: string;
   previous: PreviousGeneration;
   registry: ImportRegistry;
+  registrySnapshot: Map<string, BasicAgent>;
   target: string;
 }): Promise<ImportOutcome> {
   const rollbackFailures: string[] = [];
@@ -739,8 +783,7 @@ async function rollbackCommittedCandidate(options: {
     rollbackFailures.push(
       ...(await restoreRegistryGeneration({
         registry: options.registry,
-        previous: options.previous,
-        candidateNames: uniqueAgentNames(options.candidate.agents),
+        snapshot: options.registrySnapshot,
       })),
     );
   }
@@ -757,6 +800,8 @@ async function rollbackCommittedCandidate(options: {
       errorCode: "IMPORT_ROLLBACK_FAILED",
       rejectedBeforeCommit: false,
       committed: !diskRestored,
+      commitState: "unknown",
+      retrySafe: false,
       error:
         `${options.activationError} Rollback was incomplete: ` +
         `${rollbackFailures.join("; ")}.`,
@@ -772,8 +817,21 @@ async function rollbackCommittedCandidate(options: {
     errorCode: options.activationErrorCode,
     rejectedBeforeCommit: false,
     committed: false,
+    commitState: "restored",
+    retrySafe: true,
     error: `${options.activationError} The previous generation was restored.`,
   });
+}
+
+function removeDisappearedAgents(
+  live: Map<string, BasicAgent>,
+  previous: PreviousGeneration,
+  candidate: CandidateValidation,
+): void {
+  const candidateNames = new Set(uniqueAgentNames(candidate.agents));
+  for (const oldName of previous.owned.keys()) {
+    if (!candidateNames.has(oldName)) live.delete(oldName);
+  }
 }
 
 async function activateCommittedCandidate(options: {
@@ -784,17 +842,14 @@ async function activateCommittedCandidate(options: {
   javascript: boolean;
   previous: PreviousGeneration;
   registry: ImportRegistry;
+  registrySnapshot: Map<string, BasicAgent>;
   target: string;
 }): Promise<ImportOutcome> {
-  const names = new Set([
-    ...options.previous.owned.keys(),
-    ...uniqueAgentNames(options.candidate.agents),
-  ]);
   let activationError: string | undefined;
   let activationErrorCode = "IMPORT_ACTIVATION_FAILED";
+  let activatedLive: Map<string, BasicAgent> | undefined;
 
   try {
-    for (const name of names) options.registry.forget(name);
     if (options.javascript) {
       // Validate the committed URL as well as the staged bytes. This catches
       // factories that depend on import.meta.url, and avoids AgentRegistry's
@@ -820,6 +875,7 @@ async function activateCommittedCandidate(options: {
           after.set(agentName, instance);
         }
         const verifiedLive = await options.registry.getAllAgents();
+        activatedLive = verifiedLive;
         const verificationFailures = verifyActivatedRegistry({
           after: verifiedLive,
           candidate: options.candidate,
@@ -837,6 +893,7 @@ async function activateCommittedCandidate(options: {
     } else {
       await options.registry.reloadUserAgents();
       const after = await options.registry.getAllAgents();
+      activatedLive = after;
       const verificationFailures = verifyActivatedRegistry({
         after,
         candidate: options.candidate,
@@ -872,6 +929,19 @@ async function activateCommittedCandidate(options: {
     }
   }
 
+  if (!activationError) {
+    if (!activatedLive) {
+      activationErrorCode = "IMPORT_REGISTRY_VERIFICATION_FAILED";
+      activationError = `${options.filename} did not expose an activated registry map`;
+    } else {
+      removeDisappearedAgents(
+        activatedLive,
+        options.previous,
+        options.candidate,
+      );
+    }
+  }
+
   if (activationError) {
     return rollbackCommittedCandidate({
       activationError,
@@ -881,6 +951,7 @@ async function activateCommittedCandidate(options: {
       candidateSourceSha256: options.candidateSourceSha256,
       previous: options.previous,
       registry: options.registry,
+      registrySnapshot: options.registrySnapshot,
       target: options.target,
     });
   }
@@ -890,36 +961,24 @@ async function activateCommittedCandidate(options: {
     "previous-generation backup",
   );
   if (cleanupFailure) {
-    return failureOutcome({
+    return committedOutcome({
+      candidate: options.candidate,
       candidateSourceSha256: options.candidateSourceSha256,
-      activeSourceSha256: options.candidateSourceSha256,
-      agentName: options.candidate.agents[0]?.name,
+      filename: options.filename,
+      previous: options.previous,
       errorCode: "IMPORT_POST_COMMIT_CLEANUP_FAILED",
-      rejectedBeforeCommit: false,
-      committed: true,
-      error:
-        `${options.filename} is active, but transaction cleanup failed: ` +
-        `${cleanupFailure}.`,
+      warning:
+        `${options.filename} is active, but its previous-generation backup ` +
+        "could not be removed. Do not retry this import; check directory permissions and remove the leftover .agent-import-*.backup file.",
     });
   }
 
-  return {
-    result: {
-      status: "ok",
-      file: options.filename,
-      replaced: options.previous.owned.size > 0,
-      committed: true,
-      rejectedBeforeCommit: false,
-      candidateSourceSha256: options.candidateSourceSha256,
-      activeSourceSha256: options.candidateSourceSha256,
-      learned: options.candidate.agents.map(({ name, description }) => ({
-        name,
-        description,
-      })),
-    },
-    agentName: options.candidate.agents[0]?.name,
-    bridgeClass: options.candidate.bridgeClass,
-  };
+  return committedOutcome({
+    candidate: options.candidate,
+    candidateSourceSha256: options.candidateSourceSha256,
+    filename: options.filename,
+    previous: options.previous,
+  });
 }
 
 async function performLockedImport(options: {
@@ -931,6 +990,7 @@ async function performLockedImport(options: {
   target: string;
 }): Promise<ImportOutcome> {
   const live = await options.registry.getAllAgents();
+  const registrySnapshot = new Map(live);
   const previousResult = await previousGeneration(
     options.target,
     options.javascript,
@@ -1027,7 +1087,6 @@ async function performLockedImport(options: {
         });
       }
     }
-    await fs.rename(stage, options.target);
   } catch (error) {
     return rejectBeforeCommit({
       stage,
@@ -1042,15 +1101,50 @@ async function performLockedImport(options: {
     });
   }
 
-  return activateCommittedCandidate({
-    backup,
-    candidate,
-    candidateSourceSha256: options.candidateSourceSha256,
-    filename: options.filename,
-    javascript: options.javascript,
-    previous,
-    registry: options.registry,
-    target: options.target,
+  return withSourceWriteLock(options.target, async () => {
+    let committed = false;
+    try {
+      await fs.rename(stage, options.target);
+      committed = true;
+      return await activateCommittedCandidate({
+        backup,
+        candidate,
+        candidateSourceSha256: options.candidateSourceSha256,
+        filename: options.filename,
+        javascript: options.javascript,
+        previous,
+        registry: options.registry,
+        registrySnapshot,
+        target: options.target,
+      });
+    } catch (error) {
+      if (!committed) {
+        return rejectBeforeCommit({
+          stage,
+          backup,
+          candidateSourceSha256: options.candidateSourceSha256,
+          activeSourceSha256: previous.sourceSha256,
+          agentName: preservedAgentName,
+          errorCode: "IMPORT_COMMIT_FAILED",
+          error:
+            `${options.filename} was validated but could not be committed ` +
+            `(${errorDescription(error)}).`,
+        });
+      }
+      return rollbackCommittedCandidate({
+        activationError:
+          `${options.filename} was committed but activation threw unexpectedly ` +
+          `(${errorDescription(error)})`,
+        activationErrorCode: "IMPORT_ACTIVATION_FAILED",
+        backup,
+        candidate,
+        candidateSourceSha256: options.candidateSourceSha256,
+        previous,
+        registry: options.registry,
+        registrySnapshot,
+        target: options.target,
+      });
+    }
   });
 }
 
@@ -1078,6 +1172,8 @@ async function recordImportTerminal(
     ...(result.activeSourceSha256 === undefined
       ? {}
       : { activeSourceSha256: result.activeSourceSha256 }),
+    commitState: result.commitState,
+    retrySafe: result.retrySafe,
   };
 
   if (result.status === "ok") {
@@ -1091,6 +1187,8 @@ async function recordImportTerminal(
       metadata: {
         ...common,
         bridgeClass: outcome.bridgeClass,
+        committed: result.committed ?? false,
+        errorCode: result.errorCode,
       },
     });
     return;

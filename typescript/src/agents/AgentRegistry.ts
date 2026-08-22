@@ -6,12 +6,12 @@ import { openrappterPath } from '../infra/openrappter-home.js';
  * Mirrors the Python AgentRegistry in cli.py.
  */
 
-import { realpathSync } from 'node:fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { BasicAgent } from './BasicAgent.js';
 import { PythonAgent, introspectPythonAgents } from './PythonAgent.js';
+import { canonicalAgentSourcePath } from './source-lock.js';
 import type { AgentInfo } from './types.js';
 import { logger } from '../logging/logger.js';
 import { RESERVED_AGENT_DIRS, isReservedAgentPath } from './reserved-paths.js';
@@ -56,18 +56,7 @@ async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
 
 const registryLog = logger.child('agents');
 
-/** Stable absolute identity used to attribute a live generated agent to its file. */
-export function canonicalAgentSourcePath(file: string): string {
-  const absolute = path.resolve(file);
-  try {
-    return realpathSync.native(absolute);
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return absolute;
-    }
-    throw error;
-  }
-}
+export { canonicalAgentSourcePath } from './source-lock.js';
 
 /**
  * Attribute a generated JavaScript agent to the file that produced it.

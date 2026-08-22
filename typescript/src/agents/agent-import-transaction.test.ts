@@ -63,6 +63,22 @@ class ${className}(BasicAgent):
 `);
 }
 
+function sabotageBackupWhenLoadedAs(filename: string): string {
+  return `
+import os
+if os.path.basename(__file__) == ${JSON.stringify(filename)}:
+    parent = os.path.dirname(__file__)
+    for entry in os.listdir(parent):
+        if entry.startswith('.agent-import-') and entry.endswith('.backup'):
+            backup = os.path.join(parent, entry)
+            if os.path.isfile(backup):
+                os.unlink(backup)
+                os.mkdir(backup)
+                with open(os.path.join(backup, 'keep'), 'w', encoding='utf-8') as marker:
+                    marker.write('force deterministic backup failure')
+`;
+}
+
 function javascriptAgent(agentName: string, description: string): Buffer {
   return Buffer.from(`
 export function createAgent(BasicAgent) {
@@ -158,6 +174,59 @@ async function readIntervals(
   return complete;
 }
 
+function blockNextReload(
+  targetRegistry: AgentRegistry,
+  failure?: Error,
+): {
+  reached: Promise<void>;
+  release: () => void;
+  restore: () => void;
+} {
+  const originalReload = targetRegistry.reloadUserAgents.bind(targetRegistry);
+  let signalReached = (): void => {};
+  let release = (): void => {};
+  const reached = new Promise<void>((resolve) => {
+    signalReached = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  targetRegistry.reloadUserAgents = async () => {
+    signalReached();
+    await gate;
+    if (failure) throw failure;
+    return originalReload();
+  };
+
+  return {
+    reached,
+    release,
+    restore: () => {
+      targetRegistry.reloadUserAgents = originalReload;
+    },
+  };
+}
+
+function settleFlag(promise: Promise<unknown>): () => boolean {
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  return () => settled;
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "agent-import-transaction-"));
   registry = new AgentRegistry(path.join(dir, "__no_builtins__"), dir);
@@ -198,6 +267,8 @@ describe("transactional replacement", () => {
       status: "error",
       committed: false,
       rejectedBeforeCommit: true,
+      commitState: "not-committed",
+      retrySafe: true,
       candidateSourceSha256: digest(invalid),
       activeSourceSha256: digest(original),
       errorCode: "IMPORT_CANDIDATE_INVALID",
@@ -235,6 +306,8 @@ describe("transactional replacement", () => {
       status: "error",
       committed: false,
       rejectedBeforeCommit: false,
+      commitState: "restored",
+      retrySafe: true,
       errorCode: "IMPORT_ACTIVATION_FAILED",
       activeSourceSha256: digest(original),
     });
@@ -263,6 +336,8 @@ describe("transactional replacement", () => {
       status: "error",
       committed: false,
       rejectedBeforeCommit: false,
+      commitState: "restored",
+      retrySafe: true,
       errorCode: "IMPORT_REGISTRY_VERIFICATION_FAILED",
     });
     await expect(
@@ -353,6 +428,295 @@ describe("transactional replacement", () => {
     ).toBeUndefined();
     expect(await transactionArtifacts()).toEqual([]);
   });
+});
+
+describe("live reader fencing and gapless activation", () => {
+  it("holds execution until a failed activation restores the old generation", async () => {
+    const original = pythonAgent(
+      "FenceAgent",
+      "Fence",
+      "stable generation before rollback",
+    );
+    await importAgentFile("fence_agent.py", original, registry, { dir });
+    const held = await registry.getAgent("Fence");
+    expect(held).toBeDefined();
+    expect(await held!.perform({})).toContain(
+      "stable generation before rollback",
+    );
+
+    const blocked = blockNextReload(
+      registry,
+      new Error("injected blocked activation failure"),
+    );
+    const candidate = pythonAgent(
+      "FenceAgent",
+      "Fence",
+      "unactivated candidate must never execute",
+    );
+    const importing = importAgentFile("fence_agent.py", candidate, registry, {
+      dir,
+    });
+
+    let execution: Promise<string> | undefined;
+    try {
+      await blocked.reached;
+      expect(await fs.readFile(path.join(dir, "fence_agent.py"))).toEqual(
+        candidate,
+      );
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        expect(await registry.getAgent("Fence")).toBe(held);
+      }
+      execution = held!.perform({});
+      const executionSettled = settleFlag(execution);
+      await wait(500);
+      expect(executionSettled()).toBe(false);
+    } finally {
+      blocked.release();
+      blocked.restore();
+    }
+
+    const result = await importing;
+    expect(result).toMatchObject({
+      status: "error",
+      committed: false,
+      rejectedBeforeCommit: false,
+      commitState: "restored",
+      retrySafe: true,
+      errorCode: "IMPORT_ACTIVATION_FAILED",
+    });
+    if (!execution) throw new Error("held execution was not started");
+    const output = await execution;
+    expect(output).toContain("stable generation before rollback");
+    expect(output).not.toContain("unactivated candidate must never execute");
+    expect(await registry.getAgent("Fence")).toBe(held);
+    expect(await fs.readFile(path.join(dir, "fence_agent.py"))).toEqual(
+      original,
+    );
+  }, 60_000);
+
+  it("holds execution until a successful activation commits the new generation", async () => {
+    await importAgentFile(
+      "fence_success_agent.py",
+      pythonAgent(
+        "FenceSuccessAgent",
+        "FenceSuccess",
+        "generation before success",
+      ),
+      registry,
+      { dir },
+    );
+    const held = await registry.getAgent("FenceSuccess");
+    expect(held).toBeDefined();
+
+    const blocked = blockNextReload(registry);
+    const candidate = pythonAgent(
+      "FenceSuccessAgent",
+      "FenceSuccess",
+      "committed generation after success",
+    );
+    const importing = importAgentFile(
+      "fence_success_agent.py",
+      candidate,
+      registry,
+      { dir },
+    );
+
+    let execution: Promise<string> | undefined;
+    try {
+      await blocked.reached;
+      expect(
+        await fs.readFile(path.join(dir, "fence_success_agent.py")),
+      ).toEqual(candidate);
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        expect(await registry.getAgent("FenceSuccess")).toBe(held);
+      }
+      execution = held!.perform({});
+      const executionSettled = settleFlag(execution);
+      await wait(500);
+      expect(executionSettled()).toBe(false);
+    } finally {
+      blocked.release();
+      blocked.restore();
+    }
+
+    const result = await importing;
+    expect(result).toMatchObject({
+      status: "ok",
+      committed: true,
+      commitState: "committed",
+      retrySafe: false,
+    });
+    if (!execution) throw new Error("held execution was not started");
+    expect(await execution).toContain("committed generation after success");
+    const active = await registry.getAgent("FenceSuccess");
+    expect(active).toBeDefined();
+    expect(active).not.toBe(held);
+    expect(await active!.perform({})).toContain(
+      "committed generation after success",
+    );
+  }, 60_000);
+});
+
+describe("explicit commit states", () => {
+  it("reports committed success rather than retryable error when backup cleanup fails", async () => {
+    const target = path.join(dir, "cleanup_state_agent.py");
+    await importAgentFile(
+      "cleanup_state_agent.py",
+      pythonAgent(
+        "CleanupStateAgent",
+        "CleanupState",
+        "generation before cleanup warning",
+      ),
+      registry,
+      { dir },
+    );
+    const candidate = pythonAgent(
+      "CleanupStateAgent",
+      "CleanupState",
+      "committed despite cleanup warning",
+      sabotageBackupWhenLoadedAs("cleanup_state_agent.py"),
+    );
+
+    const result = await importAgentFile(
+      "cleanup_state_agent.py",
+      candidate,
+      registry,
+      { dir },
+    );
+
+    expect(result).toMatchObject({
+      status: "ok",
+      committed: true,
+      commitState: "committed",
+      retrySafe: false,
+      errorCode: "IMPORT_POST_COMMIT_CLEANUP_FAILED",
+      activeSourceSha256: digest(candidate),
+    });
+    expect(result.warning).toMatch(/do not retry/i);
+    expect(await fs.readFile(target)).toEqual(candidate);
+    expect(
+      await (await registry.getAgent("CleanupState"))!.perform({}),
+    ).toContain("committed despite cleanup warning");
+    const artifacts = await transactionArtifacts();
+    expect(artifacts.some((entry) => entry.endsWith(".backup"))).toBe(true);
+    for (const artifact of artifacts) {
+      await fs.rm(path.join(dir, artifact), { recursive: true, force: true });
+    }
+    expect(await transactionArtifacts()).toEqual([]);
+  }, 60_000);
+
+  it("marks a candidate committed and unsafe when disk rollback fails", async () => {
+    await importAgentFile(
+      "rollback_committed_agent.py",
+      pythonAgent(
+        "RollbackCommittedAgent",
+        "RollbackCommitted",
+        "generation before incomplete rollback",
+      ),
+      registry,
+      { dir },
+    );
+    const candidate = pythonAgent(
+      "RollbackCommittedAgent",
+      "RollbackCommitted",
+      "candidate left committed after rollback failure",
+      sabotageBackupWhenLoadedAs("rollback_committed_agent.py"),
+    );
+    const originalReload = registry.reloadUserAgents.bind(registry);
+    registry.reloadUserAgents = async () => {
+      await originalReload();
+      throw new Error("injected failure after candidate activation");
+    };
+
+    let result: ImportResultValue;
+    try {
+      result = await importAgentFile(
+        "rollback_committed_agent.py",
+        candidate,
+        registry,
+        { dir },
+      );
+    } finally {
+      registry.reloadUserAgents = originalReload;
+    }
+
+    expect(result).toMatchObject({
+      status: "error",
+      committed: true,
+      rejectedBeforeCommit: false,
+      commitState: "unknown",
+      retrySafe: false,
+      errorCode: "IMPORT_ROLLBACK_FAILED",
+      activeSourceSha256: digest(candidate),
+    });
+    expect(
+      await fs.readFile(path.join(dir, "rollback_committed_agent.py")),
+    ).toEqual(candidate);
+    expect(
+      await (await registry.getAgent("RollbackCommitted"))!.perform({}),
+    ).toContain("candidate left committed after rollback failure");
+    const artifacts = await transactionArtifacts();
+    expect(artifacts.some((entry) => entry.endsWith(".backup"))).toBe(true);
+    for (const artifact of artifacts) {
+      await fs.rm(path.join(dir, artifact), { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("marks an incomplete rollback unknown and unsafe to retry", async () => {
+    const original = pythonAgent(
+      "UnknownStateAgent",
+      "UnknownState",
+      "known generation before rollback",
+    );
+    await importAgentFile("unknown_state_agent.py", original, registry, {
+      dir,
+    });
+    const held = await registry.getAgent("UnknownState");
+    const originalReload = registry.reloadUserAgents.bind(registry);
+    const originalGetAll = registry.getAllAgents.bind(registry);
+    let failRegistryReads = false;
+    registry.reloadUserAgents = async () => {
+      failRegistryReads = true;
+      throw new Error("injected activation failure before rollback");
+    };
+    registry.getAllAgents = async () => {
+      if (failRegistryReads) {
+        throw new Error("injected registry snapshot restore failure");
+      }
+      return originalGetAll();
+    };
+
+    let result: ImportResultValue;
+    try {
+      result = await importAgentFile(
+        "unknown_state_agent.py",
+        pythonAgent(
+          "UnknownStateAgent",
+          "UnknownState",
+          "candidate that must roll back",
+        ),
+        registry,
+        { dir },
+      );
+    } finally {
+      registry.reloadUserAgents = originalReload;
+      registry.getAllAgents = originalGetAll;
+    }
+
+    expect(result).toMatchObject({
+      status: "error",
+      committed: false,
+      rejectedBeforeCommit: false,
+      commitState: "unknown",
+      retrySafe: false,
+      errorCode: "IMPORT_ROLLBACK_FAILED",
+      activeSourceSha256: digest(original),
+    });
+    expect(await fs.readFile(path.join(dir, "unknown_state_agent.py"))).toEqual(
+      original,
+    );
+    expect(await registry.getAgent("UnknownState")).toBe(held);
+  }, 60_000);
 });
 
 describe("target and registry serialization", () => {
@@ -655,6 +1019,9 @@ describe("causal import events", () => {
           candidateSourceSha256: digest(valid),
           activeSourceSha256: digest(valid),
           bridgeClass: "PythonAgent",
+          committed: true,
+          commitState: "committed",
+          retrySafe: false,
         },
       });
       expect(invalidStarted).toMatchObject({
@@ -676,6 +1043,8 @@ describe("causal import events", () => {
           candidateSourceSha256: digest(invalid),
           activeSourceSha256: digest(valid),
           rejectedBeforeCommit: true,
+          commitState: "not-committed",
+          retrySafe: true,
         },
       });
       expect(events.filter((event) => event.status === "error")).toHaveLength(

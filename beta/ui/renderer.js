@@ -33,7 +33,7 @@ let loadedUrl = null;
 let brainstemNavigationCount = 0;
 window.__brainstemBetaNavigationCount = 0;
 let latestState = null;
-// Multi-chat Brain Surgeon state (several independent Copilot chats).
+// Multi-chat Rappter Surgeon state (several independent Copilot chats).
 let surgeonSessions = [];
 let surgeonActiveId = 0;
 let surgeonSeq = 0;
@@ -392,7 +392,7 @@ window.addEventListener("message", async (event) => {
     }
     void window.brainstemBeta.recordTwinTurn(twinId, event.data.turn).catch(
       (cause) => console.warn(
-        "Frontier could not persist the completed twin turn.",
+        "OpenRappter could not persist the completed twin turn.",
         cause,
       ),
     );
@@ -483,7 +483,7 @@ window.addEventListener("message", async (event) => {
   if (type === "rapp-beta:ledger-turn") {
     void window.brainstemBeta.recordBrainstemTurn(event.data.turn).catch(
       (cause) => console.warn(
-        "Frontier could not persist the completed Brainstem turn.",
+        "OpenRappter could not persist the completed Brainstem turn.",
         cause,
       ),
     );
@@ -502,7 +502,7 @@ window.addEventListener("message", async (event) => {
         sessionId: null,
         userInput: pendingLineageReply.userInput,
       }).catch((cause) => console.warn(
-        "Frontier could not persist the delivered lineage reply.",
+        "OpenRappter could not persist the delivered lineage reply.",
         cause,
       ));
       pendingLineageReply = null;
@@ -800,7 +800,7 @@ async function openAgentFile(filename, revision = null, scope = "global") {
 
 const SURGEON_STARTERS = [
   { label: "Build and test an agent for this customer use case" },
-  { label: "Inspect this Brainstem and tell me what it can do" },
+  { label: "Inspect OpenRappter and tell me what it can do" },
   { label: "Check for beta updates while I watch" },
   { label: "Record a short autopilot demo of the current workflow" },
   { label: "Show Mode: click-through preview", className: "show-mode-preview", tour: true },
@@ -820,7 +820,7 @@ const SURGEON_STARTERS = [
       "and other infrastructure-only agents from the general list. Also offer",
       "a clearly labeled hello-world parity preset: HackerNews + ContextMemory",
       "+ ManageMemory. The memory pair is allowed only for that preset and its",
-      "storage/infrastructure requirements must remain explicit. Ask me in this Brain Surgeon",
+      "storage/infrastructure requirements must remain explicit. Ask me in this Rappter Surgeon",
       "chat which agents I want, the Copilot Studio display name, publisher",
       "prefix, and target environment/profile. Do not continue until I answer.",
       "If the selected user PAC profile is not authenticated to that exact",
@@ -846,13 +846,13 @@ const SURGEON_STARTERS = [
   },
 ];
 
-// ── Multi-chat Brain Surgeon ─────────────────────────────────────────────
+// ── Multi-chat Rappter Surgeon ─────────────────────────────────────────────
 // Several independent GitHub Copilot conversations over the one visible
 // Brainstem: a tab per chat plus a herd grid to see them at once. Each session
 // owns its transcript node (.surgeon-session); in the dock only the active one
 // shows, in the herd each node is moved into its tile — it renders identically
 // either way. Every main-process event carries a sessionId so it lands in the
-// right chat. Ported from the vBrainstem Brain Surgeon (surgeon.js).
+// right chat. Ported from the vBrainstem Rappter Surgeon (surgeon.js).
 
 function saveSurgeonSessions() {
   try {
@@ -1000,7 +1000,7 @@ function addSurgeonTypingBubble(session) {
   bubble.classList.add("typing");
   bubble.setAttribute("role", "status");
   bubble.setAttribute("aria-live", "polite");
-  bubble.setAttribute("aria-label", "Brain Surgeon is typing…");
+  bubble.setAttribute("aria-label", "Rappter Surgeon is typing…");
   const dots = document.createElement("span");
   dots.className = "surgeon-dots";
   dots.setAttribute("aria-hidden", "true");
@@ -1039,7 +1039,7 @@ function createSurgeonDelivery(session) {
         session,
         session.streamEl,
         "error",
-        String(cause?.message || cause || "Brain Surgeon failed."),
+        String(cause?.message || cause || "Rappter Surgeon failed."),
       );
       session.streamEl = null;
     },
@@ -1171,7 +1171,7 @@ function addSurgeonArtifact(session, artifact) {
   } else {
     const image = document.createElement("img");
     image.src = artifact.url;
-    image.alt = artifact.alt || "Brain Surgeon result";
+    image.alt = artifact.alt || "Rappter Surgeon result";
     tile.appendChild(image);
   }
   const link = document.createElement("a");
@@ -1196,12 +1196,12 @@ function renderSurgeonEmpty(session) {
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M12 2c-2.3 0-3.6.9-4.3 2.1-.5-.1-1-.1-1.5-.1C3.4 4 2 5.6 2 8.2v.3C1 9 .5 9.9.5 11.2v2.1c0 2 1 3.4 2.8 4.2C5.1 18.9 8.2 20 12 20s6.9-1.1 8.7-2.5c1.8-.8 2.8-2.2 2.8-4.2v-2.1c0-1.3-.5-2.2-1.5-2.7v-.3C22 5.6 20.6 4 17.8 4c-.5 0-1 0-1.5.1C15.6 2.9 14.3 2 12 2Z"/>
     </svg>
-    <h2>GitHub Copilot, in your Brainstem</h2>
+    <h2>GitHub Copilot in OpenRappter</h2>
     The full Copilot agent loop: files, shell, tests, one-chat capability
     injection, visible UI control, screenshots, and recorded demos. Open more
-    chats with <b>+</b> to build several agents at once on the same Brainstem.
+    chats with <b>+</b> to build several agents at once in the same OpenRappter workspace.
     <div class="surgeon-caps">
-      <span>run commands</span><span>read/write files</span><span>test Brainstem</span>
+      <span>run commands</span><span>read/write files</span><span>test OpenRappter</span>
     </div>
     <div class="surgeon-starters"></div>
   `;
@@ -1369,7 +1369,7 @@ function renderSurgeonTabs() {
   add.className = "surgeon-new";
   add.dataset.drive = "shell.surgeonNewTab";
   add.textContent = "+";
-  add.title = "New Copilot chat (same Brainstem)";
+  add.title = "New Copilot chat (same OpenRappter workspace)";
   add.addEventListener("click", () => newSurgeonSession());
   surgeonTabs.appendChild(add);
 }
@@ -1394,7 +1394,7 @@ function ensureSurgeonHerdDom() {
         </svg>
       </span>
       <span class="t">GitHub Copilot · Herd</span>
-      <span class="sub">several agents, one Brainstem</span>
+      <span class="sub">several agents, one OpenRappter</span>
       <button class="hstore" type="button" title="Hatch a rapplication from the RAPP Store">◈ Hatch a rapplication…</button>
       <button class="hnew" type="button">+ New chat</button>
       <button class="hclose" type="button">Dock ▸</button>
@@ -1749,7 +1749,7 @@ function renderTwinChat(tile, twin) {
     empty.textContent = "Hatching…";
     chatEl.appendChild(empty);
   }
-  // A multiplayer transcript: the Brainstem loop, the Brain Surgeon, and you all
+  // A multiplayer transcript: the Brainstem loop, the Rappter Surgeon, and you all
   // talking to the same rapplication, each turn labeled by who sent it.
   for (const message of messages.slice(-60)) {
     if (message.role === "activity") {
@@ -1910,7 +1910,7 @@ async function runSurgeon(session, prompt) {
       session.delivery?.fail(cause);
     } else {
       stopSurgeonPacer(session, { flush: true });
-      addSurgeonBubble(session, "error", String(cause?.message || cause || "Brain Surgeon failed."), false);
+      addSurgeonBubble(session, "error", String(cause?.message || cause || "Rappter Surgeon failed."), false);
       session.streamFollower?.complete();
     }
   } finally {
@@ -2028,11 +2028,11 @@ function handleSurgeonEvent(event) {
   } else if (event.type === "error") {
     session.errorShown = true;
     if (chatTypingEnabled) {
-      session.delivery?.fail(event.message || "Brain Surgeon failed.");
+      session.delivery?.fail(event.message || "Rappter Surgeon failed.");
     } else {
       hideSurgeonThinking(session);
       stopSurgeonPacer(session, { flush: true });
-      addSurgeonBubble(session, "error", event.message || "Brain Surgeon failed.", false);
+      addSurgeonBubble(session, "error", event.message || "Rappter Surgeon failed.", false);
       session.streamFollower?.complete();
     }
   } else if (event.type === "reset") {
@@ -2065,7 +2065,7 @@ function betaUrl(raw) {
 function syncBetaUpdate(update, openPanel = false) {
   const value = update || {
     phase: "idle",
-    message: "Check GitHub for the latest RAPP Brainstem Frontier.",
+    message: "Check GitHub for the latest OpenRappter.",
   };
   frame.contentWindow?.postMessage({
     type: "rapp-beta:update-state",
@@ -2076,6 +2076,20 @@ function syncBetaUpdate(update, openPanel = false) {
 
 function render(state) {
   latestState = state;
+  const neighborhoodIdentity = document.getElementById("neighborhood-identity");
+  if (neighborhoodIdentity && state.neighborhood) {
+    const name = neighborhoodIdentity.querySelector("strong");
+    const detail = neighborhoodIdentity.querySelector("small");
+    if (name) name.textContent = state.neighborhood.app_name;
+    if (detail) {
+      detail.textContent = `Good AI Estate · ${
+        state.neighborhood.instance
+      } · ${state.estate?.neighborhood_count || 1} neighborhoods`;
+    }
+    neighborhoodIdentity.dataset.neighborhoodId =
+      state.neighborhood.neighborhood_id;
+    document.title = state.neighborhood.app_name;
+  }
   applyShellChatLook(state.chatLook, state.chatTypingEnabled);
   const tilesWereRequested = dimensionTilesRequested;
   dimensionTilesRequested = state.viewMode?.mode === "arena";
@@ -2190,7 +2204,7 @@ document.getElementById("surgeon-new").addEventListener("click", async () => {
       addSurgeonBubble(
         session,
         "error",
-        `Could not reset Brain Surgeon: ${String(cause?.message || cause)}`,
+        `Could not reset Rappter Surgeon: ${String(cause?.message || cause)}`,
         false,
       );
     }
@@ -2295,6 +2309,89 @@ window.brainstemBeta.onState(render);
 window.brainstemBeta.getState().then(render);
 void maintainAmbientContext();
 setInterval(() => void maintainAmbientContext(), 240000);
+
+// ---- This local OpenRappter is a portable, content-addressed self tile -----
+(() => {
+  const exportButton = document.getElementById("openrappter-tile-export");
+  const importButton = document.getElementById("openrappter-tile-import");
+  const backupButton = document.getElementById("openrappter-tile-backup");
+  const status = document.getElementById("openrappter-tile-status");
+  if (!exportButton || !importButton || !backupButton || !status) return;
+
+  const describe = async () => {
+    try {
+      const tile = await window.brainstemBeta.openrappterTileDescribe();
+      status.textContent = `${tile.rappid} · ${tile.files} files · ${tile.bytes} bytes · ${tile.backups} backups`;
+    } catch (error) {
+      status.textContent = `Could not read this OpenRappter tile: ${error?.message || error}`;
+    }
+  };
+  const run = async (button, action) => {
+    button.disabled = true;
+    try {
+      const result = await action();
+      if (result?.canceled) return;
+      status.textContent = result.restartRequired
+        ? `Imported ${result.imported} files. Restart OpenRappter to activate the restored tile. Backup: ${result.backup}`
+        : `Saved OpenRappter tile: ${result.file}`;
+      await describe();
+    } catch (error) {
+      status.textContent = `OpenRappter tile action failed: ${error?.message || error}`;
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  exportButton.addEventListener("click", () => {
+    void run(exportButton, () => window.brainstemBeta.openrappterTileExport());
+  });
+  importButton.addEventListener("click", () => {
+    void run(importButton, () => window.brainstemBeta.openrappterTileImport());
+  });
+  backupButton.addEventListener("click", () => {
+    void run(backupButton, () => window.brainstemBeta.openrappterTileBackup());
+  });
+  void describe();
+})();
+
+// ---- Rappter Pack Sentinel: mixed nodes, deterministic acceptance ----------
+(() => {
+  const runButton = document.getElementById("rappter-pack-run");
+  const status = document.getElementById("rappter-pack-status");
+  if (!runButton || !status) return;
+
+  const refresh = async () => {
+    try {
+      const pack = await window.brainstemBeta.rappterPackStatus();
+      if (!pack.configured) {
+        status.textContent = `${pack.guidance} (${pack.config})`;
+        runButton.disabled = true;
+        return;
+      }
+      const healthy = pack.nodes.filter((node) => node.ok).length;
+      status.textContent = `${pack.pack_id} · ${healthy}/${pack.nodes.length} nodes reachable · `
+        + pack.nodes.map((node) => `${node.id}:${node.ok ? "ready" : "down"}`).join(" · ");
+      runButton.disabled = false;
+    } catch (error) {
+      status.textContent = `Could not read Rappter Pack: ${error?.message || error}`;
+      runButton.disabled = true;
+    }
+  };
+
+  runButton.addEventListener("click", async () => {
+    runButton.disabled = true;
+    status.textContent = "Running expected-vs-observed pack matrix…";
+    try {
+      const { file, report } = await window.brainstemBeta.rappterPackRun();
+      status.textContent = `${report.summary.pass}/${report.summary.total} cases passed · ${file}`;
+    } catch (error) {
+      status.textContent = `Rappter Pack matrix failed: ${error?.message || error}`;
+    } finally {
+      await refresh();
+    }
+  });
+  void refresh();
+})();
 
 
 // ---- Drag a .egg anywhere over the window to hatch it as a twin ------------

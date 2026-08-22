@@ -7055,7 +7055,7 @@ class CopilotStudioDeployAgent(BasicAgent):
                 result = _release_plan(str(kwargs.get("run_dir") or ""))
             elif action == "release":
                 raise PermissionError(
-                    "Live publish is disabled in RAPP Brainstem Frontier. "
+                    "Live publish is disabled in OpenRappter. "
                     "Use the clickable Copilot Studio link and publish manually "
                     "after reviewing the Draft."
                 )

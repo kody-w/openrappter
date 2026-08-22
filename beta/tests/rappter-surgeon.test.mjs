@@ -9,11 +9,11 @@ import path from "node:path";
 import test from "node:test";
 
 import {
-  BrainSurgeon,
-  brainSurgeonInternals,
-} from "../electron/brain-surgeon.mjs";
+  RappterSurgeon,
+  rappterSurgeonInternals,
+} from "../electron/rappter-surgeon.mjs";
 
-test("Brain Surgeon keeps the full Copilot loop and RAPP delegation tools", async () => {
+test("Rappter Surgeon keeps the full Copilot loop and RAPP delegation tools", async () => {
   let config;
   let sendTimeout;
   const session = {
@@ -30,7 +30,7 @@ test("Brain Surgeon keeps the full Copilot loop and RAPP delegation tools", asyn
       return session;
     },
   };
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime,
     brainstemUrl: "http://127.0.0.1:7071",
     uiCommand: async () => ({}),
@@ -65,6 +65,7 @@ test("Brain Surgeon keeps the full Copilot loop and RAPP delegation tools", asyn
       "drive_twin",
       "set_ai_force_mode",
       "show_mode_click_through",
+      "summon_dogg_neighborhood",
       "list_rapplications",
       "hatch_rapplication",
       "loop_brainstem_with_twin",
@@ -117,7 +118,7 @@ test("Brain Surgeon keeps the full Copilot loop and RAPP delegation tools", asyn
   );
   assert.equal(capture.parameters.properties.include_text.type, "boolean");
   assert.equal(
-    brainSurgeonInternals.compactDriverSummary({
+    rappterSurgeonInternals.compactDriverSummary({
       results: [{ summary: "▶ clicked @brainstem.send ✓" }],
     }),
     "▶ clicked @brainstem.send ✓",
@@ -126,15 +127,15 @@ test("Brain Surgeon keeps the full Copilot loop and RAPP delegation tools", asyn
 
 test("temporary agent filenames are normalized safely", () => {
   assert.equal(
-    brainSurgeonInternals.cleanFilename("demo.py"),
+    rappterSurgeonInternals.cleanFilename("demo.py"),
     "demo_agent.py",
   );
   assert.equal(
-    brainSurgeonInternals.cleanFilename("../customer demo_agent.py"),
+    rappterSurgeonInternals.cleanFilename("../customer demo_agent.py"),
     "customer_demo_agent.py",
   );
   assert.throws(
-    () => brainSurgeonInternals.cleanFilename("basic_agent.py"),
+    () => rappterSurgeonInternals.cleanFilename("basic_agent.py"),
     /safe agent filename/,
   );
 });
@@ -142,7 +143,7 @@ test("temporary agent filenames are normalized safely", () => {
 test("fresh delegation waits for its frame before reapplying the chat lease", async () => {
   const commands = [];
   const routeRequests = [];
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
     routeManager: {
@@ -214,7 +215,7 @@ test("concurrent delegations retain independent chat lease tokens", async () => 
   const chatsReady = new Promise((resolve) => {
     resolveChatsStarted = resolve;
   });
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
     routeManager: {
@@ -278,13 +279,13 @@ test("separate Surgeons reapply the shared lease registry after route swaps", as
     },
     recordTelemetry: () => {},
   };
-  const first = new BrainSurgeon({
+  const first = new RappterSurgeon({
     chatLeaseRegistry: registry,
     routeManager,
     runtime: {},
     uiCommand,
   });
-  const second = new BrainSurgeon({
+  const second = new RappterSurgeon({
     chatLeaseRegistry: registry,
     routeManager,
     runtime: {},
@@ -309,7 +310,7 @@ test("separate Surgeons reapply the shared lease registry after route swaps", as
 test("a delegation whose composer was taken back reports yielded_to_user and does not re-drive", async () => {
   const commands = [];
   const events = [];
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
     onEvent: (event) => events.push(event),
@@ -355,7 +356,7 @@ test("a failed lease release cannot replace the delegation's result", async () =
   const commands = [];
   const registry = new Set();
   const telemetry = [];
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     chatLeaseRegistry: registry,
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
@@ -393,7 +394,7 @@ test("a failed lease release cannot replace the delegation's result", async () =
   assert.equal(registry.has(token), false);
 });
 
-test("Brain Surgeon manages nested RAPPID stacks and visibly reloads selection", async () => {
+test("Rappter Surgeon manages nested RAPPID stacks and visibly reloads selection", async () => {
   const calls = [];
   const routeManager = {
     listScopedAgents: async (options = {}) => {
@@ -417,7 +418,7 @@ test("Brain Surgeon manages nested RAPPID stacks and visibly reloads selection",
       return { url: "http://127.0.0.1:7081", compositionHash: "hash" };
     },
   };
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
     routeManager,
@@ -451,12 +452,12 @@ test("Brain Surgeon manages nested RAPPID stacks and visibly reloads selection",
   ]);
 });
 
-test("Brain Surgeon validates and injects bundled Copilot Studio agents", async (t) => {
+test("Rappter Surgeon validates and injects bundled Copilot Studio agents", async (t) => {
   const active = [];
   let restarted = 0;
-  const betaHome = mkdtempSync(path.join(tmpdir(), "brain-surgeon-studio-"));
+  const betaHome = mkdtempSync(path.join(tmpdir(), "rappter-surgeon-studio-"));
   t.after(() => rmSync(betaHome, { recursive: true, force: true }));
-  const surgeon = new BrainSurgeon({
+  const surgeon = new RappterSurgeon({
     runtime: {},
     brainstemUrl: "http://127.0.0.1:7071",
     routeManager: {
@@ -482,9 +483,9 @@ test("Brain Surgeon validates and injects bundled Copilot Studio agents", async 
     uiCommand: async () => ({}),
   });
 
-  test("Brain Surgeon emits a clickable Copilot Studio agent link", async () => {
+  test("Rappter Surgeon emits a clickable Copilot Studio agent link", async () => {
     const events = [];
-    const surgeon = new BrainSurgeon({
+    const surgeon = new RappterSurgeon({
       runtime: {},
       brainstemUrl: "http://127.0.0.1:7071",
       uiCommand: async () => ({}),
@@ -523,7 +524,7 @@ test("Brain Surgeon validates and injects bundled Copilot Studio agents", async 
 
 test("deployment agent validation rejects stale filenames", () => {
   assert.equal(
-    brainSurgeonInternals.deploymentAgentSourceMatches(
+    rappterSurgeonInternals.deploymentAgentSourceMatches(
       '__manifest__ = {"version": "9.9.9"}\nself.name = "WrongTool"',
       {
         toolName: "CopilotStudioDeployBeta",
@@ -534,7 +535,7 @@ test("deployment agent validation rejects stale filenames", () => {
     false,
   );
   assert.equal(
-    brainSurgeonInternals.deploymentAgentSourceMatches(
+    rappterSurgeonInternals.deploymentAgentSourceMatches(
       '__manifest__ = {"version": "1.0.14"}\n'
         + 'BETA_DRAFT_ONLY = True\nself.name = "CopilotStudioDeployBeta"',
       {

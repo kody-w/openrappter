@@ -733,7 +733,7 @@ export function createAutopilot(ctx = {}) {
 
   function requestParent(action, payload = {}, timeoutMs = 12000) {
     if (!win?.parent || win.parent === win) {
-      return Promise.reject(new Error("The Frontier shell is unavailable."));
+      return Promise.reject(new Error("The OpenRappter shell is unavailable."));
     }
     return sendRequest(win.parent, action, payload, timeoutMs);
   }

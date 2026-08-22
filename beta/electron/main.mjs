@@ -1,6 +1,11 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -29,7 +34,7 @@ import {
   resolveChatStreamMode,
 } from "./chat-stream-mode.mjs";
 import { humanizeAgentName } from "./agent-display.mjs";
-import { BrainSurgeon } from "./brain-surgeon.mjs";
+import { RappterSurgeon } from "./rappter-surgeon.mjs";
 import {
   changeChatLook,
   readAmbientSettings,
@@ -51,10 +56,29 @@ import {
 import { CopilotStudioAuthManager } from "./copilot-studio-auth.mjs";
 import { CopilotRuntime } from "./copilot-runtime.mjs";
 import { executeLineageCommand } from "./lineage-control.mjs";
+import { summonDoggNeighborhood } from "./dogg-summon.mjs";
 import {
   openLedger,
   recordCompletedTurn,
 } from "./ledger.mjs";
+import {
+  createNeighborhoodIdentity,
+  ensureNeighborhoodManifest,
+} from "./neighborhood-identity.mjs";
+import {
+  OPENRAPPTER_TILE_EXTENSION,
+  OpenRappterTileStore,
+} from "./openrappter-tile.mjs";
+import { startOpenRappterChatEndpoint } from "./openrappter-chat-endpoint.mjs";
+import {
+  dispatchPackNode,
+  packNodeReady,
+  runPackMatrix,
+  validatePackConfig,
+  validatePackMatrix,
+  writePackReport,
+} from "./rappter-pack.mjs";
+import { assertOpenRappterSpeciesIsolation } from "./species-isolation.mjs";
 import {
   createExportRedactionScript,
   redactSensitiveValue,
@@ -70,6 +94,7 @@ import {
 import {
   createAutopilotInstallationSource,
   createFrameBridgeInstallationSource,
+  createOpenRappterBrandingSource,
   createViewToggle,
   instrumentRappUi as createInstrumentedRappUi,
 } from "./injection-sources.mjs";
@@ -85,6 +110,23 @@ import {
 import "../ui/stream-follow.js";
 import "../ui/stream-render-pacing.js";
 import "../ui/chat-look.js";
+
+const neighborhood = createNeighborhoodIdentity(
+  process.env.OPENRAPPTER_INSTANCE,
+  {
+    generation: Number.parseInt(
+      process.env.OPENRAPPTER_NEIGHBORHOOD_GENERATION || "0",
+      10,
+    ),
+    neighborhoodId: process.env.OPENRAPPTER_NEIGHBORHOOD_ID,
+    parentNeighborhoodId:
+      process.env.OPENRAPPTER_PARENT_NEIGHBORHOOD_ID || null,
+  },
+);
+const openRappterInstance = neighborhood.instance;
+const openRappterWindowTitle = neighborhood.app_name;
+app.setName(neighborhood.app_name);
+app.setAppUserModelId(neighborhood.app_user_model_id);
 
 const hasLock = app.requestSingleInstanceLock();
 const {
@@ -105,7 +147,7 @@ const {
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(dirname, "..");
-// The blue-brain app icon (build/icon.png), used for the window, the dock, and
+// The OpenRappter dinosaur icon (build/icon.png), used for the window, dock, and
 // the taskbar so the running app never shows the default Electron icon. Packaged
 // builds pick up build/icon.icns / .ico / icons/ via package.json.
 const appIconFile = path.join(packageDir, "build", "icon.png");
@@ -122,7 +164,21 @@ const autopilotClassicSource = autopilotSource.replace(
 );
 const autopilotCapability = randomUUID();
 const activityViewInstallationSource = createActivityViewInstallationSource();
+const openRappterBrandingSource = createOpenRappterBrandingSource();
 const config = resolveBrainstemConfig();
+const openRappterHome = path.resolve(
+  process.env.OPENRAPPTER_HOME || path.join(homedir(), ".openrappter"),
+);
+const betaHome = process.env.BRAINSTEM_BETA_HOME
+  || path.join(openRappterHome, "desktop");
+assertOpenRappterSpeciesIsolation({
+  home: homedir(),
+  openRappterHome,
+  betaHome,
+  brainstemHome: config.brainstemHome,
+  brainstemDir: config.brainstemDir,
+});
+ensureNeighborhoodManifest(betaHome, neighborhood);
 const chatStreamMode = resolveChatStreamMode(process.env);
 const smoothStreamCss = `
 html[data-rapp-stream="smooth"] .msg.assistant .bubble.stream-mask {
@@ -203,8 +259,6 @@ html[data-rapp-stream="smooth"] .typing span:nth-child(3) {
   }
 }
 `;
-const betaHome = process.env.BRAINSTEM_BETA_HOME
-  || path.join(config.brainstemHome, "beta-launcher");
 const ledger = hasLock ? openLedger(betaHome) : null;
 const ambient = hasLock
   ? openAmbient(betaHome, {
@@ -226,6 +280,14 @@ let viewMode = initialViewMode.viewMode;
 let viewModeOverridden = initialViewMode.viewModeOverridden;
 let arenaLayoutState = resolveCustomLayout(viewMode);
 const dimensionTileStore = new DimensionTileStore({ betaHome });
+const openRappterTileStore = new OpenRappterTileStore({
+  betaHome,
+  brainstemDir: config.brainstemDir,
+});
+const rappterPackConfigPath = process.env.RAPPTER_PACK_CONFIG
+  || path.join(openRappterHome, "pack.json");
+const rappterPackMatrixPath = process.env.RAPPTER_PACK_MATRIX
+  || path.join(packageDir, "resources", "rappter-pack", "default-matrix.json");
 const startupFingerprint = betaSourceFingerprint(path.resolve(packageDir, ".."));
 const brainstemRuntimeFingerprint = runtimeDirectoryFingerprint(
   config.brainstemDir,
@@ -621,7 +683,7 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
     if (!status) return;
     status.dataset.phase = phase;
     const lines = [
-      update.message || "Check GitHub for the latest RAPP Brainstem Frontier.",
+      update.message || "Check GitHub for the latest OpenRappter.",
       update.detail,
       update.source ? "Source: " + update.source : "",
       update.guidance,
@@ -688,12 +750,12 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
       wrapper = document.createElement("div");
       wrapper.className = "beta-app-wrapper beta-frame-menu";
       wrapper.innerHTML = '<button class="icon-btn" id="beta-app-btn" '
-        + 'type="button" title="RAPP Brainstem Frontier menu" aria-haspopup="true" '
+        + 'type="button" title="OpenRappter menu" aria-haspopup="true" '
         + 'aria-expanded="false"><span class="icon"><svg viewBox="0 0 24 24" '
         + 'fill="currentColor" aria-hidden="true"><path d="M6 10a2 2 0 1 0 0 4 '
         + '2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 0a2 2 0 1 0 '
         + '0 4 2 2 0 0 0 0-4Z"/></svg></span></button>'
-        + '<div id="beta-app-panel"><h3>RAPP Brainstem Frontier</h3>'
+        + '<div id="beta-app-panel"><h3>OpenRappter</h3>'
         + '<p class="beta-app-copy">Chat is the control surface. Agents can add '
         + 'capabilities and visibly operate this workspace while you watch.</p>'
         + '<div class="beta-chat-look" role="group" aria-label="Chat look">'
@@ -706,7 +768,7 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
         + '<button class="beta-panel-btn" id="beta-check-updates" type="button">'
         + 'Check for updates</button><div id="beta-update-status" '
         + 'data-phase="idle" role="status" aria-live="polite">Check GitHub for '
-        + 'the latest RAPP Brainstem Frontier.</div><button class="beta-panel-btn '
+        + 'the latest OpenRappter.</div><button class="beta-panel-btn '
         + 'primary" id="beta-install-update" type="button" hidden>'
         + 'Update and Restart</button></div>';
       const vscode = document.getElementById("vscode-link");
@@ -714,10 +776,10 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
       button = document.getElementById("beta-app-btn");
       panel = document.getElementById("beta-app-panel");
     }
-    button.title = "RAPP Brainstem Frontier menu";
-    button.setAttribute("aria-label", "RAPP Brainstem Frontier menu");
+    button.title = "OpenRappter menu";
+    button.setAttribute("aria-label", "OpenRappter menu");
     const menuHeading = panel.querySelector("h3");
-    if (menuHeading) menuHeading.textContent = "RAPP Brainstem Frontier";
+    if (menuHeading) menuHeading.textContent = "OpenRappter";
     document.body.classList.add("beta-app");
     button.removeAttribute("onclick");
     const checkButton = document.getElementById("beta-check-updates");
@@ -836,7 +898,7 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
               name: "AbortError",
             });
           void reader.cancel(reason).catch((cause) => {
-            console.warn("Frontier could not cancel the upstream chat stream.", cause);
+            console.warn("OpenRappter could not cancel the upstream chat stream.", cause);
           });
           controller.error(reason);
         };
@@ -1284,7 +1346,7 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
             });
           screen.abort();
           void reader.cancel(reason).catch((cause) => {
-            console.warn("Frontier could not cancel the upstream chat stream.", cause);
+            console.warn("OpenRappter could not cancel the upstream chat stream.", cause);
           });
           controller.error(reason);
         };
@@ -1526,7 +1588,7 @@ const BETA_FRAME_BRIDGE_SOURCE = `(() => {
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         window.removeEventListener("message", receive);
-        reject(new Error("Frontier agent action timed out."));
+        reject(new Error("OpenRappter agent action timed out."));
       }, 30000);
       function receive(message) {
         if (
@@ -1591,6 +1653,7 @@ function frameBridgeInstallationSource() {
   const bridgeSource = composeDimensionTilesFrameBridgeSource(checkpointSource, viewMode);
   return createFrameBridgeInstallationSource({
     autopilotSource: autopilotInstallationSource(),
+    brandingSource: openRappterBrandingSource,
     bridgeSource,
   });
 }
@@ -1607,18 +1670,24 @@ let updateCheckInFlight = false;
 let updateMenuItem = null;
 let availableUpdate = null;
 let uiDriver = null;
+let openRappterChatEndpoint = null;
 let e2eStopTimer = null;
-// One GitHub Copilot Brain Surgeon SDK session per chat tab, keyed by the id the
+// One GitHub Copilot Rappter Surgeon SDK session per chat tab, keyed by the id the
 // renderer assigns. All share one runtime, one route manager, and one visible
 // Brainstem — "several agents, one brainstem" — and every event they emit is
 // tagged with its sessionId so the renderer routes it to the right tab/tile.
-const brainSurgeons = new Map();
+const rappterSurgeons = new Map();
 const completedBrainstemRequests = new Set();
 const completedBrainstemRequestOrder = [];
 const chatLeaseRegistry = new Set();
 const MAX_BRAIN_SURGEONS = 12;
 
 const state = {
+  neighborhood,
+  estate: {
+    estate_id: neighborhood.estate_id,
+    neighborhood_count: 1,
+  },
   viewMode,
   viewModeOverridden,
   arenaLayout: arenaLayoutState.layout,
@@ -1635,7 +1704,7 @@ const state = {
   uiDriver: { phase: "starting", message: "Preparing visible AI controls..." },
   update: {
     phase: "idle",
-    message: "Check GitHub for the latest RAPP Brainstem Frontier.",
+    message: "Check GitHub for the latest OpenRappter.",
   },
   url: config.url,
 };
@@ -2016,6 +2085,7 @@ const twinManager = new TwinManager({
   brainstemUrl: () => state.url,
   onEvent: (event) => {
     if (event.type === "twin-needs-auth") notifyTwinNeedsAuth(event);
+    queueMicrotask(() => syncNeighborhoodEstate());
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(
         "beta:twin-event",
@@ -2024,6 +2094,27 @@ const twinManager = new TwinManager({
     }
   },
 });
+
+function syncNeighborhoodEstate() {
+  const neighborhoods = [{
+    kind: "root",
+    neighborhood_id: neighborhood.root_neighborhood_id,
+    name: neighborhood.instance_name,
+    rappid: null,
+  }, ...twinManager.list().map((twin) => ({
+    kind: "resident",
+    neighborhood_id: `${neighborhood.estate_id}:resident:${twin.rappid}`,
+    name: twin.name,
+    rappid: twin.rappid,
+    status: twin.status,
+  }))];
+  ensureNeighborhoodManifest(betaHome, neighborhood, { neighborhoods });
+  state.estate = {
+    estate_id: neighborhood.estate_id,
+    neighborhood_count: neighborhoods.length,
+  };
+  emitState();
+}
 
 // Twins pause at the one user-owned auth step (e.g. PAC device login). If the
 // user is multitasking off the window they must still know a twin needs them —
@@ -2150,7 +2241,7 @@ function popOutTwin(id) {
     // Deliberately NOT a child of mainWindow. A parented window shares the
     // parent's fullscreen space on macOS, so taking the pop-out fullscreen took
     // over the Brainstem window and left it blank. A popped-out rapplication is
-    // meant to be worked with on its own screen while the Frontier chat carries
+    // meant to be worked with on its own screen while the OpenRappter chat carries
     // on beside it, which requires a top-level window.
     webPreferences: {
       additionalArguments: [`--rapp-twin-id=${encodeURIComponent(id)}`],
@@ -2185,7 +2276,7 @@ function popOutTwin(id) {
 }
 
 // P2: hatch the Copilot Studio Factory + Deploy pipeline onto its OWN twin, and
-// kick its deploy loop asynchronously. The Brain Surgeon (and the main Brainstem
+// kick its deploy loop asynchronously. The Rappter Surgeon (and the main Brainstem
 // chat) stays free for other work while this twin drives PAC / Factory / Deploy
 // on its own port — the deploy engine is unchanged, only WHERE it runs and WHO
 // drives it (a twin loop, not the visible Brainstem). Draft-only; the one
@@ -2361,17 +2452,17 @@ function ownedTwinForSender(event) {
   return ownedTwinId;
 }
 
-function ensureBrainSurgeon(sessionId = 1) {
+function ensureRappterSurgeon(sessionId = 1) {
   const id = normalizeSurgeonId(sessionId);
-  let surgeon = brainSurgeons.get(id);
+  let surgeon = rappterSurgeons.get(id);
   if (!surgeon) {
-    if (brainSurgeons.size >= MAX_BRAIN_SURGEONS) {
+    if (rappterSurgeons.size >= MAX_BRAIN_SURGEONS) {
       throw new Error(
         `You have ${MAX_BRAIN_SURGEONS} Copilot chats open — close one before opening another.`,
       );
     }
 
-    surgeon = new BrainSurgeon({
+    surgeon = new RappterSurgeon({
       runtime: copilot,
       brainstemUrl: config.url,
       chatLeaseRegistry,
@@ -2383,6 +2474,14 @@ function ensureBrainSurgeon(sessionId = 1) {
         hatch: (storeId, instruction) => twinManager.hatch(storeId, { instruction: instruction || null }),
         list: () => twinManager.list(),
         list_store: () => rappStore.list(),
+        summon_dogg: (summonsFull, storeId, instruction) => (
+          summonDoggNeighborhood({
+            instruction,
+            storeId,
+            summonsFull,
+            twinManager,
+          })
+        ),
         loop: (id, goal) => { twinManager.loop(id, goal).catch(() => {}); return { ok: true, looping: id }; },
         deploy_copilot_studio: (opts) => hatchCopilotStudioTwin(opts || {}),
         open_auth: (opts) => {
@@ -2393,7 +2492,7 @@ function ensureBrainSurgeon(sessionId = 1) {
       },
       onEvent: (event) => emitSurgeonEvent({ ...event, sessionId: id }),
     });
-    brainSurgeons.set(id, surgeon);
+    rappterSurgeons.set(id, surgeon);
   }
   return surgeon;
 }
@@ -2497,7 +2596,7 @@ function createWindow() {
     height: 860,
     minWidth: 900,
     minHeight: 620,
-    title: "RAPP Brainstem Frontier",
+    title: openRappterWindowTitle,
     backgroundColor: "#0d1117",
     ...(appIcon ? { icon: appIcon } : {}),
     webPreferences: {
@@ -2574,7 +2673,7 @@ async function handleCheckForUpdates({ openPanel = false } = {}) {
     if (!update.published) {
       return setUpdateState({
         phase: "current",
-        message: `No RAPP Brainstem Frontier update is published on ${update.updateRef} yet.`,
+        message: `No OpenRappter update is published on ${update.updateRef} yet.`,
         detail: `This source build remains on ${update.currentVersion} `
           + `(${shortCommit(update.currentCommit)}). The latest repository commit `
           + `(${shortCommit(update.latestCommit)}) has no beta/VERSION manifest.`,
@@ -2595,7 +2694,7 @@ async function handleCheckForUpdates({ openPanel = false } = {}) {
       if (!update.releasePublished) {
         return setUpdateState({
           phase: "current",
-          message: `RAPP Brainstem Frontier ${update.latestVersion} is staged on ${update.updateRef} but not released.`,
+          message: `OpenRappter ${update.latestVersion} is staged on ${update.updateRef} but not released.`,
           detail: `${update.releaseProblem}\n`
             + `Installed ${update.currentVersion} (${shortCommit(update.currentCommit)}); `
             + `channel head ${shortCommit(update.channelCommit)}.`,
@@ -2606,7 +2705,7 @@ async function handleCheckForUpdates({ openPanel = false } = {}) {
       }
       return setUpdateState({
         phase: "current",
-        message: "RAPP Brainstem Frontier is up to date.",
+        message: "OpenRappter is up to date.",
         detail: `Version ${update.currentVersion} (${shortCommit(update.currentCommit)}), `
           + `the released commit behind ${update.releaseTag}.`,
         source: `${update.repository}@${update.updateRef}`,
@@ -2628,8 +2727,8 @@ async function handleCheckForUpdates({ openPanel = false } = {}) {
     return setUpdateState({
       phase: "available",
       message: update.sameVersion
-        ? `RAPP Brainstem Frontier ${update.latestVersion} can be re-aligned to its released commit.`
-        : `RAPP Brainstem Frontier ${update.latestVersion} is available.`,
+        ? `OpenRappter ${update.latestVersion} can be re-aligned to its released commit.`
+        : `OpenRappter ${update.latestVersion} is available.`,
       detail: `Installed ${update.currentVersion} (${shortCommit(update.currentCommit)}); `
         + `released ${update.latestVersion} (${shortCommit(update.latestCommit)}, ${update.releaseTag}).`,
       source: `${update.repository}@${update.updateRef}`,
@@ -2640,7 +2739,7 @@ async function handleCheckForUpdates({ openPanel = false } = {}) {
   } catch (error) {
     return setUpdateState({
       phase: "error",
-      message: "RAPP Brainstem Frontier could not check for updates.",
+      message: "OpenRappter could not check for updates.",
       detail: String(error.message || error),
     });
   } finally {
@@ -2660,7 +2759,7 @@ async function handleInstallUpdate() {
   const update = availableUpdate;
   setUpdateState({
     phase: "applying",
-    message: `Installing RAPP Brainstem Frontier ${update.latestVersion}...`,
+    message: `Installing OpenRappter ${update.latestVersion}...`,
     detail: "The app will close, run the pinned installer, and reopen.",
   });
   try {
@@ -2674,7 +2773,7 @@ async function handleInstallUpdate() {
   } catch (error) {
     return setUpdateState({
       phase: "error",
-      message: "RAPP Brainstem Frontier could not start the update.",
+      message: "OpenRappter could not start the update.",
       detail: String(error.message || error),
     });
   }
@@ -2797,7 +2896,7 @@ function loadPendingUpdateResult() {
   if (result.success) {
     state.update = {
       phase: "success",
-      message: `RAPP Brainstem Frontier updated to ${result.latestVersion}.`,
+      message: `OpenRappter updated to ${result.latestVersion}.`,
       detail: `Installed commit: ${shortCommit(result.commit)}\n`
         + "The launcher and shared Brainstem source were refreshed.",
     };
@@ -2820,13 +2919,13 @@ function loadPendingUpdateResult() {
     phase: "error",
     message: restored
       ? "The update failed; the previous version was restored."
-      : "RAPP Brainstem Frontier could not finish the update.",
+      : "OpenRappter could not finish the update.",
     detail: `${result.error || "Unknown updater error."}\n\n${rollbackDetail}\n\nLog: ${
       result.logPath || "unavailable"
     }`,
     ...(restored
       ? {}
-      : { guidance: "Re-run the Frontier installer to repair this install." }),
+      : { guidance: "Re-run the OpenRappter installer to repair this install." }),
   };
 }
 
@@ -2863,6 +2962,112 @@ function registerIpc() {
   ipcMain.handle("beta:set-view-mode", async (event, next) => {
     assertTrustedIpc(event);
     return handleViewModeChange(next || {});
+  });
+  ipcMain.handle("beta:openrappter-tile-describe", (event) => {
+    assertTrustedIpc(event);
+    return openRappterTileStore.describe();
+  });
+  ipcMain.handle("beta:openrappter-tile-export", async (event) => {
+    assertTrustedIpc(event);
+    const description = openRappterTileStore.describe();
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "Export this OpenRappter tile",
+      defaultPath: `OpenRappter-${description.content_hash.slice(0, 12)}${OPENRAPPTER_TILE_EXTENSION}`,
+      filters: [{
+        name: "OpenRappter tile",
+        extensions: ["tile"],
+      }],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    const target = result.filePath.endsWith(OPENRAPPTER_TILE_EXTENSION)
+      ? result.filePath
+      : `${result.filePath}${OPENRAPPTER_TILE_EXTENSION}`;
+    return {
+      canceled: false,
+      ...openRappterTileStore.exportTile(target),
+    };
+  });
+  ipcMain.handle("beta:openrappter-tile-import", async (event) => {
+    assertTrustedIpc(event);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Import an OpenRappter tile",
+      properties: ["openFile"],
+      filters: [{
+        name: "OpenRappter tile",
+        extensions: ["tile"],
+      }],
+    });
+    const file = result.filePaths?.[0];
+    if (result.canceled || !file) return { canceled: true };
+    return {
+      canceled: false,
+      ...openRappterTileStore.importTile(file),
+    };
+  });
+  ipcMain.handle("beta:openrappter-tile-backup", (event) => {
+    assertTrustedIpc(event);
+    return {
+      file: openRappterTileStore.backup(),
+      ...openRappterTileStore.describe(),
+    };
+  });
+  ipcMain.handle("beta:rappter-pack-status", async (event) => {
+    assertTrustedIpc(event);
+    if (!existsSync(rappterPackConfigPath)) {
+      return {
+        configured: false,
+        config: rappterPackConfigPath,
+        guidance: "Copy resources/rappter-pack/config.example.json to ~/.openrappter/pack.json.",
+      };
+    }
+    const pack = validatePackConfig(JSON.parse(
+      readFileSync(rappterPackConfigPath, "utf8"),
+    ));
+    const nodes = await Promise.all(pack.nodes.map(async (node) => {
+      try {
+        const result = await dispatchPackNode(node, {
+          action: "health",
+          case_id: "status",
+        });
+        return {
+          id: node.id,
+          machine: node.machine,
+          kind: node.kind,
+          ok: packNodeReady(result),
+          http_status: result.http_status,
+          refused: result.refused === true,
+          duration_ms: result.duration_ms,
+        };
+      } catch (error) {
+        return {
+          id: node.id,
+          machine: node.machine,
+          kind: node.kind,
+          ok: false,
+          error: String(error?.message || error),
+        };
+      }
+    }));
+    return {
+      configured: true,
+      pack_id: pack.pack_id,
+      nodes,
+    };
+  });
+  ipcMain.handle("beta:rappter-pack-run", async (event) => {
+    assertTrustedIpc(event);
+    if (!existsSync(rappterPackConfigPath)) {
+      throw new Error(`Rappter Pack config is missing at ${rappterPackConfigPath}.`);
+    }
+    const pack = validatePackConfig(JSON.parse(
+      readFileSync(rappterPackConfigPath, "utf8"),
+    ));
+    const matrix = validatePackMatrix(JSON.parse(
+      readFileSync(rappterPackMatrixPath, "utf8"),
+    ), pack);
+    const report = await runPackMatrix({ config: pack, matrix });
+    const file = writePackReport(betaHome, report);
+    return { file, report };
   });
   registerDimensionTileIpc({
     activateTile: (tile) => routeManager.startTile(tile.agents),
@@ -3015,7 +3220,7 @@ function registerIpc() {
     refreshAmbientBeforeTurn();
     const id = normalizeSurgeonId(sessionId);
     const requestId = randomUUID();
-    const result = await ensureBrainSurgeon(sessionId).send(prompt);
+    const result = await ensureRappterSurgeon(sessionId).send(prompt);
     recordCompletedTurn(ledger, {
       requestId,
       response: result.content,
@@ -3027,16 +3232,16 @@ function registerIpc() {
   });
   ipcMain.handle("beta:surgeon-reset", async (event, sessionId) => {
     assertTrustedIpc(event);
-    const surgeon = brainSurgeons.get(normalizeSurgeonId(sessionId));
+    const surgeon = rappterSurgeons.get(normalizeSurgeonId(sessionId));
     if (surgeon) await surgeon.reset();
     return { ok: true };
   });
   ipcMain.handle("beta:surgeon-close", async (event, sessionId) => {
     assertTrustedIpc(event);
     const id = normalizeSurgeonId(sessionId);
-    const surgeon = brainSurgeons.get(id);
+    const surgeon = rappterSurgeons.get(id);
     if (surgeon) {
-      brainSurgeons.delete(id);
+      rappterSurgeons.delete(id);
       await surgeon.stop().catch(() => {});
     }
     return { ok: true };
@@ -3113,11 +3318,22 @@ function registerIpc() {
 }
 
 async function startServices() {
+  const brainstemStartErrorFile = path.join(
+    betaHome,
+    "brainstem-start-error.json",
+  );
   const brainstemTask = routeManager.startDefault().then((route) => {
+    rmSync(brainstemStartErrorFile, { force: true });
     state.url = route.url;
     emitState();
   }).catch((error) => {
     state.brainstem = { phase: "error", message: String(error.message || error) };
+    writeFileSync(brainstemStartErrorFile, `${JSON.stringify({
+      schema: "openrappter-brainstem-start-error/1.0",
+      at: new Date().toISOString(),
+      message: String(error.message || error),
+      stack: String(error.stack || ""),
+    }, null, 2)}\n`, { mode: 0o600 });
     emitState();
   });
 
@@ -3136,11 +3352,11 @@ async function startServices() {
     state.surgeon = result.authenticated
       ? {
           phase: "ready",
-          message: "GitHub Copilot Agent mode is ready inside Frontier.",
+          message: "GitHub Copilot Agent mode is ready inside OpenRappter.",
         }
       : {
           phase: "signed-out",
-          message: "Sign in to GitHub Copilot before using Brain Surgeon.",
+          message: "Sign in to GitHub Copilot before using Rappter Surgeon.",
         };
     emitState();
   }).catch((error) => {
@@ -3168,12 +3384,19 @@ if (!hasLock) {
   });
 
   app.whenReady().then(() => {
-    if (drivenRun && process.platform === "darwin" && app.setActivationPolicy) {
+    if (
+      drivenRun
+      && process.env.OPENRAPPTER_DOCK_VISIBLE !== "1"
+      && process.platform === "darwin"
+      && app.setActivationPolicy
+    ) {
       app.setActivationPolicy("accessory");
     }
-    // Blue-brain dock icon in dev too (packaged builds get it from the bundle).
+    // One dock creature owns one isolated neighborhood. The common dinosaur
+    // stays recognizable while the badge and app name identify its owner.
     if (appIcon && !appIcon.isEmpty() && process.platform === "darwin" && app.dock) {
       app.dock.setIcon(appIcon);
+      app.dock.setBadge(neighborhood.dock_badge);
     }
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
       if (permission === "geolocation") {
@@ -3202,6 +3425,25 @@ if (!hasLock) {
     installApplicationMenu();
     loadPendingUpdateResult();
     mainWindow = createWindow();
+    const chatEndpointTask = startOpenRappterChatEndpoint({
+      appIdentity: neighborhood,
+      betaHome,
+      dockVisible: process.platform !== "darwin"
+        || app.dock?.isVisible?.() === true,
+      neighborhoodId: neighborhood.neighborhood_id,
+      ...(process.env.OPENRAPPTER_INSTANCE_TOKEN
+        ? { instanceToken: process.env.OPENRAPPTER_INSTANCE_TOKEN }
+        : {}),
+      requestStop: () => app.quit(),
+      resolveTarget: () => routeManager.activeRoute?.url || null,
+    }).then((endpoint) => {
+      openRappterChatEndpoint = endpoint;
+      return endpoint;
+    }).catch((error) => {
+      console.error(`OpenRappter /chat endpoint unavailable: ${error.message}`);
+      if (process.env.BRAINSTEM_BETA_SMOKE_READY_FILE) throw error;
+      return null;
+    });
     startUiDriverServer({
       resolveTwinUrls: (id) => {
         const twin = twinManager.list().find((t) => t.id === id);
@@ -3229,7 +3471,7 @@ if (!hasLock) {
       console.error(state.uiDriver.message);
       emitState();
     });
-    void startServices();
+    const servicesTask = startServices();
     const e2eStopFile = process.env.BRAINSTEM_BETA_E2E_STOP_FILE;
     if (e2eStopFile) {
       e2eStopTimer = setInterval(() => {
@@ -3244,7 +3486,39 @@ if (!hasLock) {
       process.env.BRAINSTEM_BETA_SMOKE_EXIT_MS || "0",
       10,
     );
-    if (Number.isInteger(smokeExitMs) && smokeExitMs > 0) {
+    const smokeReadyFile = process.env.BRAINSTEM_BETA_SMOKE_READY_FILE;
+    if (smokeReadyFile) {
+      void Promise.all([chatEndpointTask, servicesTask]).then(([endpoint]) => {
+        if (
+          !mainWindow
+          || mainWindow.isDestroyed()
+          || !endpoint?.url
+          || !routeManager.activeRoute?.url
+        ) {
+          throw new Error(`OpenRappter smoke readiness is incomplete: ${
+            JSON.stringify({
+              active_route: routeManager.activeRoute?.url || null,
+              brainstem: state.brainstem,
+              endpoint: endpoint?.url || null,
+              window_created: Boolean(mainWindow && !mainWindow.isDestroyed()),
+            })
+          }`);
+        }
+        writeFileSync(smokeReadyFile, `${JSON.stringify({
+          schema: "openrappter-smoke-ready/1.0",
+          pid: process.pid,
+          window_created: true,
+          chat_endpoint: endpoint.url,
+          active_route: routeManager.activeRoute.url,
+        }, null, 2)}\n`, { mode: 0o600 });
+        if (Number.isInteger(smokeExitMs) && smokeExitMs > 0) {
+          setTimeout(() => app.quit(), smokeExitMs);
+        }
+      }).catch((error) => {
+        console.error(`OpenRappter smoke readiness failed: ${error.message}`);
+        app.exit(1);
+      });
+    } else if (Number.isInteger(smokeExitMs) && smokeExitMs > 0) {
       setTimeout(() => app.quit(), smokeExitMs);
     }
   });
@@ -3270,10 +3544,11 @@ if (!hasLock) {
       e2eStopTimer = null;
     }
     Promise.allSettled([
-      ...Array.from(brainSurgeons.values(), (surgeon) => surgeon.stop()),
+      ...Array.from(rappterSurgeons.values(), (surgeon) => surgeon.stop()),
       twinManager.stopAll(),
       copilot.stop(),
       routeManager.stop(),
+      openRappterChatEndpoint?.stop(),
       uiDriver?.stop(),
     ]).finally(() => {
       ledger?.close();

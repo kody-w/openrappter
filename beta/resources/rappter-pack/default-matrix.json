@@ -1,0 +1,65 @@
+{
+  "schema": "rappter-pack-matrix/1.0",
+  "name": "OpenRappter and Brainstem pack acceptance",
+  "cases": [
+    {
+      "id": "mixed-chat-contract",
+      "action": "chat",
+      "mode": "all",
+      "candidates": ["*"],
+      "prompt": "Reply with PACK_CONTRACT_OK and one sentence naming the useful capability you can contribute.",
+      "expected": {
+        "contains": ["PACK_CONTRACT_OK"],
+        "excludes": ["ERROR"],
+        "required_envelope_fields": ["response", "agent_logs", "session_id"],
+        "max_duration_ms": 300000,
+        "min_passing": 2
+      }
+    },
+    {
+      "id": "first-valid-deliverable",
+      "action": "chat",
+      "mode": "race",
+      "candidates": ["*"],
+      "prompt": "Produce a concise test plan with exactly three numbered checks and end with DELIVERABLE_OK.",
+      "expected": {
+        "contains": ["1.", "2.", "3.", "DELIVERABLE_OK"],
+        "excludes": ["ERROR"],
+        "required_envelope_fields": ["response", "agent_logs", "session_id"],
+        "max_duration_ms": 300000,
+        "min_passing": 1
+      }
+    },
+    {
+      "id": "neighbor-collaboration",
+      "action": "chat",
+      "mode": "relay",
+      "candidates": ["*"],
+      "prompt": "Propose one high-value distributed test and end with NEIGHBOR_HANDOFF.",
+      "handoff_prompt": "Your /chat neighbor replied:\n{{previous}}\nImprove the test, retain its strongest idea, and end with NEIGHBOR_COLLAB_OK.",
+      "expected": {
+        "contains": ["NEIGHBOR_COLLAB_OK"],
+        "excludes": ["ERROR"],
+        "required_envelope_fields": ["response", "agent_logs", "session_id"],
+        "max_duration_ms": 300000,
+        "min_passing": 1
+      }
+    },
+    {
+      "id": "neighbor-collaboration-reverse",
+      "action": "chat",
+      "mode": "relay",
+      "candidates": ["*"],
+      "reverse_candidates": true,
+      "prompt": "Propose one high-value distributed test and end with REVERSE_HANDOFF.",
+      "handoff_prompt": "Your /chat neighbor replied:\n{{previous}}\nImprove the test, retain its strongest idea, and end with REVERSE_COLLAB_OK.",
+      "expected": {
+        "contains": ["REVERSE_COLLAB_OK"],
+        "excludes": ["ERROR"],
+        "required_envelope_fields": ["response", "agent_logs", "session_id"],
+        "max_duration_ms": 300000,
+        "min_passing": 1
+      }
+    }
+  ]
+}

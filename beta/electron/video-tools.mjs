@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import path from "node:path";
 
 import ffmpegStatic from "ffmpeg-static";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
@@ -12,25 +13,44 @@ function unpackedPath(filePath) {
   );
 }
 
-function resolveTool(explicit, bundled, fallback) {
+function resolveTool(explicit, packaged, bundled, fallback) {
   if (explicit) return explicit;
+  if (packaged && existsSync(packaged)) return packaged;
   const unpacked = unpackedPath(bundled);
   if (unpacked && existsSync(unpacked)) return unpacked;
   if (bundled && existsSync(bundled)) return bundled;
   return fallback;
 }
 
-export function resolveFfmpegExecutable(env = process.env) {
+export function resolveFfmpegExecutable(env = process.env, {
+  resourcesPath = process.resourcesPath,
+} = {}) {
   return resolveTool(
     env.BRAINSTEM_BETA_FFMPEG,
+    resourcesPath
+      ? path.join(
+          resourcesPath,
+          "media-tools",
+          process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+        )
+      : "",
     ffmpegStatic,
     "ffmpeg",
   );
 }
 
-export function resolveFfprobeExecutable(env = process.env) {
+export function resolveFfprobeExecutable(env = process.env, {
+  resourcesPath = process.resourcesPath,
+} = {}) {
   return resolveTool(
     env.BRAINSTEM_BETA_FFPROBE,
+    resourcesPath
+      ? path.join(
+          resourcesPath,
+          "media-tools",
+          process.platform === "win32" ? "ffprobe.exe" : "ffprobe",
+        )
+      : "",
     ffprobeInstaller.path,
     "ffprobe",
   );

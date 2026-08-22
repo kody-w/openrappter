@@ -37,7 +37,7 @@ if (-not $tag) {
     )[-1]
 }
 if (-not $tag) {
-    throw "No published RAPP Brainstem Frontier release was found in $repo. If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry."
+    throw "No published OpenRappter release was found in $repo. If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry."
 }
 
 $commit = $null

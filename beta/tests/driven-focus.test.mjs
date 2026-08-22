@@ -29,8 +29,8 @@ test("a driven run shows its window without taking focus", () => {
   );
   assert.match(
     main,
-    /drivenRun && process\.platform === "darwin"[\s\S]*?setActivationPolicy\("accessory"\)/,
-    "on macOS the app must not become the active application during a driven run",
+    /drivenRun[\s\S]*?OPENRAPPTER_DOCK_VISIBLE !== "1"[\s\S]*?process\.platform === "darwin"[\s\S]*?setActivationPolicy\("accessory"\)/,
+    "macOS driven runs stay accessory unless the Dock-identity proof explicitly opts in",
   );
 });
 

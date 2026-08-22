@@ -1,7 +1,8 @@
 {
-  "name": "@openrappter/frontier",
+  "name": "@openrappter/desktop",
   "version": "0.1.0-beta.7",
-  "description": "Skill Recorder-style desktop launcher for the shared RAPP Brainstem runtime.",
+  "description": "OpenRappter desktop application for local-first AI agents powered by GitHub Copilot.",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "main": "electron/bootstrap.mjs",
@@ -11,7 +12,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "check": "node --check electron/bootstrap.mjs && node --check electron/main.mjs && node --check electron/activity-view.mjs && node --check electron/agent-display.mjs && node --check electron/ambient.mjs && node --check electron/brain-surgeon.mjs && node --check electron/brainstem-process.mjs && node --check electron/chat-stream-mode.mjs && node --check electron/chat-look-settings.mjs && node --check electron/dimension-tiles.mjs && node --check electron/arena-layouts.mjs && node --check electron/copilot-runtime.mjs && node --check electron/copilot-studio-auth.mjs && node --check electron/injection-sources.mjs && node --check electron/ledger.mjs && node --check electron/lineage-control.mjs && node --check electron/lineage-store.mjs && node --check electron/rapp-protocol.mjs && node --check electron/route-manager.mjs && node --check electron/twin-ledger-bridge.mjs && node --check electron/twin-preload.cjs && node --check electron/ui-driver-helpers.mjs && node --check electron/ui-driver-server.mjs && node --check electron/update-manager.mjs && node --check electron/update-runner.mjs && node --check electron/video-tools.mjs && node --check electron/rapp-store.mjs && node --check scripts/brainstem-chat.mjs && node --check scripts/data-sloshing-proof.mjs && node --check scripts/drive-via-chat.mjs && node --check scripts/lineage-alm-proof.mjs && node --check scripts/measure-ui-driver-v2.mjs && node --check scripts/package-gate.mjs && node --check scripts/surgeon-chat.mjs && node --check scripts/walkthrough-certify.mjs && node --check scripts/walkthrough-gate.mjs && node --check scripts/walkthrough-provenance.mjs && node --check scripts/walkthrough-via-chat.mjs && node --check scripts/show-mode-capture.mjs && node --check scripts/frontier-acceptance.mjs && node --check ui/autopilot.js && node --check ui/dimension-tiles.js && node --check ui/renderer.js && node --check ui/show-mode-tour.js && node --check ui/stream-render-pacing.js && node --check electron/qqdrill.mjs && node --check electron/qqdrill-deps.mjs && node --check scripts/qqdrill-proof.mjs && node --check electron/drill-app.mjs && node --check scripts/rapp-drill.mjs",
+    "check": "node --check electron/bootstrap.mjs && node --check electron/main.mjs && node --check electron/activity-view.mjs && node --check electron/agent-display.mjs && node --check electron/ambient.mjs && node --check electron/rappter-surgeon.mjs && node --check electron/brainstem-process.mjs && node --check electron/chat-stream-mode.mjs && node --check electron/chat-look-settings.mjs && node --check electron/dimension-tiles.mjs && node --check electron/dogg-summon.mjs && node --check electron/neighborhood-identity.mjs && node --check electron/openrappter-chat-endpoint.mjs && node --check electron/openrappter-hatchery.mjs && node --check electron/openrappter-tile.mjs && node --check electron/rappter-pack.mjs && node --check electron/species-isolation.mjs && node --check electron/arena-layouts.mjs && node --check electron/copilot-runtime.mjs && node --check electron/copilot-studio-auth.mjs && node --check electron/injection-sources.mjs && node --check electron/ledger.mjs && node --check electron/lineage-control.mjs && node --check electron/lineage-store.mjs && node --check electron/rapp-protocol.mjs && node --check electron/route-manager.mjs && node --check electron/twin-ledger-bridge.mjs && node --check electron/twin-preload.cjs && node --check electron/ui-driver-helpers.mjs && node --check electron/ui-driver-server.mjs && node --check electron/update-manager.mjs && node --check electron/update-runner.mjs && node --check electron/video-tools.mjs && node --check electron/rapp-store.mjs && node --check scripts/brainstem-chat.mjs && node --check scripts/openrappter-chat.mjs && node --check scripts/openrappter-hatch.mjs && node --check scripts/data-sloshing-proof.mjs && node --check scripts/drive-via-chat.mjs && node --check scripts/lineage-alm-proof.mjs && node --check scripts/measure-ui-driver-v2.mjs && node --check scripts/openrappter-tile.mjs && node --check scripts/rappter-pack.mjs && node --check scripts/rappter-pack-node.mjs && node --check scripts/package-gate.mjs && node --check scripts/package-hatch-proof.mjs && node --check scripts/prepare-media-tools.mjs && node --check scripts/surgeon-chat.mjs && node --check scripts/walkthrough-certify.mjs && node --check scripts/walkthrough-gate.mjs && node --check scripts/walkthrough-provenance.mjs && node --check scripts/walkthrough-via-chat.mjs && node --check scripts/show-mode-capture.mjs && node --check scripts/frontier-acceptance.mjs && node --check ui/autopilot.js && node --check ui/dimension-tiles.js && node --check ui/renderer.js && node --check ui/show-mode-tour.js && node --check ui/stream-render-pacing.js && node --check electron/qqdrill.mjs && node --check electron/qqdrill-deps.mjs && node --check scripts/qqdrill-proof.mjs && node --check electron/drill-app.mjs && node --check scripts/rapp-drill.mjs",
     "brainstem:chat": "node scripts/brainstem-chat.mjs",
     "drive:e2e": "node scripts/drive-via-chat.mjs",
     "surgeon:chat": "node scripts/surgeon-chat.mjs",
@@ -22,13 +23,15 @@
     "walkthrough:repeat": "node scripts/walkthrough-via-chat.mjs --scenario repeat-ephemeral",
     "walkthrough:stack-churn": "node scripts/walkthrough-via-chat.mjs --scenario stack-churn",
     "show-mode:capture": "node scripts/show-mode-capture.mjs",
+    "tile:describe": "node scripts/openrappter-tile.mjs describe",
+    "pack:status": "node scripts/rappter-pack.mjs status",
+    "twin:list": "node scripts/openrappter-hatch.mjs list",
     "test": "node --test",
-    "dist:mac": "electron-builder --mac dmg zip --arm64 --publish never",
+    "prepare:media": "node scripts/prepare-media-tools.mjs",
+    "dist:mac": "npm run prepare:media && electron-builder --mac dmg zip --arm64 --publish never",
     "package:gate": "node scripts/package-gate.mjs",
     "proof:frontier-runtime": "node scripts/frontier-runtime-proof.mjs",
-    "proof:gitmolt-runtime": "bash scripts/gitmolt-runtime-proof.sh",
-    "dist:win": "electron-builder --win nsis zip --x64 --publish never",
-    "dist:linux": "electron-builder --linux AppImage --x64 --publish never"
+    "proof:gitmolt-runtime": "bash scripts/gitmolt-runtime-proof.sh"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "2.1.2",
@@ -42,8 +45,9 @@
     "electron-builder": "^26.15.6"
   },
   "build": {
-    "appId": "io.github.kody-w.openrappter.frontier",
-    "productName": "RAPP Brainstem Frontier",
+    "afterPack": "scripts/after-pack.cjs",
+    "appId": "io.github.kody-w.openrappter",
+    "productName": "OpenRappter",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -52,13 +56,20 @@
       "electron/**",
       "frontier/rapplications/molter/agents/molter_agent.py",
       "scripts/brainstem-chat.mjs",
+      "scripts/openrappter-chat.mjs",
+      "scripts/openrappter-hatch.mjs",
       "scripts/brainstem_ui_driver_agent.py",
+      "scripts/openrappter-tile.mjs",
+      "scripts/rappter-pack.mjs",
+      "scripts/rappter-pack-node.mjs",
       "scripts/show-mode-capture.mjs",
       "scripts/surgeon-chat.mjs",
       "scripts/walkthrough-gate.mjs",
       "scripts/walkthrough-provenance.mjs",
       "scripts/walkthrough-via-chat.mjs",
       "resources/**",
+      "resources/rappter-pack/**",
+      "node_modules/ffmpeg-static/**",
       "ui/**",
       "build/icon.png",
       "package.json",
@@ -94,13 +105,13 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "RAPP Brainstem Frontier uses the microphone only when you explicitly enable voice mode.",
-        "NSLocationUsageDescription": "RAPP Brainstem Frontier uses location only to provide on-device ambient context for requests such as weather or drop-a-pin."
+        "NSMicrophoneUsageDescription": "OpenRappter uses the microphone only when you explicitly enable voice mode.",
+        "NSLocationUsageDescription": "OpenRappter uses location only to provide on-device ambient context for requests such as weather or drop-a-pin."
       },
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
-      "title": "RAPP Brainstem Frontier ${version}",
+      "title": "OpenRappter ${version}",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
     },
     "win": {

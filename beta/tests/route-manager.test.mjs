@@ -421,7 +421,7 @@ test("active-agent deletion persists for stack and global sources", async () => 
       () => manager.removeActiveAgent({
         filename: "context_memory_agent.py",
       }),
-      /generated from the Frontier identity/,
+      /generated from the OpenRappter identity/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -954,4 +954,11 @@ test("ephemeral request queued behind replacement uses the new active route", as
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+test("Molter verification cannot write bytecode into the signed bundle", () => {
+  const source = readFileSync(
+    new URL("../electron/route-manager.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /PYTHONDONTWRITEBYTECODE: "1"/);
 });

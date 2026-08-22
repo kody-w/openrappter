@@ -275,7 +275,7 @@ whether a surface is open.
 ten-second undo from [`DIMENSION-TILES.md`](DIMENSION-TILES.md). One vocabulary
 for the person, the AI, and the tests.
 
-**6. It is discoverable from inside the product.** The same `help` output is what the Brain Surgeon
+**6. It is discoverable from inside the product.** The same `help` output is what the Rappter Surgeon
 is told about at startup, so an AI already in the window knows the free path exists before it spends
 a model call on a button.
 

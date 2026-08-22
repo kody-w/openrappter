@@ -196,7 +196,7 @@ export function resolvePortableNode({
     const candidate = path.join(betaHome, directory, executable);
     if (existsSync(candidate)) return candidate;
   }
-  throw new Error(`Portable Node.js is missing from ${betaHome}. Re-run the Frontier installer.`);
+  throw new Error(`Portable Node.js is missing from ${betaHome}. Re-run the OpenRappter installer.`);
 }
 
 function electronExecutable(repoRoot, platform) {
@@ -243,15 +243,15 @@ export function resolveManagedInstall({
   const betaHome = inferManagedBetaHome(packageDir, env);
   if (!betaHome || path.resolve(repoRoot) !== path.join(betaHome, "src")) {
     throw new Error(
-      "This checkout is not managed by the RAPP Brainstem Frontier installer. "
-      + "Update it with Git or re-run the Frontier installer.",
+      "This checkout is not managed by the OpenRappter installer. "
+      + "Update it with Git or re-run the OpenRappter installer.",
     );
   }
 
   const node = resolvePortableNode({ betaHome, env, platform, arch });
   const electron = electronExecutable(repoRoot, platform);
   if (!existsSync(electron)) {
-    throw new Error(`Electron is missing at ${electron}. Re-run the Frontier installer.`);
+    throw new Error(`Electron is missing at ${electron}. Re-run the OpenRappter installer.`);
   }
   return { betaHome, electron, node };
 }
@@ -670,6 +670,8 @@ export async function prepareUpdate({
   const request = {
     betaHome: managed.betaHome,
     brainstemHome,
+    openRappterHome: env.OPENRAPPTER_HOME || path.dirname(managed.betaHome),
+    openRappterBrainstemHome: env.OPENRAPPTER_BRAINSTEM_HOME || brainstemHome,
     brainstemExpectedHead: brainstemCheckout.head,
     brainstemRepoRoot: brainstemCheckout.repoRoot,
     betaExpectedHead: betaCheckout.head,
@@ -711,6 +713,8 @@ export async function prepareUpdate({
 
   const updaterEnv = {
     ...env,
+    OPENRAPPTER_HOME: request.openRappterHome,
+    OPENRAPPTER_BRAINSTEM_HOME: request.openRappterBrainstemHome,
     BRAINSTEM_BETA_HOME: managed.betaHome,
     BRAINSTEM_BETA_NODE_EXE: managed.node,
     BRAINSTEM_BETA_REPO_URL: update.remoteUrl,
@@ -743,7 +747,7 @@ export async function prepareUpdate({
     ]) {
       rmSync(temporaryPath, { force: true });
     }
-    throw new Error(`Could not start the Frontier updater: ${asErrorMessage(error)}`);
+    throw new Error(`Could not start the OpenRappter updater: ${asErrorMessage(error)}`);
   }
 
   return {

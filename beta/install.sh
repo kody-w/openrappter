@@ -1,12 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-# RAPP Brainstem Frontier desktop launcher.
-# Installs a Skill Recorder-style Electron launcher while reusing the global
-# ~/.brainstem runtime installed by the mainline AIBAST installer.
+# OpenRappter desktop application.
+# Brainstem is the bare twin. OpenRappter is the fully built-out twin: same
+# /chat wire, separate app state, runtime home, worker ports, and lifecycle.
 
-BRAINSTEM_HOME="${BRAINSTEM_HOME:-$HOME/.brainstem}"
-BETA_HOME="${BRAINSTEM_BETA_HOME:-$BRAINSTEM_HOME/beta-launcher}"
+OPENRAPPTER_HOME="${OPENRAPPTER_HOME:-$HOME/.openrappter}"
+BRAINSTEM_HOME="${OPENRAPPTER_BRAINSTEM_HOME:-$OPENRAPPTER_HOME/brainstem}"
+BETA_HOME="${BRAINSTEM_BETA_HOME:-$OPENRAPPTER_HOME/desktop}"
 BETA_SOURCE="$BETA_HOME/src"
 REPO_URL="${BRAINSTEM_BETA_REPO_URL:-https://github.com/kody-w/openrappter.git}"
 # Where the Brainstem KERNEL comes from, which is not necessarily where the
@@ -27,6 +28,79 @@ NODE_VERSION="${BRAINSTEM_BETA_NODE_VERSION:-24.19.0}"
 NO_LAUNCH="${BRAINSTEM_BETA_NO_LAUNCH:-0}"
 PORTABLE_NODE_DIR=""
 BETA_LAUNCHER_PATH=""
+
+canonical_future_directory() {
+    local raw="$1"
+    [[ "$raw" != *$'\n'* && "$raw" != *$'\r'* && -n "$raw" ]] || return 1
+    local absolute="$raw"
+    [[ "$absolute" == /* ]] || absolute="$PWD/$absolute"
+    local -a parts=()
+    local -a segments=()
+    local segment
+    IFS='/' read -r -a segments <<< "$absolute"
+    for segment in "${segments[@]}"; do
+        case "$segment" in
+            ""|".") ;;
+            "..")
+                ((${#parts[@]})) && unset "parts[$((${#parts[@]} - 1))]"
+                ;;
+            *) parts+=("$segment") ;;
+        esac
+    done
+    local normalized=""
+    for segment in "${parts[@]}"; do normalized="$normalized/$segment"; done
+    [[ -n "$normalized" ]] || normalized="/"
+    local ancestor="$normalized"
+    local suffix=""
+    while [[ ! -e "$ancestor" ]]; do
+        suffix="/${ancestor##*/}$suffix"
+        ancestor="${ancestor%/*}"
+        [[ -n "$ancestor" ]] || ancestor="/"
+    done
+    [[ -d "$ancestor" ]] || return 1
+    local physical
+    physical="$(cd -P -- "$ancestor" 2>/dev/null && pwd -P)" || return 1
+    printf '%s%s\n' "${physical%/}" "$suffix"
+}
+
+path_within() {
+    [[ "$1" == "$2" || "$1" == "$2/"* ]]
+}
+
+paths_overlap() {
+    path_within "$1" "$2" || path_within "$2" "$1"
+}
+
+CANONICAL_HOME="$(canonical_future_directory "$HOME")" || {
+    echo "[X] Refusing species driftback: HOME is not a safe directory path." >&2
+    exit 1
+}
+CANONICAL_BARE="$(canonical_future_directory "$HOME/.brainstem")" || exit 1
+CANONICAL_OPENRAPPTER="$(canonical_future_directory "$OPENRAPPTER_HOME")" || exit 1
+CANONICAL_BRAINSTEM="$(canonical_future_directory "$BRAINSTEM_HOME")" || exit 1
+CANONICAL_BETA="$(canonical_future_directory "$BETA_HOME")" || exit 1
+
+if paths_overlap "$CANONICAL_OPENRAPPTER" "$CANONICAL_BARE" \
+    || paths_overlap "$CANONICAL_BRAINSTEM" "$CANONICAL_BARE" \
+    || paths_overlap "$CANONICAL_BETA" "$CANONICAL_BARE" \
+    || [[ "$CANONICAL_BRAINSTEM" == "$CANONICAL_OPENRAPPTER" ]] \
+    || ! path_within "$CANONICAL_BRAINSTEM" "$CANONICAL_OPENRAPPTER" \
+    || [[ "$CANONICAL_BETA" == "$CANONICAL_OPENRAPPTER" ]] \
+    || ! path_within "$CANONICAL_BETA" "$CANONICAL_OPENRAPPTER" \
+    || paths_overlap "$CANONICAL_BRAINSTEM" "$CANONICAL_BETA"; then
+    echo "[X] Refusing species driftback: OpenRappter paths must be canonical, isolated children of its own home." >&2
+    exit 1
+fi
+
+OPENRAPPTER_HOME="$CANONICAL_OPENRAPPTER"
+BRAINSTEM_HOME="$CANONICAL_BRAINSTEM"
+BETA_HOME="$CANONICAL_BETA"
+BETA_SOURCE="$BETA_HOME/src"
+
+if [[ "${BRAINSTEM_BETA_VALIDATE_PATHS_ONLY:-0}" == "1" ]]; then
+    printf 'OpenRappter paths are isolated: %s\n' "$OPENRAPPTER_HOME"
+    exit 0
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -294,18 +368,26 @@ write_launchers() {
     local launcher="$BETA_HOME/launch.sh"
     cat > "$launcher" <<EOF
 #!/bin/sh
+export OPENRAPPTER_HOME="$OPENRAPPTER_HOME"
+export OPENRAPPTER_BRAINSTEM_HOME="$BRAINSTEM_HOME"
 export BRAINSTEM_HOME="$BRAINSTEM_HOME"
 export BRAINSTEM_BETA_HOME="$BETA_HOME"
 export BRAINSTEM_BETA_REPO_URL="$REPO_URL"
 export BRAINSTEM_BETA_UPDATE_REF="$UPDATE_REF"
+export BRAINSTEM_BETA_OWN_PORT="1"
 exec "$electron_bin" "$BETA_SOURCE/beta" "\$@"
 EOF
     chmod +x "$launcher"
 
     mkdir -p "$HOME/.local/bin"
-    cat > "$HOME/.local/bin/brainstem-frontier" <<EOF
+    cat > "$HOME/.local/bin/openrappter-app" <<EOF
 #!/bin/sh
 exec "$launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-app"
+    cat > "$HOME/.local/bin/brainstem-frontier" <<EOF
+#!/bin/sh
+exec "$HOME/.local/bin/openrappter-app" "\$@"
 EOF
     chmod +x "$HOME/.local/bin/brainstem-frontier"
     cat > "$HOME/.local/bin/brainstem-beta" <<EOF
@@ -323,24 +405,51 @@ export BRAINSTEM_BETA_LAUNCHER="$launcher"
 exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/surgeon-chat.mjs" "\$@"
 EOF
     chmod +x "$surgeon_launcher"
-    cat > "$HOME/.local/bin/brainstem-surgeon" <<EOF
+    cat > "$HOME/.local/bin/openrappter-surgeon" <<EOF
 #!/bin/sh
 exec "$surgeon_launcher" "\$@"
 EOF
+    chmod +x "$HOME/.local/bin/openrappter-surgeon"
+    cat > "$HOME/.local/bin/brainstem-surgeon" <<EOF
+#!/bin/sh
+exec "$HOME/.local/bin/openrappter-surgeon" "\$@"
+EOF
     chmod +x "$HOME/.local/bin/brainstem-surgeon"
 
-    local chat_launcher="$BETA_HOME/brainstem-chat.sh"
+    local chat_launcher="$BETA_HOME/openrappter-chat.sh"
     cat > "$chat_launcher" <<EOF
 #!/bin/sh
+export OPENRAPPTER_HOME="$OPENRAPPTER_HOME"
+export BRAINSTEM_HOME="$BRAINSTEM_HOME"
+export BRAINSTEM_BETA_HOME="$BETA_HOME"
+export BRAINSTEM_BETA_LAUNCHER="$launcher"
+exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/openrappter-chat.mjs" "\$@"
+EOF
+    chmod +x "$chat_launcher"
+    cat > "$HOME/.local/bin/openrappter-chat" <<EOF
+#!/bin/sh
+exec "$chat_launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-chat"
+
+    local drive_launcher="$BETA_HOME/openrappter-drive.sh"
+    cat > "$drive_launcher" <<EOF
+#!/bin/sh
+export OPENRAPPTER_HOME="$OPENRAPPTER_HOME"
 export BRAINSTEM_HOME="$BRAINSTEM_HOME"
 export BRAINSTEM_BETA_HOME="$BETA_HOME"
 export BRAINSTEM_BETA_LAUNCHER="$launcher"
 exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/brainstem-chat.mjs" "\$@"
 EOF
-    chmod +x "$chat_launcher"
+    chmod +x "$drive_launcher"
+    cat > "$HOME/.local/bin/openrappter-drive" <<EOF
+#!/bin/sh
+exec "$drive_launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-drive"
     cat > "$HOME/.local/bin/brainstem-chat" <<EOF
 #!/bin/sh
-exec "$chat_launcher" "\$@"
+exec "$HOME/.local/bin/openrappter-drive" "\$@"
 EOF
     chmod +x "$HOME/.local/bin/brainstem-chat"
 
@@ -353,53 +462,131 @@ export BRAINSTEM_BETA_LAUNCHER="$launcher"
 exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/walkthrough-via-chat.mjs" "\$@"
 EOF
     chmod +x "$walkthrough_launcher"
-    cat > "$HOME/.local/bin/brainstem-walkthrough" <<EOF
+    cat > "$HOME/.local/bin/openrappter-walkthrough" <<EOF
 #!/bin/sh
 exec "$walkthrough_launcher" "\$@"
 EOF
+    chmod +x "$HOME/.local/bin/openrappter-walkthrough"
+    cat > "$HOME/.local/bin/brainstem-walkthrough" <<EOF
+#!/bin/sh
+exec "$HOME/.local/bin/openrappter-walkthrough" "\$@"
+EOF
     chmod +x "$HOME/.local/bin/brainstem-walkthrough"
 
+    local tile_launcher="$BETA_HOME/openrappter-tile.sh"
+    cat > "$tile_launcher" <<EOF
+#!/bin/sh
+: "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
+: "\${BRAINSTEM_BETA_HOME:=$BETA_HOME}"
+: "\${BRAINSTEM_BETA_SOURCE_DIR:=$BRAINSTEM_RUNTIME_DIR}"
+export BRAINSTEM_HOME BRAINSTEM_BETA_HOME BRAINSTEM_BETA_SOURCE_DIR
+exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/openrappter-tile.mjs" "\$@"
+EOF
+    chmod +x "$tile_launcher"
+    cat > "$HOME/.local/bin/openrappter-tile" <<EOF
+#!/bin/sh
+exec "$tile_launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-tile"
+
+    local pack_launcher="$BETA_HOME/rappter-pack.sh"
+    cat > "$pack_launcher" <<EOF
+#!/bin/sh
+: "\${OPENRAPPTER_HOME:=$OPENRAPPTER_HOME}"
+: "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
+: "\${BRAINSTEM_BETA_HOME:=$BETA_HOME}"
+export OPENRAPPTER_HOME BRAINSTEM_HOME BRAINSTEM_BETA_HOME
+exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/rappter-pack.mjs" "\$@"
+EOF
+    chmod +x "$pack_launcher"
+    cat > "$HOME/.local/bin/openrappter-pack" <<EOF
+#!/bin/sh
+exec "$pack_launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-pack"
+
+    local pack_node_launcher="$BETA_HOME/rappter-pack-node.sh"
+    cat > "$pack_node_launcher" <<EOF
+#!/bin/sh
+: "\${OPENRAPPTER_HOME:=$OPENRAPPTER_HOME}"
+: "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
+: "\${BRAINSTEM_BETA_HOME:=$BETA_HOME}"
+export OPENRAPPTER_HOME BRAINSTEM_HOME BRAINSTEM_BETA_HOME
+exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/rappter-pack-node.mjs"
+EOF
+    chmod +x "$pack_node_launcher"
+    cat > "$HOME/.local/bin/openrappter-pack-node" <<EOF
+#!/bin/sh
+exec "$pack_node_launcher"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-pack-node"
+
+    local hatch_launcher="$BETA_HOME/openrappter-hatch.sh"
+    cat > "$hatch_launcher" <<EOF
+#!/bin/sh
+: "\${OPENRAPPTER_HOME:=$OPENRAPPTER_HOME}"
+: "\${BRAINSTEM_HOME:=$BRAINSTEM_HOME}"
+: "\${BRAINSTEM_BETA_SOURCE_DIR:=$BRAINSTEM_RUNTIME_DIR}"
+: "\${BRAINSTEM_BETA_PYTHON:=$BRAINSTEM_PYTHON}"
+: "\${RAPPTER_PACK_CONFIG:=\${OPENRAPPTER_HOME}/pack.json}"
+export OPENRAPPTER_HOME BRAINSTEM_HOME BRAINSTEM_BETA_SOURCE_DIR
+export BRAINSTEM_BETA_PYTHON RAPPTER_PACK_CONFIG
+exec "$PORTABLE_NODE_DIR/bin/node" "$BETA_SOURCE/beta/scripts/openrappter-hatch.mjs" "\$@"
+EOF
+    chmod +x "$hatch_launcher"
+    cat > "$HOME/.local/bin/openrappter-hatch" <<EOF
+#!/bin/sh
+exec "$hatch_launcher" "\$@"
+EOF
+    chmod +x "$HOME/.local/bin/openrappter-hatch"
+
     if [[ "$platform" == darwin-* ]]; then
-        local app_dir="$HOME/Applications/RAPP Brainstem Frontier.app"
-        local legacy_app_dir="$HOME/Applications/RAPP Brainstem Beta.app"
-        if [[ -d "$legacy_app_dir" ]]; then
-            rm -rf "$legacy_app_dir"
-        fi
+        local app_dir="$HOME/Applications/OpenRappter.app"
+        local legacy_app_dir
+        for legacy_app_dir in \
+            "$HOME/Applications/RAPP Brainstem Frontier.app" \
+            "$HOME/Applications/RAPP Brainstem Beta.app"; do
+            if [[ -d "$legacy_app_dir" ]]; then
+                rm -rf "$legacy_app_dir"
+            fi
+        done
         mkdir -p "$app_dir/Contents/MacOS"
         cat > "$app_dir/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>RAPP Brainstem Frontier</string>
-  <key>CFBundleDisplayName</key><string>RAPP Brainstem Frontier</string>
-  <key>CFBundleIdentifier</key><string>io.github.kody-w.openrappter.frontier</string>
+  <key>CFBundleName</key><string>OpenRappter</string>
+  <key>CFBundleDisplayName</key><string>OpenRappter</string>
+  <key>CFBundleIdentifier</key><string>io.github.kody-w.openrappter</string>
   <key>CFBundleVersion</key><string>0.1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleExecutable</key><string>RAPP Brainstem Frontier</string>
+  <key>CFBundleExecutable</key><string>OpenRappter</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
 </dict></plist>
 EOF
-        cat > "$app_dir/Contents/MacOS/RAPP Brainstem Frontier" <<EOF
+        cat > "$app_dir/Contents/MacOS/OpenRappter" <<EOF
 #!/bin/sh
 exec "$launcher"
 EOF
-        chmod +x "$app_dir/Contents/MacOS/RAPP Brainstem Frontier"
+        chmod +x "$app_dir/Contents/MacOS/OpenRappter"
         echo -e "  ${GREEN}[OK]${NC} App installed: $app_dir"
     else
         local applications="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
         mkdir -p "$applications"
-        rm -f "$applications/rapp-brainstem-beta.desktop"
-        cat > "$applications/rapp-brainstem-frontier.desktop" <<EOF
+        rm -f \
+            "$applications/rapp-brainstem-beta.desktop" \
+            "$applications/rapp-brainstem-frontier.desktop"
+        cat > "$applications/openrappter.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=RAPP Brainstem Frontier
-Comment=Desktop launcher for the shared RAPP Brainstem
+Name=OpenRappter
+Comment=Local-first AI agent application powered by GitHub Copilot
 Exec="$launcher"
 Terminal=false
 Categories=Development;Utility;
 StartupNotify=true
 EOF
-        chmod +x "$applications/rapp-brainstem-frontier.desktop"
+        chmod +x "$applications/openrappter.desktop"
         echo -e "  ${GREEN}[OK]${NC} Desktop entry installed"
     fi
 
@@ -408,8 +595,8 @@ EOF
 
 main() {
     echo ""
-    echo -e "${CYAN}RAPP Brainstem Frontier Launcher${NC}"
-    echo "Skill Recorder-style desktop launch over the shared global Brainstem"
+    echo -e "${CYAN}OpenRappter Launcher${NC}"
+    echo "The full local-first OpenRappter application"
     echo ""
 
     require_command curl
@@ -427,9 +614,9 @@ main() {
     write_launchers "$platform"
 
     echo ""
-    echo -e "  ${GREEN}[OK] RAPP Brainstem Frontier is installed.${NC}"
-    echo "  Frontier and standard Brainstem share: $BRAINSTEM_HOME"
-    echo "  Start later with: brainstem-frontier"
+    echo -e "  ${GREEN}[OK] OpenRappter is installed.${NC}"
+    echo "  Brainstem runtime data: $BRAINSTEM_HOME"
+    echo "  Start later with: openrappter-app"
     echo ""
     if [ "$NO_LAUNCH" != "1" ]; then
         nohup "$BETA_LAUNCHER_PATH" >"$BETA_HOME/launcher.log" 2>&1 &

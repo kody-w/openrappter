@@ -7,7 +7,7 @@
 ## Why
 
 A rapplication is a twin: a specialized agent set **plus its own UI**, both
-speaking the twin's `/chat`. In RAPP Brainstem Frontier, that UI is shown in a
+speaking the twin's `/chat`. In OpenRappter, that UI is shown in a
 herd tile (or popped out) and an AI can drive it **just like the user** — clicks,
 typing, an animated cursor — so a person can be fully hands-off and simply chat
 with the AI, which then operates the rapplication.

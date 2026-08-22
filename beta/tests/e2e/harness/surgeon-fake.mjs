@@ -17,7 +17,7 @@ function loadScript(env) {
   return {
     sessions: [{
       match: {},
-      turns: [{ final: "Fake Brain Surgeon is ready." }],
+      turns: [{ final: "Fake Rappter Surgeon is ready." }],
     }],
   };
 }

@@ -4,7 +4,7 @@
 Test the agent in your own Brainstem. Confirm. Promote — Copilot Studio, Scout,
 Cowork, or keep it local.**
 
-Show Mode is a Frontier-tagged path in RAPP Brainstem Frontier. Some customers
+Show Mode is a Frontier-tagged path in OpenRappter. Some customers
 can describe their process (the [interview loop](../../README.md)); some would
 rather show it. Show Mode turns a live recording, a video, a set of screenshots,
 or a transcript into a single-file agent you hotload and **test in your own
@@ -13,7 +13,7 @@ Brainstem first**, then promote into the Microsoft AI stack.
 This page is the built-in click-through preview, frame by frame. It is a
 **preview**: the panes paint synthetic content over the real UI; nothing is
 recorded, analyzed, hotloaded, or sent. Run it yourself from the **Show Mode:
-click-through preview** pill in the Brain Surgeon, from the intro tile, or open
+click-through preview** pill in the Rappter Surgeon, from the intro tile, or open
 [`beta/show-mode.html`](../../show-mode.html) as a shareable page.
 
 > Screenshots below are produced by driving the real Frontier window through the
@@ -29,7 +29,7 @@ click-through preview** pill in the Brain Surgeon, from the intro tile, or open
 ### 2 · The interview loop, for people who can describe the process
 ![The interview loop](step-02-interview.png)
 
-### 3 · Show Mode — one pill in the Brain Surgeon
+### 3 · Show Mode — one pill in the Rappter Surgeon
 ![Show Mode pill](step-03-pill.png)
 
 ### 4 · Four doors into one pipe: record, video, screenshots, transcript

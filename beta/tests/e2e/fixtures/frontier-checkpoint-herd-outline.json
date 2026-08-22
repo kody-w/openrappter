@@ -13,13 +13,13 @@
   },
   {
     "h": "@shell.surgeonHerd",
-    "name": "Herd view — chat with several Copilots at once",
+    "name": "Herd view",
     "role": "button",
     "state": "enabled"
   },
   {
     "h": "@shell.surgeonReset",
-    "name": "Clear and reset Brain Surgeon chat",
+    "name": "Clear and reset Rappter Surgeon chat",
     "role": "button",
     "state": "enabled"
   },
@@ -37,7 +37,7 @@
   },
   {
     "h": "@shell.surgeonNewTab",
-    "name": "New Copilot chat (same Brainstem)",
+    "name": "New Copilot chat (same OpenRappter workspace)",
     "role": "button",
     "state": "enabled"
   },
@@ -49,7 +49,7 @@
   },
   {
     "h": "[data-drive=\"surgeon[1].session\"] > div > div:nth-of-type(2) > button:nth-of-type(2)",
-    "name": "Inspect this Brainstem and tell me what it can do",
+    "name": "Inspect OpenRappter and tell me what it can do",
     "role": "button",
     "state": "enabled"
   },

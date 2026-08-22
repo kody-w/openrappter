@@ -42,7 +42,7 @@ if [ -z "$tag" ]; then
     tag=$(tags_via_git)
 fi
 [ -n "$tag" ] || {
-    echo "No published RAPP Brainstem Frontier release was found in $repo." >&2
+    echo "No published OpenRappter release was found in $repo." >&2
     echo "If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry." >&2
     exit 3
 }

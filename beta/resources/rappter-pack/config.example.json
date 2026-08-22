@@ -1,0 +1,27 @@
+{
+  "schema": "rappter-pack/1.0",
+  "pack_id": "mac-mini-pack",
+  "nodes": [
+    {
+      "id": "local-brainstem",
+      "machine": "this-mac",
+      "kind": "brainstem",
+      "capabilities": ["chat", "rapp1"],
+      "transport": { "kind": "local" }
+    },
+    {
+      "id": "local-openrappter",
+      "machine": "this-mac",
+      "kind": "openrappter",
+      "capabilities": ["chat", "rapp1", "tiles", "arena"],
+      "transport": { "kind": "local" }
+    },
+    {
+      "id": "remote-openrappter",
+      "machine": "other-mini.local",
+      "kind": "openrappter",
+      "capabilities": ["chat", "rapp1", "tiles", "arena"],
+      "transport": { "kind": "ssh", "host": "other-mini.local" }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-// Drive the Show Mode click-through inside the running RAPP Brainstem Frontier
+// Drive the Show Mode click-through inside the running OpenRappter
 // window through the token-authenticated UI driver bridge, and save one
 // screenshot per step. This is how an AI (or CI) exercises the click-through
 // exactly as a person clicking Next would see it, and how the README images
@@ -7,7 +7,7 @@
 //   node scripts/show-mode-capture.mjs [--out docs/show-mode] [--pace 900]
 //                                      [--force] [--keep-open] [--from <step>]
 //
-// Requires Frontier to be open (it will launch it through the beta launcher if
+// Requires OpenRappter to be open (it will launch it through the beta launcher if
 // not). Copilot sign-in is NOT required: the bridge drives the shell directly.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -58,13 +58,13 @@ async function waitForBridge(timeoutMs = 60000) {
     }
     await sleep(250);
   }
-  throw new Error(`RAPP Brainstem Frontier is not ready: ${lastError?.message || "timeout"}`);
+  throw new Error(`OpenRappter is not ready: ${lastError?.message || "timeout"}`);
 }
 
 function launchBeta() {
   const launcher = process.env.BRAINSTEM_BETA_LAUNCHER
     || path.join(betaHome, process.platform === "win32" ? "launch.cmd" : "launch.sh");
-  if (!existsSync(launcher)) throw new Error(`Frontier is closed and its launcher is missing at ${launcher}.`);
+  if (!existsSync(launcher)) throw new Error(`OpenRappter is closed and its launcher is missing at ${launcher}.`);
   const child = process.platform === "win32"
     ? spawn("cmd.exe", ["/d", "/c", launcher], { detached: true, stdio: "ignore", windowsHide: true })
     : spawn(launcher, [], { detached: true, stdio: "ignore" });
@@ -80,7 +80,7 @@ async function main() {
     metadata = await waitForBridge();
   }
   const status = await bridge(metadata, { action: "tour", value: "status" });
-  if (!status?.available) throw new Error(status?.error || "Show Mode click-through is not loaded in the Frontier window.");
+  if (!status?.available) throw new Error(status?.error || "Show Mode click-through is not loaded in the OpenRappter window.");
   const steps = status.steps;
   const startIndex = fromStep ? Math.max(0, steps.indexOf(fromStep)) : 0;
   mkdirSync(outDir, { recursive: true });

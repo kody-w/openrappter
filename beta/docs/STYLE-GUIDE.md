@@ -1,157 +1,177 @@
-# RAPP Brainstem Frontier — Style Guide
+# OpenRappter Style Guide
 
-The locked-in visual + interaction language for the Frontier launcher. As the
-app evolves, new surfaces conform to this; they do not redefine it. If a change
-needs to break a rule here, change this doc in the same PR and say why.
+This is the product identity for the full OpenRappter organism. Brainstem is the
+bare twin; OpenRappter is the fully built-out twin. They share the exact
+`/chat` wire but not the desktop app's name, icon, state, or dock identity.
 
-Philosophy: **"engine, not experience."** The Frontier is confident, quiet
-infrastructure — a developer tool that teaches by doing. Calm dark surfaces, one
-brand accent, semantic color used sparingly, and never decoration for its own
-sake.
+OpenRappter is local-first, capable, calm, and visibly alive. Its interface
+should feel like a trustworthy workbench for agents rather than a skin over a
+chat window.
 
----
+## 1. Naming hierarchy
 
-## 1. The brandmark
+| Name | Meaning | Customer-facing use |
+|------|---------|---------------------|
+| **OpenRappter** | The complete desktop organism | App, dock, menus, installer, self tile |
+| **Rappter Surgeon** | GitHub Copilot operating on the whole organism | Builder panel and CLI |
+| **Brainstem** | The unchanged local `/chat` runtime component | Architecture and diagnostics |
+| **Rappter Pack Sentinel** | The control plane for mixed distributed nodes | Pack inventory and dispatch |
+| **RAPP/1** | The protocol and portable artifact substrate | Identity, tiles, eggs, evidence |
 
-The Brainstem **brain glyph** is the single, fixed identity mark. Kody: *"like
-a permanent identity mark — get it right, and keep it the same everywhere."* **Never redraw,
-restyle, or approximate it.** It has one canonical source: the glyph the Grail
-app already serves as its favicon.
+Never call the full app "RAPP Brainstem", "Brainstem Frontier", or "Brain
+Surgeon". Explain the relationship as **bare twin / fully built-out twin**. The
+two products must remain easy to distinguish and able to run side by side.
 
-- **Canonical vector:** `viewBox 0 0 512 512`, a single `<path>` beginning
-  `M184 0c-30.9 0-56.5 22.7-61.1 52.3…`. Pull it verbatim from the Grail
-  brainstem (`curl -s localhost:7071/` → the `<link rel="icon">` line). Do not
-  hand-author a lookalike.
-- **Inline / favicon treatment:** the glyph in **brand blue `#58a6ff`** on
-  transparent.
-- **App / dock / tile treatment:** the *same* glyph in **white**, centered on a
-  rounded blue tile (tile gradient `#3b82f6 → #2563eb`, `rx = 224/1024`). This is
-  the only approved "container" treatment.
-- **Clear space:** keep padding ≥ 12% of the tile on every side (the generated
-  tile already does).
-- **Don't:** recolor the glyph outside {`#58a6ff`, white}, add a drop shadow to
-  the glyph, rotate it, add extra folds/eyes/antennae, or place it on a busy
-  background.
+## 2. The OpenRappter dinosaur
 
-**Assets** (all regenerated from one source `beta/build/icon.svg`, which embeds
-the exact path):
+The **OpenRappter dinosaur** is the single fixed product brandmark. **Never redraw,
+approximate, replace, rotate, or combine it with the Brainstem brain glyph.**
 
-| File | Use |
-|------|-----|
-| `beta/build/icon.svg` | source of truth (blue tile + white glyph) |
-| `beta/build/icon.png` | 1024² universal source for packagers |
-| `beta/build/icon.icns` | macOS app bundle |
-| `beta/build/icon.ico` | Windows (16–256) |
-| `beta/build/icons/16…1024` | desktop + iOS/Android/PWA sizes |
-| `beta/build/manifest.webmanifest` | PWA / mobile install |
+- Source of truth: `beta/build/icon.svg`, group `id="dino"`.
+- Shape begins `M238 614c40-182 157-302 320-302`.
+- App tile: rounded dark square, `#07111f → #102b27`.
+- Dinosaur: `#58f5d2 → #72b5ff`.
+- Eye/cutout: `#07111f`.
+- Clear space: at least 12% on all sides.
+- Dock requirement: at normal macOS dock size, OpenRappter must remain visually
+  distinct from the blue Brainstem brain before reading either label.
 
-Rebuild: `rsvg-convert` per size → `iconutil -c icns` → Pillow for `.ico`. Wired
-at runtime in `beta/electron/main.mjs` (`appIcon` → window `icon` + `app.dock.setIcon`)
-and packaged via `beta/package.json` (`mac`/`win`/`linux` `.icon`). See the
-`brainstem-brandmark` estate memory.
+The same source generates:
 
----
-
-## 2. Color
-
-Dark-first, GitHub-dark lineage. Use the tokens below; don't introduce new greys.
-
-### Surfaces (back → front)
-| Token | Hex | Where |
-|-------|-----|-------|
-| App ground | `#0d1117` | window background |
-| Panel | `#0f1013` / `#161b22` | chat log, tiles |
-| Raised | `#17181b` / `#1c1e23` | composer, input, bubbles |
-| Border | `#26282d` | default hairline |
-| Border strong | `#2a2d33` / `#30363d` | inputs, emphasis |
-
-### Text
-| Token | Hex |
+| Asset | Use |
 |-------|-----|
-| Primary | `#e6edf3` / `#e7e8ea` |
-| Secondary | `#c8c9cc` / `#d7dae0` |
-| Muted | `#8b8f98` / `#9aa0a9` |
-| Faint / placeholder | `#6e7681` |
+| `build/icon.svg` | Canonical vector and shell favicon |
+| `build/icon.png` | Runtime window/dock and universal 1024px source |
+| `build/icon.icns` | macOS app bundle |
+| `build/icon.ico` | Windows shortcut and executable |
+| `build/icons/` | Linux, PWA, and multi-size surfaces |
+| `build/manifest.webmanifest` | Installed web metadata |
 
-### Accents
-| Role | Hex | Notes |
-|------|-----|-------|
-| **Brand blue** | `#58a6ff` | the brandmark, logo, primary highlight |
-| Action blue | `#3d7cf0` → `#356fe0` | the *user's own* chat bubble (gradient), send |
-| **Twin purple** | `#7c6bd0` / `#b79cff` | everything rapplication-twin: badge `◈`, tile chrome (`#1b1730` bg, `#2f2650` border), assistant bubble left-rule |
-| Success green | `#3fb950` / `#5cc271` | "done"/ready status, second signal dot |
-| Warning amber | `#e3b341` | "sign in"/needs-auth status |
-| Error red | `#ff9a9a` on `#2a1618` | error bubbles |
+Do not use the Brainstem glyph as an OpenRappter fallback. A missing dinosaur is
+a failed package gate, not permission to borrow the bare twin's icon.
 
-**Rule:** blue = the Brainstem/you; purple = a twin/rapplication; green/amber/red
-are **semantic status only**, never brand accents. One accent per surface.
+## 3. Color system
 
----
+### Product identity
 
-## 3. Typography
+| Role | Token | Meaning |
+|------|-------|---------|
+| OpenRappter mint | `#58f5d2` | Product mark, selected product-level actions |
+| OpenRappter sky | `#72b5ff` | Dinosaur gradient and secondary identity |
+| OpenRappter night | `#07111f` | Icon ground and deep product surface |
+| OpenRappter forest | `#102b27` | Icon gradient and quiet raised surface |
 
-- **UI / body:** `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`.
-- **Mono (code, logs, activity lines, ports, RAPPIDs):** `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`.
-- **Scale (px):** body 12.5–13; chat 12.5; meta/labels 10.5–11; micro-labels 9.5
-  (uppercase, `letter-spacing: .04em`); headings 15–16, `600`.
-- Uppercase eyebrow labels (author names, section tags) get letter-spacing;
-  running text never does.
+### Runtime and actors
 
----
+| Role | Token | Meaning |
+|------|-------|---------|
+| Brainstem / action blue | `#58a6ff` | Embedded runtime controls and user action |
+| Twin purple | `#7c6bd0` / `#b79cff` | Rapplication twins and contender tiles |
+| Success | `#3fb950` | Verified ready/done state only |
+| Warning | `#e3b341` | Needs attention or authentication |
+| Error | `#ff9a9a` on `#2a1618` | Explicit failed state |
 
-## 4. Layout, spacing, shape
+Mint identifies the organism. Blue identifies its Brainstem/action layer.
+Purple identifies a twin or race contender. Green, amber, and red are semantic
+status colors, never brand decoration.
 
-- **Herd model:** the workspace is a horizontal rail of equal **tiles** —
-  Copilot chats and twin tiles side by side ("several agents, one Brainstem").
-  Each tile: header (`.hh`) → body → composer, laid out with flex + `gap`.
-- **Spacing:** 8-based rhythm (`gap: 8`, padding `9–12`). Let flex/grid `gap` do
-  spacing, not per-element margins.
-- **Radius:** tiles 9–12; chat bubbles 11 (with a 4px "tail" corner on the
-  speaker's side); buttons/pills 6–9; the brandmark tile `rx 224/1024`.
-- **Scrollbars:** thin, `#33363c` on transparent. Wide content scrolls inside its
-  own container; the app body never scrolls sideways.
+### Good AI Neighbor identity
 
----
+One top-level Electron app is one AI estate creature. Its Dock/taskbar name,
+badge, window title, in-app estate pill, user data, home, and Herd owner must
+agree. One estate may show multiple neighborhoods and worker twins. Sibling
+estates may share the dinosaur species mark, but a deterministic Dock badge and
+full app name must keep them distinguishable. Only a deliberately detached or
+hatched estate receives another Dock creature.
 
-## 5. Components
+### Surfaces and text
 
-- **Chat bubble:** user/you = action-blue gradient, right-aligned, tail bottom-right.
-  Assistant = raised panel `#1c1e23`, left-aligned, `1px #2a2d33` border, tail
-  bottom-left. Error = red-on-`#2a1618`.
-- **Multiplayer twin transcript** (the twin tile small view): a work-log over the
-  twin's `/chat`. Monospace **activity lines** (dim, no bubble) for lifecycle
-  events; author-attributed **bubbles** for turns. Each turn carries a micro
-  uppercase author label (`YOU`, `BRAINSTEM`, `JSON DOCTOR`). Self (`you`) is
-  right-aligned/blue; everyone else left-aligned. This is how the Brainstem loop,
-  the Brain Surgeon, and the user appear together in one room.
-- **Status pill** (`.hst`): tiny uppercase — `working` (blue), `ready`/`done`
-  (green), `sign in`/needs-auth (amber).
-- **Tile header buttons:** ghost buttons — `1px` border in the tile's accent
-  family, transparent-ish fill, brighten on hover. Twin tiles: `⟳ Loop` (starts
-  the Brainstem↔twin loop; lit while looping), `⤢ App` (pop out the full custom
-  rapplication UI), `×` (close).
-- **AI force mode:** when an AI is driving, the visible window's **edges glow**
-  and a small tag names the driver. It is **off by default** and never shown
-  while capturing screenshots for docs.
+- Ground: `#0d1117`
+- Panel: `#0f1013` / `#161b22`
+- Raised: `#17181b` / `#1c1e23`
+- Border: `#26282d`; strong border `#30363d`
+- Primary text: `#e6edf3`
+- Secondary text: `#c8c9cc`
+- Muted text: `#8b8f98`
 
----
+## 4. Typography and shape
 
-## 6. Voice
+- UI: `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+  "Segoe UI", sans-serif`.
+- Code, RAPPIDs, ports, and evidence:
+  `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`.
+- Body 12.5-13px; metadata 10.5-11px; headings 15-16px.
+- Use an 8px spacing rhythm.
+- Tiles use 9-12px radii; buttons 6-9px; chat bubbles 11px.
+- Product language is direct: controls say the exact outcome ("Export tile",
+  "Back up now", "Race contenders").
 
-Confident host, never defensive. Active voice; a control says exactly what
-happens ("Hatch a rapplication", "Message this twin to steer it"). Name things by
-what the user recognizes (a *twin*, a *rapplication*, the *herd*), not by
-internals. No emoji as section markers in product chrome (the `◈` twin badge and
-the brandmark are identity, not decoration). Errors say what happened and the one
-next step.
+## 5. Core components
 
----
+### OpenRappter self tile
 
-## 7. Invariants (design-level echoes of the kernel rules)
+The installed organism is itself a local content-addressed tile. Its surface
+must name its RAPPID and make **Export**, **Import**, and **Back up** visible.
+The copy must say that credentials, secrets, logs, recordings, binaries, and
+source are excluded.
 
-- The Grail kernel UI is never forked; a rapplication's custom UI **overrides**
-  the default chat by injection, and both drive the same `/chat` ("chat is the
-  only wire").
-- Twin/rapplication surfaces are always visibly distinct (purple) from the
-  Brainstem/you (blue) — a viewer can always tell who is who in a room.
-- No customer PII or secrets in any brand asset, screenshot, or shipped surface.
+### Rappter Surgeon
+
+Rappter Surgeon is GitHub Copilot working on the complete organism. It uses the
+Copilot mark plus the label **Rappter Surgeon · agent mode**. Never label this
+panel Brain Surgeon.
+
+### Herd and Agent Arena
+
+- Herd presents concurrent chats and twins without implying competition.
+- Agent Arena/table mode presents comparable tiles and races.
+- A race winner is the first completed contender that satisfies the declared
+  deliverable. Fast-but-invalid is not a winner.
+- Rappter Pack Sentinel uses the same tile grammar for remote Brainstem and
+  OpenRappter nodes, regardless of machine.
+- Cross-machine Pack transport defaults to pinned SSH. Plain private-LAN HTTP
+  requires `allow_insecure_http: true`, and direct LAN HTTP to OpenRappter is
+  forbidden.
+
+### Embedded Brainstem
+
+The unchanged bare Brainstem UI is hosted inside the fully built-out OpenRappter
+twin. Its `/chat` request and response shape is the only wire; styling and host
+controls never fork the kernel. OpenRappter is a byte-preserving proxy, not a
+contract-repair adapter: kernel-owned session/idempotency behavior is preserved,
+and Pack evidence must say `not-claimed` rather than infer stricter neighborhood
+or envelope conformance.
+
+Identity-loss recovery is an explicit operation: use
+`openrappter-tile adopt <verified.openrappter.tile>` before the first relaunch
+after reinstall. Ordinary import never overwrites a different organism RAPPID.
+
+## 6. Motion and AI operation
+
+- Motion communicates state changes, ownership, or causality.
+- When an AI drives the visible app, show bounded cursor/action feedback.
+- Do not hide autonomous work behind a spinner when a visible control or tile
+  can show what happened.
+- Recording and screenshots must omit transient force-mode decoration unless
+  that decoration is the subject being proved.
+
+## 7. Accessibility
+
+- All product actions are keyboard reachable and have stable `data-drive`
+  handles.
+- Color is never the only indication of actor or status.
+- The dinosaur has the accessible name "OpenRappter".
+- The app remains usable at the minimum supported window size.
+
+## 8. Architecture and release invariants
+
+- The Brainstem kernel and `/chat` contract remain unchanged.
+- OpenRappter owns a separate home, bundle ID, worker ports, lifecycle, and
+  backup tile so bare and fully built-out twins run side by side.
+- The OpenRappter self tile is verified before import and backs up current state
+  before replacement.
+- Customer-facing source contains no inherited Brainstem Frontier branding.
+- Package identity, icons, visible shell, installer shortcuts, and this guide
+  are tested together.
+- OpenRappter is distributed under **Apache-2.0**; third-party notices remain
+  attached to packaged builds.

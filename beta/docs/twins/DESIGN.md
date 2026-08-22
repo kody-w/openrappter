@@ -14,7 +14,13 @@
 
 ## The idea, in one paragraph
 
-The Brain Surgeon (GitHub Copilot) is the **builder** — it builds and tests
+This document's neighborhoods belong to one top-level AI estate. Under
+`openrappter-good-ai-neighbor/1.0`, a Brainstem or OpenRappter Electron app is
+an estate container with its own Dock creature, home, user data, and one or more
+herds. Worker neighborhoods never leak between estate owners; cross-estate work
+is an explicit `/chat` handoff or verified tile transfer.
+
+The Rappter Surgeon (GitHub Copilot) is the **builder** — it builds and tests
 capabilities *on* the Brainstem, and it should stay lean. Long-running
 **specialized** jobs (deploy this proven agent to Copilot Studio; push it to the
 on-device Scout endpoint; wrap it as a Microsoft Cowork agent) are **not** handed
@@ -22,14 +28,14 @@ to the Surgeon — they are handed to a **rapplication twin**: a self-contained
 rapplication that **hatches as its own Brainstem worker on its own loopback
 port**, runs its specialized loop **autonomously, driven by the Brainstem** (not
 the Surgeon), and appears as its own **tile in the herd** beside the Brainstem
-chat. The user never has to know this happened — the Brainstem + Brain Surgeon
+chat. The user never has to know this happened — the Brainstem + Rappter Surgeon
 loop decides what's needed, pulls the right rapplication **from the RAPP Store**,
 and hatches it. The user just watches it happen.
 
 ```
         ┌──────────────── the herd ────────────────────────────────┐
-        │  ▢ Brain Surgeon chat   (builds on the Brainstem)          │
-        │  ▢ Brain Surgeon chat   (a second build, in parallel)      │
+        │  ▢ Rappter Surgeon chat   (builds on the Brainstem)          │
+        │  ▢ Rappter Surgeon chat   (a second build, in parallel)      │
         │  ◈ Copilot-Studio twin  own port · own loop · deploying →  │   ← NEW tile kind
         │       └ its own chat: self-drives, but anyone can steer     │
         │  ◈ Scout twin           own port · own loop · registering  │
@@ -37,7 +43,7 @@ and hatches it. The user just watches it happen.
                     all beside the one visible Brainstem
 ```
 
-## Why not just more Brain Surgeon chats
+## Why not just more Rappter Surgeon chats
 
 Multi-chat (PR #175) already gives N Copilot chats. But a deploy job is not a
 "chat" — it is a long-running, tool-heavy, tenant-touching loop that would
@@ -179,10 +185,10 @@ hatch cs-deploy twin (own port)
 ## The twin tile: multiplayer chat small, full UI on pop-out (final)
 
 The herd twin tile is a **live multiplayer chat/work-log** over the twin's
-`/chat` — the Brainstem's autonomous loop, the Brain Surgeon, and the user all
+`/chat` — the Brainstem's autonomous loop, the Rappter Surgeon, and the user all
 talking to the same rapplication in one transcript as it unfolds (each turn
 labeled by who sent it), with a composer to steer. It renders in the host's own
-DOM (always reliable) and looks like the Brain Surgeon chat. **⤢ App** pops out
+DOM (always reliable) and looks like the Rappter Surgeon chat. **⤢ App** pops out
 the full, specialized custom rapplication UI (the twin's own `ui_url`
 document.write'd into a top-level window — which renders perfectly). Both drive
 the same `/chat`; the small view is the lighter always-on surface, the pop-out

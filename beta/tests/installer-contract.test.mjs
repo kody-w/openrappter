@@ -29,8 +29,8 @@ const activityView = readFileSync(
   path.join(root, "electron", "activity-view.mjs"),
   "utf8",
 );
-const brainSurgeon = readFileSync(
-  path.join(root, "electron", "brain-surgeon.mjs"),
+const rappterSurgeon = readFileSync(
+  path.join(root, "electron", "rappter-surgeon.mjs"),
   "utf8",
 );
 const routeManager = readFileSync(
@@ -84,7 +84,7 @@ const brainstemUi = readFileSync(
   "utf8",
 );
 
-test("beta installers use AIBAST as the canonical source", () => {
+test("desktop installers use OpenRappter as the canonical application source", () => {
   for (const installer of [unix, windows]) {
     assert.match(installer, /kody-w\/openrappter/);
     assert.doesNotMatch(installer, /kody-w\/rapp-installer/);
@@ -97,11 +97,12 @@ test("beta installers use AIBAST as the canonical source", () => {
 // does not own — on macOS the appId IS the bundle identifier a signed app is
 // registered under, so it is not cosmetic. The identity now matches the
 // repository that publishes it.
-test("Frontier is the primary customer-facing launcher identity", () => {
-  assert.equal(packageJson.name, "@openrappter/frontier");
+test("OpenRappter is the primary customer-facing application identity", () => {
+  assert.equal(packageJson.name, "@openrappter/desktop");
+  assert.equal(packageJson.license, "Apache-2.0");
   assert.equal(
     packageJson.build.appId,
-    "io.github.kody-w.openrappter.frontier",
+    "io.github.kody-w.openrappter",
     "the bundle identifier must belong to whoever ships the app",
   );
   assert.doesNotMatch(
@@ -117,8 +118,8 @@ test("Frontier is the primary customer-facing launcher identity", () => {
   assert.equal(packageJson.version, "0.1.0-beta.7");
   assert.equal(readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim(), packageJson.version);
   for (const installer of [unix, windows]) {
-    assert.match(installer, /brainstem-frontier/);
-    assert.match(installer, /Frontier and standard Brainstem share/);
+    assert.match(installer, /openrappter-app/);
+    assert.match(installer, /Brainstem runtime data/);
   }
 });
 
@@ -141,6 +142,35 @@ test("beta installers exclude the solution library", () => {
   assert.doesNotMatch(windows, /npm\.cmd" ci --prefix/);
   assert.match(unix, /--no-launch/);
   assert.match(windows, /--no-launch/);
+});
+
+test("installed estate tools preserve child paths and default only missing values", () => {
+  for (const variable of [
+    "OPENRAPPTER_HOME",
+    "BRAINSTEM_HOME",
+    "BRAINSTEM_BETA_SOURCE_DIR",
+    "BRAINSTEM_BETA_PYTHON",
+    "RAPPTER_PACK_CONFIG",
+  ]) {
+    assert.match(
+      unix,
+      new RegExp(`\\\\\\$\\{${variable}:=`),
+      `${variable} must use a shell default, not overwrite a child estate`,
+    );
+    assert.match(
+      windows,
+      new RegExp(`if not defined ${variable} set`),
+      `${variable} must use a cmd default, not overwrite a child estate`,
+    );
+  }
+  const hatchBlock = unix.slice(
+    unix.indexOf('local hatch_launcher='),
+    unix.indexOf('if [[ "$platform" == darwin-*'),
+  );
+  assert.doesNotMatch(
+    hatchBlock,
+    /^export (?:OPENRAPPTER_HOME|BRAINSTEM_HOME)=/m,
+  );
 });
 
 test("released beta installs can pin the launcher and runtime to one commit", () => {
@@ -200,7 +230,7 @@ test("dedicated beta page scripts parse", () => {
   }
 });
 
-test("beta launcher reuses the global Brainstem without duplicate toolbar IPC", () => {
+test("OpenRappter hosts its isolated Brainstem without duplicate toolbar IPC", () => {
   assert.match(main, /resolveBrainstemConfig/);
   assert.match(main, /beta:get-state/);
   assert.doesNotMatch(main, /beta:open-browser|beta:open-vscode|beta:restart/);
@@ -226,7 +256,7 @@ test("chat can hot-load an animated driver for the real frontend", () => {
   assert.match(main, /startUiDriverServer/);
   assert.match(main, /Chat agents can visibly operate this Brainstem/);
   assert.match(uiDriverAgent, /class BrainstemUiDriver/);
-  assert.match(uiDriverAgent, /actual visible RAPP Brainstem Frontier frontend/);
+  assert.match(uiDriverAgent, /actual visible OpenRappter frontend/);
   assert.match(uiDriverAgent, /animated AI cursor/);
   assert.match(uiDriverAgent, /start_recording/);
   assert.match(uiDriverAgent, /stop_recording/);
@@ -249,10 +279,10 @@ test("chat can hot-load an animated driver for the real frontend", () => {
   assert.doesNotMatch(brainstemUi, /agent_lease|user_guid.*conversation_history/);
 });
 
-test("beta embeds the full GitHub Copilot Brain Surgeon loop", () => {
+test("beta embeds the full GitHub Copilot Rappter Surgeon loop", () => {
   assert.match(ui, /id="surgeon-tab"/);
-  assert.match(ui, /Brain Surgeon · agent mode/);
-  assert.match(ui, /files, shell, tests, Brainstem/);
+  assert.match(ui, /Rappter Surgeon · agent mode/);
+  assert.match(ui, /files, shell, tests, OpenRappter/);
   assert.match(renderer, /brainstemBeta\.surgeonSend/);
   assert.match(renderer, /clearSurgeonUi/);
   assert.match(renderer, /rapp-beta-delete-agent/);
@@ -260,12 +290,12 @@ test("beta embeds the full GitHub Copilot Brain Surgeon loop", () => {
   assert.match(preload, /beta:surgeon-send/);
   assert.match(preload, /beta:delete-agent/);
   assert.match(preload, /beta:export-agent/);
-  assert.match(main, /new BrainSurgeon/);
+  assert.match(main, /new RappterSurgeon/);
   assert.match(main, /BETA_FRAME_BRIDGE_SOURCE/);
   assert.match(main, /beta-app-btn/);
   assert.match(main, /rapp-beta:check-updates/);
   assert.match(main, /brainLogo\.title = "Toggle live agents"/);
-  assert.match(main, /button\.title = "RAPP Brainstem Frontier menu"/);
+  assert.match(main, /button\.title = "OpenRappter menu"/);
   assert.match(main, /panel\.querySelector\("h3"\)/);
   assert.match(main, /app\.getPath\("downloads"\)/);
   assert.match(main, /Download agent\.py/);
@@ -273,12 +303,12 @@ test("beta embeds the full GitHub Copilot Brain Surgeon loop", () => {
   assert.match(main, /beta-agent-icon-button/);
   assert.match(main, /humanizeAgentName/);
   assert.doesNotMatch(ui, /beta-menu-toggle/);
-  assert.match(brainSurgeon, /real GitHub Copilot coding-agent loop/);
-  assert.match(brainSurgeon, /onPermissionRequest: approveAll/);
-  assert.match(brainSurgeon, /delegate_to_brainstem/);
-  assert.match(brainSurgeon, /ephemeral_agent/);
-  assert.match(brainSurgeon, /ensure_copilot_studio_deploy_agents/);
-  assert.match(brainSurgeon, /start_copilot_studio_login/);
+  assert.match(rappterSurgeon, /real GitHub Copilot coding-agent loop/);
+  assert.match(rappterSurgeon, /onPermissionRequest: approveAll/);
+  assert.match(rappterSurgeon, /delegate_to_brainstem/);
+  assert.match(rappterSurgeon, /ephemeral_agent/);
+  assert.match(rappterSurgeon, /ensure_copilot_studio_deploy_agents/);
+  assert.match(rappterSurgeon, /start_copilot_studio_login/);
   assert.match(renderer, /Deploy loaded agents to Copilot Studio/);
   assert.match(ui, /deploy-copilot-studio/);
   assert.match(surgeonChat, /action: "surgeon_chat"/);
@@ -311,9 +341,9 @@ test("beta embeds the full GitHub Copilot Brain Surgeon loop", () => {
   assert.match(walkthroughGate, /evidence matches current beta source/);
   assert.match(walkthroughCertify, /validation/);
   assert.match(walkthroughCertify, /--allow-uncertified/);
-  assert.match(unix, /brainstem-surgeon/);
+  assert.match(unix, /openrappter-surgeon/);
   assert.match(unix, /brainstem-walkthrough/);
-  assert.match(windows, /brainstem-surgeon\.cmd/);
+  assert.match(windows, /openrappter-surgeon\.cmd/);
   assert.match(windows, /brainstem-walkthrough\.cmd/);
   assert.match(
     main,
@@ -321,10 +351,10 @@ test("beta embeds the full GitHub Copilot Brain Surgeon loop", () => {
   );
 });
 
-test("blue Brainstem icon toggles the live agents Explorer", () => {
+test("OpenRappter icon toggles the live agents Explorer", () => {
   assert.doesNotMatch(ui, /id="explorer-tab"/);
   assert.match(ui, /id="agent-tree"/);
-  assert.match(ui, /live Brainstem workspace/);
+  assert.match(ui, /live OpenRappter workspace/);
   assert.match(main, /rapp-beta:toggle-explorer/);
   assert.match(main, /betaExplorerToggle/);
   assert.match(renderer, /rapp-beta:toggle-explorer/);
@@ -377,7 +407,7 @@ test("desktop chrome omits the redundant wrapper toolbar", () => {
   assert.doesNotMatch(ui, /id="guide"|id="browser"|id="vscode"|id="restart"/);
   assert.doesNotMatch(ui, /<body>\s*<header>/);
   assert.doesNotMatch(renderer, /brainstemStatus|copilotStatus|setPill/);
-  assert.doesNotMatch(renderer, /openBrowser|openVscode|restart/);
+  assert.doesNotMatch(renderer, /brainstemBeta\.(?:openBrowser|openVscode|restart)\b/);
 });
 
 // npm runs a package's scripts with the shell's PATH, and `npm test` is

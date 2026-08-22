@@ -1,0 +1,44 @@
+{
+  "schema": "openrappter-rapp1-compliance/1.0",
+  "assessed_at": "2026-08-22",
+  "status": "aligned-not-certified",
+  "authority": {
+    "repository": "kody-w/rapp-1",
+    "commit": "6723c7add2aed36bb68992fc71a56b0a4bd5ad81",
+    "path": "SPEC.md",
+    "sha256": "6d06daba65d7c045716f3d6e95db8401ab58e727820e4114466d847f62cae49b",
+    "bytes": 41880,
+    "revision": "rev-5",
+    "status": "draft-standard-for-ratification"
+  },
+  "public_spine": {
+    "repository": "kody-w/rapp-spine",
+    "spec": "rapp-spine/1.1",
+    "tests_passed": 72,
+    "graph_nodes_visited": 222,
+    "graph_nodes_expected": 222,
+    "required_sources": 129,
+    "sources_read": 91,
+    "sources_unreadable": 2,
+    "sources_unresolved": 36,
+    "blocking_gaps": 41,
+    "completion": false,
+    "openrappter_assessment": "not-assessed"
+  },
+  "rapp_repository": {
+    "repository": "kody-w/RAPP",
+    "declared_status": "not-yet-fully-rapp-1-conformant",
+    "rapp1_core_tests_passed": 113,
+    "local_preacceptance": "fail",
+    "failed_gates": 4,
+    "documentation_gate": "stale integrated tracked-file fixture"
+  },
+  "dogg_summon": {
+    "schema": "openrappter-dogg-summon/1.0",
+    "rapp1_core": false,
+    "spine_route": "rapp-estate/1.1",
+    "spine_material": "unresolved",
+    "authority": "local-estate-decides"
+  },
+  "claim": "OpenRappter is aligned to the pinned RAPP/1 primitives but full RAPP/1/spine certification is not claimed while public authorities report unresolved blockers."
+}

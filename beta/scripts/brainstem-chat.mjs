@@ -4,17 +4,16 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 
+const openRappterHome = process.env.OPENRAPPTER_HOME
+  || path.join(homedir(), ".openrappter");
 const betaHome = process.env.BRAINSTEM_BETA_HOME
-  || path.join(
-    process.env.BRAINSTEM_HOME || path.join(homedir(), ".brainstem"),
-    "beta-launcher",
-  );
+  || path.join(openRappterHome, "desktop");
 const metadataPath = process.env.BRAINSTEM_BETA_UI_DRIVER_FILE
   || path.join(betaHome, "ui-driver.json");
 const prompt = process.argv.slice(2).join(" ").trim();
 
 if (!prompt) {
-  process.stderr.write("Usage: brainstem-chat <message>\n");
+  process.stderr.write("Usage: openrappter-drive <message>\n");
   process.exit(2);
 }
 
@@ -26,7 +25,7 @@ function launchBeta() {
     process.platform === "win32" ? "launch.cmd" : "launch.sh",
   );
   if (!existsSync(launcher)) {
-    throw new Error(`RAPP Brainstem Frontier launcher is missing at ${launcher}.`);
+    throw new Error(`OpenRappter launcher is missing at ${launcher}.`);
   }
   const child = process.platform === "win32"
     ? spawn("cmd.exe", ["/d", "/c", launcher], {
@@ -66,7 +65,7 @@ async function waitForBridge(timeoutMs) {
     }
     await sleep(250);
   }
-  throw new Error(`RAPP Brainstem Frontier is not ready: ${lastError?.message || "timeout"}`);
+  throw new Error(`OpenRappter is not ready: ${lastError?.message || "timeout"}`);
 }
 
 async function main() {

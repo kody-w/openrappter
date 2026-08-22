@@ -36,6 +36,8 @@ const KIND =
   /^[a-z0-9]+(?:-[a-z0-9]+)*\.[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RAPPID =
   /^rappid:@([a-z0-9]+(?:-[a-z0-9]+)*)\/([a-z0-9]+(?:-[a-z0-9]+)*):([0-9a-f]{64})$/;
+const STREAM_ID =
+  /^(?:rappid:@[a-z0-9]+(?:-[a-z0-9]+)*\/[a-z0-9]+(?:-[a-z0-9]+)*:[0-9a-f]{64}(?::[a-z0-9]+(?:-[a-z0-9]+)*)?|net:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
 const EGG_VARIANTS = new Set([
   "runtime",
   "rapplication",
@@ -269,8 +271,8 @@ export function verifyFrame(
   if (typeof frame.kind !== "string" || !KIND.test(frame.kind)) {
     return [false, "1", "invalid kind"];
   }
-  if (typeof frame.stream_id !== "string") {
-    return [false, "1", "invalid stream_id type"];
+  if (typeof frame.stream_id !== "string" || !STREAM_ID.test(frame.stream_id)) {
+    return [false, "1", "invalid stream_id"];
   }
   if (!Number.isSafeInteger(frame.seq) || frame.seq < 0) {
     return [false, "1", "seq is not uint53"];
@@ -298,7 +300,11 @@ export function verifyFrame(
       return [false, "1", `${field} is not null or lowercase 64-hex`];
     }
   }
-  if (streamIdOfRecord && frame.stream_id !== streamIdOfRecord) {
+  if (
+    streamIdOfRecord !== null
+    && streamIdOfRecord !== undefined
+    && frame.stream_id !== streamIdOfRecord
+  ) {
     return [false, "1a", "stream_id mismatch"];
   }
   try {

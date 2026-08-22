@@ -10,7 +10,7 @@ import {
 } from "../electron/injection-sources.mjs";
 import { createTwinLedgerBridgeSource } from "../electron/twin-ledger-bridge.mjs";
 
-const banner = /^\/\*[\s\S]*Added by the RAPP Brainstem Frontier host[\s\S]*\*\//;
+const banner = /^\/\*[\s\S]*Added by the OpenRappter host[\s\S]*\*\//;
 const autopilotSource = createAutopilotInstallationSource({
   capability: "test-capability",
   classicSource: "function createAutopilot() {}\nwindow.rapp = createAutopilot();",
@@ -47,12 +47,12 @@ test("instrumented rapplication HTML declares both host-added scripts", () => {
   });
   assert.match(
     FORCE_MODE_BOOTSTRAP,
-    /^<!-- Added by the RAPP Brainstem Frontier host:/,
+    /^<!-- Added by the OpenRappter host:/,
   );
   assert.doesNotMatch(FORCE_MODE_BOOTSTRAP, /Nothing else is changed/);
   assert.match(
     html,
-    /<!-- Added by the RAPP Brainstem Frontier host:[\s\S]*?<script>window\.__rappForceModeCapable=true;/,
+    /<!-- Added by the OpenRappter host:[\s\S]*?<script>window\.__rappForceModeCapable=true;/,
   );
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
   assert.equal(scripts.length, 2);
@@ -63,7 +63,7 @@ test("the view toggle declares itself in the bytes it returns", () => {
   const source = createViewToggle(false);
   assert.match(
     source.trimStart(),
-    /^<!-- Added by the RAPP Brainstem Frontier host:/,
+    /^<!-- Added by the OpenRappter host:/,
   );
   assert.match(source, /__rappViewToggle/);
 });

@@ -13,7 +13,7 @@ const metadataPath = process.env.BRAINSTEM_BETA_UI_DRIVER_FILE
 const prompt = process.argv.slice(2).join(" ").trim();
 
 if (!prompt) {
-  process.stderr.write("Usage: brainstem-surgeon <task>\n");
+  process.stderr.write("Usage: openrappter-surgeon <task>\n");
   process.exit(2);
 }
 
@@ -47,7 +47,7 @@ async function waitForBridge(timeoutMs = 60000) {
     }
     await sleep(250);
   }
-  throw new Error(`RAPP Brainstem Frontier is not ready: ${lastError?.message || "timeout"}`);
+  throw new Error(`OpenRappter is not ready: ${lastError?.message || "timeout"}`);
 }
 
 function launchBeta() {
@@ -58,7 +58,7 @@ function launchBeta() {
   );
   if (!existsSync(launcher)) {
     throw new Error(
-      `RAPP Brainstem Frontier is closed and its launcher is missing at ${launcher}.`,
+      `OpenRappter is closed and its launcher is missing at ${launcher}.`,
     );
   }
   const child = process.platform === "win32"
@@ -100,7 +100,7 @@ async function main() {
   );
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
-    throw new Error(payload.error || `Brain Surgeon HTTP ${response.status}`);
+    throw new Error(payload.error || `Rappter Surgeon HTTP ${response.status}`);
   }
   process.stdout.write(`${JSON.stringify(payload.result, null, 2)}\n`);
 }

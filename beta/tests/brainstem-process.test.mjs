@@ -15,6 +15,7 @@ import test from "node:test";
 
 import {
   BrainstemProcess,
+  healthSourceDirectory,
   isBrainstemHealth,
   resolveBrainstemConfig,
   waitForHealth,
@@ -164,6 +165,31 @@ test("health wait returns the first valid response", async () => {
     },
   });
   assert.deepEqual(result, health);
+});
+
+test("owned health identifies authenticated source directly or unauthenticated source by soul", () => {
+  const source = path.join(tmpdir(), "owned-health-source");
+  const expected = path.resolve(source);
+  assert.equal(
+    healthSourceDirectory({
+      status: "ok",
+      brainstem_dir: source,
+      soul: path.join(source, "soul.md"),
+    }),
+    expected,
+  );
+  assert.equal(
+    healthSourceDirectory({
+      status: "unauthenticated",
+      soul: path.join(source, "soul.md"),
+    }),
+    expected,
+  );
+  assert.equal(
+    healthSourceDirectory({ status: "ok", agents: [] }),
+    null,
+    "a generic 200-style health object cannot claim ownership",
+  );
 });
 
 test("owned-port launch ignores a listener on the configured port", async (t) => {

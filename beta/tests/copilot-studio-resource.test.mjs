@@ -27,7 +27,7 @@ test("bundled parity deploy agent builds an explicit frozen agents package", asy
   assert.match(source, /drop_exact_line/);
   assert.match(source, /package_init = packaged_basic_agent\.parent \/ "__init__\.py"/);
   assert.match(source, /package_init\.write_text\("", encoding="utf-8"\)/);
-  assert.match(source, /Live publish is disabled in RAPP Brainstem Frontier/);
+  assert.match(source, /Live publish is disabled in OpenRappter/);
 });
 
 test("bundled beta Factory cannot be shadowed by generic deployment tools", async () => {

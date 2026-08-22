@@ -408,6 +408,7 @@ type ValidatedAgentImportEvidence =
     }
   | {
       kind: 'recovery-required';
+      activeGeneration: 'present' | 'absent' | 'unknown';
       activeSourceSha256?: string;
       committed: boolean;
       errorCode: string;
@@ -551,16 +552,14 @@ function validateAgentImportEvidence(
     && machine.commitState === 'unknown'
     && machine.retrySafe === false
     && machine.warning === undefined
-    && activeGeneration.state === 'unknown'
   ) {
     return {
       kind: 'recovery-required',
-      ...(activeGeneration.activeSourceSha256 === undefined
-        ? {}
-        : {
-            activeSourceSha256:
-              activeGeneration.activeSourceSha256,
-          }),
+      activeGeneration: activeGeneration.state,
+      ...('activeSourceSha256' in activeGeneration
+        && activeGeneration.activeSourceSha256 !== undefined
+        ? { activeSourceSha256: activeGeneration.activeSourceSha256 }
+        : {}),
       committed: machine.committed,
       errorCode,
     };
@@ -2150,7 +2149,7 @@ export class GatewayServer {
                         committed: evidence.committed,
                         rejectedBeforeCommit: false,
                         candidateSourceSha256,
-                        activeGeneration: 'unknown',
+                        activeGeneration: evidence.activeGeneration,
                         ...(evidence.activeSourceSha256 === undefined
                           ? {}
                           : {

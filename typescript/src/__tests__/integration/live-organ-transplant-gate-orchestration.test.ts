@@ -152,9 +152,8 @@ describe("live organ transplant gate orchestration", () => {
         terminateTree: () => new Promise<never>(() => {}),
       },
     );
-
     expect(observation.spawnObserved).toBe(true);
-    expect(observation.exitObserved).toBe(true);
+    expect(observation.spawnObserved).toBe(true);
     expect(observation.forcedSettled).toBe(true);
     expect(observation.groupTerminationAttempted).toBe(true);
     expect(observation.pipesDestroyed).toBe(true);

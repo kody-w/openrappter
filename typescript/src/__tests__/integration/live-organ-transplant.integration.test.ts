@@ -192,6 +192,10 @@ function emptyProbe(): TransplantIndependentProbeEvidence {
       reopenedContentHashes: [],
       productionExportContentHashes: [],
       allContentHashesValid: false,
+      databaseTotalCount: 0,
+      relevantEventCount: 0,
+      exportEventCount: 0,
+      validatorTotalCount: 0,
       events: [],
       causalStepIds: [],
     },
@@ -337,9 +341,12 @@ async function collectFlightEvidence(input: FlightProbeInput): Promise<void> {
   let reopenedEvents: FlightEvent[] = [];
   let productionExport: FlightExport | null = null;
   let validatedEvents: FlightEvent[] = [];
+  let databaseTotalCount = 0;
+  let validatorTotalCount = 0;
 
   try {
     await reopened.initialize();
+    databaseTotalCount = await reopened.count();
     const allEvents = await reopened.query({ limit: 10_000 });
     reopenedEvents = await reopened.query({
       traceId: input.traceId,
@@ -348,18 +355,21 @@ async function collectFlightEvidence(input: FlightProbeInput): Promise<void> {
     });
     productionExport = await reopened.export({ traceId: input.traceId });
     probe.flight.reopenedQuerySucceeded =
+      databaseTotalCount === reopenedEvents.length &&
       allEvents.length === reopenedEvents.length &&
       allEvents.every((event) => event.traceId === input.traceId);
 
     await validator.initialize();
     const imported = await validator.import(savedExport as FlightExport);
+    validatorTotalCount = await validator.count();
     validatedEvents = await validator.query({
       traceId: input.traceId,
       order: "asc",
       limit: 10_000,
     });
     probe.flight.productionValidationPassed =
-      imported === validatedEvents.length;
+      imported === validatedEvents.length &&
+      validatorTotalCount === validatedEvents.length;
   } finally {
     await Promise.all([reopened.close(), validator.close()]);
   }
@@ -395,6 +405,10 @@ async function collectFlightEvidence(input: FlightProbeInput): Promise<void> {
       ...reopenedEvents,
       ...productionExport.events,
     ].every(verifyFlightEventHash),
+    databaseTotalCount,
+    relevantEventCount: reopenedEvents.length,
+    exportEventCount: persisted.length,
+    validatorTotalCount,
     events: reopenedEvents,
     causalStepIds: [],
   };
@@ -600,7 +614,7 @@ beforeAll(async () => {
       });
     });
 
-    const flightExport = await recorder.export();
+    const flightExport = await recorder.exportTrace(traceId);
     if (!flightExport) {
       throw new Error("FlightRecorder did not produce the probe export.");
     }
@@ -800,6 +814,15 @@ describe("live organ transplant independent observer", () => {
       databaseSha256: evidence.flight.expectedDatabaseSha256,
       exportSha256: evidence.flight.expectedExportSha256,
     });
+    expect(evidence.flight.databaseTotalCount).toBe(
+      evidence.flight.relevantEventCount,
+    );
+    expect(evidence.flight.exportEventCount).toBe(
+      evidence.flight.relevantEventCount,
+    );
+    expect(evidence.flight.validatorTotalCount).toBe(
+      evidence.flight.exportEventCount,
+    );
     expect(evidence.flight.reopenedEventIds).toEqual(
       evidence.flight.persistedEventIds,
     );

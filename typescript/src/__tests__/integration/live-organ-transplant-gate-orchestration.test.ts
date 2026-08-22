@@ -28,6 +28,7 @@ interface ProcessObservation {
   runtimePidObservedWhileAlive: boolean;
   runtimeAliveAtObservation: boolean;
   runtimePgid: number | null;
+  runtimeState: string | null;
   runtimeGroupMatches: boolean;
   error: Error | null;
 }
@@ -53,6 +54,7 @@ interface GateModule {
     },
   ): Promise<ProcessObservation>;
   finalizeGateRunRoot(runRoot: string, failedNames: string[]): string | null;
+  processStateIsLive(state: unknown): boolean;
 }
 
 const GATE_PATH = fileURLToPath(
@@ -192,6 +194,7 @@ describe("live organ transplant gate orchestration", () => {
       expect(observation.runtimePidObservedWhileAlive).toBe(true);
       expect(observation.runtimeAliveAtObservation).toBe(true);
       expect(observation.runtimePgid).toBe(observation.childPid);
+      expect(gate.processStateIsLive(observation.runtimeState)).toBe(true);
       expect(observation.runtimeGroupMatches).toBe(true);
     } finally {
       rmSync(scratchBase, { recursive: true, force: true });
@@ -201,6 +204,15 @@ describe("live organ transplant gate orchestration", () => {
         // Other tests may still own siblings in the shared scratch parent.
       }
     }
+  });
+
+  it("treats zombie and dead process states as not live", () => {
+    expect(gate.processStateIsLive("S")).toBe(true);
+    expect(gate.processStateIsLive("R+")).toBe(true);
+    expect(gate.processStateIsLive("Z")).toBe(false);
+    expect(gate.processStateIsLive("Z+")).toBe(false);
+    expect(gate.processStateIsLive("X")).toBe(false);
+    expect(gate.processStateIsLive(null)).toBe(false);
   });
 
   it("removes successful run roots and preserves marked failure evidence", () => {

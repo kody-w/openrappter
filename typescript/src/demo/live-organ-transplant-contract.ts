@@ -401,6 +401,7 @@ export interface TransplantScenarioObservation {
   runtimePidObservedWhileAlive: boolean;
   runtimeAliveAtObservation: boolean;
   runtimePgid: number | null;
+  runtimeState: string | null;
   runtimeGroupMatches: boolean;
   runtimeAncestryMatches: boolean;
   runtimeObservedAtMs: number | null;
@@ -421,6 +422,10 @@ export interface TransplantRuntimePidHandoffObservation {
 export interface TransplantCausalTraceWitness {
   databaseReopened: boolean;
   productionExportValidated: boolean;
+  databaseTotalCount: number;
+  relevantEventCount: number;
+  exportEventCount: number;
+  validatorTotalCount: number;
   databaseEvents: FlightEvent[];
   persistedExportEvents: FlightEvent[];
   reopenedExportEvents: FlightEvent[];
@@ -539,6 +544,10 @@ export interface TransplantIndependentProbeEvidence {
     reopenedContentHashes: string[];
     productionExportContentHashes: string[];
     allContentHashesValid: boolean;
+    databaseTotalCount: number;
+    relevantEventCount: number;
+    exportEventCount: number;
+    validatorTotalCount: number;
     events: FlightEvent[];
     causalStepIds: string[];
   };
@@ -1245,6 +1254,7 @@ function isScenarioObservation(
       "runtimePidObservedWhileAlive",
       "runtimeAliveAtObservation",
       "runtimePgid",
+      "runtimeState",
       "runtimeGroupMatches",
       "runtimeAncestryMatches",
       "runtimeObservedAtMs",
@@ -1270,6 +1280,9 @@ function isScenarioObservation(
     typeof value.runtimePidObservedWhileAlive === "boolean" &&
     typeof value.runtimeAliveAtObservation === "boolean" &&
     (value.runtimePgid === null || isPositiveInteger(value.runtimePgid)) &&
+    (value.runtimeState === null ||
+      (typeof value.runtimeState === "string" &&
+        value.runtimeState.length > 0)) &&
     typeof value.runtimeGroupMatches === "boolean" &&
     typeof value.runtimeAncestryMatches === "boolean" &&
     (value.runtimeObservedAtMs === null ||
@@ -1311,6 +1324,10 @@ function isCausalTraceWitness(
     hasOnlyKeys(value, [
       "databaseReopened",
       "productionExportValidated",
+      "databaseTotalCount",
+      "relevantEventCount",
+      "exportEventCount",
+      "validatorTotalCount",
       "databaseEvents",
       "persistedExportEvents",
       "reopenedExportEvents",
@@ -1318,6 +1335,10 @@ function isCausalTraceWitness(
     ]) &&
     typeof value.databaseReopened === "boolean" &&
     typeof value.productionExportValidated === "boolean" &&
+    isNonNegativeInteger(value.databaseTotalCount) &&
+    isNonNegativeInteger(value.relevantEventCount) &&
+    isNonNegativeInteger(value.exportEventCount) &&
+    isNonNegativeInteger(value.validatorTotalCount) &&
     Array.isArray(value.databaseEvents) &&
     value.databaseEvents.every(isFlightEventDisplayEvidence) &&
     Array.isArray(value.persistedExportEvents) &&
@@ -1510,6 +1531,10 @@ export function isTransplantIndependentProbeEvidence(
       "reopenedContentHashes",
       "productionExportContentHashes",
       "allContentHashesValid",
+      "databaseTotalCount",
+      "relevantEventCount",
+      "exportEventCount",
+      "validatorTotalCount",
       "events",
       "causalStepIds",
     ]) &&
@@ -1529,6 +1554,10 @@ export function isTransplantIndependentProbeEvidence(
     isStringArray(flight.reopenedContentHashes) &&
     isStringArray(flight.productionExportContentHashes) &&
     typeof flight.allContentHashesValid === "boolean" &&
+    isNonNegativeInteger(flight.databaseTotalCount) &&
+    isNonNegativeInteger(flight.relevantEventCount) &&
+    isNonNegativeInteger(flight.exportEventCount) &&
+    isNonNegativeInteger(flight.validatorTotalCount) &&
     Array.isArray(flight.events) &&
     flight.events.every(isFlightEventDisplayEvidence) &&
     isStringArray(flight.causalStepIds) &&
@@ -1756,6 +1785,10 @@ function independentProbeFlightIsValid(
     probe.flight.reopenedQuerySucceeded &&
     probe.flight.productionValidationPassed &&
     probe.flight.allContentHashesValid &&
+    probe.flight.databaseTotalCount === probe.flight.relevantEventCount &&
+    probe.flight.relevantEventCount === probe.flight.events.length &&
+    probe.flight.exportEventCount === probe.flight.relevantEventCount &&
+    probe.flight.validatorTotalCount === probe.flight.exportEventCount &&
     isDeepStrictEqual(
       probe.flight.persistedEventIds,
       probe.flight.reopenedEventIds,
@@ -1975,6 +2008,10 @@ export function evaluateTransplantCausalTrace(
         (position === 0 || index > semanticIndexes[position - 1]!),
     ),
     "semantic events are not in exact causal order",
+  );
+  fail(
+    traceCompleted[0] === orderedEvents.at(-1),
+    "trace.completed must be the final ordered event",
   );
 
   const traceIds = new Set(orderedEvents.map((event) => event.traceId));
@@ -2364,6 +2401,8 @@ export function evaluateLiveOrganTransplant(
         observations.successScenario.runtimePidObservedWhileAlive &&
         observations.successScenario.runtimeAliveAtObservation &&
         observations.successScenario.runtimePgid !== null &&
+        observations.successScenario.runtimeState !== null &&
+        !/^[ZX]/i.test(observations.successScenario.runtimeState) &&
         (observations.successScenario.runtimeGroupMatches ||
           observations.successScenario.runtimeAncestryMatches) &&
         observations.successScenario.runtimeObservedAtMs !== null &&
@@ -2557,6 +2596,14 @@ export function evaluateLiveOrganTransplant(
         ) &&
         observations.exactCommandFlight.databaseReopened &&
         observations.exactCommandFlight.productionExportValidated &&
+        observations.exactCommandFlight.databaseTotalCount ===
+          observations.exactCommandFlight.relevantEventCount &&
+        observations.exactCommandFlight.relevantEventCount ===
+          observations.exactCommandFlight.databaseEvents.length &&
+        observations.exactCommandFlight.exportEventCount ===
+          observations.exactCommandFlight.relevantEventCount &&
+        observations.exactCommandFlight.validatorTotalCount ===
+          observations.exactCommandFlight.exportEventCount &&
         isDeepStrictEqual(
           result.flightRecorder.events,
           observations.exactCommandFlight.databaseEvents,

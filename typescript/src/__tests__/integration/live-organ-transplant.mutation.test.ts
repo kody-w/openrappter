@@ -184,6 +184,8 @@ const PINNED_MUTATION_IDS = [
   "flight-event-hash-corrupted",
   "flight-event-id-drift",
   "flight-required-kind-missing",
+  "exact-hidden-row-count-over-query-cap",
+  "probe-hidden-row-count-over-query-cap",
   "causal-order-swap",
   "causal-wrong-nonce",
   "causal-wrong-trace-id",
@@ -199,6 +201,8 @@ const PINNED_MUTATION_IDS = [
   "causal-wrong-runtime-handoff-pid",
   "runtime-unrelated-helper-pid",
   "runtime-dead-at-observation",
+  "runtime-zombie-state",
+  "runtime-dead-state",
   "runtime-wrong-group-and-ancestry",
   "causal-unrelated-trace-substitution",
   "causal-nonmonotonic-sequence",
@@ -225,6 +229,10 @@ const PINNED_MUTATION_IDS = [
   "causal-canonical-execute-result-status-drift",
   "causal-exact-extra-failure",
   "causal-probe-extra-failure",
+  "causal-exact-post-terminal-activity",
+  "causal-probe-post-terminal-activity",
+  "causal-exact-duplicate-trace-terminal",
+  "causal-probe-duplicate-trace-terminal",
   "causal-exact-duplicate-terminal",
   "causal-probe-duplicate-terminal",
   "causal-exact-orphan-terminal",
@@ -829,6 +837,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
       runtimePidObservedWhileAlive: false,
       runtimeAliveAtObservation: false,
       runtimePgid: null,
+      runtimeState: null,
       runtimeGroupMatches: false,
       runtimeAncestryMatches: false,
       runtimeObservedAtMs: null,
@@ -853,6 +862,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
       runtimePidObservedWhileAlive: true,
       runtimeAliveAtObservation: true,
       runtimePgid: 4201,
+      runtimeState: "S",
       runtimeGroupMatches: true,
       runtimeAncestryMatches: true,
       runtimeObservedAtMs: 3_500,
@@ -877,6 +887,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
       runtimePidObservedWhileAlive: false,
       runtimeAliveAtObservation: false,
       runtimePgid: null,
+      runtimeState: null,
       runtimeGroupMatches: false,
       runtimeAncestryMatches: false,
       runtimeObservedAtMs: null,
@@ -939,6 +950,10 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
     exactCommandFlight: {
       databaseReopened: true,
       productionExportValidated: true,
+      databaseTotalCount: events.length,
+      relevantEventCount: events.length,
+      exportEventCount: persistedEvents.length,
+      validatorTotalCount: persistedEvents.length,
       databaseEvents: structuredClone(events),
       persistedExportEvents: structuredClone(persistedEvents),
       reopenedExportEvents: structuredClone(persistedEvents),
@@ -1041,6 +1056,10 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
           (event) => event.contentHash,
         ),
         allContentHashesValid: true,
+        databaseTotalCount: probeEvents.length,
+        relevantEventCount: probeEvents.length,
+        exportEventCount: probePersistedEvents.length,
+        validatorTotalCount: probePersistedEvents.length,
         events: probeEvents,
         causalStepIds: [
           "trace-started",
@@ -2235,6 +2254,23 @@ const MUTATIONS: readonly MutationProbe[] = [
     exact("flight-recorder-integrity"),
   ),
   mutation(
+    "exact-hidden-row-count-over-query-cap",
+    "flight-recorder-integrity",
+    (input) => {
+      requireObservations(input).exactCommandFlight.databaseTotalCount = 10_001;
+    },
+    exact("flight-recorder-integrity"),
+  ),
+  mutation(
+    "probe-hidden-row-count-over-query-cap",
+    "complete-evidence",
+    (input) => {
+      requireObservations(input).independentProbe.flight.databaseTotalCount =
+        10_001;
+    },
+    exact("complete-evidence"),
+  ),
+  mutation(
     "causal-order-swap",
     "exact-command-causal-trace",
     (input) => {
@@ -2531,6 +2567,26 @@ const MUTATIONS: readonly MutationProbe[] = [
       const scenario = requireObservations(input).successScenario;
       scenario.runtimePidObservedWhileAlive = false;
       scenario.runtimeAliveAtObservation = false;
+    },
+    {
+      exactFailureIds: ["host-identity-preserved"],
+    },
+  ),
+  mutation(
+    "runtime-zombie-state",
+    "host-identity-preserved",
+    (input) => {
+      requireObservations(input).successScenario.runtimeState = "Z";
+    },
+    {
+      exactFailureIds: ["host-identity-preserved"],
+    },
+  ),
+  mutation(
+    "runtime-dead-state",
+    "host-identity-preserved",
+    (input) => {
+      requireObservations(input).successScenario.runtimeState = "X";
     },
     {
       exactFailureIds: ["host-identity-preserved"],
@@ -2894,6 +2950,75 @@ const MUTATIONS: readonly MutationProbe[] = [
             parentId: events[0]?.id ?? null,
           }),
         );
+      },
+      target === "exact"
+        ? {
+            exactFailureIds: [
+              "flight-recorder-integrity",
+              "exact-command-causal-trace",
+            ],
+          }
+        : exact("complete-evidence"),
+    ),
+  ),
+  ...(
+    [
+      ["causal-exact-post-terminal-activity", "exact"],
+      ["causal-probe-post-terminal-activity", "probe"],
+    ] as const
+  ).map(([id, target]) =>
+    mutation(
+      id,
+      target === "exact" ? "exact-command-causal-trace" : "complete-evidence",
+      (input) => {
+        const events =
+          target === "exact"
+            ? requireObservations(input).exactCommandFlight.databaseEvents
+            : requireObservations(input).independentProbe.flight.events;
+        events.push(
+          makeFlightEvent(events.length + 1, "demo.post-terminal", "info", {
+            parentId: events[0]?.id ?? null,
+          }),
+        );
+      },
+      target === "exact"
+        ? {
+            exactFailureIds: [
+              "flight-recorder-integrity",
+              "exact-command-causal-trace",
+            ],
+          }
+        : exact("complete-evidence"),
+    ),
+  ),
+  ...(
+    [
+      ["causal-exact-duplicate-trace-terminal", "exact"],
+      ["causal-probe-duplicate-trace-terminal", "probe"],
+    ] as const
+  ).map(([id, target]) =>
+    mutation(
+      id,
+      target === "exact" ? "exact-command-causal-trace" : "complete-evidence",
+      (input) => {
+        const events =
+          target === "exact"
+            ? requireObservations(input).exactCommandFlight.databaseEvents
+            : requireObservations(input).independentProbe.flight.events;
+        const terminal = events.find(
+          (event) => event.kind === "trace.completed",
+        );
+        if (!terminal) throw new Error("Missing trace terminal.");
+        const { contentHash: _hash, ...body } = terminal;
+        const duplicate = {
+          ...body,
+          id: `duplicate-${terminal.id}`,
+          sequence: events.length + 1,
+        };
+        events.push({
+          ...duplicate,
+          contentHash: computeFlightEventHash(duplicate),
+        });
       },
       target === "exact"
         ? {

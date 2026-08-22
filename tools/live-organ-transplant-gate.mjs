@@ -313,6 +313,10 @@ function processIsAlive(pid) {
   }
 }
 
+export function processStateIsLive(state) {
+  return typeof state === "string" && state.length > 0 && !/^[ZX]/i.test(state);
+}
+
 function linuxProcessIdentity(pid) {
   try {
     const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -322,6 +326,7 @@ function linuxProcessIdentity(pid) {
       .split(/\s+/);
     return {
       pid,
+      state: fields[0],
       ppid: Number(fields[1]),
       pgid: Number(fields[2]),
     };
@@ -334,7 +339,18 @@ function darwinProcessIdentity(pid) {
   return new Promise((resolve) => {
     const child = spawn(
       "ps",
-      ["-o", "pid=", "-o", "ppid=", "-o", "pgid=", "-p", String(pid)],
+      [
+        "-o",
+        "pid=",
+        "-o",
+        "ppid=",
+        "-o",
+        "pgid=",
+        "-o",
+        "state=",
+        "-p",
+        String(pid),
+      ],
       { shell: false, stdio: ["ignore", "pipe", "ignore"] },
     );
     let output = "";
@@ -358,10 +374,16 @@ function darwinProcessIdentity(pid) {
     });
     child.once("error", () => finish(null));
     child.once("close", () => {
-      const fields = output.trim().split(/\s+/).map(Number);
+      const fields = output.trim().split(/\s+/);
       finish(
-        fields.length === 3 && fields.every(Number.isInteger)
-          ? { pid: fields[0], ppid: fields[1], pgid: fields[2] }
+        fields.length === 4 &&
+          fields.slice(0, 3).map(Number).every(Number.isInteger)
+          ? {
+              pid: Number(fields[0]),
+              ppid: Number(fields[1]),
+              pgid: Number(fields[2]),
+              state: fields[3],
+            }
           : null,
       );
     });
@@ -378,6 +400,7 @@ async function observeRuntimeRelationship(runtimePid, directChildPid) {
   const observedAtMs = Date.now();
   const alive = processIsAlive(runtimePid);
   const identity = alive ? await processIdentity(runtimePid) : null;
+  const liveState = processStateIsLive(identity?.state);
   let ancestryMatches = false;
   let cursor = identity;
   const visited = new Set();
@@ -403,9 +426,10 @@ async function observeRuntimeRelationship(runtimePid, directChildPid) {
   }
   return {
     runtimePid,
-    runtimePidObservedWhileAlive: alive && identity !== null,
-    runtimeAliveAtObservation: alive,
+    runtimePidObservedWhileAlive: alive && identity !== null && liveState,
+    runtimeAliveAtObservation: alive && liveState,
     runtimePgid: identity?.pgid ?? null,
+    runtimeState: identity?.state ?? null,
     runtimeGroupMatches: identity?.pgid === directChildPid,
     runtimeAncestryMatches: ancestryMatches,
     runtimeObservedAtMs: observedAtMs,
@@ -452,6 +476,7 @@ export function runProcess(executable, args, options) {
       runtimePidObservedWhileAlive: false,
       runtimeAliveAtObservation: false,
       runtimePgid: null,
+      runtimeState: null,
       runtimeGroupMatches: false,
       runtimeAncestryMatches: false,
       runtimeObservedAtMs: null,
@@ -864,6 +889,10 @@ function emptyProbe(nonce) {
       reopenedContentHashes: [],
       productionExportContentHashes: [],
       allContentHashesValid: false,
+      databaseTotalCount: 0,
+      relevantEventCount: 0,
+      exportEventCount: 0,
+      validatorTotalCount: 0,
       events: [],
       causalStepIds: [],
     },
@@ -972,6 +1001,7 @@ function scenarioObservation(nonce, evidenceDirectory, startedEmpty, run) {
     runtimePidObservedWhileAlive: run.runtimePidObservedWhileAlive,
     runtimeAliveAtObservation: run.runtimeAliveAtObservation,
     runtimePgid: run.runtimePgid,
+    runtimeState: run.runtimeState,
     runtimeGroupMatches: run.runtimeGroupMatches,
     runtimeAncestryMatches: run.runtimeAncestryMatches,
     runtimeObservedAtMs: run.runtimeObservedAtMs,
@@ -997,6 +1027,10 @@ function emptyCausalWitness() {
   return {
     databaseReopened: false,
     productionExportValidated: false,
+    databaseTotalCount: 0,
+    relevantEventCount: 0,
+    exportEventCount: 0,
+    validatorTotalCount: 0,
     databaseEvents: [],
     persistedExportEvents: [],
     reopenedExportEvents: [],
@@ -1093,6 +1127,7 @@ async function reopenExactCommandFlight(
   const validator = new Ledger({ inMemory: true });
   try {
     await reopened.initialize();
+    const databaseTotalCount = await reopened.count();
     const allEvents = await reopened.query({ limit: 10_000 });
     const databaseEvents = traceId
       ? await reopened.query({ traceId, order: "asc", limit: 10_000 })
@@ -1100,6 +1135,7 @@ async function reopenExactCommandFlight(
     const reopenedExport = await reopened.export(traceId ? { traceId } : {});
     await validator.initialize();
     const imported = await validator.import(persisted);
+    const validatorTotalCount = await validator.count();
     const validatorEvents = traceId
       ? await validator.query({ traceId, order: "asc", limit: 10_000 })
       : [];
@@ -1109,13 +1145,19 @@ async function reopenExactCommandFlight(
     return {
       databaseReopened:
         traceId.length > 0 &&
+        databaseTotalCount === databaseEvents.length &&
         allEvents.length === databaseEvents.length &&
         allEvents.every((event) => event.traceId === traceId),
       productionExportValidated:
         imported === validatorEvents.length &&
+        validatorTotalCount === validatorEvents.length &&
         JSON.stringify(persistedEvents) === JSON.stringify(validatorEvents) &&
         JSON.stringify(persistedEvents) ===
           JSON.stringify(reopenedExport.events),
+      databaseTotalCount,
+      relevantEventCount: databaseEvents.length,
+      exportEventCount: persistedEvents.length,
+      validatorTotalCount,
       databaseEvents,
       persistedExportEvents: persistedEvents,
       reopenedExportEvents: reopenedExport.events,

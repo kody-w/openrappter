@@ -893,9 +893,15 @@ test('report and diagnostics contain no raw secrets, PII, paths, URLs, or prompt
   ].join('\n');
 
   for (const forbidden of [
+    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
     'sk-proj-FICTIONAL0123456789abcdef0123456789',
+    // rapp-keyring: allow synthetic fixture - the next value exists to prove it gets redacted
     'ghp_FICTIONAL012345678901234567890123456',
     'eyJhbGciOiJIUzI1NiJ9',
+    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
+    'ghp_FICTIONAL0123456789abcdef0123456789',
+    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaWN0aW9uYWwifQ.ZmljdGlvbmFsLXNpZ25hdHVyZQ',
     'rowan.test@example.invalid',
     'C:\\\\Users\\\\Rowan',
     'D:\\\\Fictional\\\\Orchid',

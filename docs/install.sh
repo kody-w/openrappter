@@ -13,6 +13,12 @@ ACCENT='\033[38;2;16;185;129m'       # green-bright  #10b981
 ACCENT_BRIGHT='\033[38;2;52;211;153m' # lighter green #34d399
 INFO='\033[38;2;136;146;176m'        # text-secondary #8892b0
 SUCCESS='\033[38;2;0;229;204m'       # cyan-bright   #00e5cc
+# The numeral accent in menus. It was referenced by the install-method chooser
+# and never defined, so under `set -euo pipefail` every interactive install
+# printed an unbound-variable error at the exact moment a person was choosing
+# how to install. Its own name rather than reusing SUCCESS, so that a menu
+# number does not read as a success signal.
+CYAN='\033[38;2;0;229;204m'          # cyan-bright   #00e5cc
 WARN='\033[38;2;255;176;32m'         # amber
 ERROR='\033[38;2;230;57;70m'         # coral-mid     #e63946
 MUTED='\033[38;2;90;100;128m'        # text-muted    #5a6480

@@ -3,9 +3,9 @@
 
 set -u
 
-SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
-REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../.." && pwd)
-BETA_ROOT=$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(CDPATH='' cd "$SCRIPT_DIR/../.." && pwd)
+BETA_ROOT=$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd)
 GIT_MOLT=${GIT_MOLT:-"$BETA_ROOT/tools/git-molt/bin/git-molt"}
 MOLTER_GATE="$SCRIPT_DIR/molter-gate.py"
 BRAINSTEM_PYTHON=${BRAINSTEM_PYTHON:-"$HOME/.brainstem/venv/bin/python"}
@@ -47,6 +47,8 @@ LAST_AGENTS=""
 LAST_QUARANTINE="unavailable"
 LAST_OBSERVATION=""
 
+# Invoked by the EXIT/signal traps below.
+# shellcheck disable=SC2329
 cleanup() {
     cleanup_status=$?
     trap - EXIT
@@ -282,13 +284,13 @@ scramble_attempt() {
     scramble_record_rc=$?
     scramble_lesson=$(direct_gate "$PRIMARY_BODY" "$scramble_source" 2>&1)
     scramble_gate_rc=$?
-    scramble_verify=$(verify_at "$PRIMARY_MOLT" "$PRIMARY_BODY" \
-        "$AGENT_LOCUS" "$scramble_ring" 2>&1)
+    verify_at "$PRIMARY_MOLT" "$PRIMARY_BODY" \
+        "$AGENT_LOCUS" "$scramble_ring" >/dev/null 2>&1
     scramble_verify_rc=$?
-    scramble_activate=$(molt_at "$PRIMARY_MOLT" activate \
-        "$AGENT_LOCUS" "$scramble_ring" 2>&1)
+    molt_at "$PRIMARY_MOLT" activate \
+        "$AGENT_LOCUS" "$scramble_ring" >/dev/null 2>&1
     scramble_activate_rc=$?
-    scramble_compose=$(molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" 2>&1)
+    molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" >/dev/null 2>&1
     scramble_compose_rc=$?
     observe "$scramble_label" "$PRIMARY_PORT" "$PRIMARY_PID"
 
@@ -427,8 +429,8 @@ GOOD_RECORD_RC=$?
 GOOD_VRING=$(verify_at "$PRIMARY_MOLT" "$PRIMARY_BODY" \
     "$AGENT_LOCUS" "$GOOD_RING" 2>&1)
 GOOD_VERIFY_RC=$?
-GOOD_ACTIVATE=$(molt_at "$PRIMARY_MOLT" activate \
-    "$AGENT_LOCUS" "$GOOD_VRING" 2>&1)
+molt_at "$PRIMARY_MOLT" activate \
+    "$AGENT_LOCUS" "$GOOD_VRING" >/dev/null 2>&1
 GOOD_ACTIVATE_RC=$?
 molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" >/dev/null 2>&1
 GOOD_COMPOSE_RC=$?
@@ -666,8 +668,8 @@ TRANSFER_RING=$(molt_at "$PRIMARY_MOLT" record \
     "$AGENT_LOCUS" "$TRANSFER_V4" 2>&1)
 TRANSFER_RECORD_RC=$?
 FRAME="$SCRATCH/hello-rapp.molt-frame"
-FRAME_EXPORT=$(molt_at "$PRIMARY_MOLT" frame export \
-    "$AGENT_LOCUS" "$FRAME" 2>&1)
+molt_at "$PRIMARY_MOLT" frame export \
+    "$AGENT_LOCUS" "$FRAME" >/dev/null 2>&1
 FRAME_EXPORT_RC=$?
 observe "frame-export" "$PRIMARY_PORT" "$PRIMARY_PID"
 frame_export_ok=0
@@ -700,17 +702,16 @@ for second_factory in "$SECONDARY_BODY"/agents/*_agent.py; do
         abort_proof "second factory baselines" "$second_name failed"
     fi
 done
-FRAME_IMPORT=$(molt_at "$SECONDARY_MOLT" frame import "$FRAME" 2>&1)
+molt_at "$SECONDARY_MOLT" frame import "$FRAME" >/dev/null 2>&1
 FRAME_IMPORT_RC=$?
 IMPORTED_LIVE=$(git --git-dir="$SECONDARY_MOLT" rev-parse \
     "refs/molt/live/$AGENT_LOCUS" 2>/dev/null)
 IMPORTED_BASE=$(git --git-dir="$SECONDARY_MOLT" rev-parse \
     "refs/molt/base/$AGENT_LOCUS" 2>/dev/null)
-FOREIGN_VERIFIED_ACTIVATE=$(molt_at "$SECONDARY_MOLT" activate \
-    "$AGENT_LOCUS" "$RECOVERY_VRING" 2>&1)
+molt_at "$SECONDARY_MOLT" activate \
+    "$AGENT_LOCUS" "$RECOVERY_VRING" >/dev/null 2>&1
 FOREIGN_VERIFIED_ACTIVATE_RC=$?
 molt_at "$SECONDARY_MOLT" revert "$AGENT_LOCUS" >/dev/null 2>&1
-FOREIGN_REVERT_RC=$?
 IMPORTED_ACTIVATE=$(molt_at "$SECONDARY_MOLT" activate \
     "$AGENT_LOCUS" "$TRANSFER_RING" 2>&1)
 IMPORTED_ACTIVATE_RC=$?
@@ -806,7 +807,7 @@ HN_VERIFY_RC=$?
 molt_at "$PRIMARY_MOLT" activate "$HN_LOCUS" "$HN_VRING" >/dev/null 2>&1
 HN_ACTIVATE_RC=$?
 molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" >/dev/null 2>&1
-HN_PRE_LOG=$(molt_at "$PRIMARY_MOLT" log "$HN_LOCUS" 2>&1)
+molt_at "$PRIMARY_MOLT" log "$HN_LOCUS" >/dev/null 2>&1
 HN_PRE_LOG_RC=$?
 observe "grail-user-ring" "$PRIMARY_PORT" "$PRIMARY_PID"
 
@@ -862,7 +863,7 @@ else
 fi
 FSCK_OUTPUT=$(git --git-dir="$PRIMARY_MOLT" fsck --no-progress 2>&1)
 FSCK_RC=$?
-TAMPER_COMPOSE=$(molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" 2>&1)
+molt_at "$PRIMARY_MOLT" compose "$PRIMARY_AGENTS" >/dev/null 2>&1
 TAMPER_COMPOSE_RC=$?
 observe "tampered-ring-fallback" "$PRIMARY_PORT" "$PRIMARY_PID"
 tamper_ok=0

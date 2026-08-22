@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo="${RAPP_FRONTIER_REPO:-microsoft/aibast-agents-library}"
 case "$repo" in
-    *[!A-Za-z0-9_.\/-]*|*/*/*|/*|*/|"")
+    *[!A-Za-z0-9_./-]*|*/*/*|/*|*/|"")
         echo "Invalid RAPP_FRONTIER_REPO: $repo" >&2
         exit 2
         ;;

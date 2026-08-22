@@ -21,7 +21,11 @@ import {
 } from "../flight-recorder/recorder.js";
 import type { FlightEvent } from "../flight-recorder/types.js";
 import { openrappterPath } from "../infra/openrappter-home.js";
-import type { AgentRegistry } from "./AgentRegistry.js";
+import {
+  canonicalAgentSourcePath,
+  markAgentSourceFile,
+  type AgentRegistry,
+} from "./AgentRegistry.js";
 import { BasicAgent } from "./BasicAgent.js";
 import { PythonAgent, runnerPath } from "./PythonAgent.js";
 
@@ -104,6 +108,8 @@ const PROTECTED = new Set([
 
 const PYTHON_STAGE_SUFFIX = ".py.stage";
 const targetLocks = new Map<string, Promise<void>>();
+/** Registry mutations share a namespace even when target files differ. */
+const registryLocks = new WeakMap<ImportRegistry, Promise<void>>();
 
 /**
  * Filename sanitiser.
@@ -159,11 +165,24 @@ async function readIfExists(file: string): Promise<Buffer | null> {
 }
 
 function sameFilePath(left: string, right: string): boolean {
-  return path.resolve(left) === path.resolve(right);
+  return canonicalAgentSourcePath(left) === canonicalAgentSourcePath(right);
 }
 
 function sourceFileOf(agent: BasicAgent): string | undefined {
-  return agent instanceof PythonAgent ? agent.sourceFile : undefined;
+  if (agent instanceof PythonAgent) {
+    return canonicalAgentSourcePath(agent.sourceFile);
+  }
+  const marker = Object.getOwnPropertyDescriptor(agent, "sourceFile");
+  if (
+    !marker ||
+    marker.enumerable ||
+    marker.writable ||
+    marker.configurable ||
+    typeof marker.value !== "string"
+  ) {
+    return undefined;
+  }
+  return canonicalAgentSourcePath(marker.value);
 }
 
 function uniqueAgentNames(agents: CandidateAgent[]): string[] {
@@ -215,6 +234,28 @@ async function withTargetLock<T>(
     release();
     if (targetLocks.get(target) === lock) {
       targetLocks.delete(target);
+    }
+  }
+}
+
+async function withRegistryLock<T>(
+  registry: ImportRegistry,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const predecessor = registryLocks.get(registry);
+  let release = (): void => {};
+  const lock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registryLocks.set(registry, lock);
+
+  if (predecessor) await predecessor;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (registryLocks.get(registry) === lock) {
+      registryLocks.delete(registry);
     }
   }
 }
@@ -482,6 +523,7 @@ async function validateJavaScript(
     if (typeof instance.name !== "string" || instance.name.trim() === "") {
       return { ok: false, error: "the factory agent has no capability name" };
     }
+    markAgentSourceFile(instance, file);
 
     return {
       ok: true,
@@ -547,7 +589,10 @@ async function previousGeneration(
     }
     for (const agentName of uniqueAgentNames(validation.agents)) {
       const agent = live.get(agentName);
-      if (agent) owned.set(agentName, agent);
+      const sourceFile = agent ? sourceFileOf(agent) : undefined;
+      if (agent && sourceFile && sameFilePath(sourceFile, target)) {
+        owned.set(agentName, agent);
+      }
     }
   }
 
@@ -609,14 +654,15 @@ function verifyActivatedRegistry(options: {
         `${descriptor.name} parameter metadata does not match the candidate`,
       );
     }
-    if (!options.javascript) {
-      if (!(active instanceof PythonAgent)) {
-        failures.push(`${descriptor.name} is not a PythonAgent`);
-        continue;
-      }
-      if (!sameFilePath(active.sourceFile, options.target)) {
-        failures.push(`${descriptor.name} is registered from another file`);
-      }
+    if (!options.javascript && !(active instanceof PythonAgent)) {
+      failures.push(`${descriptor.name} is not a PythonAgent`);
+      continue;
+    }
+    const sourceFile = sourceFileOf(active);
+    if (!sourceFile) {
+      failures.push(`${descriptor.name} has no canonical source marker`);
+    } else if (!sameFilePath(sourceFile, options.target)) {
+      failures.push(`${descriptor.name} is registered from another file`);
     }
   }
 
@@ -946,8 +992,10 @@ async function performLockedImport(options: {
     });
   }
 
+  const authoritativeLive = await options.registry.getAllAgents();
   const clashes = candidateNames.filter((agentName) => {
-    return live.has(agentName) && !previous.owned.has(agentName);
+    const existing = authoritativeLive.get(agentName);
+    return existing !== undefined && previous.owned.get(agentName) !== existing;
   });
   if (clashes.length > 0) {
     return rejectBeforeCommit({
@@ -1130,14 +1178,16 @@ export async function importAgentFile(
       const resolvedDirectory = await fs.realpath(path.dirname(target));
       const lockTarget = path.join(resolvedDirectory, path.basename(target));
       outcome = await withTargetLock(lockTarget, () =>
-        performLockedImport({
-          filename: name,
-          contents,
-          candidateSourceSha256,
-          javascript: name.endsWith(".js"),
-          registry,
-          target,
-        }),
+        withRegistryLock(registry, () =>
+          performLockedImport({
+            filename: name,
+            contents,
+            candidateSourceSha256,
+            javascript: name.endsWith(".js"),
+            registry,
+            target,
+          }),
+        ),
       );
     } catch (error) {
       outcome = failureOutcome({

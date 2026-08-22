@@ -10,12 +10,30 @@ import {
   setFlightRecorder,
 } from "../flight-recorder/recorder.js";
 import { AgentRegistry } from "./AgentRegistry.js";
+import { BasicAgent } from "./BasicAgent.js";
 import { importAgentFile, withAgentImportProvenance } from "./agent-import.js";
 
 type ImportResultValue = Awaited<ReturnType<typeof importAgentFile>>;
 
 let dir = "";
 let registry: AgentRegistry;
+
+class ForeignSharedAgent extends BasicAgent {
+  constructor() {
+    super("Shared", {
+      name: "Shared",
+      description: "foreign built-in capability",
+      parameters: { type: "object", properties: {}, required: [] },
+    });
+  }
+
+  async perform(_kwargs: Record<string, unknown>): Promise<string> {
+    return JSON.stringify({
+      status: "success",
+      result: "foreign object remained callable",
+    });
+  }
+}
 
 function pythonAgent(
   className: string,
@@ -78,8 +96,8 @@ async function statIdentity(file: string): Promise<string> {
   ].join(":");
 }
 
-async function transactionArtifacts(): Promise<string[]> {
-  return (await fs.readdir(dir)).filter((entry) =>
+async function transactionArtifacts(directory = dir): Promise<string[]> {
+  return (await fs.readdir(directory)).filter((entry) =>
     entry.startsWith(".agent-import-"),
   );
 }
@@ -251,16 +269,26 @@ describe("transactional replacement", () => {
     expect(await transactionArtifacts()).toEqual([]);
   });
 
-  it("keeps JavaScript factory imports loadable across same-file replacement", async () => {
+  it("uses immutable source markers for JavaScript same-file replacement", async () => {
     await fs.writeFile(path.join(dir, "package.json"), '{"type":"module"}\n', {
       mode: 0o600,
     });
-    const first = await importAgentFile(
-      "factory_agent.js",
+    const target = path.join(dir, "factory_agent.js");
+    await fs.writeFile(
+      target,
       javascriptAgent("Factory", "factory version one"),
-      registry,
-      { dir },
+      { mode: 0o600 },
     );
+    expect(await registry.reloadUserAgents()).toContain("Factory");
+    const original = await registry.getAgent("Factory");
+    expect(original).toBeDefined();
+    expect(Object.getOwnPropertyDescriptor(original!, "sourceFile")).toEqual({
+      value: path.resolve(target),
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+
     const second = await importAgentFile(
       "factory_agent.js",
       javascriptAgent("Factory", "factory version two"),
@@ -268,20 +296,63 @@ describe("transactional replacement", () => {
       { dir },
     );
 
-    expect(first).toMatchObject({ status: "ok", committed: true });
     expect(second, second.error).toMatchObject({
       status: "ok",
       committed: true,
       replaced: true,
     });
     const active = await registry.getAgent("Factory");
+    expect(active).not.toBe(original);
     expect(active?.metadata.description).toBe("factory version two");
     expect(await active!.perform({})).toContain("factory version two");
+    expect(Object.getOwnPropertyDescriptor(active!, "sourceFile")).toEqual({
+      value: path.resolve(target),
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
+    expect(await transactionArtifacts()).toEqual([]);
+  });
+
+  it("rejects a dormant JavaScript file from taking over a foreign live name", async () => {
+    await fs.writeFile(path.join(dir, "package.json"), '{"type":"module"}\n', {
+      mode: 0o600,
+    });
+    const target = path.join(dir, "dormant_agent.js");
+    const dormant = javascriptAgent("Shared", "dormant file generation");
+    await fs.writeFile(target, dormant, { mode: 0o600 });
+    const identityBefore = await statIdentity(target);
+    const foreign = new ForeignSharedAgent();
+    const live = await registry.getAllAgents();
+    live.set("Shared", foreign);
+
+    const result = await importAgentFile(
+      "dormant_agent.js",
+      javascriptAgent("Shared", "takeover candidate"),
+      registry,
+      { dir },
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      committed: false,
+      rejectedBeforeCommit: true,
+      errorCode: "IMPORT_NAME_COLLISION",
+    });
+    expect(await fs.readFile(target)).toEqual(dormant);
+    expect(await statIdentity(target)).toBe(identityBefore);
+    expect(await registry.getAgent("Shared")).toBe(foreign);
+    expect(await foreign.perform({})).toContain(
+      "foreign object remained callable",
+    );
+    expect(
+      Object.getOwnPropertyDescriptor(foreign, "sourceFile"),
+    ).toBeUndefined();
     expect(await transactionArtifacts()).toEqual([]);
   });
 });
 
-describe("per-target serialization", () => {
+describe("target and registry serialization", () => {
   it("does not overlap candidate validation for one resolved target", async () => {
     const marker = path.join(dir, "same-target.log");
     const [first, second] = await Promise.all([
@@ -320,44 +391,143 @@ describe("per-target serialization", () => {
     expect(await transactionArtifacts()).toEqual([]);
   }, 60_000);
 
-  it("allows validation for distinct resolved targets to overlap", async () => {
-    const marker = path.join(dir, "distinct-targets.log");
-    const [first, second] = await Promise.all([
-      importAgentFile(
-        "parallel_a_agent.py",
-        timedPythonAgent({
-          className: "ParallelAAgent",
-          agentName: "ParallelA",
-          marker,
-          token: "a",
-          delaySeconds: 0.5,
-        }),
+  it("admits at most one synchronized import of a shared capability", async () => {
+    let ready = 0;
+    let release = (): void => {};
+    const together = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const synchronizedImport = async (
+      filename: string,
+      className: string,
+      description: string,
+    ): Promise<ImportResultValue> => {
+      ready += 1;
+      if (ready === 2) release();
+      await together;
+      return importAgentFile(
+        filename,
+        pythonAgent(className, "Shared", description),
         registry,
         { dir },
-      ),
-      importAgentFile(
-        "parallel_b_agent.py",
-        timedPythonAgent({
-          className: "ParallelBAgent",
-          agentName: "ParallelB",
-          marker,
-          token: "b",
-          delaySeconds: 0.5,
-        }),
-        registry,
-        { dir },
-      ),
-    ]);
+      );
+    };
 
-    expect(first.status).toBe("ok");
-    expect(second.status).toBe("ok");
-    const intervals = await readIntervals(marker);
-    const a = intervals.get("a");
-    const b = intervals.get("b");
-    expect(a).toBeDefined();
-    expect(b).toBeDefined();
-    expect(a!.start < b!.end && b!.start < a!.end).toBe(true);
+    const filenames = ["shared_a_agent.py", "shared_b_agent.py"];
+    const descriptions = ["shared candidate A", "shared candidate B"];
+    const originalReload = registry.reloadUserAgents.bind(registry);
+    let reloadCalls = 0;
+    let releaseActivation = (): void => {};
+    // Without registry serialization, holding the first activation lets both
+    // transactions pass their empty collision snapshots and reach reload.
+    const activationGate = new Promise<void>((resolve) => {
+      releaseActivation = resolve;
+    });
+    const gateTimeout = setTimeout(releaseActivation, 1_000);
+    registry.reloadUserAgents = async () => {
+      reloadCalls += 1;
+      if (reloadCalls === 2) releaseActivation();
+      await activationGate;
+      return originalReload();
+    };
+
+    let results: ImportResultValue[] = [];
+    try {
+      results = await Promise.all([
+        synchronizedImport(filenames[0], "SharedAAgent", descriptions[0]),
+        synchronizedImport(filenames[1], "SharedBAgent", descriptions[1]),
+      ]);
+    } finally {
+      clearTimeout(gateTimeout);
+      releaseActivation();
+      registry.reloadUserAgents = originalReload;
+    }
+
+    const winnerIndex = results.findIndex((result) => result.status === "ok");
+    const losers = results.filter((result) => result.status === "error");
+    expect(reloadCalls).toBe(1);
+    expect(results.filter((result) => result.status === "ok")).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(losers[0]).toMatchObject({
+      committed: false,
+      rejectedBeforeCommit: true,
+      errorCode: "IMPORT_NAME_COLLISION",
+    });
+    if (winnerIndex < 0) throw new Error("shared import had no winner");
+
+    const active = await registry.getAgent("Shared");
+    expect(active).toBeDefined();
+    expect(await active!.perform({})).toContain(descriptions[winnerIndex]);
+    await expect(
+      fs.access(path.join(dir, filenames[winnerIndex])),
+    ).resolves.toBeUndefined();
+    await expect(
+      fs.access(path.join(dir, filenames[1 - winnerIndex])),
+    ).rejects.toThrow();
+    expect(await registry.getAgent("Shared")).toBe(active);
     expect(await transactionArtifacts()).toEqual([]);
+  }, 60_000);
+
+  it("does not serialize transactions owned by distinct registries", async () => {
+    const otherDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "agent-import-other-registry-"),
+    );
+    const otherRegistry = new AgentRegistry(
+      path.join(otherDir, "__no_builtins__"),
+      otherDir,
+    );
+    const marker = path.join(dir, "distinct-registries.log");
+
+    try {
+      const [first, second] = await Promise.all([
+        importAgentFile(
+          "shared_agent.py",
+          timedPythonAgent({
+            className: "RegistryOneAgent",
+            agentName: "Shared",
+            marker,
+            token: "registry-one",
+            delaySeconds: 0.5,
+          }),
+          registry,
+          { dir },
+        ),
+        importAgentFile(
+          "shared_agent.py",
+          timedPythonAgent({
+            className: "RegistryTwoAgent",
+            agentName: "Shared",
+            marker,
+            token: "registry-two",
+            delaySeconds: 0.5,
+          }),
+          otherRegistry,
+          { dir: otherDir },
+        ),
+      ]);
+
+      expect(first.status).toBe("ok");
+      expect(second.status).toBe("ok");
+      const intervals = await readIntervals(marker);
+      const firstInterval = intervals.get("registry-one");
+      const secondInterval = intervals.get("registry-two");
+      expect(firstInterval).toBeDefined();
+      expect(secondInterval).toBeDefined();
+      expect(
+        firstInterval!.start < secondInterval!.end &&
+          secondInterval!.start < firstInterval!.end,
+      ).toBe(true);
+      expect(await (await registry.getAgent("Shared"))!.perform({})).toContain(
+        "Shared timed candidate.",
+      );
+      expect(
+        await (await otherRegistry.getAgent("Shared"))!.perform({}),
+      ).toContain("Shared timed candidate.");
+      expect(await transactionArtifacts()).toEqual([]);
+      expect(await transactionArtifacts(otherDir)).toEqual([]);
+    } finally {
+      await fs.rm(otherDir, { recursive: true, force: true });
+    }
   }, 60_000);
 });
 

@@ -6,6 +6,7 @@ import { openrappterPath } from '../infra/openrappter-home.js';
  * Mirrors the Python AgentRegistry in cli.py.
  */
 
+import { realpathSync } from 'node:fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -54,6 +55,38 @@ async function walkAgentFiles(dir: string, prefix = ''): Promise<string[]> {
 }
 
 const registryLog = logger.child('agents');
+
+/** Stable absolute identity used to attribute a live generated agent to its file. */
+export function canonicalAgentSourcePath(file: string): string {
+  const absolute = path.resolve(file);
+  try {
+    return realpathSync.native(absolute);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return absolute;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Attribute a generated JavaScript agent to the file that produced it.
+ *
+ * Ownership is intentionally immutable and invisible to normal object
+ * enumeration: import transactions use it to distinguish a same-file update
+ * from a foreign capability with the same public name.
+ */
+export function markAgentSourceFile(
+  agent: BasicAgent,
+  file: string,
+): void {
+  Object.defineProperty(agent, 'sourceFile', {
+    value: canonicalAgentSourcePath(file),
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+}
 
 export class AgentRegistry {
   private agentsDir: string;
@@ -166,6 +199,7 @@ export class AgentRegistry {
             const AgentClass = mod.createAgent(BasicAgent);
             if (AgentClass) {
               const instance = new AgentClass() as BasicAgent;
+              markAgentSourceFile(instance, filePath);
               if (!this.agents.has(instance.name)) {
                 this.agents.set(instance.name, instance);
               }

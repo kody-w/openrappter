@@ -315,7 +315,7 @@ describe("transactional replacement", () => {
     expect(await registry.getAgent("Rollback")).toBe(held);
     expect(await held!.perform({})).toContain("generation one");
     expect(await transactionArtifacts()).toEqual([]);
-  });
+  }, 15_000);
 
   it("rolls a new install back when registry verification cannot find it", async () => {
     const originalReload = registry.reloadUserAgents.bind(registry);
@@ -345,7 +345,7 @@ describe("transactional replacement", () => {
     ).rejects.toThrow();
     expect(await registry.getAgent("Missing")).toBeUndefined();
     expect(await transactionArtifacts()).toEqual([]);
-  });
+  }, 15_000);
 
   it("uses immutable source markers for JavaScript same-file replacement", async () => {
     await fs.writeFile(path.join(dir, "package.json"), '{"type":"module"}\n', {

@@ -44,6 +44,36 @@ interface TestImportResult {
   errorCode?: string;
 }
 
+const INCOMPLETE_EVIDENCE_CASES: Array<{
+  name: string;
+  result: (candidateSourceSha256: string) => TestImportResult;
+}> = [
+  {
+    name: 'missing machine fields',
+    result: () => ({ status: 'ok', file: 'checksum_agent.py' }),
+  },
+  {
+    name: 'contradictory rejection fields',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      committed: true,
+      rejectedBeforeCommit: true,
+      candidateSourceSha256,
+      activeSourceSha256: sha256('previous active source'),
+      errorCode: 'agent-contract-invalid',
+    }),
+  },
+  {
+    name: 'a forged candidate hash',
+    result: (candidateSourceSha256) => ({
+      status: 'ok',
+      committed: true,
+      candidateSourceSha256: sha256('forged candidate'),
+      activeSourceSha256: candidateSourceSha256,
+    }),
+  },
+];
+
 const provenanceBridge = vi.hoisted(() => ({
   calls: [] as CapturedProvenance[],
 }));
@@ -229,7 +259,8 @@ describe('POST /agents/import causal provenance', () => {
         status: 'ok',
         file: filename,
         committed: true,
-        candidateSourceSha256: '0'.repeat(64),
+        candidateSourceSha256,
+        activeSourceSha256: candidateSourceSha256,
       };
     });
     const recordSpy = vi.spyOn(recorder, 'record');
@@ -247,7 +278,8 @@ describe('POST /agents/import causal provenance', () => {
       status: 'ok',
       file: 'checksum_agent.py',
       committed: true,
-      candidateSourceSha256: '0'.repeat(64),
+      candidateSourceSha256,
+      activeSourceSha256: candidateSourceSha256,
     });
 
     const events = await traceEvents(traceId);
@@ -369,6 +401,74 @@ describe('POST /agents/import causal provenance', () => {
     });
   });
 
+  it.each(INCOMPLETE_EVIDENCE_CASES)(
+    'fails closed on $name without fabricating terminal metadata',
+    async ({ name, result }) => {
+      const contents = `machine-evidence-source-sentinel:${name}`;
+      const candidateSourceSha256 = sha256(contents);
+      let importerCalls = 0;
+      await startServer(async () => {
+        importerCalls += 1;
+        return result(candidateSourceSha256);
+      });
+      const recordSpy = vi.spyOn(recorder, 'record');
+      const traceId = `incomplete-evidence-${name.replaceAll(' ', '-')}`;
+
+      const { response } = await postInsideTrace(
+        traceId,
+        provenanceBody(traceId, contents),
+      );
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(503);
+      expect(responseBody).toEqual({
+        status: 'error',
+        error:
+          'Agent import result lacked complete, consistent provenance evidence.',
+      });
+      expect(importerCalls).toBe(1);
+      expect(provenanceBridge.calls).toHaveLength(1);
+
+      const events = await traceEvents(traceId);
+      const started = events.find(
+        (event) => event.kind === 'gateway.agent.import.started',
+      );
+      const failed = events.find(
+        (event) => event.kind === 'gateway.agent.import.failed',
+      );
+      expect(failed).toMatchObject({
+        traceId,
+        parentId: started?.id,
+        source: 'gateway',
+        status: 'error',
+      });
+      expect(failed?.metadata).toEqual({
+        requestId: 'gateway-request-2',
+        httpStatus: 503,
+        responseStatus: 'error',
+        evidenceIncomplete: true,
+        candidateSourceSha256,
+      });
+      expect(failed?.metadata).not.toHaveProperty('committed');
+      expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
+      expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
+      expect(
+        events.some(
+          (event) => event.kind === 'gateway.agent.import.completed',
+        ),
+      ).toBe(false);
+
+      const persisted = JSON.stringify(events);
+      const recorderInputs = JSON.stringify(recordSpy.mock.calls);
+      const serializedResponse = JSON.stringify(responseBody);
+      for (const secret of [contents, TOKEN]) {
+        expect(persisted).not.toContain(secret);
+        expect(recorderInputs).not.toContain(secret);
+        expect(serializedResponse).not.toContain(secret);
+      }
+    },
+  );
+
   it('rejects incomplete, invalid, and rootless provenance before importing', async () => {
     let importerCalls = 0;
     await startServer(async () => {
@@ -470,6 +570,7 @@ describe('POST /agents/import causal provenance', () => {
     });
     expect(failed?.metadata).not.toHaveProperty('committed');
     expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
+    expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
     expect(JSON.stringify(failed)).not.toContain('exception text');
   });
 });

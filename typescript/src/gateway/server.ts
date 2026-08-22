@@ -281,6 +281,53 @@ function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
 }
 
+type ValidatedAgentImportEvidence =
+  | { kind: 'accepted'; activeSourceSha256: string }
+  | { kind: 'rejected'; activeSourceSha256: string }
+  | { kind: 'incomplete' };
+
+function validateAgentImportEvidence(
+  result: unknown,
+  candidateSourceSha256: string,
+): ValidatedAgentImportEvidence {
+  if (
+    typeof result !== 'object'
+    || result === null
+    || Array.isArray(result)
+  ) {
+    return { kind: 'incomplete' };
+  }
+  const machine = result as Partial<GatewayAgentImportResult>;
+  if (machine.candidateSourceSha256 !== candidateSourceSha256) {
+    return { kind: 'incomplete' };
+  }
+  if (
+    machine.status === 'ok'
+    && machine.committed === true
+    && machine.activeSourceSha256 === candidateSourceSha256
+    && machine.rejectedBeforeCommit !== true
+  ) {
+    return {
+      kind: 'accepted',
+      activeSourceSha256: machine.activeSourceSha256,
+    };
+  }
+  if (
+    machine.status === 'error'
+    && machine.committed === false
+    && machine.rejectedBeforeCommit === true
+    && isSha256(machine.activeSourceSha256)
+    && typeof machine.errorCode === 'string'
+    && machine.errorCode.trim().length > 0
+  ) {
+    return {
+      kind: 'rejected',
+      activeSourceSha256: machine.activeSourceSha256,
+    };
+  }
+  return { kind: 'incomplete' };
+}
+
 function isJsonSerializable(value: unknown): boolean {
   try {
     return JSON.stringify(value) !== undefined;
@@ -1702,6 +1749,38 @@ export class GatewayServer {
                   return;
                 }
 
+                const evidence = validateAgentImportEvidence(
+                  result,
+                  candidateSourceSha256,
+                );
+                if (evidence.kind === 'incomplete') {
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus: 503,
+                        responseStatus: 'error',
+                        evidenceIncomplete: true,
+                        candidateSourceSha256,
+                      },
+                    }),
+                  );
+                  writeJsonResponse(
+                    res,
+                    503,
+                    {
+                      status: 'error',
+                      error:
+                        'Agent import result lacked complete, consistent provenance evidence.',
+                    },
+                    corsHeaders,
+                  );
+                  return;
+                }
+
                 if (!isJsonSerializable(result)) {
                   await recorder.withParent(started.id, () =>
                     recorder.record({
@@ -1728,8 +1807,8 @@ export class GatewayServer {
                   return;
                 }
 
-                const httpStatus = result.status === 'ok' ? 200 : 400;
-                if (result.status === 'ok') {
+                const httpStatus = evidence.kind === 'accepted' ? 200 : 400;
+                if (evidence.kind === 'accepted') {
                   await recorder.withParent(started.id, () =>
                     recorder.record({
                       kind: 'gateway.agent.import.completed',
@@ -1738,8 +1817,8 @@ export class GatewayServer {
                       metadata: {
                         requestId: provenance.value.requestId,
                         httpStatus,
-                        responseStatus: result.status,
-                        committed: result.committed ?? true,
+                        responseStatus: 'ok',
+                        committed: true,
                         candidateSourceSha256,
                       },
                     }),
@@ -1753,17 +1832,11 @@ export class GatewayServer {
                       metadata: {
                         requestId: provenance.value.requestId,
                         httpStatus,
-                        responseStatus: result.status,
-                        committed: result.committed ?? false,
-                        rejectedBeforeCommit:
-                          result.rejectedBeforeCommit ?? true,
+                        responseStatus: 'error',
+                        committed: false,
+                        rejectedBeforeCommit: true,
                         candidateSourceSha256,
-                        ...(isSha256(result.activeSourceSha256)
-                          ? {
-                              activeSourceSha256:
-                                result.activeSourceSha256,
-                            }
-                          : {}),
+                        activeSourceSha256: evidence.activeSourceSha256,
                       },
                     }),
                   );

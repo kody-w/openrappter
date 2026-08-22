@@ -42,6 +42,9 @@ interface TestImportResult {
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
+  commitState?: 'precommit' | 'committed' | 'restored' | 'unknown';
+  retrySafe?: boolean;
+  warning?: string;
 }
 
 const INCOMPLETE_EVIDENCE_CASES: Array<{
@@ -61,6 +64,8 @@ const INCOMPLETE_EVIDENCE_CASES: Array<{
       candidateSourceSha256,
       activeSourceSha256: sha256('previous active source'),
       errorCode: 'agent-contract-invalid',
+      commitState: 'precommit',
+      retrySafe: true,
     }),
   },
   {
@@ -68,8 +73,201 @@ const INCOMPLETE_EVIDENCE_CASES: Array<{
     result: (candidateSourceSha256) => ({
       status: 'ok',
       committed: true,
+      rejectedBeforeCommit: false,
       candidateSourceSha256: sha256('forged candidate'),
       activeSourceSha256: candidateSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
+    }),
+  },
+];
+
+const ACTIVE_TRACE_REJECTION_CASES: Array<{
+  name: string;
+  boundary?: ScenarioBoundaryMode;
+  transformTraceView?: (events: FlightEvent[]) => FlightEvent[];
+}> = [
+  {
+    name: 'multiple trace roots',
+    transformTraceView: (events) => {
+      const root = events.find((event) =>
+        event.kind === 'trace.started' && event.parentId === null,
+      );
+      return root
+        ? [...events, { ...root, id: `${root.id}-duplicate` }]
+        : events;
+    },
+  },
+  {
+    name: 'a stale root with no process incarnation',
+    transformTraceView: (events) => rewriteTraceRoot(events, (metadata) => {
+      const stale = { ...metadata };
+      delete stale.ownerIncarnation;
+      return stale;
+    }),
+  },
+  {
+    name: 'a root owned by a foreign PID',
+    transformTraceView: (events) => rewriteTraceRoot(events, (metadata) => ({
+      ...metadata,
+      ownerPid: process.pid + 1,
+    })),
+  },
+  {
+    name: 'a root owned by a foreign process incarnation',
+    transformTraceView: (events) => rewriteTraceRoot(events, (metadata) => ({
+      ...metadata,
+      ownerIncarnation: 'foreign-process-incarnation',
+    })),
+  },
+  {
+    name: 'a missing scenario boundary',
+    boundary: 'missing',
+  },
+  {
+    name: 'a nonce-mismatched scenario boundary',
+    boundary: 'nonce-mismatch',
+  },
+  {
+    name: 'a scenario boundary from the wrong source',
+    boundary: 'wrong-source',
+  },
+  {
+    name: 'duplicate top-level scenario boundaries',
+    boundary: 'duplicate',
+  },
+  {
+    name: 'a completed scenario inside an active trace',
+    boundary: 'completed',
+  },
+];
+
+const EXPLICIT_POSTCOMMIT_OUTCOMES: Array<{
+  name: string;
+  httpStatus: number;
+  terminalKind:
+    | 'gateway.agent.import.completed'
+    | 'gateway.agent.import.failed';
+  result: (candidateSourceSha256: string) => TestImportResult;
+  metadata: (
+    candidateSourceSha256: string,
+    activeSourceSha256: string,
+  ) => Record<string, unknown>;
+}> = [
+  {
+    name: 'restored-after-commit error',
+    httpStatus: 409,
+    terminalKind: 'gateway.agent.import.failed',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'activation failed and the previous generation was restored',
+      errorCode: 'IMPORT_ACTIVATION_FAILED',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: sha256('restored active source'),
+      commitState: 'restored',
+      retrySafe: true,
+    }),
+    metadata: (candidateSourceSha256, activeSourceSha256) => ({
+      requestId: 'gateway-request-2',
+      httpStatus: 409,
+      responseStatus: 'error',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256,
+      commitState: 'restored',
+      retrySafe: true,
+      errorCode: 'IMPORT_ACTIVATION_FAILED',
+    }),
+  },
+  {
+    name: 'committed cleanup warning',
+    httpStatus: 200,
+    terminalKind: 'gateway.agent.import.completed',
+    result: (candidateSourceSha256) => ({
+      status: 'ok',
+      file: 'checksum_agent.py',
+      warning: 'The committed candidate is active; cleanup remains pending.',
+      errorCode: 'IMPORT_POST_COMMIT_CLEANUP_FAILED',
+      committed: true,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: candidateSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
+    }),
+    metadata: (candidateSourceSha256, activeSourceSha256) => ({
+      requestId: 'gateway-request-2',
+      httpStatus: 200,
+      responseStatus: 'ok',
+      committed: true,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
+      warning: 'The committed candidate is active; cleanup remains pending.',
+      errorCode: 'IMPORT_POST_COMMIT_CLEANUP_FAILED',
+    }),
+  },
+  {
+    name: 'incomplete rollback with the candidate still committed',
+    httpStatus: 500,
+    terminalKind: 'gateway.agent.import.failed',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'rollback could not establish a safe active generation',
+      errorCode: 'IMPORT_ROLLBACK_FAILED',
+      committed: true,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: candidateSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
+    }),
+    metadata: (candidateSourceSha256, activeSourceSha256) => ({
+      requestId: 'gateway-request-2',
+      httpStatus: 500,
+      responseStatus: 'error',
+      committed: true,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
+      errorCode: 'IMPORT_ROLLBACK_FAILED',
+      recoveryRequired: true,
+    }),
+  },
+  {
+    name: 'incomplete rollback with unknown commit state',
+    httpStatus: 500,
+    terminalKind: 'gateway.agent.import.failed',
+    result: (candidateSourceSha256) => ({
+      status: 'error',
+      error: 'rollback left the active generation uncertain',
+      errorCode: 'IMPORT_ROLLBACK_FAILED',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256: sha256('uncertain active source'),
+      commitState: 'unknown',
+      retrySafe: false,
+    }),
+    metadata: (candidateSourceSha256, activeSourceSha256) => ({
+      requestId: 'gateway-request-2',
+      httpStatus: 500,
+      responseStatus: 'error',
+      committed: false,
+      rejectedBeforeCommit: false,
+      candidateSourceSha256,
+      activeSourceSha256,
+      commitState: 'unknown',
+      retrySafe: false,
+      errorCode: 'IMPORT_ROLLBACK_FAILED',
+      recoveryRequired: true,
     }),
   },
 ];
@@ -100,6 +298,19 @@ let dataDirectory = '';
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function rewriteTraceRoot(
+  events: FlightEvent[],
+  rewriteMetadata: (
+    metadata: Record<string, unknown>,
+  ) => Record<string, unknown>,
+): FlightEvent[] {
+  return events.map((event) =>
+    event.kind === 'trace.started' && event.parentId === null
+      ? { ...event, metadata: rewriteMetadata(event.metadata) }
+      : event,
+  );
 }
 
 function provenanceBody(
@@ -158,25 +369,93 @@ async function postImport(
   );
 }
 
+type ScenarioBoundaryMode =
+  | 'valid'
+  | 'missing'
+  | 'nonce-mismatch'
+  | 'wrong-source'
+  | 'duplicate'
+  | 'completed';
+
+interface TraceRequestOptions {
+  authenticated?: boolean;
+  query?: string;
+  boundary?: ScenarioBoundaryMode;
+  transformTraceView?: (events: FlightEvent[]) => FlightEvent[];
+}
+
+async function recordScenarioBoundary(
+  root: FlightEvent,
+  nonce: string,
+  mode: ScenarioBoundaryMode = 'valid',
+): Promise<void> {
+  if (mode === 'missing') return;
+  const count = mode === 'duplicate' ? 2 : 1;
+  for (let index = 0; index < count; index += 1) {
+    await recorder.record({
+      kind: 'demo.transplant.started',
+      source: mode === 'wrong-source'
+        ? 'not-live-organ-transplant'
+        : 'live-organ-transplant',
+      status: 'started',
+      parentId: root.id,
+      metadata: {
+        nonce: mode === 'nonce-mismatch' ? `${nonce}-mismatch` : nonce,
+      },
+    });
+  }
+  if (mode === 'completed') {
+    await recorder.record({
+      kind: 'demo.transplant.completed',
+      source: 'live-organ-transplant',
+      status: 'success',
+      parentId: root.id,
+      metadata: { nonce },
+    });
+  }
+}
+
 async function postInsideTrace(
   traceId: string,
   body: Record<string, unknown>,
-  options: {
-    authenticated?: boolean;
-    query?: string;
-  } = {},
+  options: TraceRequestOptions = {},
 ): Promise<{ response: Response; root: FlightEvent }> {
   let response: Response | undefined;
   let root: FlightEvent | undefined;
+  const queryRecorder = recorder.query.bind(recorder);
   await recorder.runTrace({ traceId }, async () => {
-    const roots = await recorder.query({
+    const roots = await queryRecorder({
       traceId,
       kind: 'trace.started',
       order: 'asc',
     });
     root = roots.find((event) => event.parentId === null);
     if (!root) throw new Error('Test trace root was not recorded.');
-    response = await postImport(body, options);
+    const nonce =
+      typeof body.scenarioNonce === 'string' ? body.scenarioNonce : '';
+    await recordScenarioBoundary(
+      root,
+      nonce,
+      options.boundary ?? 'valid',
+    );
+    if (options.transformTraceView) {
+      const transformTraceView = options.transformTraceView;
+      const querySpy = vi.spyOn(recorder, 'query').mockImplementation(
+        async (query = {}) => {
+          const events = await queryRecorder(query);
+          return query.traceId === traceId
+            ? transformTraceView(events)
+            : events;
+        },
+      );
+      try {
+        response = await postImport(body, options);
+      } finally {
+        querySpy.mockRestore();
+      }
+    } else {
+      response = await postImport(body, options);
+    }
   });
   if (!response || !root) {
     throw new Error('Test request did not complete inside its Flight trace.');
@@ -245,6 +524,93 @@ describe('POST /agents/import causal provenance', () => {
     ).toEqual([]);
   });
 
+  it.each(ACTIVE_TRACE_REJECTION_CASES)(
+    'rejects $name before any importer side effect',
+    async ({ name, boundary, transformTraceView }) => {
+      let importerCalls = 0;
+      await startServer(async (_filename, contents) => {
+        importerCalls += 1;
+        const hash = sha256(contents);
+        return {
+          status: 'ok',
+          committed: true,
+          rejectedBeforeCommit: false,
+          candidateSourceSha256: hash,
+          activeSourceSha256: hash,
+          commitState: 'committed',
+          retrySafe: false,
+        };
+      });
+      const traceId =
+        `inactive-${name.replace(/[^a-z0-9]+/giu, '-').toLowerCase()}`;
+      const contents = `root-rejection-source-sentinel:${name}`;
+
+      const { response } = await postInsideTrace(
+        traceId,
+        provenanceBody(traceId, contents),
+        { boundary, transformTraceView },
+      );
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(responseBody).toMatchObject({
+        status: 'error',
+        error: expect.any(String),
+      });
+      expect(importerCalls).toBe(0);
+      expect(provenanceBridge.calls).toEqual([]);
+      const events = await traceEvents(traceId);
+      expect(
+        events.some((event) =>
+          event.kind.startsWith('gateway.agent.import.'),
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(events)).not.toContain(contents);
+      expect(JSON.stringify(events)).not.toContain(TOKEN);
+      expect(JSON.stringify(responseBody)).not.toContain(contents);
+      expect(JSON.stringify(responseBody)).not.toContain(TOKEN);
+    },
+  );
+
+  it('rejects a completed scenario trace before invoking the importer', async () => {
+    let importerCalls = 0;
+    await startServer(async () => {
+      importerCalls += 1;
+      return { status: 'ok' };
+    });
+    const traceId = 'completed-import-trace';
+    await recorder.runTrace({ traceId }, async () => {
+      const root = (await recorder.query({
+        traceId,
+        kind: 'trace.started',
+      })).find((event) => event.parentId === null);
+      if (!root) throw new Error('Completed test trace has no root.');
+      await recordScenarioBoundary(root, 'flagship-scenario-2');
+    });
+
+    const response = await postImport(
+      provenanceBody(traceId, 'completed-trace-source-sentinel'),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining('no longer active'),
+    });
+    expect(importerCalls).toBe(0);
+    expect(provenanceBridge.calls).toEqual([]);
+    const events = await traceEvents(traceId);
+    expect(
+      events.some((event) =>
+        event.kind.startsWith('gateway.agent.import.'),
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(events)).not.toContain(
+      'completed-trace-source-sentinel',
+    );
+    expect(JSON.stringify(events)).not.toContain(TOKEN);
+  });
+
   it('records the computed hash and exact causal parents for a query-string request', async () => {
     const contents = 'print("source-sentinel-never-record")\n';
     const candidateSourceSha256 = sha256(contents);
@@ -259,8 +625,11 @@ describe('POST /agents/import causal provenance', () => {
         status: 'ok',
         file: filename,
         committed: true,
+        rejectedBeforeCommit: false,
         candidateSourceSha256,
         activeSourceSha256: candidateSourceSha256,
+        commitState: 'committed',
+        retrySafe: false,
       };
     });
     const recordSpy = vi.spyOn(recorder, 'record');
@@ -278,8 +647,11 @@ describe('POST /agents/import causal provenance', () => {
       status: 'ok',
       file: 'checksum_agent.py',
       committed: true,
+      rejectedBeforeCommit: false,
       candidateSourceSha256,
       activeSourceSha256: candidateSourceSha256,
+      commitState: 'committed',
+      retrySafe: false,
     });
 
     const events = await traceEvents(traceId);
@@ -367,6 +739,8 @@ describe('POST /agents/import causal provenance', () => {
       candidateSourceSha256,
       activeSourceSha256,
       errorCode: 'agent-contract-invalid',
+      commitState: 'precommit',
+      retrySafe: true,
     }));
     const traceId = 'invalid-replacement-trace';
 
@@ -375,6 +749,17 @@ describe('POST /agents/import causal provenance', () => {
       provenanceBody(traceId, contents),
     );
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      status: 'error',
+      error: 'agent contract invalid',
+      committed: false,
+      rejectedBeforeCommit: true,
+      candidateSourceSha256,
+      activeSourceSha256,
+      errorCode: 'agent-contract-invalid',
+      commitState: 'precommit',
+      retrySafe: true,
+    });
 
     const events = await traceEvents(traceId);
     const started = events.find(
@@ -400,6 +785,66 @@ describe('POST /agents/import causal provenance', () => {
       activeSourceSha256,
     });
   });
+
+  it.each(EXPLICIT_POSTCOMMIT_OUTCOMES)(
+    'preserves the explicit $name outcome',
+    async ({ name, httpStatus, terminalKind, result, metadata }) => {
+      const contents = `postcommit-source-sentinel:${name}`;
+      const candidateSourceSha256 = sha256(contents);
+      const importResult = result(candidateSourceSha256);
+      if (!importResult.activeSourceSha256) {
+        throw new Error('Explicit outcome fixture requires an active hash.');
+      }
+      let importerCalls = 0;
+      await startServer(async () => {
+        importerCalls += 1;
+        return importResult;
+      });
+      const recordSpy = vi.spyOn(recorder, 'record');
+      const traceId =
+        `outcome-${name.replace(/[^a-z0-9]+/giu, '-').toLowerCase()}`;
+
+      const { response } = await postInsideTrace(
+        traceId,
+        provenanceBody(traceId, contents),
+      );
+      const responseBody = await response.json();
+
+      expect(response.status).toBe(httpStatus);
+      expect(responseBody).toEqual(importResult);
+      expect(importerCalls).toBe(1);
+      const events = await traceEvents(traceId);
+      const started = events.find(
+        (event) => event.kind === 'gateway.agent.import.started',
+      );
+      const terminal = events.find((event) => event.kind === terminalKind);
+      expect(terminal).toMatchObject({
+        traceId,
+        parentId: started?.id,
+        source: 'gateway',
+        status: terminalKind.endsWith('.completed') ? 'success' : 'error',
+      });
+      expect(terminal?.metadata).toEqual(
+        metadata(
+          candidateSourceSha256,
+          importResult.activeSourceSha256,
+        ),
+      );
+      expect(terminal?.metadata).not.toHaveProperty('evidenceIncomplete');
+      expect(terminal?.metadata.committed).toBe(importResult.committed);
+      expect(terminal?.metadata.retrySafe).toBe(importResult.retrySafe);
+      expect(terminal?.metadata.commitState).toBe(importResult.commitState);
+
+      const persisted = JSON.stringify(events);
+      const recorderInputs = JSON.stringify(recordSpy.mock.calls);
+      const serializedResponse = JSON.stringify(responseBody);
+      for (const secret of [contents, TOKEN]) {
+        expect(persisted).not.toContain(secret);
+        expect(recorderInputs).not.toContain(secret);
+        expect(serializedResponse).not.toContain(secret);
+      }
+    },
+  );
 
   it.each(INCOMPLETE_EVIDENCE_CASES)(
     'fails closed on $name without fabricating terminal metadata',
@@ -452,6 +897,9 @@ describe('POST /agents/import causal provenance', () => {
       expect(failed?.metadata).not.toHaveProperty('committed');
       expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
       expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
+      expect(failed?.metadata).not.toHaveProperty('commitState');
+      expect(failed?.metadata).not.toHaveProperty('retrySafe');
+      expect(failed?.metadata).not.toHaveProperty('recoveryRequired');
       expect(
         events.some(
           (event) => event.kind === 'gateway.agent.import.completed',
@@ -571,6 +1019,9 @@ describe('POST /agents/import causal provenance', () => {
     expect(failed?.metadata).not.toHaveProperty('committed');
     expect(failed?.metadata).not.toHaveProperty('rejectedBeforeCommit');
     expect(failed?.metadata).not.toHaveProperty('activeSourceSha256');
+    expect(failed?.metadata).not.toHaveProperty('commitState');
+    expect(failed?.metadata).not.toHaveProperty('retrySafe');
+    expect(failed?.metadata).not.toHaveProperty('recoveryRequired');
     expect(JSON.stringify(failed)).not.toContain('exception text');
   });
 });

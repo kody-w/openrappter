@@ -39,6 +39,7 @@ import {
 } from './usage.js';
 import { getFlightRecorder } from '../flight-recorder/recorder.js';
 import type { FlightEvent } from '../flight-recorder/types.js';
+import { processMatchesIncarnation } from '../flight-recorder/process-owner.js';
 import {
   listAgentFiles,
   readAgentFile,
@@ -202,7 +203,10 @@ interface GatewayAgentImportResult extends CurrentAgentImportResult {
   candidateSourceSha256?: string;
   activeSourceSha256?: string;
   errorCode?: string;
-}
+  commitState?: unknown;
+  retrySafe?: unknown;
+  warning?: unknown;
+};
 
 interface AgentImportRuntimeBoundary {
   withAgentImportProvenance?: <T>(
@@ -288,9 +292,124 @@ function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{64}$/u.test(value);
 }
 
+type ActiveImportTraceValidation =
+  | { ok: true; root: FlightEvent }
+  | { ok: false; error: string };
+
+function validateActiveImportTrace(
+  events: readonly FlightEvent[],
+  scenarioNonce: string,
+): ActiveImportTraceValidation {
+  const roots = events.filter((event) =>
+    event.kind === 'trace.started' && event.parentId === null,
+  );
+  if (roots.length !== 1) {
+    return {
+      ok: false,
+      error: roots.length === 0
+        ? 'No root trace.started event exists for the supplied traceId.'
+        : 'The supplied traceId has more than one root trace.started event.',
+    };
+  }
+
+  const root = roots[0];
+  if (root.source !== 'runtime' || root.status !== 'started') {
+    return {
+      ok: false,
+      error: 'The supplied traceId does not identify a runtime trace root.',
+    };
+  }
+  const ownerPid = root.metadata.ownerPid;
+  const ownerIncarnation = root.metadata.ownerIncarnation;
+  if (
+    typeof ownerPid !== 'number'
+    || !Number.isSafeInteger(ownerPid)
+    || ownerPid <= 0
+    || ownerPid !== process.pid
+    || typeof ownerIncarnation !== 'string'
+    || ownerIncarnation.length === 0
+    || !processMatchesIncarnation(ownerPid, ownerIncarnation)
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId is not owned by this runtime process.',
+    };
+  }
+  if (
+    events.some((event) =>
+      event.kind === 'trace.completed' || event.kind === 'trace.failed',
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId is no longer active.',
+    };
+  }
+
+  const boundaries = events.filter((event) =>
+    event.kind === 'demo.transplant.started' && event.parentId === root.id,
+  );
+  if (boundaries.length !== 1) {
+    return {
+      ok: false,
+      error:
+        'The supplied traceId must contain exactly one active transplant scenario boundary.',
+    };
+  }
+  const boundary = boundaries[0];
+  if (
+    boundary.source !== 'live-organ-transplant'
+    || boundary.status !== 'started'
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied traceId has an invalid transplant scenario boundary.',
+    };
+  }
+  if (boundary.metadata.nonce !== scenarioNonce) {
+    return {
+      ok: false,
+      error: 'The supplied scenarioNonce does not match the active trace.',
+    };
+  }
+  if (
+    events.some((event) =>
+      (
+        event.kind === 'demo.transplant.completed'
+        || event.kind === 'demo.transplant.failed'
+      )
+      && event.parentId === root.id,
+    )
+  ) {
+    return {
+      ok: false,
+      error: 'The supplied transplant scenario is no longer active.',
+    };
+  }
+  return { ok: true, root };
+}
+
 type ValidatedAgentImportEvidence =
   | { kind: 'accepted'; activeSourceSha256: string }
-  | { kind: 'rejected'; activeSourceSha256: string }
+  | { kind: 'precommit-rejection'; activeSourceSha256: string }
+  | {
+      kind: 'restored';
+      activeSourceSha256: string;
+      errorCode: string;
+    }
+  | {
+      kind: 'committed-warning';
+      activeSourceSha256: string;
+      errorCode: string;
+      warning: string;
+    }
+  | {
+      kind: 'recovery-required';
+      activeSourceSha256: string;
+      committed: boolean;
+      commitState: 'committed' | 'unknown';
+      errorCode: string;
+    }
   | { kind: 'incomplete' };
 
 function validateAgentImportEvidence(
@@ -308,12 +427,35 @@ function validateAgentImportEvidence(
   if (machine.candidateSourceSha256 !== candidateSourceSha256) {
     return { kind: 'incomplete' };
   }
+  const errorCode =
+    typeof machine.errorCode === 'string'
+    && machine.errorCode.trim().length > 0
+      ? machine.errorCode
+      : undefined;
+  const warning =
+    typeof machine.warning === 'string'
+    && machine.warning.trim().length > 0
+      ? machine.warning
+      : undefined;
   if (
     machine.status === 'ok'
     && machine.committed === true
     && machine.activeSourceSha256 === candidateSourceSha256
-    && machine.rejectedBeforeCommit !== true
+    && machine.rejectedBeforeCommit === false
+    && machine.commitState === 'committed'
+    && machine.retrySafe === false
   ) {
+    if (warning !== undefined && errorCode !== undefined) {
+      return {
+        kind: 'committed-warning',
+        activeSourceSha256: machine.activeSourceSha256,
+        errorCode,
+        warning,
+      };
+    }
+    if (machine.warning !== undefined || machine.errorCode !== undefined) {
+      return { kind: 'incomplete' };
+    }
     return {
       kind: 'accepted',
       activeSourceSha256: machine.activeSourceSha256,
@@ -324,12 +466,55 @@ function validateAgentImportEvidence(
     && machine.committed === false
     && machine.rejectedBeforeCommit === true
     && isSha256(machine.activeSourceSha256)
-    && typeof machine.errorCode === 'string'
-    && machine.errorCode.trim().length > 0
+    && errorCode !== undefined
+    && machine.commitState === 'precommit'
+    && machine.retrySafe === true
+    && machine.warning === undefined
   ) {
     return {
-      kind: 'rejected',
+      kind: 'precommit-rejection',
       activeSourceSha256: machine.activeSourceSha256,
+    };
+  }
+  if (
+    machine.status === 'error'
+    && machine.committed === false
+    && machine.rejectedBeforeCommit === false
+    && isSha256(machine.activeSourceSha256)
+    && errorCode !== undefined
+    && machine.commitState === 'restored'
+    && machine.retrySafe === true
+    && machine.warning === undefined
+  ) {
+    return {
+      kind: 'restored',
+      activeSourceSha256: machine.activeSourceSha256,
+      errorCode,
+    };
+  }
+  if (
+    machine.status === 'error'
+    && typeof machine.committed === 'boolean'
+    && machine.rejectedBeforeCommit === false
+    && isSha256(machine.activeSourceSha256)
+    && errorCode !== undefined
+    && (
+      machine.commitState === 'unknown'
+      || (
+        machine.commitState === 'committed'
+        && machine.committed === true
+        && machine.activeSourceSha256 === candidateSourceSha256
+      )
+    )
+    && machine.retrySafe === false
+    && machine.warning === undefined
+  ) {
+    return {
+      kind: 'recovery-required',
+      activeSourceSha256: machine.activeSourceSha256,
+      committed: machine.committed,
+      commitState: machine.commitState,
+      errorCode,
     };
   }
   return { kind: 'incomplete' };
@@ -1643,11 +1828,10 @@ export class GatewayServer {
               return;
             }
 
-            let traceStartedEvents: FlightEvent[];
+            let traceEvents: FlightEvent[];
             try {
-              traceStartedEvents = await recorder.query({
+              traceEvents = await recorder.query({
                 traceId: provenance.value.traceId,
-                kind: 'trace.started',
                 order: 'asc',
               });
             } catch {
@@ -1662,27 +1846,24 @@ export class GatewayServer {
               );
               return;
             }
-            const traceRoots = traceStartedEvents.filter((event) =>
-              event.parentId === null
-              && event.source === 'runtime'
-              && event.status === 'started',
+            const activeTrace = validateActiveImportTrace(
+              traceEvents,
+              provenance.value.scenarioNonce,
             );
-            if (traceRoots.length !== 1) {
+            if (!activeTrace.ok) {
               writeJsonResponse(
                 res,
                 400,
                 {
                   status: 'error',
-                  error: traceRoots.length === 0
-                    ? 'No root trace.started event exists for the supplied traceId.'
-                    : 'The supplied traceId has more than one root trace.started event.',
+                  error: activeTrace.error,
                 },
                 corsHeaders,
               );
               return;
             }
 
-            const root = traceRoots[0];
+            const root = activeTrace.root;
             const candidateSourceSha256 = createHash('sha256')
               .update(sourceBytes)
               .digest('hex');
@@ -1814,8 +1995,9 @@ export class GatewayServer {
                   return;
                 }
 
-                const httpStatus = evidence.kind === 'accepted' ? 200 : 400;
+                let httpStatus: number;
                 if (evidence.kind === 'accepted') {
+                  httpStatus = 200;
                   await recorder.withParent(started.id, () =>
                     recorder.record({
                       kind: 'gateway.agent.import.completed',
@@ -1830,7 +2012,8 @@ export class GatewayServer {
                       },
                     }),
                   );
-                } else {
+                } else if (evidence.kind === 'precommit-rejection') {
+                  httpStatus = 400;
                   await recorder.withParent(started.id, () =>
                     recorder.record({
                       kind: 'gateway.agent.import.failed',
@@ -1844,6 +2027,71 @@ export class GatewayServer {
                         rejectedBeforeCommit: true,
                         candidateSourceSha256,
                         activeSourceSha256: evidence.activeSourceSha256,
+                      },
+                    }),
+                  );
+                } else if (evidence.kind === 'restored') {
+                  httpStatus = 409;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'error',
+                        committed: false,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeSourceSha256: evidence.activeSourceSha256,
+                        commitState: 'restored',
+                        retrySafe: true,
+                        errorCode: evidence.errorCode,
+                      },
+                    }),
+                  );
+                } else if (evidence.kind === 'committed-warning') {
+                  httpStatus = 200;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.completed',
+                      source: 'gateway',
+                      status: 'success',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'ok',
+                        committed: true,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeSourceSha256: evidence.activeSourceSha256,
+                        commitState: 'committed',
+                        retrySafe: false,
+                        warning: evidence.warning,
+                        errorCode: evidence.errorCode,
+                      },
+                    }),
+                  );
+                } else {
+                  httpStatus = 500;
+                  await recorder.withParent(started.id, () =>
+                    recorder.record({
+                      kind: 'gateway.agent.import.failed',
+                      source: 'gateway',
+                      status: 'error',
+                      metadata: {
+                        requestId: provenance.value.requestId,
+                        httpStatus,
+                        responseStatus: 'error',
+                        committed: evidence.committed,
+                        rejectedBeforeCommit: false,
+                        candidateSourceSha256,
+                        activeSourceSha256: evidence.activeSourceSha256,
+                        commitState: evidence.commitState,
+                        retrySafe: false,
+                        errorCode: evidence.errorCode,
+                        recoveryRequired: true,
                       },
                     }),
                   );

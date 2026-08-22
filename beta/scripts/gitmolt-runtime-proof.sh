@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Prove git-molt can evolve a live copied Brainstem without killing it.
+# shellcheck disable=SC2034,SC2317,SC2329
+# Captured command output is retained for proof-side effects, and cleanup is
+# invoked through traps that static analysis cannot see as direct calls.
 
 set -u
 
-SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
-REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../.." && pwd)
-BETA_ROOT=$(CDPATH= cd "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(CDPATH='' cd "$SCRIPT_DIR/../.." && pwd)
+BETA_ROOT=$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd)
 GIT_MOLT=${GIT_MOLT:-"$BETA_ROOT/tools/git-molt/bin/git-molt"}
 MOLTER_GATE="$SCRIPT_DIR/molter-gate.py"
 BRAINSTEM_PYTHON=${BRAINSTEM_PYTHON:-"$HOME/.brainstem/venv/bin/python"}

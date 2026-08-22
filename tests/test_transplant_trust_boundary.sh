@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Literal documentation contract for executable Python agent registration.
 # Run: bash tests/test_transplant_trust_boundary.sh
+# shellcheck disable=SC2016
+# Markdown backticks are intentionally matched as literal single-quoted text.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

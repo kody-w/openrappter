@@ -302,6 +302,8 @@ assert_contains "$readme_source" '[1/6] DONOR VERIFIED' \
   "README includes the six-beat transcript"
 assert_contains "$readme_source" '[6/6] FLIGHT SEALED' \
   "README transcript ends with persisted Flight proof"
+# shellcheck disable=SC2088
+# This is the literal Markdown path shown to users, not a shell-expanded path.
 assert_contains "$readme_source" \
   '~/.openrappter/demo-runs/live-organ-transplant/<timestamp>-<nonce>/' \
   "README identifies the default evidence directory"

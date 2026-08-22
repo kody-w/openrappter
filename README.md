@@ -43,6 +43,24 @@ Or try the quickstart demo: `git clone https://github.com/kody-w/openrappter.git
 
 ---
 
+## Try the beta in a browser
+
+**[kody-w.github.io/openrappter/beta/](https://kody-w.github.io/openrappter/beta/)** — nothing to
+install. Scan a commons, fold what is safe to absorb, watch a contradicting frame get refused by name,
+and roll back.
+
+The page loads the shipped module unmodified rather than a demonstration written to resemble it; a
+test fails the build if the served copy ever drifts from `beta/electron/`.
+
+The same thing from a terminal:
+
+```bash
+node beta/scripts/rapp-drill.mjs status
+node beta/scripts/rapp-drill.mjs scan <source>
+node beta/scripts/rapp-drill.mjs fold <source>
+node beta/scripts/rapp-drill.mjs restore
+```
+
 ## Built on RAPP
 
 OpenRappter is an organism; [RAPP](https://github.com/kody-w/rapp-1) is the

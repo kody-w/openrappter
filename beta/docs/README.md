@@ -42,6 +42,8 @@ them, they win.
 | [ONE-TIME-SEALS.md](ONE-TIME-SEALS.md) | Local-first preferences that need no setting up, and why nothing syncs. |
 | [DIMENSION-MINING.md](DIMENSION-MINING.md) | Racing many possible versions at a goal the machine can check. |
 | [QQDRILL-PROTOCOL.md](QQDRILL-PROTOCOL.md) | `rapp-qqdrill/1.0` — the parallel execution engine underneath: how many drills run at once, isolated, and under what budget. |
+| *(no document)* `../electron/drill-app.mjs` | The application that drives the drill: a store of plain files, scan, checkpoint-before-fold, restore. Run it with `node beta/scripts/rapp-drill.mjs`. |
+| *(no document)* `../../docs/beta/` | The published beta page — the same library running in a browser, at kody-w.github.io/openrappter/beta/ |
 | [LOCAL-MODEL-PLAYER.md](LOCAL-MODEL-PLAYER.md) | Making the last paid command local too. |
 | [CARTRIDGE-PWA.md](CARTRIDGE-PWA.md) | Exporting a rapp as a cartridge that runs in a browser, offline, and merges back when it comes home. |
 | [DIMENSION-TILES.md](DIMENSION-TILES.md) | The shipped herd/arena toggle and the on-disk tile record. |

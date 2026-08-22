@@ -1,0 +1,147 @@
+{
+  "candidates": [
+    {
+      "activeDays": 3,
+      "candidateId": "candidate-d107da16f9b929a5",
+      "classification": "root-cause-fix",
+      "confidence": "high",
+      "evidence": [
+        {
+          "day": "2026-06-11",
+          "evidenceId": "evidence-8986709e4662ed4b6419",
+          "recordOrdinals": [
+            1
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-004",
+          "sourceId": "source-681befebb8c1"
+        },
+        {
+          "day": "2026-06-13",
+          "evidenceId": "evidence-1f5a7f24f867a507b839",
+          "recordOrdinals": [
+            2
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-007",
+          "sourceId": "source-681befebb8c1"
+        },
+        {
+          "day": "2026-06-16",
+          "evidenceId": "evidence-8c790b3b8a26468b04d3",
+          "recordOrdinals": [
+            3
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-011",
+          "sourceId": "source-681befebb8c1"
+        }
+      ],
+      "existingCapability": null,
+      "falsePositiveRisks": [
+        "Similar failure wording can describe different root causes; inspect before changing a workflow.",
+        "Repeated setup may be environment-specific rather than suitable for automation."
+      ],
+      "label": "Repeated setup or recovery workflow",
+      "observedActiveFriction": {
+        "confidence": "unavailable",
+        "lowerSeconds": 0,
+        "method": "capped-active-intervals-v1",
+        "upperSeconds": 0
+      },
+      "occurrences": 3,
+      "patternType": "repair-loop",
+      "sessions": 3
+    },
+    {
+      "activeDays": 2,
+      "candidateId": "candidate-8370806596de86df",
+      "classification": "reuse-existing",
+      "confidence": "high",
+      "evidence": [
+        {
+          "day": "2026-06-10",
+          "evidenceId": "evidence-e90fec646bfd30cb8dbc",
+          "recordOrdinals": [
+            4
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-009",
+          "sourceId": "source-681befebb8c1"
+        },
+        {
+          "day": "2026-06-15",
+          "evidenceId": "evidence-978680bedb2c956aadaa",
+          "recordOrdinals": [
+            6
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-001",
+          "sourceId": "source-681befebb8c1"
+        },
+        {
+          "day": "2026-06-15",
+          "evidenceId": "evidence-8b15463292c6d93e44fd",
+          "recordOrdinals": [
+            5
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-003",
+          "sourceId": "source-681befebb8c1"
+        }
+      ],
+      "existingCapability": {
+        "match": "reuse",
+        "name": "release-reviewer",
+        "reason": "The inspected release-reviewer capability directly covers repeated review and release gates."
+      },
+      "falsePositiveRisks": [
+        "Repeated review language may refer to distinct release gates with different policies."
+      ],
+      "label": "Repeated review or release workflow",
+      "observedActiveFriction": {
+        "confidence": "unavailable",
+        "lowerSeconds": 0,
+        "method": "capped-active-intervals-v1",
+        "upperSeconds": 0
+      },
+      "occurrences": 3,
+      "patternType": "review-workflow",
+      "sessions": 3
+    }
+  ],
+  "diagnostics": [],
+  "excluded": {
+    "belowEvidenceThreshold": 0,
+    "controlMessages": 7,
+    "intentionalVerificationLoops": 0
+  },
+  "mode": "observe",
+  "schemaVersion": "rapter-clever-girl.observe.v1",
+  "scope": {
+    "minimumActiveDays": 2,
+    "minimumSessions": 3,
+    "skillsRootsCount": 1,
+    "windowEnd": null,
+    "windowStart": null
+  },
+  "sources": [
+    {
+      "acceptedRecords": 13,
+      "skippedRecords": 0,
+      "sourceDigest": "sha256:9a160bdff901a1b220d1e8247674d45c8c1216620a22b25c89e8fc86dc9a47c8",
+      "sourceId": "source-681befebb8c1",
+      "sourceType": "copilot",
+      "status": "ok"
+    }
+  ],
+  "status": "ok",
+  "summary": {
+    "acceptedRecords": 13,
+    "activeDays": 9,
+    "candidateCount": 2,
+    "highConfidenceCandidateCount": 2,
+    "sessions": 11,
+    "skippedRecords": 0
+  }
+}

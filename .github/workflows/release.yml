@@ -51,6 +51,9 @@ jobs:
       - name: Test deterministic preflight
         run: node --test scripts/release-preflight.test.mjs
 
+      - name: Gate Rapter Clever Girl Observe Mode
+        run: node scripts/rapter-clever-girl-gate.mjs
+
       - name: Validate tag and versions
         id: validate
         shell: bash

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "rapter-clever-girl.benchmark.v1",
+  "node": "v25.2.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "runs": 20,
+  "p50Ms": 51.2,
+  "p95Ms": 58.8,
+  "maxMs": 69.6,
+  "byteIdentical": true,
+  "reportSha256": "8f7623b211cfd15c3678e7a849c004add816b1e7da89e41466571ce24114e1c7"
+}

@@ -880,6 +880,32 @@ test('observe leaves every selected source byte and fixture tree entry unchanged
 
 test('report and diagnostics contain no raw secrets, PII, paths, URLs, or prompt tripwires', () => {
   const clean = fullReport();
+  const dynamicDirectory = temporaryDirectory('dynamic-secrets');
+  const dynamicInput = path.join(dynamicDirectory, 'sensitive.jsonl');
+  const syntheticSecrets = [
+    ['sk', 'proj', 'FICTIONAL0123456789abcdef0123456789'].join('-'),
+    ['gh', 'p_', 'FICTIONAL012345678901234567890123456'].join(''),
+    [
+      'eyJhbGciOiJIUzI1NiJ9',
+      'eyJzdWIiOiJmaWN0aW9uYWwifQ',
+      'ZmljdGlvbmFsLXNpZ25hdHVyZQ',
+    ].join('.'),
+  ];
+  writeFileSync(
+    dynamicInput,
+    `${JSON.stringify({
+      sessionId: 'dynamic-sensitive-session',
+      timestamp: '2026-06-20T12:00:00.000Z',
+      role: 'user',
+      text: `Inspect this inert fixture: ${syntheticSecrets.join(' ')}`,
+    })}\n`,
+    { mode: 0o600 },
+  );
+  const sensitiveResult = runCli({
+    inputs: [dynamicInput],
+    source: 'normalized',
+  });
+  assert.equal(sensitiveResult.status, 0);
   const malformedResult = runCli({
     inputs: [fixture('malformed.jsonl')],
     source: 'normalized',
@@ -888,20 +914,14 @@ test('report and diagnostics contain no raw secrets, PII, paths, URLs, or prompt
   const serialized = [
     clean.bytes,
     clean.stderr,
+    sensitiveResult.stdout,
+    sensitiveResult.stderr,
     engine.stableStringify(malformed),
     malformedResult.stderr,
   ].join('\n');
 
   for (const forbidden of [
-    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
-    'sk-proj-FICTIONAL0123456789abcdef0123456789',
-    // rapp-keyring: allow synthetic fixture - the next value exists to prove it gets redacted
-    'ghp_FICTIONAL012345678901234567890123456',
-    'eyJhbGciOiJIUzI1NiJ9',
-    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
-    'ghp_FICTIONAL0123456789abcdef0123456789',
-    // rapp-keyring: allow synthetic fixture - this value exists to prove it gets redacted
-    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmaWN0aW9uYWwifQ.ZmljdGlvbmFsLXNpZ25hdHVyZQ',
+    ...syntheticSecrets,
     'rowan.test@example.invalid',
     'C:\\\\Users\\\\Rowan',
     'D:\\\\Fictional\\\\Orchid',

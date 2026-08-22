@@ -48,7 +48,7 @@ LAST_QUARANTINE="unavailable"
 LAST_OBSERVATION=""
 
 # Invoked by the EXIT/signal traps below.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup() {
     cleanup_status=$?
     trap - EXIT

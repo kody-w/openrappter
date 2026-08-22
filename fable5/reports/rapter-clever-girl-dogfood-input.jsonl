@@ -1,0 +1,13 @@
+{"session_id":"redacted-repair-a","timestamp":"2026-06-11T12:00:00.000Z","user_message":"The fictional Windows onboarding launcher fails on first run; repair its bootstrap."}
+{"session_id":"redacted-repair-b","timestamp":"2026-06-13T12:00:00.000Z","user_message":"A made-up desktop installer stalls during startup; fix the local setup path."}
+{"session_id":"redacted-repair-c","timestamp":"2026-06-16T12:00:00.000Z","user_message":"A sample deployment pipeline is not starting after release; fix the bootstrap rather than retrying."}
+{"session_id":"redacted-review-a","timestamp":"2026-06-10T12:00:00.000Z","user_message":"Perform an adversarial read-only review of a fictional change and report only evidence-backed defects."}
+{"session_id":"redacted-review-b","timestamp":"2026-06-15T12:00:00.000Z","user_message":"Perform a final read-only review of a sample feature after its accessibility pass."}
+{"session_id":"redacted-review-c","timestamp":"2026-06-15T13:00:00.000Z","user_message":"Read-only review the example governance change and test whether its stated claims hold."}
+{"session_id":"redacted-control-a","timestamp":"2026-06-01T12:00:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-a","timestamp":"2026-06-01T12:01:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-b","timestamp":"2026-06-02T12:00:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-b","timestamp":"2026-06-02T12:01:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-c","timestamp":"2026-06-03T12:00:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-d","timestamp":"2026-06-04T12:00:00.000Z","user_message":"continue"}
+{"session_id":"redacted-control-e","timestamp":"2026-06-04T12:01:00.000Z","user_message":"continue"}

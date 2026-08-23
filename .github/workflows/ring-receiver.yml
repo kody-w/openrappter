@@ -6,9 +6,9 @@ permissions:
 jobs:
   receive:
     if: github.event.sender.login == 'kody-w'
-    uses: kody-w/openrappter-release-train/.github/workflows/receive.yml@3f84a14c56d4e0b13971a7f253cdf9d3dd7d310f
+    uses: kody-w/openrappter-release-train/.github/workflows/receive.yml@2605992220cf1dec238fe0798f55452350219c81
     with:
-      authority_commit: 3f84a14c56d4e0b13971a7f253cdf9d3dd7d310f
+      authority_commit: 2605992220cf1dec238fe0798f55452350219c81
       action: ${{ github.event.action }}
       payload_json: ${{ toJson(github.event.client_payload) }}
       target_ring: stable

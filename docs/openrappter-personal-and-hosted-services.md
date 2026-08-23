@@ -1,10 +1,20 @@
 # OpenRappter Personal and separately operated services
 
-OpenRappter is the free/open, local-first personal organism. This repository is
-licensed under the **Apache License, Version 2.0** (`LICENSE`). It is not MIT
-licensed. The license permits use, modification, creation of derivative works,
-distribution, and commercial use, subject to its actual terms. Nothing here
-changes or retroactively relicenses existing OpenRappter code.
+OpenRappter is the free/open, local-first personal organism. OpenRappter-authored
+material is offered under the **Apache License, Version 2.0**, subject to the
+root [`LICENSE`](../LICENSE) and [`NOTICE`](../NOTICE). Apache-2.0 permits use,
+modification, creation of derivative works, distribution, and commercial use,
+subject to its terms. This summary does not replace those files or determine
+the license of material authored by someone else.
+
+This is a mixed-license repository. As recorded in `NOTICE`, imported material
+under `beta/` and `rapp_brainstem/` remains governed by the MIT license
+reproduced at
+[`licenses/aibast-agents-library-MIT.txt`](../licenses/aibast-agents-library-MIT.txt).
+Individual third-party files and dependencies may carry additional notices.
+The applicable license and file-level notice control; this document neither
+relicenses them nor makes the legal conclusion that every repository file has
+one uniform license.
 
 Anyone may run OpenRappter, fork it, and self-host or mutate their fork while
 complying with Apache-2.0. Those open-source rights do not automatically create
@@ -30,9 +40,11 @@ Apache-2.0:
 - interoperability uses public, versioned, data-only contracts.
 
 The public `contracts/xpedition-extension-v1.json` schema is one such seam. It
-describes display metadata, navigation, and a required capability. A descriptor
-does not grant that capability, inherit authentication, read local state, or
-bundle hosted-service access.
+describes display metadata, an approved local route and optional fragment, and
+a capability selected from a closed public vocabulary. It cannot name an
+external endpoint or private control-plane scope. A descriptor does not grant
+that capability, inherit authentication, read local state, or bundle
+hosted-service access.
 
 Product, pricing, privacy, and legal terms for any separately operated service
 belong in that service and require its owner and qualified-counsel review. This

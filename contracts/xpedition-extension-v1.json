@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openrappter.dev/contracts/xpedition-extension-v1.json",
   "title": "XPedition Extension Descriptor v1",
-  "description": "Data-only descriptor. Validation does not grant capabilities, authentication, state access, or hosted-service entitlement.",
+  "description": "Public data-only descriptor for approved local application routes. Validation grants no capability or state access.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,7 +10,7 @@
     "title",
     "description",
     "glyph",
-    "href",
+    "routeId",
     "requiredCapability",
     "surfaceVersion"
   ],
@@ -34,13 +34,45 @@
       "minLength": 1,
       "maxLength": 4
     },
-    "href": {
+    "routeId": {
       "type": "string",
-      "pattern": "^(#|https://)"
+      "enum": [
+        "observe",
+        "chat",
+        "show-and-tell",
+        "agents",
+        "showcase",
+        "flight",
+        "skills",
+        "channels",
+        "sessions",
+        "cron",
+        "devices",
+        "presence",
+        "debug",
+        "zen",
+        "accounts",
+        "memory",
+        "settings",
+        "terminal",
+        "help"
+      ]
+    },
+    "fragment": {
+      "type": "string",
+      "pattern": "^#[a-z][a-z0-9-]{0,63}$"
     },
     "requiredCapability": {
       "type": "string",
-      "pattern": "^[a-z-]+:[a-z-]+$"
+      "enum": [
+        "ui:view",
+        "agent:read",
+        "channel:read",
+        "session:read",
+        "skill:read",
+        "system:read",
+        "memory:read"
+      ]
     },
     "surfaceVersion": {
       "const": 1

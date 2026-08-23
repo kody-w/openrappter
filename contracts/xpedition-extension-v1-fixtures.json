@@ -1,0 +1,159 @@
+{
+  "accepted": [
+    {
+      "id": "agent-explorer",
+      "title": "Agent Explorer",
+      "description": "Browse agents exposed by the local runtime.",
+      "glyph": "A",
+      "routeId": "agents",
+      "requiredCapability": "agent:read",
+      "surfaceVersion": 1
+    },
+    {
+      "id": "system-health",
+      "title": "System Health",
+      "description": "Inspect local runtime health.",
+      "glyph": "+",
+      "routeId": "presence",
+      "fragment": "#overview",
+      "requiredCapability": "system:read",
+      "surfaceVersion": 1
+    }
+  ],
+  "rejected": [
+    {
+      "reason": "arbitrary external URL",
+      "value": {
+        "id": "remote",
+        "title": "Remote",
+        "description": "Must not navigate outside approved local routes.",
+        "glyph": "R",
+        "href": "https://example.com/app",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "credential-bearing URL",
+      "value": {
+        "id": "credential",
+        "title": "Credential",
+        "description": "Must not contain URL credentials.",
+        "glyph": "C",
+        "href": "https://user:secret@example.com/",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "query secret",
+      "value": {
+        "id": "query-secret",
+        "title": "Query secret",
+        "description": "Must not contain query credentials.",
+        "glyph": "Q",
+        "href": "https://example.com/?token=secret",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "loopback host",
+      "value": {
+        "id": "loopback",
+        "title": "Loopback",
+        "description": "Must not name a loopback host.",
+        "glyph": "L",
+        "href": "http://127.0.0.1/private",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "link-local host",
+      "value": {
+        "id": "metadata",
+        "title": "Metadata",
+        "description": "Must not name a link-local host.",
+        "glyph": "M",
+        "href": "http://169.254.169.254/latest/meta-data",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "control-plane path",
+      "value": {
+        "id": "control",
+        "title": "Control",
+        "description": "Must not name a control-plane route.",
+        "glyph": "C",
+        "routeId": "/control-plane/admin",
+        "requiredCapability": "system:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "tenant capability",
+      "value": {
+        "id": "tenant-admin",
+        "title": "Tenant admin",
+        "description": "Must not express tenant authority.",
+        "glyph": "T",
+        "routeId": "settings",
+        "requiredCapability": "tenant:admin",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "billing capability",
+      "value": {
+        "id": "billing",
+        "title": "Billing",
+        "description": "Must not express billing authority.",
+        "glyph": "B",
+        "routeId": "settings",
+        "requiredCapability": "billing:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "private package capability",
+      "value": {
+        "id": "private-package",
+        "title": "Private package",
+        "description": "Must not express private package authority.",
+        "glyph": "P",
+        "routeId": "skills",
+        "requiredCapability": "private-package:load",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "telemetry hook",
+      "value": {
+        "id": "telemetry",
+        "title": "Telemetry",
+        "description": "Must not add out-of-contract telemetry.",
+        "glyph": "T",
+        "routeId": "presence",
+        "requiredCapability": "system:read",
+        "surfaceVersion": 1,
+        "telemetryEndpoint": "https://telemetry.example/collect"
+      }
+    },
+    {
+      "reason": "secret-shaped fragment",
+      "value": {
+        "id": "secret-fragment",
+        "title": "Secret fragment",
+        "description": "Fragments are local identifiers, not query data.",
+        "glyph": "S",
+        "routeId": "agents",
+        "fragment": "#token=secret",
+        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    }
+  ]
+}

@@ -102,3 +102,17 @@ These actions only operate visible shell state. They cannot read secrets,
 approve tools, install agents, bypass gateway authentication, or bypass native
 consent. Existing element-ref commands and their private/sensitive subtree
 guards are unchanged.
+
+## External product extension seam
+
+Separately operated products can describe an XPedition-compatible surface with
+the exported, data-only `XpeditionExtensionV1` contract. The descriptor contains
+only an id, display metadata, a hash or HTTPS location, a required capability,
+and `surfaceVersion: 1`. `isXpeditionExtensionV1()` validates this untrusted
+boundary data.
+
+The descriptor does not register an OpenRappter agent, read local memory,
+inherit authentication, receive secrets, grant a capability, or bundle any
+hosted service. The host still owns authorization, navigation, isolation, and
+rendering. This seam lets another product preserve XPedition interaction
+vocabulary without copying the shell or personal state.

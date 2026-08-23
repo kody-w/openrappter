@@ -2,6 +2,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import {
+  isXpeditionExtensionV1,
+  type XpeditionExtensionV1,
+} from '../services/xpedition.js';
 
 function read(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -65,5 +69,26 @@ describe('Windows XPedition build and accessibility contract', () => {
       expect(desktopActions).toContain(`'${action}'`);
     }
     expect(desktopActions).toContain("'install_agent'");
+  });
+
+  it('exposes a data-only v1 extension seam without granting host authority', () => {
+    const extension: XpeditionExtensionV1 = {
+      id: 'business-nursery',
+      title: 'Business Nursery',
+      description: 'A separately operated, capability-gated surface.',
+      glyph: 'BN',
+      href: 'https://service.example/nursery',
+      requiredCapability: 'organism:read',
+      surfaceVersion: 1,
+    };
+    expect(isXpeditionExtensionV1(extension)).toBe(true);
+    expect(isXpeditionExtensionV1({
+      ...extension,
+      href: 'javascript:alert(1)',
+    })).toBe(false);
+    expect(isXpeditionExtensionV1({
+      ...extension,
+      requiredCapability: '',
+    })).toBe(false);
   });
 });

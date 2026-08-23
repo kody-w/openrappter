@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openrappter.dev/contracts/xpedition-extension-v1.json",
+  "title": "XPedition Extension Descriptor v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "description",
+    "glyph",
+    "href",
+    "requiredCapability",
+    "surfaceVersion"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,63}$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "glyph": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4
+    },
+    "href": {
+      "type": "string",
+      "pattern": "^(#|https://)"
+    },
+    "requiredCapability": {
+      "type": "string",
+      "pattern": "^[a-z-]+:[a-z-]+$"
+    },
+    "surfaceVersion": {
+      "const": 1
+    }
+  }
+}

@@ -50,6 +50,44 @@ export interface XpeditionApp {
   desktop: boolean;
 }
 
+/**
+ * Stable, data-only seam for separately operated products to describe an
+ * XPedition-compatible app without importing OpenRappter state or internals.
+ * The host remains responsible for authorization and rendering.
+ */
+export interface XpeditionExtensionV1 {
+  id: string;
+  title: string;
+  description: string;
+  glyph: string;
+  href: string;
+  requiredCapability: string;
+  surfaceVersion: 1;
+}
+
+export function isXpeditionExtensionV1(
+  value: unknown,
+): value is XpeditionExtensionV1 {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return record.surfaceVersion === 1 &&
+    typeof record.id === 'string' &&
+    /^[a-z][a-z0-9-]{1,63}$/.test(record.id) &&
+    typeof record.title === 'string' &&
+    record.title.length > 0 &&
+    record.title.length <= 80 &&
+    typeof record.description === 'string' &&
+    record.description.length > 0 &&
+    record.description.length <= 240 &&
+    typeof record.glyph === 'string' &&
+    record.glyph.length > 0 &&
+    record.glyph.length <= 4 &&
+    typeof record.href === 'string' &&
+    (record.href.startsWith('#') || record.href.startsWith('https://')) &&
+    typeof record.requiredCapability === 'string' &&
+    /^[a-z-]+:[a-z-]+$/.test(record.requiredCapability);
+}
+
 export const XPEDITION_APPS: readonly XpeditionApp[] = [
   {
     id: 'observe',

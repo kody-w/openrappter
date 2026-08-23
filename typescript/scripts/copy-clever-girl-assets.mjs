@@ -13,6 +13,10 @@ const assets = [
   ["scripts/rapter-clever-girl-context.mjs", "rapter-clever-girl-context.mjs"],
   ["scripts/rapter-clever-girl-reader.mjs", "rapter-clever-girl-reader.mjs"],
   [
+    "scripts/rapter-clever-girl-schema-validator.mjs",
+    "rapter-clever-girl-schema-validator.mjs",
+  ],
+  [
     "contracts/rapter-clever-girl-observe-v2.json",
     "rapter-clever-girl-observe-v2.json",
   ],

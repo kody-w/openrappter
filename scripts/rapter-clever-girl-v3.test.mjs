@@ -21,6 +21,11 @@ import {
   parseArgs,
 } from './rapter-clever-girl.mjs';
 import {
+  matchCapabilities,
+  mergeCapabilityCatalogs,
+  parseCapabilityCatalog,
+} from './rapter-clever-girl-context.mjs';
+import {
   ObserveReportReaderError,
   readObserveReport,
   supportedObserveReportVersions,
@@ -103,11 +108,11 @@ function runV3({
   const selectedInputs = inputs ?? fixtureInputs(cwd);
   const args = [ENGINE, 'observe'];
   for (const input of selectedInputs) args.push('--input', input);
+  args.push('--source', 'normalized');
+  if (reportVersion !== null) {
+    args.push('--report-version', reportVersion);
+  }
   args.push(
-    '--source',
-    'normalized',
-    '--report-version',
-    reportVersion,
     '--min-sessions',
     String(minimumSessions),
     '--min-days',
@@ -330,6 +335,79 @@ test('acceptance 7: reuse and extension require every behavioral contract sectio
   writeFileSync(conflictPath, `${JSON.stringify(conflictCatalog)}\n`, {
     mode: 0o600,
   });
+
+  test('same-version complete-contract conflicts are unqualified and merge order independent', () => {
+    const catalog = JSON.parse(readFileSync(CONTRACT_CATALOG, 'utf8'));
+    const baseValue = {
+      ...catalog,
+      capabilities: [catalog.capabilities[1]],
+    };
+    const vectors = {
+      input: (contract) => {
+        contract.inputs[0].description = 'Different explicit bounded input.';
+      },
+      permission: (contract) => {
+        contract.permissions[0].access = 'none';
+      },
+      failure: (contract) => {
+        contract.failures[0].behavior = 'Return a different closed failure.';
+      },
+      limitation: (contract) => {
+        contract.limitations[0] = 'A different operational limitation.';
+      },
+    };
+
+    for (const [label, mutate] of Object.entries(vectors)) {
+      const changedValue = structuredClone(baseValue);
+      mutate(changedValue.capabilities[0].behavioralContract);
+      const first = parseCapabilityCatalog(baseValue, {
+        sourceId: 'source-000000000001',
+        sourceDigest: `sha256:${'1'.repeat(64)}`,
+      });
+      const second = parseCapabilityCatalog(changedValue, {
+        sourceId: 'source-000000000002',
+        sourceDigest: `sha256:${'2'.repeat(64)}`,
+      });
+      const forward = mergeCapabilityCatalogs([first, second]);
+      const reverse = mergeCapabilityCatalogs([second, first]);
+      assert.deepEqual(reverse, forward, `${label} conflict depended on source order`);
+      assert.equal(forward.length, 1);
+      assert.equal(forward[0].contractQualified, false);
+      assert.equal(forward[0].contractConflict, true);
+      assert.equal(forward[0].contractVersion, null);
+      assert.equal(forward[0].contractDigest, null);
+      assert.equal(forward[0].contractVariants.length, 2);
+
+      const [match] = matchCapabilities(
+        'review-workflow',
+        forward,
+        [],
+        { requireBehavioralContract: true },
+      );
+      assert.equal(match.match, 'possible-overlap');
+      assert.equal(match.contractQualified, false);
+      assert.equal(match.contractConflict, true);
+      assert.equal(match.contractVersion, null);
+      assert.equal(match.contractDigest, null);
+      assert.match(match.reason, /conflict/i);
+    }
+
+    const duplicate = parseCapabilityCatalog(structuredClone(baseValue), {
+      sourceId: 'source-000000000003',
+      sourceDigest: `sha256:${'3'.repeat(64)}`,
+    });
+    const identical = mergeCapabilityCatalogs([
+      parseCapabilityCatalog(baseValue, {
+        sourceId: 'source-000000000001',
+        sourceDigest: `sha256:${'1'.repeat(64)}`,
+      }),
+      duplicate,
+    ]);
+    assert.equal(identical[0].contractQualified, true);
+    assert.equal(identical[0].contractConflict, false);
+    assert.match(identical[0].contractDigest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(identical[0].contractVariants.length, 1);
+  });
   const conflictInputs = fixtureInputs(conflictDirectory);
   const conflictReport = runV3({
     directory: conflictDirectory,
@@ -423,6 +501,7 @@ test('v3 limits and deterministic replay are explicit and byte stable', () => {
 test('package exports include the v3 reader and all closed contracts', () => {
   for (const relative of [
     'scripts/rapter-clever-girl-reader.mjs',
+    'scripts/rapter-clever-girl-schema-validator.mjs',
     'contracts/rapter-clever-girl-observe-v2.json',
     'contracts/rapter-clever-girl-observe-v3.json',
     'contracts/rapter-clever-girl-capability-catalog-v2.json',
@@ -459,6 +538,78 @@ test('the reader preserves v2 semantics while accepting v3 and rejecting contrac
   );
 });
 
+test('the reader enforces every closed v2 and v3 schema boundary', () => {
+  const directory = workspace('reader-closed-schema');
+  const inputs = fixtureInputs(directory);
+  const v2 = runV3({
+    directory,
+    inputs,
+    reportVersion: '2',
+  }).report;
+  const v3 = runV3({ directory, inputs }).report;
+  assert.equal(readObserveReport(v2).version, '2');
+  assert.equal(readObserveReport(JSON.stringify(v3)).version, '3');
+
+  const mutations = [
+    {
+      label: 'minimal invalid report',
+      value: {
+        schemaVersion: 'rapter-clever-girl.observe.v3',
+        mode: 'observe',
+      },
+    },
+    {
+      label: 'additional top-level property',
+      value: { ...structuredClone(v3), unexpected: true },
+    },
+    {
+      label: 'empty sources below minItems',
+      value: { ...structuredClone(v3), sources: [] },
+    },
+    {
+      label: 'malformed nested candidate enum',
+      value: (() => {
+        const changed = structuredClone(v3);
+        changed.candidates[0].promotion.blockers = ['not-a-closed-blocker'];
+        return changed;
+      })(),
+    },
+    {
+      label: 'malformed nested context constant',
+      value: (() => {
+        const changed = structuredClone(v3);
+        changed.context.behavioralCapabilityContracts.requirement = 'other';
+        return changed;
+      })(),
+    },
+    {
+      label: 'additional nested context property',
+      value: (() => {
+        const changed = structuredClone(v3);
+        changed.context.behavioralCapabilityContracts.extra = 1;
+        return changed;
+      })(),
+    },
+    {
+      label: 'malformed nested source pattern',
+      value: (() => {
+        const changed = structuredClone(v2);
+        changed.sources[0].sourceId = 'source-invalid';
+        return changed;
+      })(),
+    },
+  ];
+  for (const { label, value } of mutations) {
+    assert.throws(
+      () => readObserveReport(value),
+      (error) =>
+        error instanceof ObserveReportReaderError &&
+        error.code === 'OBSERVE_REPORT_INVALID',
+      label,
+    );
+  }
+});
+
 test('auto emission selects v3 only when facet or capability-contract evidence exists', () => {
   const directory = workspace('auto');
   const inputs = fixtureInputs(directory);
@@ -484,4 +635,34 @@ test('auto emission selects v3 only when facet or capability-contract evidence e
     reportVersion: 'auto',
   }).report;
   assert.equal(v2.schemaVersion, 'rapter-clever-girl.observe.v2');
+});
+
+test('unflagged repair output is byte-identical v2 and auto selection is opt-in', () => {
+  const directory = workspace('default-v2');
+  const inputs = fixtureInputs(directory);
+  const unflagged = runV3({
+    directory,
+    inputs,
+    reportVersion: null,
+  });
+  const explicitV2 = runV3({
+    directory,
+    inputs,
+    reportVersion: '2',
+  });
+  assert.equal(unflagged.bytes, explicitV2.bytes);
+  assert.equal(
+    unflagged.report.schemaVersion,
+    'rapter-clever-girl.observe.v2',
+  );
+
+  const automatic = runV3({
+    directory,
+    inputs,
+    reportVersion: 'auto',
+  });
+  assert.equal(
+    automatic.report.schemaVersion,
+    'rapter-clever-girl.observe.v3',
+  );
 });

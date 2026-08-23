@@ -32,6 +32,7 @@ describe("Clever Girl package smoke contract", () => {
       "dist/clever-girl/rapter-clever-girl.mjs",
       "dist/clever-girl/rapter-clever-girl-context.mjs",
       "dist/clever-girl/rapter-clever-girl-reader.mjs",
+      "dist/clever-girl/rapter-clever-girl-schema-validator.mjs",
       "dist/clever-girl/rapter-clever-girl-observe-v2.json",
       "dist/clever-girl/rapter-clever-girl-observe-v3.json",
       "dist/clever-girl/rapter-clever-girl-capability-catalog-v2.json",
@@ -45,6 +46,10 @@ describe("Clever Girl package smoke contract", () => {
     expect(source).toContain("rapter-clever-girl.observe.v2");
     expect(source).toContain("rapter-clever-girl.observe.v3");
     expect(source).toContain("installedClever.stdout !== sourceClever.stdout");
+    expect(source).toContain("installedClever.stdout !== installedExplicitV2.stdout");
+    expect(source).toContain("explicit auto did not select v3");
     expect(source).toContain("installedV3.stdout !== sourceV3.stdout");
+    expect(source).toContain("optional v3 assets were absent");
+    expect(source).toContain("fail closed without its report contract");
   });
 });

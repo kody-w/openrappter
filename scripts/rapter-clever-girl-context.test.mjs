@@ -150,7 +150,7 @@ test('accepts the generic estate adapter while retaining opaque capability names
   const { result, report } = reportFor({ estate: GENERIC_ESTATE_MANIFEST });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(report.context.estateManifest.schema, 'clevergirl-estate/1.0');
-  assert.equal(report.context.estateManifest.sourceType, 'generic-estate-manifest');
+  assert.equal(report.context.estateManifest.sourceType, 'rapp-monorepo-manifest');
   assert.equal(report.context.estateManifest.repositoryCount, 3);
   assert.equal(report.context.estateManifest.status, 'ok');
   const estateMatches = report.candidates.flatMap(({ capabilityMatches }) =>

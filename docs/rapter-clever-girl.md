@@ -86,13 +86,14 @@ openrappter clever-girl observe
   [--min-days <integer>]
   [--output <explicit-path>]
   [--facet-sidecar-output <explicit-path>]
-  [--report-version auto|2|3]
+  [--report-version auto|2|3]             default: 2
   [--pretty]
 ```
 
 The published npm package includes the observer engine, bounded context
 matcher, v2/v3 report contracts, capability-contract and sidecar schemas,
-backward-compatible reader, and observer skill. The
+deterministic closed-schema validator, backward-compatible reader, and
+observer skill. The
 installed launcher routes this command directly to that packaged engine,
 without initializing the general OpenRappter CLI. From a source checkout,
 `node scripts/rapter-clever-girl.mjs observe ...` invokes the same engine.
@@ -222,7 +223,10 @@ Manifest, estate, local-skill, and normalized-v1 metadata may establish only
 `possible-overlap`. Reuse or extension requires a
 `rapter-clever-girl.capabilities.v2` entry with a versioned behavioral
 contract covering inputs, outputs, permissions, failures, limitations, and
-declared tests. Capability names are opaque in v3 reports.
+declared tests. The complete closed contract is canonically SHA-256-addressed.
+Same-name contracts with different versions, or with the same version but
+different complete digests, are explicit conflicts and cannot qualify for
+reuse or extension. Capability names are opaque in v3 reports.
 
 Repair friction uses `disjoint-capped-active-interval-union-v1`: every
 contributing interval is allocated once, split overlap is zero, and union
@@ -231,13 +235,16 @@ complete opaque assignment set at mode `0600`.
 
 ### V2 migration
 
-`--report-version auto` is the default. It emits v3 when closed repair
-assignments or qualified behavioral-contract evidence exists, and otherwise
-emits v2. `--report-version 2` retains the original v2 analyzer and exact
-closed shape; v2 semantics are not upgraded in place. The packaged
-`dist/clever-girl/rapter-clever-girl-reader.mjs` accepts both versions without
-converting either report. Consumers should branch on `schemaVersion`, adopt
-the v3 detector/context fields, then stop requesting v2.
+Omitting `--report-version`, or explicitly selecting `--report-version 2`,
+retains the original byte-compatible v2 analyzer and exact closed shape; v2
+semantics are not upgraded in place. V3 requires explicit
+`--report-version 3`. Data-dependent selection occurs only when
+`--report-version auto` is explicitly supplied; it emits v3 when closed repair
+assignments or qualified behavioral-contract evidence exists and otherwise
+emits v2. The packaged reader validates the full shipped version-specific
+schema without network access and accepts both versions without converting
+either report. Consumers should branch on `schemaVersion`, adopt the v3
+detector/context fields, then explicitly request v3.
 
 ### Minimal shape
 

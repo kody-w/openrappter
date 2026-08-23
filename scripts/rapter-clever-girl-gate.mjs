@@ -23,6 +23,10 @@ const TEST = path.join(SCRIPT_DIR, 'rapter-clever-girl.test.mjs');
 const CONTEXT_TEST = path.join(SCRIPT_DIR, 'rapter-clever-girl-context.test.mjs');
 const V3_TEST = path.join(SCRIPT_DIR, 'rapter-clever-girl-v3.test.mjs');
 const READER = path.join(SCRIPT_DIR, 'rapter-clever-girl-reader.mjs');
+const SCHEMA_VALIDATOR = path.join(
+  SCRIPT_DIR,
+  'rapter-clever-girl-schema-validator.mjs',
+);
 const CONTRACT = path.join(
   REPO_ROOT,
   'contracts',
@@ -274,6 +278,7 @@ check('observer source has no network, subprocess, or implicit-history capabilit
     readFileSync(ENGINE, 'utf8'),
     readFileSync(CONTEXT_ENGINE, 'utf8'),
     readFileSync(READER, 'utf8'),
+    readFileSync(SCHEMA_VALIDATOR, 'utf8'),
   ].join('\n');
   const forbidden = [
     /node:(?:child_process|http|https|net|tls|dns|dgram)/,
@@ -344,8 +349,41 @@ check('bounded estate and repository-evidence suite passes', () => {
 check('v3 split detector and compatibility suite passes', () => {
   const result = runNode(['--test', V3_TEST]);
   requireSuccess(result, 'v3 adversarial suite');
-  assert.match(result.stdout, /(?:#|ℹ)\s+pass 14\b/);
+  assert.match(result.stdout, /(?:#|ℹ)\s+pass 17\b/);
   assert.match(result.stdout, /(?:#|ℹ)\s+fail 0\b/);
+});
+
+check('unflagged compatibility stays byte-identical v2 and auto is explicit', () => {
+  const base = [
+    ENGINE,
+    'observe',
+    '--input',
+    fixture('normalized.jsonl'),
+    '--source',
+    'normalized',
+  ];
+  const unflagged = runNode(base);
+  const explicitV2 = runNode([...base, '--report-version', '2']);
+  requireSuccess(unflagged, 'unflagged v2 replay');
+  requireSuccess(explicitV2, 'explicit v2 replay');
+  assert.equal(unflagged.stdout, explicitV2.stdout);
+  assert.equal(
+    JSON.parse(unflagged.stdout).schemaVersion,
+    'rapter-clever-girl.observe.v2',
+  );
+
+  const automatic = runNode([
+    ...base,
+    '--capability-catalog',
+    fixture('capability-contract-catalog.json'),
+    '--report-version',
+    'auto',
+  ]);
+  requireSuccess(automatic, 'explicit auto replay');
+  assert.equal(
+    JSON.parse(automatic.stdout).schemaVersion,
+    'rapter-clever-girl.observe.v3',
+  );
 });
 
 check('fresh fixture replay produces the intended inert decisions', () => {

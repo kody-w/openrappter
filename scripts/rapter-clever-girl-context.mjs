@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import {
+  canonicalSchemaDigest,
+  validateBehavioralContractShape,
+} from './rapter-clever-girl-schema-validator.mjs';
 
 export const EVIDENCE_LIMITS = Object.freeze({
   maximumInputs: 64,
@@ -175,101 +179,20 @@ function capabilityEntry({
     contractQualified: behavioralContract !== null,
     contractVersion: behavioralContract?.version ?? null,
     contractTestCount: behavioralContract?.tests.length ?? 0,
+    contractDigest: behavioralContract?.digest ?? null,
+    contractConflict: false,
     limited: tokens.truncated,
   };
 }
 
-function boundedContractString(value, maximum = 1_024) {
-  return typeof value === 'string' && value.length >= 1 && value.length <= maximum;
-}
-
-function validContractField(field) {
-  return (
-    field !== null &&
-    typeof field === 'object' &&
-    !Array.isArray(field) &&
-    boundedContractString(field.name, 64) &&
-    /^[a-z][a-z0-9_-]{0,63}$/.test(field.name) &&
-    boundedContractString(field.type, 64) &&
-    boundedContractString(field.description)
-  );
-}
-
-function validContractPermission(permission) {
-  return (
-    permission !== null &&
-    typeof permission === 'object' &&
-    !Array.isArray(permission) &&
-    boundedContractString(permission.resource, 64) &&
-    /^[a-z][a-z0-9_.-]{0,63}$/.test(permission.resource) &&
-    ['none', 'read', 'write', 'execute'].includes(permission.access) &&
-    boundedContractString(permission.reason)
-  );
-}
-
-function validContractFailure(failure) {
-  return (
-    failure !== null &&
-    typeof failure === 'object' &&
-    !Array.isArray(failure) &&
-    boundedContractString(failure.code, 64) &&
-    /^[A-Z][A-Z0-9_]{0,63}$/.test(failure.code) &&
-    boundedContractString(failure.condition) &&
-    boundedContractString(failure.behavior)
-  );
-}
-
-function validContractTest(test) {
-  return (
-    test !== null &&
-    typeof test === 'object' &&
-    !Array.isArray(test) &&
-    boundedContractString(test.id, 64) &&
-    /^[a-z0-9][a-z0-9_.-]{0,63}$/.test(test.id) &&
-    boundedContractString(test.assertion)
-  );
-}
-
 function parseBehavioralContract(value) {
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    Array.isArray(value) ||
-    value.schemaVersion !== 'rapter-clever-girl.capability-contract.v1' ||
-    !boundedContractString(value.version, 64) ||
-    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(
-      value.version,
-    ) ||
-    !Array.isArray(value.inputs) ||
-    value.inputs.length < 1 ||
-    value.inputs.length > 64 ||
-    !value.inputs.every(validContractField) ||
-    !Array.isArray(value.outputs) ||
-    value.outputs.length < 1 ||
-    value.outputs.length > 64 ||
-    !value.outputs.every(validContractField) ||
-    !Array.isArray(value.permissions) ||
-    value.permissions.length < 1 ||
-    value.permissions.length > 64 ||
-    !value.permissions.every(validContractPermission) ||
-    !Array.isArray(value.failures) ||
-    value.failures.length < 1 ||
-    value.failures.length > 64 ||
-    !value.failures.every(validContractFailure) ||
-    !Array.isArray(value.limitations) ||
-    value.limitations.length < 1 ||
-    value.limitations.length > 64 ||
-    !value.limitations.every((entry) => boundedContractString(entry)) ||
-    !Array.isArray(value.tests) ||
-    value.tests.length < 1 ||
-    value.tests.length > 256 ||
-    !value.tests.every(validContractTest)
-  ) {
+  if (!validateBehavioralContractShape(value)) {
     throw new EvidenceValidationError('CAPABILITY_CONTRACT_INVALID');
   }
   return {
     version: value.version,
     tests: value.tests,
+    digest: canonicalSchemaDigest(value),
   };
 }
 
@@ -634,12 +557,28 @@ function mergeStringArrays(left = [], right = []) {
   return [...new Set([...left, ...right])].sort((a, b) => a.localeCompare(b, 'en'));
 }
 
+function contractVariant(capability) {
+  if (
+    capability.contractQualified !== true ||
+    typeof capability.contractVersion !== 'string' ||
+    !/^sha256:[a-f0-9]{64}$/.test(capability.contractDigest ?? '')
+  ) {
+    return null;
+  }
+  return {
+    version: capability.contractVersion,
+    digest: capability.contractDigest,
+    testCount: capability.contractTestCount ?? 0,
+  };
+}
+
 export function mergeCapabilityCatalogs(catalogs) {
   const merged = new Map();
   for (const catalog of catalogs) {
     for (const capability of catalog?.capabilities ?? []) {
       const key = capability.matchName ?? capability.name;
       const current = merged.get(key);
+      const variant = contractVariant(capability);
       if (!current) {
         merged.set(key, {
           ...capability,
@@ -647,13 +586,12 @@ export function mergeCapabilityCatalogs(catalogs) {
           tokenHashes: [...capability.tokenHashes],
           sourceTypes: [...capability.sourceTypes],
           sourceIds: [...capability.sourceIds],
-          contractQualified: capability.contractQualified === true,
-          contractVersion: capability.contractVersion ?? null,
-          contractTestCount: capability.contractTestCount ?? 0,
-          contractVersions:
-            capability.contractQualified === true
-              ? [capability.contractVersion]
-              : [],
+          contractQualified: variant !== null,
+          contractVersion: variant?.version ?? null,
+          contractTestCount: variant?.testCount ?? 0,
+          contractDigest: variant?.digest ?? null,
+          contractConflict: false,
+          contractVariants: variant === null ? [] : [variant],
         });
         continue;
       }
@@ -661,18 +599,32 @@ export function mergeCapabilityCatalogs(catalogs) {
       current.tokenHashes = mergeStringArrays(current.tokenHashes, capability.tokenHashes);
       current.sourceTypes = mergeStringArrays(current.sourceTypes, capability.sourceTypes);
       current.sourceIds = mergeStringArrays(current.sourceIds, capability.sourceIds);
-      current.contractVersions = mergeStringArrays(
-        current.contractVersions,
-        capability.contractQualified === true
-          ? [capability.contractVersion]
-          : [],
-      );
-      current.contractQualified = current.contractVersions.length === 1;
+      const variants = [
+        ...current.contractVariants,
+        ...(variant === null ? [] : [variant]),
+      ];
+      current.contractVariants = [
+        ...new Map(
+          variants.map((entry) => [
+            `${entry.version}:${entry.digest}`,
+            entry,
+          ]),
+        ).values(),
+      ].sort((left, right) =>
+        `${left.version}:${left.digest}`.localeCompare(
+          `${right.version}:${right.digest}`,
+          'en',
+        ));
+      current.contractConflict = current.contractVariants.length > 1;
+      current.contractQualified = current.contractVariants.length === 1;
       current.contractVersion = current.contractQualified
-        ? current.contractVersions[0]
+        ? current.contractVariants[0].version
+        : null;
+      current.contractDigest = current.contractQualified
+        ? current.contractVariants[0].digest
         : null;
       current.contractTestCount = current.contractQualified
-        ? Math.max(current.contractTestCount, capability.contractTestCount ?? 0)
+        ? current.contractVariants[0].testCount
         : 0;
       if (current.sourceTypes.includes('estate-repository')) {
         current.name = opaqueEstateCapabilityName(key);
@@ -739,6 +691,7 @@ export function matchCapabilities(
     const lexicalMatch =
       score >= 2_700 ? 'reuse' : score >= 1_700 ? 'extend' : 'possible-overlap';
     const contractQualified = capability.contractQualified === true;
+    const contractConflict = capability.contractConflict === true;
     const match =
       requireBehavioralContract && !contractQualified
         ? 'possible-overlap'
@@ -758,12 +711,20 @@ export function matchCapabilities(
     };
     if (requireBehavioralContract) {
       candidate.contractQualified = contractQualified;
+      candidate.contractConflict = contractConflict;
       candidate.contractVersion = contractQualified
         ? capability.contractVersion
         : null;
       candidate.contractTestCount = contractQualified
         ? capability.contractTestCount
         : 0;
+      candidate.contractDigest = contractQualified
+        ? capability.contractDigest
+        : null;
+      if (contractConflict) {
+        candidate.reason =
+          'Selected catalogs conflict on the complete behavioral contract identity for this capability name; reuse and extension are unqualified.';
+      }
     }
     candidates.push(candidate);
   }

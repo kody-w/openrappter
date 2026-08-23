@@ -1,3 +1,5 @@
+import { validateObserveReportShape } from './rapter-clever-girl-schema-validator.mjs';
+
 const SUPPORTED_REPORTS = Object.freeze({
   'rapter-clever-girl.observe.v2': '2',
   'rapter-clever-girl.observe.v3': '3',
@@ -35,17 +37,14 @@ export function readObserveReport(value) {
     throw new ObserveReportReaderError('OBSERVE_REPORT_VERSION_UNSUPPORTED');
   }
   if (
-    report.mode !== 'observe' ||
-    !['ok', 'partial', 'failed'].includes(report.status) ||
-    !Array.isArray(report.sources) ||
-    !Array.isArray(report.candidates) ||
-    report.replay?.analyzerVersion !== version ||
-    !/^sha256:[a-f0-9]{64}$/.test(report.replay?.analysisFingerprint ?? '')
+    version === '3' &&
+    Number.isInteger(report.detector?.unassignedRepairOccurrences) &&
+    report.detector.unassignedRepairOccurrences !== 0
   ) {
-    throw new ObserveReportReaderError('OBSERVE_REPORT_INVALID');
-  }
-  if (version === '3' && report.detector?.unassignedRepairOccurrences !== 0) {
     throw new ObserveReportReaderError('OBSERVE_REPORT_V3_ASSIGNMENT_GAP');
+  }
+  if (!validateObserveReportShape(report.schemaVersion, report)) {
+    throw new ObserveReportReaderError('OBSERVE_REPORT_INVALID');
   }
   return { version, report };
 }

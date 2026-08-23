@@ -53,7 +53,7 @@ export function registerCleverGirlCommand(program: Command): void {
       "--facet-sidecar-output <path>",
       "Write complete opaque v3 repair assignments to a new POSIX path",
     )
-    .option("--report-version <version>", "auto, 2, or 3", "auto")
+    .option("--report-version <version>", "auto, 2, or 3", "2")
     .option("--pretty", "Pretty-print the JSON report")
     .action(async () => {
       const commandIndex = process.argv.indexOf("clever-girl");

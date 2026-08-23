@@ -24,6 +24,10 @@ import {
   priorityBasisPoints,
   repositoryCorroboration,
 } from './rapter-clever-girl-context.mjs';
+import {
+  validateObserveReportShape,
+  validateRepairSidecarShape,
+} from './rapter-clever-girl-schema-validator.mjs';
 
 const SCHEMA_VERSION_V2 = 'rapter-clever-girl.observe.v2';
 const SCHEMA_VERSION_V3 = 'rapter-clever-girl.observe.v3';
@@ -269,7 +273,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     pretty: false,
     output: null,
     facetSidecarOutput: null,
-    reportVersion: 'auto',
+    reportVersion: '2',
   };
   const singletonOptions = new Set();
 
@@ -2061,8 +2065,10 @@ function buildCandidate({
               match: capability.match,
               reason: capability.reason,
               contractQualified: capability.contractQualified,
+              contractConflict: capability.contractConflict,
               contractVersion: capability.contractVersion,
               contractTestCount: capability.contractTestCount,
+              contractDigest: capability.contractDigest,
             }
           : {
             name: capability.name,
@@ -3354,8 +3360,22 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       duplicateActivitySources,
     },
     context: {
-      estateManifest: estateResult?.summary ?? null,
-      capabilityCatalogs: uniqueCapabilityResults.map((result) => result.summary),
+      estateManifest:
+        reportVersion === '2' &&
+        estateResult?.summary.sourceType === 'generic-estate-manifest'
+          ? {
+              ...estateResult.summary,
+              sourceType: 'rapp-monorepo-manifest',
+            }
+          : estateResult?.summary ?? null,
+      capabilityCatalogs: uniqueCapabilityResults.map((result) =>
+        reportVersion === '2' &&
+        result.summary.sourceType === 'behavioral-capabilities'
+          ? {
+              ...result.summary,
+              sourceType: 'normalized-capabilities',
+            }
+          : result.summary),
       repositoryActivitySources: uniqueActivityResults.map((result) => result.summary),
       catalogCoverage,
     },
@@ -3375,14 +3395,15 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       unqualifiedCapabilities: mergedCapabilities.filter(
         (capability) => capability.contractQualified !== true,
       ).length,
+      conflictingCapabilities: mergedCapabilities.filter(
+        (capability) => capability.contractConflict === true,
+      ).length,
       requirement:
         'reuse-and-extend-require-versioned-behavioral-contract-v1',
     };
     report.detector = analysis.detector;
   }
   const text = `${stableStringify(report, options.pretty === true)}\n`;
-  writeStdout(text);
-  if (options.output) await atomicWrite(options.output, text);
   let sidecar = null;
   let sidecarText = null;
   if (options.facetSidecarOutput) {
@@ -3414,6 +3435,16 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       },
     };
     sidecarText = `${stableStringify(sidecar, options.pretty === true)}\n`;
+  }
+  if (!validateObserveReportShape(report.schemaVersion, report)) {
+    throw new Error('Generated report did not satisfy its closed contract.');
+  }
+  if (sidecar !== null && !validateRepairSidecarShape(sidecar)) {
+    throw new Error('Generated sidecar did not satisfy its closed contract.');
+  }
+  writeStdout(text);
+  if (options.output) await atomicWrite(options.output, text);
+  if (options.facetSidecarOutput) {
     await atomicWrite(options.facetSidecarOutput, sidecarText);
   }
   return {

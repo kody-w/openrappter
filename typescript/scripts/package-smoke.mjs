@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -21,13 +22,18 @@ const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const npmCli = process.env.npm_execpath;
 const scratch = mkdtempSync(path.join(packageRoot, ".package-smoke-"));
 
-function run(command, args, options = {}) {
+function runUnchecked(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: packageRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
   });
+  return result;
+}
+
+function run(command, args, options = {}) {
+  const result = runUnchecked(command, args, options);
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(
@@ -123,6 +129,7 @@ try {
     "dist/clever-girl/rapter-clever-girl.mjs",
     "dist/clever-girl/rapter-clever-girl-context.mjs",
     "dist/clever-girl/rapter-clever-girl-reader.mjs",
+    "dist/clever-girl/rapter-clever-girl-schema-validator.mjs",
     "dist/clever-girl/rapter-clever-girl-observe-v2.json",
     "dist/clever-girl/rapter-clever-girl-observe-v3.json",
     "dist/clever-girl/rapter-clever-girl-capability-catalog-v2.json",
@@ -176,6 +183,14 @@ try {
     [
       path.join("scripts", "rapter-clever-girl-reader.mjs"),
       path.join("dist", "clever-girl", "rapter-clever-girl-reader.mjs"),
+    ],
+    [
+      path.join("scripts", "rapter-clever-girl-schema-validator.mjs"),
+      path.join(
+        "dist",
+        "clever-girl",
+        "rapter-clever-girl-schema-validator.mjs",
+      ),
     ],
     [
       path.join("contracts", "rapter-clever-girl-observe-v2.json"),
@@ -249,14 +264,26 @@ try {
     ),
     { mode: 0o600 },
   );
+  const sourceEngine = path.resolve(
+    packageRoot,
+    "..",
+    "scripts",
+    "rapter-clever-girl.mjs",
+  );
+  const capabilityCatalog = path.resolve(
+    packageRoot,
+    "..",
+    "scripts",
+    "fixtures",
+    "rapter-clever-girl",
+    "capability-contract-catalog.json",
+  );
   const cleverArgs = [
     "observe",
     "--input",
     cleverInput,
     "--source",
     "normalized",
-    "--report-version",
-    "2",
   ];
   const installedClever = run(
     process.execPath,
@@ -265,38 +292,57 @@ try {
   );
   const sourceClever = run(
     process.execPath,
-    [
-      path.resolve(packageRoot, "..", "scripts", "rapter-clever-girl.mjs"),
-      ...cleverArgs,
-    ],
+    [sourceEngine, ...cleverArgs],
+    { cwd: installRoot },
+  );
+  const installedExplicitV2 = run(
+    process.execPath,
+    [binary, "clever-girl", ...cleverArgs, "--report-version", "2"],
+    { cwd: installRoot },
+  );
+  const sourceExplicitV2 = run(
+    process.execPath,
+    [sourceEngine, ...cleverArgs, "--report-version", "2"],
     { cwd: installRoot },
   );
   const installedReport = JSON.parse(installedClever.stdout);
   if (
     installedReport.schemaVersion !== "rapter-clever-girl.observe.v2" ||
     installedClever.stdout !== sourceClever.stdout ||
-    installedClever.stderr !== sourceClever.stderr
+    installedClever.stderr !== sourceClever.stderr ||
+    installedClever.stdout !== installedExplicitV2.stdout ||
+    installedClever.stderr !== installedExplicitV2.stderr ||
+    installedClever.stdout !== sourceExplicitV2.stdout ||
+    installedClever.stderr !== sourceExplicitV2.stderr
   ) {
     throw new Error(
       "Installed Clever Girl CLI does not preserve the Observe Mode v2 result",
     );
   }
 
-  const v3Args = [
-    "observe",
-    "--input",
-    cleverInput,
-    "--source",
-    "normalized",
+  const autoArgs = [
+    ...cleverArgs,
     "--capability-catalog",
-    path.resolve(
-      packageRoot,
-      "..",
-      "scripts",
-      "fixtures",
-      "rapter-clever-girl",
-      "capability-contract-catalog.json",
-    ),
+    capabilityCatalog,
+    "--report-version",
+    "auto",
+  ];
+  const installedAuto = run(
+    process.execPath,
+    [binary, "clever-girl", ...autoArgs],
+    { cwd: installRoot },
+  );
+  if (
+    JSON.parse(installedAuto.stdout).schemaVersion !==
+    "rapter-clever-girl.observe.v3"
+  ) {
+    throw new Error("Installed Clever Girl explicit auto did not select v3");
+  }
+
+  const v3Args = [
+    ...cleverArgs,
+    "--capability-catalog",
+    capabilityCatalog,
     "--report-version",
     "3",
   ];
@@ -307,10 +353,7 @@ try {
   );
   const sourceV3 = run(
     process.execPath,
-    [
-      path.resolve(packageRoot, "..", "scripts", "rapter-clever-girl.mjs"),
-      ...v3Args,
-    ],
+    [sourceEngine, ...v3Args],
     { cwd: installRoot },
   );
   const installedV3Report = JSON.parse(installedV3.stdout);
@@ -323,6 +366,71 @@ try {
       "Installed Clever Girl CLI does not preserve the Observe Mode v3 result",
     );
   }
+
+  const installedCleverRoot = path.join(installedRoot, "dist", "clever-girl");
+  if (process.platform !== "win32") {
+    const sidecarContract = path.join(
+      installedCleverRoot,
+      "rapter-clever-girl-repair-assignments-v1.json",
+    );
+    const hiddenSidecarContract = `${sidecarContract}.missing`;
+    const forbiddenSidecar = path.join(scratch, "must-not-exist-sidecar.json");
+    renameSync(sidecarContract, hiddenSidecarContract);
+    const absentSidecar = runUnchecked(
+      process.execPath,
+      [
+        binary,
+        "clever-girl",
+        ...v3Args,
+        "--facet-sidecar-output",
+        forbiddenSidecar,
+      ],
+      { cwd: installRoot },
+    );
+    if (
+      absentSidecar.error ||
+      absentSidecar.status !== 2 ||
+      absentSidecar.stdout !== "" ||
+      existsSync(forbiddenSidecar)
+    ) {
+      throw new Error(
+        "Installed explicit v3 did not fail closed without its sidecar contract",
+      );
+    }
+    renameSync(hiddenSidecarContract, sidecarContract);
+  }
+
+  const v3Contract = path.join(
+    installedCleverRoot,
+    "rapter-clever-girl-observe-v3.json",
+  );
+  const hiddenV3Contract = `${v3Contract}.missing`;
+  renameSync(v3Contract, hiddenV3Contract);
+  const unflaggedWithoutV3Assets = run(
+    process.execPath,
+    [binary, "clever-girl", ...cleverArgs],
+    { cwd: installRoot },
+  );
+  if (unflaggedWithoutV3Assets.stdout !== installedClever.stdout) {
+    throw new Error(
+      "Installed unflagged v2 changed when optional v3 assets were absent",
+    );
+  }
+  const absentV3Contract = runUnchecked(
+    process.execPath,
+    [binary, "clever-girl", ...v3Args],
+    { cwd: installRoot },
+  );
+  if (
+    absentV3Contract.error ||
+    absentV3Contract.status !== 2 ||
+    absentV3Contract.stdout !== ""
+  ) {
+    throw new Error(
+      "Installed explicit v3 did not fail closed without its report contract",
+    );
+  }
+  renameSync(hiddenV3Contract, v3Contract);
 
   const cli = run(
     process.execPath,

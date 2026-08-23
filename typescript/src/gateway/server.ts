@@ -31,7 +31,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
-import { registerReleaseRingMethods } from './methods/release-ring-methods.js';
+import { registerReleaseRingMethods } from './release-ring-rpc.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {

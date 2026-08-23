@@ -7,8 +7,8 @@ import {
   writePersistedRing,
   type RingManifest,
   type RingName,
-} from '../../release-rings.js';
-import { VERSION } from '../../version.js';
+} from '../release-rings.js';
+import { VERSION } from '../version.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(

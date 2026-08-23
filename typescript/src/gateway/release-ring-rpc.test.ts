@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { registerReleaseRingMethods } from './release-ring-methods.js';
-import type { RingManifest, RingName } from '../../release-rings.js';
+import { registerReleaseRingMethods } from './release-ring-rpc.js';
+import type { RingManifest, RingName } from '../release-rings.js';
 
 function manifest(
   ring: RingName,

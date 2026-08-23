@@ -124,7 +124,7 @@ try {
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
     "dist/release-rings.js",
-    "dist/gateway/methods/release-ring-methods.js",
+    "dist/gateway/release-ring-rpc.js",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);

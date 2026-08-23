@@ -60,6 +60,12 @@ describe('a dropped Python agent becomes usable immediately', () => {
     );
 
     expect(result.status).toBe('ok');
+    expect(result).toMatchObject({
+      activeGeneration: 'present',
+      commitState: 'committed',
+      retrySafe: false,
+      activeSourceSha256: result.candidateSourceSha256,
+    });
     expect(result.learned?.[0]).toMatchObject({ name: 'Weather', description: 'Reports the weather.' });
 
     // The whole point: usable NOW, from the same registry instance.
@@ -92,6 +98,12 @@ describe('the refusals', () => {
 
     expect(result.status).toBe('error');
     expect(result.error).toMatch(/did not load as an agent/i);
+    expect(result).toMatchObject({
+      activeGeneration: 'absent',
+      commitState: 'not-committed',
+      retrySafe: true,
+    });
+    expect(result.activeSourceSha256).toBeUndefined();
     // Nothing left behind: a file that cannot load must not sit in the agents
     // directory looking installed.
     await expect(fs.access(path.join(dir, 'notes.py'))).rejects.toThrow();
@@ -198,18 +210,24 @@ describe('the refusals', () => {
     const result = await importAgentFile('basic_agent.py', Buffer.from('x=1'), registry, { dir });
     expect(result.status).toBe('error');
     expect(result.error).toMatch(/scaffolding/i);
+    expect(result.activeGeneration).toBe('absent');
+    expect(result.activeSourceSha256).toBeUndefined();
   });
 
   it('refuses a file that is not .py or .js', async () => {
     const result = await importAgentFile('notes.txt', Buffer.from('hello'), registry, { dir });
     expect(result.status).toBe('error');
     expect(result.error).toMatch(/not an agent/i);
+    expect(result.activeGeneration).toBe('absent');
+    expect(result.activeSourceSha256).toBeUndefined();
   });
 
   it('refuses an empty file rather than installing nothing', async () => {
     const result = await importAgentFile('empty_agent.py', Buffer.from(''), registry, { dir });
     expect(result.status).toBe('error');
     expect(result.error).toMatch(/empty/i);
+    expect(result.activeGeneration).toBe('absent');
+    expect(result.activeSourceSha256).toBeUndefined();
   });
 });
 

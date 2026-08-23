@@ -17,6 +17,11 @@ import {
   readAssetPayload,
   verifyRappid,
 } from '../../rappids/index.js';
+import type {
+  MutationApprovalBinding,
+  PairingRequest,
+} from '../../rappids/host-authority.js';
+import { RappidHostAuthority } from '../../rappids/host-authority.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -29,7 +34,10 @@ interface MethodRegistrar {
 export interface RappidMethodsOptions {
   root?: string;
   dataDir: string;
-  authorizeMutation?: (request: RappidMutationAuthorization) => Promise<boolean>;
+  authorizeMutation?: (
+    request: RappidMutationAuthorization,
+    connection: unknown,
+  ) => Promise<boolean>;
 }
 
 export interface RappidMutationAuthorization {
@@ -51,11 +59,12 @@ function required(value: unknown, label: string): string {
 async function requireMutationAuthorization(
   options: RappidMethodsOptions,
   request: RappidMutationAuthorization,
+  connection: unknown,
 ): Promise<void> {
   if (!options.authorizeMutation) {
     throw new Error('RAPPID mutation approval authority is unavailable');
   }
-  if (!await options.authorizeMutation(request)) {
+  if (!await options.authorizeMutation(request, connection)) {
     throw new Error('RAPPID mutation approval was refused or already consumed');
   }
 }
@@ -100,7 +109,7 @@ export function registerRappidMethods(
 
   server.registerMethod<{ rappid?: string; proposalId?: string; approvalId?: string }>(
     'rappid.grow',
-    async (params) => {
+    async (params, connection) => {
       const rappid = required(params?.rappid, 'rappid');
       const proposalId = required(params?.proposalId, 'proposalId');
       await requireMutationAuthorization(options, {
@@ -108,7 +117,7 @@ export function registerRappidMethods(
         operation: 'grow',
         rappid,
         proposalId,
-      });
+      }, connection);
       return growRappid(rappid, proposalId, habitat);
     },
     auth,
@@ -123,7 +132,7 @@ export function registerRappidMethods(
     approvalId?: string;
   }>(
     'rappid.attach-skill',
-    async (params) => {
+    async (params, connection) => {
       const rappid = required(params?.rappid, 'rappid');
       const sessionId = required(params?.sessionId, 'sessionId');
       const contentHash = required(params?.contentHash, 'contentHash');
@@ -133,7 +142,7 @@ export function registerRappidMethods(
         rappid,
         sessionId,
         contentHash,
-      });
+      }, connection);
       return attachSkillDimension(rappid, {
         ...habitat,
         sessionId,
@@ -144,5 +153,75 @@ export function registerRappidMethods(
       });
     },
     auth,
+  );
+}
+
+interface RappidConnectionContext {
+  metadata?: {
+    rappidDeviceId?: unknown;
+    rappidScopes?: unknown;
+  };
+}
+
+function principal(connection: unknown): {
+  id: string;
+  scopes?: string[];
+  pairedDevice: boolean;
+} {
+  const context = connection as RappidConnectionContext | undefined;
+  const deviceId = context?.metadata?.rappidDeviceId;
+  const scopes = context?.metadata?.rappidScopes;
+  if (typeof deviceId === 'string' && Array.isArray(scopes)) {
+    return {
+      id: deviceId,
+      scopes: scopes.filter((scope): scope is string => typeof scope === 'string'),
+      pairedDevice: true,
+    };
+  }
+  return { id: 'operator', pairedDevice: false };
+}
+
+export function registerRappidHostMethods(
+  server: MethodRegistrar,
+  authority: RappidHostAuthority,
+): void {
+  server.registerMethod<{ host?: string }>(
+    'rappid.pairing.begin',
+    async (params, connection) => {
+      if (principal(connection).pairedDevice) {
+        throw new Error('paired devices cannot create pairing offers');
+      }
+      return authority.beginPairing(required(params?.host, 'host'));
+    },
+    { requiresAuth: true },
+  );
+
+  server.registerMethod<PairingRequest>(
+    'rappid.pairing.complete',
+    async (params) => authority.completePairing(params),
+  );
+
+  server.registerMethod<MutationApprovalBinding>(
+    'rappid.approval.issue',
+    async (params, connection) => {
+      const caller = principal(connection);
+      return authority.issueMutationApproval(caller.id, caller.scopes, params);
+    },
+    { requiresAuth: true },
+  );
+
+  server.registerMethod<{ credentialID?: string }>(
+    'rappid.pairing.revoke',
+    async (params, connection) => {
+      if (principal(connection).pairedDevice) {
+        throw new Error('paired devices cannot revoke device credentials');
+      }
+      const credentialID = required(params?.credentialID, 'credentialID');
+      if (!authority.revokeDevice(credentialID)) {
+        throw new Error('credential is unknown or already revoked');
+      }
+      return { revoked: true };
+    },
+    { requiresAuth: true },
   );
 }

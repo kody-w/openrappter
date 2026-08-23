@@ -178,7 +178,7 @@
   },
   "mode": "observe",
   "replay": {
-    "analysisFingerprint": "sha256:ccd84638b43ead4fa482d1dc5f1ac19cdba9fd640e7f0286bc1b0f9c5a32627c",
+    "analysisFingerprint": "sha256:c3dc2fb5a7e4f9c8faaa64d287a634b83a3fd42da178f223ab3f821ba92c7b33",
     "analyzerVersion": "2"
   },
   "schemaVersion": "rapter-clever-girl.observe.v2",

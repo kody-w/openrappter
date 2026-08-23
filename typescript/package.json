@@ -25,7 +25,7 @@
     "format": "prettier --write .",
     "prepack": "npm run build",
     "pack:locked": "node scripts/pack-locked.mjs",
-    "copy:assets": "node scripts/copy-assets.mjs"
+    "copy:assets": "node scripts/copy-assets.mjs && node scripts/copy-clever-girl-assets.mjs"
   },
   "keywords": [
     "ai",

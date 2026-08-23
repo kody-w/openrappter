@@ -119,8 +119,14 @@ try {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
   for (const required of [
+    "bin/clever-girl.mjs",
     "dist/agents/ShowAndTellAgent.js",
     "dist/agents/DesktopControlAgent.js",
+    "dist/clever-girl/rapter-clever-girl.mjs",
+    "dist/clever-girl/rapter-clever-girl-context.mjs",
+    "dist/clever-girl/rapter-clever-girl-observe-v2.json",
+    "dist/clever-girl/SKILL.md",
+    "dist/cli/clever-girl.js",
     "dist/desktop-control/queue.js",
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
@@ -193,6 +199,110 @@ try {
     });
   } finally {
     renameSync(hiddenVectors, vectorRoot);
+  const cleverGirlAssets = [
+    [
+      path.join("scripts", "rapter-clever-girl.mjs"),
+      path.join("dist", "clever-girl", "rapter-clever-girl.mjs"),
+    ],
+    [
+      path.join("scripts", "rapter-clever-girl-context.mjs"),
+      path.join("dist", "clever-girl", "rapter-clever-girl-context.mjs"),
+    ],
+    [
+      path.join("contracts", "rapter-clever-girl-observe-v2.json"),
+      path.join(
+        "dist",
+        "clever-girl",
+        "rapter-clever-girl-observe-v2.json",
+      ),
+    ],
+    [
+      path.join(
+        ".claude",
+        "skills",
+        "rapter-clever-girl-observe",
+        "SKILL.md",
+      ),
+      path.join("dist", "clever-girl", "SKILL.md"),
+    ],
+  ];
+  for (const [repositoryRelative, packageRelative] of cleverGirlAssets) {
+    const repositoryFile = path.resolve(packageRoot, "..", repositoryRelative);
+    const installedFile = path.join(installedRoot, packageRelative);
+    if (
+      !existsSync(installedFile) ||
+      readFileSync(installedFile, "utf8") !==
+        readFileSync(repositoryFile, "utf8")
+    ) {
+      throw new Error(
+        `Installed package does not contain the exact ${packageRelative} asset`,
+      );
+    }
+  }
+
+  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
+  const cleverHelp = run(
+    process.execPath,
+    [binary, "clever-girl", "observe", "--help"],
+    { cwd: installRoot },
+  );
+  if (
+    !cleverHelp.stdout.includes("openrappter clever-girl observe") ||
+    !cleverHelp.stdout.includes("--input <path>")
+  ) {
+    throw new Error("Installed package does not expose Clever Girl help");
+  }
+
+  const cleverInput = path.join(scratch, "clever-girl-input.jsonl");
+  writeFileSync(
+    cleverInput,
+    readFileSync(
+      path.resolve(
+        packageRoot,
+        "..",
+        "scripts",
+        "fixtures",
+        "rapter-clever-girl",
+        "normalized.jsonl",
+      ),
+      "utf8",
+    ),
+    { mode: 0o600 },
+  );
+  const cleverArgs = [
+    "observe",
+    "--input",
+    cleverInput,
+    "--source",
+    "normalized",
+  ];
+  const installedClever = run(
+    process.execPath,
+    [binary, "clever-girl", ...cleverArgs],
+    { cwd: installRoot },
+  );
+  const sourceClever = run(
+    process.execPath,
+    [
+      path.resolve(
+        packageRoot,
+        "..",
+        "scripts",
+        "rapter-clever-girl.mjs",
+      ),
+      ...cleverArgs,
+    ],
+    { cwd: installRoot },
+  );
+  const installedReport = JSON.parse(installedClever.stdout);
+  if (
+    installedReport.schemaVersion !== "rapter-clever-girl.observe.v2" ||
+    installedClever.stdout !== sourceClever.stdout ||
+    installedClever.stderr !== sourceClever.stderr
+  ) {
+    throw new Error(
+      "Installed Clever Girl CLI does not preserve the Observe Mode v2 result",
+    );
   }
 
   const cli = run(
@@ -220,7 +330,6 @@ try {
   // the runtime path an ordinary npm install provides.
   runNpm(["rebuild", "better-sqlite3"], { cwd: installRoot });
 
-  const binary = path.join(installedRoot, "bin", "openrappter.mjs");
   const showHelp = run(process.execPath, [binary, "show", "--help"], {
     cwd: installRoot,
     env: {
@@ -644,7 +753,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, and Show-and-Tell`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
   );
 } finally {
   rmSync(scratch, {

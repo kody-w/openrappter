@@ -14,6 +14,16 @@ from openrappter.imessage.rpc import (
     ImsgRpcTimeout,
 )
 
+# Tests that assert a *terminal* condition -- the child exited, or emitted
+# unframeable output -- resolve as soon as the child acts, so this timeout is
+# only a safety net against a hang and must be generous. It was previously 1s,
+# which raced a cold Python interpreter spawn: warm, the request resolves in
+# ~25ms, but the first spawn after heavy disk activity measured ~920ms against
+# that 1s budget. Any jitter past it surfaced as ImsgRpcTimeout instead of the
+# expected terminal error, so the suite failed ~50% of the time when run
+# straight after the full suite and passed when run warm.
+TERMINAL_TIMEOUT = 30.0
+
 
 def fake_rpc(tmp_path, behavior="normal"):
     script = tmp_path / "fake-imsg"
@@ -69,11 +79,11 @@ def test_rpc_child_exit_fails_request(tmp_path):
     client = ImsgRpcClient(fake_rpc(tmp_path, "exit"))
     client.start()
     with pytest.raises(ImsgRpcClosed):
-        client.request("probe", {}, timeout=1)
+        client.request("probe", {}, timeout=TERMINAL_TIMEOUT)
 
 
 def test_rpc_malformed_stdout_is_terminal(tmp_path):
     client = ImsgRpcClient(fake_rpc(tmp_path, "malformed"))
     client.start()
     with pytest.raises(ImsgRpcProtocolError):
-        client.request("probe", {}, timeout=1)
+        client.request("probe", {}, timeout=TERMINAL_TIMEOUT)

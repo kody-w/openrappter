@@ -1,0 +1,4 @@
+{"timestamp":"2026-06-01T08:59:00.000Z","type":"session_meta","payload":{"id":"one-fictional-codex-session","originator":"codex_cli_rs"}}
+{"timestamp":"2026-06-01T09:00:00.000Z","type":"response_item","payload":{"type":"message","id":"fictional-message-1","role":"user","content":[{"type":"input_text","text":"Repair the recurring setup failure and rerun the bootstrap."}]}}
+{"timestamp":"2026-06-02T09:00:00.000Z","type":"response_item","payload":{"type":"message","id":"fictional-message-2","role":"user","content":[{"type":"input_text","text":"Repair the recurring setup failure and rerun the bootstrap."}]}}
+{"timestamp":"2026-06-03T09:00:00.000Z","type":"response_item","payload":{"type":"message","id":"fictional-message-3","role":"user","content":[{"type":"input_text","text":"Repair the recurring setup failure and rerun the bootstrap."}]}}

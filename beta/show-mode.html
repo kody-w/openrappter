@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Show Mode click-through preview for OpenRappter: record or import a task, approve the steps, hotload the agent, test it locally, confirm, promote.">
+  <title>Show Mode · OpenRappter click-through</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background: #0d1117; color: #e6edf3; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    :root { --explorer-width: min(360px, 100vw); --surgeon-width: min(440px, 100vw); }
+    button { border: 1px solid #30363d; border-radius: 6px; padding: 7px 11px; background: #21262d; color: #e6edf3; cursor: pointer; font: inherit; font-size: 12px; }
+    button:hover { border-color: #58a6ff; background: #30363d; }
+    #ribbon { position: fixed; z-index: 30; top: 0; left: 0; right: 0; height: 34px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
+      background: #161b22; border-bottom: 1px solid #30363d; font-size: 12px; color: #9ea7b3; }
+    #ribbon b { color: #f0f6fc; }
+    #ribbon .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff5f52; box-shadow: 0 0 0 3px rgba(255,95,82,.25); }
+    #ribbon .sp { flex: 1; }
+    #ribbon a { color: #58a6ff; text-decoration: none; }
+    #ribbon button { padding: 4px 10px; font-size: 11.5px; }
+    main { position: absolute; top: 34px; bottom: 0; left: var(--explorer-width); right: var(--surgeon-width); background: #0d1117; display: flex; flex-direction: column; }
+    /* center: a still of the kernel chat */
+    .k-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid #21262d; color: #c9d1d9; font-size: 13px; }
+    .k-head .brand { font-weight: 700; color: #f0f6fc; }
+    .k-head .pill { margin-left: auto; font: 11px/1 ui-monospace, Menlo, monospace; color: #8b949e; border: 1px solid #30363d; border-radius: 999px; padding: 4px 8px; }
+    .k-chat { flex: 1; padding: 20px clamp(14px, 6%, 80px); display: flex; flex-direction: column; gap: 10px; justify-content: flex-end; }
+    .k-msg { max-width: 70%; padding: 10px 13px; border-radius: 12px; border: 1px solid #30363d; background: #161b22; color: #c9d1d9; font-size: 13.5px; line-height: 1.5; }
+    .k-input { display: flex; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid #21262d; }
+    .k-input div { flex: 1; border: 1px solid #30363d; border-radius: 10px; padding: 10px 12px; color: #6e7681; font-size: 13px; background: #0d1117; }
+    .k-input button { border-radius: 10px; padding: 8px 16px; background: #1f6feb; border-color: #1f6feb; color: #fff; font-weight: 700; }
+    aside { position: fixed; top: 34px; bottom: 0; background: #0f1218; border-color: #23262c; }
+    #explorer { left: 0; width: var(--explorer-width); border-right: 1px solid #23262c; display: flex; flex-direction: column; }
+    #surgeon { right: 0; width: var(--surgeon-width); border-left: 1px solid #23262c; display: flex; flex-direction: column; }
+    aside header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #23262c; }
+    aside header strong { display: block; font-size: 14px; }
+    aside header span.sub { color: #8b8f98; font-size: 10.5px; }
+    .title { display: flex; flex-direction: column; line-height: 1.15; }
+    #agent-tree { padding: 10px 6px; font-size: 12.5px; color: #c9d1d9; }
+    #agent-tree .h { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: #8b949e; margin: 10px 10px 4px; }
+    #agent-tree .row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; color: #8b949e; }
+    #agent-tree .row .scope { margin-left: auto; font: 10px/1 ui-monospace, Menlo, monospace; padding: 3px 6px; border-radius: 4px; background: #21262d; }
+    #agent-viewer { margin: auto 10px 10px; border: 1px dashed #30363d; border-radius: 8px; padding: 14px; color: #6e7681; font-size: 12px; }
+    #surgeon-log { flex: 1; padding: 14px; overflow: hidden; }
+    .surgeon-empty { text-align: center; color: #9ea7b3; font-size: 13px; }
+    .surgeon-empty h2 { margin: 8px 0 5px; color: #e7e8ea; font-size: 16px; }
+    .surgeon-caps { display: flex; justify-content: center; gap: 6px; margin: 10px 0 14px; }
+    .surgeon-caps span { font-size: 10.5px; color: #8b949e; border: 1px solid #2a2d33; border-radius: 999px; padding: 3px 8px; }
+    .surgeon-starters { display: flex; flex-direction: column; gap: 7px; text-align: left; }
+    .surgeon-starters button { padding: 9px 12px; border-color: #2a2d33; border-radius: 10px; background: #1a1c21; color: #d7dae0; text-align: left; }
+    .surgeon-starters button.deploy-copilot-studio { margin-top: 5px; border-color: #8957e5; background: linear-gradient(135deg,#25163f,#10263f); color: #f0e7ff; font-weight: 800; box-shadow: inset 3px 0 #a371f7; }
+    .surgeon-starters button.deploy-copilot-studio::before { content: "🚀"; margin-right: 8px; }
+    .surgeon-starters button.show-mode-preview { border-color: #d0463a; background: linear-gradient(135deg,#3a1614,#26191f); color: #ffe9e6; font-weight: 800; box-shadow: inset 3px 0 #ff6a5c; }
+    .surgeon-starters button.show-mode-preview::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ff5f52; margin-right: 9px; vertical-align: 1px; box-shadow: 0 0 0 3px rgba(255,95,82,.25); }
+    .surgeon-composer { padding: 10px 12px 12px; border-top: 1px solid #23262c; }
+    .surgeon-box { border: 1px solid #2a2d33; border-radius: 12px; background: #16181d; padding: 9px 11px 6px; color: #6e7681; font-size: 13px; }
+    .surgeon-bar { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 10px; color: #8b8f98; }
+    .surgeon-bar button { margin-left: auto; border-radius: 9px; padding: 7px 16px; background: linear-gradient(180deg,#3d7cf0,#2f66d8); border: 0; color: #fff; font-weight: 700; }
+    @media (max-width: 900px) {
+      :root { --explorer-width: 0px; --surgeon-width: min(360px, 100vw); }
+      #explorer { display: none; }
+    }
+  </style>
+</head>
+<body class="explorer-open surgeon-open">
+  <div id="ribbon">
+    <span class="dot" aria-hidden="true"></span>
+    <span><b>Show Mode</b> · click-through preview of OpenRappter</span>
+    <span class="sp"></span>
+    <button type="button" data-show-mode-tour="true">Start the click-through</button>
+    <a href="./" title="OpenRappter installer">Install OpenRappter →</a>
+  </div>
+
+  <aside id="explorer" class="open" aria-label="Live Brainstem agents Explorer">
+    <header>
+      <span aria-hidden="true">🗂️</span>
+      <span class="title"><strong>Explorer</strong><span class="sub">live Brainstem workspace</span></span>
+    </header>
+    <div id="agent-tree" role="tree">
+      <div class="h">global agents</div>
+      <div class="row">📄 context_memory_agent.py <span class="scope">memory</span></div>
+      <div class="row">📄 manage_memory_agent.py <span class="scope">memory</span></div>
+      <div class="row">📄 hacker_news_agent.py <span class="scope">global</span></div>
+    </div>
+    <div id="agent-viewer">Select an <code>agent.py</code> file to inspect the exact source the live Brainstem discovers on every chat request.</div>
+  </aside>
+
+  <main>
+    <div class="k-head"><span class="brand">OpenRappter</span><span>· local · full organism</span><span class="pill">RAPP/1 · /chat</span></div>
+    <div class="k-chat">
+      <div class="k-msg">👋 Hi. I'm your Brainstem — I know a few things and I can learn a lot more. Ask me what I can do.</div>
+    </div>
+    <div class="k-input"><div>Message your Brainstem…</div><button type="button">Send</button></div>
+  </main>
+
+  <aside id="surgeon" class="open" aria-label="GitHub Copilot Rappter Surgeon">
+    <header>
+      <span aria-hidden="true">🧠</span>
+      <span class="title"><strong>GitHub Copilot</strong><span class="sub">Rappter Surgeon · agent mode</span></span>
+    </header>
+    <div id="surgeon-log" role="log">
+      <div class="surgeon-empty">
+        <h2>GitHub Copilot, in your Brainstem</h2>
+        The full Copilot agent loop: files, shell, tests, one-chat capability injection, visible UI control, screenshots, and recorded demos.
+        <div class="surgeon-caps"><span>run commands</span><span>read/write files</span><span>test Brainstem</span></div>
+        <div class="surgeon-starters">
+          <button type="button">Build and test an agent for this customer use case</button>
+          <button type="button">Inspect this Brainstem and tell me what it can do</button>
+          <button type="button">Check for beta updates while I watch</button>
+          <button type="button">Record a short autopilot demo of the current workflow</button>
+          <button type="button" class="show-mode-preview" data-show-mode-tour="true">Show Mode: click-through preview</button>
+          <button type="button" class="deploy-copilot-studio">Deploy loaded agents to Copilot Studio</button>
+        </div>
+      </div>
+    </div>
+    <div class="surgeon-composer">
+      <div class="surgeon-box">Describe what to build or do…
+        <div class="surgeon-bar"><span>Agent · files, shell, tests, Brainstem</span><button type="button">Build</button></div>
+      </div>
+    </div>
+  </aside>
+
+  <script src="ui/show-mode-tour.js"></script>
+  <script>
+    // Auto-start the click-through on load unless the URL says otherwise.
+    if (!/(?:^|[?&])autostart=0(?:&|$)/.test(location.search)) {
+      window.addEventListener("load", () => setTimeout(() => window.rappShowModeTour.start(0), 400), { once: true });
+    }
+  </script>
+</body>
+</html>

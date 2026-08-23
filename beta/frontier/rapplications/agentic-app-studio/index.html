@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agentic App Studio</title>
+<style>
+  :root{--ground:#0d1117;--panel:#161b22;--raised:#1c1e23;--border:#26282d;--t1:#e6edf3;--t2:#c8c9cc;--t3:#8b8f98;
+    --purple:#b79cff;--purple-bd:#2f2650;--green:#5cc271;--blue:#58a6ff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--ground);color:var(--t1);font:13px Inter,ui-sans-serif,system-ui,sans-serif;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:100vh}
+  h1{font-size:15px;display:flex;align-items:center;gap:8px}
+  h1 .badge{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--purple);border:1px solid var(--purple-bd);background:#1b1730;border-radius:6px;padding:2px 7px}
+  p.lede{color:var(--t3);font-size:12px}
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .step{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:10px}
+  .step .n{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3)}
+  .step h3{font-size:12.5px;margin:3px 0 8px}
+  input,select{width:100%;background:var(--raised);border:1px solid #30363d;border-radius:8px;color:var(--t1);padding:7px 9px;font:12px inherit;margin-bottom:6px}
+  button{width:100%;font:600 12px Inter,system-ui,sans-serif;padding:8px 10px;border-radius:8px;border:1px solid #2b4a7a;background:#0f1a2b;color:var(--blue);cursor:pointer}
+  button:hover{border-color:var(--blue)}
+  .step.deploy button{border-color:#274a30;background:#0f1f14;color:var(--green)}
+  #status{font-size:12px;color:var(--t3);min-height:16px}
+  #out{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:12px;flex:1;overflow:auto;font-size:12px;white-space:pre-wrap;color:var(--t2)}
+  .law{font-size:10.5px;color:var(--t3);border-top:1px dashed var(--border);padding-top:8px}
+</style>
+</head>
+<body>
+  <h1>Agentic App Studio <span class="badge">Frontier rapplication</span></h1>
+  <p class="lede">Shape the solution in the Brainstem, then ship it: pick agents (local Brainstem and/or a public RAR), design a Power Apps <b>code app</b> around them, test it on a local server, and deploy the same app to your connected Power Platform environment.</p>
+  <div class="steps">
+    <div class="step"><div class="n">1 · Agents</div><h3>Pick the crew</h3>
+      <input id="agentName" placeholder="agent name or RAR id">
+      <select id="agentSource"><option value="local">from local Brainstem</option><option value="rar">from public RAR</option></select>
+      <button data-act="list">List available</button><div style="height:6px"></div><button data-act="add">Add agent</button></div>
+    <div class="step"><div class="n">2 · Design</div><h3>Design the code app</h3>
+      <input id="appName" placeholder="App name" value="Agentic Workshop App">
+      <button data-act="design">Design app</button></div>
+    <div class="step"><div class="n">3 · Test</div><h3>Run it locally</h3>
+      <button data-act="serve">Start local server</button><div style="height:6px"></div><button data-act="stop">Stop server</button></div>
+    <div class="step deploy"><div class="n">4 · Ship</div><h3>Deploy to Power Platform</h3>
+      <input id="envUrl" placeholder="https://yourorg.crm.dynamics.com">
+      <button data-act="deploy">Deploy (pac code push)</button></div>
+  </div>
+  <div id="status"></div>
+  <div id="main" style="display:flex;gap:10px;flex:1;min-height:0">
+    <div id="out" style="flex:1">Status appears here. Everything designed and tested on this device; only deploy talks to your environment.</div>
+    <div id="previewWrap" style="flex:1.2;display:none;flex-direction:column;gap:6px;min-width:0">
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3)">Live preview — the generated code app</span>
+        <span id="previewUrl" style="font-size:10.5px;color:var(--blue)"></span>
+      </div>
+      <iframe id="preview" style="flex:1;border:1px solid var(--purple-bd);border-radius:9px;background:#fff;min-height:260px"></iframe>
+      <div style="display:flex;gap:6px">
+        <input id="driveText" placeholder="Drive the app: ask its agents something…" style="margin:0">
+        <button id="driveSend" style="width:auto;white-space:nowrap">▸ Drive</button>
+      </div>
+      <div id="driveLog" style="font-size:11px;color:var(--t3);max-height:70px;overflow:auto"></div>
+    </div>
+  </div>
+  <div class="law">Local-first: agents are sha-verified on add · the app runs on 127.0.0.1 until YOU deploy · deploy uses your own pac sign-in.</div>
+<script>
+const $=id=>document.getElementById(id);
+const CMD={
+  list:()=> "action=list_agents",
+  add:()=> "action=add_agent, source="+$("agentSource").value+", name='"+$("agentName").value.trim()+"'",
+  design:()=> "action=design_app, app_name='"+$("appName").value.trim()+"'",
+  serve:()=> "action=serve", stop:()=> "action=stop_server",
+  deploy:()=> "action=deploy"+($("envUrl").value.trim()?", environment_url='"+$("envUrl").value.trim()+"'":""),
+};
+document.querySelectorAll("button[data-act]").forEach(b=>b.addEventListener("click",async()=>{
+  $("status").textContent="Working (local twin /chat)…";
+  try{
+    const r=await fetch("/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({user_input:"Call the AgenticAppStudio tool with "+CMD[b.dataset.act]()+" . Repeat the tool's answer verbatim.",user_guid:"agentic-app-studio-ui"})});
+    const d=await r.json(); $("out").textContent=d.response||d.error||JSON.stringify(d);
+    $("status").textContent=r.ok?"Done.":"The twin Brainstem needs a sign-in for chat-driven runs.";
+  }catch(e){ $("status").textContent="Chat unavailable ("+e.message+") — showing last on-device state."; }
+  poll();
+}));
+// ── Preview + drive: when the local server is up, the generated code app is
+// embedded RIGHT HERE and driven over its AgenticDrive postMessage bus — so a
+// human or an autonomous operator controls the generated app through this
+// rapplication like any native one.
+let previewSrc=null;
+function drive(cmd){const f=$("preview");if(f&&f.contentWindow)f.contentWindow.postMessage(Object.assign({type:"agentic-drive"},cmd),"*");}
+window.addEventListener("message",e=>{const m=e.data;if(!m||m.type!=="agentic-event")return;
+  const d=document.createElement("div");d.textContent="["+m.event+"] "+(m.text||JSON.stringify(m.agents||""));
+  $("driveLog").prepend(d);});
+$("driveSend").addEventListener("click",()=>{const t=$("driveText").value.trim();if(!t)return;$("driveText").value="";drive({cmd:"ask",text:t});});
+$("driveText").addEventListener("keydown",e=>{if(e.key==="Enter")$("driveSend").click();});
+window.AgenticStudioDrive={ask:t=>drive({cmd:"ask",text:t}),status:()=>drive({cmd:"status"})};
+async function poll(){
+  try{
+    const t=await fetch("/agents/export/studio_live_state.py",{cache:"no-store"}).then(r=>r.ok?r.text():null);
+    if(!t)return; const nl=t.indexOf("\n"); const s=JSON.parse(nl>=0?t.slice(nl+1):t);
+    const app=s.app?("app: "+s.app.name):"app: (not designed)";
+    const srv=s.server?("local server: "+s.server.url):"local server: stopped";
+    $("status").textContent="Selected: "+(s.agents||[]).map(a=>a.id).join(", ")+" · "+app+" · "+srv;
+    if(s.server&&s.server.url){ if(previewSrc!==s.server.url){previewSrc=s.server.url;$("preview").src=s.server.url;$("previewUrl").textContent=s.server.url;}
+      $("previewWrap").style.display="flex"; }
+    else { $("previewWrap").style.display="none"; previewSrc=null; }
+  }catch(e){}
+}
+setInterval(poll,3000); poll();
+</script>
+</body>
+</html>

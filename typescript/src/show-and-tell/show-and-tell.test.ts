@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -28,6 +29,25 @@ import {
 } from './index.js';
 
 const roots: string[] = [];
+
+interface ShowAndTellContract {
+  session: { schema: string; states: string[] };
+  event: { types: string[] };
+  privacy: {
+    directoryMode: string;
+    directoryModeAppliesToCreatedAncestors: boolean;
+    fileMode: string;
+  };
+}
+
+function loadShowAndTellContract(): ShowAndTellContract {
+  return JSON.parse(
+    readFileSync(
+      path.resolve(import.meta.dirname, '../../../contracts/show-and-tell-v1.json'),
+      'utf8',
+    ),
+  ) as ShowAndTellContract;
+}
 const originalSkills = process.env.OPENRAPPTER_SKILLS_DIR;
 const originalAutomations = process.env.OPENRAPPTER_AUTOMATIONS_DIR;
 
@@ -122,6 +142,87 @@ describe('ShowAndTellStore', () => {
       ),
     ) as { session: { schema: string } };
     expect(contract.session.schema).toBe(SHOW_AND_TELL_SCHEMA);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'creates every directory at the mode the contract promises',
+    async () => {
+      // Python's mkdir(parents=True, mode=) ignores the mode for ancestors, so
+      // this is the assertion that keeps the two runtimes on the same footing.
+      const contract = loadShowAndTellContract();
+      const expected = parseInt(contract.privacy.directoryMode, 8);
+      expect(contract.privacy.directoryModeAppliesToCreatedAncestors).toBe(true);
+
+      const base = tempRoot();
+      const root = path.join(base, 'fresh', 'nested', 'show');
+      const store = new ShowAndTellStore(root);
+      const session = await store.createSession({ intentHint: 'expenses' });
+      await store.initialize();
+
+      for (const directory of [
+        root,
+        path.dirname(root),
+        path.dirname(path.dirname(root)),
+        store.sessionDir(session.id),
+      ]) {
+        expect(statSync(directory).mode & 0o777).toBe(expected);
+      }
+      store.close();
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'writes files at the mode the contract promises',
+    async () => {
+      const contract = loadShowAndTellContract();
+      const expected = parseInt(contract.privacy.fileMode, 8);
+
+      const root = tempRoot();
+      const store = new ShowAndTellStore(root);
+      await store.initialize();
+
+      expect(statSync(path.join(root, 'show-and-tell.db')).mode & 0o777).toBe(expected);
+      store.close();
+    },
+  );
+
+  it('emits exactly the event vocabulary the contract declares', () => {
+    // Both runtimes open the same show-and-tell.db, so a type either side
+    // emits has to be one the other side's analyzer understands.
+    const contract = loadShowAndTellContract();
+    const declared = new Set(contract.event.types);
+    expect(declared.size).toBe(contract.event.types.length);
+    expect(declared.size).toBeGreaterThan(0);
+
+    const pattern =
+      /['"]((?:session|app|browser|frame|narration|manual|computer|collector)\.[a-z.]+)['"]/g;
+    const emitted = new Set<string>();
+    for (const file of [
+      path.resolve(import.meta.dirname, 'store.ts'),
+      path.resolve(import.meta.dirname, 'worker.ts'),
+      path.resolve(import.meta.dirname, 'analyzer.ts'),
+      path.resolve(import.meta.dirname, 'capture.ts'),
+      path.resolve(import.meta.dirname, 'active.ts'),
+      path.resolve(import.meta.dirname, '../agents/ShowAndTellAgent.ts'),
+    ]) {
+      for (const match of readFileSync(file, 'utf8').matchAll(pattern)) {
+        emitted.add(match[1]!);
+      }
+    }
+
+    expect([...emitted].filter((type) => !declared.has(type))).toEqual([]);
+    expect([...declared].filter((type) => !emitted.has(type))).toEqual([]);
+  });
+
+  it('declares exactly the session states the runtime implements', () => {
+    const contract = loadShowAndTellContract();
+    const source = readFileSync(
+      path.resolve(import.meta.dirname, 'types.ts'),
+      'utf8',
+    );
+    const union = /export type ShowAndTellState =([^;]+);/.exec(source)?.[1] ?? '';
+    const states = [...union.matchAll(/'([a-z]+)'/g)].map((match) => match[1]!);
+    expect(states.sort()).toEqual([...contract.session.states].sort());
   });
 
   describe('Show-and-Tell collector ownership', () => {

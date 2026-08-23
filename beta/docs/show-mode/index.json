@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "generated_utc": "2026-08-18T14:37:01.955Z",
+  "pace_ms": 1100,
+  "force_mode": false,
+  "steps": [
+    {
+      "index": 0,
+      "id": "welcome",
+      "file": "step-01-welcome.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-34-571Z.png"
+    },
+    {
+      "index": 1,
+      "id": "interview",
+      "file": "step-02-interview.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-36-611Z.png"
+    },
+    {
+      "index": 2,
+      "id": "pill",
+      "file": "step-03-pill.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-38-647Z.png"
+    },
+    {
+      "index": 3,
+      "id": "doors",
+      "file": "step-04-doors.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-40-691Z.png"
+    },
+    {
+      "index": 4,
+      "id": "import",
+      "file": "step-05-import.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-42-729Z.png"
+    },
+    {
+      "index": 5,
+      "id": "analyze",
+      "file": "step-06-analyze.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-44-765Z.png"
+    },
+    {
+      "index": 6,
+      "id": "edit",
+      "file": "step-07-edit.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-46-821Z.png"
+    },
+    {
+      "index": 7,
+      "id": "approve",
+      "file": "step-08-approve.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-48-864Z.png"
+    },
+    {
+      "index": 8,
+      "id": "preview",
+      "file": "step-09-preview.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-50-924Z.png"
+    },
+    {
+      "index": 9,
+      "id": "test",
+      "file": "step-10-test.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-52-976Z.png"
+    },
+    {
+      "index": 10,
+      "id": "confirm",
+      "file": "step-11-confirm.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-55-027Z.png"
+    },
+    {
+      "index": 11,
+      "id": "promote",
+      "file": "step-12-promote.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-57-061Z.png"
+    },
+    {
+      "index": 12,
+      "id": "why",
+      "file": "step-13-why.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-36-59-113Z.png"
+    },
+    {
+      "index": 13,
+      "id": "end",
+      "file": "step-14-end.png",
+      "source": "/Users/kodywildfeuer/.brainstem/beta-launcher/captures/brainstem-2026-08-18T14-37-01-142Z.png"
+    }
+  ],
+  "note": "Preview only: ghost content over the real panes; nothing recorded, analyzed, hotloaded, or sent."
+}

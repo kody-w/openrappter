@@ -1,0 +1,146 @@
+{
+  "schema": "rapter-clever-girl.capabilities.v2",
+  "capabilities": [
+    {
+      "id": "dependency-recovery-guide",
+      "name": "dependency-recovery-guide",
+      "description": "Diagnose deterministic dependency installation and version conflicts.",
+      "tags": ["dependency", "install", "repair"],
+      "behavioralContract": {
+        "schemaVersion": "rapter-clever-girl.capability-contract.v1",
+        "version": "1.2.0",
+        "inputs": [
+          {
+            "name": "diagnostic",
+            "type": "string",
+            "description": "Bounded dependency diagnostic."
+          }
+        ],
+        "outputs": [
+          {
+            "name": "finding",
+            "type": "object",
+            "description": "Deterministic diagnosis without applying changes."
+          }
+        ],
+        "permissions": [
+          {
+            "resource": "local_metadata",
+            "access": "read",
+            "reason": "Reads only explicitly supplied metadata."
+          }
+        ],
+        "failures": [
+          {
+            "code": "INPUT_UNSUPPORTED",
+            "condition": "The diagnostic shape is not recognized.",
+            "behavior": "Returns a closed error without executing a repair."
+          }
+        ],
+        "limitations": [
+          "Does not install packages or change dependency files."
+        ],
+        "tests": [
+          {
+            "id": "dependency-conflict",
+            "assertion": "A known conflict returns one stable diagnosis."
+          }
+        ]
+      }
+    },
+    {
+      "id": "release-gate-auditor",
+      "name": "release-gate-auditor",
+      "description": "Review release gates and report merge readiness.",
+      "tags": ["review", "release", "gate", "audit"],
+      "behavioralContract": {
+        "schemaVersion": "rapter-clever-girl.capability-contract.v1",
+        "version": "2.0.1",
+        "inputs": [
+          {
+            "name": "gate_state",
+            "type": "object",
+            "description": "Explicit bounded release gate state."
+          }
+        ],
+        "outputs": [
+          {
+            "name": "verdict",
+            "type": "object",
+            "description": "Read-only gate verdict with blockers."
+          }
+        ],
+        "permissions": [
+          {
+            "resource": "gate_metadata",
+            "access": "read",
+            "reason": "Inspects only the supplied gate state."
+          }
+        ],
+        "failures": [
+          {
+            "code": "GATE_STATE_INVALID",
+            "condition": "Required gate fields are absent.",
+            "behavior": "Returns an unverified verdict and no side effect."
+          }
+        ],
+        "limitations": [
+          "Does not approve, merge, publish, or deploy."
+        ],
+        "tests": [
+          {
+            "id": "blocked-gate",
+            "assertion": "A failed required check produces a blocked verdict."
+          }
+        ]
+      }
+    },
+    {
+      "id": "traceable-delivery-planner",
+      "name": "traceable-delivery-planner",
+      "description": "Plan traceable branch, commit, review, and publish steps.",
+      "tags": ["delivery", "branch", "commit", "publish"],
+      "behavioralContract": {
+        "schemaVersion": "rapter-clever-girl.capability-contract.v1",
+        "version": "1.0.0",
+        "inputs": [
+          {
+            "name": "delivery_state",
+            "type": "object",
+            "description": "Explicit current delivery state."
+          }
+        ],
+        "outputs": [
+          {
+            "name": "plan",
+            "type": "array",
+            "description": "Ordered inert delivery plan."
+          }
+        ],
+        "permissions": [
+          {
+            "resource": "delivery_metadata",
+            "access": "read",
+            "reason": "Uses only explicit metadata to construct the plan."
+          }
+        ],
+        "failures": [
+          {
+            "code": "STATE_INCOMPLETE",
+            "condition": "The supplied state cannot establish a safe order.",
+            "behavior": "Returns no plan and lists missing state categories."
+          }
+        ],
+        "limitations": [
+          "Does not execute version-control or publishing operations."
+        ],
+        "tests": [
+          {
+            "id": "ordered-plan",
+            "assertion": "A complete state produces the same ordered plan on replay."
+          }
+        ]
+      }
+    }
+  ]
+}

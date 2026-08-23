@@ -34,6 +34,11 @@ FLIGHT_EXPORT_SCHEMA = "openrappter-flight-export/1.0"
 DEFAULT_RETENTION_EVENTS = 10_000
 DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024
 MAX_SANITIZE_STRING_BYTES = 64 * 1024
+#: Budget for a file-metadata field that rides along next to an excluded path.
+#: Measured in UTF-8 bytes so the two runtimes agree: ``len()`` counts code
+#: points and JavaScript's ``.length`` counts UTF-16 code units, which put an
+#: astral string on opposite sides of the same number.
+MAX_FILE_METADATA_FIELD_BYTES = 256
 MAX_EMBEDDED_JSON_PARSE_CHARS = MAX_SANITIZE_STRING_BYTES * 4
 MAX_EMBEDDED_JSON_DEPTH = 4
 MAX_SANITIZE_NODES = 10_000
@@ -689,6 +694,41 @@ try {
         )
 
 
+def private_mkdir(directory: Path) -> Path:
+    """``mkdir -p`` that keeps every directory it creates private.
+
+    ``Path.mkdir(parents=True, mode=0o700)`` is not the Python spelling of
+    ``mkdirSync(dir, {recursive: true, mode: 0o700})``: CPython documents that
+    missing ancestors "are created with the default permissions without taking
+    mode into account", so only the leaf ends up 0700 while every ancestor
+    lands at 0777 & ~umask -- world-readable under the usual umask of 022.
+
+    Both runtimes share one on-disk layout, so whichever created
+    ``~/.openrappter`` first decided whether it was private. This creates the
+    missing chain a directory at a time so Python matches Node, and hardens the
+    leaf so an already-existing directory is repaired rather than trusted.
+    Ancestors that already exist are left alone, which is also what Node does.
+    """
+    directory = Path(directory)
+    missing: list[Path] = []
+    candidate = directory
+    while not os.path.lexists(candidate):
+        missing.append(candidate)
+        if candidate.parent == candidate:
+            break
+        candidate = candidate.parent
+
+    for path in reversed(missing):
+        path.mkdir(mode=0o700, exist_ok=True)
+
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)  # private-mkdir-canonical
+    if not directory.is_symlink():
+        # Callers that reject symlinks do so after this returns; never chmod
+        # through one on the way there.
+        _harden_private_path(directory, directory=True)
+    return directory
+
+
 def _prepare_managed_database_directory(directory: Path) -> None:
     existing = directory
     while not os.path.lexists(existing):
@@ -696,7 +736,7 @@ def _prepare_managed_database_directory(directory: Path) -> None:
             break
         existing = existing.parent
     _assert_private_directory(existing)
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_mkdir(directory)
     _assert_private_directory(directory)
     _harden_private_path(directory, directory=True)
 
@@ -1396,10 +1436,11 @@ def _contains_excluded_file_locator(
     ancestors: Optional[set[int]] = None,
     depth: int = 0,
 ) -> bool:
-    if (
-        value is None
-        or isinstance(value, (str, bytes, bytearray, memoryview))
-    ):
+    # The depth guard fails closed, so it must only be reached by values that
+    # actually need walking. A leaf has no keys: whether it hides a locator is
+    # answerable exactly, at any depth, and answering it here is what keeps the
+    # verdict from depending on the type of the leaf.
+    if not isinstance(value, (Mapping, list, tuple, set, frozenset)):
         return False
     if depth > 16:
         return True
@@ -1459,7 +1500,7 @@ def _is_safe_file_metadata_field(
     if normalized in {"language", "mime", "mimetype", "extension"}:
         return (
             isinstance(value, str)
-            and len(value) <= 256
+            and len(value.encode("utf-8")) <= MAX_FILE_METADATA_FIELD_BYTES
             and _sanitize_string(value, privacy) == value
         )
     return False

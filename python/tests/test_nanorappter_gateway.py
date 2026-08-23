@@ -98,12 +98,35 @@ def _request(port: int, payload: bytes, timeout: float = 5.0) -> bytes:
         sock.close()
 
 
-def _post(body: bytes, content_length: object | None = None) -> bytes:
+def _post(
+    body: bytes,
+    content_length: object | None = None,
+    *,
+    host: str = "t",
+    origin: str | None = None,
+    content_type: str = "application/json",
+) -> bytes:
     declared = len(body) if content_length is None else content_length
+    headers = [
+        b"POST / HTTP/1.1",
+        f"Host: {host}".encode(),
+        b"Connection: close",
+        f"Content-Type: {content_type}".encode(),
+        b"Content-Length: " + str(declared).encode(),
+    ]
+    if origin is not None:
+        headers.append(f"Origin: {origin}".encode())
+    return b"\r\n".join(headers) + b"\r\n\r\n" + body
+
+
+def _options(port: int, origin: str, method: str = "POST") -> bytes:
     return (
-        b"POST / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n"
-        b"Content-Type: application/json\r\n"
-        b"Content-Length: " + str(declared).encode() + b"\r\n\r\n" + body
+        b"OPTIONS / HTTP/1.1\r\n"
+        + f"Host: 127.0.0.1:{port}\r\n".encode()
+        + f"Origin: {origin}\r\n".encode()
+        + f"Access-Control-Request-Method: {method}\r\n".encode()
+        + b"Access-Control-Request-Headers: Content-Type\r\n"
+        + b"Connection: close\r\n\r\n"
     )
 
 
@@ -114,6 +137,14 @@ def _status(response: bytes) -> int:
 
 def _body(response: bytes) -> dict:
     return json.loads(response.split(b"\r\n\r\n", 1)[1])
+
+
+def _headers(response: bytes) -> dict[str, str]:
+    lines = response.split(b"\r\n\r\n", 1)[0].split(b"\r\n")[1:]
+    return {
+        name.decode().lower(): value.decode().strip()
+        for name, value in (line.split(b":", 1) for line in lines)
+    }
 
 
 class TestTheDocumentedCommandRuns:
@@ -179,6 +210,133 @@ class TestMalformedRequestsAreAnswered:
         """Length 0 has always meant "{}" and must keep meaning it."""
         response = _request(gateway_port, _post(b""))
         assert _status(response) == 200
+
+
+class TestBrowserOriginBoundary:
+    def test_status_remains_cross_origin_readable(self, gateway_port):
+        response = _request(
+            gateway_port,
+            (
+                b"GET / HTTP/1.1\r\n"
+                + f"Host: 127.0.0.1:{gateway_port}\r\n".encode()
+                + b"Origin: https://status.example\r\n"
+                + b"Connection: close\r\n\r\n"
+            ),
+        )
+        assert _status(response) == 200
+        assert _headers(response)["access-control-allow-origin"] == "*"
+
+    def test_malicious_post_preflight_is_refused(self, gateway_port):
+        response = _request(
+            gateway_port,
+            _options(gateway_port, "https://evil.example"),
+        )
+        assert _status(response) == 403
+        assert "access-control-allow-origin" not in _headers(response)
+        assert "access-control-allow-methods" not in _headers(response)
+
+    @pytest.mark.parametrize(
+        "origin,host",
+        [
+            ("https://evil.example", None),
+            ("http://evil.example", "evil.example"),
+            ("http://localhost:9999", None),
+            ("null", None),
+        ],
+    )
+    def test_cross_origin_simple_posts_cannot_invoke_agents(
+        self, gateway_port, origin, host
+    ):
+        gateway_host = host or f"127.0.0.1:{gateway_port}"
+        status_before = _body(
+            _request(
+                gateway_port,
+                b"GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+            )
+        )
+        response = _request(
+            gateway_port,
+            _post(
+                b'{"agent_id":"bot","event":"cross-origin"}',
+                host=gateway_host,
+                origin=origin,
+                content_type="text/plain",
+            ),
+        )
+        status_after = _body(
+            _request(
+                gateway_port,
+                b"GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+            )
+        )
+        assert _status(response) == 403
+        assert "access-control-allow-origin" not in _headers(response)
+        assert (
+            status_after["agents"]["bot"]["log_entries"]
+            == status_before["agents"]["bot"]["log_entries"]
+        )
+
+    def test_exact_loopback_same_origin_preflight_and_post_are_allowed(
+        self, gateway_port
+    ):
+        origin = f"http://127.0.0.1:{gateway_port}"
+        preflight = _request(gateway_port, _options(gateway_port, origin))
+        assert _status(preflight) == 204
+        preflight_headers = _headers(preflight)
+        assert preflight_headers["access-control-allow-origin"] == origin
+        assert preflight_headers["access-control-allow-methods"] == "POST, OPTIONS"
+        assert preflight_headers["vary"] == "Origin"
+
+        response = _request(
+            gateway_port,
+            _post(
+                b'{"agent_id":"bot","event":"same-origin"}',
+                host=f"127.0.0.1:{gateway_port}",
+                origin=origin,
+            ),
+        )
+        assert _status(response) == 200
+        assert _body(response)["reply"] == "same-origin"
+        response_headers = _headers(response)
+        assert response_headers["access-control-allow-origin"] == origin
+        assert response_headers["vary"] == "Origin"
+
+    def test_no_origin_text_plain_cannot_invoke_agents(self, gateway_port):
+        status_before = _body(
+            _request(
+                gateway_port,
+                b"GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+            )
+        )
+        response = _request(
+            gateway_port,
+            _post(
+                b'{"agent_id":"bot","event":"simple-content-type"}',
+                content_type="text/plain",
+            ),
+        )
+        status_after = _body(
+            _request(
+                gateway_port,
+                b"GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
+            )
+        )
+        assert _status(response) == 415
+        assert (
+            status_after["agents"]["bot"]["log_entries"]
+            == status_before["agents"]["bot"]["log_entries"]
+        )
+
+    def test_json_content_type_parameters_remain_compatible(self, gateway_port):
+        response = _request(
+            gateway_port,
+            _post(
+                b'{"agent_id":"bot","event":"json-charset"}',
+                content_type="application/json; charset=utf-8",
+            ),
+        )
+        assert _status(response) == 200
+        assert _body(response)["reply"] == "json-charset"
 
 
 class TestOneCallerCannotStallTheRest:

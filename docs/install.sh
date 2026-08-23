@@ -13,6 +13,12 @@ ACCENT='\033[38;2;16;185;129m'       # green-bright  #10b981
 ACCENT_BRIGHT='\033[38;2;52;211;153m' # lighter green #34d399
 INFO='\033[38;2;136;146;176m'        # text-secondary #8892b0
 SUCCESS='\033[38;2;0;229;204m'       # cyan-bright   #00e5cc
+# The numeral accent in menus. It was referenced by the install-method chooser
+# and never defined, so under `set -euo pipefail` every interactive install
+# printed an unbound-variable error at the exact moment a person was choosing
+# how to install. Its own name rather than reusing SUCCESS, so that a menu
+# number does not read as a success signal.
+CYAN='\033[38;2;0;229;204m'          # cyan-bright   #00e5cc
 WARN='\033[38;2;255;176;32m'         # amber
 ERROR='\033[38;2;230;57;70m'         # coral-mid     #e63946
 MUTED='\033[38;2;90;100;128m'        # text-muted    #5a6480
@@ -144,6 +150,10 @@ GUM=""
 GUM_STATUS="skipped"
 GUM_REASON=""
 
+has_controlling_tty() {
+    { : </dev/tty; } 2>/dev/null && { : >/dev/tty; } 2>/dev/null
+}
+
 gum_is_tty() {
     if [[ -n "${NO_COLOR:-}" ]]; then
         return 1
@@ -154,7 +164,7 @@ gum_is_tty() {
     if [[ -t 2 || -t 1 ]]; then
         return 0
     fi
-    if [[ -r /dev/tty && -w /dev/tty ]]; then
+    if has_controlling_tty; then
         return 0
     fi
     return 1
@@ -493,8 +503,13 @@ ui_choose() {
     # Read numpad input
     while true; do
         echo -n -e "${MUTED}Enter number [1-${count}]:${NC} " >&2
-        local input
-        read -r input </dev/tty 2>/dev/null || read -r input
+        local input=""
+        if { read -r input </dev/tty; } 2>/dev/null; then
+            :
+        elif ! read -r input; then
+            echo -e "${WARN}  No interactive input available${NC}" >&2
+            return 1
+        fi
         # Strip whitespace
         input="${input// /}"
         if [[ "$input" =~ ^[0-9]+$ ]] && (( input >= 1 && input <= count )); then
@@ -2756,7 +2771,7 @@ main() {
     # Note: `curl | bash` redirects stdin from the pipe, so -t 0 is false even in a terminal.
     # We check /dev/tty instead and redirect stdin from it so the wizard can prompt the user.
     if [[ "${OPT_NO_ONBOARD:-false}" != "true" ]] && [[ -n "$OPENRAPPTER_BIN" ]]; then
-        if [[ -e /dev/tty ]]; then
+        if has_controlling_tty; then
             echo ""
             ui_info "Running setup wizard..."
             echo ""

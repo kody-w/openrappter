@@ -7,6 +7,13 @@ const CIRCULAR = "[circular]";
 const UNSERIALIZABLE = "[unserializable]";
 const DEFAULT_MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SANITIZE_STRING_BYTES = 64 * 1024;
+/**
+ * Budget for a file-metadata field that rides along next to an excluded path.
+ * Measured in UTF-8 bytes so the two runtimes agree: `.length` counts UTF-16
+ * code units and Python's `len()` counts code points, which put an astral
+ * string on opposite sides of the same number.
+ */
+const MAX_FILE_METADATA_FIELD_BYTES = 256;
 const MAX_EMBEDDED_JSON_PARSE_CHARS = MAX_SANITIZE_STRING_BYTES * 4;
 const MAX_EMBEDDED_JSON_DEPTH = 4;
 const MAX_SANITIZE_NODES = 10_000;
@@ -411,14 +418,13 @@ function containsExcludedFileLocator(
   ancestors = new WeakSet<object>(),
   depth = 0,
 ): boolean {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    depth > 16 ||
-    ancestors.has(value)
-  ) {
-    return depth > 16;
-  }
+  // The depth guard fails closed, so it must only be reached by values that
+  // actually need walking. A leaf has no keys: whether it hides a locator is
+  // answerable exactly, at any depth, and answering it here is what keeps the
+  // verdict from depending on the type of the leaf.
+  if (value === null || typeof value !== "object") return false;
+  if (depth > 16) return true;
+  if (ancestors.has(value)) return false;
 
   ancestors.add(value);
   try {
@@ -493,7 +499,7 @@ function isSafeFileMetadataField(
   ) {
     return (
       typeof value === "string" &&
-      value.length <= 256 &&
+      Buffer.byteLength(value, "utf8") <= MAX_FILE_METADATA_FIELD_BYTES &&
       sanitizeString(value, privacy) === value
     );
   }

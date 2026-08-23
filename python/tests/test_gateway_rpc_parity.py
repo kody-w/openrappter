@@ -64,3 +64,44 @@ class TestSharedSurface:
             "these Python gateway methods are in neither `shared` nor `python_only`; "
             f"add them to contracts/gateway-rpc-parity.json: {unexplained}"
         )
+
+
+class TestHealthChecks:
+    """`health` is shared, and `checks` is the part a monitor actually reads.
+
+    The contract described `checks` in prose as agreeing between the runtimes.
+    It did not: TypeScript reported five checks and Python two. Prose cannot
+    fail a build, so the disagreement survived. These tests assert the lists in
+    `health_checks`, and TypeScript has the matching test.
+    """
+
+    def test_the_contract_declares_the_check_names(self):
+        # Guards the rest: an empty list would make every assertion vacuous.
+        assert len(CONTRACT["health_checks"]["shared"]) >= 4
+
+    def test_health_reports_exactly_the_shared_checks(self):
+        checks = set(GatewayServer().get_health()["checks"])
+        expected = set(CONTRACT["health_checks"]["shared"])
+        assert checks == expected, (
+            f"missing={sorted(expected - checks)} unexpected={sorted(checks - expected)}; "
+            "update contracts/gateway-rpc-parity.json#health_checks rather than drifting"
+        )
+
+    def test_typescript_only_checks_are_not_reported_here(self):
+        # If Python gains one of these it is no longer TypeScript-only and the
+        # contract must move it to `shared`.
+        checks = set(GatewayServer().get_health()["checks"])
+        crossed = sorted(set(CONTRACT["health_checks"]["typescript_only"]) & checks)
+        assert crossed == [], f"declared typescript-only but reported by Python: {crossed}"
+
+    def test_the_channels_check_tracks_the_channel_registry(self):
+        """The reason this check has to exist.
+
+        All five shared `channels.*` methods guard on `channel_registry is
+        None`, and `channels.list` answers `[]` in that case — which a client
+        cannot tell apart from "zero channels are configured". TypeScript
+        exposes the difference as `checks.channels`; without it, Python offers
+        no way to pre-flight the channel surface it advertises as shared.
+        """
+        assert GatewayServer().get_health()["checks"]["channels"] is False
+        assert GatewayServer(channel_registry=object()).get_health()["checks"]["channels"] is True

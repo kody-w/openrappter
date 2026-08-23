@@ -1,0 +1,31 @@
+{
+  "schema": "clevergirl-estate/1.0",
+  "capturedAt": "2026-08-22T18:00:00Z",
+  "notCaptured": [],
+  "repositories": [
+    {
+      "name": "first-run-doctor",
+      "revision": "v2.4.0",
+      "files": 12,
+      "bytes": 4096,
+      "skippedLarge": [],
+      "withheld": []
+    },
+    {
+      "name": "release-train",
+      "revision": "release-2026.08",
+      "files": 18,
+      "bytes": 8192,
+      "skippedLarge": [],
+      "withheld": []
+    },
+    {
+      "name": "workflow-observer",
+      "revision": "3333333333333333333333333333333333333333",
+      "files": 9,
+      "bytes": 2048,
+      "skippedLarge": [],
+      "withheld": []
+    }
+  ]
+}

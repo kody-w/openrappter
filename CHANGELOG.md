@@ -9,6 +9,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Release preflight now accepts strict SemVer prerelease tags such as
+  `v1.14.0-beta.9` when every TypeScript and Python manifest/runtime reports
+  the exact same version. It still rejects malformed tags, build metadata, and
+  version drift; Python artifacts use their lossless PEP 440 filename form,
+  npm prereleases never move `latest`, and GitHub prereleases are marked
+  explicitly.
+
+- Deciding whether a recorded value hides a locator for an excluded file means
+  walking it, and the walk gives up past 16 levels and fails closed. Both
+  runtimes consulted that guard for values that never needed walking, so the
+  verdict on a leaf depended on its type and on how deep it sat. Two structures
+  of identical shape were classified differently because one ended in a string
+  and the other in a number: a 16-deep chain ending in `42` was replaced with
+  `[excluded-path]` while the same chain ending in `"leaf"` survived intact.
+  The runtimes disagreed about which, because Python short-circuited `None` and
+  `str` before the depth check while TypeScript short-circuited nothing --
+  TypeScript discarded an entire 16-deep array that Python kept, and at 17
+  levels they swapped. Both now answer for non-containers before consulting the
+  guard, which is exact: a leaf has no keys, so it can never hide a locator at
+  any depth. Detection of real excluded paths is unchanged, and the change can
+  only remove data from the log, never add it. Measured by running 231 nested
+  shapes through both sanitizers and diffing: 20 divergences before, 0 after.
+  A separate 252-shape sweep of the whole redaction surface -- secret-shaped
+  keys and values, unicode, truncation boundaries, embedded JSON, payload
+  limits and error summaries -- found no other divergence.
+
+- The two runtimes disagreed about which file metadata may ride along next to
+  an excluded credential path. When a recorded object carries a locator for an
+  excluded file, every sibling field is replaced with `[excluded-path]` except a
+  short allowlist -- `size`, `length`, `language`, `mime`, `mimetype`,
+  `extension` -- and a text field qualified only if it fit a 256 budget. Python
+  measured that budget with `len()`, which counts code points, and TypeScript
+  with `.length`, which counts UTF-16 code units, so a 200-emoji `mime` value
+  sat on opposite sides of the same number: Python wrote it to the flight log
+  verbatim while TypeScript blanked it. Both now measure it in UTF-8 bytes, the
+  unit every other size cap in the flight recorder already uses, which also
+  closes the case both runtimes got wrong -- a 200-character two-byte string
+  that fits either native length but not the byte budget. Verified by running
+  31 metadata shapes through both sanitizers and diffing: 1 divergence before,
+  0 after.
+- `contracts/excluded-path-corpus.json` said every sibling field is blanked,
+  without mentioning the metadata allowlist that is the one deliberate hole in
+  that sweep. The allowlist and its budget are now recorded in the contract and
+  asserted by both runtimes.
+
+- Python created private directories world-readable when it had to create their
+  parents. `Path.mkdir(parents=True, mode=0o700)` applies `mode` only to the
+  final directory -- CPython creates missing ancestors with the default
+  permissions and ignores `mode` for them -- while Node's
+  `mkdirSync(dir, { recursive: true, mode: 0o700 })` applies it to every
+  directory it creates. Both runtimes share one on-disk layout, so on a machine
+  where `~/.openrappter` did not exist yet, whichever runtime got there first
+  decided whether it was `0700` or world-readable `0755`. All 15 sites that
+  asked for `0700` now go through a new `private_mkdir()` helper that matches
+  Node, including the Flight Recorder log directory and the iMessage state and
+  config directories. A test fails the build if the old idiom reappears
+  anywhere in the Python product tree.
+- The Show-and-Tell contract's privacy and vocabulary guarantees were never
+  asserted: both runtimes checked only `session.schema`, so the `0700`/`0600`
+  mode promises, the 14-name event vocabulary, and the session-state list could
+  all drift silently. Both runtimes now measure them against
+  `contracts/show-and-tell-v1.json`, and the contract records explicitly that
+  the directory mode covers ancestors the runtime creates.
+
+- The Python gateway's `health` response omitted the `channels` check that
+  TypeScript reports. Every shared `channels.*` method guards on
+  `channel_registry`, and `channels.list` answers `[]` when it is absent --
+  which a client cannot tell apart from "no channels are configured". Python
+  now reports `channels` (and TypeScript's `storage` placeholder), so the
+  advertised channel surface can be pre-flighted on both runtimes.
+
+- `contracts/gateway-rpc-parity.json` claimed `health`'s `checks` sub-object
+  agreed between the runtimes, and scoped the only exception to the optional
+  `instance` field. It did not agree: TypeScript reported five checks and
+  Python two. The claim was prose, and prose cannot fail a build, so the
+  disagreement survived. Check names are now data under `health_checks`,
+  asserted by both runtimes. The contract's stated TypeScript method count
+  was also stale (54; the live count is 74).
+
+- `DashboardHandler.execute_agent()` dropped the `status` key when an agent
+  returned something that was not JSON. TypeScript falls back to
+  `{ status: 'success', raw: resultStr }` (`dashboard.ts:398`); Python fell
+  back to `{'raw': ...}`, so `result['status']` raised `KeyError` for a
+  plain-text agent but returned a value for a JSON one -- the result shape
+  depended on what the agent happened to emit.
+
+- `python/openrappter/gateway/dashboard.py` described itself as an "HTTP
+  dashboard handler" that "mirrors TypeScript gateway/dashboard.ts". It
+  handles no HTTP: `handle()`, `sendJson()` and prefix routing are not
+  ported, and the `_prefix` it stored was never read by anything. The
+  docstring now states the actual scope and names the omission, the dead
+  `_prefix` is gone, and the parity map records `gateway/dashboard` as a
+  partial port so a green dashboard audit is not mistaken for transport
+  coverage.
+
+- Python's `StreamManager.push_block()` could not mark a block finished. The
+  `done` field was public, mirrored TypeScript, and was named in the module
+  docstring as the signal that a block is "marked done" -- but it was
+  hardcoded `False` at every construction site, so no Python code path could
+  ever set it `True` and a subscriber waiting on `block.done` waited forever.
+  It also always generated a fresh UUID, so the caller-supplied block id and
+  the replace-by-id upsert that TypeScript guarantees were both unreachable;
+  pushing an updated block appended a duplicate instead of revising the
+  original. `push_block()` now accepts keyword-only `done`, `block_id` and
+  `delta` and replaces a block whose id already exists, matching
+  `pushBlock` in `typescript/src/gateway/streaming.ts`. Existing positional
+  callers are unaffected. The module docstring claimed it mirrored the
+  TypeScript API "with one known exception" (the WebSocket transport hook),
+  so this gap was undocumented as well as unreachable.
+
+- `test_imessage_rpc.py` failed roughly half the time when run immediately
+  after the full suite, and passed when run warm -- the pattern that trains
+  people to re-run red builds instead of reading them. Root cause was a
+  1-second timeout in the two tests that assert *terminal* conditions (the RPC
+  child exited, or emitted unframeable output). Those conditions resolve as
+  soon as the child acts, so the timeout is only a safety net against a hang,
+  but 1s raced a cold Python interpreter spawn: warm, the request resolves in
+  ~25ms; the first spawn after heavy disk activity measured ~920ms against the
+  1s budget. Past that the client correctly raised `ImsgRpcTimeout` instead of
+  the expected terminal error and the assertion failed. The client was never
+  at fault. Raised the safety net to 30s via a named constant, which leaves
+  the tests just as fast -- they resolve on the terminal condition, not the
+  timeout -- and measurably more consistent (0.57s per run, against 0.72-1.89s
+  before).
+
+- Python's MCP server diverged from TypeScript on five wire-visible points,
+  none of them covered by a test. The most serious: a tool whose agent
+  *resolved* with a structured `{"status": "error"}` envelope was reported to
+  the client as a **success**. TypeScript classifies that case through the
+  shared `agentResultIsError` helper and sets MCP's `isError` flag, and the
+  helper's own docstring states that every composition layer -- chain, graph,
+  broadcast, MCP, chat -- routes through it "so the two runtimes cannot drift
+  apart". Python ships the same classifier as `result_status.agent_result_is_error`
+  and already used it in chain, graph, subagent, and basic_agent; the MCP
+  server was the single layer that did not, so a declared failure reached the
+  client indistinguishable from success.
+
+  Also fixed, all confirmed by direct request/response capture: `initialize`
+  omitted the spec-required `protocolVersion` (TypeScript returns
+  `2024-11-05`, pinned by its parity test) so the response was not
+  spec-conformant; `tools/list` emitted `required: []` where TypeScript omits
+  the key entirely, which is not equivalent for strict schema validators;
+  `tools/call` returned an unknown-tool message of `Tool not found: X` against
+  TypeScript's `Unknown tool: X`; and JSON results were passed through
+  unformatted where TypeScript re-serialises with a 2-space indent, so
+  identical agent output rendered differently in the two runtimes.
+
+  Added `python/tests/test_mcp_server.py` (21 tests) mirroring
+  `typescript/src/__tests__/parity/mcp-server.test.ts`. The module previously
+  had no behavioral test at all -- `test_module_exports.py` only asserted that
+  it imports. One test pins the `isError` invariant against the shared
+  classifier itself rather than a hard-coded example, so the two cannot drift
+  again.
+
 - The TS<->Python parity map (`.claude/skills/ts-python-parity-check/SKILL.md`)
   told auditors that three shipped subsystems did not exist in Python. It
   listed `gateway`, `WatchmakerAgent`, and `mcp` as having "no Python

@@ -1,0 +1,2 @@
+{"sessionId":"insufficient-repair-01","timestamp":"2026-06-10T09:00:00.000Z","role":"user","text":"Repair the recurring Windows setup: fix the PowerShell launcher and PATH, rerun bootstrap, and verify desktop startup."}
+{"sessionId":"insufficient-repair-02","timestamp":"2026-06-10T10:00:00.000Z","role":"user","text":"Repair the recurring Windows setup again: fix PowerShell and PATH, rerun bootstrap safely, and verify desktop startup."}

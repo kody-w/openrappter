@@ -14,11 +14,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SEMVER_COMPONENT_SOURCE = '(?:0|[1-9]\\d*)';
+const SEMVER_PRERELEASE_IDENTIFIER_SOURCE =
+  '(?:0|[1-9]\\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)';
+const SEMVER_PRERELEASE_SOURCE =
+  `${SEMVER_PRERELEASE_IDENTIFIER_SOURCE}(?:\\.${SEMVER_PRERELEASE_IDENTIFIER_SOURCE})*`;
 const SEMVER_SOURCE =
-  `${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}`;
-const SEMVER_PATTERN = new RegExp(`^(${SEMVER_COMPONENT_SOURCE})\\.(${SEMVER_COMPONENT_SOURCE})\\.(${SEMVER_COMPONENT_SOURCE})$`);
+  `${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}`
+  + `(?:-${SEMVER_PRERELEASE_SOURCE})?`;
+const SEMVER_PATTERN = new RegExp(
+  `^(${SEMVER_COMPONENT_SOURCE})\\.(${SEMVER_COMPONENT_SOURCE})\\.(${SEMVER_COMPONENT_SOURCE})`
+  + `(?:-(${SEMVER_PRERELEASE_SOURCE}))?$`,
+);
 const TAG_PATTERN = new RegExp(`^v(${SEMVER_SOURCE})$`);
-const MACOS_TAG_PATTERN = new RegExp(`^v(${SEMVER_SOURCE})-bar$`);
+const STABLE_SEMVER_SOURCE =
+  `${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}\\.${SEMVER_COMPONENT_SOURCE}`;
+const MACOS_TAG_PATTERN = new RegExp(`^v(${STABLE_SEMVER_SOURCE})-bar$`);
 const REGISTRY_URLS = Object.freeze({
   npm: 'https://registry.npmjs.org',
   pypi: 'https://pypi.org/pypi',
@@ -44,15 +54,32 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
 function requireSemver(version, label = 'version') {
   const match = typeof version === 'string' && SEMVER_PATTERN.exec(version);
   if (!match) {
-    throw new Error(`${label} must match X.Y.Z exactly (received ${JSON.stringify(version)})`);
+    throw new Error(
+      `${label} must be strict SemVer X.Y.Z or X.Y.Z-PRERELEASE without build metadata`
+      + ` (received ${JSON.stringify(version)})`,
+    );
   }
-  return match.slice(1).map((component) => BigInt(component));
+  return {
+    core: match.slice(1, 4).map((component) => BigInt(component)),
+    prerelease: match[4]?.split('.') ?? [],
+  };
+}
+
+function requireStableSemver(version, label = 'version') {
+  const parsed = requireSemver(version, label);
+  if (parsed.prerelease.length > 0) {
+    throw new Error(`${label} must be a stable X.Y.Z version (received ${JSON.stringify(version)})`);
+  }
+  return parsed;
 }
 
 export function parsePackageReleaseTag(tag) {
   const version = typeof tag === 'string' && TAG_PATTERN.exec(tag)?.[1];
   if (!version) {
-    throw new Error(`tag must match vX.Y.Z exactly (received ${JSON.stringify(tag)})`);
+    throw new Error(
+      'tag must be strict SemVer vX.Y.Z or vX.Y.Z-PRERELEASE without build metadata'
+      + ` (received ${JSON.stringify(tag)})`,
+    );
   }
   return version;
 }
@@ -69,9 +96,35 @@ export function compareSemver(left, right) {
   const leftParts = requireSemver(left, 'left version');
   const rightParts = requireSemver(right, 'right version');
 
-  for (let index = 0; index < leftParts.length; index += 1) {
-    if (leftParts[index] > rightParts[index]) return 1;
-    if (leftParts[index] < rightParts[index]) return -1;
+  for (let index = 0; index < leftParts.core.length; index += 1) {
+    if (leftParts.core[index] > rightParts.core[index]) return 1;
+    if (leftParts.core[index] < rightParts.core[index]) return -1;
+  }
+
+  if (leftParts.prerelease.length === 0) {
+    return rightParts.prerelease.length === 0 ? 0 : 1;
+  }
+  if (rightParts.prerelease.length === 0) return -1;
+
+  const identifierCount = Math.max(
+    leftParts.prerelease.length,
+    rightParts.prerelease.length,
+  );
+  for (let index = 0; index < identifierCount; index += 1) {
+    const leftIdentifier = leftParts.prerelease[index];
+    const rightIdentifier = rightParts.prerelease[index];
+    if (leftIdentifier === undefined) return -1;
+    if (rightIdentifier === undefined) return 1;
+    if (leftIdentifier === rightIdentifier) continue;
+
+    const leftNumeric = /^\d+$/.test(leftIdentifier);
+    const rightNumeric = /^\d+$/.test(rightIdentifier);
+    if (leftNumeric && rightNumeric) {
+      return BigInt(leftIdentifier) > BigInt(rightIdentifier) ? 1 : -1;
+    }
+    if (leftNumeric) return -1;
+    if (rightNumeric) return 1;
+    return leftIdentifier > rightIdentifier ? 1 : -1;
   }
   return 0;
 }
@@ -87,12 +140,33 @@ export function highestSemver(versions) {
   return highest;
 }
 
+export function pythonArtifactVersion(version) {
+  const { prerelease } = requireSemver(version);
+  if (prerelease.length === 0) return version;
+
+  const [label, number] = prerelease;
+  const normalizedLabel = {
+    alpha: 'a',
+    beta: 'b',
+    rc: 'rc',
+  }[label];
+  if (!normalizedLabel || prerelease.length !== 2 || !/^\d+$/.test(number)) {
+    throw new Error(
+      `prerelease ${JSON.stringify(prerelease.join('.'))} cannot be represented`
+      + ' identically by npm SemVer and Python package metadata;'
+      + ' use alpha.N, beta.N, or rc.N',
+    );
+  }
+  return `${version.slice(0, version.indexOf('-'))}${normalizedLabel}${number}`;
+}
+
 export function expectedArtifactNames(version) {
   requireSemver(version);
+  const pythonVersion = pythonArtifactVersion(version);
   return [
     `openrappter-${version}.tgz`,
-    `openrappter-${version}-py3-none-any.whl`,
-    `openrappter-${version}.tar.gz`,
+    `openrappter-${pythonVersion}-py3-none-any.whl`,
+    `openrappter-${pythonVersion}.tar.gz`,
   ];
 }
 
@@ -119,9 +193,20 @@ export function validateReleaseState(state) {
 
   for (const [label, version] of versions) {
     if (typeof version !== 'string' || !SEMVER_PATTERN.test(version)) {
-      errors.push(`${label} version must match X.Y.Z exactly (received ${JSON.stringify(version)})`);
+      errors.push(
+        `${label} version must be strict SemVer X.Y.Z or X.Y.Z-PRERELEASE`
+        + ` without build metadata (received ${JSON.stringify(version)})`,
+      );
     } else if (tagVersion && version !== tagVersion) {
       errors.push(`${label} version ${version} does not match tag version ${tagVersion}`);
+    }
+  }
+
+  if (tagVersion) {
+    try {
+      pythonArtifactVersion(tagVersion);
+    } catch (error) {
+      errors.push(error.message);
     }
   }
 
@@ -197,7 +282,8 @@ function readLocalRegistryArtifacts({
 function registryVersionUrl(registry, packageName, version, registryUrls = REGISTRY_URLS) {
   const baseUrl = registryUrls[registry].replace(/\/$/, '');
   const encodedName = encodeURIComponent(packageName);
-  const encodedVersion = encodeURIComponent(version);
+  const registryVersion = registry === 'pypi' ? pythonArtifactVersion(version) : version;
+  const encodedVersion = encodeURIComponent(registryVersion);
   return registry === 'npm'
     ? `${baseUrl}/${encodedName}/${encodedVersion}`
     : `${baseUrl}/${encodedName}/${encodedVersion}/json`;
@@ -446,7 +532,7 @@ export async function fetchNpmReleaseIndex(packageName, options = {}) {
   const metadata = await responseJson(response, 'npm', 'release index lookup');
   const latestVersion = metadata?.['dist-tags']?.latest;
   if (latestVersion !== undefined) {
-    requireSemver(latestVersion, 'npm latest version');
+    requireStableSemver(latestVersion, 'npm latest version');
   }
   const publishedVersions = metadata?.versions && typeof metadata.versions === 'object'
     ? Object.keys(metadata.versions)
@@ -461,8 +547,9 @@ export function chooseNpmPublishTag({
   repositoryTags = [],
 }) {
   requireSemver(candidateVersion, 'npm candidate version');
+  pythonArtifactVersion(candidateVersion);
   if (latestVersion !== undefined) {
-    requireSemver(latestVersion, 'npm latest version');
+    requireStableSemver(latestVersion, 'npm latest version');
   }
 
   const repositoryVersions = repositoryTags
@@ -475,10 +562,13 @@ export function chooseNpmPublishTag({
   ]);
   const isCurrentRelease = currentReleaseVersion === undefined
     || compareSemver(candidateVersion, currentReleaseVersion) >= 0;
+  const { prerelease } = requireSemver(candidateVersion, 'npm candidate version');
   return {
-    tag: isCurrentRelease
-      ? 'latest'
-      : `release-${candidateVersion.replaceAll('.', '-')}`,
+    tag: prerelease.length > 0
+      ? prerelease[0]
+      : isCurrentRelease
+        ? 'latest'
+        : `release-${candidateVersion.replaceAll('.', '-')}`,
     currentReleaseVersion,
     isCurrentRelease,
   };
@@ -644,20 +734,20 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/release-preflight.mjs --tag vX.Y.Z [options]
+  console.log(`Usage: node scripts/release-preflight.mjs --tag vX.Y.Z[-PRERELEASE] [options]
 
 Options:
   --root PATH                         repository root
-  --typescript-runtime-version X.Y.Z actual TypeScript runtime report
-  --python-runtime-version X.Y.Z     actual Python runtime report
+  --typescript-runtime-version VERSION actual TypeScript runtime report
+  --python-runtime-version VERSION     actual Python runtime report
   --artifacts-dir PATH               exact npm/wheel/sdist artifact directory
   --check-registry npm|pypi          reconcile remote and local artifacts
   --stage-missing-dir PATH           stage only missing PyPI artifacts
   --require-present                  wait for all registry artifacts to match
   --attempts N                       registry verification attempts (default 12)
   --retry-delay-ms N                 delay between attempts (default 5000)
-  --npm-publish-tag-candidate X.Y.Z  select latest or a historical npm tag
-  --include-repository-tags          include strict vX.Y.Z git tags in selection
+  --npm-publish-tag-candidate VERSION select an explicit npm dist-tag
+  --include-repository-tags          include strict SemVer git tags in selection
   --help                             show this help`);
 }
 

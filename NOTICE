@@ -22,3 +22,12 @@ The name "openrappter", the rappter mark, and related marks are held by
 Wildhaven Homes LLC and are not granted by this License. See TRADEMARK.md.
 Apache-2.0 §6 expressly withholds trademark rights, which is the intended
 behaviour here.
+
+---
+
+Portions of this product (`beta/` and `rapp_brainstem/`) were imported from
+microsoft/aibast-agents-library, the Microsoft downstream distribution of the RAPP
+stack, under the MIT License. That license is reproduced verbatim at
+`licenses/aibast-agents-library-MIT.txt` and continues to govern those files.
+
+Imported at source commit 038de085d6841ecdfcdfb3d5fc56b9bbec655f24.

@@ -1,0 +1,84 @@
+# The beta suite had no workflow. 593 tests existed and ran only when a person
+# typed `npm test` — which is how thirty-two defects lived in the tree long
+# enough to need an adversarial review to find. A test nobody runs is a comment.
+name: Beta tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['beta/**', '.github/workflows/beta-tests.yml']
+  pull_request:
+    paths: ['beta/**', '.github/workflows/beta-tests.yml']
+
+concurrency:
+  group: beta-tests-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: beta (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both platforms the product installs on. They skip different tests, so
+        # a suite that is green on one is not evidence about the other.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the engines floor in beta/package.json. engine-strict=true
+          # means an older Node fails at install with a message naming the
+          # versions, rather than a dozen unrelated test errors much later.
+          node-version: '24.19.0'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Several suites dry-load the Grail, which imports flask. The test helper
+      # prefers a Brainstem venv and falls back to whatever python it can find —
+      # so build the venv the installer would build, and name it explicitly.
+      # Without this CI reports "No module named 'flask'" on Linux and "a Python
+      # interpreter is required" on Windows, neither of which is a product fault.
+      - name: Python environment the product actually runs in
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv .ci-venv
+          if [ -x .ci-venv/Scripts/python.exe ]; then
+            VENV=.ci-venv/Scripts/python.exe
+          else
+            VENV=.ci-venv/bin/python
+          fi
+          "$VENV" -m pip install --quiet --upgrade pip
+          "$VENV" -m pip install --quiet -r rapp_brainstem/requirements.txt
+          # Ask the interpreter for its own path rather than composing one. On
+          # Windows this step runs under bash, where $PWD is a POSIX path like
+          # /d/a/repo — Node cannot stat that, so existsSync fails, every
+          # candidate in integrationPython() falls through, and the suite reports
+          # no interpreter at all. sys.executable is always native.
+          PY="$("$VENV" -c 'import sys; print(sys.executable)')"
+          echo "BRAINSTEM_BETA_PYTHON=$PY" >> "$GITHUB_ENV"
+          "$VENV" -c "import flask; print('flask', flask.__version__)"
+          echo "interpreter: $PY"
+
+      - name: Install dependencies
+        working-directory: beta
+        # --ignore-scripts is not belt-and-braces here: beta/.npmrc sets it
+        # because a transitive postinstall downloads and chmods an unchecked
+        # native binary. Passing it explicitly keeps that true if the file moves.
+        run: npm ci --ignore-scripts
+
+      - name: Syntax check
+        working-directory: beta
+        run: npm run check
+
+      - name: Run the suite
+        working-directory: beta
+        run: npm test

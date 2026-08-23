@@ -59,3 +59,13 @@ sessions.json
 
 # Competitor reference copy (submodule removed, kept locally for reference)
 openclaw/
+
+# beta/build/ holds the packaged app's icons and macOS entitlements — real source,
+# not build output. The generic build/ rule above silently swallowed all 31 files
+# on import; this keeps them.
+!beta/build/
+!beta/build/**
+
+# Generated Electron packages belong in GitHub Releases, never Git history.
+/beta/release/
+/beta/.release-media-tools/

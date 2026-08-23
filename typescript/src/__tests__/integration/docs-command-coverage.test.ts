@@ -122,7 +122,11 @@ function documentedInvocations(file: string): { argv: { value: string; quoted: b
           .replace(/&amp;/g, '&')
       : block;
 
-    for (const rawLine of text.split('\n')) {
+    // A shell line ending in `\` continues on the next physical line. Treat
+    // the whole command as one invocation so every continued option is checked
+    // instead of mistaking the continuation marker for a positional argument.
+    const logicalLines = text.replace(/\\\r?\n\s*/g, ' ').split('\n');
+    for (const rawLine of logicalLines) {
       // Comment lines are sample output, not instructions.
       const line = rawLine.replace(/^\s*[$>]\s*/, '').trim();
       if (!line || line.startsWith('#')) continue;

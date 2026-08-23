@@ -1,0 +1,10 @@
+{"kind":"pull_request","repository":"fictional/release-a","observedAt":"2026-06-18T12:00:00Z","artifactKey":"pr-101","state":"opened"}
+{"kind":"review","repository":"fictional/release-a","observedAt":"2026-06-18T12:10:00Z","artifactKey":"pr-101","state":"completed"}
+{"kind":"check_run","repository":"fictional/release-a","observedAt":"2026-06-18T12:20:00Z","artifactKey":"pr-101-ci","conclusion":"failure","durationMs":120000}
+{"kind":"check_run","repository":"fictional/release-a","observedAt":"2026-06-18T12:30:00Z","artifactKey":"pr-101-ci","conclusion":"success","durationMs":90000}
+{"kind":"pull_request","repository":"fictional/release-b","observedAt":"2026-06-19T12:00:00Z","artifactKey":"pr-102","state":"merged"}
+{"kind":"check_run","repository":"fictional/release-b","observedAt":"2026-06-19T12:20:00Z","artifactKey":"pr-102-ci","conclusion":"failure","durationMs":60000}
+{"kind":"release","repository":"fictional/release-b","observedAt":"2026-06-19T13:00:00Z","artifactKey":"release-20","state":"completed"}
+{"kind":"pull_request","repository":"fictional/release-c","observedAt":"2026-06-20T12:00:00Z","artifactKey":"pr-103","state":"opened"}
+{"kind":"review","repository":"fictional/release-c","observedAt":"2026-06-20T12:10:00Z","artifactKey":"pr-103","state":"completed"}
+{"kind":"check_run","repository":"fictional/release-c","observedAt":"2026-06-20T12:20:00Z","artifactKey":"pr-103-ci","conclusion":"failure","durationMs":180000}

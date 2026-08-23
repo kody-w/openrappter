@@ -1415,6 +1415,64 @@ async function recordImportTerminal(
   })) !== null;
 }
 
+async function activeImportLifecycleRoot(
+  recorder: ReturnType<typeof getFlightRecorder>,
+): Promise<FlightEvent | null> {
+  const context = recorder.currentTrace();
+  if (!context) return null;
+  try {
+    const roots = await recorder.query({
+      traceId: context.traceId,
+      kind: "trace.started",
+      order: "asc",
+    });
+    const matching = roots.filter((event) =>
+      event.parentId === null &&
+      event.source === "runtime" &&
+      event.status === "started" &&
+      event.metadata.ownerPid === process.pid &&
+      typeof event.metadata.ownerIncarnation === "string" &&
+      event.metadata.ownerIncarnation.length > 0
+    );
+    return matching.length === 1 ? matching[0]! : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function importAgentFile(
+  originalName: string,
+  contents: Buffer,
+  registry: ImportRegistry,
+  opts: { dir?: string } = {},
+): Promise<ImportResult> {
+  await ensureFlightRecorderFromEnv();
+  const recorder = getFlightRecorder();
+  if (recorder.currentTrace()) {
+    return importAgentFileInActiveTrace(
+      originalName,
+      contents,
+      registry,
+      opts,
+    );
+  }
+  const provenance = provenanceStorage.getStore();
+  return recorder.runTrace(
+    {
+      traceId:
+        provenance?.traceId ??
+        `standalone-agent-import-${randomUUID()}`,
+    },
+    () => importAgentFileInActiveTrace(
+      originalName,
+      contents,
+      registry,
+      opts,
+    ),
+    { retentionProtected: true },
+  );
+}
+
 /**
  * Stage, validate, atomically commit, and activate a dropped agent.
  *
@@ -1422,7 +1480,7 @@ async function recordImportTerminal(
  * is not a hot-load, and this function is the only thing that can honestly
  * report that the capability is live.
  */
-export async function importAgentFile(
+async function importAgentFileInActiveTrace(
   originalName: string,
   contents: Buffer,
   registry: ImportRegistry,
@@ -1435,14 +1493,29 @@ export async function importAgentFile(
 
   await ensureFlightRecorderFromEnv();
   const recorder = getFlightRecorder();
+  const lifecycleRoot = await activeImportLifecycleRoot(recorder);
+  if (!lifecycleRoot) {
+    const target = canonicalAgentSourcePath(path.resolve(dir, name));
+    const activeGeneration = await observeActiveGeneration(target);
+    return failureOutcome({
+      candidateSourceSha256,
+      ...activeGeneration,
+      errorCode: "IMPORT_LIFECYCLE_PIN_FAILED",
+      rejectedBeforeCommit: true,
+      committed: false,
+      commitState: "not-committed",
+      retrySafe: true,
+      error:
+        `${name} was not inspected or changed because no active durable ` +
+        "Flight lifecycle pin could be established.",
+    }).result;
+  }
   const started = await recordFlightEventDurably(recorder, {
     kind: "agent.import.started",
     source: "agent-import",
     status: "started",
     ...(provenance?.traceId ? { traceId: provenance.traceId } : {}),
-    ...(provenance?.gatewayParentEventId
-      ? { parentId: provenance.gatewayParentEventId }
-      : {}),
+    parentId: provenance?.gatewayParentEventId ?? lifecycleRoot.id,
     metadata: {
       ...provenanceMetadata(provenance),
       filename: name,

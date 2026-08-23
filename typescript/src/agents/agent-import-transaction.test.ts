@@ -1090,6 +1090,7 @@ describe("causal import events", () => {
     const invalid = Buffer.from("FLIGHT_SOURCE_LEAK_SENTINEL_9f630289 = (\n");
 
     try {
+      await recorder.runTrace({ traceId }, async () => {
       const validParent = await recorder.record({
         kind: "gateway.agent.import.started",
         source: "gateway",
@@ -1210,6 +1211,7 @@ describe("causal import events", () => {
       const serialized = JSON.stringify(events);
       expect(serialized).not.toContain("FLIGHT_SOURCE_LEAK_SENTINEL_9f630289");
       expect(serialized).not.toContain("class EventAgent");
+      });
     } finally {
       setFlightRecorder(previousRecorder);
       await recorder.close();

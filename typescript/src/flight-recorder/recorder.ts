@@ -74,6 +74,10 @@ function defaultDatabasePath(): string {
 }
 const DEFAULT_RETENTION = 10_000;
 const RETENTION_BATCH_RATIO = 0.1;
+const OWNERSHIP_RELEASE_ATTEMPTS = 4;
+const OWNERSHIP_RELEASE_BASE_DELAY_MS = 25;
+const MAX_PENDING_OWNERSHIP_RELEASES = 1_024;
+const OWNERSHIP_RECONCILE_BATCH = 64;
 let environmentRecorder: Promise<FlightRecorder> | null = null;
 let recorderGeneration = 0;
 
@@ -382,6 +386,10 @@ export interface FlightDurableAppend {
   receipt: FlightAppendReceipt;
 }
 
+export interface FlightTraceRunOptions {
+  retentionProtected?: boolean;
+}
+
 export class FlightRecorder {
   private readonly options: Required<
     Pick<FlightRecorderOptions, "enabled" | "retentionEvents">
@@ -414,6 +422,8 @@ export class FlightRecorder {
   private retainedEventCount = 0;
   private nextRetentionCheckCount = 0;
   private retentionMaintenance: Promise<void> | null = null;
+  private pendingOwnershipReleases = 0;
+  private ownershipReconciliation: Promise<void> | null = null;
   private identityKey: string | undefined;
   private readonly ownerId = randomUUID();
   private ownerPath: string | undefined;
@@ -498,6 +508,9 @@ export class FlightRecorder {
         );
       }
       await this.ledger.bindIdentityKey?.(this.identityKey);
+      this.pendingOwnershipReleases =
+        await this.ledger.pendingOwnershipReleaseCount?.() ?? 0;
+      await this.reconcileOwnershipReleases();
       if (!this.privacy.redactedValues?.includes(this.identityKey)) {
         this.privacy.redactedValues = [
           ...(this.privacy.redactedValues ?? []),
@@ -580,6 +593,8 @@ export class FlightRecorder {
       this.retainedEventCount = 0;
       this.nextRetentionCheckCount = 0;
       this.retentionMaintenance = null;
+      this.pendingOwnershipReleases = 0;
+      this.ownershipReconciliation = null;
       this.closing = false;
       unregisterRecorderOwner(this.ownerPath);
       this.ownerPath = undefined;
@@ -685,6 +700,7 @@ export class FlightRecorder {
   async runTrace<T>(
     context: Partial<FlightTraceContext>,
     operation: () => Promise<T>,
+    options: FlightTraceRunOptions = {},
   ): Promise<T> {
     const inherited = this.currentTrace();
     if (!inherited && (this.closed || this.closing || this.clearing)) {
@@ -742,7 +758,12 @@ export class FlightRecorder {
               kind: "trace.started",
               source: "runtime",
               status: "started",
-              metadata: { nested: Boolean(inherited) },
+              metadata: {
+                nested: Boolean(inherited),
+                ...(options.retentionProtected === true
+                  ? { retentionProtected: true }
+                  : {}),
+              },
             });
             return this.withParent(root?.id ?? null, async () => {
               try {
@@ -961,6 +982,9 @@ export class FlightRecorder {
         await this.enforceRetention(
           input.kind === "trace.completed" || input.kind === "trace.failed",
         );
+        if (this.pendingOwnershipReleases > 0) {
+          await this.reconcileOwnershipReleases();
+        }
       } catch (error) {
         // The event is already durable. Retention health must be surfaced, but
         // callers still need its ID for child causality and its true sequence.
@@ -1200,6 +1224,7 @@ export class FlightRecorder {
   }
 
   async health(): Promise<FlightRecorderHealth> {
+    await this.reconcileOwnershipReleases();
     let eventCount = 0;
     if (this.initialized && this.ledger) {
       try {
@@ -1214,6 +1239,7 @@ export class FlightRecorder {
       eventCount,
       errorCount: this.errorCount,
       lastError: this.lastError,
+      pendingOwnershipReleases: this.pendingOwnershipReleases,
       databasePath: this.options.inMemory
         ? ":memory:"
         : (this.options.databasePath ?? defaultDatabasePath()),
@@ -1240,10 +1266,72 @@ export class FlightRecorder {
   }
 
   private async releaseStartOwnership(eventId: string): Promise<void> {
+    const release = this.ledger?.releaseEventOwnership;
+    if (!release || !this.ledger) return;
+    let finalError: unknown;
+    for (let attempt = 0; attempt < OWNERSHIP_RELEASE_ATTEMPTS; attempt += 1) {
+      try {
+        await release.call(this.ledger, eventId);
+        this.pendingOwnershipReleases =
+          await this.ledger.pendingOwnershipReleaseCount?.() ?? 0;
+        return;
+      } catch (error) {
+        finalError = error;
+        this.noteError(error);
+        if (attempt + 1 < OWNERSHIP_RELEASE_ATTEMPTS) {
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              OWNERSHIP_RELEASE_BASE_DELAY_MS * 2 ** attempt,
+            ),
+          );
+        }
+      }
+    }
     try {
-      await this.ledger?.releaseEventOwnership?.(eventId);
-    } catch (error) {
-      this.noteError(error);
+      this.pendingOwnershipReleases =
+        await this.ledger.queueEventOwnershipRelease?.(
+          eventId,
+          MAX_PENDING_OWNERSHIP_RELEASES,
+        ) ?? this.pendingOwnershipReleases;
+    } catch (queueError) {
+      this.noteError(queueError);
+      if (finalError) this.lastError = errorText(finalError);
+    }
+  }
+
+  private async reconcileOwnershipReleases(): Promise<void> {
+    if (
+      !this.ledger?.reconcileEventOwnershipReleases ||
+      this.ownershipReconciliation
+    ) {
+      if (this.ownershipReconciliation) {
+        await this.ownershipReconciliation;
+      }
+      return;
+    }
+    const operation = (async () => {
+      try {
+        const result =
+          await this.ledger!.reconcileEventOwnershipReleases!(
+            OWNERSHIP_RECONCILE_BATCH,
+          );
+        this.pendingOwnershipReleases = result.pending;
+      } catch (error) {
+        this.noteError(error);
+        this.pendingOwnershipReleases =
+          await this.ledger?.pendingOwnershipReleaseCount?.()
+            .catch(() => this.pendingOwnershipReleases) ??
+          this.pendingOwnershipReleases;
+      }
+    })();
+    this.ownershipReconciliation = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.ownershipReconciliation === operation) {
+        this.ownershipReconciliation = null;
+      }
     }
   }
 

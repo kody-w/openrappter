@@ -119,6 +119,7 @@ export interface FlightRecorderHealth {
   errorCount: number;
   lastError?: string;
   databasePath?: string;
+  pendingOwnershipReleases: number;
 }
 
 export interface FlightTraceContext {
@@ -156,4 +157,12 @@ export interface FlightLedger {
   pruneRuntime?(keep: number): Promise<number>;
   bindIdentityKey?(identityKey: string): Promise<void>;
   releaseEventOwnership?(eventId: string): Promise<void>;
+  queueEventOwnershipRelease?(
+    eventId: string,
+    maxPending: number,
+  ): Promise<number>;
+  reconcileEventOwnershipReleases?(
+    limit: number,
+  ): Promise<{ released: number; pending: number }>;
+  pendingOwnershipReleaseCount?(): Promise<number>;
 }

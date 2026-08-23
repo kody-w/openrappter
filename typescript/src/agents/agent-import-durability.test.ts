@@ -72,7 +72,10 @@ afterEach(async () => {
 
 describe("privileged import Flight durability", () => {
   it("does not create a stage, target, or registry entry without a durable start", async () => {
-    vi.spyOn(recorder, "record").mockResolvedValueOnce(null);
+    const realRecord = recorder.record.bind(recorder);
+    vi.spyOn(recorder, "record").mockImplementation(async (input) =>
+      input.kind === "agent.import.started" ? null : realRecord(input),
+    );
     const result = await importAgentFile(
       "no_start_agent.py",
       pythonAgent("NoStartAgent", "NoStart", "must never be inspected"),

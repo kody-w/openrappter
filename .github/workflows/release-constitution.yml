@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: kody-w/openrappter-release-train
-          ref: 1985eb8cd4d3b80155bcc0c6bc0a0622de7f47ec
+          ref: 98ace213a7fcf858d917e5474dd79cb271b49cf6
           path: authority
       - if: inputs.artifact_name != ''
         uses: actions/download-artifact@v4
@@ -32,11 +32,10 @@ jobs:
         run: |
           set -euo pipefail
           artifact_url=null; install_url=null; artifact_sha=null; provenance=null
-          local_sha=""
           if [ -n "${{ inputs.artifact_name }}" ]; then
             tarball="release-dist/openrappter-${RELEASE_VERSION}.tgz"
             test -f "$tarball"
-            local_sha="$(sha256sum "$tarball" | cut -d' ' -f1)"
+            test -s "$tarball"
           fi
           python - "$artifact_url" "$install_url" "$artifact_sha" "$provenance" <<'PY'
           import json,os,sys
@@ -52,5 +51,5 @@ jobs:
           },open("release.json","w"))
           PY
           args=(--policy authority/contracts/release-constitution-v1.json --release release.json --remote --discover-artifact)
-          if [ -n "$local_sha" ]; then args+=(--local-artifact-sha "$local_sha"); fi
+          if [ -n "${{ inputs.artifact_name }}" ]; then args+=(--local-artifacts-dir release-dist); fi
           python authority/scripts/release_gate.py "${args[@]}"

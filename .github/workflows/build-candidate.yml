@@ -1,0 +1,91 @@
+name: Build immutable non-stable candidate
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact canonical main commit (blank = current main)
+        required: false
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: candidate-${{ inputs.source_commit || github.sha }}
+  cancel-in-progress: false
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          set -euo pipefail
+          head="${INPUT_COMMIT:-$(gh api repos/kody-w/openrappter/commits/main --jq .sha)}"
+          printf '%s' "$head" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"
+          gh api "repos/kody-w/openrappter/commits/$head/check-runs?per_page=100" \
+            -H "Accept: application/vnd.github+json" > checks.json
+          python - "$head" <<'PY'
+          import json,sys
+          head=sys.argv[1]; rows=json.load(open("checks.json"))["check_runs"]
+          required=["TypeScript (Node 22)","Python (3.10)","Python (3.12)","Dashboard UI","Runtime parity (golden vectors)","conformance","macos-14","ubuntu-latest","windows-latest"]
+          for name in required:
+            candidates=[r for r in rows if r["name"]==name and r["head_sha"]==head]
+            assert candidates, f"missing exact-head check {name}"
+            latest=max(candidates,key=lambda r:r["id"])
+            assert latest["status"]=="completed" and latest["conclusion"]=="success", f"non-green {name}"
+          PY
+          echo "SOURCE_COMMIT=$head" >> "$GITHUB_ENV"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.head }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: typescript/package-lock.json }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build exact candidate bytes once
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          (cd typescript && npm ci && npm run build && npm pack --pack-destination ../candidate)
+          python -m pip install --disable-pip-version-check build
+          (cd python && python -m build --outdir ../candidate)
+          cp install.sh install.ps1 candidate/
+          version="$(node -p 'require("./typescript/package.json").version')"
+          node --input-type=module - "$SOURCE_COMMIT" "$version" <<'NODE'
+          import fs from 'node:fs';
+          import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
+          const value=buildProvenance('candidate',process.argv[2],process.argv[3]);
+          verifyProvenance('candidate',value);
+          fs.writeFileSync('candidate/provenance.json',JSON.stringify(value,null,2)+'\n');
+          NODE
+          (cd candidate && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort) > SHA256SUMS)
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
+          bundle_sha="$(sha256sum candidate.tar.gz | cut -d' ' -f1)"
+          echo "BUNDLE_SHA=$bundle_sha" >> "$GITHUB_ENV"
+      - name: Commit immutable public candidate bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin candidates:candidates 2>/dev/null || true
+          if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf .; fi
+          path="candidates/$SOURCE_COMMIT"
+          mkdir -p "$path"
+          target="$path/$BUNDLE_SHA.tar.gz"
+          if [ -f "$target" ]; then
+            echo "$BUNDLE_SHA  $target" | sha256sum -c -
+            exit 0
+          fi
+          cp candidate.tar.gz "$target"
+          cp candidate/provenance.json "$path/provenance.json"
+          cp candidate/SHA256SUMS "$path/SHA256SUMS"
+          git add "$path"
+          git commit -m "candidate: $SOURCE_COMMIT $BUNDLE_SHA"
+          git push origin candidates
+          echo "::notice::candidate channel only; never stable/default"

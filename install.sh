@@ -971,7 +971,7 @@ try {
   if (!/^[0-9a-f]{64}$/.test(m.promotion_id)) throw new Error('missing authority promotion id');
   for (const u of [m.artifact.url, m.artifact.install_url].filter(Boolean)) {
     const parsed = new URL(u);
-    if (parsed.protocol !== 'https:' || !['github.com','registry.npmjs.org'].includes(parsed.hostname)) throw new Error('unauthorized URL');
+    if (parsed.protocol !== 'https:' || !['github.com','registry.npmjs.org','raw.githubusercontent.com'].includes(parsed.hostname)) throw new Error('unauthorized URL');
   }
   if (!['published','unpublished','disabled'].includes(m.status)) throw new Error('bad status');
   if (new Date(m.promoted_at) > new Date(Date.now() + 300000)) throw new Error('future manifest');
@@ -981,9 +981,10 @@ try {
   if (m.status === 'published') {
     const npm = m.artifact.provenance === 'npm-registry-download-sha256' && m.artifact.url === npmUrl && m.artifact.install_url === npmUrl;
     const release = m.artifact.provenance === 'github-release-download-sha256' && releasePrefix && m.artifact.url.startsWith(releasePrefix) && m.artifact.install_url === m.artifact.url;
-    if (!npm && !release) throw new Error('artifact is not bound to canonical package/version');
+    const candidate = m.artifact.provenance === 'github-candidate-bundle-sha256' && m.artifact.install_url === m.artifact.url && new RegExp(`^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${m.source.commit}/${m.artifact.sha256}\\.tar\\.gz$`).test(m.artifact.url);
+    if (!npm && !release && !candidate) throw new Error('artifact is not bound to canonical package/version');
   }
-  const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id];
+  const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id, m.artifact.provenance];
   process.stdout.write(fields.map((v) => Buffer.from(String(v)).toString('base64')).join('|'));
 } catch (error) {
   console.error(`ring manifest rejected: ${error.message}`);
@@ -1026,13 +1027,14 @@ NODE
     download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$manifest" ||
         { ui_error "Immutable authority target manifest unreachable"; return 1; }
     encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
-    IFS='|' read -r _rv _ra _rs _rc _rst _rr _rpid <<< "$encoded"
+    IFS='|' read -r _rv _ra _rs _rc _rst _rr _rpid _rprov <<< "$encoded"
     RESOLVED_RING_VERSION="$(printf '%s' "$_rv" | base64 --decode)"
     RESOLVED_RING_ARTIFACT="$(printf '%s' "$_ra" | base64 --decode)"
     RESOLVED_RING_SHA256="$(printf '%s' "$_rs" | base64 --decode)"
     RESOLVED_RING_COMMIT="$(printf '%s' "$_rc" | base64 --decode)"
     RESOLVED_RING_STATUS="$(printf '%s' "$_rst" | base64 --decode)"
     RESOLVED_RING_REASON="$(printf '%s' "$_rr" | base64 --decode)"
+    RESOLVED_RING_PROVENANCE="$(printf '%s' "$_rprov" | base64 --decode)"
     local manifest_promotion_id
     manifest_promotion_id="$(printf '%s' "$_rpid" | base64 --decode)"
     [[ "$manifest_promotion_id" == "$promotion_id" ]] ||
@@ -1876,7 +1878,23 @@ install_via_npm() {
         ui_error "Artifact checksum mismatch (expected ${RESOLVED_RING_SHA256}, got ${actual})"
         exit 1
     fi
-    pkg_spec="$artifact"
+    if [[ "$RESOLVED_RING_PROVENANCE" == "github-candidate-bundle-sha256" ]]; then
+        local candidate_dir
+        candidate_dir="${INSTALL_DIR}/.candidate-${RESOLVED_RING_SHA256}"
+        rm -rf "$candidate_dir"
+        mkdir -p "$candidate_dir"
+        tar -xzf "$artifact" -C "$candidate_dir"
+        (cd "$candidate_dir" && sha256sum -c SHA256SUMS)
+        local candidate_packages=()
+        while IFS= read -r package; do candidate_packages+=("$package"); done < <(
+            find "$candidate_dir" -maxdepth 1 -type f -name 'openrappter-*.tgz' | sort
+        )
+        [[ "${#candidate_packages[@]}" -eq 1 ]] ||
+            { ui_error "Candidate bundle must contain exactly one npm tarball"; exit 1; }
+        pkg_spec="${candidate_packages[0]}"
+    else
+        pkg_spec="$artifact"
+    fi
 
     # Fix npm prefix if needed (Linux EACCES)
     if [[ "$OPT_SET_NPM_PREFIX" == "true" ]]; then

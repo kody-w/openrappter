@@ -12,6 +12,7 @@ const PRIVILEGED = [
   /\bnpm\s+dist-tag\b/,
   /\bgit\s+push\b.*\btag/,
   /installer[-_ ]?(?:channel|manifest).*(?:write|publish|update)/i,
+  /actions\/deploy-pages/,
 ];
 
 export function auditWorkflows(workflowDir) {

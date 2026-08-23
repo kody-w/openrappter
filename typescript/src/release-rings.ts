@@ -34,7 +34,7 @@ export interface RingManifest {
     url: string;
     install_url: string | null;
     sha256: string;
-    provenance: 'github-commit-archive-sha256' | 'npm-registry-download-sha256' | 'github-release-download-sha256';
+    provenance: 'github-commit-archive-sha256' | 'npm-registry-download-sha256' | 'github-release-download-sha256' | 'github-candidate-bundle-sha256';
   };
   promoted_at: string;
   predecessor: Exclude<RingName, 'stable'> | null;
@@ -47,7 +47,7 @@ export interface RingManifest {
 const TOP_KEYS = ['artifact', 'predecessor', 'promoted_at', 'promotion_id', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
 const SOURCE_KEYS = ['commit', 'repository', 'tag'];
 const ARTIFACT_KEYS = ['install_url', 'provenance', 'sha256', 'url'];
-const ALLOWED_HOSTS = new Set(['github.com', 'registry.npmjs.org']);
+const ALLOWED_HOSTS = new Set(['github.com', 'registry.npmjs.org', 'raw.githubusercontent.com']);
 
 function isClosed(value: unknown, keys: string[]): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -175,7 +175,12 @@ export function validateRingManifest(
       && releasePrefix !== ''
       && String(value.artifact.url).startsWith(releasePrefix)
       && value.artifact.install_url === value.artifact.url;
-    if (!npm && !release) throw new Error('published artifact is not bound to canonical package/version');
+    const candidate = value.artifact.provenance === 'github-candidate-bundle-sha256'
+      && value.artifact.install_url === value.artifact.url
+      && new RegExp(
+        `^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${value.source.commit}/${value.artifact.sha256}\\.tar\\.gz$`,
+      ).test(String(value.artifact.url));
+    if (!npm && !release && !candidate) throw new Error('published artifact is not bound to canonical package/version');
   } else if (
     value.artifact.url !== `https://github.com/kody-w/openrappter/archive/${value.source.commit}.tar.gz`
     || value.artifact.install_url !== null

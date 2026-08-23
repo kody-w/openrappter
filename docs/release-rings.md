@@ -54,3 +54,11 @@ Latest is resolved authority-first from that repository's monotonic
 `heads/<ring>.json`, then an immutable receipt, then the exact target commit.
 Target-repository `main` manifests and pointers are informational only and
 cannot override or replay the authority head.
+
+Before nightly, `build-candidate.yml` builds npm, wheel, sdist, and public
+installer bytes once from an exact green `main` commit. It stores the
+deterministic bundle on the public `candidates` branch and identifies it by the
+branch commit plus bundle SHA-256. This is the non-stable candidate channel,
+never a default registry/release. Every ring promotes that same bundle digest;
+the beta selector extracts and verifies the inner npm tarball only after its
+existing non-stable/downgrade warnings.

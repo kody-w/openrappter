@@ -385,7 +385,7 @@ function Resolve-RingManifest {
     foreach ($value in @($m.artifact.url, $m.artifact.install_url)) {
         if (-not $value) { continue }
         $parsed = [Uri]$value
-        if ($parsed.Scheme -ne "https" -or $parsed.Host -notin @("github.com", "registry.npmjs.org")) { throw "Unauthorized artifact URL" }
+        if ($parsed.Scheme -ne "https" -or $parsed.Host -notin @("github.com", "registry.npmjs.org", "raw.githubusercontent.com")) { throw "Unauthorized artifact URL" }
     }
     if ([DateTimeOffset]$m.promoted_at -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw "Future ring manifest" }
     if ($m.status -ne "published") { throw "$SelectedRing is $($m.status): $($m.reason)" }
@@ -394,7 +394,9 @@ function Resolve-RingManifest {
     $releasePrefix = if ($m.source.tag) { "https://github.com/kody-w/openrappter/releases/download/$($m.source.tag)/" } else { "" }
     $npmBound = $m.artifact.provenance -eq "npm-registry-download-sha256" -and $m.artifact.url -eq $npmUrl -and $m.artifact.install_url -eq $npmUrl
     $releaseBound = $m.artifact.provenance -eq "github-release-download-sha256" -and $releasePrefix -and $m.artifact.url.StartsWith($releasePrefix) -and $m.artifact.install_url -eq $m.artifact.url
-    if (-not $npmBound -and -not $releaseBound) { throw "Artifact is not bound to canonical package/version" }
+    $candidatePattern = "^https://raw\.githubusercontent\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/$($m.source.commit)/$($m.artifact.sha256)\.tar\.gz$"
+    $candidateBound = $m.artifact.provenance -eq "github-candidate-bundle-sha256" -and $m.artifact.url -match $candidatePattern -and $m.artifact.install_url -eq $m.artifact.url
+    if (-not $npmBound -and -not $releaseBound -and -not $candidateBound) { throw "Artifact is not bound to canonical package/version" }
 
     if ((Get-CanonicalJsonHash $receipt) -ne $head.receipt_sha256 -or
         (Get-CanonicalJsonHash $m) -ne $head.target_manifest_sha256 -or
@@ -500,6 +502,25 @@ function Install-ViaNpm {
     if ($actual -ne $manifest.artifact.sha256) {
         Remove-Item $artifact -Force -ErrorAction SilentlyContinue
         throw "Artifact checksum mismatch (expected $($manifest.artifact.sha256), got $actual)"
+    }
+
+    if ($manifest.artifact.provenance -eq "github-candidate-bundle-sha256") {
+        $candidateDir = Join-Path $HOME_DIR ".candidate-$($manifest.artifact.sha256)"
+        Remove-Item $candidateDir -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $candidateDir -Force | Out-Null
+        & tar -xzf $artifact -C $candidateDir
+        if ($LASTEXITCODE -ne 0) { throw "Candidate bundle extraction failed" }
+        $checks = Get-Content (Join-Path $candidateDir "SHA256SUMS")
+        foreach ($line in $checks) {
+            if ($line -notmatch '^([0-9a-f]{64})\s+\*?(.+)$') { throw "Malformed candidate checksum line" }
+            $file = Join-Path $candidateDir $Matches[2]
+            if ((Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant() -ne $Matches[1]) {
+                throw "Candidate inner checksum mismatch: $($Matches[2])"
+            }
+        }
+        $packages = @(Get-ChildItem $candidateDir -Filter "openrappter-*.tgz" -File)
+        if ($packages.Count -ne 1) { throw "Candidate bundle must contain exactly one npm tarball" }
+        $artifact = $packages[0].FullName
     }
 
     Write-Info "Running: npm install -g verified artifact"

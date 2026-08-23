@@ -150,7 +150,8 @@ describe('ring selection', () => {
           .map(name => fs.readFileSync(path.join(workflowDir, name), 'utf8'))
           .join('\n');
         expect(workflows).not.toMatch(/RING_AUTHORITY_TOKEN|RING_ENABLED|repository_dispatch/);
-        expect(workflows).toMatch(/apply-request\.yml@[0-9a-f]{40}/);
+        expect(workflows).toMatch(/gh pr create/);
+        expect(workflows).not.toMatch(/push origin (?:HEAD:)?main/);
       });
     });
 

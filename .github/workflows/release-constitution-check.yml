@@ -14,4 +14,6 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           node --test tools/release-constitution-static.test.mjs
+          node --test scripts/candidate-bundle.test.mjs
+          node --test scripts/verify-pages-installer.test.mjs
           node tools/release-constitution-static.mjs

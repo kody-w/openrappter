@@ -13,3 +13,13 @@ test('detects a new direct npm publish bypass', () => {
   assert.match(result.violations.join('\n'), /bypasses release-constitution/);
   fs.rmSync(root, { recursive: true, force: true });
 });
+test('stable receiver proposes a checked PR and never writes protected main', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/apply-promotion.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(workflow, /gh pr create/);
+  assert.match(workflow, /gh pr merge.*--auto --merge/);
+  assert.doesNotMatch(workflow, /contents\/\.ring\/manifest\.json.*--method PUT/);
+  assert.doesNotMatch(workflow, /push origin (?:HEAD:)?main/);
+});

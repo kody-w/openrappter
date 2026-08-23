@@ -1,32 +1,69 @@
-name: Apply stable promotion request
+name: Propose stable promotion request
 on:
   workflow_dispatch:
     inputs:
-      request_commit: { required: false, type: string }
-      request_path: { required: false, type: string }
+      request_sequence: { required: false, type: number, default: 0 }
   schedule: [{ cron: '37 * * * *' }]
-permissions: { contents: read }
+permissions:
+  contents: read
 concurrency: { group: apply-stable, cancel-in-progress: false }
 jobs:
-  discover:
+  propose:
+    permissions:
+      contents: write
+      pull-requests: write
     runs-on: ubuntu-latest
-    outputs: { commit: '${{ steps.find.outputs.commit }}', path: '${{ steps.find.outputs.path }}' }
     steps:
-      - id: find
-        env: { GH_TOKEN: '${{ github.token }}', INPUT_COMMIT: '${{ inputs.request_commit }}', INPUT_PATH: '${{ inputs.request_path }}' }
+      - uses: actions/checkout@v4
+        with: { ref: main, path: target, fetch-depth: 0 }
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: main
+          path: authority
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SEQUENCE: ${{ inputs.request_sequence }}
         run: |
           set -euo pipefail
-          if [ -n "${INPUT_COMMIT:-}" ] || [ -n "${INPUT_PATH:-}" ]; then
-            printf '%s' "$INPUT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; printf '%s' "$INPUT_PATH" | grep -Eq '^requests/stable/[0-9a-f]{64}\.json$'
-            commit="$INPUT_COMMIT"; path="$INPUT_PATH"
-          else
-            path="$(gh api repos/kody-w/openrappter-release-train/contents/requests/stable?ref=main --jq '.[].path' 2>/dev/null | sort | tail -1 || true)"; [ -n "$path" ] || exit 0
-            commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$path&per_page=1" --jq '.[0].sha')"
+          cursor=0
+          if [ -f target/.ring/stable-applied-request.json ]; then
+            cursor="$(python -c 'import json; print(json.load(open("target/.ring/stable-applied-request.json"))["request_sequence"])')"
           fi
-          echo "commit=$commit" >> "$GITHUB_OUTPUT"; echo "path=$path" >> "$GITHUB_OUTPUT"
-  apply:
-    needs: discover
-    if: needs.discover.outputs.commit != ''
-    permissions: { contents: write }
-    uses: kody-w/openrappter-release-train/.github/workflows/apply-request.yml@4421bd0f63a4a632fc8745e01d1855cce2969efe
-    with: { request_commit: '${{ needs.discover.outputs.commit }}', request_path: '${{ needs.discover.outputs.path }}', target_ring: stable, target_repository: kody-w/openrappter }
+          args=(--index authority/request-index/stable.json --cursor "$cursor")
+          if [ "$REQUESTED_SEQUENCE" -gt 0 ]; then args+=(--sequence "$REQUESTED_SEQUENCE"); fi
+          selected="$(PYTHONPATH=authority/scripts python authority/scripts/request_queue.py select "${args[@]}")"
+          request_path="$(printf '%s' "$selected" | python -c 'import json,sys; v=json.load(sys.stdin); print(v["path"] if v else "")')"
+          [ -n "$request_path" ] || { echo "no unapplied stable request"; exit 0; }
+          cp "authority/$request_path" request.json
+          manifest_head="$(git -C target log -1 --format=%H -- .ring/manifest.json)"
+          PYTHONPATH=authority/scripts python authority/scripts/target_receiver.py prepare \
+            --payload request.json --current target/.ring/manifest.json \
+            --output proposed.json --target-ring stable \
+            --target-repository kody-w/openrappter --current-head "$manifest_head"
+          id="$(python -c 'import json; print(json.load(open("request.json"))["promotion_id"])')"
+          sequence="$(python -c 'import json; print(json.load(open("request.json"))["sequence"])')"
+          request_sha="$(python -c 'import json,hashlib; v=json.load(open("request.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
+          manifest_sha="$(python -c 'import json; print(json.load(open("request.json"))["target_manifest_sha256"])')"
+          branch="ring/stable-${id:0:16}"
+          git -C target switch -C "$branch"
+          cp proposed.json target/.ring/manifest.json
+          python - "$sequence" "$id" "$request_sha" "$manifest_sha" "$request_path" <<'PY'
+          import json,sys
+          sequence,id,request_sha,manifest_sha,path=sys.argv[1:]
+          json.dump({"schema":"openrappter-stable-applied-request/v1","request_sequence":int(sequence),"request_id":id,"request_sha256":request_sha,"request_path":path,"target_manifest_sha256":manifest_sha},open("target/.ring/stable-applied-request.json","w"),indent=2,sort_keys=True)
+          PY
+          git -C target config user.name github-actions
+          git -C target config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C target add .ring/manifest.json .ring/stable-applied-request.json
+          if git -C target diff --cached --quiet; then exit 0; fi
+          git -C target commit -m "ring: propose stable request $sequence"
+          git -C target push --force-with-lease origin "$branch"
+          pr="$(gh pr list --repo kody-w/openrappter --head "$branch" --json number --jq '.[0].number // empty')"
+          if [ -z "$pr" ]; then
+            gh pr create --repo kody-w/openrappter --base main --head "$branch" \
+              --title "Promote stable candidate sequence $sequence" \
+              --body "Exact validated request: \`$request_path\`. Requires Release Constitution and owner approval."
+            pr="$(gh pr list --repo kody-w/openrappter --head "$branch" --json number --jq '.[0].number')"
+          fi
+          gh pr merge "$pr" --repo kody-w/openrappter --auto --merge || true

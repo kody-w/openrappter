@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -148,6 +148,40 @@ openrappter show-and-tell test
 
 See [Show-and-Tell](./docs/show-and-tell.md) for the lifecycle, privacy boundary,
 cross-runtime contract, and artifact formats.
+
+### Rapter Clever Girl: observe recurring friction, then stop
+
+Rapter Clever Girl Observe Mode reads only the coding-assistant history exports
+you explicitly select. It supports Claude JSONL, Codex JSONL, Copilot export
+JSONL, OpenRappter Flight JSON, and normalized JSONL; accepts explicit
+repository-activity exports, `rapp-monorepo/1.0` manifests, capability
+catalogs, and skill roots; and emits at most five evidence-backed inert
+proposals with estate-wide collision checks and conservative active-friction
+ranges.
+
+```bash
+node scripts/rapter-clever-girl.mjs observe \
+  --input <explicit path> \
+  --activity <explicit repository-activity export> \
+  --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
+  --capability-catalog <explicit catalog.json> \
+  --skills-root .claude/skills \
+  --pretty
+
+# Prove the observer and its tests still enforce the safety contract
+node scripts/rapter-clever-girl-gate.mjs
+```
+
+It is local-only and has no watcher, network call, subprocess, model call,
+raw-transcript/repository output, productivity score, or apply path. Every
+selected file and analysis stage is bounded; duplicates and degraded evidence
+are visible. Transcript and repository content is untrusted data, never
+instructions. Observe Mode does not create, update, install, enable, or
+schedule a skill or automation; promotion is a separate explicit workflow.
+
+See [Rapter Clever Girl](./docs/rapter-clever-girl.md) for adapters, the
+`rapter-clever-girl.observe.v2` output contract, evidence/provenance,
+failure semantics, thresholds, limitations, and the promotion boundary.
 
 ### Electron Desktop: Skill Recorder ergonomics, OpenRappter core
 

@@ -1,0 +1,217 @@
+{
+  "candidates": [
+    {
+      "activeDays": 3,
+      "candidateId": "candidate-d107da16f9b929a5",
+      "capabilityMatches": [],
+      "catalogCoverage": "complete",
+      "classification": "root-cause-fix",
+      "confidence": "high",
+      "evidence": [
+        {
+          "day": "2026-06-11",
+          "evidenceId": "evidence-e4cdb1bb936bf51d7c80",
+          "recordOrdinals": [
+            1
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-004",
+          "sourceId": "source-a4662561a39c"
+        },
+        {
+          "day": "2026-06-13",
+          "evidenceId": "evidence-1aa2282c82d6dabe598e",
+          "recordOrdinals": [
+            2
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-007",
+          "sourceId": "source-a4662561a39c"
+        },
+        {
+          "day": "2026-06-16",
+          "evidenceId": "evidence-9c5e81cbb5642c5cf9ca",
+          "recordOrdinals": [
+            3
+          ],
+          "ruleId": "detector.repair-loop.v1",
+          "sessionAlias": "session-011",
+          "sourceId": "source-a4662561a39c"
+        }
+      ],
+      "existingCapability": null,
+      "falsePositiveRisks": [
+        "Similar failure wording can describe different root causes; inspect before changing a workflow.",
+        "Repeated setup may be environment-specific rather than suitable for automation."
+      ],
+      "label": "Repeated setup or recovery workflow",
+      "observedActiveFriction": {
+        "confidence": "unavailable",
+        "lowerSeconds": 0,
+        "method": "capped-active-intervals-v1",
+        "upperSeconds": 0
+      },
+      "occurrences": 3,
+      "patternType": "repair-loop",
+      "priorityBasisPoints": 4900,
+      "repositoryEvidence": {
+        "events": 0,
+        "failedChecks": 0,
+        "pullRequests": 0,
+        "repositories": 0,
+        "status": "unavailable"
+      },
+      "sessions": 3
+    },
+    {
+      "activeDays": 2,
+      "candidateId": "candidate-8370806596de86df",
+      "capabilityMatches": [
+        {
+          "capabilityId": "capability-62eaaaee06c36400",
+          "match": "reuse",
+          "name": "release-reviewer",
+          "reason": "Selected capability catalogs contain a strong deterministic match for this recurring pattern.",
+          "sourceTypes": [
+            "skill-root"
+          ]
+        },
+        {
+          "capabilityId": "capability-6c9f8a4c282b385c",
+          "match": "extend",
+          "name": "fable5-pass",
+          "reason": "Selected capability catalogs contain a related capability that may cover part of this pattern.",
+          "sourceTypes": [
+            "skill-root"
+          ]
+        },
+        {
+          "capabilityId": "capability-9961a7174deb9254",
+          "match": "possible-overlap",
+          "name": "ts-python-parity-check",
+          "reason": "Selected capability catalogs contain a lexical or topical overlap that requires inspection.",
+          "sourceTypes": [
+            "skill-root"
+          ]
+        }
+      ],
+      "catalogCoverage": "complete",
+      "classification": "reuse-existing",
+      "confidence": "high",
+      "evidence": [
+        {
+          "day": "2026-06-10",
+          "evidenceId": "evidence-5edf074da4ba4167bee6",
+          "recordOrdinals": [
+            4
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-009",
+          "sourceId": "source-a4662561a39c"
+        },
+        {
+          "day": "2026-06-15",
+          "evidenceId": "evidence-457c3ba9d1c4341dc574",
+          "recordOrdinals": [
+            6
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-001",
+          "sourceId": "source-a4662561a39c"
+        },
+        {
+          "day": "2026-06-15",
+          "evidenceId": "evidence-f2079837a44d3275ef68",
+          "recordOrdinals": [
+            5
+          ],
+          "ruleId": "detector.review-workflow.v1",
+          "sessionAlias": "session-003",
+          "sourceId": "source-a4662561a39c"
+        }
+      ],
+      "existingCapability": {
+        "match": "reuse",
+        "name": "release-reviewer",
+        "reason": "Selected capability catalogs contain a strong deterministic match for this recurring pattern."
+      },
+      "falsePositiveRisks": [
+        "Repeated review language may refer to distinct release gates with different policies."
+      ],
+      "label": "Repeated review or release workflow",
+      "observedActiveFriction": {
+        "confidence": "unavailable",
+        "lowerSeconds": 0,
+        "method": "capped-active-intervals-v1",
+        "upperSeconds": 0
+      },
+      "occurrences": 3,
+      "patternType": "review-workflow",
+      "priorityBasisPoints": 4700,
+      "repositoryEvidence": {
+        "events": 0,
+        "failedChecks": 0,
+        "pullRequests": 0,
+        "repositories": 0,
+        "status": "unavailable"
+      },
+      "sessions": 3
+    }
+  ],
+  "context": {
+    "capabilityCatalogs": [],
+    "catalogCoverage": "complete",
+    "estateManifest": null,
+    "repositoryActivitySources": []
+  },
+  "diagnostics": [],
+  "excluded": {
+    "belowEvidenceThreshold": 0,
+    "candidateCap": 0,
+    "controlMessages": 7,
+    "duplicateActivitySources": 0,
+    "duplicateCatalogs": 0,
+    "duplicateSources": 0,
+    "evidenceItems": 0,
+    "intentionalVerificationLoops": 0,
+    "workLimitEvents": 0
+  },
+  "mode": "observe",
+  "replay": {
+    "analysisFingerprint": "sha256:ccd84638b43ead4fa482d1dc5f1ac19cdba9fd640e7f0286bc1b0f9c5a32627c",
+    "analyzerVersion": "2"
+  },
+  "schemaVersion": "rapter-clever-girl.observe.v2",
+  "scope": {
+    "capabilityCatalogInputsCount": 0,
+    "estateManifestProvided": false,
+    "minimumActiveDays": 2,
+    "minimumSessions": 3,
+    "repositoryActivityInputsCount": 0,
+    "skillsRootsCount": 1,
+    "windowEnd": null,
+    "windowStart": null
+  },
+  "sources": [
+    {
+      "acceptedRecords": 13,
+      "skippedRecords": 0,
+      "sourceDigest": "sha256:9a160bdff901a1b220d1e8247674d45c8c1216620a22b25c89e8fc86dc9a47c8",
+      "sourceId": "source-a4662561a39c",
+      "sourceType": "copilot",
+      "status": "ok"
+    }
+  ],
+  "status": "ok",
+  "summary": {
+    "acceptedRecords": 13,
+    "activeDays": 9,
+    "candidateCount": 2,
+    "capabilitiesInspected": 7,
+    "highConfidenceCandidateCount": 2,
+    "repositoryActivityRecords": 0,
+    "selectedCandidateId": "candidate-d107da16f9b929a5",
+    "sessions": 11,
+    "skippedRecords": 0
+  }
+}

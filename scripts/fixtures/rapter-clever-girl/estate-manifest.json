@@ -1,0 +1,40 @@
+{
+  "schema": "rapp-monorepo/1.0",
+  "owner": "kody-w",
+  "captured_at": "2026-08-22T18:00:00Z",
+  "membership_pattern": "^(?:rapp|openrappter)",
+  "max_file_mb": 2,
+  "not_captured": [],
+  "repos": [
+    {
+      "repo": "rapp-first-run-doctor",
+      "commit": "1111111111111111111111111111111111111111",
+      "committed_at": "2026-08-20T12:00:00Z",
+      "captured_at": "2026-08-22T18:00:00Z",
+      "files": 12,
+      "bytes": 4096,
+      "skipped_large": [],
+      "withheld": []
+    },
+    {
+      "repo": "rapp-release-train",
+      "commit": "2222222222222222222222222222222222222222",
+      "committed_at": "2026-08-21T12:00:00Z",
+      "captured_at": "2026-08-22T18:00:00Z",
+      "files": 18,
+      "bytes": 8192,
+      "skipped_large": [],
+      "withheld": []
+    },
+    {
+      "repo": "rapp-workflow-observer",
+      "commit": "3333333333333333333333333333333333333333",
+      "committed_at": "2026-08-22T12:00:00Z",
+      "captured_at": "2026-08-22T18:00:00Z",
+      "files": 9,
+      "bytes": 2048,
+      "skipped_large": [],
+      "withheld": []
+    }
+  ]
+}

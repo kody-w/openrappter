@@ -21,7 +21,7 @@ describe("Windows package smoke cleanup", () => {
 });
 
 describe("Clever Girl package smoke contract", () => {
-  it("checks exact installed assets, help, and v2 behavior", () => {
+  it("checks exact installed assets, help, and v2/v3 behavior", () => {
     const source = readFileSync(
       new URL("../../../scripts/package-smoke.mjs", import.meta.url),
       "utf8",
@@ -31,7 +31,11 @@ describe("Clever Girl package smoke contract", () => {
       "bin/clever-girl.mjs",
       "dist/clever-girl/rapter-clever-girl.mjs",
       "dist/clever-girl/rapter-clever-girl-context.mjs",
+      "dist/clever-girl/rapter-clever-girl-reader.mjs",
       "dist/clever-girl/rapter-clever-girl-observe-v2.json",
+      "dist/clever-girl/rapter-clever-girl-observe-v3.json",
+      "dist/clever-girl/rapter-clever-girl-capability-catalog-v2.json",
+      "dist/clever-girl/rapter-clever-girl-repair-assignments-v1.json",
       "dist/clever-girl/SKILL.md",
       "dist/cli/clever-girl.js",
     ]) {
@@ -39,6 +43,8 @@ describe("Clever Girl package smoke contract", () => {
     }
     expect(source).toContain('"clever-girl", "observe", "--help"');
     expect(source).toContain("rapter-clever-girl.observe.v2");
+    expect(source).toContain("rapter-clever-girl.observe.v3");
     expect(source).toContain("installedClever.stdout !== sourceClever.stdout");
+    expect(source).toContain("installedV3.stdout !== sourceV3.stdout");
   });
 });

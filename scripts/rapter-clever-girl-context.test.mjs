@@ -9,7 +9,6 @@ import {
   truncateSync,
   writeFileSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, test } from 'node:test';
@@ -20,8 +19,10 @@ import { EVIDENCE_LIMITS } from './rapter-clever-girl-context.mjs';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE_PATH = path.join(SCRIPT_DIR, 'rapter-clever-girl.mjs');
 const FIXTURES = path.join(SCRIPT_DIR, 'fixtures', 'rapter-clever-girl');
+const TEST_WORK_ROOT = path.join(path.dirname(SCRIPT_DIR), '.test-work');
 const SKILLS_ROOT = path.join(FIXTURES, 'skills');
 const ESTATE_MANIFEST = path.join(FIXTURES, 'estate-manifest.json');
+const GENERIC_ESTATE_MANIFEST = path.join(FIXTURES, 'generic-estate-manifest.json');
 const CAPABILITY_CATALOG = path.join(FIXTURES, 'capability-catalog.json');
 const REPOSITORY_ACTIVITY = path.join(FIXTURES, 'repository-activity.jsonl');
 const FULL_INPUTS = [
@@ -42,7 +43,10 @@ afterEach(() => {
 });
 
 function temporaryDirectory(label) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), `clever-girl-context-${label}-`));
+  mkdirSync(TEST_WORK_ROOT, { recursive: true });
+  const directory = mkdtempSync(
+    path.join(TEST_WORK_ROOT, `clever-girl-context-${label}-`),
+  );
   TEMPORARY_DIRECTORIES.push(directory);
   return directory;
 }
@@ -53,6 +57,7 @@ function cliArgs({
   catalogs = [CAPABILITY_CATALOG],
   estate = ESTATE_MANIFEST,
   skillsRoot = SKILLS_ROOT,
+  reportVersion = '2',
   extra = [],
 } = {}) {
   const args = [ENGINE_PATH, 'observe'];
@@ -62,6 +67,7 @@ function cliArgs({
   for (const catalog of catalogs) args.push('--capability-catalog', catalog);
   if (estate) args.push('--estate-manifest', estate);
   if (skillsRoot) args.push('--skills-root', skillsRoot);
+  args.push('--report-version', reportVersion);
   args.push(...extra);
   return args;
 }
@@ -138,6 +144,21 @@ test('joins recurring session demand with bounded estate supply and repository e
     sourceTypes.includes('estate-repository'));
   assert.ok(estateCollision);
   assert.match(estateCollision.name, /^estate-capability-[a-f0-9]{12}$/);
+});
+
+test('accepts the generic estate adapter while retaining opaque capability names', () => {
+  const { result, report } = reportFor({ estate: GENERIC_ESTATE_MANIFEST });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(report.context.estateManifest.schema, 'clevergirl-estate/1.0');
+  assert.equal(report.context.estateManifest.sourceType, 'generic-estate-manifest');
+  assert.equal(report.context.estateManifest.repositoryCount, 3);
+  assert.equal(report.context.estateManifest.status, 'ok');
+  const estateMatches = report.candidates.flatMap(({ capabilityMatches }) =>
+    capabilityMatches.filter(({ sourceTypes }) =>
+      sourceTypes.includes('estate-repository')));
+  assert.ok(estateMatches.length > 0);
+  assert.ok(estateMatches.every(({ name }) =>
+    /^estate-capability-[a-f0-9]{12}$/.test(name)));
 });
 
 test('repository and estate evidence cannot manufacture session demand', () => {

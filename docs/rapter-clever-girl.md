@@ -85,11 +85,14 @@ openrappter clever-girl observe
   [--min-sessions <integer>]
   [--min-days <integer>]
   [--output <explicit-path>]
+  [--facet-sidecar-output <explicit-path>]
+  [--report-version auto|2|3]
   [--pretty]
 ```
 
 The published npm package includes the observer engine, bounded context
-matcher, `rapter-clever-girl.observe.v2` contract, and observer skill. The
+matcher, v2/v3 report contracts, capability-contract and sidecar schemas,
+backward-compatible reader, and observer skill. The
 installed launcher routes this command directly to that packaged engine,
 without initializing the general OpenRappter CLI. From a source checkout,
 `node scripts/rapter-clever-girl.mjs observe ...` invokes the same engine.
@@ -151,7 +154,9 @@ remain visible.
 
 ## API and output contract
 
-The authoritative JSON Schema is
+The authoritative current JSON Schema is
+[`contracts/rapter-clever-girl-observe-v3.json`](../contracts/rapter-clever-girl-observe-v3.json).
+The immutable v2 schema remains at
 [`contracts/rapter-clever-girl-observe-v2.json`](../contracts/rapter-clever-girl-observe-v2.json).
 
 The executable is also an ES module with these programmatic exports:
@@ -175,7 +180,7 @@ Every report contains:
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Constant `rapter-clever-girl.observe.v2` |
+| `schemaVersion` | `rapter-clever-girl.observe.v2` or `rapter-clever-girl.observe.v3` |
 | `mode` | Constant `observe` |
 | `status` | `ok`, `partial`, or `failed` |
 | `scope` | Time window, evidence thresholds, and explicit context-input counts |
@@ -204,6 +209,35 @@ Classifications distinguish:
 - `insufficient-evidence`
 
 None is an approval or executable plan.
+
+### V3 detector and capability contracts
+
+V3 replaces the global repair bucket with a deterministic closed repair facet
+× domain assignment. Every eligible source/session/day occurrence receives
+exactly one primary pair. Duplicate signals and source skew are explicit, and
+a single-source cluster cannot be promotion-eligible. Generic
+failure/build/review/repetition controls cannot become setup candidates.
+
+Manifest, estate, local-skill, and normalized-v1 metadata may establish only
+`possible-overlap`. Reuse or extension requires a
+`rapter-clever-girl.capabilities.v2` entry with a versioned behavioral
+contract covering inputs, outputs, permissions, failures, limitations, and
+declared tests. Capability names are opaque in v3 reports.
+
+Repair friction uses `disjoint-capped-active-interval-union-v1`: every
+contributing interval is allocated once, split overlap is zero, and union
+bounds cannot exceed the original range. `--facet-sidecar-output` persists the
+complete opaque assignment set at mode `0600`.
+
+### V2 migration
+
+`--report-version auto` is the default. It emits v3 when closed repair
+assignments or qualified behavioral-contract evidence exists, and otherwise
+emits v2. `--report-version 2` retains the original v2 analyzer and exact
+closed shape; v2 semantics are not upgraded in place. The packaged
+`dist/clever-girl/rapter-clever-girl-reader.mjs` accepts both versions without
+converting either report. Consumers should branch on `schemaVersion`, adopt
+the v3 detector/context fields, then stop requesting v2.
 
 ### Minimal shape
 

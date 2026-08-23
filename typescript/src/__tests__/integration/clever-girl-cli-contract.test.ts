@@ -22,6 +22,13 @@ const fixture = path.join(
   "rapter-clever-girl",
   "normalized.jsonl",
 );
+const capabilityCatalog = path.join(
+  repositoryRoot,
+  "scripts",
+  "fixtures",
+  "rapter-clever-girl",
+  "capability-contract-catalog.json",
+);
 const environment = {
   ...process.env,
   HOME: path.join(repositoryRoot, ".clever-girl-test-home-not-created"),
@@ -61,6 +68,8 @@ describe("Clever Girl installed CLI contract", () => {
       "--min-sessions <count>",
       "--min-days <count>",
       "--output <path>",
+      "--facet-sidecar-output <path>",
+      "--report-version <version>",
       "--pretty",
     ]) {
       expect(result.stdout).toContain(option);
@@ -74,6 +83,8 @@ describe("Clever Girl installed CLI contract", () => {
       fixture,
       "--source",
       "normalized",
+      "--report-version",
+      "2",
     ];
     const direct = run([engine, ...observeArgs]);
     const packagedInterface = run([binary, "clever-girl", ...observeArgs]);
@@ -85,6 +96,34 @@ describe("Clever Girl installed CLI contract", () => {
       schemaVersion: "rapter-clever-girl.observe.v2",
       mode: "observe",
       status: "ok",
+    });
+  });
+
+  it("emits byte-identical Observe Mode v3 JSON with behavioral contracts", () => {
+    const observeArgs = [
+      "observe",
+      "--input",
+      fixture,
+      "--source",
+      "normalized",
+      "--capability-catalog",
+      capabilityCatalog,
+      "--report-version",
+      "3",
+    ];
+    const direct = run([engine, ...observeArgs]);
+    const packagedInterface = run([binary, "clever-girl", ...observeArgs]);
+
+    expect(packagedInterface.status).toBe(direct.status);
+    expect(packagedInterface.stdout).toBe(direct.stdout);
+    expect(packagedInterface.stderr).toBe(direct.stderr);
+    expect(JSON.parse(packagedInterface.stdout)).toMatchObject({
+      schemaVersion: "rapter-clever-girl.observe.v3",
+      mode: "observe",
+      status: "ok",
+      detector: {
+        unassignedRepairOccurrences: 0,
+      },
     });
   });
 

@@ -1,0 +1,947 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openrappter.dev/contracts/rapter-clever-girl-observe-v3.json",
+  "title": "Rapter Clever Girl Observe Mode v3 Report",
+  "description": "Deterministic closed facet-by-domain workflow observations with contract-gated capability reuse.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mode",
+    "status",
+    "scope",
+    "sources",
+    "summary",
+    "candidates",
+    "excluded",
+    "context",
+    "detector",
+    "replay",
+    "diagnostics"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "rapter-clever-girl.observe.v3"
+    },
+    "mode": {
+      "const": "observe"
+    },
+    "status": {
+      "enum": ["ok", "partial", "failed"]
+    },
+    "scope": {
+      "$ref": "#/$defs/scope"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "rapter-clever-girl-observe-v2.json#/$defs/sessionSource"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
+    },
+    "excluded": {
+      "$ref": "#/$defs/excluded"
+    },
+    "context": {
+      "$ref": "#/$defs/context"
+    },
+    "detector": {
+      "$ref": "#/$defs/detector"
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["analyzerVersion", "analysisFingerprint"],
+      "properties": {
+        "analyzerVersion": {
+          "const": "3"
+        },
+        "analysisFingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "rapter-clever-girl-observe-v2.json#/$defs/diagnostic"
+      }
+    }
+  },
+  "$defs": {
+    "nonnegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "windowStart",
+        "windowEnd",
+        "minimumSessions",
+        "minimumActiveDays",
+        "skillsRootsCount",
+        "repositoryActivityInputsCount",
+        "capabilityCatalogInputsCount",
+        "estateManifestProvided"
+      ],
+      "properties": {
+        "windowStart": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "windowEnd": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "minimumSessions": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "minimumActiveDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "skillsRootsCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "repositoryActivityInputsCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "capabilityCatalogInputsCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "estateManifestProvided": {
+          "type": "boolean"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessions",
+        "activeDays",
+        "acceptedRecords",
+        "skippedRecords",
+        "candidateCount",
+        "highConfidenceCandidateCount",
+        "promotionEligibleCandidateCount",
+        "selectedCandidateId",
+        "repositoryActivityRecords",
+        "capabilitiesInspected"
+      ],
+      "properties": {
+        "sessions": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "activeDays": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "acceptedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "candidateCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "highConfidenceCandidateCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "promotionEligibleCandidateCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "selectedCandidateId": {
+          "type": ["string", "null"],
+          "pattern": "^candidate-[a-f0-9]{16}$"
+        },
+        "repositoryActivityRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "capabilitiesInspected": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "excluded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controlMessages",
+        "belowEvidenceThreshold",
+        "intentionalVerificationLoops",
+        "candidateCap",
+        "evidenceItems",
+        "workLimitEvents",
+        "duplicateSources",
+        "duplicateCatalogs",
+        "duplicateActivitySources"
+      ],
+      "properties": {
+        "controlMessages": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "belowEvidenceThreshold": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "intentionalVerificationLoops": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "candidateCap": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "evidenceItems": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "workLimitEvents": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "duplicateSources": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "duplicateCatalogs": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "duplicateActivitySources": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "estateManifest",
+        "capabilityCatalogs",
+        "repositoryActivitySources",
+        "catalogCoverage",
+        "behavioralCapabilityContracts"
+      ],
+      "properties": {
+        "estateManifest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/estateSourceV3"
+            }
+          ]
+        },
+        "capabilityCatalogs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/catalogSourceV3"
+          }
+        },
+        "repositoryActivitySources": {
+          "type": "array",
+          "items": {
+            "$ref": "rapter-clever-girl-observe-v2.json#/$defs/activitySource"
+          }
+        },
+        "catalogCoverage": {
+          "enum": ["none", "partial", "complete"]
+        },
+        "behavioralCapabilityContracts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "qualifiedCapabilities",
+            "unqualifiedCapabilities",
+            "requirement"
+          ],
+          "properties": {
+            "qualifiedCapabilities": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "unqualifiedCapabilities": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "requirement": {
+              "const": "reuse-and-extend-require-versioned-behavioral-contract-v1"
+            }
+          }
+        }
+      }
+    },
+    "estateSourceV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceId",
+        "sourceType",
+        "sourceDigest",
+        "status",
+        "schema",
+        "snapshotAt",
+        "acceptedRecords",
+        "skippedRecords",
+        "repositoryCount",
+        "withheldFiles",
+        "skippedLargeFiles"
+      ],
+      "properties": {
+        "sourceId": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/sourceBaseProperties/sourceId"
+        },
+        "sourceType": {
+          "enum": ["rapp-monorepo-manifest", "generic-estate-manifest"]
+        },
+        "sourceDigest": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/sourceBaseProperties/sourceDigest"
+        },
+        "status": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/status"
+        },
+        "schema": {
+          "type": ["string", "null"]
+        },
+        "snapshotAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "acceptedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "repositoryCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "withheldFiles": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedLargeFiles": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "catalogSourceV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceId",
+        "sourceType",
+        "sourceDigest",
+        "status",
+        "schema",
+        "acceptedRecords",
+        "skippedRecords"
+      ],
+      "properties": {
+        "sourceId": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/sourceBaseProperties/sourceId"
+        },
+        "sourceType": {
+          "enum": [
+            "capability-catalog",
+            "rapp-registry",
+            "rapp-store",
+            "rapp-skills",
+            "rar-match",
+            "normalized-capabilities",
+            "behavioral-capabilities"
+          ]
+        },
+        "sourceDigest": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/sourceBaseProperties/sourceDigest"
+        },
+        "status": {
+          "$ref": "rapter-clever-girl-observe-v2.json#/$defs/status"
+        },
+        "schema": {
+          "type": ["string", "null"]
+        },
+        "acceptedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "skippedRecords": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lowerSeconds", "upperSeconds"],
+      "properties": {
+        "lowerSeconds": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "upperSeconds": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "detector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facetTaxonomyVersion",
+        "domainTaxonomyVersion",
+        "eligibleRepairOccurrences",
+        "assignedRepairOccurrences",
+        "unassignedRepairOccurrences",
+        "rawRepairSignals",
+        "duplicateRepairSignals",
+        "facetDomainClusterCount",
+        "facetDomainDistribution",
+        "splitFriction"
+      ],
+      "properties": {
+        "facetTaxonomyVersion": {
+          "const": "closed-repair-facets.v1"
+        },
+        "domainTaxonomyVersion": {
+          "const": "closed-repair-domains.v1"
+        },
+        "eligibleRepairOccurrences": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "assignedRepairOccurrences": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "unassignedRepairOccurrences": {
+          "const": 0
+        },
+        "rawRepairSignals": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "duplicateRepairSignals": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "facetDomainClusterCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "facetDomainDistribution": {
+          "type": "array",
+          "maxItems": 90,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "facet",
+              "domain",
+              "occurrences",
+              "rawSignals",
+              "genericOccurrences"
+            ],
+            "properties": {
+              "facet": {
+                "$ref": "#/$defs/facet"
+              },
+              "domain": {
+                "$ref": "#/$defs/domain"
+              },
+              "occurrences": {
+                "$ref": "#/$defs/nonnegativeInteger"
+              },
+              "rawSignals": {
+                "$ref": "#/$defs/nonnegativeInteger"
+              },
+              "genericOccurrences": {
+                "$ref": "#/$defs/nonnegativeInteger"
+              }
+            }
+          }
+        },
+        "splitFriction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "measuredIntervals",
+            "original",
+            "union",
+            "overlapSeconds",
+            "withinOriginalBounds"
+          ],
+          "properties": {
+            "method": {
+              "const": "disjoint-capped-active-interval-union-v1"
+            },
+            "measuredIntervals": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "original": {
+              "$ref": "#/$defs/range"
+            },
+            "union": {
+              "$ref": "#/$defs/range"
+            },
+            "overlapSeconds": {
+              "const": 0
+            },
+            "withinOriginalBounds": {
+              "const": true
+            }
+          }
+        }
+      }
+    },
+    "facet": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "access-recovery",
+        "dependency-recovery",
+        "configuration-recovery",
+        "environment-bootstrap",
+        "deployment-recovery",
+        "runtime-recovery",
+        "filesystem-recovery",
+        "tool-integration-recovery",
+        "diagnostic-recovery"
+      ]
+    },
+    "domain": {
+      "type": ["string", "null"],
+      "enum": [
+        null,
+        "identity-access",
+        "dependencies",
+        "configuration",
+        "developer-environment",
+        "ci-build",
+        "deployment",
+        "runtime-service",
+        "filesystem",
+        "developer-tooling",
+        "general-workflow"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceId",
+        "sourceId",
+        "sessionAlias",
+        "day",
+        "recordOrdinals",
+        "ruleId"
+      ],
+      "properties": {
+        "evidenceId": {
+          "type": "string",
+          "pattern": "^evidence-[a-f0-9]{20}$"
+        },
+        "sourceId": {
+          "type": "string",
+          "pattern": "^source-[a-f0-9]{12}$"
+        },
+        "sessionAlias": {
+          "type": "string",
+          "pattern": "^session-[0-9]{3,}$"
+        },
+        "day": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "recordOrdinals": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "ruleId": {
+          "type": "string",
+          "pattern": "^detector\\.[a-z0-9.-]+\\.v1$"
+        }
+      }
+    },
+    "friction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lowerSeconds", "upperSeconds", "method", "confidence"],
+      "properties": {
+        "lowerSeconds": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "upperSeconds": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        },
+        "method": {
+          "enum": [
+            "capped-active-intervals-v1",
+            "disjoint-capped-active-interval-union-v1"
+          ]
+        },
+        "confidence": {
+          "enum": ["medium", "low", "unavailable"]
+        }
+      }
+    },
+    "capabilityMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilityId",
+        "name",
+        "match",
+        "reason",
+        "sourceTypes",
+        "contractQualified",
+        "contractVersion",
+        "contractTestCount"
+      ],
+      "properties": {
+        "capabilityId": {
+          "type": "string",
+          "pattern": "^capability-[a-f0-9]{16}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "match": {
+          "enum": ["reuse", "extend", "possible-overlap"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sourceTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "contractQualified": {
+          "type": "boolean"
+        },
+        "contractVersion": {
+          "type": ["string", "null"],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+        },
+        "contractTestCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "existingCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "match",
+        "reason",
+        "contractQualified",
+        "contractVersion",
+        "contractTestCount"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "match": {
+          "enum": ["reuse", "extend", "possible-overlap"]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "contractQualified": {
+          "type": "boolean"
+        },
+        "contractVersion": {
+          "type": ["string", "null"],
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+        },
+        "contractTestCount": {
+          "$ref": "#/$defs/nonnegativeInteger"
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateId",
+        "label",
+        "patternType",
+        "classification",
+        "confidence",
+        "occurrences",
+        "sessions",
+        "activeDays",
+        "evidence",
+        "observedActiveFriction",
+        "existingCapability",
+        "capabilityMatches",
+        "catalogCoverage",
+        "repositoryEvidence",
+        "falsePositiveRisks",
+        "priorityBasisPoints",
+        "facet",
+        "domain",
+        "deduplication",
+        "sourceSkew",
+        "controlProfile",
+        "promotion"
+      ],
+      "properties": {
+        "candidateId": {
+          "type": "string",
+          "pattern": "^candidate-[a-f0-9]{16}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "patternType": {
+          "enum": [
+            "repair-loop",
+            "review-workflow",
+            "delivery-workflow",
+            "recurring-correction",
+            "tool-sequence"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "root-cause-fix",
+            "reuse-existing",
+            "extend-existing",
+            "consolidate-existing",
+            "new-skill-candidate",
+            "new-automation-candidate",
+            "workflow-fix",
+            "insufficient-evidence"
+          ]
+        },
+        "confidence": {
+          "enum": ["high", "medium", "low"]
+        },
+        "occurrences": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "activeDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "observedActiveFriction": {
+          "$ref": "#/$defs/friction"
+        },
+        "existingCapability": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/existingCapability"
+            }
+          ]
+        },
+        "capabilityMatches": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/capabilityMatch"
+          }
+        },
+        "catalogCoverage": {
+          "enum": ["none", "partial", "complete"]
+        },
+        "repositoryEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "events",
+            "repositories",
+            "pullRequests",
+            "failedChecks"
+          ],
+          "properties": {
+            "status": {
+              "enum": ["available", "unavailable"]
+            },
+            "events": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "repositories": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "pullRequests": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "failedChecks": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            }
+          }
+        },
+        "falsePositiveRisks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "priorityBasisPoints": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "facet": {
+          "$ref": "#/$defs/facet"
+        },
+        "domain": {
+          "$ref": "#/$defs/domain"
+        },
+        "deduplication": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rawSignals",
+            "uniqueOccurrences",
+            "duplicateSignals",
+            "key"
+          ],
+          "properties": {
+            "rawSignals": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "uniqueOccurrences": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "duplicateSignals": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "key": {
+              "const": "source-session-day"
+            }
+          }
+        },
+        "sourceSkew": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sourceCount",
+            "dominantSourceOccurrences",
+            "dominantSourceBasisPoints",
+            "distribution"
+          ],
+          "properties": {
+            "sourceCount": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "dominantSourceOccurrences": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "dominantSourceBasisPoints": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "distribution": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["sourceId", "occurrences"],
+                "properties": {
+                  "sourceId": {
+                    "type": "string",
+                    "pattern": "^source-[a-f0-9]{12}$"
+                  },
+                  "occurrences": {
+                    "$ref": "#/$defs/nonnegativeInteger"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "controlProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["genericOccurrences", "setupCandidate"],
+          "properties": {
+            "genericOccurrences": {
+              "$ref": "#/$defs/nonnegativeInteger"
+            },
+            "setupCandidate": {
+              "type": "boolean"
+            }
+          }
+        },
+        "promotion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eligible", "verdict", "blockers"],
+          "properties": {
+            "eligible": {
+              "type": "boolean"
+            },
+            "verdict": {
+              "enum": ["eligible-for-human-review", "not-eligible"]
+            },
+            "blockers": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "recurrence-threshold",
+                  "single-source",
+                  "behavioral-contract-required",
+                  "generic-control"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-openrappter-contract": {
+    "mode": "local-read-only-observe",
+    "maximumCandidates": 5,
+    "network": false,
+    "modelCalls": false,
+    "execution": false,
+    "sourceMutation": false,
+    "v2SemanticsMutated": false
+  }
+}

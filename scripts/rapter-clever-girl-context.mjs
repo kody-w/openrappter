@@ -154,6 +154,7 @@ function capabilityEntry({
   sourceId,
   nativeDigest = '',
   opaqueName = false,
+  behavioralContract = null,
 }) {
   const matchName = safeCapabilityName(name);
   const publicName = opaqueName
@@ -171,7 +172,104 @@ function capabilityEntry({
     tokenHashes: tokens.hashes,
     sourceTypes: [sourceType],
     sourceIds: [sourceId],
+    contractQualified: behavioralContract !== null,
+    contractVersion: behavioralContract?.version ?? null,
+    contractTestCount: behavioralContract?.tests.length ?? 0,
     limited: tokens.truncated,
+  };
+}
+
+function boundedContractString(value, maximum = 1_024) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= maximum;
+}
+
+function validContractField(field) {
+  return (
+    field !== null &&
+    typeof field === 'object' &&
+    !Array.isArray(field) &&
+    boundedContractString(field.name, 64) &&
+    /^[a-z][a-z0-9_-]{0,63}$/.test(field.name) &&
+    boundedContractString(field.type, 64) &&
+    boundedContractString(field.description)
+  );
+}
+
+function validContractPermission(permission) {
+  return (
+    permission !== null &&
+    typeof permission === 'object' &&
+    !Array.isArray(permission) &&
+    boundedContractString(permission.resource, 64) &&
+    /^[a-z][a-z0-9_.-]{0,63}$/.test(permission.resource) &&
+    ['none', 'read', 'write', 'execute'].includes(permission.access) &&
+    boundedContractString(permission.reason)
+  );
+}
+
+function validContractFailure(failure) {
+  return (
+    failure !== null &&
+    typeof failure === 'object' &&
+    !Array.isArray(failure) &&
+    boundedContractString(failure.code, 64) &&
+    /^[A-Z][A-Z0-9_]{0,63}$/.test(failure.code) &&
+    boundedContractString(failure.condition) &&
+    boundedContractString(failure.behavior)
+  );
+}
+
+function validContractTest(test) {
+  return (
+    test !== null &&
+    typeof test === 'object' &&
+    !Array.isArray(test) &&
+    boundedContractString(test.id, 64) &&
+    /^[a-z0-9][a-z0-9_.-]{0,63}$/.test(test.id) &&
+    boundedContractString(test.assertion)
+  );
+}
+
+function parseBehavioralContract(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    value.schemaVersion !== 'rapter-clever-girl.capability-contract.v1' ||
+    !boundedContractString(value.version, 64) ||
+    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/.test(
+      value.version,
+    ) ||
+    !Array.isArray(value.inputs) ||
+    value.inputs.length < 1 ||
+    value.inputs.length > 64 ||
+    !value.inputs.every(validContractField) ||
+    !Array.isArray(value.outputs) ||
+    value.outputs.length < 1 ||
+    value.outputs.length > 64 ||
+    !value.outputs.every(validContractField) ||
+    !Array.isArray(value.permissions) ||
+    value.permissions.length < 1 ||
+    value.permissions.length > 64 ||
+    !value.permissions.every(validContractPermission) ||
+    !Array.isArray(value.failures) ||
+    value.failures.length < 1 ||
+    value.failures.length > 64 ||
+    !value.failures.every(validContractFailure) ||
+    !Array.isArray(value.limitations) ||
+    value.limitations.length < 1 ||
+    value.limitations.length > 64 ||
+    !value.limitations.every((entry) => boundedContractString(entry)) ||
+    !Array.isArray(value.tests) ||
+    value.tests.length < 1 ||
+    value.tests.length > 256 ||
+    !value.tests.every(validContractTest)
+  ) {
+    throw new EvidenceValidationError('CAPABILITY_CONTRACT_INVALID');
+  }
+  return {
+    version: value.version,
+    tests: value.tests,
   };
 }
 
@@ -184,13 +282,42 @@ function requirePlainObject(value, code) {
 
 export function parseEstateManifest(value, { sourceId, sourceDigest }) {
   const manifest = requirePlainObject(value, 'ESTATE_MANIFEST_INVALID');
+  let shape;
+  if (manifest.schema === 'rapp-monorepo/1.0') {
+    shape = {
+      sourceType: 'rapp-monorepo-manifest',
+      snapshotAt: manifest.captured_at,
+      repositories: manifest.repos,
+      notCaptured: manifest.not_captured,
+      repositoryName: (repository) => repository.repo,
+      revision: (repository) => repository.commit,
+      files: (repository) => repository.files,
+      bytes: (repository) => repository.bytes,
+      skippedLarge: (repository) => repository.skipped_large,
+      withheld: (repository) => repository.withheld,
+    };
+  } else if (manifest.schema === 'clevergirl-estate/1.0') {
+    shape = {
+      sourceType: 'generic-estate-manifest',
+      snapshotAt: manifest.capturedAt,
+      repositories: manifest.repositories,
+      notCaptured: manifest.notCaptured,
+      repositoryName: (repository) => repository.name,
+      revision: (repository) => repository.revision,
+      files: (repository) => repository.files,
+      bytes: (repository) => repository.bytes,
+      skippedLarge: (repository) => repository.skippedLarge,
+      withheld: (repository) => repository.withheld,
+    };
+  } else {
+    throw new EvidenceValidationError('ESTATE_MANIFEST_SCHEMA_UNSUPPORTED');
+  }
   if (
-    manifest.schema !== 'rapp-monorepo/1.0' ||
-    safeDateTime(manifest.captured_at) === null ||
-    !Array.isArray(manifest.repos) ||
-    manifest.repos.length < 1 ||
-    manifest.repos.length > EVIDENCE_LIMITS.maximumEstateRepositories ||
-    !Array.isArray(manifest.not_captured)
+    safeDateTime(shape.snapshotAt) === null ||
+    !Array.isArray(shape.repositories) ||
+    shape.repositories.length < 1 ||
+    shape.repositories.length > EVIDENCE_LIMITS.maximumEstateRepositories ||
+    !Array.isArray(shape.notCaptured)
   ) {
     throw new EvidenceValidationError('ESTATE_MANIFEST_INVALID');
   }
@@ -199,50 +326,62 @@ export function parseEstateManifest(value, { sourceId, sourceDigest }) {
   let withheldFiles = 0;
   let skippedLargeFiles = 0;
   const capabilities = [];
-  for (const repository of manifest.repos) {
+  for (const repository of shape.repositories) {
     requirePlainObject(repository, 'ESTATE_REPOSITORY_INVALID');
+    const repositoryName = shape.repositoryName(repository);
+    const revision = shape.revision(repository);
+    const files = shape.files(repository);
+    const bytes = shape.bytes(repository);
+    const skippedLarge = shape.skippedLarge(repository);
+    const withheld = shape.withheld(repository);
     if (
-      typeof repository.repo !== 'string' ||
-      !/^[A-Za-z0-9_.-]{1,100}$/.test(repository.repo) ||
-      names.has(repository.repo) ||
-      typeof repository.commit !== 'string' ||
-      !/^[0-9a-f]{40}$/.test(repository.commit) ||
-      !Number.isSafeInteger(repository.files) ||
-      repository.files < 0 ||
-      !Number.isSafeInteger(repository.bytes) ||
-      repository.bytes < 0 ||
-      !Array.isArray(repository.skipped_large) ||
-      !Array.isArray(repository.withheld)
+      typeof repositoryName !== 'string' ||
+      !/^[A-Za-z0-9_.-]{1,100}$/.test(repositoryName) ||
+      names.has(repositoryName) ||
+      typeof revision !== 'string' ||
+      !/^[A-Za-z0-9._:@/+~-]{1,128}$/.test(revision) ||
+      !Number.isSafeInteger(files) ||
+      files < 0 ||
+      !Number.isSafeInteger(bytes) ||
+      bytes < 0 ||
+      !Array.isArray(skippedLarge) ||
+      !Array.isArray(withheld)
     ) {
       throw new EvidenceValidationError('ESTATE_REPOSITORY_INVALID');
     }
-    names.add(repository.repo);
-    withheldFiles += repository.withheld.length;
-    skippedLargeFiles += repository.skipped_large.length;
+    if (
+      manifest.schema === 'rapp-monorepo/1.0' &&
+      !/^[0-9a-f]{40}$/.test(revision)
+    ) {
+      throw new EvidenceValidationError('ESTATE_REPOSITORY_INVALID');
+    }
+    names.add(repositoryName);
+    withheldFiles += withheld.length;
+    skippedLargeFiles += skippedLarge.length;
     const capability = capabilityEntry({
-        name: repository.repo,
-        text: repository.repo.replace(/[-_.]+/g, ' '),
+        name: repositoryName,
+        text: repositoryName.replace(/[-_.]+/g, ' '),
         sourceType: 'estate-repository',
         sourceId,
-        nativeDigest: repository.commit,
+        nativeDigest: revision,
         opaqueName: true,
       });
     delete capability.limited;
     capabilities.push(capability);
   }
 
-  const skippedRecords = manifest.not_captured.length;
+  const skippedRecords = shape.notCaptured.length;
   return {
     summary: {
       sourceId,
-      sourceType: 'rapp-monorepo-manifest',
+      sourceType: shape.sourceType,
       sourceDigest,
       status: skippedRecords > 0 || withheldFiles > 0 || skippedLargeFiles > 0 ? 'partial' : 'ok',
       schema: manifest.schema,
-      snapshotAt: safeDateTime(manifest.captured_at),
-      acceptedRecords: manifest.repos.length,
+      snapshotAt: safeDateTime(shape.snapshotAt),
+      acceptedRecords: shape.repositories.length,
       skippedRecords,
-      repositoryCount: manifest.repos.length,
+      repositoryCount: shape.repositories.length,
       withheldFiles,
       skippedLargeFiles,
     },
@@ -273,6 +412,14 @@ function catalogShape(value) {
         schema: catalog.schema,
         entries: catalog.capabilities,
         sourceType: 'normalized-capabilities',
+        requiresBehavioralContract: false,
+      };
+    case 'rapter-clever-girl.capabilities.v2':
+      return {
+        schema: catalog.schema,
+        entries: catalog.capabilities,
+        sourceType: 'behavioral-capabilities',
+        requiresBehavioralContract: true,
       };
     default:
       throw new EvidenceValidationError('CAPABILITY_CATALOG_SCHEMA_UNSUPPORTED');
@@ -339,6 +486,10 @@ export function parseCapabilityCatalog(value, { sourceId, sourceDigest }) {
           : typeof entry.singleton_sha256 === 'string'
             ? entry.singleton_sha256
             : '';
+    let behavioralContract = null;
+    if (shape.requiresBehavioralContract) {
+      behavioralContract = parseBehavioralContract(entry.behavioralContract);
+    }
     const catalogText = catalogEntryText(entry);
     const capability = capabilityEntry({
         name: rawName,
@@ -346,6 +497,7 @@ export function parseCapabilityCatalog(value, { sourceId, sourceDigest }) {
         sourceType: shape.sourceType,
         sourceId,
         nativeDigest,
+        behavioralContract,
       });
     if (catalogText.truncated || capability.limited) skippedRecords += 1;
     delete capability.limited;
@@ -495,6 +647,13 @@ export function mergeCapabilityCatalogs(catalogs) {
           tokenHashes: [...capability.tokenHashes],
           sourceTypes: [...capability.sourceTypes],
           sourceIds: [...capability.sourceIds],
+          contractQualified: capability.contractQualified === true,
+          contractVersion: capability.contractVersion ?? null,
+          contractTestCount: capability.contractTestCount ?? 0,
+          contractVersions:
+            capability.contractQualified === true
+              ? [capability.contractVersion]
+              : [],
         });
         continue;
       }
@@ -502,6 +661,19 @@ export function mergeCapabilityCatalogs(catalogs) {
       current.tokenHashes = mergeStringArrays(current.tokenHashes, capability.tokenHashes);
       current.sourceTypes = mergeStringArrays(current.sourceTypes, capability.sourceTypes);
       current.sourceIds = mergeStringArrays(current.sourceIds, capability.sourceIds);
+      current.contractVersions = mergeStringArrays(
+        current.contractVersions,
+        capability.contractQualified === true
+          ? [capability.contractVersion]
+          : [],
+      );
+      current.contractQualified = current.contractVersions.length === 1;
+      current.contractVersion = current.contractQualified
+        ? current.contractVersions[0]
+        : null;
+      current.contractTestCount = current.contractQualified
+        ? Math.max(current.contractTestCount, capability.contractTestCount ?? 0)
+        : 0;
       if (current.sourceTypes.includes('estate-repository')) {
         current.name = opaqueEstateCapabilityName(key);
       }
@@ -532,7 +704,18 @@ function matchReason(match) {
   return 'Selected capability catalogs contain a lexical or topical overlap that requires inspection.';
 }
 
-export function matchCapabilities(patternType, capabilities, candidateTokenHashes) {
+function opaqueBehavioralCapabilityName(capabilityId) {
+  return `contract-capability-${sha256(
+    `behavioral-capability-name-v1:${capabilityId}`,
+  ).slice(0, 12)}`;
+}
+
+export function matchCapabilities(
+  patternType,
+  capabilities,
+  candidateTokenHashes,
+  { requireBehavioralContract = false } = {},
+) {
   const keywords = PATTERN_KEYWORDS[patternType] ?? [];
   const candidates = [];
   for (const capability of capabilities ?? []) {
@@ -553,15 +736,36 @@ export function matchCapabilities(patternType, capabilities, candidateTokenHashe
       Math.min(intersection, 8) * 250 +
       Math.round(similarity * 1_000);
     if (score < 700) continue;
-    const match = score >= 2_700 ? 'reuse' : score >= 1_700 ? 'extend' : 'possible-overlap';
-    candidates.push({
+    const lexicalMatch =
+      score >= 2_700 ? 'reuse' : score >= 1_700 ? 'extend' : 'possible-overlap';
+    const contractQualified = capability.contractQualified === true;
+    const match =
+      requireBehavioralContract && !contractQualified
+        ? 'possible-overlap'
+        : lexicalMatch;
+    const candidate = {
       capabilityId: capability.capabilityId,
-      name: capability.name,
+      name: requireBehavioralContract
+        ? opaqueBehavioralCapabilityName(capability.capabilityId)
+        : capability.name,
       match,
-      reason: matchReason(match),
+      reason:
+        requireBehavioralContract && !contractQualified
+          ? 'Selected metadata overlaps, but reuse or extension requires a complete versioned behavioral capability contract.'
+          : matchReason(match),
       sourceTypes: capability.sourceTypes,
       score,
-    });
+    };
+    if (requireBehavioralContract) {
+      candidate.contractQualified = contractQualified;
+      candidate.contractVersion = contractQualified
+        ? capability.contractVersion
+        : null;
+      candidate.contractTestCount = contractQualified
+        ? capability.contractTestCount
+        : 0;
+    }
+    candidates.push(candidate);
   }
   return candidates
     .sort((left, right) => {

@@ -122,7 +122,11 @@ try {
     "dist/agents/DesktopControlAgent.js",
     "dist/clever-girl/rapter-clever-girl.mjs",
     "dist/clever-girl/rapter-clever-girl-context.mjs",
+    "dist/clever-girl/rapter-clever-girl-reader.mjs",
     "dist/clever-girl/rapter-clever-girl-observe-v2.json",
+    "dist/clever-girl/rapter-clever-girl-observe-v3.json",
+    "dist/clever-girl/rapter-clever-girl-capability-catalog-v2.json",
+    "dist/clever-girl/rapter-clever-girl-repair-assignments-v1.json",
     "dist/clever-girl/SKILL.md",
     "dist/cli/clever-girl.js",
     "dist/desktop-control/queue.js",
@@ -147,10 +151,9 @@ try {
     JSON.stringify({ name: "openrappter-package-smoke", private: true }),
   );
 
-  runNpm(
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
-    { cwd: installRoot },
-  );
+  runNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
+    cwd: installRoot,
+  });
 
   const installedRoot = path.join(installRoot, "node_modules", "openrappter");
   const installedIndex = path.join(installedRoot, "ui", "dist", "index.html");
@@ -171,20 +174,35 @@ try {
       path.join("dist", "clever-girl", "rapter-clever-girl-context.mjs"),
     ],
     [
+      path.join("scripts", "rapter-clever-girl-reader.mjs"),
+      path.join("dist", "clever-girl", "rapter-clever-girl-reader.mjs"),
+    ],
+    [
       path.join("contracts", "rapter-clever-girl-observe-v2.json"),
+      path.join("dist", "clever-girl", "rapter-clever-girl-observe-v2.json"),
+    ],
+    [
+      path.join("contracts", "rapter-clever-girl-observe-v3.json"),
+      path.join("dist", "clever-girl", "rapter-clever-girl-observe-v3.json"),
+    ],
+    [
+      path.join("contracts", "rapter-clever-girl-capability-catalog-v2.json"),
       path.join(
         "dist",
         "clever-girl",
-        "rapter-clever-girl-observe-v2.json",
+        "rapter-clever-girl-capability-catalog-v2.json",
       ),
     ],
     [
+      path.join("contracts", "rapter-clever-girl-repair-assignments-v1.json"),
       path.join(
-        ".claude",
-        "skills",
-        "rapter-clever-girl-observe",
-        "SKILL.md",
+        "dist",
+        "clever-girl",
+        "rapter-clever-girl-repair-assignments-v1.json",
       ),
+    ],
+    [
+      path.join(".claude", "skills", "rapter-clever-girl-observe", "SKILL.md"),
       path.join("dist", "clever-girl", "SKILL.md"),
     ],
   ];
@@ -237,6 +255,8 @@ try {
     cleverInput,
     "--source",
     "normalized",
+    "--report-version",
+    "2",
   ];
   const installedClever = run(
     process.execPath,
@@ -246,12 +266,7 @@ try {
   const sourceClever = run(
     process.execPath,
     [
-      path.resolve(
-        packageRoot,
-        "..",
-        "scripts",
-        "rapter-clever-girl.mjs",
-      ),
+      path.resolve(packageRoot, "..", "scripts", "rapter-clever-girl.mjs"),
       ...cleverArgs,
     ],
     { cwd: installRoot },
@@ -264,6 +279,48 @@ try {
   ) {
     throw new Error(
       "Installed Clever Girl CLI does not preserve the Observe Mode v2 result",
+    );
+  }
+
+  const v3Args = [
+    "observe",
+    "--input",
+    cleverInput,
+    "--source",
+    "normalized",
+    "--capability-catalog",
+    path.resolve(
+      packageRoot,
+      "..",
+      "scripts",
+      "fixtures",
+      "rapter-clever-girl",
+      "capability-contract-catalog.json",
+    ),
+    "--report-version",
+    "3",
+  ];
+  const installedV3 = run(
+    process.execPath,
+    [binary, "clever-girl", ...v3Args],
+    { cwd: installRoot },
+  );
+  const sourceV3 = run(
+    process.execPath,
+    [
+      path.resolve(packageRoot, "..", "scripts", "rapter-clever-girl.mjs"),
+      ...v3Args,
+    ],
+    { cwd: installRoot },
+  );
+  const installedV3Report = JSON.parse(installedV3.stdout);
+  if (
+    installedV3Report.schemaVersion !== "rapter-clever-girl.observe.v3" ||
+    installedV3.stdout !== sourceV3.stdout ||
+    installedV3.stderr !== sourceV3.stderr
+  ) {
+    throw new Error(
+      "Installed Clever Girl CLI does not preserve the Observe Mode v3 result",
     );
   }
 
@@ -385,292 +442,308 @@ try {
   }
 
   if (process.platform !== "win32") {
-  const flightDb = path.join(home, "flight.db");
-  const flightEnv = {
-    ...process.env,
-    HOME: home,
-    USERPROFILE: home,
-    NODE_ENV: "production",
-    OPENRAPPTER_FLIGHT_RECORDER: "1",
-    OPENRAPPTER_FLIGHT_DB: flightDb,
-  };
-  const managedHome = path.join(scratch, "managed-home");
-  mkdirSync(managedHome, { recursive: true, mode: 0o755 });
-  chmodSync(managedHome, 0o755);
-  const {
-    OPENRAPPTER_FLIGHT_DB: _ignoredFlightDb,
-    ...environmentWithoutFlightDb
-  } = process.env;
-  run(process.execPath, [binary, "flight", "status", "--json"], {
-    cwd: installRoot,
-    env: {
-      ...environmentWithoutFlightDb,
-      HOME: managedHome,
-      USERPROFILE: managedHome,
+    const flightDb = path.join(home, "flight.db");
+    const flightEnv = {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
       NODE_ENV: "production",
       OPENRAPPTER_FLIGHT_RECORDER: "1",
-    },
-  });
-  const managedDirectory = path.join(managedHome, ".openrappter");
-  const managedDatabase = path.join(managedDirectory, "flight-recorder.db");
-  if (process.platform !== "win32") {
-    if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
-      throw new Error("Packaged default Flight Recorder directory is not 0700");
+      OPENRAPPTER_FLIGHT_DB: flightDb,
+    };
+    const managedHome = path.join(scratch, "managed-home");
+    mkdirSync(managedHome, { recursive: true, mode: 0o755 });
+    chmodSync(managedHome, 0o755);
+    const {
+      OPENRAPPTER_FLIGHT_DB: _ignoredFlightDb,
+      ...environmentWithoutFlightDb
+    } = process.env;
+    run(process.execPath, [binary, "flight", "status", "--json"], {
+      cwd: installRoot,
+      env: {
+        ...environmentWithoutFlightDb,
+        HOME: managedHome,
+        USERPROFILE: managedHome,
+        NODE_ENV: "production",
+        OPENRAPPTER_FLIGHT_RECORDER: "1",
+      },
+    });
+    const managedDirectory = path.join(managedHome, ".openrappter");
+    const managedDatabase = path.join(managedDirectory, "flight-recorder.db");
+    if (process.platform !== "win32") {
+      if ((statSync(managedDirectory).mode & 0o777) !== 0o700) {
+        throw new Error(
+          "Packaged default Flight Recorder directory is not 0700",
+        );
+      }
+      if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
+        throw new Error(
+          "Packaged default Flight Recorder database is not 0600",
+        );
+      }
+      if (
+        (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
+        0o600
+      ) {
+        throw new Error("Packaged Flight Recorder identity key is not 0600");
+      }
     }
-    if ((statSync(managedDatabase).mode & 0o777) !== 0o600) {
-      throw new Error("Packaged default Flight Recorder database is not 0600");
+
+    // ShellAgent is deterministic and needs no provider credential.
+    run(process.execPath, [binary, "ls"], {
+      cwd: installRoot,
+      env: flightEnv,
+    });
+    const beforeExec = run(
+      process.execPath,
+      [binary, "flight", "status", "--json"],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const beforeExecStatus = parseJsonValue(beforeExec.stdout, "{", "}");
+    run(process.execPath, [binary, "list directory", "--exec", "Shell"], {
+      cwd: installRoot,
+      env: flightEnv,
+    });
+
+    const status = run(
+      process.execPath,
+      [binary, "flight", "status", "--json"],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const statusJson = parseJsonValue(status.stdout, "{", "}");
+    if (
+      !statusJson.initialized ||
+      statusJson.eventCount <= beforeExecStatus.eventCount
+    ) {
+      throw new Error(
+        `Packaged --exec did not append a Flight Recorder trace:\n${status.stdout}`,
+      );
+    }
+    const mcpBinary = path.join(installedRoot, "dist", "mcp", "stdio.js");
+    const mcpRequest = `${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "Shell",
+        arguments: { query: "list directory" },
+      },
+    })}\n`;
+    const standaloneMcp = spawnSync(process.execPath, [mcpBinary], {
+      cwd: installRoot,
+      encoding: "utf8",
+      input: mcpRequest,
+      env: flightEnv,
+    });
+    if (
+      standaloneMcp.status !== 0 ||
+      !standaloneMcp.stdout.includes('"result"')
+    ) {
+      throw new Error(
+        `Packaged standalone MCP failed:\n${standaloneMcp.stdout}\n${standaloneMcp.stderr}`,
+      );
+    }
+    const standaloneExportResult = run(
+      process.execPath,
+      [binary, "flight", "export"],
+      { cwd: installRoot, env: flightEnv },
+    );
+    const standaloneExport = parseJsonValue(
+      standaloneExportResult.stdout,
+      "{",
+      "}",
+    );
+    const standaloneTool = [...standaloneExport.events]
+      .reverse()
+      .find((event) => event.kind === "tool.call.started");
+    const standaloneAgent = standaloneTool
+      ? standaloneExport.events.find(
+          (event) =>
+            event.traceId === standaloneTool.traceId &&
+            event.kind === "agent.execute.started",
+        )
+      : undefined;
+    if (
+      !standaloneTool ||
+      !standaloneAgent ||
+      standaloneAgent.parentId !== standaloneTool.id
+    ) {
+      throw new Error(
+        "Standalone MCP call omitted the tool-to-agent lifecycle",
+      );
+    }
+    const afterStandalone = run(
+      process.execPath,
+      [binary, "flight", "status", "--json"],
+      { cwd: installRoot, env: flightEnv },
+    );
+    const afterStandaloneStatus = parseJsonValue(
+      afterStandalone.stdout,
+      "{",
+      "}",
+    );
+    const mcpTraceId = "package-mcp-trace";
+    const mcpParentId = "package-provider-attempt";
+    const mcpResult = spawnSync(process.execPath, [mcpBinary], {
+      cwd: installRoot,
+      encoding: "utf8",
+      input: mcpRequest,
+      env: {
+        ...flightEnv,
+        OPENRAPPTER_FLIGHT_TRACE_ID: mcpTraceId,
+        OPENRAPPTER_FLIGHT_PARENT_ID: mcpParentId,
+        OPENRAPPTER_FLIGHT_SESSION_ID: "package-mcp-session",
+      },
+    });
+    if (mcpResult.status !== 0 || !mcpResult.stdout.includes('"result"')) {
+      throw new Error(
+        `Packaged MCP child failed to execute Shell:\n${mcpResult.stdout}\n${mcpResult.stderr}`,
+      );
+    }
+    const afterMcp = run(
+      process.execPath,
+      [binary, "flight", "status", "--json"],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const afterMcpStatus = parseJsonValue(afterMcp.stdout, "{", "}");
+    if (afterMcpStatus.eventCount <= afterStandaloneStatus.eventCount) {
+      throw new Error("Packaged MCP child did not persist agent events");
+    }
+    const ownerDirectory = `${flightDb}.owners`;
+    if (existsSync(ownerDirectory) && readdirSync(ownerDirectory).length > 0) {
+      throw new Error("Packaged MCP child leaked recorder owner markers");
+    }
+    const mcpExportResult = run(
+      process.execPath,
+      [binary, "flight", "export", "--trace", mcpTraceId],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const mcpExport = parseJsonValue(mcpExportResult.stdout, "{", "}");
+    const mcpToolStarted = mcpExport.events.find(
+      (event) => event.kind === "tool.call.started",
+    );
+    const mcpAgentStarted = mcpExport.events.find(
+      (event) => event.kind === "agent.execute.started",
+    );
+    const mcpChildStarted = mcpExport.events.find(
+      (event) =>
+        event.kind === "trace.started" && event.parentId === mcpParentId,
+    );
+    if (
+      !mcpToolStarted ||
+      !mcpAgentStarted ||
+      !mcpChildStarted ||
+      mcpToolStarted.parentId !== mcpChildStarted.id ||
+      mcpAgentStarted.parentId !== mcpToolStarted.id ||
+      mcpExport.events.some((event) => event.traceId !== mcpTraceId)
+    ) {
+      throw new Error(
+        "Packaged MCP child did not preserve parent trace causality",
+      );
+    }
+
+    const eventsResult = run(
+      process.execPath,
+      [binary, "flight", "events", "--json"],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const events = parseJsonValue(eventsResult.stdout, "[", "]");
+    if (!Array.isArray(events) || events.length < 5) {
+      throw new Error("Packaged flight events returned no trace");
+    }
+    if (events.some((event) => Object.hasOwn(event, "payload"))) {
+      throw new Error(
+        "Packaged default Flight Recorder persisted raw payload IO",
+      );
+    }
+
+    const exportPath = path.join(scratch, "flight-export.json");
+    writeFileSync(exportPath, "public placeholder", { mode: 0o644 });
+    chmodSync(exportPath, 0o644);
+    run(
+      process.execPath,
+      [binary, "flight", "export", "--output", exportPath],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
+    );
+    const exported = JSON.parse(readFileSync(exportPath, "utf8"));
+    if (exported.schema !== "openrappter-flight-export/1.0") {
+      throw new Error("Packaged flight export has the wrong schema");
     }
     if (
-      (statSync(`${managedDatabase}.identity-key`).mode & 0o777) !==
-      0o600
+      process.platform !== "win32" &&
+      (statSync(exportPath).mode & 0o777) !== 0o600
     ) {
-      throw new Error("Packaged Flight Recorder identity key is not 0600");
+      throw new Error("Packaged flight export overwrite is not mode 0600");
     }
-  }
 
-  // ShellAgent is deterministic and needs no provider credential.
-  run(process.execPath, [binary, "ls"], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  const beforeExec = run(
-    process.execPath,
-    [binary, "flight", "status", "--json"],
-    {
+    run(process.execPath, [binary, "flight", "clear", "--yes"], {
       cwd: installRoot,
       env: flightEnv,
-    },
-  );
-  const beforeExecStatus = parseJsonValue(beforeExec.stdout, "{", "}");
-  run(process.execPath, [binary, "list directory", "--exec", "Shell"], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-
-  const status = run(process.execPath, [binary, "flight", "status", "--json"], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  const statusJson = parseJsonValue(status.stdout, "{", "}");
-  if (
-    !statusJson.initialized ||
-    statusJson.eventCount <= beforeExecStatus.eventCount
-  ) {
-    throw new Error(
-      `Packaged --exec did not append a Flight Recorder trace:\n${status.stdout}`,
+    });
+    run(process.execPath, [binary, "flight", "import", exportPath], {
+      cwd: installRoot,
+      env: flightEnv,
+    });
+    const restored = run(
+      process.execPath,
+      [binary, "flight", "status", "--json"],
+      {
+        cwd: installRoot,
+        env: flightEnv,
+      },
     );
-  }
-  const mcpBinary = path.join(installedRoot, "dist", "mcp", "stdio.js");
-  const mcpRequest = `${JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: {
-      name: "Shell",
-      arguments: { query: "list directory" },
-    },
-  })}\n`;
-  const standaloneMcp = spawnSync(process.execPath, [mcpBinary], {
-    cwd: installRoot,
-    encoding: "utf8",
-    input: mcpRequest,
-    env: flightEnv,
-  });
-  if (
-    standaloneMcp.status !== 0 ||
-    !standaloneMcp.stdout.includes('"result"')
-  ) {
-    throw new Error(
-      `Packaged standalone MCP failed:\n${standaloneMcp.stdout}\n${standaloneMcp.stderr}`,
-    );
-  }
-  const standaloneExportResult = run(
-    process.execPath,
-    [binary, "flight", "export"],
-    { cwd: installRoot, env: flightEnv },
-  );
-  const standaloneExport = parseJsonValue(
-    standaloneExportResult.stdout,
-    "{",
-    "}",
-  );
-  const standaloneTool = [...standaloneExport.events]
-    .reverse()
-    .find((event) => event.kind === "tool.call.started");
-  const standaloneAgent = standaloneTool
-    ? standaloneExport.events.find(
-        (event) =>
-          event.traceId === standaloneTool.traceId &&
-          event.kind === "agent.execute.started",
-      )
-    : undefined;
-  if (
-    !standaloneTool ||
-    !standaloneAgent ||
-    standaloneAgent.parentId !== standaloneTool.id
-  ) {
-    throw new Error("Standalone MCP call omitted the tool-to-agent lifecycle");
-  }
-  const afterStandalone = run(
-    process.execPath,
-    [binary, "flight", "status", "--json"],
-    { cwd: installRoot, env: flightEnv },
-  );
-  const afterStandaloneStatus = parseJsonValue(
-    afterStandalone.stdout,
-    "{",
-    "}",
-  );
-  const mcpTraceId = "package-mcp-trace";
-  const mcpParentId = "package-provider-attempt";
-  const mcpResult = spawnSync(process.execPath, [mcpBinary], {
-    cwd: installRoot,
-    encoding: "utf8",
-    input: mcpRequest,
-    env: {
-      ...flightEnv,
-      OPENRAPPTER_FLIGHT_TRACE_ID: mcpTraceId,
-      OPENRAPPTER_FLIGHT_PARENT_ID: mcpParentId,
-      OPENRAPPTER_FLIGHT_SESSION_ID: "package-mcp-session",
-    },
-  });
-  if (mcpResult.status !== 0 || !mcpResult.stdout.includes('"result"')) {
-    throw new Error(
-      `Packaged MCP child failed to execute Shell:\n${mcpResult.stdout}\n${mcpResult.stderr}`,
-    );
-  }
-  const afterMcp = run(
-    process.execPath,
-    [binary, "flight", "status", "--json"],
-    {
-      cwd: installRoot,
-      env: flightEnv,
-    },
-  );
-  const afterMcpStatus = parseJsonValue(afterMcp.stdout, "{", "}");
-  if (afterMcpStatus.eventCount <= afterStandaloneStatus.eventCount) {
-    throw new Error("Packaged MCP child did not persist agent events");
-  }
-  const ownerDirectory = `${flightDb}.owners`;
-  if (
-    existsSync(ownerDirectory) &&
-    readdirSync(ownerDirectory).length > 0
-  ) {
-    throw new Error("Packaged MCP child leaked recorder owner markers");
-  }
-  const mcpExportResult = run(
-    process.execPath,
-    [binary, "flight", "export", "--trace", mcpTraceId],
-    {
-      cwd: installRoot,
-      env: flightEnv,
-    },
-  );
-  const mcpExport = parseJsonValue(mcpExportResult.stdout, "{", "}");
-  const mcpToolStarted = mcpExport.events.find(
-    (event) => event.kind === "tool.call.started",
-  );
-  const mcpAgentStarted = mcpExport.events.find(
-    (event) => event.kind === "agent.execute.started",
-  );
-  const mcpChildStarted = mcpExport.events.find(
-    (event) =>
-      event.kind === "trace.started" &&
-      event.parentId === mcpParentId,
-  );
-  if (
-    !mcpToolStarted ||
-    !mcpAgentStarted ||
-    !mcpChildStarted ||
-    mcpToolStarted.parentId !== mcpChildStarted.id ||
-    mcpAgentStarted.parentId !== mcpToolStarted.id ||
-    mcpExport.events.some((event) => event.traceId !== mcpTraceId)
-  ) {
-    throw new Error("Packaged MCP child did not preserve parent trace causality");
-  }
-
-  const eventsResult = run(
-    process.execPath,
-    [binary, "flight", "events", "--json"],
-    {
-      cwd: installRoot,
-      env: flightEnv,
-    },
-  );
-  const events = parseJsonValue(eventsResult.stdout, "[", "]");
-  if (!Array.isArray(events) || events.length < 5) {
-    throw new Error("Packaged flight events returned no trace");
-  }
-  if (events.some((event) => Object.hasOwn(event, "payload"))) {
-    throw new Error(
-      "Packaged default Flight Recorder persisted raw payload IO",
-    );
-  }
-
-  const exportPath = path.join(scratch, "flight-export.json");
-  writeFileSync(exportPath, "public placeholder", { mode: 0o644 });
-  chmodSync(exportPath, 0o644);
-  run(process.execPath, [binary, "flight", "export", "--output", exportPath], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  const exported = JSON.parse(readFileSync(exportPath, "utf8"));
-  if (exported.schema !== "openrappter-flight-export/1.0") {
-    throw new Error("Packaged flight export has the wrong schema");
-  }
-  if (
-    process.platform !== "win32" &&
-    (statSync(exportPath).mode & 0o777) !== 0o600
-  ) {
-    throw new Error("Packaged flight export overwrite is not mode 0600");
-  }
-
-  run(process.execPath, [binary, "flight", "clear", "--yes"], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  run(process.execPath, [binary, "flight", "import", exportPath], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  const restored = run(
-    process.execPath,
-    [binary, "flight", "status", "--json"],
-    {
-      cwd: installRoot,
-      env: flightEnv,
-    },
-  );
-  const restoredStatus = parseJsonValue(restored.stdout, "{", "}");
-  if (restoredStatus.eventCount !== exported.events.length) {
-    throw new Error("Packaged flight export/import did not round-trip exactly");
-  }
-  const identityTemporaryArtifacts = [
-    `${flightDb}.identity-key.123.01234567-89ab-cdef-0123-456789abcdef.tmp`,
-    `${flightDb}.identity-key.456.0123456789abcdef0123456789abcdef.tmp`,
-  ];
-  const identityKeyContents = readFileSync(
-    `${flightDb}.identity-key`,
-    "utf8",
-  );
-  for (const artifact of identityTemporaryArtifacts) {
-    writeFileSync(artifact, identityKeyContents, { mode: 0o600 });
-  }
-  run(process.execPath, [binary, "reset", "--yes"], {
-    cwd: installRoot,
-    env: flightEnv,
-  });
-  for (const resetPath of [
-    flightDb,
-    `${flightDb}-wal`,
-    `${flightDb}-shm`,
-    `${flightDb}.identity-key`,
-    ...identityTemporaryArtifacts,
-  ]) {
-    if (existsSync(resetPath)) {
-      throw new Error(`Packaged reset left Flight Recorder state: ${resetPath}`);
+    const restoredStatus = parseJsonValue(restored.stdout, "{", "}");
+    if (restoredStatus.eventCount !== exported.events.length) {
+      throw new Error(
+        "Packaged flight export/import did not round-trip exactly",
+      );
     }
-  }
+    const identityTemporaryArtifacts = [
+      `${flightDb}.identity-key.123.01234567-89ab-cdef-0123-456789abcdef.tmp`,
+      `${flightDb}.identity-key.456.0123456789abcdef0123456789abcdef.tmp`,
+    ];
+    const identityKeyContents = readFileSync(
+      `${flightDb}.identity-key`,
+      "utf8",
+    );
+    for (const artifact of identityTemporaryArtifacts) {
+      writeFileSync(artifact, identityKeyContents, { mode: 0o600 });
+    }
+    run(process.execPath, [binary, "reset", "--yes"], {
+      cwd: installRoot,
+      env: flightEnv,
+    });
+    for (const resetPath of [
+      flightDb,
+      `${flightDb}-wal`,
+      `${flightDb}-shm`,
+      `${flightDb}.identity-key`,
+      ...identityTemporaryArtifacts,
+    ]) {
+      if (existsSync(resetPath)) {
+        throw new Error(
+          `Packaged reset left Flight Recorder state: ${resetPath}`,
+        );
+      }
+    }
   } else {
     const windowsFlightDir = path.join(scratch, "windows-flight-recorder");
     mkdirSync(windowsFlightDir, { recursive: true });
@@ -715,7 +788,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
+    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
   );
 } finally {
   rmSync(scratch, {

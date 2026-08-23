@@ -70,6 +70,9 @@ assert_executable() {
 export OPENRAPPTER_INSTALL_SH_NO_RUN=1
 # shellcheck disable=SC1090
 source "$INSTALL_SCRIPT"
+# Sourcing the installer installs its own EXIT trap. Restore test cleanup while
+# still removing any installer scratch files it registered.
+trap 'cleanup_tmpfiles; rm -rf "$TEST_SCRATCH"' EXIT
 
 # Pre-load script content for content assertion tests
 script_content="$(cat "$INSTALL_SCRIPT")"

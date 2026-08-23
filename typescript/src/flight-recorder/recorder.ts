@@ -49,6 +49,7 @@ import {
 } from "./redaction.js";
 import {
   FLIGHT_EVENT_SCHEMA,
+  type FlightAppendReceipt,
   type FlightEvent,
   type FlightEventInput,
   type FlightExport,
@@ -372,6 +373,15 @@ interface StoredFlightTraceContext extends FlightTraceContext {
   generation?: TraceGeneration;
 }
 
+interface DurableReceiptRequest {
+  receipt?: FlightAppendReceipt;
+}
+
+export interface FlightDurableAppend {
+  event: FlightEvent;
+  receipt: FlightAppendReceipt;
+}
+
 export class FlightRecorder {
   private readonly options: Required<
     Pick<FlightRecorderOptions, "enabled" | "retentionEvents">
@@ -382,6 +392,8 @@ export class FlightRecorder {
   private readonly ownsLedger: boolean;
   private readonly traceStorage =
     new AsyncLocalStorage<StoredFlightTraceContext>();
+  private readonly durableReceiptStorage =
+    new AsyncLocalStorage<DurableReceiptRequest>();
   private readonly sequenceByTrace = new Map<string, number>();
   private readonly sequenceLocks = new Map<string, Promise<void>>();
   private ledger: FlightLedger | null;
@@ -920,7 +932,11 @@ export class FlightRecorder {
               ...eventWithoutHash,
               contentHash: computeFlightEventHash(eventWithoutHash),
             };
-            await this.ledger!.append(persisted);
+            const receipt = await this.ledger!.append(persisted);
+            const durableRequest = this.durableReceiptStorage.getStore();
+            if (durableRequest && receipt) {
+              durableRequest.receipt = receipt;
+            }
             return persisted;
           });
           break;
@@ -933,6 +949,7 @@ export class FlightRecorder {
             );
             continue;
           }
+
           throw error;
         }
       }
@@ -963,6 +980,28 @@ export class FlightRecorder {
         this.mutationIdleWaiters.clear();
       }
     }
+  }
+
+  async recordDurably(
+    input: FlightEventInput,
+  ): Promise<FlightDurableAppend | null> {
+    const request: DurableReceiptRequest = {};
+    return this.durableReceiptStorage.run(request, async () => {
+      const event = await this.record(input);
+      const receipt = request.receipt;
+      if (
+        !event ||
+        !receipt ||
+        receipt.eventId !== event.id ||
+        receipt.traceId !== event.traceId ||
+        receipt.kind !== event.kind ||
+        receipt.sequence !== event.sequence ||
+        receipt.contentHash !== event.contentHash
+      ) {
+        return null;
+      }
+      return { event, receipt };
+    });
   }
 
   async exportTrace(traceId: string): Promise<FlightExport | null> {

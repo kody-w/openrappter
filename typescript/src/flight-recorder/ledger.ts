@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  FlightAppendReceipt,
   FlightEvent,
   FlightEventQuery,
   FlightEventStatus,
@@ -307,13 +308,43 @@ export class SQLiteFlightLedger implements FlightLedger {
     this.db = null;
   }
 
-  async append(event: FlightEvent): Promise<void> {
+  async append(event: FlightEvent): Promise<FlightAppendReceipt | void> {
     const db = this.ensureDb();
     const serialized = serializeEvent(event, "event");
     const statement = db.prepare(insertSql(false));
     db.pragma(`busy_timeout = ${RUNTIME_BUSY_TIMEOUT_MS}`);
     try {
-      statement.run(...eventParameters(serialized));
+      return db.transaction(() => {
+        const inserted = statement.run(...eventParameters(serialized));
+        if (inserted.changes === 0) return undefined;
+        const row = db
+          .prepare(`
+            SELECT rowid AS row_id, *
+            FROM flight_events
+            WHERE id = ?
+          `)
+          .get(event.id) as PruneEventRow | undefined;
+        const stored = row ? rowToEvent(row) : undefined;
+        if (
+          !stored ||
+          stored.id !== event.id ||
+          stored.traceId !== event.traceId ||
+          stored.kind !== event.kind ||
+          stored.sequence !== event.sequence ||
+          stored.contentHash !== event.contentHash
+        ) {
+          throw new Error(
+            `Flight event "${event.id}" was not queryable by exact immutable identity inside its append transaction.`,
+          );
+        }
+        return {
+          eventId: stored.id,
+          traceId: stored.traceId,
+          kind: stored.kind,
+          sequence: stored.sequence,
+          contentHash: stored.contentHash,
+        };
+      })();
     } finally {
       db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     }

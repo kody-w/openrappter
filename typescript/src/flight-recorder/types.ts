@@ -134,10 +134,18 @@ export interface FlightExport {
   events: FlightEvent[];
 }
 
+export interface FlightAppendReceipt {
+  eventId: string;
+  traceId: string;
+  kind: string;
+  sequence: number;
+  contentHash: string;
+}
+
 export interface FlightLedger {
   initialize(): Promise<void>;
   close(): Promise<void>;
-  append(event: FlightEvent): Promise<void>;
+  append(event: FlightEvent): Promise<FlightAppendReceipt | void>;
   query(query?: FlightEventQuery): Promise<FlightEvent[]>;
   count(): Promise<number>;
   prune(keep: number): Promise<number>;

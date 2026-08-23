@@ -2,28 +2,27 @@ import type { FlightRecorder } from "./recorder.js";
 import type { FlightEvent, FlightEventInput } from "./types.js";
 
 /**
- * Append one event and prove the backing ledger can immediately count it.
- * A returned event is therefore durable for this recorder generation, not
- * merely accepted by the in-memory API.
+ * Append one event and require the recorder's exact committed-storage receipt.
+ * Retention may prune older rows after append without invalidating this
+ * acknowledgment; a missing or mismatched per-event receipt fails closed.
  */
 export async function recordFlightEventDurably(
   recorder: FlightRecorder,
   input: FlightEventInput,
 ): Promise<FlightEvent | null> {
-  const before = await recorder.health();
-  if (!before.enabled || !before.initialized) return null;
-
-  const event = await recorder.record(input);
-  if (!event) return null;
-
-  const after = await recorder.health();
+  const durable = await recorder.recordDurably(input);
   if (
-    !after.enabled ||
-    !after.initialized ||
-    after.errorCount !== before.errorCount ||
-    after.eventCount < before.eventCount + 1
+    !durable ||
+    durable.receipt.eventId !== durable.event.id ||
+    durable.receipt.traceId !== durable.event.traceId ||
+    durable.receipt.kind !== durable.event.kind ||
+    durable.receipt.sequence !== durable.event.sequence ||
+    durable.receipt.contentHash !== durable.event.contentHash ||
+    durable.event.kind !== input.kind ||
+    durable.event.source !== input.source ||
+    (input.traceId !== undefined && durable.event.traceId !== input.traceId)
   ) {
     return null;
   }
-  return event;
+  return durable.event;
 }

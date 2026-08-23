@@ -13,9 +13,7 @@ export function registerCleverGirlCommand(program: Command): void {
 
   cleverGirl
     .command("observe")
-    .description(
-      "Emit a local, read-only rapter-clever-girl.observe.v2 JSON report",
-    )
+    .description("Emit a local, read-only versioned Clever Girl JSON report")
     .option(
       "--input <path>",
       "Explicit coding-assistant history export (repeatable)",
@@ -50,10 +48,12 @@ export function registerCleverGirlCommand(program: Command): void {
     .option("--until <date-time>", "Inclusive RFC 3339 end time")
     .option("--min-sessions <count>", "Selected recurrence session threshold")
     .option("--min-days <count>", "Selected recurrence active-day threshold")
+    .option("--output <path>", "Also write to a new explicit path (POSIX only)")
     .option(
-      "--output <path>",
-      "Also write to a new explicit path (POSIX only)",
+      "--facet-sidecar-output <path>",
+      "Write complete opaque v3 repair assignments to a new POSIX path",
     )
+    .option("--report-version <version>", "auto, 2, or 3", "2")
     .option("--pretty", "Pretty-print the JSON report")
     .action(async () => {
       const commandIndex = process.argv.indexOf("clever-girl");

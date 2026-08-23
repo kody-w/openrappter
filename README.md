@@ -208,8 +208,9 @@ openrappter clever-girl observe \
 node scripts/rapter-clever-girl-gate.mjs
 ```
 
-The npm package installs that command and ships the v2 engine, context matcher,
-JSON contract, and observer skill with it. Contributors can invoke the same
+The npm package installs that command and ships the v3 engine,
+backward-compatible v2/v3 reader, closed contracts, capability-contract
+schema, context matcher, and observer skill with it. Contributors can invoke the same
 engine directly with `node scripts/rapter-clever-girl.mjs observe ...`.
 
 It is local-only and has no watcher, network call, subprocess, model call,
@@ -220,7 +221,7 @@ instructions. Observe Mode does not create, update, install, enable, or
 schedule a skill or automation; promotion is a separate explicit workflow.
 
 See [Rapter Clever Girl](./docs/rapter-clever-girl.md) for adapters, the
-`rapter-clever-girl.observe.v2` output contract, evidence/provenance,
+`rapter-clever-girl.observe.v3` output contract, v2 migration, evidence/provenance,
 failure semantics, thresholds, limitations, and the promotion boundary.
 
 ### Electron Desktop: Skill Recorder ergonomics, OpenRappter core

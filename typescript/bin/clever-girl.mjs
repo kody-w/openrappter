@@ -22,9 +22,7 @@ function createHelp() {
 
   const observe = command
     .command("observe")
-    .description(
-      "Emit a local, read-only rapter-clever-girl.observe.v2 JSON report",
-    )
+    .description("Emit a local, read-only versioned Clever Girl JSON report")
     .option(
       "--input <path>",
       "Explicit coding-assistant history export (repeatable)",
@@ -60,6 +58,11 @@ function createHelp() {
     .option("--min-sessions <count>", "Selected recurrence session threshold")
     .option("--min-days <count>", "Selected recurrence active-day threshold")
     .option("--output <path>", "Also write to a new explicit path (POSIX only)")
+    .option(
+      "--facet-sidecar-output <path>",
+      "Write complete opaque v3 repair assignments to a new POSIX path",
+    )
+    .option("--report-version <version>", "auto, 2, or 3", "2")
     .option("--pretty", "Pretty-print the JSON report");
 
   return { command, observe };

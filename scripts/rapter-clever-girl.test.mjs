@@ -9,6 +9,7 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -17,7 +18,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -35,6 +35,7 @@ const FIXTURES = path.join(
   'fixtures',
   'rapter-clever-girl',
 );
+const TEST_WORK_ROOT = path.join(REPO_ROOT, '.test-work');
 const SKILLS_ROOT = path.join(FIXTURES, 'skills');
 const CONTRACT = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8'));
 const TEMPORARY_DIRECTORIES = [];
@@ -78,8 +79,9 @@ function fixture(name) {
 }
 
 function temporaryDirectory(label = 'case') {
+  mkdirSync(TEST_WORK_ROOT, { recursive: true });
   const directory = mkdtempSync(
-    path.join(os.tmpdir(), `rapter-clever-girl-${label}-`),
+    path.join(TEST_WORK_ROOT, `rapter-clever-girl-${label}-`),
   );
   TEMPORARY_DIRECTORIES.push(directory);
   return directory;
@@ -90,6 +92,7 @@ function cliArguments({
   source = 'auto',
   skillsRoot,
   skillsRoots,
+  reportVersion = '2',
   extra = [],
 }) {
   const args = [ENGINE_PATH, 'observe'];
@@ -98,6 +101,7 @@ function cliArguments({
   for (const root of skillsRoots ?? (skillsRoot ? [skillsRoot] : [])) {
     args.push('--skills-root', root);
   }
+  args.push('--report-version', reportVersion);
   args.push(...extra);
   return args;
 }

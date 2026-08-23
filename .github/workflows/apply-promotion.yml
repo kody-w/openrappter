@@ -5,7 +5,7 @@ on:
       request_commit: { required: false, type: string }
       request_path: { required: false, type: string }
   schedule: [{ cron: '37 * * * *' }]
-permissions: { contents: write }
+permissions: { contents: read }
 concurrency: { group: apply-stable, cancel-in-progress: false }
 jobs:
   discover:
@@ -27,5 +27,6 @@ jobs:
   apply:
     needs: discover
     if: needs.discover.outputs.commit != ''
+    permissions: { contents: write }
     uses: kody-w/openrappter-release-train/.github/workflows/apply-request.yml@4421bd0f63a4a632fc8745e01d1855cce2969efe
     with: { request_commit: '${{ needs.discover.outputs.commit }}', request_path: '${{ needs.discover.outputs.path }}', target_ring: stable, target_repository: kody-w/openrappter }

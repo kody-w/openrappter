@@ -18,7 +18,7 @@ Require at least one explicit input path. Do not search home directories or
 guess where an assistant stores history.
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input <explicit path> \
   --activity <explicit repository-activity export> \
   --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
@@ -26,6 +26,10 @@ node scripts/rapter-clever-girl.mjs observe \
   --skills-root .claude/skills \
   --pretty
 ```
+
+The installed npm CLI loads the packaged observer directly; it does not start
+the general OpenRappter runtime. In a source checkout, the equivalent
+contributor command is `node scripts/rapter-clever-girl.mjs observe ...`.
 
 `--input` is required. `--input`, `--activity`, `--capability-catalog`, and
 `--skills-root` are repeatable; `--estate-manifest` is optional and singular.

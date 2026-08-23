@@ -160,7 +160,7 @@ proposals with estate-wide collision checks and conservative active-friction
 ranges.
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input <explicit path> \
   --activity <explicit repository-activity export> \
   --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
@@ -171,6 +171,10 @@ node scripts/rapter-clever-girl.mjs observe \
 # Prove the observer and its tests still enforce the safety contract
 node scripts/rapter-clever-girl-gate.mjs
 ```
+
+The npm package installs that command and ships the v2 engine, context matcher,
+JSON contract, and observer skill with it. Contributors can invoke the same
+engine directly with `node scripts/rapter-clever-girl.mjs observe ...`.
 
 It is local-only and has no watcher, network call, subprocess, model call,
 raw-transcript/repository output, productivity score, or apply path. Every

@@ -60,6 +60,8 @@ param(
 
 # ── Strict mode ──────────────────────────────────────────────────────────────
 $ErrorActionPreference = "Stop"
+$METHOD_WAS_BOUND = $PSBoundParameters.ContainsKey("Method")
+$VERSION_WAS_BOUND = $PSBoundParameters.ContainsKey("Version")
 
 # Helper: run npm commands safely (npm.ps1 wrapper breaks under StrictMode)
 function Invoke-Npm {
@@ -101,10 +103,10 @@ $INSTALL_STAGE  = 0
 $INSTALL_TOTAL  = 4
 
 # ── Environment variable overrides ──────────────────────────────────────────
-if (-not $PSBoundParameters.ContainsKey("Method") -and $env:OPENRAPPTER_INSTALL_METHOD) {
+if (-not $METHOD_WAS_BOUND -and $env:OPENRAPPTER_INSTALL_METHOD) {
     $Method = $env:OPENRAPPTER_INSTALL_METHOD
 }
-if (-not $PSBoundParameters.ContainsKey("Version") -and $env:OPENRAPPTER_VERSION) {
+if (-not $VERSION_WAS_BOUND -and $env:OPENRAPPTER_VERSION) {
     $Version = $env:OPENRAPPTER_VERSION
 }
 if (-not $Ring -and $Channel) { $Ring = $Channel }
@@ -1075,7 +1077,7 @@ function Main {
     Write-Stage "Choosing install method"
 
     # If upgrading, match existing method unless overridden
-    if ($isUpgrade -and -not $env:OPENRAPPTER_INSTALL_METHOD) {
+    if ($isUpgrade -and -not $METHOD_WAS_BOUND -and -not $env:OPENRAPPTER_INSTALL_METHOD) {
         $Method = $existingMethod
         Write-Info "Matching existing install method: $Method"
     }

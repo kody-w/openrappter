@@ -40,6 +40,7 @@ function setup(options: {
   const auth = new Map<string, boolean>();
   const persistRing = vi.fn();
   const value = options.value ?? manifest('stable');
+  const fetchManifest = vi.fn(async (ring: RingName) => ({ ...value, ring }) as RingManifest);
   registerReleaseRingMethods({
     registerMethod(name, handler, methodOptions) {
       methods.set(
@@ -51,10 +52,10 @@ function setup(options: {
   }, {
     currentVersion: options.currentVersion ?? '1.9.8',
     selectedRing: () => options.selected ?? 'stable',
-    fetchManifest: async (ring) => ({ ...value, ring }) as RingManifest,
+    fetchManifest,
     persistRing,
   });
-  return { methods, auth, persistRing };
+  return { methods, auth, persistRing, fetchManifest };
 }
 
 describe('release-ring RPC', () => {
@@ -97,7 +98,7 @@ describe('release-ring RPC', () => {
   });
 
   it('requires explicit downgrade approval and applies only on the mutation RPC', async () => {
-    const { methods, persistRing, auth } = setup({ currentVersion: '2.0.0' });
+    const { methods, persistRing, auth, fetchManifest } = setup({ currentVersion: '2.0.0' });
     await methods.get('rings.preview')!({ ring: 'beta' });
     expect(persistRing).not.toHaveBeenCalled();
     await expect(methods.get('rings.apply')!({
@@ -107,6 +108,9 @@ describe('release-ring RPC', () => {
     await methods.get('rings.apply')!({ ring: 'beta', allowDowngrade: true });
     expect(persistRing).toHaveBeenCalledTimes(1);
     expect(persistRing).toHaveBeenCalledWith('beta');
+    expect(fetchManifest).toHaveBeenCalledTimes(3);
+    // preview + refused apply + successful apply: each operation uses exactly
+    // one validated snapshot and never refetches after persistence.
     expect(auth.get('rings.apply')).toBe(true);
   });
 });

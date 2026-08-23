@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [Living Company Desktop](./docs/living-company-desktop.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [XPedition Extensions](./docs/xpedition-extensions.md) | [Living Company Desktop](./docs/living-company-desktop.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -101,7 +101,7 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
 
-### Default interface: Rapter's Clever Girl Edition
+### Default interface: OpenRappter Personal / Rapter's Clever Girl Edition
 
 The hosted dashboard and Electron desktop now boot into **Windows XPedition**,
 an original Windows-XP-inspired desktop shell for OpenRappter. Start, taskbar,
@@ -115,6 +115,16 @@ truthful health check. Existing users can choose
 **Start → Legacy OpenRappter** for the previous shell without deleting saved
 state. See [Windows XPedition](./docs/windows-xpedition.md) for onboarding,
 release-ring behavior, keyboard controls, semantic automation, and migration.
+
+The shell is branded **OpenRappter Personal / Rapter's Clever Girl Edition**.
+OpenRappter remains tenant-free and contains no proprietary SaaS billing,
+entitlement, training, or control-plane code. A separate private RapterOS SaaS
+may mount independently supplied business applications through the stable
+[XPedition extension API](./docs/xpedition-extensions.md); OpenRappter does not
+depend on that private implementation.
+
+OpenRappter's rights follow this repository's actual **Apache License 2.0** in
+[`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE). It is not represented as MIT.
 
 Windows XPedition also includes
 [The Living Company Desktop](./docs/living-company-desktop.md) as required

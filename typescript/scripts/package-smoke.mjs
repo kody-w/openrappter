@@ -185,14 +185,21 @@ try {
     );
   }
   const installedUiAssets = path.join(installedRoot, "ui", "dist", "assets");
-  const livingCompanyBundled = readdirSync(installedUiAssets)
+  const installedUiJavaScript = readdirSync(installedUiAssets)
     .filter((name) => name.endsWith(".js"))
-    .some((name) =>
-      readFileSync(path.join(installedUiAssets, name), "utf8")
-        .includes("Living Company Week"));
-  if (!livingCompanyBundled) {
+    .map((name) => readFileSync(path.join(installedUiAssets, name), "utf8"))
+    .join("\n");
+  if (!installedUiJavaScript.includes("Living Company Week")) {
     throw new Error(
       "Installed package does not contain the Living Company Desktop runtime",
+    );
+  }
+  if (
+    !installedUiJavaScript.includes("OpenRappter Personal") ||
+    !installedUiJavaScript.includes("openrappter-xpedition-extension/1.0")
+  ) {
+    throw new Error(
+      "Installed package does not contain the personal branding and XPedition extension API",
     );
   }
 
@@ -750,7 +757,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes Windows XPedition, Living Company Desktop, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
+    `Package smoke passed: ${artifact.filename} includes OpenRappter Personal, XPedition extensions, Living Company Desktop, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
   );
 } finally {
   rmSync(scratch, {

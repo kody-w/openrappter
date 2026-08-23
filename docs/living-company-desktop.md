@@ -4,6 +4,12 @@ The Living Company Desktop expands Windows XPedition from an agent desktop
 into the operating surface for a small, local-first company. It is required
 product UI, not a Showcase demo.
 
+In OpenRappter Personal these applications operate on the owner's local
+organism and fixture-safe seams. They are not multi-tenant SaaS surfaces.
+Licensed, isolated hosted business organisms belong to the separate private
+RapterOS product and integrate only through
+[versioned XPedition extensions](./xpedition-extensions.md).
+
 Every company application is registered in
 `typescript/ui/src/services/company-app-registry.ts`. The shell has one generic
 `<openrappter-company-app>` renderer; adding an application does not add another

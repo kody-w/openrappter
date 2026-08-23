@@ -31,6 +31,13 @@ The same compiled UI boots in hosted and Electron deployments. Windows
 XPedition is the default shell; **Start → Legacy OpenRappter** is the reversible
 migration path. See [Windows XPedition](./windows-xpedition.md).
 
+The renderer identifies itself as **OpenRappter Personal / Rapter's Clever Girl
+Edition**. It is tenant-free. Separately loaded business-organism applications
+may register through the public
+[XPedition extension API](./xpedition-extensions.md), but the packaged Electron
+runtime contains no private RapterOS billing, entitlement, tenancy, training,
+or control-plane dependency.
+
 ## Development
 
 ```bash

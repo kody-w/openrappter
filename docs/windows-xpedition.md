@@ -9,6 +9,12 @@ Its required operating layer is
 company applications, draft-only automation hooks, action-bound approval
 gates, and a deterministic zero-side-effect work-week harness.
 
+The default shell is branded **OpenRappter Personal / Rapter's Clever Girl
+Edition**. It is tenant-free and contains no proprietary SaaS billing or
+control-plane implementation. Independently provided business surfaces can use
+the versioned [XPedition Application Extension API](./xpedition-extensions.md);
+OpenRappter has no private dependency on those extensions.
+
 It is a desktop shell, not a static demonstration. Every operational window
 mounts an existing Lit product surface and uses the existing authenticated
 gateway client. The shell does not replace gateway RPC, approval, channel,
@@ -88,6 +94,16 @@ The legacy header has a **Windows XPedition** button to switch back.
 Preferences use the versioned key
 `openrappter.xpedition.preferences.v1`; the small
 `openrappter.shell` compatibility key keeps shell selection reversible.
+
+## Open core and hosted business boundary
+
+OpenRappter Personal remains the free/open default organism. Rights to the open
+core follow this repository's actual **Apache License 2.0** in `LICENSE` and
+the notices in `NOTICE`; OpenRappter is not claimed to be MIT.
+
+Hosted, licensed business-organism tenancy and training belong to the separate
+private RapterOS SaaS. Tenant provisioning, billing, entitlement, training,
+and private control-plane code are not part of XPedition or this repository.
 
 ## Semantic desktop control
 

@@ -5,6 +5,7 @@
 import './components/app.js';
 import './components/xpedition-onboarding.js';
 import './components/company-app.js';
+import './components/xpedition-extension-host.js';
 import './components/xpedition-shell.js';
 import './components/sidebar.js';
 import './components/surgeon.js';
@@ -24,6 +25,8 @@ import './components/accounts.js';
 import './components/presence.js';
 import './components/debug.js';
 import { installDesktopCommandHandler } from './services/desktop-control.js';
+import { installXpeditionExtensionApi } from './services/xpedition-extensions.js';
 
 installDesktopCommandHandler();
+installXpeditionExtensionApi();
 console.log('OpenRappter UI initialized');

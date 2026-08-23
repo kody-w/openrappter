@@ -1,4 +1,4 @@
-import { XPEDITION_APP_IDS } from './xpedition.js';
+import { isXpeditionAppId } from './xpedition.js';
 import {
   APPROVAL_REQUIRED_ACTIONS,
   type ExternalAction,
@@ -334,11 +334,10 @@ export async function handleDesktopUiCommand(
     case 'desktop_state':
       return controllableApp().getDesktopState();
     case 'open_app': {
-      const appId = boundedString(
-        args.appId,
-        'XPedition app',
-        XPEDITION_APP_IDS,
-      );
+      const appId = boundedString(args.appId, 'XPedition app');
+      if (!isXpeditionAppId(appId)) {
+        throw new Error(`Unknown or unregistered XPedition app: ${appId}`);
+      }
       return await controllableApp().openDesktopApp(appId);
     }
     case 'focus_window':

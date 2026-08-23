@@ -365,7 +365,7 @@ describe('agent-operable semantic XPedition controls', () => {
     await expect(handleDesktopUiCommand({
       action: 'open_app',
       args: { appId: 'arbitrary-code' },
-    })).rejects.toThrow(/Unknown XPedition app/);
+    })).rejects.toThrow(/Unknown or unregistered XPedition app/);
     await expect(handleDesktopUiCommand({
       action: 'onboarding_step',
       args: { step: 'secrets' },

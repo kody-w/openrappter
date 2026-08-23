@@ -24,6 +24,9 @@ describe('Windows XPedition build and accessibility contract', () => {
   const configComponent = read('../components/config.ts');
   const cronComponent = read('../components/cron.ts');
   const sessionsComponent = read('../components/sessions.ts');
+  const extensionApi = read('../services/xpedition-extensions.ts');
+  const extensionHost = read('../components/xpedition-extension-host.ts');
+  const license = read('../../../../LICENSE');
 
   it('boots XPedition by default while retaining a reversible legacy route', () => {
     expect(app).toContain("private shell: ShellPreference = 'xpedition'");
@@ -101,5 +104,25 @@ describe('Windows XPedition build and accessibility contract', () => {
     expect(companyRuntime).not.toContain("call('channels.send'");
     expect(companyRuntime).not.toContain("call('config.set'");
     expect(companyRuntime).not.toContain("call('exec.respond'");
+  });
+
+  it('brands the personal organism and states the repository license truthfully', () => {
+    expect(shell).toContain('OpenRappter Personal');
+    expect(shell).toContain('Apache License 2.0');
+    expect(shell).toContain('separate private RapterOS SaaS');
+    expect(shell).toContain('OpenRappter is not presented as MIT');
+    expect(license).toContain('Apache License');
+    expect(license).toContain('Version 2.0, January 2004');
+  });
+
+  it('exposes a versioned extension interface without a private dependency', () => {
+    expect(extensionApi).toContain('openrappter-xpedition-extension/1.0');
+    expect(extensionApi).toContain('registerXpeditionExtension');
+    expect(extensionApi).toContain('installXpeditionExtensionApi');
+    expect(extensionHost).toContain("product: 'OpenRappter Personal'");
+    expect(main).toContain('installXpeditionExtensionApi()');
+    expect(extensionApi).not.toMatch(
+      /tenantId|billingAccount|entitlementKey|controlPlaneUrl|from ['\"]rapteros/i,
+    );
   });
 });

@@ -2,6 +2,12 @@ import {
   COMPANY_APP_IDS,
   COMPANY_APP_REGISTRATIONS,
 } from './company-app-registry.js';
+import {
+  isRegisteredXpeditionExtensionId,
+  listXpeditionExtensions,
+  xpeditionExtension,
+  type XpeditionExtensionId,
+} from './xpedition-extensions.js';
 
 export const XPEDITION_APP_IDS = [
   'observe',
@@ -26,7 +32,9 @@ export const XPEDITION_APP_IDS = [
   ...COMPANY_APP_IDS,
 ] as const;
 
-export type XpeditionAppId = (typeof XPEDITION_APP_IDS)[number];
+export type XpeditionAppId =
+  | (typeof XPEDITION_APP_IDS)[number]
+  | XpeditionExtensionId;
 export type OpenRappterView =
   | 'surgeon'
   | 'chat'
@@ -53,6 +61,8 @@ export interface XpeditionApp {
   glyph: string;
   view?: OpenRappterView;
   unavailableReason?: string;
+  extensionElement?: `${string}-${string}`;
+  dataSeams?: readonly string[];
   desktop: boolean;
 }
 
@@ -225,7 +235,7 @@ export const XPEDITION_APPS: readonly XpeditionApp[] = [
     id: 'help',
     title: 'Help & About',
     shortTitle: 'Help',
-    description: "About Rapter's Clever Girl Edition.",
+    description: "About OpenRappter Personal and Rapter's Clever Girl Edition.",
     glyph: '?',
     desktop: false,
   },
@@ -233,8 +243,46 @@ export const XPEDITION_APPS: readonly XpeditionApp[] = [
 ] as const;
 
 export function isXpeditionAppId(value: unknown): value is XpeditionAppId {
-  return typeof value === 'string' &&
-    (XPEDITION_APP_IDS as readonly string[]).includes(value);
+  return (
+    typeof value === 'string' &&
+    (XPEDITION_APP_IDS as readonly string[]).includes(value)
+  ) || isRegisteredXpeditionExtensionId(value);
+}
+
+export function allXpeditionApps(): readonly XpeditionApp[] {
+  return [
+    ...XPEDITION_APPS,
+    ...listXpeditionExtensions().map((extension) => ({
+      id: extension.id,
+      title: extension.title,
+      shortTitle: extension.shortTitle,
+      description: extension.description,
+      glyph: extension.glyph,
+      extensionElement: extension.elementTag,
+      dataSeams: extension.dataSeams,
+      desktop: extension.desktop === true,
+    })),
+  ];
+}
+
+export function xpeditionApp(
+  id: XpeditionAppId,
+): XpeditionApp | null {
+  const core = XPEDITION_APPS.find((candidate) => candidate.id === id);
+  if (core) return core;
+  const extension = xpeditionExtension(id);
+  return extension
+    ? {
+        id: extension.id,
+        title: extension.title,
+        shortTitle: extension.shortTitle,
+        description: extension.description,
+        glyph: extension.glyph,
+        extensionElement: extension.elementTag,
+        dataSeams: extension.dataSeams,
+        desktop: extension.desktop === true,
+      }
+    : null;
 }
 
 export interface XpeditionWindowState {
@@ -276,7 +324,8 @@ export class XpeditionWindowManager {
       this.focus(existing.id);
       return { ...existing };
     }
-    const app = XPEDITION_APPS.find((candidate) => candidate.id === appId)!;
+    const app = xpeditionApp(appId);
+    if (!app) throw new Error(`Unknown or unregistered XPedition app: ${appId}`);
     const offset = this.windows.length % 6;
     const window: XpeditionWindowState = {
       id: `xpedition-${appId}`,

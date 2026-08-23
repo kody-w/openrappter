@@ -439,9 +439,9 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
           <h1>Welcome, clever girl.</h1>
           <p class="subtitle">A calm local desktop for capable agents.</p>
           <p>
-            Rapter's Clever Girl Edition is the new OpenRappter home.
-            Windows XPedition keeps every existing gateway capability under
-            one keyboard-friendly desktop shell.
+            OpenRappter Personal is the free/open default organism.
+            Rapter's Clever Girl Edition and Windows XPedition keep every
+            existing gateway capability under one keyboard-friendly shell.
           </p>
           <div class="panel">
             <strong>Original by design.</strong>
@@ -613,8 +613,8 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
       <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
         <aside>
           <span class="edition">
-            <strong>Rapter's Clever Girl Edition</strong>
-            Windows XPedition
+            <strong>OpenRappter Personal</strong>
+            Rapter's Clever Girl Edition · Windows XPedition
           </span>
           <ol aria-label="Setup progress">
             ${ONBOARDING_STEPS.map((step, index) => html`

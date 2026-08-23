@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- XPedition now brands the default organism as **OpenRappter Personal /
+  Rapter's Clever Girl Edition** and exposes the stable
+  `openrappter-xpedition-extension/1.0` app/window seam. The open shell remains
+  tenant-free and contains no private RapterOS billing, entitlement, training,
+  or control-plane implementation.
+
 - Windows XPedition now includes The Living Company Desktop as first-class
   product UI. Seven durable registered company windows consume real
   gateway/storage seams; a deterministic Monday–Friday fixture harness emits a

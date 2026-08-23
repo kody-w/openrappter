@@ -3,13 +3,14 @@ import { customElement, property, state } from 'lit/decorators.js';
 import {
   DEFAULT_XPEDITION_PREFERENCES,
   FixtureReleaseRingAdapter,
-  XPEDITION_APPS,
   XpeditionWindowManager,
+  allXpeditionApps,
   isOnboardingStep,
   isReleaseRing,
   isXpeditionAppId,
   loadXpeditionPreferences,
   saveXpeditionPreferences,
+  xpeditionApp,
   xpeditionStorage,
   type ContrastPreference,
   type OnboardingStep,
@@ -34,6 +35,10 @@ import {
   type CompanyApprovalRequest,
   type ExternalAction,
 } from '../services/living-company.js';
+import {
+  subscribeXpeditionExtensions,
+  xpeditionExtension,
+} from '../services/xpedition-extensions.js';
 
 interface DragState {
   id: string;
@@ -699,6 +704,8 @@ export class OpenRappterXpeditionShell extends LitElement {
   });
   private clockTimer?: ReturnType<typeof setInterval>;
   private drag: DragState | null = null;
+  private unsubscribeExtensions?: () => void;
+  @state() private extensionRevision = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -708,6 +715,13 @@ export class OpenRappterXpeditionShell extends LitElement {
     this.clockTimer = setInterval(() => {
       this.now = new Date();
     }, 30_000);
+    this.unsubscribeExtensions = subscribeXpeditionExtensions(() => {
+      this.extensionRevision++;
+      const registered = new Set(allXpeditionApps().map((app) => app.id));
+      for (const window of this.manager.state.windows) {
+        if (!registered.has(window.appId)) this.manager.close(window.id);
+      }
+    });
     globalThis.addEventListener('pointermove', this.handlePointerMove);
     globalThis.addEventListener('pointerup', this.handlePointerUp);
   }
@@ -715,6 +729,7 @@ export class OpenRappterXpeditionShell extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     if (this.clockTimer) clearInterval(this.clockTimer);
+    this.unsubscribeExtensions?.();
     globalThis.removeEventListener('pointermove', this.handlePointerMove);
     globalThis.removeEventListener('pointerup', this.handlePointerUp);
   }
@@ -755,7 +770,7 @@ export class OpenRappterXpeditionShell extends LitElement {
   }
 
   openView(view: OpenRappterView): Record<string, unknown> {
-    const app = XPEDITION_APPS.find((candidate) => candidate.view === view);
+    const app = this.appCatalog.find((candidate) => candidate.view === view);
     if (!app) throw new Error(`No XPedition app maps to view: ${view}`);
     return this.openApp(app.id);
   }
@@ -928,7 +943,7 @@ export class OpenRappterXpeditionShell extends LitElement {
     event: KeyboardEvent,
     index: number,
   ): void {
-    const shortcuts = XPEDITION_APPS.filter((app) => app.desktop);
+    const shortcuts = this.appCatalog.filter((app) => app.desktop);
     let next = index;
     if (event.key === 'ArrowDown') next = Math.min(shortcuts.length - 1, index + 2);
     else if (event.key === 'ArrowUp') next = Math.max(0, index - 2);
@@ -964,6 +979,19 @@ export class OpenRappterXpeditionShell extends LitElement {
   };
 
   private renderAppContent(app: XpeditionApp) {
+    if (app.extensionElement) {
+      const extension = xpeditionExtension(app.id);
+      return html`
+        <openrappter-xpedition-extension-host
+          .extension=${extension}
+          @open-xpedition-app=${(event: CustomEvent<{ appId: string }>) => {
+            if (isXpeditionAppId(event.detail.appId)) {
+              this.openApp(event.detail.appId);
+            }
+          }}
+        ></openrappter-xpedition-extension-host>
+      `;
+    }
     if (app.unavailableReason) {
       return html`
         <div class="unavailable" role="status">
@@ -987,12 +1015,27 @@ export class OpenRappterXpeditionShell extends LitElement {
     if (app.id === 'help') {
       return html`
         <article class="about">
-          <h2>Rapter's Clever Girl Edition</h2>
-          <p><strong>Windows XPedition</strong> · user slug <code>rapters-clevergirledition</code></p>
+          <h2>OpenRappter Personal</h2>
+          <p>
+            <strong>Rapter's Clever Girl Edition · Windows XPedition</strong>
+            · user slug <code>rapters-clevergirledition</code>
+          </p>
           <p>
             A local-first desktop shell for OpenRappter. All operational
             windows below reuse the existing gateway RPC client and Lit
             product surfaces.
+          </p>
+          <p>
+            <strong>Open-core boundary:</strong> this repository is licensed
+            under the <strong>Apache License 2.0</strong>; your rights to the
+            open core follow the repository's <code>LICENSE</code> and
+            <code>NOTICE</code> files. OpenRappter is not presented as MIT.
+          </p>
+          <p>
+            Hosted, licensed business-organism tenancy and training belong to
+            the separate private RapterOS SaaS. OpenRappter Personal contains
+            no tenant provisioning, billing, entitlement, or private
+            control-plane implementation.
           </p>
           <ul>
             <li><kbd>Ctrl</kbd> + <kbd>Space</kbd>: open Start</li>
@@ -1110,7 +1153,8 @@ export class OpenRappterXpeditionShell extends LitElement {
   }
 
   private renderWindow(window: XpeditionWindowState) {
-    const app = XPEDITION_APPS.find((candidate) => candidate.id === window.appId)!;
+    const app = xpeditionApp(window.appId);
+    if (!app) return nothing;
     if (window.minimized) return nothing;
     const style = window.maximized
       ? `z-index:${window.zIndex}`
@@ -1176,13 +1220,13 @@ export class OpenRappterXpeditionShell extends LitElement {
         <header class="start-header">
           <span class="profile-mark" aria-hidden="true">R</span>
           <span>
-            <strong>Rapter's Clever Girl Edition</strong>
-            Windows XPedition · Living Company Desktop
+            <strong>OpenRappter Personal</strong>
+            Rapter's Clever Girl Edition · Windows XPedition
           </span>
         </header>
         <div class="start-grid">
           <div class="start-apps">
-            ${XPEDITION_APPS.map((app) => html`
+            ${this.appCatalog.map((app) => html`
               <button
                 class="start-item"
                 role="menuitem"
@@ -1207,12 +1251,12 @@ export class OpenRappterXpeditionShell extends LitElement {
   }
 
   render() {
-    const desktopApps = XPEDITION_APPS.filter((app) => app.desktop);
+    const desktopApps = this.appCatalog.filter((app) => app.desktop);
     return html`
       <main
         class="desktop"
         role="application"
-        aria-label="Rapter's Clever Girl Edition Windows XPedition desktop"
+        aria-label="OpenRappter Personal, Rapter's Clever Girl Edition, Windows XPedition desktop"
         tabindex="0"
         @keydown=${this.handleDesktopKeydown}
         @click=${(event: MouseEvent) => {
@@ -1220,8 +1264,8 @@ export class OpenRappterXpeditionShell extends LitElement {
         }}
       >
         <div class="brand" aria-hidden="true">
-          <strong>Rapter's Clever Girl Edition</strong>
-          <span>Windows XPedition · Living Company Desktop</span>
+          <strong>OpenRappter Personal</strong>
+          <span>Rapter's Clever Girl Edition · Windows XPedition</span>
         </div>
 
         ${!this.connected && this.preferences.onboardingCompleted
@@ -1310,6 +1354,11 @@ export class OpenRappterXpeditionShell extends LitElement {
             `}
       </main>
     `;
+  }
+
+  private get appCatalog(): readonly XpeditionApp[] {
+    void this.extensionRevision;
+    return allXpeditionApps();
   }
 }
 

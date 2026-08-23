@@ -100,6 +100,24 @@ validates against the exact RAPPID and proposed mutation. If no authority is
 configured, mutation fails closed. The model-facing `QuantumRappidAgent`
 contains only read and proposal operations.
 
+Native clients pair through a real host handshake:
+
+1. an authenticated operator calls `rappid.pairing.begin` and displays its
+   five-minute one-time link code;
+2. the device submits `rappid.pairing.complete` with a domain-separated proof
+   bound to that code, its random install id, and a nonce—the code never travels;
+3. the host consumes the code and returns a revocable, expiring bearer grant
+   scoped only to the requested RAPPID methods;
+4. the device sends that token as `Authorization: Bearer <token>`. Logs may
+   redact it; the transport may not replace the wire credential with redaction
+   text.
+
+Before mutation, the paired device calls `rappid.approval.issue` with the exact
+RAPPID and proposal/content binding. The host binds the resulting approval id
+to that device, scope, payload, and expiry. `rappid.grow` or
+`rappid.attach-skill` atomically consumes it; replay, expiry, another device,
+or any mismatched field is refused.
+
 The marketplace/Habitat visual surface, Show-and-Tell recorder integration,
 committed-message chat reveal, and iOS companion are intentionally outside
 this protocol/runtime release unit.

@@ -27,6 +27,7 @@ import type {
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { askBrainstem } from './brainstem-client.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
+import { registerRappidMethods } from './methods/rappid-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
@@ -3365,6 +3366,7 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+    registerRappidMethods(this, { dataDir: this.dataDir });
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }

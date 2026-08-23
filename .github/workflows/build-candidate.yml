@@ -6,8 +6,8 @@ on:
         description: Exact canonical main commit (blank = current main)
         required: false
         type: string
-      version:
-        description: Exact intended package version, for example 0.1.0-beta.11
+      channel_version:
+        description: Exact channel identity, for example 0.1.0-beta.11
         required: true
         type: string
       release_tag:
@@ -18,6 +18,10 @@ on:
         required: true
         type: choice
         options: [release, snapshot]
+      candidate_id:
+        description: Optional snapshot ID; release IDs derive from release_tag
+        required: false
+        type: string
 permissions:
   contents: write
 concurrency:
@@ -62,31 +66,34 @@ jobs:
         with: { python-version: '3.12' }
       - name: Build exact candidate bytes once
         env:
-          CANDIDATE_VERSION: ${{ inputs.version }}
+          CHANNEL_VERSION: ${{ inputs.channel_version }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           CANDIDATE_KIND: ${{ inputs.candidate_kind }}
+          INPUT_CANDIDATE_ID: ${{ inputs.candidate_id }}
         run: |
           set -euo pipefail
           ts_version="$(node -p 'require("./typescript/package.json").version')"
           py_version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml","rb"))["project"]["version"])')"
           runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
-          test "$ts_version" = "$CANDIDATE_VERSION"
-          test "$py_version" = "$CANDIDATE_VERSION"
-          test "$runtime_version" = "$CANDIDATE_VERSION"
           if [ "$CANDIDATE_KIND" = release ]; then
-            test "$RELEASE_TAG" = "v$CANDIDATE_VERSION"
+            test "$RELEASE_TAG" = "v$CHANNEL_VERSION"
+            candidate_id="$(python -c 'import urllib.parse,os; print(urllib.parse.quote(os.environ[\"RELEASE_TAG\"],safe=\"._-\"))')"
           else
             test -z "$RELEASE_TAG"
+            candidate_id="${INPUT_CANDIDATE_ID:-snapshot-$SOURCE_DATE_EPOCH}"
           fi
+          printf '%s' "$candidate_id" | grep -Eq '^[A-Za-z0-9._%-]+$'
+          echo "CANDIDATE_ID=$candidate_id" >> "$GITHUB_ENV"
           mkdir candidate
           (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)
           python -m pip install --disable-pip-version-check "build==1.5.1" "hatchling==1.31.0"
           (cd python && python -m build --no-isolation --outdir ../candidate)
           cp install.sh install.ps1 candidate/
-          node --input-type=module - "$SOURCE_COMMIT" "$CANDIDATE_VERSION" "$RELEASE_TAG" "$CANDIDATE_KIND" "$SOURCE_DATE_EPOCH" <<'NODE'
+          node --input-type=module - "$SOURCE_COMMIT" "$ts_version" "$py_version" "$runtime_version" "$CHANNEL_VERSION" "$RELEASE_TAG" "$CANDIDATE_KIND" "$candidate_id" "$SOURCE_DATE_EPOCH" <<'NODE'
           import fs from 'node:fs';
           import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
-          const value=buildProvenance('candidate',process.argv[2],process.argv[3],process.argv[4]||null,process.argv[5],Number(process.argv[6]));
+          const versions={npm:process.argv[3],pypi:process.argv[4],runtime:process.argv[5],channel:process.argv[6]};
+          const value=buildProvenance('candidate',process.argv[2],versions,process.argv[7]||null,process.argv[8],process.argv[9],Number(process.argv[10]));
           verifyProvenance('candidate',value);
           fs.writeFileSync('candidate/provenance.json',JSON.stringify(value,null,2)+'\n');
           NODE
@@ -103,17 +110,33 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin candidates:candidates 2>/dev/null || true
           if git show-ref --verify --quiet refs/heads/candidates; then git switch candidates; else git switch --orphan candidates; git rm -rf .; fi
-          path="candidates/$SOURCE_COMMIT"
+          path="candidates/$SOURCE_COMMIT/$CANDIDATE_KIND/$CANDIDATE_ID"
           mkdir -p "$path"
           target="$path/$BUNDLE_SHA.tar.gz"
           if [ -f "$target" ]; then
             echo "$BUNDLE_SHA  $target" | sha256sum -c -
-            exit 0
+            cmp candidate/provenance.json "$path/provenance.json"
+          else
+            cp candidate.tar.gz "$target"
+            cp candidate/provenance.json "$path/provenance.json"
           fi
-          cp candidate.tar.gz "$target"
-          cp candidate/provenance.json "$path/provenance.json"
-          cp candidate/SHA256SUMS "$path/SHA256SUMS"
-          git add "$path"
+          index="candidates/$SOURCE_COMMIT/index.json"
+          node --input-type=module - "$index" "$CANDIDATE_KIND" "$CANDIDATE_ID" "$BUNDLE_SHA" "$path" <<'NODE'
+          import fs from 'node:fs';
+          const [index,kind,id,sha,path]=process.argv.slice(2);
+          let value={schema:'openrappter-candidate-index/v1',source_commit:process.env.SOURCE_COMMIT,snapshots:[],releases:[]};
+          if(fs.existsSync(index))value=JSON.parse(fs.readFileSync(index));
+          const key=kind==='release'?'releases':'snapshots';
+          const entry={id,bundle_sha256:sha,path,provenance_path:`${path}/provenance.json`,source_date_epoch:Number(process.env.SOURCE_DATE_EPOCH)};
+          const old=value[key].find(row=>row.id===id);
+          if(old&&JSON.stringify(old)!==JSON.stringify(entry))throw Error('conflicting rebuild for immutable candidate id');
+          if(!old)value[key].push(entry);
+          value[key].sort((a,b)=>a.source_date_epoch-b.source_date_epoch||a.id.localeCompare(b.id));
+          fs.mkdirSync(`candidates/${process.env.SOURCE_COMMIT}`,{recursive:true});
+          fs.writeFileSync(index,JSON.stringify(value,null,2)+'\n');
+          NODE
+          git add "$path" "$index"
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m "candidate: $SOURCE_COMMIT $BUNDLE_SHA"
           git push origin candidates
           echo "::notice::candidate channel only; never stable/default"

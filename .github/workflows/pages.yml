@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: kody-w/openrappter-release-train
-          ref: d8bb50f04e3b5d9b29564202abcab6383077977d
+          ref: 2749023560a8390c7d34a01f1ce3c78d770e77be
           path: authority
       - env: { GH_TOKEN: '${{ github.token }}' }
         run: |

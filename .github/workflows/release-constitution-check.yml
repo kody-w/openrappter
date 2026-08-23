@@ -16,4 +16,5 @@ jobs:
           node --test tools/release-constitution-static.test.mjs
           node --test scripts/candidate-bundle.test.mjs
           node --test scripts/verify-pages-installer.test.mjs
+          bash tests/test_release_ring_journey.sh
           node tools/release-constitution-static.mjs

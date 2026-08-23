@@ -1,0 +1,1 @@
+rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=e6b7ea25892188e39bc134a4e94ddb3a5ee5f983e7653d84012af3f0618c18a8&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=physical-card-nonce-01

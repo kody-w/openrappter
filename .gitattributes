@@ -1,0 +1,3 @@
+# Frozen protocol fixtures are byte-addressed. Never rewrite their line endings.
+tests/vectors/rapp-1-08893fd/rappid-card/** -text
+python/openrappter/rappid_card/test_vectors/** -text

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -6,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -123,6 +125,10 @@ try {
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
+    "dist/rappid-card/test-vectors/deck.json",
+    "dist/rappid-card/test-vectors/physical.rappid-card.json",
+    "dist/rappid-card/test-vectors/physical-payload.txt",
+    "dist/rappid-card/test-vectors/PROVENANCE.json",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);
@@ -153,6 +159,40 @@ try {
     readFileSync(installedIndex, "utf8").length === 0
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
+  }
+
+  const vectorRoot = path.join(installedRoot, "dist", "rappid-card", "test-vectors");
+  const provenance = JSON.parse(
+    readFileSync(path.join(vectorRoot, "PROVENANCE.json"), "utf8"),
+  );
+  if (
+    provenance.source_commit !== "08893fdf8d495f9da8c202cd004fc1587082816c"
+    || provenance.deck_schema !== "rappid-card-vectors/3"
+  ) {
+    throw new Error("Packaged RAPPID card provenance is wrong");
+  }
+  for (const [name, expected] of Object.entries(provenance.sha256)) {
+    const actual = createHash("sha256")
+      .update(readFileSync(path.join(vectorRoot, name)))
+      .digest("hex");
+    if (actual !== expected) {
+      throw new Error(`Packaged ${name} hash ${actual} != ${expected}`);
+    }
+  }
+
+  const hiddenVectors = `${vectorRoot}.hidden`;
+  renameSync(vectorRoot, hiddenVectors);
+  try {
+    run(process.execPath, [path.join(installedRoot, "bin", "openrappter.mjs"), "--help"], {
+      cwd: installRoot,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    run(process.execPath, [path.join(installedRoot, "bin", "openrappter.mjs"), "rappid-card", "--help"], {
+      cwd: installRoot,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+  } finally {
+    renameSync(hiddenVectors, vectorRoot);
   }
 
   const cli = run(

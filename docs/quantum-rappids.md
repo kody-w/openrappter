@@ -104,6 +104,23 @@ The marketplace/Habitat visual surface, Show-and-Tell recorder integration,
 committed-message chat reveal, and iOS companion are intentionally outside
 this protocol/runtime release unit.
 
+## Virtual Debug Card
+
+The **RAPPID Debug Card** page inspects the RAPP/1 §7.10 profile without
+mutating or awakening a Quantum RAPPID. `.rappid-card.json` remains the
+canonical eleven-key frame, never a private envelope. The UI displays signed
+frame and policy fields and can run offline verification without hydration or
+replay-state commits.
+
+Production calling cards use `body.calling-card` + `rappid-card/1`; debug cards
+use `body.debug-card` + `rappid-card-test/1`. Detached EdDSA JWS, keyed
+SPKI→RAPPID binding, signed runtime policy, authority and revocation views,
+globally routable HTTPS endpoint evidence, transactional replay state,
+`rapp/1:egg` inventory, and particle continuity follow protocol PR #12 commit
+`08893fdf8d495f9da8c202cd004fc1587082816c`.
+
+See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
+
 ## RAPP/1 boundary
 
 RAPP/1 remains the authority for:

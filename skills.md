@@ -259,6 +259,14 @@ python3 -m openrappter.cli [options]  # Direct
 | `show-and-tell build --target <skill|automation|all>` | Build portable artifacts from the approved analysis |
 | `show-and-tell replay` | Preview a side-effect-free replay plan |
 | `show-and-tell test` | Validate artifact integrity, privacy, and disabled defaults |
+| `rappid-card` | Virtual RAPPID Debug Card fixture, verification, QR, and simulator command group |
+| `rappid-card fixtures <directory> [--format svg\|png\|both]` | Export the exact 63-scenario authoritative deck with canonical eleven-key frames, links, trust docs, and QR artifacts |
+| `rappid-card inspect <card> --link <uri-or-file>` | Parse canonical frame bytes and the exact `m,e,n` compact URI |
+| `rappid-card verify <card> --link <uri-or-file> --scenario <name> --state <sqlite>` | Run the exact test-vector verifier inside a `synthetic-conformance-fixture`, `live:false` envelope |
+| `rappid-card verify <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file> --state <sqlite>` | Fail closed as live-adapter-required; bundle data never supplies production roots/live evidence |
+| `rappid-card inspect-offline <card> --link <uri-or-file> --bundle <json> --trust-config <0600-file>` | Historical inspection reports `historical-unproven`, never opens replay state, and always reports `awake:false` |
+| `rappid-card qr <link> <output> [--format svg\|png]` | Render the exact compact link with an ecosystem QR encoder |
+| `rappid-card simulate <scenario> --state <sqlite>` | Run one mandatory vector in an unmistakable synthetic/non-live envelope |
 
 ### Interactive Mode Slash Commands
 

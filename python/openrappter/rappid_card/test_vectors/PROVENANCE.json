@@ -1,0 +1,15 @@
+{
+  "source_repository": "kody-w/rapp-1",
+  "source_commit": "08893fdf8d495f9da8c202cd004fc1587082816c",
+  "deck_schema": "rappid-card-vectors/3",
+  "source_paths": {
+    "deck.json": "vectors/rappid-card/deck.json",
+    "physical.rappid-card.json": "vectors/rappid-card/physical.rappid-card.json",
+    "physical-payload.txt": "vectors/rappid-card/physical-payload.txt"
+  },
+  "sha256": {
+    "deck.json": "b6361b31038645e1246cfc83e3b797406ce1f78eb7765d48ba57e64d7f300f15",
+    "physical.rappid-card.json": "2dd9c7eede4e2080639866dd4eb4d9c1d44263ff1dc09e6a4ec2e434149fa4c8",
+    "physical-payload.txt": "93b9dc0fac2a22511bc50a4d26a4065f994434ea6524d4d8351eae76ffc9e347"
+  }
+}

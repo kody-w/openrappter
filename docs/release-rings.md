@@ -41,6 +41,12 @@ openrappter rings status --ring stable --json
 openrappter update --ring beta
 ```
 
+The first-party Configuration screen exposes the same five-value setting as a
+small release-ring switcher. Selecting a row only previews its validated exact
+version, commit, and status. A separate Apply action is required; non-stable
+rings warn, older rings require a downgrade acknowledgement, and disabled or
+unpublished rings cannot be applied. The UI never downloads a package itself.
+
 The satellite repositories are maintained pointers, not source forks. Schema,
 promotion rules, and append-only receipts are owned by
 [`kody-w/openrappter-release-train`](https://github.com/kody-w/openrappter-release-train).

@@ -98,11 +98,18 @@ fi
 printf "\n\033[1m▸ Release rings\033[0m\n"
 saved_channel="$CHANNEL"
 saved_channel_file="$CHANNEL_FILE"
+saved_legacy_channel_file="$LEGACY_CHANNEL_FILE"
 CHANNEL=""
-CHANNEL_FILE="$REPO_ROOT/tests/.missing-ring-selection"
+CHANNEL_FILE="$TEST_SCRATCH/ring"
+LEGACY_CHANNEL_FILE="$TEST_SCRATCH/channel"
 assert_eq "$(effective_channel)" "stable" "stable is the behavior-safe default"
 CHANNEL="beta"
 assert_eq "$(effective_channel)" "beta" "explicit selector wins over persisted/default ring"
+DRY_RUN=0
+persist_channel
+assert_eq "$(cat "$CHANNEL_FILE")" "beta" "installer persists the shared validated ring setting"
+CHANNEL=""
+assert_eq "$(effective_channel)" "beta" "persisted shared setting is selected"
 for ring in stable beta canary alpha nightly; do
   assert_contains "$(ring_repository "$ring")" "kody-w/openrappter" "$ring maps to an allowlisted repository"
 done
@@ -110,6 +117,7 @@ manifest_fields="$(validate_ring_manifest_file "$REPO_ROOT/.ring/manifest.json" 
 assert_not_empty "$manifest_fields" "stable closed manifest validates"
 CHANNEL="$saved_channel"
 CHANNEL_FILE="$saved_channel_file"
+LEGACY_CHANNEL_FILE="$saved_legacy_channel_file"
 
 # ── OS Detection ──
 printf "\n\033[1m▸ OS detection\033[0m\n"

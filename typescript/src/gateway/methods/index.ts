@@ -45,6 +45,7 @@ import { registerZenMethods } from './zen-methods.js';
 import { registerBackupMethods } from './backup-methods.js';
 import { registerTwinMethods } from './twin-methods.js';
 import { registerSurgeonMethods } from './surgeon-methods.js';
+import { registerReleaseRingMethods } from './release-ring-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -86,6 +87,7 @@ export function registerAllMethods(
   registerZenMethods(server, deps);
   registerBackupMethods(server, deps);
   registerTwinMethods(server, deps);
+  registerReleaseRingMethods(server);
 }
 
 // Re-export individual registration functions
@@ -114,4 +116,5 @@ export {
   registerBackupMethods,
   registerTwinMethods,
   registerSurgeonMethods,
+  registerReleaseRingMethods,
 };

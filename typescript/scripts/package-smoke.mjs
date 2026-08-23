@@ -123,6 +123,8 @@ try {
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",
     "dist/cli/show-and-tell.js",
+    "dist/release-rings.js",
+    "dist/gateway/methods/release-ring-methods.js",
   ]) {
     if (!packedFiles.has(required)) {
       throw new Error(`Tarball does not contain ${required}`);
@@ -153,6 +155,14 @@ try {
     readFileSync(installedIndex, "utf8").length === 0
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
+  }
+  const installedAssets = path.join(installedRoot, "ui", "dist", "assets");
+  const uiJavascript = readdirSync(installedAssets)
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => readFileSync(path.join(installedAssets, name), "utf8"))
+    .join("\n");
+  if (!uiJavascript.includes("Apply for next update")) {
+    throw new Error("Installed UI does not contain the release-ring switcher");
   }
 
   const cli = run(

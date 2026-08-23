@@ -87,6 +87,7 @@ $NPM_PACKAGE    = "openrappter"
 $REPO_URL       = "https://github.com/kody-w/openrappter.git"
 $MIN_NODE       = 20
 $HOME_DIR       = Join-Path $env:USERPROFILE ".openrappter"
+$RING_FILE      = Join-Path $HOME_DIR "ring"
 $GATEWAY_PID    = Join-Path $HOME_DIR "gateway.pid"
 # The port the readiness probe knocks on. It must be the port the gateway
 # actually binds, so it follows the CLI's own precedence: OPENRAPPTER_PORT, then
@@ -109,6 +110,13 @@ if (-not $Ring -and $env:OPENRAPPTER_CHANNEL) { $Ring = $env:OPENRAPPTER_CHANNEL
 # so it silently failed. Keep it working as an alias for the beta ring.
 if (-not $Ring -and $env:OPENRAPPTER_BETA -eq "1") { $Ring = "beta" }
 if ($env:OPENRAPPTER_ALLOW_DOWNGRADE -eq "true") { $AllowDowngrade = $true }
+if (-not $Ring -and (Test-Path $RING_FILE)) {
+    $savedRing = (Get-Content $RING_FILE -Raw).Trim()
+    if ($savedRing -notin @("stable", "beta", "canary", "alpha", "nightly")) {
+        throw "Persisted release ring is invalid: $savedRing"
+    }
+    $Ring = $savedRing
+}
 if ($env:OPENRAPPTER_HOME)           { $InstallDir = $env:OPENRAPPTER_HOME }
 if ($env:OPENRAPPTER_NO_PROMPT -eq "true") { $NoPrompt = $true }
 if (-not $InstallDir) { $InstallDir = $HOME_DIR }
@@ -983,6 +991,9 @@ function Main {
     } else {
         Install-ViaGit
     }
+    $selectedRing = if ($Ring) { $Ring } else { "stable" }
+    New-Item -ItemType Directory -Path $HOME_DIR -Force | Out-Null
+    Set-Content -Path $RING_FILE -Value $selectedRing -Encoding ascii
 
     # ── Copilot SDK setup ──
     Setup-CopilotSdk

@@ -886,7 +886,8 @@ OPT_SET_NPM_PREFIX=false
 # `npm install openrappter`.
 RING_ORDER="stable beta canary alpha nightly"
 CHANNEL="${OPENRAPPTER_RING:-${OPENRAPPTER_CHANNEL:-}}"
-CHANNEL_FILE="${INSTALL_DIR}/channel"
+CHANNEL_FILE="${INSTALL_DIR}/ring"
+LEGACY_CHANNEL_FILE="${INSTALL_DIR}/channel"
 OPT_ALLOW_DOWNGRADE="${OPENRAPPTER_ALLOW_DOWNGRADE:-false}"
 
 # OPENRAPPTER_BETA predates rings and used to resolve a `beta` dist-tag that
@@ -927,14 +928,19 @@ effective_channel() {
         printf '%s\n' "$CHANNEL"
         return 0
     fi
-    if [[ -r "$CHANNEL_FILE" ]]; then
-        local saved
-        saved="$(tr -d '[:space:]' < "$CHANNEL_FILE" 2>/dev/null || true)"
+    local setting saved
+    for setting in "$CHANNEL_FILE" "$LEGACY_CHANNEL_FILE"; do
+        [[ -r "$setting" ]] || continue
+        saved="$(tr -d '[:space:]' < "$setting" 2>/dev/null || true)"
         if [[ -n "$saved" ]] && is_valid_ring "$saved"; then
             printf '%s\n' "$saved"
             return 0
         fi
-    fi
+        if [[ -n "$saved" ]]; then
+            ui_error "Persisted release ring is invalid: $saved"
+            return 1
+        fi
+    done
     printf 'stable\n'
 }
 
@@ -1018,7 +1024,7 @@ resolve_pkg_spec() {
     printf '%s\n' "$RESOLVED_RING_ARTIFACT"
 }
 
-# Remember the ring so `openrappter` upgrades stay on the same train car.
+# Remember the validated ring in the same setting read by the CLI and UI.
 persist_channel() {
     local ring
     ring="$(effective_channel)"

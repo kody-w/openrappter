@@ -1,12 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   RINGS,
   RING_MANIFEST_URLS,
   downloadAndVerify,
   fetchRingManifest,
+  readPersistedRing,
   resolveRing,
   selectRing,
   validateRingManifest,
+  writePersistedRing,
 } from '../../release-rings.js';
 
 const stable = {
@@ -34,10 +38,49 @@ const response = (body: unknown, ok = true) => ({
 }) as Response;
 
 describe('ring selection', () => {
-  it('defaults safely to stable', () => expect(selectRing({ env: {} })).toBe('stable'));
+  it('defaults safely to stable', () => expect(selectRing({ env: {}, persistedRing: null })).toBe('stable'));
   it('uses CLI over OPENRAPPTER_RING over legacy channel', () => {
-    expect(selectRing({ cliRing: 'alpha', env: { OPENRAPPTER_RING: 'beta' } })).toBe('alpha');
-    expect(selectRing({ env: { OPENRAPPTER_RING: 'canary', OPENRAPPTER_CHANNEL: 'beta' } })).toBe('canary');
+    expect(selectRing({
+      cliRing: 'alpha',
+      env: { OPENRAPPTER_RING: 'beta' },
+      persistedRing: 'nightly',
+    })).toBe('alpha');
+    expect(selectRing({
+      env: { OPENRAPPTER_RING: 'canary', OPENRAPPTER_CHANNEL: 'beta' },
+      persistedRing: 'nightly',
+    })).toBe('canary');
+    expect(selectRing({ env: {}, persistedRing: 'beta' })).toBe('beta');
+  });
+
+  describe('shared persisted ring setting', () => {
+    const home = path.resolve('.test-release-ring-setting');
+    let previousHome: string | undefined;
+
+    beforeEach(() => {
+      previousHome = process.env.OPENRAPPTER_HOME;
+      process.env.OPENRAPPTER_HOME = home;
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    afterEach(() => {
+      fs.rmSync(home, { recursive: true, force: true });
+      if (previousHome === undefined) delete process.env.OPENRAPPTER_HOME;
+      else process.env.OPENRAPPTER_HOME = previousHome;
+    });
+
+    it('round-trips only an allowlisted value through the CLI/installer setting', () => {
+      writePersistedRing('nightly');
+      expect(readPersistedRing()).toBe('nightly');
+      expect(fs.readFileSync(path.join(home, 'ring'), 'utf8')).toBe('nightly\n');
+      expect(selectRing({ env: {} })).toBe('nightly');
+    });
+
+    it('fails closed on a tampered persisted value', () => {
+      fs.mkdirSync(home, { recursive: true });
+      fs.writeFileSync(path.join(home, 'ring'), 'attacker/repo\n');
+      expect(() => readPersistedRing()).toThrow('invalid');
+      expect(() => selectRing({ env: {} })).toThrow('invalid');
+    });
   });
   it('maps every ring to only its known repository', () => {
     for (const ring of RINGS) expect(RING_MANIFEST_URLS[ring]).toContain(`openrappter${ring === 'stable' ? '' : `-${ring}`}/main/.ring/manifest.json`);

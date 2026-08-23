@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { openrappterHome, openrappterPath } from './infra/openrappter-home.js';
 
 export const RINGS = ['stable', 'beta', 'canary', 'alpha', 'nightly'] as const;
 export type RingName = (typeof RINGS)[number];
@@ -63,12 +66,43 @@ export function isRing(value: string): value is RingName {
   return (RINGS as readonly string[]).includes(value);
 }
 
+export function readPersistedRing(): RingName | null {
+  const candidates = [openrappterPath('ring'), openrappterPath('channel')];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    const value = fs.readFileSync(file, 'utf8').trim();
+    if (!isRing(value)) {
+      throw new Error(`persisted release ring ${JSON.stringify(value)} is invalid`);
+    }
+    return value;
+  }
+  return null;
+}
+
+export function writePersistedRing(ring: RingName): void {
+  if (!isRing(ring)) throw new Error(`cannot persist unknown release ring ${JSON.stringify(ring)}`);
+  const home = openrappterHome();
+  fs.mkdirSync(home, { recursive: true });
+  const destination = path.join(home, 'ring');
+  const staging = path.join(home, `.ring-${process.pid}.new`);
+  fs.writeFileSync(staging, `${ring}\n`, { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(staging, destination);
+}
+
 export function selectRing(options: {
   cliRing?: string;
   env?: NodeJS.ProcessEnv;
+  persistedRing?: string | null;
 } = {}): RingName {
   const env = options.env ?? process.env;
-  const candidate = options.cliRing || env.OPENRAPPTER_RING || env.OPENRAPPTER_CHANNEL || 'stable';
+  const persisted = options.persistedRing === undefined
+    ? readPersistedRing()
+    : options.persistedRing;
+  const candidate = options.cliRing
+    || env.OPENRAPPTER_RING
+    || env.OPENRAPPTER_CHANNEL
+    || persisted
+    || 'stable';
   if (!isRing(candidate)) {
     throw new Error(`unknown release ring ${JSON.stringify(candidate)}; expected ${RINGS.join(', ')}`);
   }

@@ -31,6 +31,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerReleaseRingMethods } from './methods/release-ring-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -2498,6 +2499,7 @@ export class GatewayServer {
   }
 
   private registerBuiltInMethods(): void {
+    registerReleaseRingMethods(this);
     // Core
     const publicMethods: Array<[string, RpcMethodHandler]> = [
       ['status', async () => this.getStatus()],

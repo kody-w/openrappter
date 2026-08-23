@@ -30,6 +30,7 @@ Run `openrappter <command> --help` for a command's own options.
 | `hatch` | `[options] <name>` | Hatch a twin rappter on this device |
 | `flight` |  | Inspect the local privacy-aware Flight Recorder |
 | `show-and-tell` |  | Learn a reusable skill or automation from a local demonstration |
+| `rappid-card` |  | Generate, inspect, verify, render, and simulate virtual RAPPID Debug Cards |
 | `clever-girl` |  | Observe recurring friction in explicit local exports |
 | `skills` |  | Manage skills |
 | `agents` |  | Manage agents |

@@ -44,6 +44,7 @@ const INTENTIONALLY_INVOKED = new Set([
   'registerRappterMethods',
   'registerRappidHostMethods',
   'registerRappidMethods',
+  'registerRappidCardMethods',
   'registerShowcaseMethods',
   'registerSurgeonMethods',
 ]);

@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Quantum RAPPIDs](./docs/quantum-rappids.md) | [RAPPID Debug Card](./docs/rappid-debug-card.md) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -79,6 +79,20 @@ these agents adoptable by a governed deployment.
 
 Details: [`docs/RAPP.md`](docs/RAPP.md)
 
+### Virtual RAPPID Debug Card
+
+The authenticated Habitat includes the RAPP/1 §7.10 Calling Card / Debug Card
+verifier from `kody-w/rapp-1` PR #12 commit `2167c34`. Production uses
+`body.calling-card` + `rappid-card/1`; test-only debug uses
+`body.debug-card` + `rappid-card-test/1`. Both runtimes enforce detached
+unencoded EdDSA JWS with SPKI→RAPPID binding, signed runtime, authority and
+revocation views, global HTTPS origin policy, durable transactional replay
+state, and the exact ordered verification contract.
+
+Offline inspection verifies and displays the signed card without hydrating,
+committing replay state, or waking the organism.
+
+See [Virtual RAPPID Debug Card](./docs/rappid-debug-card.md).
 
 ## Get Started — Let Your AI Agent Do It
 

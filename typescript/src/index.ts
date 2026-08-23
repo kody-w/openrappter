@@ -29,6 +29,7 @@ import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
+import { registerRappidCardCommand } from './cli/rappid-card.js';
 import { registerCleverGirlCommand } from './cli/clever-girl.js';
 import { registerSkillsCommand } from './cli/skills.js';
 import { registerAgentsCommand } from './cli/agents.js';
@@ -2589,6 +2590,7 @@ registerDoctorCommand(program);
 registerRappterCommand(program);
 registerFlightRecorderCommand(program);
 registerShowAndTellCommand(program);
+registerRappidCardCommand(program);
 registerCleverGirlCommand(program);
 // Same silence as cron, five more times. `skills`, `agents`, `models` and
 // `update` were implemented, exported from `cli/index.ts`, and never

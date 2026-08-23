@@ -27,6 +27,7 @@ import type {
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { askBrainstem } from './brainstem-client.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
+import { registerRappidCardMethods } from './methods/rappid-card-methods.js';
 import {
   registerRappidHostMethods,
   registerRappidMethods,
@@ -3486,6 +3487,7 @@ export class GatewayServer {
       'rappid.pairing.complete',
       this.methods.get('rappid.pairing.complete')!,
     );
+    registerRappidCardMethods(this, { dataDir: this.dataDir });
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }

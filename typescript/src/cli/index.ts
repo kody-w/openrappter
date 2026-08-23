@@ -44,6 +44,7 @@ export { registerUpdateCommand } from './update.js';
 export { registerLoginCommand } from './login.js';
 export { registerMemoryCommand } from './memory.js';
 export { registerShowAndTellCommand } from './show-and-tell.js';
+export { registerRappidCardCommand } from './rappid-card.js';
 export { registerCleverGirlCommand } from './clever-girl.js';
 export { registerHubCommands } from './hubs.js';
 export { launchBar } from './bar.js';

@@ -6,7 +6,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 
-type View = 'surgeon' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = 'surgeon' | 'rappid-card' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -226,6 +226,8 @@ export class OpenRappterApp extends LitElement {
             @toggle-focus=${this.handleToggleFocus}
           ></openrappter-chat>
         `;
+      case 'rappid-card':
+        return html`<openrappter-rappid-card></openrappter-rappid-card>`;
       case 'show-and-tell':
         return html`<openrappter-show-and-tell></openrappter-show-and-tell>`;
       case 'channels':
@@ -330,6 +332,7 @@ export class OpenRappterApp extends LitElement {
   private getViewTitle(): string {
     const titles: Record<View, string> = {
       surgeon: 'Copilot Surgeon',
+      'rappid-card': 'RAPPID Debug Card',
       chat: 'Chat',
       'show-and-tell': 'Show-and-Tell',
       channels: 'Channels',

@@ -58,11 +58,11 @@ Primary sources:
 Default invocation:
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
-  --input <explicit path> \
-  --activity <explicit repository-activity export> \
-  --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
-  --capability-catalog <explicit catalog.json> \
+openrappter clever-girl observe \
+  --input <path> \
+  --activity <activity-path> \
+  --estate-manifest <manifest-path> \
+  --capability-catalog <catalog-path> \
   --skills-root .claude/skills \
   --pretty
 ```
@@ -73,7 +73,7 @@ The observer never searches for any of them implicitly. `--source` is global
 to the session-history inputs; use `auto` for mixed history formats.
 
 ```text
-node scripts/rapter-clever-girl.mjs observe
+openrappter clever-girl observe
   --input <path>                         required; repeatable
   [--activity <path>]                    repeatable
   [--estate-manifest <path>]
@@ -87,6 +87,12 @@ node scripts/rapter-clever-girl.mjs observe
   [--output <explicit-path>]
   [--pretty]
 ```
+
+The published npm package includes the observer engine, bounded context
+matcher, `rapter-clever-girl.observe.v2` contract, and observer skill. The
+installed launcher routes this command directly to that packaged engine,
+without initializing the general OpenRappter CLI. From a source checkout,
+`node scripts/rapter-clever-girl.mjs observe ...` invokes the same engine.
 
 The JSON report is always emitted to stdout. On POSIX systems, `--output`
 additionally writes the same bytes atomically to a **new**, explicitly named
@@ -340,7 +346,7 @@ not disappear from totals. Thresholds are not relaxed to force a candidate.
 ### Observe one Copilot export
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input ./exports/copilot-30d.jsonl \
   --source copilot \
   --skills-root .claude/skills \
@@ -350,7 +356,7 @@ node scripts/rapter-clever-girl.mjs observe \
 ### Combine explicitly selected assistants
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input ./exports/claude.jsonl \
   --input ./exports/codex.jsonl \
   --input ./exports/copilot.jsonl \
@@ -364,7 +370,7 @@ node scripts/rapter-clever-girl.mjs observe \
 ### Add explicit RAPP estate and repository evidence
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input ./exports/copilot.jsonl \
   --source copilot \
   --activity ./exports/github-activity.jsonl \
@@ -381,7 +387,7 @@ the estate snapshot, execute repository content, or fetch live GitHub data.
 ### Explicitly persist the inert report
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input ./exports/normalized.jsonl \
   --source normalized \
   --skills-root .claude/skills \
@@ -427,7 +433,7 @@ three-session/three-day `root-cause-fix`, a three-session/two-day
 The committed ledger can be replayed and benchmarked directly:
 
 ```bash
-node scripts/rapter-clever-girl.mjs observe \
+openrappter clever-girl observe \
   --input fable5/reports/rapter-clever-girl-dogfood-input.jsonl \
   --source copilot \
   --skills-root .claude/skills

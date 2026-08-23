@@ -136,6 +136,7 @@ export {
 } from './growth.js';
 export type { GrowthOptions, GrowthResult, PendingGrowth } from './growth.js';
 export { assertVerified, isVerified, verifyOrganism } from './verify.js';
+export * from './host-authority.js';
 
 export interface HabitatOptions {
   /** Habitat root. Defaults to `$RAPP_RAPPIDS_HOME`, else `~/.rapp/twins`. */

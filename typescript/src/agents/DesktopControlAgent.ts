@@ -11,7 +11,7 @@ export const __manifest__ = {
   version: '1.0.0',
   display_name: 'Desktop Control',
   description:
-    'Drives the visible OpenRappter Electron UI through typed snapshots, navigation, clicks, inputs, scrolling, and approval-gated agent installation.',
+    'Drives the visible OpenRappter Electron UI through typed snapshots, XPedition desktop/window actions, navigation, clicks, inputs, scrolling, and approval-gated agent installation.',
   author: 'Kody Wildfeuer',
   ring: 'ga',
   capabilities: ['filesystem-write', 'ui-control', 'dynamic-code'],
@@ -26,7 +26,7 @@ export class DesktopControlAgent extends BasicAgent {
     const metadata: AgentMetadata = {
       name: 'DesktopControl',
       description:
-        'Controls the visible OpenRappter Electron app while the user watches. Call snapshot first to receive refs, then navigate, click, input, select, scroll, or wait. install_agent stages a .py or _agent.ts file and asks the user for native approval before hot-loading it.',
+        'Controls the visible OpenRappter Electron app while the user watches. Use desktop_state, open_app, focus_window, close_window, onboarding_step, or switch_shell for deterministic XPedition control. Call snapshot for element refs before click/input/select. install_agent still requires native approval.',
       parameters: {
         type: 'object',
         properties: {
@@ -40,6 +40,12 @@ export class DesktopControlAgent extends BasicAgent {
               'select',
               'scroll',
               'wait',
+              'desktop_state',
+              'open_app',
+              'focus_window',
+              'close_window',
+              'onboarding_step',
+              'switch_shell',
               'install_agent',
             ],
             description: 'Typed UI operation.',
@@ -69,6 +75,45 @@ export class DesktopControlAgent extends BasicAgent {
           milliseconds: {
             type: 'integer',
             description: 'Bounded wait duration.',
+          },
+          appId: {
+            type: 'string',
+            enum: [
+              'observe',
+              'chat',
+              'agents',
+              'showcase',
+              'flight',
+              'skills',
+              'channels',
+              'memory',
+              'settings',
+              'terminal',
+              'help',
+            ],
+            description: 'Bounded XPedition app id for open_app.',
+          },
+          windowId: {
+            type: 'string',
+            description: 'Window id returned by desktop_state.',
+          },
+          step: {
+            type: 'string',
+            enum: [
+              'welcome',
+              'privacy',
+              'gateway',
+              'release',
+              'skills',
+              'channels',
+              'health',
+            ],
+            description: 'First-run step for onboarding_step.',
+          },
+          shell: {
+            type: 'string',
+            enum: ['xpedition', 'legacy'],
+            description: 'Migration shell for switch_shell.',
           },
           filename: {
             type: 'string',
@@ -113,7 +158,7 @@ export class DesktopControlAgent extends BasicAgent {
         action: 'snapshot',
         message:
           'DesktopControl takes a typed action, not a natural-language query. ' +
-          'Use action with one of: snapshot, navigate, click, input, select, scroll, wait, install_agent.',
+          'Use action with one of: snapshot, navigate, click, input, select, scroll, wait, desktop_state, open_app, focus_window, close_window, onboarding_step, switch_shell, install_agent.',
       });
     }
     const action = (
@@ -127,6 +172,10 @@ export class DesktopControlAgent extends BasicAgent {
       'direction',
       'amount',
       'milliseconds',
+      'appId',
+      'windowId',
+      'step',
+      'shell',
       'filename',
       'source',
     ]) {

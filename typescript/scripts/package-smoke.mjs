@@ -113,6 +113,9 @@ try {
   if (!packedFiles.has("ui/dist/index.html")) {
     throw new Error("Tarball does not contain ui/dist/index.html");
   }
+  if (!packedFiles.has("ui/dist/xpedition-landscape.svg")) {
+    throw new Error("Tarball does not contain the original XPedition landscape");
+  }
   if (!packedFiles.has("npm-shrinkwrap.json")) {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
@@ -159,6 +162,27 @@ try {
     readFileSync(installedIndex, "utf8").length === 0
   ) {
     throw new Error("Installed package is missing ui/dist/index.html");
+  }
+  const installedLandscape = path.join(
+    installedRoot,
+    "ui",
+    "dist",
+    "xpedition-landscape.svg",
+  );
+  const sourceLandscape = path.join(
+    packageRoot,
+    "ui",
+    "public",
+    "xpedition-landscape.svg",
+  );
+  if (
+    !existsSync(installedLandscape) ||
+    readFileSync(installedLandscape, "utf8") !==
+      readFileSync(sourceLandscape, "utf8")
+  ) {
+    throw new Error(
+      "Installed package does not contain the exact original XPedition landscape",
+    );
   }
 
   const cleverGirlAssets = [
@@ -715,7 +739,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes runnable Web UI, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
+    `Package smoke passed: ${artifact.filename} includes Windows XPedition, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
   );
 } finally {
   rmSync(scratch, {

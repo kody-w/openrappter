@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -100,6 +100,21 @@ Your agent will clone the repo, install dependencies, start the gateway and UI, 
 ## What Is openrappter
 
 A dual-runtime (Python + TypeScript) AI agent framework that uses **GitHub Copilot** as the cloud AI backbone. Copilot handles inference; your agent data (memory, config, state) stays local in `~/.openrappter/`.
+
+### Default interface: Rapter's Clever Girl Edition
+
+The hosted dashboard and Electron desktop now boot into **Windows XPedition**,
+an original Windows-XP-inspired desktop shell for OpenRappter. Start, taskbar,
+tray, windows, onboarding, accessibility modes, and the landscape are all
+in-repository originals. Operational windows reuse the real Lit surfaces and
+authenticated gateway RPC client; there is no mock dashboard behind the shell.
+
+First run explains the local privacy boundary, verifies the real gateway,
+discovers installed skills, keeps channel setup optional, and requires a
+truthful health check. Existing users can choose
+**Start → Legacy OpenRappter** for the previous shell without deleting saved
+state. See [Windows XPedition](./docs/windows-xpedition.md) for onboarding,
+release-ring behavior, keyboard controls, semantic automation, and migration.
 
 ### Flight Recorder: one truthful local execution history
 

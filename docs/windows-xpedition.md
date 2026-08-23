@@ -1,0 +1,104 @@
+# Rapter's Clever Girl Edition: Windows XPedition
+
+Windows XPedition is the default OpenRappter interface on the hosted dashboard
+and in Electron. Its user slug is `rapters-clevergirledition`; the edition name
+is `windows-xpedition`.
+
+It is a desktop shell, not a static demonstration. Every operational window
+mounts an existing Lit product surface and uses the existing authenticated
+gateway client. The shell does not replace gateway RPC, approval, channel,
+configuration, memory, or agent logic.
+
+![Windows XPedition first-run setup](./assets/windows-xpedition-first-run.png)
+
+## Desktop
+
+- **Clever Girl Observe** mounts the live Copilot Surgeon patient surface.
+- **Chat & Agents**, **Agent Explorer**, **Showcase**, **Skills**, **Channels**,
+  **Settings**, and **Flight Recorder** mount their existing UI components.
+- **Memory** explains when the current gateway has no bounded Memory UI RPC;
+  it never substitutes mock data. Existing local memory remains available to
+  the Memory agent and CLI.
+- **Terminal / Shell** appears only as an honest unavailable panel when the
+  gateway has no standalone terminal route. Authorized Shell-agent operations
+  are unchanged.
+- **Help & About** documents keyboard controls and the migration escape hatch.
+
+The original `xpedition-landscape.svg` is built with the UI. OpenRappter does
+not ship Microsoft logos, Bliss wallpaper, Windows sounds, proprietary icons,
+or copied binary assets.
+
+### Keyboard and accessibility
+
+- `Ctrl` + `Space`: open or close Start
+- `Alt` + `Tab` or `F6`: cycle visible windows
+- arrow keys: move among desktop shortcuts
+- `Enter` or `Space`: open a focused shortcut
+- `Escape`: close Start
+
+Windows use labelled non-modal dialog semantics. Focus is visible, errors use
+live regions and words as well as color, text scales with the browser, and the
+shell supports light, dark, high-contrast, forced-colors, narrow-screen, and
+reduced-motion modes.
+
+## First-run onboarding
+
+The seven setup pages are:
+
+1. welcome to the edition;
+2. local-first/privacy boundary;
+3. real gateway connection and retry;
+4. typed release ring, with `stable` as default;
+5. real `skills.list` discovery;
+6. optional channel setup guidance through the existing Channels surface;
+7. a real gateway `health` RPC.
+
+Setup completes only after a valid health response that is not `error`.
+Disconnected, malformed, and failed responses remain visible and retryable.
+The wizard stores only explicit non-secret UI preferences: completion, shell,
+release ring, and contrast. Channel credentials and gateway secrets stay in
+their existing protected stores.
+
+## Release-ring integration seam
+
+The headless `ReleaseRingAdapter` accepts exactly:
+
+```text
+stable | beta | canary | alpha | nightly
+```
+
+The included fixture reports `stable` and refuses to pretend it resolved or
+installed another ring. Selecting a preview ring displays a warning and
+requires **Apply / Update**. Until the release updater supplies a concrete
+adapter, that action reports `unavailable` and confirms that no manifest or
+files changed. Manifest selection is deliberately not reimplemented in the UI.
+
+## Migration and legacy shell
+
+No existing OpenRappter state is deleted or rewritten. A missing preference
+defaults to XPedition. During this migration release, choose
+**Start → Legacy OpenRappter** to restore the previous sidebar/dashboard shell.
+The legacy header has a **Windows XPedition** button to switch back.
+
+Preferences use the versioned key
+`openrappter.xpedition.preferences.v1`; the small
+`openrappter.shell` compatibility key keeps shell selection reversible.
+
+## Semantic desktop control
+
+The existing `DesktopControl` queue and approval boundary now support these
+bounded actions:
+
+```text
+desktop_state
+open_app          appId: observe|chat|agents|showcase|flight|skills|channels|memory|settings|terminal|help
+focus_window      windowId from desktop_state
+close_window      windowId from desktop_state
+onboarding_step   step: welcome|privacy|gateway|release|skills|channels|health
+switch_shell      shell: xpedition|legacy
+```
+
+These actions only operate visible shell state. They cannot read secrets,
+approve tools, install agents, bypass gateway authentication, or bypass native
+consent. Existing element-ref commands and their private/sensitive subtree
+guards are unchanged.

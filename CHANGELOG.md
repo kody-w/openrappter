@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Rapter's Clever Girl Edition (`rapters-clevergirledition`) is now the default
+  hosted and Electron interface. Windows XPedition provides an original
+  local-first desktop, truthful first-run onboarding, typed release-ring seam,
+  real existing product surfaces, accessible keyboard/window management, and
+  bounded semantic desktop actions. Existing saved state is preserved, and
+  **Start → Legacy OpenRappter** keeps the previous shell available throughout
+  the migration release.
+
 ### Fixed
 
 - Release preflight now accepts strict SemVer prerelease tags such as

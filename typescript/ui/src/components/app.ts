@@ -5,8 +5,21 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
+import {
+  isOnboardingStep,
+  isXpeditionAppId,
+  loadXpeditionPreferences,
+  saveXpeditionPreferences,
+  xpeditionStorage,
+  type OnboardingStep,
+  type OpenRappterView,
+  type ShellPreference,
+  type XpeditionAppId,
+  type XpeditionPreferences,
+} from '../services/xpedition.js';
+import type { OpenRappterXpeditionShell } from './xpedition-shell.js';
 
-type View = 'surgeon' | 'chat' | 'show-and-tell' | 'channels' | 'sessions' | 'cron' | 'config' | 'logs' | 'agents' | 'skills' | 'devices' | 'presence' | 'debug' | 'showcase' | 'zen' | 'accounts';
+type View = OpenRappterView;
 
 @customElement('openrappter-app')
 export class OpenRappterApp extends LitElement {
@@ -125,6 +138,16 @@ export class OpenRappterApp extends LitElement {
       background: rgba(88, 245, 210, 0.18);
     }
 
+    .shell-switch {
+      border: 1px solid var(--border);
+      border-radius: 0.45rem;
+      padding: 0.4rem 0.65rem;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      cursor: pointer;
+      font: 700 0.75rem/1 inherit;
+    }
+
     .spinner {
       width: 40px;
       height: 40px;
@@ -145,6 +168,11 @@ export class OpenRappterApp extends LitElement {
   private currentView: View = 'surgeon';
 
   @state()
+  private shell: ShellPreference = 'xpedition';
+
+  private xpeditionPreferences: XpeditionPreferences | null = null;
+
+  @state()
   private connected = false;
 
   @state()
@@ -161,8 +189,10 @@ export class OpenRappterApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    this.xpeditionPreferences = loadXpeditionPreferences(xpeditionStorage());
+    this.shell = this.xpeditionPreferences.shell;
     if (window.openrappterDesktop) {
-      this.navigate('chat');
+      if (this.shell === 'legacy') this.navigate('chat');
     }
     this.connectToGateway();
 
@@ -172,6 +202,8 @@ export class OpenRappterApp extends LitElement {
       if (connected) {
         this.connecting = false;
         this.connectionError = null;
+      } else {
+        this.connectionError = 'The gateway connection was lost.';
       }
     };
   }
@@ -214,6 +246,80 @@ export class OpenRappterApp extends LitElement {
   navigate(view: View): void {
     this.currentView = view;
     if (view !== 'chat') this.focusMode = false;
+    if (this.shell === 'xpedition') {
+      void this.updateComplete.then(() => {
+        this.xpeditionSurface()?.openView(view);
+      });
+    }
+  }
+
+  getDesktopState(): Record<string, unknown> {
+    if (this.shell === 'xpedition') {
+      return this.xpeditionSurface()?.getDesktopState() ?? {
+        schema: 'openrappter-xpedition-state/1.0',
+        shell: 'xpedition',
+        connected: this.connected,
+        windows: [],
+      };
+    }
+    return {
+      schema: 'openrappter-xpedition-state/1.0',
+      shell: 'legacy',
+      connected: this.connected,
+      view: this.currentView,
+      windows: [],
+    };
+  }
+
+  async openDesktopApp(appId: XpeditionAppId): Promise<Record<string, unknown>> {
+    if (!isXpeditionAppId(appId)) {
+      throw new Error(`Unknown XPedition app: ${String(appId)}`);
+    }
+    if (this.shell !== 'xpedition') {
+      this.switchShell('xpedition');
+      await this.updateComplete;
+    }
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted yet.');
+    return surface.openApp(appId);
+  }
+
+  focusDesktopWindow(id: string): Record<string, unknown> {
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.focusWindow(id);
+  }
+
+  closeDesktopWindow(id: string): Record<string, unknown> {
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.closeWindow(id);
+  }
+
+  selectOnboardingStep(step: OnboardingStep): Record<string, unknown> {
+    if (!isOnboardingStep(step)) {
+      throw new Error(`Unknown onboarding step: ${String(step)}`);
+    }
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.selectOnboardingStep(step);
+  }
+
+  switchShell(shell: ShellPreference): void {
+    if (shell !== 'xpedition' && shell !== 'legacy') {
+      throw new Error(`Unknown OpenRappter shell: ${String(shell)}`);
+    }
+    const preferences = this.xpeditionPreferences ??
+      loadXpeditionPreferences(xpeditionStorage());
+    this.xpeditionPreferences = { ...preferences, shell };
+    saveXpeditionPreferences(xpeditionStorage(), this.xpeditionPreferences);
+    this.shell = shell;
+  }
+
+  private xpeditionSurface(): OpenRappterXpeditionShell | null {
+    return this.shadowRoot?.querySelector(
+      'openrappter-xpedition-shell',
+    ) as OpenRappterXpeditionShell | null;
   }
 
   private renderView() {
@@ -260,6 +366,22 @@ export class OpenRappterApp extends LitElement {
   }
 
   render() {
+    if (this.shell === 'xpedition') {
+      return html`
+        <openrappter-xpedition-shell
+          .connected=${this.connected}
+          .connectionError=${this.connectionError ?? (this.connecting ? 'Connecting to the local gateway…' : '')}
+          @retry-gateway=${() => void this.connectToGateway()}
+          @switch-shell=${(event: CustomEvent<{ shell: ShellPreference }>) => {
+            this.switchShell(event.detail.shell);
+          }}
+          @xpedition-preferences=${(event: CustomEvent<XpeditionPreferences>) => {
+            this.xpeditionPreferences = event.detail;
+          }}
+        ></openrappter-xpedition-shell>
+      `;
+    }
+
     // Only the very first connection blocks the surface. A later drop must
     // leave the operating room usable and offer an explicit retry instead of
     // trapping the owner behind a spinner.
@@ -317,6 +439,9 @@ export class OpenRappterApp extends LitElement {
             <span class="status-dot ${this.connected ? 'connected' : ''}"></span>
             ${this.connected ? 'Connected' : 'Disconnected'}
             ${this.status ? html` • Uptime: ${this.formatUptime(this.status.uptime)}` : ''}
+            <button class="shell-switch" @click=${() => this.switchShell('xpedition')}>
+              Windows XPedition
+            </button>
           </div>
         </header>`}
 

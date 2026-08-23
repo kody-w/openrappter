@@ -15,7 +15,7 @@ Electron main process
   └─ exposes narrow context-isolated IPC methods
 
 Sandboxed renderer
-  └─ existing OpenRappter UI + visual Show-and-Tell workspace
+  └─ Windows XPedition shell + existing OpenRappter product surfaces
 
 Packed OpenRappter runtime
   ├─ TypeScript gateway and agents
@@ -26,6 +26,10 @@ Packed OpenRappter runtime
 The system Node installation and Electron never share a native SQLite binary.
 `desktop/scripts/install-runtime.mjs` packs the current OpenRappter package,
 installs it under `desktop/runtime`, and rebuilds only that copy for Electron.
+
+The same compiled UI boots in hosted and Electron deployments. Windows
+XPedition is the default shell; **Start → Legacy OpenRappter** is the reversible
+migration path. See [Windows XPedition](./windows-xpedition.md).
 
 ## Development
 
@@ -85,6 +89,11 @@ Always snapshot before using refs:
 Use DesktopControl to snapshot the UI, navigate to show-and-tell, fill the
 session title and intent, then take another snapshot to verify the values.
 ```
+
+XPedition also exposes bounded shell-state operations that do not require
+coordinate scraping: `desktop_state`, `open_app`, `focus_window`,
+`close_window`, `onboarding_step`, and `switch_shell`. They use the same
+private queue and do not widen gateway, approval, or native-consent authority.
 
 Hot-loaded Python and TypeScript agents may return:
 

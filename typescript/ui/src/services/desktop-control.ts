@@ -18,6 +18,16 @@ interface DesktopUiSnapshot {
   elements: DesktopElementSnapshot[];
 }
 
+interface XpeditionControllableApp extends HTMLElement {
+  getDesktopState(): Record<string, unknown>;
+  openDesktopApp(appId: string): Record<string, unknown> | Promise<Record<string, unknown>>;
+  focusDesktopWindow(id: string): Record<string, unknown>;
+  closeDesktopWindow(id: string): Record<string, unknown>;
+  selectOnboardingStep(step: string): Record<string, unknown>;
+  switchShell(shell: 'xpedition' | 'legacy'): void;
+  updateComplete?: Promise<unknown>;
+}
+
 const views = new Set([
   'surgeon',
   'chat',
@@ -201,6 +211,28 @@ async function navigate(view: unknown): Promise<Record<string, unknown>> {
   return { view };
 }
 
+function controllableApp(): XpeditionControllableApp {
+  const app = document.querySelector('openrappter-app') as
+    | XpeditionControllableApp
+    | null;
+  if (!app) throw new Error('OpenRappter app surface is not mounted.');
+  return app;
+}
+
+function boundedString(
+  value: unknown,
+  name: string,
+  allowed?: readonly string[],
+): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 120) {
+    throw new Error(`${name} must be a non-empty bounded string.`);
+  }
+  if (allowed && !allowed.includes(value)) {
+    throw new Error(`Unknown ${name}: ${value}`);
+  }
+  return value;
+}
+
 function requireRef(value: unknown): HTMLElement {
   if (typeof value !== 'string') throw new Error('A UI ref is required.');
   if (!value.startsWith(`g${currentGeneration}-`)) {
@@ -281,6 +313,55 @@ export async function handleDesktopUiCommand(
     case 'navigate':
       await navigate(args.view);
       return snapshotDesktopUi();
+    case 'desktop_state':
+      return controllableApp().getDesktopState();
+    case 'open_app': {
+      const appId = boundedString(args.appId, 'XPedition app', [
+        'observe',
+        'chat',
+        'agents',
+        'showcase',
+        'flight',
+        'skills',
+        'channels',
+        'memory',
+        'settings',
+        'terminal',
+        'help',
+      ]);
+      return await controllableApp().openDesktopApp(appId);
+    }
+    case 'focus_window':
+      return controllableApp().focusDesktopWindow(
+        boundedString(args.windowId, 'XPedition window id'),
+      );
+    case 'close_window':
+      return controllableApp().closeDesktopWindow(
+        boundedString(args.windowId, 'XPedition window id'),
+      );
+    case 'onboarding_step':
+      return controllableApp().selectOnboardingStep(
+        boundedString(args.step, 'onboarding step', [
+          'welcome',
+          'privacy',
+          'gateway',
+          'release',
+          'skills',
+          'channels',
+          'health',
+        ]),
+      );
+    case 'switch_shell': {
+      const shell = boundedString(
+        args.shell,
+        'shell',
+        ['xpedition', 'legacy'],
+      ) as 'xpedition' | 'legacy';
+      const app = controllableApp();
+      app.switchShell(shell);
+      await app.updateComplete;
+      return app.getDesktopState();
+    }
     case 'click': {
       const element = requireRef(args.ref);
       if (element.dataset.desktopSensitive !== undefined) {

@@ -3,6 +3,8 @@
  */
 
 import './components/app.js';
+import './components/xpedition-onboarding.js';
+import './components/xpedition-shell.js';
 import './components/sidebar.js';
 import './components/surgeon.js';
 import './components/chat.js';

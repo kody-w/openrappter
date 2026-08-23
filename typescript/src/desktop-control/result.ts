@@ -11,6 +11,12 @@ const permitted = new Set<DesktopControlAction>([
   'select',
   'scroll',
   'wait',
+  'desktop_state',
+  'open_app',
+  'focus_window',
+  'close_window',
+  'onboarding_step',
+  'switch_shell',
 ]);
 
 let sharedQueue: DesktopCommandQueue | undefined;

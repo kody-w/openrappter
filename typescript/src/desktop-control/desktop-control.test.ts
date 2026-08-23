@@ -146,6 +146,12 @@ describe('agent-reachable UI action boundary', () => {
     'select',
     'scroll',
     'wait',
+    'desktop_state',
+    'open_app',
+    'focus_window',
+    'close_window',
+    'onboarding_step',
+    'switch_shell',
   ];
   const WITHHELD_FROM_AGENTS = ['install_agent'];
 

@@ -984,7 +984,7 @@ try {
     if (!npm && !release) throw new Error('artifact is not bound to canonical package/version');
   }
   const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id];
-  process.stdout.write(fields.map((v) => Buffer.from(String(v)).toString('base64')).join('\t'));
+  process.stdout.write(fields.map((v) => Buffer.from(String(v)).toString('base64')).join('|'));
 } catch (error) {
   console.error(`ring manifest rejected: ${error.message}`);
   process.exit(1);
@@ -1004,7 +1004,7 @@ resolve_ring_manifest() {
     download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/manifest.json" "$manifest" ||
         { ui_error "Could not reach ${ring} ring manifest"; return 1; }
     encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
-    IFS=$'\t' read -r _rv _ra _rs _rc _rst _rr _rpid <<< "$encoded"
+    IFS='|' read -r _rv _ra _rs _rc _rst _rr _rpid <<< "$encoded"
     RESOLVED_RING_VERSION="$(printf '%s' "$_rv" | base64 --decode)"
     RESOLVED_RING_ARTIFACT="$(printf '%s' "$_ra" | base64 --decode)"
     RESOLVED_RING_SHA256="$(printf '%s' "$_rs" | base64 --decode)"
@@ -1019,10 +1019,10 @@ resolve_ring_manifest() {
 const fs=require('node:fs'), [file,ring,id]=process.argv.slice(2), p=JSON.parse(fs.readFileSync(file));
 const keys=['authority_commit','authority_repository','promotion_id','receipt_path','receipt_sha256','schema'];
 if(JSON.stringify(Object.keys(p).sort())!==JSON.stringify(keys)||p.schema!=='openrappter-ring-authority/v1'||p.authority_repository!=='kody-w/openrappter-release-train'||!/^[0-9a-f]{40}$/.test(p.authority_commit)||p.promotion_id!==id||p.receipt_path!==`receipts/${ring}/${id}.json`||!/^[0-9a-f]{64}$/.test(p.receipt_sha256))process.exit(1);
-process.stdout.write([p.authority_commit,p.receipt_path,p.receipt_sha256].map(v=>Buffer.from(v).toString('base64')).join('\t'));
+process.stdout.write([p.authority_commit,p.receipt_path,p.receipt_sha256].map(v=>Buffer.from(v).toString('base64')).join('|'));
 NODE
     )" || { ui_error "Authority pointer rejected"; return 1; }
-    IFS=$'\t' read -r _ac _rp _rsha <<< "$pointer_info"
+    IFS='|' read -r _ac _rp _rsha <<< "$pointer_info"
     local authority_commit receipt_path receipt_sha target_commit
     authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
     receipt_path="$(printf '%s' "$_rp"|base64 --decode)"

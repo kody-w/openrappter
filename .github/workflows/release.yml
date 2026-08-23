@@ -604,9 +604,18 @@ jobs:
             openrappter-sdist-smoke/bin/python -c 'import openrappter.show_and_tell, openrappter.show_and_tell_worker; from openrappter.cli import AgentRegistry; names = {item["name"] for item in AgentRegistry(load_skills=False).list_agents()}; assert "ShowAndTell" in names'
           )
 
+  release-constitution:
+    needs: [preflight, build-artifacts]
+    uses: ./.github/workflows/release-constitution.yml
+    with:
+      commit: ${{ github.sha }}
+      tag: ${{ github.ref_name }}
+      version: ${{ needs.preflight.outputs.version }}
+      artifact_name: release-artifacts-${{ needs.preflight.outputs.version }}
+
   publish-registries:
     name: Reconcile and publish exact registry artifacts
-    needs: [preflight, smoke-artifacts, build-electron-artifacts]
+    needs: [preflight, smoke-artifacts, build-electron-artifacts, release-constitution]
     runs-on: ubuntu-latest
     concurrency:
       group: openrappter-registry-publication
@@ -750,7 +759,7 @@ jobs:
 
   github-release:
     name: Create checksummed GitHub Release
-    needs: [preflight, publish-registries, build-electron-artifacts]
+    needs: [preflight, publish-registries, build-electron-artifacts, release-constitution]
     runs-on: ubuntu-latest
     permissions:
       contents: write

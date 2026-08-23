@@ -46,9 +46,18 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
+  release-constitution:
+    needs: validate-tag
+    uses: ./.github/workflows/release-constitution.yml
+    with:
+      commit: ${{ github.sha }}
+      tag: v${{ needs.validate-tag.outputs.version }}
+      version: ${{ needs.validate-tag.outputs.version }}
+      discover_artifact: true
+
   build-and-release:
     name: Build & Release DMG
-    needs: validate-tag
+    needs: [validate-tag, release-constitution]
     runs-on: macos-14
     timeout-minutes: 30
     env:

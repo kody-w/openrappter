@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Make a plan, write test cases, build the application, run those tests until the application passes, then publish to the public repo and let the user know when they can test.
 
+## Release Constitution
+
+Distribution—not local development—is fail-closed behind the machine
+`openrappter-release-constitution/v1` policy in
+`kody-w/openrappter-release-train`. Never add a direct stable, tag, GitHub
+release, npm/PyPI, or installer-channel path. The exact commit/version/artifact
+must have finalized immutable receipts in order nightly → alpha → canary →
+beta, and every privileged publish job must depend on `release-constitution`.
+Emergency rollback has no bypass flag and may use only an already-receipted
+exact artifact.
+
 ## Git Worktree Etiquette
 
 Multiple Claude Code sessions may run concurrently using git worktrees. Be a good neighbor:

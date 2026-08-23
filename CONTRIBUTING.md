@@ -1,5 +1,14 @@
 # Contributing to openrappter
 
+## Distribution changes
+
+The required `Release Constitution` check statically audits every workflow
+publication operation. A distributable identity must have finalized immutable
+nightly, alpha, canary, and beta receipts in that order before stable, tags,
+GitHub releases, npm/PyPI, or installer channels may move. Changes under
+`.github/workflows/`, the constitution checker, or CODEOWNERS require owner
+review. This gate does not restrict local builds or tests.
+
 Thank you for your interest in contributing to openrappter! 🦖
 
 ## Getting Started

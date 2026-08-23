@@ -1,0 +1,17 @@
+name: Release Constitution
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  release-constitution:
+    name: Release Constitution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          node --test tools/release-constitution-static.test.mjs
+          node tools/release-constitution-static.mjs

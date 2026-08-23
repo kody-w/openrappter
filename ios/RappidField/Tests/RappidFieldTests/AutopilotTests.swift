@@ -759,16 +759,14 @@ final class AutopilotTests: XCTestCase {
         let filled = try await send(harness, commandJSON("fillPairingCode", value: code))
         XCTAssertEqual(filled.status, .ok)
 
-        // A command cannot smuggle a token in: the grant is minted locally.
+        // A command cannot smuggle a token in: DEBUG automation can only
+        // enter the visibly demo-only fixture mode and mints no grant.
         let paired = try await send(harness, commandJSON("submitSyntheticPair", value: "ghp_pretend_oauth_token"))
         XCTAssertEqual(paired.status, .ok)
-        XCTAssertTrue(harness.model.pairing.isPaired)
+        XCTAssertEqual(harness.model.pairing, .synthetic)
 
         let stored = try await harness.model.credentialStore.load()
-        let credential = try XCTUnwrap(stored)
-        XCTAssertFalse(credential.token.contains("ghp_pretend_oauth_token"), "no injected credential is ever adopted")
-        XCTAssertTrue(credential.isSyntheticGrant)
-        XCTAssertTrue(credential.isScopedToHabitatMethodsOnly)
+        XCTAssertNil(stored, "demo-only synthetic mode must not create a credential")
 
         let snapshot = try await send(harness, commandJSON("snapshot"))
         for receipt in [paired, snapshot] {
@@ -777,14 +775,12 @@ final class AutopilotTests: XCTestCase {
             for forbidden in ["token", "bearer", "secret", "ghp_", "gho_", "oauth", "synthetic-scoped-credential", "password"] {
                 XCTAssertFalse(lowered.contains(forbidden), "a receipt must not carry \(forbidden): \(json)")
             }
-            XCTAssertFalse(json.contains(credential.token))
-            XCTAssertFalse(json.contains(credential.credentialID))
             XCTAssertFalse(json.contains(code), "the one-time code never leaves in a receipt")
             XCTAssertFalse(json.contains("localhost"), "the host address is not echoed back")
         }
 
         let state = try stateDictionary(paired)
-        XCTAssertEqual(state["pairing"] as? String, "paired")
+        XCTAssertEqual(state["pairing"] as? String, "synthetic")
         XCTAssertEqual(state["pairingCodeFilled"] as? Bool, true)
         XCTAssertEqual(state["origin"] as? String, "synthetic", "a locally minted grant never makes a fixture look verified")
     }
@@ -814,7 +810,7 @@ final class AutopilotTests: XCTestCase {
         try await send(harness, commandJSON("fillPairingCode", value: "H7K2-9QMR-3TVX"))
         try await send(harness, commandJSON("submitSyntheticPair"))
         try await send(harness, commandJSON("navigate", target: "growth"))
-        XCTAssertTrue(harness.model.pairing.isPaired)
+        XCTAssertEqual(harness.model.pairing, .synthetic)
 
         let receipt = try await send(harness, commandJSON("resetSyntheticState"))
         XCTAssertEqual(receipt.status, .ok)

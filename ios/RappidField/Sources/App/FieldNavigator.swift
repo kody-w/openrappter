@@ -44,6 +44,7 @@ final class FieldNavigator {
 
     var pairingHostText = "http://localhost:8787"
     var pairingCodeText = ""
+    var pairingFingerprintText = ""
     var pairingLinkText = ""
     var pairingProblem: String?
 
@@ -138,7 +139,7 @@ final class FieldNavigator {
         return try RappidLink(
             host: host,
             code: try OneTimeCode(pairingCodeText),
-            hostFingerprint: String(Digest.sha256Hex(host.absoluteString).prefix(8))
+            hostFingerprint: pairingFingerprintText
         )
     }
 
@@ -148,6 +149,7 @@ final class FieldNavigator {
         selectedTab = .fieldGuide
         pairingHostText = "http://localhost:8787"
         pairingCodeText = ""
+        pairingFingerprintText = ""
         pairingLinkText = ""
         pairingProblem = nil
         proposal = nil

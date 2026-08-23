@@ -388,7 +388,8 @@ final class AutopilotDriver {
             // here fetches the address; it is only stored for the operator's
             // own host to be reached later.
             guard let url = URL(string: value),
-                  url.scheme?.lowercased() == "https" || RappidLink.isLoopback(url) else {
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "https" || (scheme == "http" && RappidLink.isLoopback(url)) else {
                 throw AutopilotRefusal.valueRejected("not a host address this app will talk to")
             }
             navigator.pairingHostText = value
@@ -401,11 +402,18 @@ final class AutopilotDriver {
             navigator.pairingCodeText = value
 
         case .submitSyntheticPair:
-            // No credential can be supplied by a command: the grant is minted
-            // locally from the code the operator's own host displayed.
-            let link = try navigator.composedLink()
+            // DEBUG automation can enter the visibly demo-only fixture mode,
+            // but it cannot mint, inject, or receive a host credential.
+            guard let host = URL(string: navigator.pairingHostText) else {
+                throw AutopilotRefusal.valueRejected("not a host address this app will talk to")
+            }
+            _ = try RappidLink(
+                host: host,
+                code: OneTimeCode(navigator.pairingCodeText),
+                hostFingerprint: "00000000"
+            )
             navigator.pairingProblem = nil
-            await model.pairSynthetically(with: link)
+            model.enterSyntheticPairedMode()
             engine.syncProposal()
 
         case .fillChatInput:

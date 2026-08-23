@@ -46,7 +46,7 @@ struct PairingView: View {
                 case .unpaired:
                     SectionHeader(title: "No host paired", subtitle: "Everything you see is a deterministic local sample.")
                 case .synthetic:
-                    SectionHeader(title: "Synthetic paired mode", subtitle: "A rehearsal of the paired experience. Growth appends stay refused.")
+                    SectionHeader(title: "Demo-only synthetic mode", subtitle: "Local fixtures only. No host credential exists and growth stays refused.")
                 case let .paired(credential):
                     SectionHeader(title: "Paired", subtitle: credential.hostURL.absoluteString)
                     StatLine(label: "Credential", value: credential.credentialID)
@@ -103,6 +103,8 @@ struct PairingView: View {
                     .keyboardType(.URL)
                 labelledField(title: "One-time code", text: $navigator.pairingCodeText, prompt: "ABCD-EFGH-JKMN")
                     .textInputAutocapitalization(.characters)
+                labelledField(title: "Host fingerprint", text: $navigator.pairingFingerprintText, prompt: "ab12cd34")
+                    .textInputAutocapitalization(.never)
 
                 Button(working ? "Pairing…" : "Pair with this host") {
                     Task { await pair(fromFields: true) }
@@ -168,10 +170,10 @@ struct PairingView: View {
         FieldCard(accent: FieldTheme.ember) {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeader(
-                    title: "No host handy?",
-                    subtitle: "Synthetic paired mode walks the whole flow against local fixtures."
+                    title: "Demo without a host",
+                    subtitle: "Synthetic mode is visibly local-only and never creates a credential."
                 )
-                Button("Enter synthetic paired mode") { model.enterSyntheticPairedMode() }
+                Button("Enter demo-only synthetic mode") { model.enterSyntheticPairedMode() }
                     .buttonStyle(QuietButtonStyle(tint: FieldTheme.ember))
                 Text("It stays honest: fixtures remain labelled, and rappid.grow keeps refusing.")
                     .font(.system(size: 12, design: .rounded))
@@ -187,7 +189,7 @@ struct PairingView: View {
                 ForEach(GatewayMethod.allCases, id: \.rawValue) { method in
                     StatLine(label: "Method", value: method.rawValue)
                 }
-                StatLine(label: "Transport", value: "URLSession WebSocket / HTTPS")
+                StatLine(label: "Transport", value: "URLSession JSON-RPC over HTTPS / loopback HTTP")
                 StatLine(label: "Credential carried as", value: "Authorization header")
                 StatLine(label: "Proof domain", value: PairingProof.domain)
             }
@@ -222,7 +224,7 @@ struct PairingView: View {
                 link = try RappidLink(parsing: navigator.pairingLinkText)
             }
             navigator.pairingProblem = nil
-            await model.pairSynthetically(with: link)
+            await model.pair(with: link)
         } catch {
             navigator.pairingProblem = error.localizedDescription
         }

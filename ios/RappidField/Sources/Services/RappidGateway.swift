@@ -36,7 +36,7 @@ enum GatewayError: LocalizedError, Equatable {
     }
 }
 
-/// The four habitat methods this prototype speaks.
+/// The scoped Habitat methods plus the host-side approval issuance seam.
 protocol RappidGateway {
     func list() async throws -> [Companion]
     func asset(rappid: RappidIdentity, asset: String) async throws -> AssetPayload
@@ -48,6 +48,7 @@ enum GatewayMethod: String, CaseIterable {
     case list = "rappid.list"
     case asset = "rappid.asset"
     case autocomplete = "rappid.autocomplete"
+    case approvalIssue = "rappid.approval.issue"
     case grow = "rappid.grow"
 }
 
@@ -70,7 +71,7 @@ struct GatewayCall: Equatable {
 }
 
 /// How a call reaches the host. Swappable so the same gateway code runs over
-/// HTTPS, over a WebSocket, or against a recording double in tests.
+/// HTTPS/loopback HTTP or against a recording double in tests.
 protocol HostTransport {
     func send(_ call: GatewayCall) async throws -> Data
 }
@@ -105,7 +106,7 @@ struct HTTPHostTransport: HostTransport {
 
     func send(_ call: GatewayCall) async throws -> Data {
         guard let credential = await credentials.currentCredential() else { throw GatewayError.notPaired }
-        var request = URLRequest(url: hostURL.appendingPathComponent("rpc"))
+        var request = URLRequest(url: hostURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
@@ -119,62 +120,6 @@ struct HTTPHostTransport: HostTransport {
             throw GatewayError.rpc(code: http.statusCode, message: String(decoding: data, as: UTF8.self))
         }
         return data
-    }
-}
-
-/// JSON-RPC over a single WebSocket, which is what a local host actually
-/// serves. One task per connection, responses matched by call id.
-actor WebSocketHostTransport: HostTransport {
-    private let hostURL: URL
-    private let credentials: CredentialProviding
-    private let session: URLSession
-    private var task: URLSessionWebSocketTask?
-
-    init(hostURL: URL, credentials: CredentialProviding, session: URLSession = .shared) {
-        self.hostURL = hostURL
-        self.credentials = credentials
-        self.session = session
-    }
-
-    private func connected(with credential: DeviceCredential) throws -> URLSessionWebSocketTask {
-        if let task, task.closeCode == .invalid { return task }
-        var components = URLComponents(url: hostURL, resolvingAgainstBaseURL: false)
-        components?.scheme = hostURL.scheme == "https" ? "wss" : "ws"
-        components?.path = "/ws"
-        guard let url = components?.url else { throw GatewayError.transport("bad host URL") }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
-        let created = session.webSocketTask(with: request)
-        created.resume()
-        task = created
-        return created
-    }
-
-    func send(_ call: GatewayCall) async throws -> Data {
-        guard let credential = await credentials.currentCredential() else { throw GatewayError.notPaired }
-        let socket = try connected(with: credential)
-        do {
-            try await socket.send(.data(try call.encodedBody()))
-            // The habitat methods are request/response; a local host answers
-            // the call it was given before it moves on.
-            switch try await socket.receive() {
-            case let .data(data):
-                return data
-            case let .string(text):
-                return Data(text.utf8)
-            @unknown default:
-                throw GatewayError.malformedResponse("unknown WebSocket frame")
-            }
-        } catch let error as GatewayError {
-            throw error
-        } catch {
-            throw GatewayError.transport(error.localizedDescription)
-        }
-    }
-
-    func disconnect() {
-        task?.cancel(with: .goingAway, reason: nil)
-        task = nil
     }
 }
 
@@ -230,18 +175,46 @@ struct HostGateway: RappidGateway {
     }
 
     func grow(_ request: AppendRequest) async throws -> AppendReceipt {
+        let approvalPayload = try await result(.approvalIssue, [
+            "operation": "grow",
+            "rappid": request.rappid.description,
+            "proposalId": request.proposalID,
+        ])
+        guard let approval = approvalPayload as? [String: Any],
+              let approvalID = approval["approvalId"] as? String,
+              !approvalID.isEmpty,
+              approval["expiresAt"] as? String != nil else {
+            throw GatewayError.malformedResponse(
+                "rappid.approval.issue did not return approvalId/expiresAt"
+            )
+        }
         let payload = try await result(.grow, [
             "rappid": request.rappid.description,
             "proposalId": request.proposalID,
+            "approvalId": approvalID,
         ])
         guard let row = payload as? [String: Any] else {
             throw GatewayError.malformedResponse("rappid.grow did not return an object")
         }
+        guard let returnedRappid = row["rappid"] as? String,
+              returnedRappid == request.rappid.description,
+              let appended = row["appended"] as? [String: Any],
+              let seq = appended["seq"] as? Int,
+              seq >= 0,
+              let frameHash = appended["frame_hash"] as? String,
+              frameHash.range(
+                of: #"^[0-9a-f]{64}$"#,
+                options: .regularExpression
+              ) != nil else {
+            throw GatewayError.malformedResponse(
+                "rappid.grow did not return exact rappid/appended.seq/frame_hash"
+            )
+        }
         return AppendReceipt(
             rappid: request.rappid,
             proposalID: request.proposalID,
-            frameSeq: row["seq"] as? Int ?? 0,
-            frameHash: row["frame_hash"] as? String ?? row["frameHash"] as? String ?? "",
+            frameSeq: seq,
+            frameHash: frameHash,
             acceptedAt: Date()
         )
     }

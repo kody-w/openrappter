@@ -98,7 +98,16 @@ struct RappidLink: Equatable {
 
     init(host: URL, code: OneTimeCode, hostFingerprint: String) throws {
         guard let scheme = host.scheme?.lowercased(),
-              scheme == "https" || (scheme == "http" && Self.isLoopback(host)) else {
+              scheme == "https" || (scheme == "http" && Self.isLoopback(host)),
+              host.user == nil,
+              host.password == nil,
+              host.query == nil,
+              host.fragment == nil,
+              host.path.isEmpty || host.path == "/",
+              hostFingerprint.range(
+                of: #"^[0-9a-f]{8}$"#,
+                options: .regularExpression
+              ) != nil else {
             throw LinkError.badHost(host.absoluteString)
         }
         self.host = host
@@ -190,6 +199,68 @@ enum PairingProof {
     }
 }
 
+struct HostPairingClient {
+    let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func complete(_ requestBody: PairingRequest, with link: RappidLink) async throws -> DeviceCredential {
+        let encodedRequest = try JSONEncoder().encode(requestBody)
+        guard let params = try JSONSerialization.jsonObject(with: encodedRequest) as? [String: Any] else {
+            throw GatewayError.malformedResponse("pairing request could not be encoded")
+        }
+        let body = try JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0",
+            "id": UUID().uuidString,
+            "method": "rappid.pairing.complete",
+            "params": params,
+        ], options: [.sortedKeys])
+        var request = URLRequest(url: link.host)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw GatewayError.transport("pairing returned no HTTP response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw GatewayError.rpc(
+                code: http.statusCode,
+                message: String(decoding: data, as: UTF8.self)
+            )
+        }
+        guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GatewayError.malformedResponse("pairing response is not JSON-RPC")
+        }
+        if let error = envelope["error"] as? [String: Any] {
+            throw GatewayError.rpc(
+                code: error["code"] as? Int ?? -1,
+                message: error["message"] as? String ?? "pairing refused"
+            )
+        }
+        guard let result = envelope["result"] as? [String: Any] else {
+            throw GatewayError.malformedResponse("pairing response has no credential")
+        }
+        let credentialData = try JSONSerialization.data(withJSONObject: result)
+        let credential = try JSONDecoder().decode(DeviceCredential.self, from: credentialData)
+        guard !credential.isSyntheticGrant,
+              !credential.credentialID.isEmpty,
+              !credential.token.isEmpty,
+              !credential.isExpired(),
+              credential.hostURL == link.host,
+              credential.hostFingerprint == link.hostFingerprint,
+              credential.isScopedToHabitatMethodsOnly,
+              Set(credential.scopes) == Set(requestBody.requestedScopes) else {
+            throw GatewayError.malformedResponse(
+                "pairing credential is not bound to this host link and requested scope"
+            )
+        }
+        return credential
+    }
+}
+
 /// What this device shows the host to be scanned.
 ///
 /// It is an offer, not a secret: a name, a random per-install value, the
@@ -243,6 +314,17 @@ struct DeviceCredential: Codable, Equatable, CustomStringConvertible {
     /// look like a verified organism.
     var isSyntheticGrant: Bool = false
 
+    private enum CodingKeys: String, CodingKey {
+        case credentialID
+        case token
+        case scopes
+        case hostURL
+        case hostFingerprint
+        case issuedAt
+        case expiresAt
+        case isSyntheticGrant
+    }
+
     init(
         credentialID: String,
         token: String,
@@ -270,9 +352,67 @@ struct DeviceCredential: Codable, Equatable, CustomStringConvertible {
         scopes = try container.decode([String].self, forKey: .scopes)
         hostURL = try container.decode(URL.self, forKey: .hostURL)
         hostFingerprint = try container.decode(String.self, forKey: .hostFingerprint)
-        issuedAt = try container.decode(Date.self, forKey: .issuedAt)
-        expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
+        issuedAt = try Self.decodeDate(container, key: .issuedAt)
+        expiresAt = try Self.decodeOptionalDate(container, key: .expiresAt)
         isSyntheticGrant = try container.decodeIfPresent(Bool.self, forKey: .isSyntheticGrant) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(credentialID, forKey: .credentialID)
+        try container.encode(token, forKey: .token)
+        try container.encode(scopes, forKey: .scopes)
+        try container.encode(hostURL, forKey: .hostURL)
+        try container.encode(hostFingerprint, forKey: .hostFingerprint)
+        try container.encode(Self.dateText(issuedAt), forKey: .issuedAt)
+        if let expiresAt {
+            try container.encode(Self.dateText(expiresAt), forKey: .expiresAt)
+        }
+        try container.encode(isSyntheticGrant, forKey: .isSyntheticGrant)
+    }
+
+    private static func dateText(_ value: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: value)
+    }
+
+    private static func date(_ text: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    }
+
+    private static func decodeDate(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) throws -> Date {
+        let text = try container.decode(String.self, forKey: key)
+        guard let parsed = date(text) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "date is not ISO 8601"
+            )
+        }
+        return parsed
+    }
+
+    private static func decodeOptionalDate(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        key: CodingKeys
+    ) throws -> Date? {
+        guard let text = try container.decodeIfPresent(String.self, forKey: key) else {
+            return nil
+        }
+        guard let parsed = date(text) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "date is not ISO 8601"
+            )
+        }
+        return parsed
     }
 
     /// Redacted on purpose: a credential that prints itself ends up in a log.

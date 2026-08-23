@@ -123,23 +123,14 @@ final class AppModel {
         PairingRequest(deviceName: deviceName, deviceInstallID: deviceInstallID, nonce: nonce, code: code)
     }
 
-    /// The prototype's stand-in for the host's grant. A real host mints this;
-    /// nothing here contacts GitHub, Copilot, or any account system.
-    func pairSynthetically(with link: RappidLink) async {
-        let credential = DeviceCredential(
-            credentialID: String(Digest.sha256Hex("\(deviceInstallID):\(link.code.normalised)").prefix(16)),
-            token: "synthetic-scoped-credential-\(UUID().uuidString)",
-            scopes: AuthPolicy.requestedScopes,
-            hostURL: link.host,
-            hostFingerprint: link.hostFingerprint,
-            issuedAt: Date(),
-            expiresAt: Calendar.current.date(byAdding: .day, value: 7, to: Date()),
-            isSyntheticGrant: true
-        )
+    func pair(with link: RappidLink, session: URLSession = .shared) async {
         do {
+            let request = pairingRequest(code: link.code)
+            let credential = try await HostPairingClient(session: session)
+                .complete(request, with: link)
             try await credentialStore.save(credential)
             adopt(credential: credential)
-            pairingNotice = "Paired with \(link.host.absoluteString). This device now holds a scoped credential your host can revoke. No host was actually contacted, so the field still shows deterministic samples."
+            pairingNotice = "Paired with \(link.host.absoluteString). The host verified the one-time proof and issued a scoped, revocable device credential."
         } catch let error as CredentialStoreError where error.isMissingEntitlement {
             pairingNotice = "This build cannot reach the Keychain here, so the credential was not stored. Pairing was not completed."
         } catch {
@@ -187,7 +178,7 @@ final class AppModel {
             gateway = SyntheticGateway()
             return
         }
-        let transport = WebSocketHostTransport(
+        let transport = HTTPHostTransport(
             hostURL: credential.hostURL,
             credentials: StoredCredentialProvider(store: credentialStore)
         )

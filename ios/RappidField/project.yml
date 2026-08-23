@@ -29,6 +29,8 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         ITSAppUsesNonExemptEncryption: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         UIUserInterfaceStyle: Dark
         UILaunchScreen:
           UIColorName: ""

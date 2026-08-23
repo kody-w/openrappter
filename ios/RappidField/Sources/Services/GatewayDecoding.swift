@@ -99,22 +99,31 @@ enum GatewayDecoding {
     }
 
     static func proposal(from row: [String: Any], rappid: RappidIdentity, hostURL: URL) throws -> GrowthProposal {
-        guard let id = row["id"] as? String ?? row["proposalId"] as? String else {
-            throw GatewayError.malformedResponse("proposal without an id")
+        guard let id = row["id"] as? String,
+              !id.isEmpty,
+              let returnedRappid = row["rappid"] as? String,
+              returnedRappid == rappid.description,
+              let dimension = row["dimension"] as? String,
+              let title = row["title"] as? String,
+              let summary = row["summary"] as? String,
+              let predictedStats = row["predictedStats"] as? [String: Any],
+              let predictedFrameHeight = predictedStats["frameHeight"] as? Int,
+              predictedFrameHeight >= 0,
+              row["predictedStage"] as? String != nil,
+              let evidence = row["evidence"] as? [String],
+              row["assets"] as? [[String: Any]] != nil,
+              let authoritative = row["authoritative"] as? Bool,
+              authoritative == false else {
+            throw GatewayError.malformedResponse(
+                "proposal did not match exact #438 id/rappid/predictedStats.frameHeight shape"
+            )
         }
-        // A host that claims authority over a proposal is refused: a proposal
-        // is a reading in every runtime, and this client will not render one
-        // as fact.
-        if let authoritative = row["authoritative"] as? Bool, authoritative {
-            throw GatewayError.malformedResponse("host marked a proposal authoritative")
-        }
-        let predictedFrameHeight = row["predictedFrameHeight"] as? Int ?? 0
         return GrowthProposal(
             id: id,
             rappid: rappid,
-            dimension: row["dimension"] as? String ?? "unknown",
-            title: row["title"] as? String ?? "Proposed append",
-            summary: row["summary"] as? String ?? "",
+            dimension: dimension,
+            title: title,
+            summary: summary,
             provider: ProviderClaim(
                 name: (row["provider"] as? [String: Any])?["name"] as? String ?? "host",
                 kind: (row["provider"] as? [String: Any])?["kind"] as? String ?? "unstated",
@@ -125,7 +134,7 @@ enum GatewayDecoding {
             predictedStatDelta: row["predictedStatDelta"] as? [String: Int] ?? [:],
             predictedStage: MoltStage.derived(fromFrameHeight: predictedFrameHeight),
             predictedDisplayHeightMillimetres: DisplayHeightCurve.v1_2.millimetres(frameHeight: predictedFrameHeight),
-            evidence: row["evidence"] as? [String] ?? [],
+            evidence: evidence,
             proposedAssets: [],
             origin: .pairedHost(hostURL)
         )

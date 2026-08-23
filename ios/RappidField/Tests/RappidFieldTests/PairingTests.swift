@@ -10,7 +10,10 @@ final class PairingTests: XCTestCase {
         XCTAssertTrue(AuthPolicy.deviceCredentialIsScoped)
         XCTAssertTrue(AuthPolicy.deviceCredentialIsRevocableFromHost)
         XCTAssertEqual(AuthPolicy.requestedScopes, ["rappid.list", "rappid.asset", "rappid.autocomplete", "rappid.grow"])
-        XCTAssertEqual(Set(AuthPolicy.requestedScopes), Set(GatewayMethod.allCases.map(\.rawValue)))
+        XCTAssertEqual(
+            Set(AuthPolicy.requestedScopes),
+            Set(GatewayMethod.allCases.filter { $0 != .approvalIssue }.map(\.rawValue))
+        )
     }
 
     /// The one thing a pairing payload must never contain.
@@ -99,19 +102,71 @@ final class PairingTests: XCTestCase {
         XCTAssertEqual(parsed.code.normalised, code.normalised)
 
         // Loopback over plain HTTP is fine; it never leaves the device.
-        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://localhost:8787")!, code: code, hostFingerprint: "aa"))
-        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://127.0.0.1:8787")!, code: code, hostFingerprint: "aa"))
-        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://[::1]:8787")!, code: code, hostFingerprint: "aa"))
+        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://localhost:8787")!, code: code, hostFingerprint: "aa11bb22"))
+        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://127.0.0.1:8787")!, code: code, hostFingerprint: "aa11bb22"))
+        XCTAssertNoThrow(try RappidLink(host: URL(string: "http://[::1]:8787")!, code: code, hostFingerprint: "aa11bb22"))
         // Loopback is an HTTP exception, not an arbitrary-scheme exception.
-        XCTAssertThrowsError(try RappidLink(host: URL(string: "ftp://localhost:8787")!, code: code, hostFingerprint: "aa"))
-        XCTAssertThrowsError(try RappidLink(host: URL(string: "ws://127.0.0.1:8787")!, code: code, hostFingerprint: "aa"))
-        XCTAssertThrowsError(try RappidLink(host: URL(string: "file://localhost/tmp/socket")!, code: code, hostFingerprint: "aa"))
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "ftp://localhost:8787")!, code: code, hostFingerprint: "aa11bb22"))
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "ws://127.0.0.1:8787")!, code: code, hostFingerprint: "aa11bb22"))
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "file://localhost/tmp/socket")!, code: code, hostFingerprint: "aa11bb22"))
         // Bonjour names resolve to other LAN machines, not loopback.
-        XCTAssertThrowsError(try RappidLink(host: URL(string: "http://studio.local")!, code: code, hostFingerprint: "aa"))
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "http://studio.local")!, code: code, hostFingerprint: "aa11bb22"))
         // Plain HTTP to anywhere else is not.
-        XCTAssertThrowsError(try RappidLink(host: URL(string: "http://example.com")!, code: code, hostFingerprint: "aa"))
+        XCTAssertThrowsError(try RappidLink(host: URL(string: "http://example.com")!, code: code, hostFingerprint: "aa11bb22"))
         XCTAssertThrowsError(try RappidLink(parsing: "https://example.com/pair"))
         XCTAssertThrowsError(try RappidLink(parsing: "rappid-link://pair?host=https://a.b"))
+    }
+
+    func testRealPairingSendsProofNotCodeAndDecodesHostCredential() async throws {
+        CapturingURLProtocol.reset()
+        CapturingURLProtocol.responseBody = Data(#"""
+        {
+          "jsonrpc":"2.0",
+          "id":"pair",
+          "result":{
+            "credentialID":"rappid_device_1",
+            "token":"real-scoped-bearer",
+            "scopes":["rappid.list","rappid.asset","rappid.autocomplete","rappid.grow"],
+            "hostURL":"https://studio.local:8787",
+            "hostFingerprint":"ab12cd34",
+            "issuedAt":"2026-08-23T20:00:00.000Z",
+            "expiresAt":"2026-09-23T20:00:00.000Z",
+            "isSyntheticGrant":false
+          }
+        }
+        """#.utf8)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CapturingURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let link = try RappidLink(
+            host: host,
+            code: code,
+            hostFingerprint: "ab12cd34"
+        )
+        let request = PairingRequest(
+            deviceName: "Field phone",
+            deviceInstallID: "install-0001",
+            nonce: "pairing-nonce-0001",
+            code: code
+        )
+
+        let credential = try await HostPairingClient(session: session)
+            .complete(request, with: link)
+        XCTAssertEqual(credential.token, "real-scoped-bearer")
+        XCTAssertFalse(credential.isSyntheticGrant)
+        XCTAssertTrue(credential.isScopedToHabitatMethodsOnly)
+
+        let sent = try XCTUnwrap(CapturingURLProtocol.lastRequest)
+        XCTAssertEqual(sent.url, host)
+        XCTAssertNil(sent.value(forHTTPHeaderField: "Authorization"))
+        let body = String(
+            decoding: try XCTUnwrap(CapturingURLProtocol.lastBody),
+            as: UTF8.self
+        )
+        XCTAssertTrue(body.contains("rappid.pairing.complete"))
+        XCTAssertTrue(body.contains(request.proof))
+        XCTAssertFalse(body.contains(code.normalised))
+        XCTAssertFalse(body.contains(code.description))
     }
 
     func testCredentialStoreRoundTrip() async throws {

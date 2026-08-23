@@ -177,9 +177,13 @@ revokes at any time ------------>   credential dies; the app falls back to fixtu
   `http://localhost`, `http://127.0.0.1`, and `http://[::1]` are accepted,
   while FTP, file, WebSocket, and every other scheme are refused even when
   their host is loopback.
-- Transports are `URLSession`-based and swappable: `WebSocketHostTransport`
-  (default for a local host), `HTTPHostTransport`, and `SyntheticGateway`.
-  Methods: `rappid.list`, `rappid.asset`, `rappid.autocomplete`, `rappid.grow`.
+- The real host transport is `HTTPHostTransport`: JSON-RPC over HTTPS or
+  literal-loopback HTTP. `SyntheticGateway` is a separate, visibly demo-only
+  fixture and never creates or stores a credential.
+- Before `rappid.grow`, the device requests `rappid.approval.issue` for the
+  exact RAPPID and proposal id, then sends the returned single-use
+  `approvalId`. The host rejects replay, expiry, another device, a missing
+  `rappid.grow` scope, or any mismatched binding.
 
 ---
 
@@ -579,9 +583,9 @@ generated and git-ignored; `project.yml` is the source of truth.
 | Wake-call synthesis and playback, rendered on device | — |
 | Weight ledger, dedupe, incomplete-weight refusal | Fixture memory/skill/device byte counts; the sonic ones are real |
 | Display-height curve and versioning | — |
-| Leash, approval, and every append refusal | `rappid.grow` succeeding: no host is reachable and fixtures always refuse |
-| Pairing protocol types, proof derivation, Keychain storage, scoped credential | The host handshake — pairing mints a **synthetic** credential locally, contacts no host, and holds no real secret |
-| JSON-RPC wire shape and both transports | Live traffic against a running host, which is untested end to end |
+| Leash, local confirmation, host-issued single-use approval, and exact `rappid.grow` receipt | Synthetic fixtures always refuse |
+| One-time host proof handshake, Keychain storage, scoped bearer credential, and host revocation | Demo-only synthetic mode stores no credential |
+| JSON-RPC over URLSession with the real bearer in `Authorization` and strict #438 decoding | — |
 | CMR/1 buffering, commit, cancel, failure | The companion's voice — replies come from a small local responder, not a model |
 | The play loop: encounters, drills, attunement, and their effect on a reading | A long game — there is one encounter table and one drill, sized to prove the loop rather than to fill an evening |
 | The debug autopilot, its allowlist, refusals and receipts | Anything in a Release build — it is compiled out, and the CLI is a development tool, not a product surface |
@@ -591,5 +595,4 @@ Companions shown without a paired host are **deterministic local fixtures**,
 labelled `SYNTHETIC` on every screen that shows one, and the app refuses to
 append to them rather than faking a body frame.
 
-There is no App Store metadata, no icon artwork, no analytics, and no
-networking against a live host in this prototype.
+There is no App Store metadata, no icon artwork, and no analytics.

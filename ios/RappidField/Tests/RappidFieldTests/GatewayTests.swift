@@ -6,13 +6,19 @@ import XCTest
 final class CapturingURLProtocol: URLProtocol {
     static var lastRequest: URLRequest?
     static var lastBody: Data?
+    static var requests: [URLRequest] = []
+    static var bodies: [Data] = []
     static var responseBody = Data()
+    static var responseBodies: [Data] = []
     static var statusCode = 200
 
     static func reset() {
         lastRequest = nil
         lastBody = nil
+        requests = []
+        bodies = []
         responseBody = Data()
+        responseBodies = []
         statusCode = 200
     }
 
@@ -21,8 +27,10 @@ final class CapturingURLProtocol: URLProtocol {
 
     override func startLoading() {
         Self.lastRequest = request
+        Self.requests.append(request)
         if let body = request.httpBody {
             Self.lastBody = body
+            Self.bodies.append(body)
         } else if let stream = request.httpBodyStream {
             stream.open()
             var data = Data()
@@ -34,6 +42,7 @@ final class CapturingURLProtocol: URLProtocol {
             }
             stream.close()
             Self.lastBody = data
+            Self.bodies.append(data)
         }
 
         let response = HTTPURLResponse(
@@ -43,7 +52,10 @@ final class CapturingURLProtocol: URLProtocol {
             headerFields: ["Content-Type": "application/json"]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Self.responseBody)
+        let responseData = Self.responseBodies.isEmpty
+            ? Self.responseBody
+            : Self.responseBodies.removeFirst()
+        client?.urlProtocol(self, didLoad: responseData)
         client?.urlProtocolDidFinishLoading(self)
     }
 
@@ -76,9 +88,19 @@ final class GatewayTests: XCTestCase {
         return URLSession(configuration: configuration)
     }
 
-    func testTheFourHabitatMethodsAreTheOnesSpoken() {
+    func testTheHostMethodsIncludeApprovalWithoutRequestingItAsADeviceScope() {
         XCTAssertEqual(
             GatewayMethod.allCases.map(\.rawValue),
+            [
+                "rappid.list",
+                "rappid.asset",
+                "rappid.autocomplete",
+                "rappid.approval.issue",
+                "rappid.grow",
+            ]
+        )
+        XCTAssertEqual(
+            AuthPolicy.requestedScopes,
             ["rappid.list", "rappid.asset", "rappid.autocomplete", "rappid.grow"]
         )
     }
@@ -108,7 +130,11 @@ final class GatewayTests: XCTestCase {
 
         let request = try XCTUnwrap(CapturingURLProtocol.lastRequest)
         XCTAssertEqual(request.httpMethod, "POST")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer scoped-device-token")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer scoped-device-token"
+        )
+        XCTAssertEqual(request.url, host)
         XCTAssertFalse(try XCTUnwrap(request.url).absoluteString.contains("scoped-device-token"), "no credential in the URL")
 
         let body = String(decoding: try XCTUnwrap(CapturingURLProtocol.lastBody), as: UTF8.self)
@@ -173,6 +199,101 @@ final class GatewayTests: XCTestCase {
         XCTAssertFalse(companion.stats.weightComplete, "a dimension the host called unmeasured stays unmeasured")
         XCTAssertNil(companion.stats.totalWeightBytes)
         XCTAssertEqual(companion.stats.residentWeightBytes, 212)
+    }
+
+    func testProposalDecodesExactNestedPredictedStatsAndRefusesMissingShape() throws {
+        let identity = SyntheticField.identity(for: .current)
+        let row: [String: Any] = [
+            "id": "proposal-1",
+            "rappid": identity.description,
+            "dimension": "sonic",
+            "title": "Grow sound",
+            "summary": "Append a sonic dimension.",
+            "predictedStats": ["frameHeight": 7],
+            "predictedStage": "hatchling",
+            "evidence": ["verified"],
+            "assets": [],
+            "authoritative": false,
+        ]
+        let proposal = try GatewayDecoding.proposal(
+            from: row,
+            rappid: identity,
+            hostURL: host
+        )
+        XCTAssertEqual(proposal.predictedFrameHeight, 7)
+
+        var flat = row
+        flat.removeValue(forKey: "predictedStats")
+        flat["predictedFrameHeight"] = 7
+        XCTAssertThrowsError(try GatewayDecoding.proposal(
+            from: flat,
+            rappid: identity,
+            hostURL: host
+        ))
+    }
+
+    func testGrowIssuesHostApprovalAndRequiresExactNestedAppendReceipt() async throws {
+        CapturingURLProtocol.reset()
+        let identity = SyntheticField.identity(for: .current)
+        let frameHash = String(repeating: "a", count: 64)
+        CapturingURLProtocol.responseBodies = [
+            Data(#"{"jsonrpc":"2.0","id":"1","result":{"approvalId":"approval-1","expiresAt":"2026-08-23T21:00:00.000Z"}}"#.utf8),
+            Data("""
+            {"jsonrpc":"2.0","id":"2","result":{"rappid":"\(identity.description)","appended":{"seq":4,"frame_hash":"\(frameHash)"}}}
+            """.utf8),
+        ]
+        let gateway = HostGateway(
+            transport: HTTPHostTransport(
+                hostURL: host,
+                credentials: StubCredentialProvider(credential: credential()),
+                session: session()
+            ),
+            hostURL: host
+        )
+        let receipt = try await gateway.grow(
+            AppendRequest(rappid: identity, proposalID: "proposal-1")
+        )
+        XCTAssertEqual(receipt.frameSeq, 4)
+        XCTAssertEqual(receipt.frameHash, frameHash)
+        XCTAssertEqual(CapturingURLProtocol.bodies.count, 2)
+        let approvalBody = String(
+            decoding: CapturingURLProtocol.bodies[0],
+            as: UTF8.self
+        )
+        let growBody = String(
+            decoding: CapturingURLProtocol.bodies[1],
+            as: UTF8.self
+        )
+        XCTAssertTrue(approvalBody.contains("rappid.approval.issue"))
+        XCTAssertTrue(growBody.contains(#""approvalId":"approval-1""#))
+    }
+
+    func testGrowFailsClosedOnLegacyFlatReceipt() async {
+        CapturingURLProtocol.reset()
+        let identity = SyntheticField.identity(for: .current)
+        CapturingURLProtocol.responseBodies = [
+            Data(#"{"jsonrpc":"2.0","id":"1","result":{"approvalId":"approval-1","expiresAt":"2026-08-23T21:00:00.000Z"}}"#.utf8),
+            Data(#"{"jsonrpc":"2.0","id":"2","result":{"seq":0,"frame_hash":"bad"}}"#.utf8),
+        ]
+        let gateway = HostGateway(
+            transport: HTTPHostTransport(
+                hostURL: host,
+                credentials: StubCredentialProvider(credential: credential()),
+                session: session()
+            ),
+            hostURL: host
+        )
+        do {
+            _ = try await gateway.grow(
+                AppendRequest(rappid: identity, proposalID: "proposal-1")
+            )
+            XCTFail("legacy flat grow receipt must be refused")
+        } catch {
+            guard case let GatewayError.malformedResponse(detail) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(detail.contains("appended.seq/frame_hash"))
+        }
     }
 
     func testUnknownSpeciesIsRenderedButFlagged() throws {

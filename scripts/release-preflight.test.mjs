@@ -565,6 +565,21 @@ test('release workflows retain per-tag builds and globally serialize publication
   );
 });
 
+test('Install Smoke runs whenever any shell script changes', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/install-smoke.yml', import.meta.url),
+    'utf8',
+  );
+  const pathsBlock =
+    workflow.match(/paths: &install-smoke-paths\n(?<paths>(?:\s+- .*\n)+)/)
+      ?.groups?.paths ?? '';
+  assert.match(pathsBlock, /^\s+- '\*\*\/\*\.sh'$/m);
+  assert.doesNotMatch(
+    pathsBlock.replace(/^\s+- '\*\*\/\*\.sh'\n/m, ''),
+    /^\s+- '\*\*\/\*\.sh'$/m,
+  );
+});
+
 test('macOS workflow validates tag provenance and never injects output into shell', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/release-bar.yml', import.meta.url),

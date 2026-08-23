@@ -8,7 +8,8 @@ In OpenRappter Personal these applications operate on the owner's local
 organism and fixture-safe seams. They are not multi-tenant SaaS surfaces.
 Licensed, isolated hosted business organisms belong to the separate private
 RapterOS product and integrate only through
-[versioned XPedition extensions](./xpedition-extensions.md).
+#445's authoritative data-only local-route descriptor after that contract is
+merged and its reader is installed.
 
 Every company application is registered in
 `typescript/ui/src/services/company-app-registry.ts`. The shell has one generic
@@ -66,6 +67,13 @@ Authenticated configuration saves are gated as `credential.change`; cron-job
 removal and session deletion are gated as `irreversible.action`. Keyboard
 shortcuts and ordinary semantic clicks can request these actions but cannot
 confirm them.
+
+Configuration review freezes the exact raw/form serialization, format,
+current base hash, reviewed-content SHA-256, action, and canonical payload
+SHA-256. Editors are disabled while review is pending. Any edit invalidates the
+request visibly; confirmation rechecks the local payload and live base hash,
+then submits only the frozen bytes with the reviewed base hash. Substitution,
+concurrent changes, stale actions, and agent confirmation fail closed.
 
 ## Draft-only automation hooks
 

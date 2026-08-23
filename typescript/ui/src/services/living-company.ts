@@ -346,6 +346,14 @@ export class ActionBoundApprovalGate {
     request.status = 'consumed';
   }
 
+  invalidate(id: string, action: ExternalAction): void {
+    const request = this.requests.get(id);
+    if (!request || request.status !== 'pending' || request.action !== action) {
+      throw new Error(`Cannot invalidate stale company approval: ${id}`);
+    }
+    request.status = 'rejected';
+  }
+
   snapshot(): CompanyApprovalRequest[] {
     return [...this.requests.values()].map((request) => ({ ...request }));
   }

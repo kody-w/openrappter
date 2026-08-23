@@ -11,9 +11,14 @@ gates, and a deterministic zero-side-effect work-week harness.
 
 The default shell is branded **OpenRappter Personal / Rapter's Clever Girl
 Edition**. It is tenant-free and contains no proprietary SaaS billing or
-control-plane implementation. Independently provided business surfaces can use
-the versioned [XPedition Application Extension API](./xpedition-extensions.md);
-OpenRappter has no private dependency on those extensions.
+control-plane implementation. The sole v1 extension format is #445's
+authoritative data-only `xpedition-extension-v1` selector: `appId`,
+public read/view capability IDs, bounded order, and surface version may select
+an existing first-party entry only. Display metadata and routes remain owned by
+the trusted local registry.
+Registration fails closed until #445 lands and its exact reader is installed.
+V1 does not load supplied JavaScript, custom elements, URLs, IPC, credentials,
+storage, DOM references, or direct control activation.
 
 It is a desktop shell, not a static demonstration. Every operational window
 mounts an existing Lit product surface and uses the existing authenticated
@@ -70,6 +75,13 @@ The wizard stores only explicit non-secret UI preferences: completion, shell,
 release ring, and contrast. Channel credentials and gateway secrets stay in
 their existing protected stores.
 
+Every step and error state includes **Use Legacy OpenRappter**. It works while
+the gateway is offline, preserves existing state, and makes the migration
+escape hatch available before onboarding completes. The wizard is a real modal:
+focus enters it, background windows/taskbar/shortcuts are inert, Tab and
+Shift-Tab stay contained, Escape keeps setup open and focuses the safe legacy
+action, and focus is restored when the wizard leaves.
+
 ## Release-ring integration seam
 
 The headless `ReleaseRingAdapter` accepts exactly:
@@ -104,6 +116,10 @@ the notices in `NOTICE`; OpenRappter is not claimed to be MIT.
 Hosted, licensed business-organism tenancy and training belong to the separate
 private RapterOS SaaS. Tenant provisioning, billing, entitlement, training,
 and private control-plane code are not part of XPedition or this repository.
+
+An executable extension format is not shipped. Any future executable design
+would require a distinct schema version and a separately reviewed sandbox; it
+must not be interpreted as v1.
 
 ## Semantic desktop control
 

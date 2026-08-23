@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - XPedition now brands the default organism as **OpenRappter Personal /
-  Rapter's Clever Girl Edition** and exposes the stable
-  `openrappter-xpedition-extension/1.0` app/window seam. The open shell remains
-  tenant-free and contains no private RapterOS billing, entitlement, training,
-  or control-plane implementation.
+  Rapter's Clever Girl Edition**. Its sole v1 extension seam is #445's
+  authoritative data-only approved-local-route descriptor. Registration fails
+  closed until the exact reader lands; v1 loads no supplied executable,
+  custom-element, URL, IPC, storage, DOM, or control handler. The open shell
+  remains tenant-free and contains no private RapterOS billing, entitlement,
+  training, or control-plane implementation.
 
 - Windows XPedition now includes The Living Company Desktop as first-class
   product UI. Seven durable registered company windows consume real
@@ -31,6 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the migration release.
 
 ### Fixed
+
+- XPedition v1 no longer mounts supplied custom elements or executable
+  extension code. Descriptor registration fails closed until #445's exact
+  authoritative data-only local-route reader is installed.
+- Configuration approval now binds the exact frozen payload/action/base hashes,
+  rejects edits and concurrent base changes, and saves only reviewed bytes.
+- First-run setup now provides an offline-safe Legacy escape hatch on every
+  step plus contained modal focus, inert background, safe Escape behavior, and
+  focus restoration.
 
 - Release preflight now accepts strict SemVer prerelease tags such as
   `v1.14.0-beta.9` when every TypeScript and Python manifest/runtime reports

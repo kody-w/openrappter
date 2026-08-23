@@ -3,10 +3,12 @@ import {
   COMPANY_APP_REGISTRATIONS,
 } from './company-app-registry.js';
 import {
-  isRegisteredXpeditionExtensionId,
-  listXpeditionExtensions,
-  xpeditionExtension,
-  type XpeditionExtensionId,
+  isRegisteredXpeditionDescriptorId,
+  listXpeditionDescriptors,
+  xpeditionDescriptor,
+  type ApprovedXpeditionCapability,
+  type ApprovedXpeditionRouteId,
+  type XpeditionExtensionAppId,
 } from './xpedition-extensions.js';
 
 export const XPEDITION_APP_IDS = [
@@ -34,7 +36,7 @@ export const XPEDITION_APP_IDS = [
 
 export type XpeditionAppId =
   | (typeof XPEDITION_APP_IDS)[number]
-  | XpeditionExtensionId;
+  | XpeditionExtensionAppId;
 export type OpenRappterView =
   | 'surgeon'
   | 'chat'
@@ -61,8 +63,9 @@ export interface XpeditionApp {
   glyph: string;
   view?: OpenRappterView;
   unavailableReason?: string;
-  extensionElement?: `${string}-${string}`;
-  dataSeams?: readonly string[];
+  routeId?: ApprovedXpeditionRouteId;
+  capabilityIds?: readonly ApprovedXpeditionCapability[];
+  order?: number;
   desktop: boolean;
 }
 
@@ -246,22 +249,31 @@ export function isXpeditionAppId(value: unknown): value is XpeditionAppId {
   return (
     typeof value === 'string' &&
     (XPEDITION_APP_IDS as readonly string[]).includes(value)
-  ) || isRegisteredXpeditionExtensionId(value);
+  ) || isRegisteredXpeditionDescriptorId(value);
 }
 
 export function allXpeditionApps(): readonly XpeditionApp[] {
   return [
     ...XPEDITION_APPS,
-    ...listXpeditionExtensions().map((extension) => ({
-      id: extension.id,
-      title: extension.title,
-      shortTitle: extension.shortTitle,
-      description: extension.description,
-      glyph: extension.glyph,
-      extensionElement: extension.elementTag,
-      dataSeams: extension.dataSeams,
-      desktop: extension.desktop === true,
-    })),
+    ...[...listXpeditionDescriptors()]
+      .sort((left, right) =>
+        (left.descriptor.order ?? 1000) - (right.descriptor.order ?? 1000))
+      .map(({ appId, descriptor }) => {
+      const route = XPEDITION_APPS.find((app) => app.id === descriptor.appId);
+      return {
+        id: appId,
+        title: route?.title ?? descriptor.appId,
+        shortTitle: route?.shortTitle ?? descriptor.appId,
+        description: route?.description ?? `Approved local route ${descriptor.appId}.`,
+        glyph: route?.glyph ?? '?',
+        routeId: descriptor.appId,
+        capabilityIds: descriptor.capabilityIds,
+        order: descriptor.order,
+        view: route?.view,
+        unavailableReason: route?.unavailableReason,
+        desktop: false,
+      };
+      }),
   ];
 }
 
@@ -270,19 +282,25 @@ export function xpeditionApp(
 ): XpeditionApp | null {
   const core = XPEDITION_APPS.find((candidate) => candidate.id === id);
   if (core) return core;
-  const extension = xpeditionExtension(id);
-  return extension
-    ? {
-        id: extension.id,
-        title: extension.title,
-        shortTitle: extension.shortTitle,
-        description: extension.description,
-        glyph: extension.glyph,
-        extensionElement: extension.elementTag,
-        dataSeams: extension.dataSeams,
-        desktop: extension.desktop === true,
-      }
-    : null;
+  const registration = xpeditionDescriptor(id);
+  if (!registration) return null;
+  const route = XPEDITION_APPS.find(
+    (candidate) => candidate.id === registration.descriptor.appId,
+  );
+  return {
+    id: registration.appId,
+    title: route?.title ?? registration.descriptor.appId,
+    shortTitle: route?.shortTitle ?? registration.descriptor.appId,
+    description: route?.description ??
+      `Approved local route ${registration.descriptor.appId}.`,
+    glyph: route?.glyph ?? '?',
+    routeId: registration.descriptor.appId,
+    capabilityIds: registration.descriptor.capabilityIds,
+    order: registration.descriptor.order,
+    view: route?.view,
+    unavailableReason: route?.unavailableReason,
+    desktop: false,
+  };
 }
 
 export interface XpeditionWindowState {

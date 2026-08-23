@@ -25,7 +25,6 @@ describe('Windows XPedition build and accessibility contract', () => {
   const cronComponent = read('../components/cron.ts');
   const sessionsComponent = read('../components/sessions.ts');
   const extensionApi = read('../services/xpedition-extensions.ts');
-  const extensionHost = read('../components/xpedition-extension-host.ts');
   const license = read('../../../../LICENSE');
 
   it('boots XPedition by default while retaining a reversible legacy route', () => {
@@ -115,12 +114,17 @@ describe('Windows XPedition build and accessibility contract', () => {
     expect(license).toContain('Version 2.0, January 2004');
   });
 
-  it('exposes a versioned extension interface without a private dependency', () => {
-    expect(extensionApi).toContain('openrappter-xpedition-extension/1.0');
-    expect(extensionApi).toContain('registerXpeditionExtension');
-    expect(extensionApi).toContain('installXpeditionExtensionApi');
-    expect(extensionHost).toContain("product: 'OpenRappter Personal'");
-    expect(main).toContain('installXpeditionExtensionApi()');
+  it('exposes only the authoritative data-only #445 descriptor seam', () => {
+    expect(extensionApi).toContain(
+      'https://openrappter.dev/contracts/xpedition-extension-v1.json',
+    );
+    expect(extensionApi).toContain('installAuthoritativeXpeditionExtensionReader');
+    expect(extensionApi).toContain('registerXpeditionDescriptor');
+    expect(main).toContain('installXpeditionDescriptorApi()');
+    expect(shell).not.toContain('openrappter-xpedition-extension-host');
+    expect(extensionApi).not.toMatch(
+      /customElements|createElement|elementTag|gatewayToken|preload|localStorage/,
+    );
     expect(extensionApi).not.toMatch(
       /tenantId|billingAccount|entitlementKey|controlPlaneUrl|from ['\"]rapteros/i,
     );

@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [XPedition Extensions](./docs/xpedition-extensions.md) | [Living Company Desktop](./docs/living-company-desktop.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [Living Company Desktop](./docs/living-company-desktop.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -119,9 +119,12 @@ release-ring behavior, keyboard controls, semantic automation, and migration.
 The shell is branded **OpenRappter Personal / Rapter's Clever Girl Edition**.
 OpenRappter remains tenant-free and contains no proprietary SaaS billing,
 entitlement, training, or control-plane code. A separate private RapterOS SaaS
-may mount independently supplied business applications through the stable
-[XPedition extension API](./docs/xpedition-extensions.md); OpenRappter does not
-depend on that private implementation.
+may submit data-only selectors for approved existing local app entries
+through the authoritative `xpedition-extension-v1` contract in
+[PR #445](https://github.com/kody-w/openrappter/pull/445). V1 cannot load code,
+custom elements, URLs, IPC, credentials, DOM references, or control handlers.
+Caller titles, descriptions, glyphs, routes, fragments, and handlers are not
+part of v1. Registration stays disabled until #445 lands and its exact reader is installed.
 
 OpenRappter's rights follow this repository's actual **Apache License 2.0** in
 [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE). It is not represented as MIT.

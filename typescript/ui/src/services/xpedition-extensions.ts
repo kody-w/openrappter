@@ -1,149 +1,189 @@
-export const XPEDITION_EXTENSION_SCHEMA =
-  'openrappter-xpedition-extension/1.0' as const;
+export const AUTHORITATIVE_XPEDITION_EXTENSION_SCHEMA_ID =
+  'https://openrappter.dev/contracts/xpedition-extension-v1.json' as const;
 
-export type XpeditionExtensionId = `extension:${string}`;
+export const APPROVED_XPEDITION_ROUTE_IDS = [
+  'observe',
+  'chat',
+  'show-and-tell',
+  'agents',
+  'showcase',
+  'flight',
+  'skills',
+  'channels',
+  'sessions',
+  'cron',
+  'devices',
+  'presence',
+  'debug',
+  'zen',
+  'accounts',
+  'memory',
+  'settings',
+  'terminal',
+  'help',
+] as const;
 
-export interface XpeditionAppExtensionV1 {
-  schema: typeof XPEDITION_EXTENSION_SCHEMA;
-  id: XpeditionExtensionId;
-  title: string;
-  shortTitle: string;
-  description: string;
-  glyph: string;
-  elementTag: `${string}-${string}`;
-  desktop?: boolean;
-  dataSeams: readonly string[];
+export type ApprovedXpeditionRouteId =
+  (typeof APPROVED_XPEDITION_ROUTE_IDS)[number];
+
+export type ApprovedXpeditionCapability =
+  | 'ui:view'
+  | 'agent:read'
+  | 'channel:read'
+  | 'session:read'
+  | 'skill:read'
+  | 'system:read'
+  | 'memory:read';
+
+export interface XpeditionExtensionDescriptorV1 {
+  appId: ApprovedXpeditionRouteId;
+  capabilityIds?: readonly ApprovedXpeditionCapability[];
+  order?: number;
+  surfaceVersion: 1;
+}
+
+export interface XpeditionExtensionReadResult {
+  ok: boolean;
+  value?: XpeditionExtensionDescriptorV1;
+  error?: string;
+}
+
+export interface AuthoritativeXpeditionExtensionReaderV1 {
+  schemaId: typeof AUTHORITATIVE_XPEDITION_EXTENSION_SCHEMA_ID;
+  read(candidate: unknown): XpeditionExtensionReadResult;
+}
+
+export type XpeditionExtensionAppId = `extension:${string}`;
+
+interface RegisteredDescriptor {
+  appId: XpeditionExtensionAppId;
+  descriptor: XpeditionExtensionDescriptorV1;
 }
 
 type ExtensionListener = (
-  extensions: readonly XpeditionAppExtensionV1[],
+  descriptors: readonly RegisteredDescriptor[],
 ) => void;
 
-const extensions = new Map<XpeditionExtensionId, XpeditionAppExtensionV1>();
+const descriptors = new Map<XpeditionExtensionAppId, RegisteredDescriptor>();
 const listeners = new Set<ExtensionListener>();
+let authoritativeReader: AuthoritativeXpeditionExtensionReaderV1 | null = null;
 
-function bounded(value: unknown, name: string, max: number): string {
-  if (
-    typeof value !== 'string' ||
-    value.trim() === '' ||
-    Array.from(value).length > max
-  ) {
-    throw new Error(`${name} must be a non-empty string of at most ${max} characters.`);
-  }
-  return value.trim();
-}
-
-function validate(
-  candidate: XpeditionAppExtensionV1,
-): XpeditionAppExtensionV1 {
-  if (candidate.schema !== XPEDITION_EXTENSION_SCHEMA) {
-    throw new Error(`Unsupported XPedition extension schema: ${String(candidate.schema)}`);
-  }
-  if (!/^extension:[a-z0-9][a-z0-9-]{1,62}$/.test(candidate.id)) {
-    throw new Error(
-      'XPedition extension id must use extension:<lowercase-kebab-name>.',
-    );
-  }
-  if (!/^[a-z][a-z0-9]*-[a-z0-9-]+$/.test(candidate.elementTag)) {
-    throw new Error('XPedition extension elementTag must be a valid custom-element name.');
-  }
-  if (
-    !Array.isArray(candidate.dataSeams) ||
-    candidate.dataSeams.length === 0 ||
-    candidate.dataSeams.length > 20 ||
-    candidate.dataSeams.some((seam) =>
-      typeof seam !== 'string' ||
-      seam.trim() === '' ||
-      Array.from(seam).length > 100)
-  ) {
-    throw new Error('XPedition extension dataSeams must name 1–20 bounded interfaces.');
-  }
-  return Object.freeze({
-    schema: XPEDITION_EXTENSION_SCHEMA,
-    id: candidate.id,
-    title: bounded(candidate.title, 'title', 80),
-    shortTitle: bounded(candidate.shortTitle, 'shortTitle', 40),
-    description: bounded(candidate.description, 'description', 240),
-    glyph: bounded(candidate.glyph, 'glyph', 8),
-    elementTag: candidate.elementTag,
-    desktop: candidate.desktop === true,
-    dataSeams: Object.freeze(
-      candidate.dataSeams.map((seam) => seam.trim()),
-    ),
-  });
-}
-
-function notify(): void {
-  const snapshot = listXpeditionExtensions();
-  for (const listener of listeners) listener(snapshot);
-}
-
-export function registerXpeditionExtension(
-  candidate: XpeditionAppExtensionV1,
-): () => void {
-  const extension = validate(candidate);
-  if (extensions.has(extension.id)) {
-    throw new Error(`XPedition extension is already registered: ${extension.id}`);
-  }
-  extensions.set(extension.id, extension);
-  notify();
-  return () => {
-    if (extensions.delete(extension.id)) notify();
-  };
-}
-
-export function listXpeditionExtensions(): readonly XpeditionAppExtensionV1[] {
+function snapshot(): readonly RegisteredDescriptor[] {
   return Object.freeze(
-    [...extensions.values()].map((extension) => Object.freeze({
-      ...extension,
-      dataSeams: Object.freeze([...extension.dataSeams]),
+    [...descriptors.values()].map((registration) => Object.freeze({
+      appId: registration.appId,
+      descriptor: Object.freeze({ ...registration.descriptor }),
     })),
   );
 }
 
-export function xpeditionExtension(
-  id: unknown,
-): XpeditionAppExtensionV1 | null {
-  return typeof id === 'string'
-    ? extensions.get(id as XpeditionExtensionId) ?? null
+function notify(): void {
+  const current = snapshot();
+  for (const listener of listeners) listener(current);
+}
+
+export function installAuthoritativeXpeditionExtensionReader(
+  reader: AuthoritativeXpeditionExtensionReaderV1,
+): () => void {
+  if (reader.schemaId !== AUTHORITATIVE_XPEDITION_EXTENSION_SCHEMA_ID) {
+    throw new Error('XPedition reader does not match the authoritative #445 schema id.');
+  }
+  if (authoritativeReader) {
+    throw new Error('The authoritative XPedition descriptor reader is already installed.');
+  }
+  authoritativeReader = reader;
+  return () => {
+    authoritativeReader = null;
+    descriptors.clear();
+    notify();
+  };
+}
+
+export function registerXpeditionDescriptor(
+  candidate: unknown,
+): () => void {
+  if (!authoritativeReader) {
+    throw new Error(
+      'XPedition v1 registration is disabled until #445 lands and its authoritative contract reader is installed.',
+    );
+  }
+  const result = authoritativeReader.read(candidate);
+  if (!result.ok || !result.value) {
+    throw new Error(result.error || 'Descriptor rejected by the authoritative #445 reader.');
+  }
+  const descriptor = Object.freeze({ ...result.value });
+  if (
+    descriptor.surfaceVersion !== 1 ||
+    !APPROVED_XPEDITION_ROUTE_IDS.includes(descriptor.appId)
+  ) {
+    throw new Error('Descriptor does not map to an approved local XPedition v1 route.');
+  }
+  const canonical = Object.freeze({
+    appId: descriptor.appId,
+    ...(descriptor.capabilityIds
+      ? { capabilityIds: Object.freeze([...descriptor.capabilityIds]) }
+      : {}),
+    ...(descriptor.order === undefined ? {} : { order: descriptor.order }),
+    surfaceVersion: 1 as const,
+  });
+  const appId = `extension:${canonical.appId}` as XpeditionExtensionAppId;
+  if (descriptors.has(appId)) {
+    throw new Error(`XPedition descriptor is already registered: ${canonical.appId}`);
+  }
+  descriptors.set(appId, Object.freeze({ appId, descriptor: canonical }));
+  notify();
+  return () => {
+    if (descriptors.delete(appId)) notify();
+  };
+}
+
+export function listXpeditionDescriptors(): readonly RegisteredDescriptor[] {
+  return snapshot();
+}
+
+export function xpeditionDescriptor(
+  appId: unknown,
+): RegisteredDescriptor | null {
+  return typeof appId === 'string'
+    ? descriptors.get(appId as XpeditionExtensionAppId) ?? null
     : null;
 }
 
-export function isRegisteredXpeditionExtensionId(
-  id: unknown,
-): id is XpeditionExtensionId {
-  return typeof id === 'string' &&
-    extensions.has(id as XpeditionExtensionId);
+export function isRegisteredXpeditionDescriptorId(
+  appId: unknown,
+): appId is XpeditionExtensionAppId {
+  return typeof appId === 'string' &&
+    descriptors.has(appId as XpeditionExtensionAppId);
 }
 
-export function subscribeXpeditionExtensions(
+export function subscribeXpeditionDescriptors(
   listener: ExtensionListener,
 ): () => void {
   listeners.add(listener);
-  listener(listXpeditionExtensions());
+  listener(snapshot());
   return () => listeners.delete(listener);
 }
 
-export interface XpeditionExtensionApiV1 {
-  schema: typeof XPEDITION_EXTENSION_SCHEMA;
-  register(extension: XpeditionAppExtensionV1): () => void;
-  list(): readonly XpeditionAppExtensionV1[];
+export interface XpeditionDescriptorApiV1 {
+  schemaId: typeof AUTHORITATIVE_XPEDITION_EXTENSION_SCHEMA_ID;
+  register(candidate: unknown): () => void;
+  list(): readonly RegisteredDescriptor[];
 }
 
-export function installXpeditionExtensionApi(): XpeditionExtensionApiV1 {
-  const api: XpeditionExtensionApiV1 = Object.freeze({
-    schema: XPEDITION_EXTENSION_SCHEMA,
-    register: registerXpeditionExtension,
-    list: listXpeditionExtensions,
+export function installXpeditionDescriptorApi(): XpeditionDescriptorApiV1 {
+  const api: XpeditionDescriptorApiV1 = Object.freeze({
+    schemaId: AUTHORITATIVE_XPEDITION_EXTENSION_SCHEMA_ID,
+    register: registerXpeditionDescriptor,
+    list: listXpeditionDescriptors,
   });
   if (globalThis.window) {
-    globalThis.window.openrappterXpeditionExtensions = api;
+    globalThis.window.openrappterXpeditionDescriptors = api;
   }
   return api;
 }
 
 declare global {
   interface Window {
-    openrappterXpeditionExtensions?: XpeditionExtensionApiV1;
+    openrappterXpeditionDescriptors?: XpeditionDescriptorApiV1;
   }
 }

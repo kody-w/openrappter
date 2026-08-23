@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property, query, state } from 'lit/decorators.js';
 import { gateway, type GatewayClient } from '../services/gateway.js';
 import {
   FixtureReleaseRingAdapter,
@@ -212,6 +212,21 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
       padding-top: 2rem;
     }
 
+    button.legacy {
+      margin-right: auto;
+      border-color: #725518;
+      background: #fff7d6;
+      color: #4f3908;
+    }
+
+    .modal-status {
+      min-height: 1.2rem;
+      margin-top: 0.4rem;
+      color: #6a4500;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
     button {
       min-height: 2.55rem;
       padding: 0.55rem 1rem;
@@ -294,13 +309,28 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
   @state() private healthState: 'idle' | 'loading' | 'success' | 'error' = 'idle';
   @state() private health: HealthResult | null = null;
   @state() private healthError = '';
+  @state() private modalStatus = '';
+  @query('.wizard') private wizard?: HTMLElement;
+  private previousFocus: HTMLElement | null = null;
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     void this.ringAdapter.current().then((ring) => {
       this.ring = ring;
       this.appliedRing = ring;
     });
+  }
+
+  protected firstUpdated(): void {
+    queueMicrotask(() => this.wizard?.focus());
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this.previousFocus?.isConnected) this.previousFocus.focus();
   }
 
   selectStep(step: OnboardingStep): void {
@@ -430,6 +460,48 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
       bubbles: true,
       composed: true,
     }));
+  }
+
+  private useLegacy(): void {
+    this.dispatchEvent(new CustomEvent('switch-shell', {
+      detail: { shell: 'legacy' },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  private handleDialogKeydown(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.modalStatus =
+        'Setup remains open to preserve state. Use Legacy OpenRappter is focused.';
+      this.shadowRoot?.querySelector<HTMLButtonElement>('.legacy')?.focus();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      this.shadowRoot?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute('inert'));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      this.wizard?.focus();
+      return;
+    }
+    const active = this.shadowRoot?.activeElement;
+    const current = focusable.indexOf(active as HTMLElement);
+    if (event.shiftKey && (current <= 0)) {
+      event.preventDefault();
+      focusable[focusable.length - 1].focus();
+    } else if (!event.shiftKey && current === focusable.length - 1) {
+      event.preventDefault();
+      focusable[0].focus();
+    } else if (current < 0) {
+      event.preventDefault();
+      (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus();
+    }
   }
 
   private renderStep() {
@@ -610,7 +682,15 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
   render() {
     const atLastStep = this.step === 'health';
     return html`
-      <section class="wizard" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+      <section
+        class="wizard"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wizard-title"
+        aria-describedby="wizard-subtitle wizard-status"
+        tabindex="-1"
+        @keydown=${this.handleDialogKeydown}
+      >
         <aside>
           <span class="edition">
             <strong>OpenRappter Personal</strong>
@@ -627,8 +707,17 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
         </aside>
         <main>
           <span id="wizard-title" class="subtitle">Windows XPedition setup</span>
+          <span id="wizard-subtitle" class="subtitle">
+            Local-first setup. You can return to Legacy OpenRappter at any time.
+          </span>
           ${this.renderStep()}
+          <div id="wizard-status" class="modal-status" role="status" aria-live="polite">
+            ${this.modalStatus}
+          </div>
           <div class="actions">
+            <button class="legacy" @click=${this.useLegacy}>
+              Use Legacy OpenRappter
+            </button>
             <button ?disabled=${this.stepIndex === 0} @click=${this.previous}>Back</button>
             ${atLastStep
               ? html`

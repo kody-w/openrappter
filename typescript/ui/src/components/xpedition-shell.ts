@@ -36,8 +36,7 @@ import {
   type ExternalAction,
 } from '../services/living-company.js';
 import {
-  subscribeXpeditionExtensions,
-  xpeditionExtension,
+  subscribeXpeditionDescriptors,
 } from '../services/xpedition-extensions.js';
 
 interface DragState {
@@ -715,7 +714,7 @@ export class OpenRappterXpeditionShell extends LitElement {
     this.clockTimer = setInterval(() => {
       this.now = new Date();
     }, 30_000);
-    this.unsubscribeExtensions = subscribeXpeditionExtensions(() => {
+    this.unsubscribeExtensions = subscribeXpeditionDescriptors(() => {
       this.extensionRevision++;
       const registered = new Set(allXpeditionApps().map((app) => app.id));
       for (const window of this.manager.state.windows) {
@@ -978,18 +977,30 @@ export class OpenRappterXpeditionShell extends LitElement {
     this.drag = null;
   };
 
-  private renderAppContent(app: XpeditionApp) {
-    if (app.extensionElement) {
-      const extension = xpeditionExtension(app.id);
+  private renderAppContent(app: XpeditionApp): unknown {
+    if (app.routeId) {
+      const route = xpeditionApp(app.routeId);
+      if (!route) {
+        return html`
+          <div class="unavailable" role="status">
+            Approved local route ${app.routeId} is unavailable in this build.
+          </div>
+        `;
+      }
       return html`
-        <openrappter-xpedition-extension-host
-          .extension=${extension}
-          @open-xpedition-app=${(event: CustomEvent<{ appId: string }>) => {
-            if (isXpeditionAppId(event.detail.appId)) {
-              this.openApp(event.detail.appId);
-            }
-          }}
-        ></openrappter-xpedition-extension-host>
+        <div class="capability-note" role="note">
+          Data-only descriptor mapped to first-party route
+          <code>${app.routeId}</code>.
+          ${app.capabilityIds?.length
+            ? html`
+                Declared public capabilities:
+                ${app.capabilityIds.map((capability) =>
+                  html`<code>${capability}</code>`)}
+              `
+            : html`No optional capability selectors were requested.`}
+          Descriptor metadata never activates controls.
+        </div>
+        ${this.renderAppContent(route)}
       `;
     }
     if (app.unavailableReason) {
@@ -1168,6 +1179,8 @@ export class OpenRappterXpeditionShell extends LitElement {
         aria-modal="false"
         aria-label=${window.title}
         tabindex="-1"
+        ?inert=${!this.preferences.onboardingCompleted}
+        aria-hidden=${this.preferences.onboardingCompleted ? 'false' : 'true'}
         @pointerdown=${() => this.manager.focus(window.id)}
       >
         <header
@@ -1216,7 +1229,13 @@ export class OpenRappterXpeditionShell extends LitElement {
   private renderStartMenu() {
     if (!this.startOpen) return nothing;
     return html`
-      <section class="start-menu" role="menu" aria-label="Start menu">
+      <section
+        class="start-menu"
+        role="menu"
+        aria-label="Start menu"
+        ?inert=${!this.preferences.onboardingCompleted}
+        aria-hidden=${this.preferences.onboardingCompleted ? 'false' : 'true'}
+      >
         <header class="start-header">
           <span class="profile-mark" aria-hidden="true">R</span>
           <span>
@@ -1279,7 +1298,12 @@ export class OpenRappterXpeditionShell extends LitElement {
             `
           : nothing}
 
-        <nav class="shortcuts" aria-label="Desktop shortcuts">
+        <nav
+          class="shortcuts"
+          aria-label="Desktop shortcuts"
+          ?inert=${!this.preferences.onboardingCompleted}
+          aria-hidden=${this.preferences.onboardingCompleted ? 'false' : 'true'}
+        >
           ${desktopApps.map((app, index) => html`
             <button
               class="shortcut"
@@ -1299,7 +1323,12 @@ export class OpenRappterXpeditionShell extends LitElement {
         ${this.desktopState.windows.map((window) => this.renderWindow(window))}
         ${this.renderStartMenu()}
 
-        <footer class="taskbar" aria-label="Taskbar">
+        <footer
+          class="taskbar"
+          aria-label="Taskbar"
+          ?inert=${!this.preferences.onboardingCompleted}
+          aria-hidden=${this.preferences.onboardingCompleted ? 'false' : 'true'}
+        >
           <button
             class="start-button"
             aria-haspopup="menu"
@@ -1348,6 +1377,10 @@ export class OpenRappterXpeditionShell extends LitElement {
                 @retry-gateway=${(event: Event) => {
                   event.stopPropagation();
                   this.dispatchEvent(new CustomEvent('retry-gateway', { bubbles: true, composed: true }));
+                }}
+                @switch-shell=${(event: Event) => {
+                  event.stopPropagation();
+                  this.switchLegacy();
                 }}
                 @onboarding-complete=${this.finishOnboarding}
               ></openrappter-xpedition-onboarding>

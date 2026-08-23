@@ -45,6 +45,10 @@ import { registerZenMethods } from './zen-methods.js';
 import { registerBackupMethods } from './backup-methods.js';
 import { registerTwinMethods } from './twin-methods.js';
 import { registerSurgeonMethods } from './surgeon-methods.js';
+import {
+  registerRappidHostMethods,
+  registerRappidMethods,
+} from './rappid-methods.js';
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -114,4 +118,6 @@ export {
   registerBackupMethods,
   registerTwinMethods,
   registerSurgeonMethods,
+  registerRappidMethods,
+  registerRappidHostMethods,
 };

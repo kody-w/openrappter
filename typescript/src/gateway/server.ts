@@ -27,6 +27,10 @@ import type {
 import { RPC_ERROR, GatewayEvents } from './types.js';
 import { askBrainstem } from './brainstem-client.js';
 import { registerShowcaseMethods } from './methods/showcase-methods.js';
+import {
+  registerRappidHostMethods,
+  registerRappidMethods,
+} from './methods/rappid-methods.js';
 import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
@@ -48,6 +52,12 @@ import { readAnatomy } from './anatomy.js';
 import { readGatewayLogs } from './log-store.js';
 import { renderAnatomyPage } from './anatomy-page.js';
 import type { RappterManager } from './rappter-manager.js';
+import {
+  RappidHostAuthority,
+} from '../rappids/host-authority.js';
+import type {
+  AuthenticatedRappidDevice,
+} from '../rappids/host-authority.js';
 import type { SurgeonService } from '../surgeon/service.js';
 import { VERSION } from '../version.js';
 import { buildChatEnvelope } from './chat-envelope.js';
@@ -333,6 +343,11 @@ interface ParsedFrame {
   params?: Record<string, unknown>;
 }
 
+interface GatewayAuthentication {
+  authenticated: boolean;
+  device?: AuthenticatedRappidDevice;
+}
+
 export class GatewayServer {
   private wss: WebSocketServer | null = null;
   private httpServer: ReturnType<typeof createServer> | null = null;
@@ -341,6 +356,7 @@ export class GatewayServer {
   private connections = new Map<string, { ws: WebSocket; info: ConnectionInfo }>();
   private methods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
   private publicHttpMethods = new Map<string, { handler: RpcMethodHandler; requiresAuth: boolean }>();
+  private readonly rappidHostAuthority: RappidHostAuthority;
   private rateLimits = new Map<string, RateLimitEntry>();
   private frameRateLimits = new Map<string, RateLimitEntry>();
   /** Live zen streaming state — see gateway/zen-stream.ts. */
@@ -452,6 +468,7 @@ export class GatewayServer {
       executionTimeoutMs: config?.executionTimeoutMs,
       shutdownTimeoutMs: config?.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT,
     };
+    this.rappidHostAuthority = new RappidHostAuthority(this.dataDir);
     this.loadSessions();
     this.loadCronStore();
   }
@@ -1703,7 +1720,8 @@ export class GatewayServer {
             return;
           }
           if (parsed.jsonrpc === '2.0' && typeof parsed.method === 'string') {
-            const authenticated = this.resolveHttpAuthenticated(req, parsed);
+            const authentication = this.resolveHttpAuthentication(req, parsed, true);
+            const authenticated = authentication.authenticated;
             const method = this.methods.get(parsed.method);
             const isPublicMethod = !!method
               && this.publicHttpMethods.get(parsed.method) === method;
@@ -1735,8 +1753,21 @@ export class GatewayServer {
               authenticated,
               subscriptions: new Set(),
               lastActivity: Date.now(),
-              metadata: {},
+              metadata: this.authenticationMetadata(authentication),
             };
+            if (!this.rappidDeviceMethodAllowed(info, parsed.method, parsed.params)) {
+              this.metrics.recordRequest('auth_failure');
+              res.writeHead(403, { 'Content-Type': 'application/json', ...corsHeaders });
+              res.end(JSON.stringify({
+                jsonrpc: '2.0',
+                id: parsed.id,
+                error: {
+                  code: RPC_ERROR.UNAUTHORIZED,
+                  message: `Paired credential is not scoped for '${parsed.method}'`,
+                },
+              }));
+              return;
+            }
             try {
               const result = await this.runWithTimeout(method.handler(parsed.params || {}, info));
               if (!this.isGenerationActive(requestGeneration)) return;
@@ -2090,6 +2121,19 @@ export class GatewayServer {
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message: `Method '${frame.method}' requires authentication` } });
       return;
     }
+    if (!this.rappidDeviceMethodAllowed(info, frame.method, frame.params)) {
+      this.metrics.recordRequest('auth_failure');
+      this.sendFrame(ws, {
+        type: 'res',
+        id: frame.id,
+        ok: false,
+        error: {
+          code: RPC_ERROR.UNAUTHORIZED,
+          message: `Paired credential is not scoped for '${frame.method}'`,
+        },
+      });
+      return;
+    }
 
     // Execute. Streaming calls have exactly one terminal streaming frame;
     // they never also receive a normal `type: "res"` frame.
@@ -2239,23 +2283,41 @@ export class GatewayServer {
    * - `mode: 'password'`: requires `password` to constant-time-match
    *   `config.auth.password`.
    */
-  private isAuthCredentialValid(credential?: { token?: string; password?: string }): boolean {
+  private authenticateCredential(
+    credential?: { token?: string; password?: string },
+    allowRappidDevice = true,
+  ): GatewayAuthentication {
+    if (allowRappidDevice) {
+      const device = this.rappidHostAuthority.authenticateBearer(credential?.token);
+      if (device) return { authenticated: true, device };
+    }
     const authMode = this.config.auth?.mode ?? 'none';
-    if (authMode === 'none') return true;
+    if (authMode === 'none') return { authenticated: true };
 
     if (authMode === 'token') {
       const token = credential?.token;
       const validTokens = this.config.auth?.tokens ?? [];
-      return !!token && validTokens.some((candidate) => safeCompare(candidate, token));
+      return {
+        authenticated: !!token
+          && validTokens.some((candidate) => safeCompare(candidate, token)),
+      };
     }
 
     if (authMode === 'password') {
       const password = credential?.password;
       const expected = this.config.auth?.password;
-      return !!password && !!expected && safeCompare(password, expected);
+      return {
+        authenticated: !!password && !!expected && safeCompare(password, expected),
+      };
     }
 
-    return false;
+    return { authenticated: false };
+  }
+
+  private isAuthCredentialValid(
+    credential?: { token?: string; password?: string },
+  ): boolean {
+    return this.authenticateCredential(credential).authenticated;
   }
 
   /**
@@ -2285,7 +2347,7 @@ export class GatewayServer {
     const authMode = this.config.auth?.mode ?? 'none';
 
     return {
-      token: bodyAuth?.token ?? (authMode === 'token' ? bearer : undefined),
+      token: bodyAuth?.token ?? bearer,
       password: bodyAuth?.password ?? (authMode === 'password' ? bearer : undefined),
     };
   }
@@ -2299,8 +2361,47 @@ export class GatewayServer {
    * dispatch path.
    */
   private resolveHttpAuthenticated(req: IncomingMessage, body?: Record<string, unknown>): boolean {
+    return this.resolveHttpAuthentication(req, body, false).authenticated;
+  }
+
+  private resolveHttpAuthentication(
+    req: IncomingMessage,
+    body?: Record<string, unknown>,
+    allowRappidDevice = true,
+  ): GatewayAuthentication {
     const credential = this.extractHttpAuthCredential(req, body);
-    return this.isAuthCredentialValid(credential);
+    return this.authenticateCredential(credential, allowRappidDevice);
+  }
+
+  private authenticationMetadata(
+    authentication: GatewayAuthentication,
+  ): Record<string, unknown> {
+    if (!authentication.device) return { rappidPrincipalId: 'operator' };
+    return {
+      rappidPrincipalId: authentication.device.deviceId,
+      rappidDeviceId: authentication.device.deviceId,
+      rappidDeviceName: authentication.device.deviceName,
+      rappidScopes: [...authentication.device.scopes],
+    };
+  }
+
+  private rappidDeviceMethodAllowed(
+    info: ConnectionInfo,
+    method: string,
+    params?: Record<string, unknown>,
+  ): boolean {
+    const scopes = info.metadata?.rappidScopes;
+    if (!Array.isArray(scopes)) return true;
+    if (method === 'rappid.approval.issue') {
+      const operation = params?.operation;
+      const required = operation === 'grow'
+        ? 'rappid.grow'
+        : operation === 'attach-skill'
+          ? 'rappid.attach-skill'
+          : '';
+      return required !== '' && scopes.includes(required);
+    }
+    return scopes.includes(method);
   }
 
   /** Parse both new-protocol frames and legacy JSON-RPC */
@@ -2331,7 +2432,8 @@ export class GatewayServer {
     // by the HTTP JSON-RPC transport (see `isAuthCredentialValid`) so WS and
     // HTTP callers are held to one canonical auth contract.
     const auth = params.auth as { token?: string; password?: string } | undefined;
-    if (!this.isAuthCredentialValid(auth)) {
+    const authentication = this.authenticateCredential(auth);
+    if (!authentication.authenticated) {
       const authMode = this.config.auth?.mode ?? 'none';
       const message = authMode === 'password' ? 'Invalid or missing password' : 'Invalid or missing auth token';
       this.sendFrame(ws, { type: 'res', id: frame.id, ok: false, error: { code: RPC_ERROR.UNAUTHORIZED, message } });
@@ -2342,6 +2444,7 @@ export class GatewayServer {
     info.authenticated = true;
     info.metadata = {
       ...info.metadata,
+      ...this.authenticationMetadata(authentication),
       clientId: client.id,
       clientVersion: client.version,
       clientPlatform: client.platform,
@@ -3365,6 +3468,24 @@ export class GatewayServer {
 
     // Showcase methods
     registerShowcaseMethods(this);
+    registerRappidHostMethods(this, this.rappidHostAuthority);
+    registerRappidMethods(this, {
+      dataDir: this.dataDir,
+      authorizeMutation: async (request, connection) => {
+        const info = connection as ConnectionInfo;
+        const principalId = typeof info?.metadata?.rappidDeviceId === 'string'
+          ? info.metadata.rappidDeviceId
+          : 'operator';
+        return this.rappidHostAuthority.consumeMutationApproval(
+          principalId,
+          request,
+        );
+      },
+    });
+    this.publicHttpMethods.set(
+      'rappid.pairing.complete',
+      this.methods.get('rappid.pairing.complete')!,
+    );
     if (this.surgeonService) {
       registerSurgeonMethods(this, this.surgeonService);
     }

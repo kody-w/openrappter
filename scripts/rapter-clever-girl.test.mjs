@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
   chmodSync,
   copyFileSync,
   cpSync,
@@ -27,7 +28,7 @@ const ENGINE_PATH = path.join(SCRIPT_DIR, 'rapter-clever-girl.mjs');
 const CONTRACT_PATH = path.join(
   REPO_ROOT,
   'contracts',
-  'rapter-clever-girl-observe-v1.json',
+  'rapter-clever-girl-observe-v2.json',
 );
 const FIXTURES = path.join(
   SCRIPT_DIR,
@@ -55,6 +56,7 @@ const REQUIRED_EXPORTS = [
   'parseHistoryBytes',
   'normalizeRecord',
   'openRegularFileNoFollow',
+  'readHandleBounded',
   'loadSkillCatalog',
   'analyzeHistory',
   'stableStringify',
@@ -251,9 +253,11 @@ function assertReportContract(report) {
     'summary',
     'candidates',
     'excluded',
+    'context',
+    'replay',
     'diagnostics',
   ], 'report');
-  assert.equal(report.schemaVersion, 'rapter-clever-girl.observe.v1');
+  assert.equal(report.schemaVersion, 'rapter-clever-girl.observe.v2');
   assert.equal(report.mode, 'observe');
   assert.ok(['ok', 'partial', 'failed'].includes(report.status));
 
@@ -263,6 +267,9 @@ function assertReportContract(report) {
     'minimumSessions',
     'minimumActiveDays',
     'skillsRootsCount',
+    'repositoryActivityInputsCount',
+    'capabilityCatalogInputsCount',
+    'estateManifestProvided',
   ], 'scope');
   assert.ok(report.scope.windowStart === null || validDateTime(report.scope.windowStart));
   assert.ok(report.scope.windowEnd === null || validDateTime(report.scope.windowEnd));
@@ -272,6 +279,11 @@ function assertReportContract(report) {
   assert.ok(report.scope.minimumActiveDays >= 1);
   assert.ok(Number.isInteger(report.scope.skillsRootsCount));
   assert.ok(report.scope.skillsRootsCount >= 0);
+  assert.ok(Number.isInteger(report.scope.repositoryActivityInputsCount));
+  assert.ok(report.scope.repositoryActivityInputsCount >= 0);
+  assert.ok(Number.isInteger(report.scope.capabilityCatalogInputsCount));
+  assert.ok(report.scope.capabilityCatalogInputsCount >= 0);
+  assert.equal(typeof report.scope.estateManifestProvided, 'boolean');
 
   assert.ok(Array.isArray(report.sources) && report.sources.length >= 1);
   for (const [index, source] of report.sources.entries()) {
@@ -305,10 +317,27 @@ function assertReportContract(report) {
     'skippedRecords',
     'candidateCount',
     'highConfidenceCandidateCount',
+    'selectedCandidateId',
+    'repositoryActivityRecords',
+    'capabilitiesInspected',
   ], 'summary');
-  for (const [key, value] of Object.entries(report.summary)) {
+  for (const key of [
+    'sessions',
+    'activeDays',
+    'acceptedRecords',
+    'skippedRecords',
+    'candidateCount',
+    'highConfidenceCandidateCount',
+    'repositoryActivityRecords',
+    'capabilitiesInspected',
+  ]) {
+    const value = report.summary[key];
     assert.ok(Number.isInteger(value) && value >= 0, `summary.${key} is invalid`);
   }
+  assert.ok(
+    report.summary.selectedCandidateId === null ||
+      /^candidate-[a-f0-9]{16}$/.test(report.summary.selectedCandidateId),
+  );
   assert.equal(report.summary.candidateCount, report.candidates.length);
   assert.equal(
     report.summary.highConfidenceCandidateCount,
@@ -338,6 +367,10 @@ function assertReportContract(report) {
       'evidence',
       'observedActiveFriction',
       'existingCapability',
+      'capabilityMatches',
+      'catalogCoverage',
+      'repositoryEvidence',
+      'priorityBasisPoints',
       'falsePositiveRisks',
     ], `candidates[${index}]`);
     assert.match(candidate.candidateId, /^candidate-[a-f0-9]{16}$/);
@@ -361,6 +394,7 @@ function assertReportContract(report) {
       'root-cause-fix',
       'reuse-existing',
       'extend-existing',
+      'consolidate-existing',
       'new-skill-candidate',
       'new-automation-candidate',
       'workflow-fix',
@@ -383,7 +417,7 @@ function assertReportContract(report) {
       ], `candidates[${index}].evidence[${evidenceIndex}]`);
       assert.match(evidence.evidenceId, /^evidence-[a-f0-9]{20}$/);
       assert.match(evidence.sourceId, /^source-[a-f0-9]{12}$/);
-      assert.match(evidence.sessionAlias, /^session-[0-9]{3}$/);
+      assert.match(evidence.sessionAlias, /^session-[0-9]{3,}$/);
       assert.match(evidence.day, /^\d{4}-\d{2}-\d{2}$/);
       assert.ok(Array.isArray(evidence.recordOrdinals));
       assert.ok(evidence.recordOrdinals.length >= 1);
@@ -420,6 +454,37 @@ function assertReportContract(report) {
       ));
       assert.ok(candidate.existingCapability.reason.length >= 1);
     }
+    assert.ok(Array.isArray(candidate.capabilityMatches));
+    assert.ok(candidate.capabilityMatches.length <= 3);
+    for (const match of candidate.capabilityMatches) {
+      exactKeys(match, [
+        'capabilityId',
+        'name',
+        'match',
+        'reason',
+        'sourceTypes',
+      ], `candidates[${index}].capabilityMatches`);
+      assert.match(match.capabilityId, /^capability-[a-f0-9]{16}$/);
+      assert.ok(match.name.length >= 1);
+      assert.ok(['reuse', 'extend', 'possible-overlap'].includes(match.match));
+      assert.ok(match.reason.length >= 1);
+      assert.ok(Array.isArray(match.sourceTypes) && match.sourceTypes.length >= 1);
+    }
+    assert.ok(['none', 'partial', 'complete'].includes(candidate.catalogCoverage));
+    exactKeys(candidate.repositoryEvidence, [
+      'status',
+      'events',
+      'repositories',
+      'pullRequests',
+      'failedChecks',
+    ], `candidates[${index}].repositoryEvidence`);
+    assert.ok(['available', 'unavailable'].includes(candidate.repositoryEvidence.status));
+    for (const key of ['events', 'repositories', 'pullRequests', 'failedChecks']) {
+      assert.ok(Number.isInteger(candidate.repositoryEvidence[key]));
+      assert.ok(candidate.repositoryEvidence[key] >= 0);
+    }
+    assert.ok(Number.isInteger(candidate.priorityBasisPoints));
+    assert.ok(candidate.priorityBasisPoints >= 0 && candidate.priorityBasisPoints <= 10_000);
     assert.ok(
       Array.isArray(candidate.falsePositiveRisks)
       && candidate.falsePositiveRisks.length >= 1
@@ -433,10 +498,37 @@ function assertReportContract(report) {
     'controlMessages',
     'belowEvidenceThreshold',
     'intentionalVerificationLoops',
+    'candidateCap',
+    'evidenceItems',
+    'workLimitEvents',
+    'duplicateSources',
+    'duplicateCatalogs',
+    'duplicateActivitySources',
   ], 'excluded');
   for (const [key, value] of Object.entries(report.excluded)) {
     assert.ok(Number.isInteger(value) && value >= 0, `excluded.${key} is invalid`);
   }
+
+  exactKeys(report.context, [
+    'estateManifest',
+    'capabilityCatalogs',
+    'repositoryActivitySources',
+    'catalogCoverage',
+  ], 'context');
+  assert.ok(
+    report.context.estateManifest === null ||
+      typeof report.context.estateManifest === 'object',
+  );
+  assert.ok(Array.isArray(report.context.capabilityCatalogs));
+  assert.ok(Array.isArray(report.context.repositoryActivitySources));
+  assert.ok(['none', 'partial', 'complete'].includes(report.context.catalogCoverage));
+
+  exactKeys(report.replay, [
+    'analyzerVersion',
+    'analysisFingerprint',
+  ], 'replay');
+  assert.equal(report.replay.analyzerVersion, '2');
+  assert.match(report.replay.analysisFingerprint, /^sha256:[a-f0-9]{64}$/);
 
   assert.ok(Array.isArray(report.diagnostics));
   for (const [index, diagnostic] of report.diagnostics.entries()) {
@@ -451,7 +543,7 @@ function assertReportContract(report) {
     ], `diagnostics[${index}]`);
     assert.match(diagnostic.sourceId, /^source-[a-f0-9]{12}$/);
     assert.ok(['partial', 'failed'].includes(diagnostic.status));
-    assert.ok(['read', 'parse', 'normalize', 'redact', 'mine'].includes(
+    assert.ok(['read', 'parse', 'normalize', 'redact', 'mine', 'estate', 'catalog', 'activity'].includes(
       diagnostic.stage,
     ));
     assert.match(diagnostic.code, /^[A-Z][A-Z0-9_]+$/);
@@ -1053,6 +1145,48 @@ test('descriptor-safe reads reject symlink and regular-file swaps after lstat', 
     }),
     /SOURCE_CHANGED_DURING_OPEN/,
   );
+
+  const growingSource = path.join(cwd, 'growing-source.jsonl');
+  writeFileSync(growingSource, '{"selected":true}\n');
+  const growingHandle = await engine.openRegularFileNoFollow(growingSource);
+  try {
+    await assert.rejects(
+      engine.readHandleBounded(
+        growingHandle,
+        1_024,
+        'SOURCE_TOO_LARGE',
+        'SOURCE_CHANGED_DURING_READ',
+        {
+          afterStat: async () => {
+            appendFileSync(growingSource, '{"grew":true}\n');
+          },
+        },
+      ),
+      /SOURCE_CHANGED_DURING_READ/,
+    );
+  } finally {
+    await growingHandle.close();
+  }
+
+  const preReadGrowth = path.join(cwd, 'pre-read-growth.jsonl');
+  writeFileSync(preReadGrowth, '{"selected":true}\n');
+  const preReadHandle = await engine.openRegularFileNoFollow(preReadGrowth);
+  try {
+    const reservedSize = (await preReadHandle.stat()).size;
+    appendFileSync(preReadGrowth, '{"grew-before-read":true}\n');
+    await assert.rejects(
+      engine.readHandleBounded(
+        preReadHandle,
+        1_024,
+        'SOURCE_TOO_LARGE',
+        'SOURCE_CHANGED_DURING_READ',
+        { expectedSize: reservedSize },
+      ),
+      /SOURCE_CHANGED_DURING_READ/,
+    );
+  } finally {
+    await preReadHandle.close();
+  }
 });
 
 test('explicit output cannot alias, overwrite, or enter selected source/catalog scope', async () => {

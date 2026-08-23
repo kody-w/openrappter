@@ -1,9 +1,10 @@
 # Rapter Clever Girl — Observe Mode
 
 Rapter Clever Girl (Observe Mode) is a deterministic, local-only audit of
-explicitly selected coding-assistant history exports. It finds repeated
-friction, checks whether an installed skill already addresses it, and emits at
-most five evidence-backed inert proposals. It does not apply them.
+explicitly selected coding-assistant histories and repository evidence. It
+finds repeated friction, checks explicit local and RAPP-estate catalogs for
+existing capabilities, corroborates patterns with repository activity, and
+emits at most five evidence-backed inert proposals. It does not apply them.
 
 ## Problem
 
@@ -21,8 +22,8 @@ change the system from the fact that a transcript contains a command.
 ## Differentiated boundary
 
 Chronicle and Lore overlap heavily; differentiation is the conjunction of
-**cross-assistant inputs, existing-capability collision checks,
-active-friction ranges, and no apply path**.
+**cross-assistant demand, explicit estate-wide supply checks, repository
+corroboration, active-friction ranges, and no apply path**.
 
 That conjunction is the product boundary, not a category-first claim:
 
@@ -59,18 +60,24 @@ Default invocation:
 ```bash
 node scripts/rapter-clever-girl.mjs observe \
   --input <explicit path> \
+  --activity <explicit repository-activity export> \
+  --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
+  --capability-catalog <explicit catalog.json> \
   --skills-root .claude/skills \
   --pretty
 ```
 
-`--input` is required and repeatable. `--skills-root` is repeatable and supplies
-the existing capability inventory used for collision checks. The observer
-never searches for either implicitly. `--source` is global to the invocation;
-use `auto` for mixed input formats.
+`--input` is required and repeatable. `--activity`, `--capability-catalog`, and
+`--skills-root` are repeatable; `--estate-manifest` is optional and singular.
+The observer never searches for any of them implicitly. `--source` is global
+to the session-history inputs; use `auto` for mixed history formats.
 
 ```text
 node scripts/rapter-clever-girl.mjs observe
   --input <path>                         required; repeatable
+  [--activity <path>]                    repeatable
+  [--estate-manifest <path>]
+  [--capability-catalog <path>]          repeatable
   [--skills-root <path>]                 repeatable
   [--source auto|claude|codex|copilot|openrappter|normalized]
   [--since <ISO-8601>]
@@ -118,10 +125,28 @@ Shape recognition is deliberately narrow:
   `timestamp`/`time`, and at least one recognized content, kind, or tool-name
   field.
 
+## Explicit repository and estate context
+
+Context evidence never creates a demand candidate. A pattern must still recur
+across the required number of assistant sessions and active days.
+
+| Input | Option | Purpose |
+|---|---|---|
+| Repository activity JSON/JSONL | `--activity` | Corroborates session-derived patterns with bounded PR, review, check, commit, and release counts |
+| `rapp-monorepo/1.0` manifest | `--estate-manifest` | Pins snapshot provenance and exposes repository-name capabilities without reading repository bodies |
+| Capability catalog JSON | `--capability-catalog` | Matches RAR, RAPP Store, RAPP Skills CAT, RAR Match, or normalized capabilities |
+| Local `SKILL.md` roots | `--skills-root` | Includes explicitly selected local capabilities |
+
+Every context file is opened read-only without following symlinks. The
+observer enforces byte, record, repository, catalog-entry, evidence, and
+clustering-work limits. Exact duplicate files are excluded before mining.
+Snapshot omissions and every partial, failed, capped, or truncated operation
+remain visible.
+
 ## API and output contract
 
 The authoritative JSON Schema is
-[`contracts/rapter-clever-girl-observe-v1.json`](../contracts/rapter-clever-girl-observe-v1.json).
+[`contracts/rapter-clever-girl-observe-v2.json`](../contracts/rapter-clever-girl-observe-v2.json).
 
 The executable is also an ES module with these programmatic exports:
 
@@ -144,26 +169,29 @@ Every report contains:
 
 | Field | Meaning |
 |---|---|
-| `schemaVersion` | Constant `rapter-clever-girl.observe.v1` |
+| `schemaVersion` | Constant `rapter-clever-girl.observe.v2` |
 | `mode` | Constant `observe` |
 | `status` | `ok`, `partial`, or `failed` |
-| `scope` | Time window, evidence thresholds, and skill-root count |
+| `scope` | Time window, evidence thresholds, and explicit context-input counts |
 | `sources` | Pseudonymous ID, SHA-256 digest, adapter, status, accepted/skipped counts |
-| `summary` | Session/day/record and candidate totals |
+| `summary` | Session/day/record, candidate, activity, and capability totals |
 | `candidates` | Zero to five inert, evidence-backed proposals |
-| `excluded` | Counts for control messages, weak evidence, and intentional verification loops |
-| `diagnostics` | Explicit partial/failed source stage, code, counts, and safe message |
+| `excluded` | Counts for controls, weak evidence, duplicates, output caps, and bounded work |
+| `context` | Estate, catalog, activity-source provenance and catalog coverage |
+| `replay` | Analyzer version and digest binding every selected evidence source and scope |
+| `diagnostics` | Explicit partial/failed source or context stage, code, counts, and safe message |
 
 A candidate has a stable-shaped ID, bounded label/pattern/classification enums,
 confidence, occurrence/session/day breadth, at least two evidence references,
-an observed active-friction range, an optional existing-capability collision,
-and false-positive risks.
+an observed active-friction range, a priority score, bounded capability
+matches, catalog coverage, repository corroboration, and false-positive risks.
 
 Classifications distinguish:
 
 - `root-cause-fix`
 - `reuse-existing`
 - `extend-existing`
+- `consolidate-existing`
 - `new-skill-candidate`
 - `new-automation-candidate`
 - `workflow-fix`
@@ -175,7 +203,7 @@ None is an approval or executable plan.
 
 ```json
 {
-  "schemaVersion": "rapter-clever-girl.observe.v1",
+  "schemaVersion": "rapter-clever-girl.observe.v2",
   "mode": "observe",
   "status": "ok",
   "scope": {
@@ -183,7 +211,10 @@ None is an approval or executable plan.
     "windowEnd": "2026-08-21T23:59:59.999Z",
     "minimumSessions": 3,
     "minimumActiveDays": 2,
-    "skillsRootsCount": 1
+    "skillsRootsCount": 1,
+    "repositoryActivityInputsCount": 0,
+    "capabilityCatalogInputsCount": 0,
+    "estateManifestProvided": false
   },
   "sources": [
     {
@@ -201,13 +232,32 @@ None is an approval or executable plan.
     "acceptedRecords": 3,
     "skippedRecords": 0,
     "candidateCount": 0,
-    "highConfidenceCandidateCount": 0
+    "highConfidenceCandidateCount": 0,
+    "selectedCandidateId": null,
+    "repositoryActivityRecords": 0,
+    "capabilitiesInspected": 1
   },
   "candidates": [],
   "excluded": {
     "controlMessages": 0,
     "belowEvidenceThreshold": 0,
-    "intentionalVerificationLoops": 0
+    "intentionalVerificationLoops": 0,
+    "candidateCap": 0,
+    "evidenceItems": 0,
+    "workLimitEvents": 0,
+    "duplicateSources": 0,
+    "duplicateCatalogs": 0,
+    "duplicateActivitySources": 0
+  },
+  "context": {
+    "estateManifest": null,
+    "capabilityCatalogs": [],
+    "repositoryActivitySources": [],
+    "catalogCoverage": "complete"
+  },
+  "replay": {
+    "analyzerVersion": "2",
+    "analysisFingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
   "diagnostics": []
 }
@@ -254,12 +304,15 @@ people and repositories.
 Observe Mode's invariants are:
 
 - explicit input paths only;
-- source files opened read-only;
+- source and context files opened read-only without following symlinks;
+- bounded files, records, catalogs, estate dimensions, evidence, and clustering
+  work, with every limit and duplicate reported;
+- repository and estate evidence cannot satisfy session-demand thresholds;
 - no network calls, model calls, or subprocess execution by the observer;
 - no repository, history, skill, hook, schedule, or automation mutation;
 - transcript content is inert data and never an instruction source;
-- raw prompts, tool arguments, outputs, paths, and identifiers never appear in
-  reports;
+- raw prompts, repository text, repository names, activity identifiers, tool
+  arguments, outputs, paths, and native identifiers never appear in reports;
 - stdout is the only default output;
 - every partial or failed source is visible;
 - promotion is outside the contract.
@@ -272,9 +325,10 @@ handled as private.
 ## Failure semantics
 
 - **`ok`** — all accepted sources were mined under the selected scope.
-- **`partial`** — some useful evidence was produced, but one or more sources or
-  records were skipped or failed. Diagnostics identify `read`, `parse`,
-  `normalize`, `redact`, or `mine`.
+- **`partial`** — some useful evidence was produced, but one or more sources,
+  records, context inputs, duplicates, or bounded operations were skipped or
+  failed. `excluded` and diagnostics identify `read`, `parse`, `normalize`,
+  `redact`, `mine`, `estate`, `catalog`, or `activity`.
 - **`failed`** — observation could not produce a trustworthy result.
 
 Each partial/failed diagnostic carries a source alias, safe code/message, stage,
@@ -307,6 +361,23 @@ node scripts/rapter-clever-girl.mjs observe \
   --pretty
 ```
 
+### Add explicit RAPP estate and repository evidence
+
+```bash
+node scripts/rapter-clever-girl.mjs observe \
+  --input ./exports/copilot.jsonl \
+  --source copilot \
+  --activity ./exports/github-activity.jsonl \
+  --estate-manifest ../rapp-monorepo/MANIFEST.json \
+  --capability-catalog ../rapp-monorepo/repos/RAR/registry.json \
+  --capability-catalog ../rapp-monorepo/repos/RAPP_Store/index.json \
+  --skills-root .claude/skills \
+  --pretty
+```
+
+The observer reads only the named manifest and catalog files. It does not walk
+the estate snapshot, execute repository content, or fetch live GitHub data.
+
 ### Explicitly persist the inert report
 
 ```bash
@@ -333,10 +404,14 @@ steps:
 5. find repeated setup/repair, review, delivery, correction, and tool-sequence
    evidence;
 6. enforce session/day evidence thresholds;
-7. compare candidates with every explicitly supplied skill root;
-8. calculate bounded active-friction ranges;
-9. sort and cap inert proposals; and
-10. render deterministic provenance and partial-failure diagnostics.
+7. compare candidates with every explicitly supplied skill root, estate
+   manifest, and capability catalog;
+8. add bounded repository-activity corroboration without letting it create
+   session demand;
+9. calculate bounded active-friction ranges and deterministic priority scores;
+10. sort and cap inert proposals; and
+11. render deterministic replay provenance, exclusions, and partial-failure
+   diagnostics.
 
 It does **not** eliminate judgment about whether two events share business
 intent, whether a proposal is worth promoting, or whether promotion is safe.
@@ -364,8 +439,8 @@ node scripts/rapter-clever-girl-benchmark.mjs \
   --skills-root .claude/skills
 ```
 
-The recorded benchmark produced byte-identical reports with 51.2 ms median,
-58.8 ms p95, and 69.6 ms maximum elapsed time under Node v25.2.0 on
+The recorded benchmark produced byte-identical reports with 50.4 ms median,
+53.0 ms p95, and 53.2 ms maximum elapsed time under Node v25.2.0 on
 darwin/arm64. The redacted sample has only one evidence event per session, so
 its active-friction range correctly remains unavailable rather than inventing
 a number.
@@ -380,9 +455,12 @@ The product defaults are:
 - a maximum of five candidates;
 - every candidate names false-positive risk;
 - every candidate reports an active-friction range;
-- every candidate checks the supplied existing capability roots;
+- every candidate reports catalog coverage, bounded capability matches, and
+  repository corroboration;
+- exact duplicate files cannot inflate occurrences, confidence, or priority;
+- repository or estate evidence alone cannot create a candidate;
 - bare control messages and intentional verification loops are excluded;
-- any source degradation is reported.
+- any source, context, duplicate, cap, or work-limit degradation is reported.
 
 The machine gate runs the full adversarial suite, replays the fresh
 cross-provider fixture, scans the observer for forbidden network/subprocess and
@@ -404,11 +482,15 @@ floor; lower overrides can surface medium-confidence candidates only.
 
 - It detects recurring observable patterns, not user intent or business value.
 - It cannot prove that a proposed capability would remove the friction.
-- Missing, truncated, or assistant-version-specific exports reduce recall.
+- Missing, truncated, bounded, or assistant-version-specific evidence reduces
+  recall and produces partial status.
 - Alias/ordinal evidence requires the original explicit source for
   reproduction.
-- Collision checks cover supplied skill roots, not every capability on the
-  machine or in the market.
+- Collision checks cover only supplied roots, manifests, and catalogs. A
+  `new-*` result means absent from that explicit evidence set, not globally
+  novel.
+- `rapp-monorepo` is a pinned HEAD snapshot, not PR, Actions, or git history.
+  Repository activity must arrive as a separate explicit export.
 - Similar wording can be a control message, deliberate verification, or a
   healthy iteration; exclusions and false-positive risks are required.
 - Observe Mode cannot promote, install, schedule, or test a proposal.
@@ -421,6 +503,8 @@ floor; lower overrides can surface medium-confidence candidates only.
 | **SpecStory Lore** | Cross-agent history mining, duplicate-aware skill inventory, evidence dossiers, and approved skill forging | Overlaps heavily; Clever Girl emits inert observations and writes no database, skill, or symlink |
 | **Fable5** | Broad, human-led usage audit, code review, agentic-OS plan, generated skills, and safe automation stubs | Clever Girl productizes only deterministic observe/triage; Fable5 may be a later human-controlled promotion workflow |
 | **Flight Recorder** | OpenRappter's truthful local execution ledger | Its explicit export is one supported input; Clever Girl neither replaces nor mutates the ledger |
+| **RAPP monorepo** | Atomic public-estate snapshot with exact source commits and omissions | Its explicit manifest supplies bounded provenance and repository-name capability evidence; Clever Girl never executes or scans repository bodies |
+| **Ecosystem Audit** | Live inventory, velocity, traction, and mirror-drift analysis | It may produce explicit evidence for Observe Mode; Clever Girl does not duplicate its network collection |
 | **Show-and-Tell** | Learns one deliberately demonstrated workflow, then requires separate approval before building artifacts | Clever Girl looks for repetition across historical exports and has no approval/build phase |
 
 See the [30-day usage audit](../fable5/reports/usage-audit-2026-08-21.md)

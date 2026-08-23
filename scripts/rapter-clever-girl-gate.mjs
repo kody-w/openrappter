@@ -18,11 +18,13 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.dirname(SCRIPT_DIR);
 const ENGINE = path.join(SCRIPT_DIR, 'rapter-clever-girl.mjs');
+const CONTEXT_ENGINE = path.join(SCRIPT_DIR, 'rapter-clever-girl-context.mjs');
 const TEST = path.join(SCRIPT_DIR, 'rapter-clever-girl.test.mjs');
+const CONTEXT_TEST = path.join(SCRIPT_DIR, 'rapter-clever-girl-context.test.mjs');
 const CONTRACT = path.join(
   REPO_ROOT,
   'contracts',
-  'rapter-clever-girl-observe-v1.json',
+  'rapter-clever-girl-observe-v2.json',
 );
 const DOGFOOD_REPORT = path.join(
   REPO_ROOT,
@@ -135,12 +137,14 @@ function mutateAndRequireRed({ name, find, replace }) {
 
 check('contract is valid and pins the observe invariants', () => {
   const contract = JSON.parse(readFileSync(CONTRACT, 'utf8'));
-  assert.equal(contract.properties.schemaVersion.const, 'rapter-clever-girl.observe.v1');
+  assert.equal(contract.properties.schemaVersion.const, 'rapter-clever-girl.observe.v2');
   assert.equal(contract.properties.mode.const, 'observe');
   assert.equal(contract.properties.candidates.maxItems, 5);
   assert.equal(contract['x-openrappter-contract'].minimumSessions, 3);
   assert.equal(contract['x-openrappter-contract'].minimumActiveDays, 2);
   assert.equal(contract['x-openrappter-contract'].activeGapCapSeconds, 300);
+  assert.equal(contract['x-openrappter-contract'].maximumInputBytes, 67_108_864);
+  assert.equal(contract['x-openrappter-contract'].maximumSkillDepth, 12);
   assert.ok(
     contract['x-openrappter-contract'].observeInvariants.includes('no network calls'),
   );
@@ -195,7 +199,10 @@ check('contract is valid and pins the observe invariants', () => {
 });
 
 check('observer source has no network, subprocess, or implicit-history capability', () => {
-  const source = readFileSync(ENGINE, 'utf8');
+  const source = [
+    readFileSync(ENGINE, 'utf8'),
+    readFileSync(CONTEXT_ENGINE, 'utf8'),
+  ].join('\n');
   const forbidden = [
     /node:(?:child_process|http|https|net|tls|dns|dgram)/,
     /\bfetch\s*\(/,
@@ -207,6 +214,29 @@ check('observer source has no network, subprocess, or implicit-history capabilit
   ];
   for (const pattern of forbidden) {
     assert.doesNotMatch(source, pattern);
+  }
+});
+
+check('schema validator dependencies use public registry tarballs and SHA-512', () => {
+  const lock = JSON.parse(
+    readFileSync(path.join(REPO_ROOT, 'typescript', 'package-lock.json'), 'utf8'),
+  );
+  for (const key of [
+    'node_modules/@eslint/eslintrc/node_modules/ajv',
+    'node_modules/@eslint/eslintrc/node_modules/json-schema-traverse',
+    'node_modules/ajv',
+    'node_modules/ajv-formats',
+    'node_modules/eslint/node_modules/ajv',
+    'node_modules/eslint/node_modules/json-schema-traverse',
+    'node_modules/fast-json-stable-stringify',
+    'node_modules/fast-uri',
+    'node_modules/json-schema-traverse',
+    'node_modules/uri-js',
+  ]) {
+    const entry = lock.packages[key];
+    assert.ok(entry, `lockfile is missing ${key}`);
+    assert.match(entry.resolved, /^https:\/\/registry\.npmjs\.org\//);
+    assert.match(entry.integrity, /^sha512-/);
   }
 });
 
@@ -228,6 +258,13 @@ check('full adversarial node:test suite passes', () => {
   const result = runNode(['--test', TEST]);
   requireSuccess(result, 'adversarial suite');
   assert.match(result.stdout, /(?:#|ℹ)\s+pass 29\b/);
+  assert.match(result.stdout, /(?:#|ℹ)\s+fail 0\b/);
+});
+
+check('bounded estate and repository-evidence suite passes', () => {
+  const result = runNode(['--test', CONTEXT_TEST]);
+  requireSuccess(result, 'context adversarial suite');
+  assert.match(result.stdout, /(?:#|ℹ)\s+pass 12\b/);
   assert.match(result.stdout, /(?:#|ℹ)\s+fail 0\b/);
 });
 

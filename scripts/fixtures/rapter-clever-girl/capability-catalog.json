@@ -1,0 +1,36 @@
+{
+  "schema": "rapter-clever-girl.capabilities.v1",
+  "capabilities": [
+    {
+      "id": "release-gate-auditor",
+      "name": "release-gate-auditor",
+      "description": "Review pull requests, audit release gates, and verify merge readiness.",
+      "tags": [
+        "review",
+        "release",
+        "gate",
+        "audit"
+      ]
+    },
+    {
+      "id": "first-run-doctor",
+      "name": "first-run-doctor",
+      "description": "Diagnose setup, installer, configuration, and recovery failures.",
+      "tags": [
+        "setup",
+        "repair",
+        "doctor"
+      ]
+    },
+    {
+      "id": "rapp-release-train",
+      "name": "rapp-release-train",
+      "description": "Coordinate release review and delivery gates across a train.",
+      "tags": [
+        "review",
+        "release",
+        "delivery"
+      ]
+    }
+  ]
+}

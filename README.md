@@ -153,13 +153,18 @@ cross-runtime contract, and artifact formats.
 
 Rapter Clever Girl Observe Mode reads only the coding-assistant history exports
 you explicitly select. It supports Claude JSONL, Codex JSONL, Copilot export
-JSONL, OpenRappter Flight JSON, and normalized JSONL; checks supplied skill
-roots for existing-capability collisions; and emits at most five
-evidence-backed inert proposals with conservative active-friction ranges.
+JSONL, OpenRappter Flight JSON, and normalized JSONL; accepts explicit
+repository-activity exports, `rapp-monorepo/1.0` manifests, capability
+catalogs, and skill roots; and emits at most five evidence-backed inert
+proposals with estate-wide collision checks and conservative active-friction
+ranges.
 
 ```bash
 node scripts/rapter-clever-girl.mjs observe \
   --input <explicit path> \
+  --activity <explicit repository-activity export> \
+  --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
+  --capability-catalog <explicit catalog.json> \
   --skills-root .claude/skills \
   --pretty
 
@@ -167,13 +172,15 @@ node scripts/rapter-clever-girl.mjs observe \
 node scripts/rapter-clever-girl-gate.mjs
 ```
 
-It is local-only and has no watcher, model call, raw-transcript output,
-productivity score, or apply path. Transcript text is untrusted data, never
+It is local-only and has no watcher, network call, subprocess, model call,
+raw-transcript/repository output, productivity score, or apply path. Every
+selected file and analysis stage is bounded; duplicates and degraded evidence
+are visible. Transcript and repository content is untrusted data, never
 instructions. Observe Mode does not create, update, install, enable, or
 schedule a skill or automation; promotion is a separate explicit workflow.
 
 See [Rapter Clever Girl](./docs/rapter-clever-girl.md) for adapters, the
-`rapter-clever-girl.observe.v1` output contract, evidence/provenance,
+`rapter-clever-girl.observe.v2` output contract, evidence/provenance,
 failure semantics, thresholds, limitations, and the promotion boundary.
 
 ### Electron Desktop: Skill Recorder ergonomics, OpenRappter core

@@ -70,18 +70,22 @@ The **entire** minimum lovable product is:
    JSONL, OpenRappter Flight JSON, and normalized JSONL.
 3. Deterministic local normalization and mining; no model, network, or
    subprocess execution by the observer.
-4. Versioned `rapter-clever-girl.observe.v1` JSON on stdout by default.
+4. Versioned `rapter-clever-girl.observe.v2` JSON on stdout by default.
 5. Pseudonymous evidence using source digests, session aliases, record
    ordinals, days, and detector rule IDs—not raw text.
-6. Existing-capability collision checks over explicit `--skills-root` paths.
+6. Existing-capability collision checks over explicit `--skills-root`,
+   `--estate-manifest`, and `--capability-catalog` paths.
 7. Conservative `capped-active-intervals-v1` lower/upper ranges with a
    300-second gap cap and visible confidence.
-8. Explicit exclusions for bare control messages, below-threshold evidence,
-   and intentional verification loops.
-9. No more than five inert proposals, each with evidence breadth,
+8. Optional explicit repository-activity corroboration that cannot create
+   session demand.
+9. Explicit exclusions for bare controls, weak evidence, intentional
+   verification loops, duplicates, candidate/evidence caps, and bounded work.
+10. No more than five inert proposals, each with evidence breadth,
    classification, collision result, and false-positive risks.
-10. Explicit per-source `ok`/`partial`/`failed` reporting and diagnostics.
-11. No apply, creation, install, enable, watch, or schedule path.
+11. Explicit per-source/context `ok`/`partial`/`failed` reporting and
+    diagnostics.
+12. No apply, creation, install, enable, watch, or schedule path.
 
 Nothing else is required for the GO.
 
@@ -110,7 +114,7 @@ These are release gates, not roadmap suggestions.
 
 Conditional GO becomes release GO only when evidence shows:
 
-- the committed v1 contract validates representative reports;
+- the committed v2 contract validates representative reports;
 - all five adapters have a valid fixture and a malformed/partial fixture;
 - a prompt-injection transcript remains inert;
 - raw prompts, outputs, paths, and identifiers do not appear in reports;
@@ -144,8 +148,8 @@ secrets, paths, prompt injection, malformed records, intentional verification,
 negative controls, repeated setup repair, repeated release review, and seven
 bare `continue` prompts.
 
-- **29/29 adversarial tests passed.**
-- **12/12 acceptance-gate checks passed.**
+- **41/41 adversarial tests passed.**
+- **14/14 acceptance-gate checks passed.**
 - Pull-request CI and release preflight both fail hard on the acceptance gate.
 - Controlled mutations of control-message exclusion, POSIX `0600` output mode,
   source-symlink refusal, opened-file identity, candidate cap, and active-gap
@@ -176,9 +180,9 @@ node scripts/rapter-clever-girl-benchmark.mjs \
   --skills-root .claude/skills
 ```
 
-Under Node v25.2.0 on darwin/arm64 it measured **51.2 ms median**, **58.8 ms
-p95**, and **69.6 ms maximum**, with byte-identical compact output and SHA-256
-`8f7623b211cfd15c3678e7a849c004add816b1e7da89e41466571ce24114e1c7`.
+Under Node v25.2.0 on darwin/arm64 it measured **50.4 ms median**, **53.0 ms
+p95**, and **53.2 ms maximum**, with byte-identical compact output and SHA-256
+`122add3d6ce0c53693c4124eee956e3a455e90029b7fe459839fda929846e996`.
 Because the redacted ledger intentionally keeps only one evidence event per
 session, the active-friction range is unavailable. That is the correct
 fail-honest result, not a missing success metric.

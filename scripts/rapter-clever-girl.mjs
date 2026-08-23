@@ -5,7 +5,7 @@ import {
   link,
   lstat,
   open,
-  readdir,
+  opendir,
   realpath,
   unlink,
 } from 'node:fs/promises';
@@ -13,8 +13,19 @@ import { constants as FS_CONSTANTS } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  EVIDENCE_LIMITS,
+  EvidenceValidationError,
+  matchCapabilities,
+  mergeCapabilityCatalogs,
+  parseCapabilityCatalog,
+  parseEstateManifest,
+  parseRepositoryActivity,
+  priorityBasisPoints,
+  repositoryCorroboration,
+} from './rapter-clever-girl-context.mjs';
 
-const SCHEMA_VERSION = 'rapter-clever-girl.observe.v1';
+const SCHEMA_VERSION = 'rapter-clever-girl.observe.v2';
 const SOURCE_TYPES = new Set([
   'auto',
   'claude',
@@ -26,6 +37,7 @@ const SOURCE_TYPES = new Set([
 const ACTIVE_GAP_CAP_SECONDS = 300;
 const MAX_CANDIDATES = 5;
 const MAX_TEXT_CHARS = 262_144;
+const MAX_EVIDENCE_PER_CANDIDATE = 20;
 
 const LABELS = Object.freeze({
   'repair-loop': 'Repeated setup or recovery workflow',
@@ -190,6 +202,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
   const options = {
     mode: 'observe',
     inputs: [],
+    activityInputs: [],
+    capabilityCatalogs: [],
+    estateManifest: null,
     skillsRoots: [],
     source: 'auto',
     since: null,
@@ -219,6 +234,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
     const inlineValue = equalsIndex === -1 ? undefined : argument.slice(equalsIndex + 1);
     const supported = new Set([
       '--input',
+      '--activity',
+      '--capability-catalog',
+      '--estate-manifest',
       '--skills-root',
       '--source',
       '--since',
@@ -245,6 +263,26 @@ export function parseArgs(argv = process.argv.slice(2)) {
       options.inputs.push(value);
       continue;
     }
+    if (option === '--activity') {
+      if (value === '-') {
+        throw new CliError(
+          'INVALID_ACTIVITY_INPUT',
+          'Configuration error: --activity must explicitly name a source file.',
+        );
+      }
+      options.activityInputs.push(value);
+      continue;
+    }
+    if (option === '--capability-catalog') {
+      if (value === '-') {
+        throw new CliError(
+          'INVALID_CAPABILITY_CATALOG',
+          'Configuration error: --capability-catalog must explicitly name a source file.',
+        );
+      }
+      options.capabilityCatalogs.push(value);
+      continue;
+    }
     if (option === '--skills-root') {
       if (value === '-') {
         throw new CliError(
@@ -269,6 +307,15 @@ export function parseArgs(argv = process.argv.slice(2)) {
           );
         }
         options.source = value;
+        break;
+      case '--estate-manifest':
+        if (value === '-') {
+          throw new CliError(
+            'INVALID_ESTATE_MANIFEST',
+            'Configuration error: --estate-manifest must explicitly name a source file.',
+          );
+        }
+        options.estateManifest = value;
         break;
       case '--since': {
         const parsed = parseIsoDateTime(value, option);
@@ -308,6 +355,23 @@ export function parseArgs(argv = process.argv.slice(2)) {
       'Configuration error: at least one explicit --input path is required.',
     );
   }
+  for (const [values, maximum, option] of [
+    [options.inputs, EVIDENCE_LIMITS.maximumInputs, '--input'],
+    [options.activityInputs, EVIDENCE_LIMITS.maximumActivityInputs, '--activity'],
+    [
+      options.capabilityCatalogs,
+      EVIDENCE_LIMITS.maximumCapabilityCatalogs,
+      '--capability-catalog',
+    ],
+    [options.skillsRoots, EVIDENCE_LIMITS.maximumSkillsRoots, '--skills-root'],
+  ]) {
+    if (values.length > maximum) {
+      throw new CliError(
+        'TOO_MANY_INPUTS',
+        `Configuration error: ${option} exceeds its supported count.`,
+      );
+    }
+  }
   if (
     options.sinceMs !== null &&
     options.untilMs !== null &&
@@ -341,7 +405,11 @@ function containerRecords(value) {
  * Parse JSON or JSONL bytes. Malformed JSONL lines are represented by a
  * counted issue; parsed transcript values remain inert objects.
  */
-export function parseHistoryBytes(bytes) {
+export function parseHistoryBytes(bytes, options = {}) {
+  const maximumRecords =
+    Number.isSafeInteger(options.maximumRecords) && options.maximumRecords >= 0
+      ? options.maximumRecords
+      : EVIDENCE_LIMITS.maximumRecordsPerSource;
   let text;
   try {
     text = decodeHistoryBytes(bytes);
@@ -350,6 +418,7 @@ export function parseHistoryBytes(bytes) {
       format: 'unknown',
       records: [],
       skippedRecords: 1,
+      attemptedRecords: 1,
       issues: [{ code: 'INVALID_UTF8', count: 1 }],
     };
   }
@@ -359,6 +428,7 @@ export function parseHistoryBytes(bytes) {
       format: 'unknown',
       records: [],
       skippedRecords: 1,
+      attemptedRecords: 0,
       issues: [{ code: 'EMPTY_INPUT', count: 1 }],
     };
   }
@@ -371,14 +441,21 @@ export function parseHistoryBytes(bytes) {
         format: 'json',
         records: [],
         skippedRecords: 1,
+        attemptedRecords: 1,
         issues: [{ code: 'EMPTY_CONTAINER', count: 1 }],
       };
     }
+    const acceptedValues = values.slice(0, maximumRecords);
+    const limitedRecords = Math.max(0, values.length - acceptedValues.length);
     return {
       format: 'json',
-      records: values.map((value, index) => ({ ordinal: index + 1, value })),
-      skippedRecords: 0,
-      issues: [],
+      records: acceptedValues.map((value, index) => ({ ordinal: index + 1, value })),
+      skippedRecords: limitedRecords,
+      attemptedRecords: acceptedValues.length,
+      issues:
+        limitedRecords > 0
+          ? [{ code: 'RECORD_LIMIT_REACHED', count: limitedRecords }]
+          : [],
     };
   } catch {
     // A failed whole-document parse is expected for JSONL and is not itself a
@@ -386,75 +463,121 @@ export function parseHistoryBytes(bytes) {
   }
 
   const records = [];
-  let skippedRecords = 0;
+  let malformedRecords = 0;
+  let limitedRecords = 0;
   let attemptedOrdinal = 0;
+  let attemptedRecords = 0;
   for (const line of text.split(/\r?\n/)) {
     if (line.trim().length === 0) continue;
     attemptedOrdinal += 1;
+    if (attemptedRecords >= maximumRecords) {
+      limitedRecords += 1;
+      continue;
+    }
     try {
       const parsed = JSON.parse(line);
       const values = Array.isArray(parsed) ? parsed : [parsed];
       if (values.length === 0) {
-        skippedRecords += 1;
+        attemptedRecords += 1;
+        malformedRecords += 1;
         continue;
       }
       for (const value of values) {
-        records.push({ ordinal: attemptedOrdinal, value });
+        if (attemptedRecords < maximumRecords) {
+          attemptedRecords += 1;
+          records.push({ ordinal: attemptedOrdinal, value });
+        } else {
+          limitedRecords += 1;
+        }
       }
     } catch {
-      skippedRecords += 1;
+      attemptedRecords += 1;
+      malformedRecords += 1;
     }
   }
 
+  let skippedRecords = malformedRecords + limitedRecords;
   if (records.length === 0 && skippedRecords === 0) skippedRecords = 1;
+  const issues = [];
+  if (malformedRecords > 0) {
+    issues.push({
+      code: records.length === 0 && limitedRecords === 0
+        ? 'UNPARSEABLE_INPUT'
+        : 'MALFORMED_RECORDS',
+      count: malformedRecords,
+    });
+  }
+  if (limitedRecords > 0) {
+    issues.push({ code: 'RECORD_LIMIT_REACHED', count: limitedRecords });
+  }
   return {
     format: 'jsonl',
     records,
     skippedRecords,
-    issues:
-      skippedRecords > 0
-        ? [{ code: records.length === 0 ? 'UNPARSEABLE_INPUT' : 'MALFORMED_RECORDS', count: skippedRecords }]
-        : [],
+    attemptedRecords,
+    issues,
   };
 }
 
-function appendKnownText(value, output, depth = 0) {
-  if (output.length >= MAX_TEXT_CHARS || depth > 6 || value === null || value === undefined) {
+function appendKnownText(value, state, depth = 0) {
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (state.characters >= MAX_TEXT_CHARS || depth > 6) {
+    state.truncated = true;
     return;
   }
   if (typeof value === 'string') {
-    const remaining = MAX_TEXT_CHARS - output.length;
-    output.push(value.slice(0, remaining));
+    const remaining = MAX_TEXT_CHARS - state.characters;
+    const selected = value.slice(0, remaining);
+    state.parts.push(selected);
+    state.characters += selected.length;
+    if (selected.length < value.length) state.truncated = true;
     return;
   }
   if (Array.isArray(value)) {
-    for (const item of value) appendKnownText(item, output, depth + 1);
+    for (const item of value) appendKnownText(item, state, depth + 1);
     return;
   }
   if (typeof value !== 'object') return;
   for (const key of ['text', 'content', 'message', 'input_text', 'output_text']) {
-    if (own(value, key)) appendKnownText(value[key], output, depth + 1);
+    if (own(value, key)) appendKnownText(value[key], state, depth + 1);
   }
 }
 
-function textFrom(...values) {
-  const output = [];
-  for (const value of values) appendKnownText(value, output);
-  return output.join('\n').slice(0, MAX_TEXT_CHARS);
+function textFromWithStatus(...values) {
+  const state = { parts: [], characters: 0, truncated: false };
+  for (const value of values) appendKnownText(value, state);
+  return {
+    text: state.parts.join('\n').slice(0, MAX_TEXT_CHARS),
+    truncated: state.truncated,
+  };
 }
 
-function hashTokens(text) {
+function textFrom(...values) {
+  return textFromWithStatus(...values).text;
+}
+
+function hashTokensWithStatus(text) {
   const tokens = text
     .normalize('NFKC')
     .toLowerCase()
     .match(/[\p{L}\p{N}][\p{L}\p{N}_-]{1,31}/gu);
-  if (!tokens) return [];
+  if (!tokens) return { hashes: [], truncated: false };
   const hashes = new Set();
   for (const token of tokens) {
     if (!TOKEN_STOP_WORDS.has(token)) hashes.add(sha256(`token-v1:${token}`).slice(0, 20));
     if (hashes.size >= 128) break;
   }
-  return [...hashes].sort();
+  const uniqueTokens = new Set(tokens.filter((token) => !TOKEN_STOP_WORDS.has(token)));
+  return {
+    hashes: [...hashes].sort(),
+    truncated: uniqueTokens.size > hashes.size,
+  };
+}
+
+function hashTokens(text) {
+  return hashTokensWithStatus(text).hashes;
 }
 
 function classifyText(text) {
@@ -511,6 +634,7 @@ function classifyText(text) {
   if (/\b(?:document|documentation|readme)\b/.test(lower)) correctionTopics.push('documentation');
 
   const workflowSignal = setup || failure || repairAction || review || deliverySignals >= 2 || correction;
+  const tokenResult = hashTokensWithStatus(normalized);
   return {
     isControl: CONTROL_MESSAGE_RE.test(normalized),
     repair: (setup && (failure || repairAction)) || (failure && repairAction),
@@ -519,7 +643,8 @@ function classifyText(text) {
     correction,
     correctionTopics: [...new Set(correctionTopics)].sort(),
     verificationOnly: intentionalVerification || (verification && !workflowSignal),
-    tokenHashes: hashTokens(normalized),
+    tokenHashes: tokenResult.hashes,
+    limitCodes: tokenResult.truncated ? ['TOKEN_LIMIT_REACHED'] : [],
   };
 }
 
@@ -719,6 +844,7 @@ export async function openRegularFileNoFollow(
   } catch {
     throw new SafeReadError(readCode);
   }
+
   if (before.isSymbolicLink()) throw new SafeReadError(symlinkCode);
   if (!before.isFile()) throw new SafeReadError(notFileCode);
   if (typeof hooks.afterLstat === 'function') await hooks.afterLstat();
@@ -743,6 +869,54 @@ export async function openRegularFileNoFollow(
   }
 }
 
+export async function readHandleBounded(
+  handle,
+  maximumBytes,
+  tooLargeCode,
+  changedCode = 'SOURCE_CHANGED_DURING_READ',
+  hooks = {},
+) {
+  const before = await handle.stat();
+  if (
+    (Number.isSafeInteger(hooks.expectedSize) &&
+      before.size !== hooks.expectedSize) ||
+    !Number.isSafeInteger(before.size) ||
+    before.size > maximumBytes
+  ) {
+    if (
+      Number.isSafeInteger(hooks.expectedSize) &&
+      before.size !== hooks.expectedSize
+    ) {
+      throw new SafeReadError(changedCode);
+    }
+    throw new SafeReadError(tooLargeCode);
+  }
+  if (typeof hooks.afterStat === 'function') await hooks.afterStat();
+
+  const buffer = Buffer.alloc(before.size + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      offset,
+    );
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  const after = await handle.stat();
+  if (
+    offset !== before.size ||
+    after.size !== before.size ||
+    String(before.dev) !== String(after.dev) ||
+    String(before.ino) !== String(after.ino)
+  ) {
+    throw new SafeReadError(changedCode);
+  }
+  return buffer.subarray(0, offset);
+}
+
 function makeNormalizedEvent({
   sourceId,
   ordinal,
@@ -757,11 +931,17 @@ function makeNormalizedEvent({
   toolName,
   status,
   durationMs,
+  textTruncated = false,
 }) {
   const parsedTimestamp = normalizedTimestamp(timestamp);
   if (parsedTimestamp.invalid) return { errorCode: 'INVALID_TIMESTAMP' };
   const safeText = typeof text === 'string' ? text.slice(0, MAX_TEXT_CHARS) : '';
-  const features = classifyText(safeText);
+  const classifiedFeatures = classifyText(safeText);
+  const limitCodes = [
+    ...(textTruncated ? ['TEXT_LIMIT_REACHED'] : []),
+    ...classifiedFeatures.limitCodes,
+  ];
+  const { limitCodes: _limitCodes, ...features } = classifiedFeatures;
   const normalizedStatus = typeof status === 'string' ? status.toLowerCase() : '';
   const statusError = /\b(?:error|failed|failure|timeout|denied)\b/.test(normalizedStatus);
   const toolCategory = classifyTool(toolName, `${kind ?? ''} ${role ?? ''}`);
@@ -786,6 +966,7 @@ function makeNormalizedEvent({
       durationMs: duration,
       features,
     },
+    issues: [...new Set(limitCodes)].sort(),
   };
 }
 
@@ -815,35 +996,38 @@ export function normalizeRecord(record, options = {}) {
   if (adapter === 'copilot') {
     const sessionId = record.session_id;
     const timestamp = record.timestamp;
-    const userText = textFrom(record.user_message);
-    const assistantText = textFrom(record.assistant_response);
-    if (userText.length > 0) {
+    const userText = textFromWithStatus(record.user_message);
+    const assistantText = textFromWithStatus(record.assistant_response);
+    if (userText.text.length > 0) {
       specs.push({
         sessionId,
         timestamp,
         role: 'user',
         kind: 'message',
-        text: userText,
+        text: userText.text,
+        textTruncated: userText.truncated,
       });
     }
-    if (assistantText.length > 0) {
+    if (assistantText.text.length > 0) {
       specs.push({
         sessionId,
         timestamp,
         role: 'assistant',
         kind: 'message',
-        text: assistantText,
+        text: assistantText.text,
+        textTruncated: assistantText.truncated,
       });
     }
   } else if (adapter === 'claude') {
     const type = record.type;
-    const content = textFrom(record.message, record.content, record.toolUseResult);
+    const content = textFromWithStatus(record.message, record.content, record.toolUseResult);
     specs.push({
       sessionId: record.sessionId,
       timestamp: record.timestamp,
       role: roleFrom(type, valueFor(record.message, 'role'), valueFor(record.content, 'role')),
       kind: type,
-      text: content,
+      text: content.text,
+      textTruncated: content.truncated,
       toolName:
         valueFor(record, 'toolName', 'tool_name') ??
         toolNameFromContent(record.content) ??
@@ -857,12 +1041,16 @@ export function normalizeRecord(record, options = {}) {
       record.type === 'session_meta'
         ? valueFor(payload, 'sessionId', 'session_id', 'conversationId', 'id')
         : valueFor(payload, 'sessionId', 'session_id', 'conversationId');
+    const content = textFromWithStatus(
+      valueFor(payload, 'message', 'content', 'text', 'input', 'output'),
+    );
     specs.push({
       sessionId: codexSessionId,
       timestamp: record.timestamp,
       role: roleFrom(record.type, valueFor(payload, 'role', 'type')),
       kind: `${record.type} ${String(valueFor(payload, 'type') ?? '')}`,
-      text: textFrom(valueFor(payload, 'message', 'content', 'text', 'input', 'output')),
+      text: content.text,
+      textTruncated: content.truncated,
       toolName:
         valueFor(payload, 'toolName', 'tool_name', 'name') ?? toolNameFromContent(payload),
       status: valueFor(payload, 'status', 'result_status'),
@@ -870,12 +1058,14 @@ export function normalizeRecord(record, options = {}) {
     });
   } else if (adapter === 'openrappter') {
     const payload = record.payload;
+    const content = textFromWithStatus(valueFor(payload, 'content', 'message', 'text'));
     specs.push({
       sessionId: record.sessionId,
       timestamp: record.timestamp,
       role: roleFrom(valueFor(payload, 'role'), record.kind, record.toolName),
       kind: record.kind,
-      text: textFrom(valueFor(payload, 'content', 'message', 'text')),
+      text: content.text,
+      textTruncated: content.truncated,
       toolName: record.toolName ?? valueFor(payload, 'toolName', 'tool_name'),
       status: record.status,
       durationMs: record.durationMs,
@@ -883,14 +1073,16 @@ export function normalizeRecord(record, options = {}) {
   } else {
     const role = valueFor(record, 'role', 'actor', 'type');
     const kind = valueFor(record, 'kind', 'eventType', 'event_type', 'type');
+    const content = textFromWithStatus(
+      valueFor(record, 'content', 'text', 'message', 'user_message', 'assistant_response'),
+    );
     specs.push({
       sessionId: valueFor(record, 'sessionId', 'session_id'),
       timestamp: valueFor(record, 'timestamp', 'time'),
       role: roleFrom(role, kind),
       kind,
-      text: textFrom(
-        valueFor(record, 'content', 'text', 'message', 'user_message', 'assistant_response'),
-      ),
+      text: content.text,
+      textTruncated: content.truncated,
       toolName:
         valueFor(record, 'toolName', 'tool_name') ??
         toolNameFromContent(valueFor(record, 'content', 'message')),
@@ -904,6 +1096,7 @@ export function normalizeRecord(record, options = {}) {
   }
 
   const records = [];
+  const issues = [];
   for (let eventIndex = 0; eventIndex < specs.length; eventIndex += 1) {
     const result = makeNormalizedEvent({
       ...specs[eventIndex],
@@ -917,8 +1110,14 @@ export function normalizeRecord(record, options = {}) {
       return { sourceType: adapter, records: [], errorCode: result.errorCode };
     }
     records.push(result.event);
+    issues.push(...result.issues);
   }
-  return { sourceType: adapter, records, errorCode: null };
+  return {
+    sourceType: adapter,
+    records,
+    errorCode: null,
+    issues: [...new Set(issues)].sort(),
+  };
 }
 
 function unquoteYamlScalar(value) {
@@ -989,7 +1188,18 @@ function skillTopics(text) {
   return [...new Set(topics)].sort();
 }
 
-async function collectSkillFiles(root, state) {
+async function collectSkillFiles(root, state, depth = 0) {
+  if (state.traversalStopped) return;
+  if (depth > EVIDENCE_LIMITS.maximumSkillDepth) {
+    state.diagnostics.push({ code: 'SKILL_DEPTH_LIMIT_REACHED', count: 1 });
+    state.skippedEntries += 1;
+    return;
+  }
+  if (state.files.length >= EVIDENCE_LIMITS.maximumCapabilityEntries) {
+    state.diagnostics.push({ code: 'SKILL_ENTRY_LIMIT_REACHED', count: 1 });
+    state.skippedEntries += 1;
+    return;
+  }
   let stats;
   try {
     stats = await lstat(root);
@@ -1016,14 +1226,53 @@ async function collectSkillFiles(root, state) {
     state.skippedEntries += 1;
     return;
   }
+  if (state.visitedDirectories >= EVIDENCE_LIMITS.maximumSkillDirectories) {
+    state.diagnostics.push({ code: 'SKILL_DIRECTORY_LIMIT_REACHED', count: 1 });
+    state.skippedEntries += 1;
+    state.traversalStopped = true;
+    return;
+  }
+  state.visitedDirectories += 1;
 
   let entries;
+  let directoryHandle;
   try {
-    entries = await readdir(root, { withFileTypes: true });
+    const noFollow = FS_CONSTANTS.O_NOFOLLOW ?? 0;
+    const directoryFlag = FS_CONSTANTS.O_DIRECTORY ?? 0;
+    directoryHandle = await open(
+      root,
+      FS_CONSTANTS.O_RDONLY | noFollow | directoryFlag,
+    );
+    const openedDirectory = await directoryHandle.stat();
+    entries = [];
+    const directory = await opendir(root);
+    for await (const entry of directory) {
+      if (state.visitedEntries >= EVIDENCE_LIMITS.maximumSkillEntries) {
+        state.diagnostics.push({ code: 'SKILL_ENTRY_LIMIT_REACHED', count: 1 });
+        state.skippedEntries += 1;
+        state.traversalStopped = true;
+        return;
+      }
+      state.visitedEntries += 1;
+      entries.push(entry);
+    }
+    const currentDirectory = await lstat(root);
+    if (
+      currentDirectory.isSymbolicLink() ||
+      !currentDirectory.isDirectory() ||
+      String(openedDirectory.dev) !== String(currentDirectory.dev) ||
+      String(openedDirectory.ino) !== String(currentDirectory.ino)
+    ) {
+      state.diagnostics.push({ code: 'SKILL_DIRECTORY_CHANGED_DURING_READ', count: 1 });
+      state.skippedEntries += 1;
+      return;
+    }
   } catch {
     state.diagnostics.push({ code: 'SKILLS_ROOT_UNREADABLE', count: 1 });
     state.skippedEntries += 1;
     return;
+  } finally {
+    if (directoryHandle) await directoryHandle.close().catch(() => {});
   }
   entries.sort((left, right) => left.name.localeCompare(right.name, 'en'));
   for (const entry of entries) {
@@ -1032,7 +1281,8 @@ async function collectSkillFiles(root, state) {
       state.diagnostics.push({ code: 'SKILLS_SYMLINK_SKIPPED', count: 1 });
       state.skippedEntries += 1;
     } else if (entry.isDirectory()) {
-      await collectSkillFiles(child, state);
+      await collectSkillFiles(child, state, depth + 1);
+      if (state.traversalStopped) return;
     } else if (entry.isFile() && entry.name === 'SKILL.md') {
       state.files.push(child);
     }
@@ -1046,21 +1296,84 @@ async function collectSkillFiles(root, state) {
  */
 export async function loadSkillCatalog(roots = []) {
   const explicitRoots = Array.isArray(roots) ? roots : [roots];
-  const state = { files: [], diagnostics: [], skippedEntries: 0 };
+  const state = {
+    files: [],
+    diagnostics: [],
+    skippedEntries: 0,
+    visitedDirectories: 0,
+    visitedEntries: 0,
+    metadataBytes: 0,
+    traversalStopped: false,
+    metadataLimitReached: false,
+    scopeRoots: [],
+  };
+  for (const root of explicitRoots) {
+    try {
+      const stats = await lstat(root);
+      if (!stats.isSymbolicLink()) {
+        state.scopeRoots.push(pathKey(await realpath(root)));
+      }
+    } catch {
+      // collectSkillFiles emits the redacted diagnostic for unavailable roots.
+    }
+  }
   for (const root of explicitRoots) await collectSkillFiles(root, state);
   state.files.sort((left, right) => left.localeCompare(right, 'en'));
 
   const skills = [];
   for (const file of state.files) {
+    if (state.metadataLimitReached) break;
     let handle;
     try {
+      const canonicalBefore = pathKey(await realpath(file));
+      if (!state.scopeRoots.some((root) => pathIsWithin(canonicalBefore, root))) {
+        throw new SafeReadError('SKILL_SCOPE_ESCAPE_REFUSED');
+      }
       handle = await openRegularFileNoFollow(file, {
         symlinkCode: 'SKILL_SYMLINK_SKIPPED',
         notFileCode: 'SKILLS_FILE_UNSUPPORTED',
         changedCode: 'SKILL_CHANGED_DURING_OPEN',
         readCode: 'SKILL_READ_FAILED',
       });
-      const bytes = await handle.readFile();
+      const stats = await handle.stat();
+      if (
+        !Number.isSafeInteger(stats.size) ||
+        stats.size > EVIDENCE_LIMITS.maximumMetadataBytes
+      ) {
+        throw new SafeReadError('SKILL_FILE_TOO_LARGE');
+      }
+      const reservedBytes = stats.size + 1;
+      if (
+        state.metadataBytes + reservedBytes >
+        EVIDENCE_LIMITS.maximumSkillMetadataBytes
+      ) {
+        throw new SafeReadError('SKILL_TOTAL_BYTES_LIMIT_REACHED');
+      }
+      state.metadataBytes += reservedBytes;
+      const remainingBytes =
+        EVIDENCE_LIMITS.maximumSkillMetadataBytes -
+        (state.metadataBytes - reservedBytes);
+      const bytes = await readHandleBounded(
+        handle,
+        Math.min(EVIDENCE_LIMITS.maximumMetadataBytes, remainingBytes),
+        stats.size > EVIDENCE_LIMITS.maximumMetadataBytes
+          ? 'SKILL_FILE_TOO_LARGE'
+          : 'SKILL_TOTAL_BYTES_LIMIT_REACHED',
+        'SKILL_CHANGED_DURING_READ',
+        { expectedSize: stats.size },
+      );
+      const pathStats = await lstat(file);
+      const handleStats = await handle.stat();
+      const canonicalAfter = pathKey(await realpath(file));
+      if (
+        pathStats.isSymbolicLink() ||
+        String(pathStats.dev) !== String(handleStats.dev) ||
+        String(pathStats.ino) !== String(handleStats.ino) ||
+        canonicalAfter !== canonicalBefore ||
+        !state.scopeRoots.some((root) => pathIsWithin(canonicalAfter, root))
+      ) {
+        throw new SafeReadError('SKILL_CHANGED_DURING_READ');
+      }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const frontmatter = parseSkillFrontmatter(text);
       if (!frontmatter) {
@@ -1070,13 +1383,25 @@ export async function loadSkillCatalog(roots = []) {
       }
       const safeName = safeSkillName(frontmatter.name);
       const derivedText = `${frontmatter.name}\n${frontmatter.description}`;
+      const skillId = `capability-${sha256(
+        `skill-v2:${safeName}:${sha256(bytes)}`,
+      ).slice(0, 16)}`;
       skills.push({
         name: safeName,
-        skillId: `skill-${sha256(`skill-v1:${safeName}:${sha256(bytes)}`).slice(0, 16)}`,
+        skillId,
+        capabilityId: skillId,
         topics: skillTopics(derivedText),
         tokenHashes: hashTokens(derivedText),
+        sourceTypes: ['skill-root'],
+        sourceIds: [`source-${sha256(`skill-source-v1:${sha256(bytes)}`).slice(0, 12)}`],
       });
     } catch (error) {
+      if (
+        error instanceof SafeReadError &&
+        error.code === 'SKILL_TOTAL_BYTES_LIMIT_REACHED'
+      ) {
+        state.metadataLimitReached = true;
+      }
       state.diagnostics.push({
         code: error instanceof SafeReadError ? error.code : 'SKILL_READ_FAILED',
         count: 1,
@@ -1098,6 +1423,12 @@ export async function loadSkillCatalog(roots = []) {
     skills: [...byName.values()],
     skippedEntries: state.skippedEntries,
     diagnostics: aggregateCounts(state.diagnostics),
+    coverage:
+      explicitRoots.length === 0
+        ? 'none'
+        : state.skippedEntries > 0
+          ? 'partial'
+          : 'complete',
   };
 }
 
@@ -1183,63 +1514,34 @@ function falsePositiveRisks(patternType) {
   }
 }
 
-function chooseCapability(patternType, catalog, events) {
-  const skills = (Array.isArray(catalog?.skills) ? catalog.skills : []).filter(
-    (skill) => skill.name !== 'rapter-clever-girl-observe',
-  );
-  const preferredName =
-    patternType === 'review-workflow'
-      ? 'release-reviewer'
-      : patternType === 'repair-loop'
-        ? 'root-cause-fix'
-        : null;
-  if (preferredName) {
-    const preferred = skills.find((skill) => skill.name === preferredName);
-    if (preferred) {
-      return {
-        name: preferred.name,
-        match: patternType === 'repair-loop' ? 'extend' : 'reuse',
-        reason:
-          patternType === 'repair-loop'
-            ? 'Extend the inspected root-cause capability instead of automating a recurring workaround.'
-            : 'The inspected release-reviewer capability directly covers repeated review and release gates.',
-      };
-    }
-  }
-
+function chooseCapabilities(patternType, catalog, events) {
+  const capabilities = (
+    Array.isArray(catalog?.capabilities)
+      ? catalog.capabilities
+      : Array.isArray(catalog?.skills)
+        ? catalog.skills
+        : []
+  ).filter((capability) => capability.name !== 'rapter-clever-girl-observe');
   const candidateTokens = [
     ...new Set(events.flatMap((event) => event.features?.tokenHashes ?? [])),
   ].sort();
-  const related = skills
-    .filter((skill) => Array.isArray(skill.topics) && skill.topics.includes(patternType))
-    .map((skill) => {
-      const intersection = candidateTokens.filter((token) =>
-        skill.tokenHashes.includes(token)).length;
-      return {
-        skill,
-        intersection,
-        similarity: jaccard(candidateTokens, skill.tokenHashes),
-      };
-    })
-    .filter(({ intersection, similarity }) => intersection >= 2 && similarity >= 0.1)
-    .sort((left, right) => {
-      if (left.similarity !== right.similarity) return right.similarity - left.similarity;
-      if (left.intersection !== right.intersection) return right.intersection - left.intersection;
-      return left.skill.name.localeCompare(right.skill.name, 'en');
-    })[0]?.skill;
-  if (!related) return null;
-  return {
-    name: related.name,
-    match: 'possible-overlap',
-    reason:
-      'The explicitly selected catalog has lexical signals related to this pattern; inspect it before creating a new capability.',
-  };
+  return matchCapabilities(patternType, capabilities, candidateTokens);
 }
 
-function classificationFor(patternType, capability) {
+function classificationFor(patternType, capabilityMatches, catalogCoverage) {
   if (patternType === 'repair-loop') return 'root-cause-fix';
+  const capability = capabilityMatches[0] ?? null;
+  if (
+    capabilityMatches.length >= 2 &&
+    capabilityMatches[0].match === 'reuse' &&
+    capabilityMatches[1].match === 'reuse' &&
+    capabilityMatches[0].name !== capabilityMatches[1].name
+  ) {
+    return 'consolidate-existing';
+  }
   if (capability?.match === 'reuse') return 'reuse-existing';
   if (capability?.match === 'extend') return 'extend-existing';
+  if (capability === null && catalogCoverage !== 'complete') return 'insufficient-evidence';
   if (patternType === 'tool-sequence') return 'new-automation-candidate';
   if (patternType === 'recurring-correction') return 'workflow-fix';
   return 'new-skill-candidate';
@@ -1302,7 +1604,7 @@ function activeFriction(candidateEvents, allEvents) {
 }
 
 function makeEvidence(groups, aliases, ruleId) {
-  return groups.slice(0, 20).map((group) => {
+  return groups.slice(0, MAX_EVIDENCE_PER_CANDIDATE).map((group) => {
     const ordinals = [...new Set(group.events.map((event) => event.ordinal))].sort(
       (left, right) => left - right,
     );
@@ -1329,6 +1631,7 @@ function buildCandidate({
   catalog,
   minSessions,
   minDays,
+  activityEvents,
 }) {
   const sessions = new Set(evidenceGroups.map((group) => group.sessionKey)).size;
   const activeDays = new Set(evidenceGroups.map((group) => group.day)).size;
@@ -1341,22 +1644,44 @@ function buildCandidate({
     occurrences >= Math.max(minSessions, 3)
       ? 'high'
       : 'medium';
-  const capability = chooseCapability(patternType, catalog, events);
+  const capabilityMatches = chooseCapabilities(patternType, catalog, events);
+  const capability = capabilityMatches[0] ?? null;
+  const repositoryEvidence = repositoryCorroboration(patternType, activityEvents);
   const ruleId = RULE_IDS[patternType];
-  return {
+  const candidate = {
     candidateId: `candidate-${sha256(`${patternType}:${clusterKey}`).slice(0, 16)}`,
     label: LABELS[patternType],
     patternType,
-    classification: classificationFor(patternType, capability),
+    classification: classificationFor(
+      patternType,
+      capabilityMatches,
+      catalog?.coverage ?? 'none',
+    ),
     confidence,
     occurrences,
     sessions,
     activeDays,
     evidence: makeEvidence(evidenceGroups, aliases, ruleId),
     observedActiveFriction: activeFriction(events, allEvents),
-    existingCapability: capability,
+    existingCapability:
+      capability === null
+        ? null
+        : {
+            name: capability.name,
+            match: capability.match,
+            reason: capability.reason,
+          },
+    capabilityMatches,
+    catalogCoverage: catalog?.coverage ?? 'none',
+    repositoryEvidence,
     falsePositiveRisks: falsePositiveRisks(patternType),
+    _excludedEvidence: Math.max(
+      0,
+      evidenceGroups.length - MAX_EVIDENCE_PER_CANDIDATE,
+    ),
   };
+  candidate.priorityBasisPoints = priorityBasisPoints(candidate, repositoryEvidence);
+  return candidate;
 }
 
 function correctionClusters(events) {
@@ -1478,6 +1803,9 @@ export function analyzeHistory(records, options = {}) {
     controlMessages: 0,
     belowEvidenceThreshold: 0,
     intentionalVerificationLoops: 0,
+    candidateCap: 0,
+    evidenceItems: 0,
+    workLimitEvents: 0,
   };
   const candidateEvents = [];
   for (const event of inWindow) {
@@ -1531,10 +1859,15 @@ export function analyzeHistory(records, options = {}) {
     },
   ];
 
+  const correctionEvents = candidateEvents
+    .filter((event) => event.role === 'user' && event.features?.correction)
+    .sort(compareEvents);
+  excluded.workLimitEvents += Math.max(
+    0,
+    correctionEvents.length - EVIDENCE_LIMITS.maximumCorrectionEvents,
+  );
   for (const cluster of correctionClusters(
-    candidateEvents.filter(
-      (event) => event.role === 'user' && event.features?.correction,
-    ),
+    correctionEvents.slice(0, EVIDENCE_LIMITS.maximumCorrectionEvents),
   )) {
     definitions.push({
       patternType: 'recurring-correction',
@@ -1543,7 +1876,16 @@ export function analyzeHistory(records, options = {}) {
     });
   }
 
-  const toolDefinitions = toolSequenceClusters(candidateEvents);
+  const orderedToolEvents = candidateEvents
+    .filter((event) => event.toolCategory)
+    .sort(compareEvents);
+  excluded.workLimitEvents += Math.max(
+    0,
+    orderedToolEvents.length - EVIDENCE_LIMITS.maximumToolEvents,
+  );
+  const toolDefinitions = toolSequenceClusters(
+    orderedToolEvents.slice(0, EVIDENCE_LIMITS.maximumToolEvents),
+  );
   for (const sequence of toolDefinitions) {
     if (sequence.occurrences.length < 2) continue;
     if (sequence.occurrences.every((occurrence) => occurrence.verificationOnly)) {
@@ -1571,12 +1913,20 @@ export function analyzeHistory(records, options = {}) {
       catalog: options.catalog ?? { skills: [] },
       minSessions: options.minSessions ?? 3,
       minDays: options.minDays ?? 2,
+      activityEvents: options.activityEvents ?? [],
     });
-    if (candidate) candidates.push(candidate);
+    if (candidate) {
+      excluded.evidenceItems += candidate._excludedEvidence;
+      delete candidate._excludedEvidence;
+      candidates.push(candidate);
+    }
     else excluded.belowEvidenceThreshold += 1;
   }
 
   candidates.sort((left, right) => {
+    if (left.priorityBasisPoints !== right.priorityBasisPoints) {
+      return right.priorityBasisPoints - left.priorityBasisPoints;
+    }
     const confidenceOrder = CONFIDENCE_RANK[right.confidence] - CONFIDENCE_RANK[left.confidence];
     if (confidenceOrder !== 0) return confidenceOrder;
     if (left.occurrences !== right.occurrences) return right.occurrences - left.occurrences;
@@ -1584,6 +1934,7 @@ export function analyzeHistory(records, options = {}) {
     if (left.activeDays !== right.activeDays) return right.activeDays - left.activeDays;
     return left.candidateId.localeCompare(right.candidateId, 'en');
   });
+  excluded.candidateCap = Math.max(0, candidates.length - MAX_CANDIDATES);
 
   return {
     sessions: sessionKeys.length,
@@ -1650,6 +2001,15 @@ function diagnosticMessage(stage, code) {
   if (stage === 'mine') {
     return 'One or more entries in an explicitly selected skill catalog could not be inspected.';
   }
+  if (stage === 'estate') {
+    return 'The explicitly selected estate manifest was invalid, incomplete, or unreadable.';
+  }
+  if (stage === 'catalog') {
+    return 'An explicitly selected capability catalog was invalid, incomplete, or unreadable.';
+  }
+  if (stage === 'activity') {
+    return 'An explicitly selected repository activity source was invalid, incomplete, or unreadable.';
+  }
   return 'A deterministic analysis stage reported a redacted diagnostic.';
 }
 
@@ -1665,13 +2025,18 @@ function reportDiagnostic(source, status, stage, code) {
   };
 }
 
-async function readSource(input, requestedSource, digestOccurrences) {
+async function readSource(input, requestedSource, seenDigests, maximumRecords) {
   let handle;
   let bytes;
   let readFailureCode = 'SOURCE_READ_FAILED';
   try {
     handle = await openRegularFileNoFollow(input);
-    bytes = await handle.readFile();
+    bytes = await readHandleBounded(
+      handle,
+      EVIDENCE_LIMITS.maximumSourceBytes,
+      'SOURCE_TOO_LARGE',
+      'SOURCE_CHANGED_DURING_READ',
+    );
   } catch (error) {
     if (error instanceof SafeReadError) readFailureCode = error.code;
     const digest = sha256(Buffer.alloc(0));
@@ -1687,16 +2052,25 @@ async function readSource(input, requestedSource, digestOccurrences) {
       source,
       events: [],
       diagnostics: [reportDiagnostic(source, 'failed', 'read', readFailureCode)],
+      attemptedRecords: 0,
     };
   } finally {
     if (handle) await handle.close().catch(() => {});
   }
 
   const digest = sha256(bytes);
-  const occurrence = (digestOccurrences.get(digest) ?? 0) + 1;
-  digestOccurrences.set(digest, occurrence);
-  const sourceId = `source-${sha256(`source-v1:${digest}:${occurrence}`).slice(0, 12)}`;
-  const parsed = parseHistoryBytes(bytes);
+  if (seenDigests.has(digest)) {
+    return {
+      duplicate: true,
+      source: null,
+      events: [],
+      diagnostics: [],
+      attemptedRecords: 0,
+    };
+  }
+  seenDigests.add(digest);
+  const sourceId = `source-${sha256(`source-v2:${digest}`).slice(0, 12)}`;
+  const parsed = parseHistoryBytes(bytes, { maximumRecords });
   const events = [];
   let acceptedRecords = 0;
   let skippedRecords = parsed.skippedRecords;
@@ -1730,9 +2104,17 @@ async function readSource(input, requestedSource, digestOccurrences) {
     acceptedRecords += 1;
     detectedSourceTypes.add(normalized.sourceType);
     events.push(...normalized.records);
+    for (const code of normalized.issues ?? []) {
+      normalizationIssues.push({ code, count: 1 });
+    }
   }
 
-  const status = acceptedRecords === 0 ? 'failed' : skippedRecords > 0 ? 'partial' : 'ok';
+  const status =
+    acceptedRecords === 0
+      ? 'failed'
+      : skippedRecords > 0 || normalizationIssues.length > 0
+        ? 'partial'
+        : 'ok';
   const detectedSourceType =
     requestedSource === 'auto' && detectedSourceTypes.size === 1
       ? [...detectedSourceTypes][0]
@@ -1754,7 +2136,213 @@ async function readSource(input, requestedSource, digestOccurrences) {
       reportDiagnostic(source, diagnosticStatus, 'normalize', issue.code),
     ),
   ];
-  return { source, events, diagnostics };
+  return {
+    source,
+    events,
+    diagnostics,
+    attemptedRecords: parsed.attemptedRecords,
+  };
+}
+
+function totalRecordLimitResult(input, requestedSource) {
+  const source = {
+    sourceId: `source-${sha256(`record-limit-v1:${String(input)}`).slice(0, 12)}`,
+    sourceType: requestedSource,
+    sourceDigest: `sha256:${sha256(Buffer.alloc(0))}`,
+    status: 'failed',
+    acceptedRecords: 0,
+    skippedRecords: 1,
+  };
+  return {
+    source,
+    events: [],
+    diagnostics: [
+      reportDiagnostic(source, 'failed', 'parse', 'TOTAL_RECORD_LIMIT_REACHED'),
+    ],
+    attemptedRecords: 0,
+  };
+}
+
+async function readContextBytes(input, {
+  maximumBytes = EVIDENCE_LIMITS.maximumMetadataBytes,
+  tooLargeCode,
+  symlinkCode,
+  notFileCode,
+  changedCode,
+  readChangedCode,
+  readCode,
+}) {
+  let handle;
+  try {
+    handle = await openRegularFileNoFollow(input, {
+      symlinkCode,
+      notFileCode,
+      changedCode,
+      readCode,
+    });
+    return await readHandleBounded(
+      handle,
+      maximumBytes,
+      tooLargeCode,
+      readChangedCode,
+    );
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+}
+
+function failedContextSummary(input, sourceType, fields = {}) {
+  return {
+    sourceId: `source-${sha256(`context-failure-v1:${sourceType}:${String(input)}`).slice(0, 12)}`,
+    sourceType,
+    sourceDigest: `sha256:${sha256(Buffer.alloc(0))}`,
+    status: 'failed',
+    acceptedRecords: 0,
+    skippedRecords: 1,
+    ...fields,
+  };
+}
+
+function decodeJsonBytes(bytes, code) {
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    throw new EvidenceValidationError(code);
+  }
+}
+
+async function readEstateContext(input) {
+  try {
+    const bytes = await readContextBytes(input, {
+      tooLargeCode: 'ESTATE_MANIFEST_TOO_LARGE',
+      symlinkCode: 'ESTATE_MANIFEST_SYMLINK_REFUSED',
+      notFileCode: 'ESTATE_MANIFEST_NOT_FILE',
+      changedCode: 'ESTATE_MANIFEST_CHANGED_DURING_OPEN',
+      readChangedCode: 'ESTATE_MANIFEST_CHANGED_DURING_READ',
+      readCode: 'ESTATE_MANIFEST_READ_FAILED',
+    });
+    const digest = sha256(bytes);
+    const sourceId = `source-${sha256(`estate-v1:${digest}`).slice(0, 12)}`;
+    const parsed = parseEstateManifest(
+      decodeJsonBytes(bytes, 'ESTATE_MANIFEST_INVALID'),
+      { sourceId, sourceDigest: `sha256:${digest}` },
+    );
+    const diagnostics =
+      parsed.summary.status === 'partial'
+        ? [reportDiagnostic(parsed.summary, 'partial', 'estate', 'ESTATE_MANIFEST_PARTIAL')]
+        : [];
+    return { ...parsed, diagnostics };
+  } catch (error) {
+    const summary = failedContextSummary(input, 'rapp-monorepo-manifest', {
+      schema: null,
+      snapshotAt: null,
+      repositoryCount: 0,
+      withheldFiles: 0,
+      skippedLargeFiles: 0,
+    });
+    const code =
+      error instanceof SafeReadError || error instanceof EvidenceValidationError
+        ? error.code
+        : 'ESTATE_MANIFEST_READ_FAILED';
+    return {
+      summary,
+      capabilities: [],
+      diagnostics: [reportDiagnostic(summary, 'failed', 'estate', code)],
+    };
+  }
+}
+
+async function readCapabilityContext(input, seenDigests) {
+  try {
+    const bytes = await readContextBytes(input, {
+      tooLargeCode: 'CAPABILITY_CATALOG_TOO_LARGE',
+      symlinkCode: 'CAPABILITY_CATALOG_SYMLINK_REFUSED',
+      notFileCode: 'CAPABILITY_CATALOG_NOT_FILE',
+      changedCode: 'CAPABILITY_CATALOG_CHANGED_DURING_OPEN',
+      readChangedCode: 'CAPABILITY_CATALOG_CHANGED_DURING_READ',
+      readCode: 'CAPABILITY_CATALOG_READ_FAILED',
+    });
+    const digest = sha256(bytes);
+    if (seenDigests.has(digest)) {
+      return { duplicate: true, summary: null, capabilities: [], diagnostics: [] };
+    }
+    seenDigests.add(digest);
+    const sourceId = `source-${sha256(`catalog-v1:${digest}`).slice(0, 12)}`;
+    const parsed = parseCapabilityCatalog(
+      decodeJsonBytes(bytes, 'CAPABILITY_CATALOG_INVALID'),
+      { sourceId, sourceDigest: `sha256:${digest}` },
+    );
+    const diagnostics =
+      parsed.summary.status === 'partial'
+        ? [reportDiagnostic(parsed.summary, 'partial', 'catalog', 'CAPABILITY_CATALOG_PARTIAL')]
+        : [];
+    return { ...parsed, diagnostics };
+  } catch (error) {
+    const summary = failedContextSummary(input, 'capability-catalog', { schema: null });
+    const code =
+      error instanceof SafeReadError || error instanceof EvidenceValidationError
+        ? error.code
+        : 'CAPABILITY_CATALOG_READ_FAILED';
+    return {
+      duplicate: false,
+      summary,
+      capabilities: [],
+      diagnostics: [reportDiagnostic(summary, 'failed', 'catalog', code)],
+    };
+  }
+}
+
+async function readActivityContext(input, seenDigests) {
+  try {
+    const bytes = await readContextBytes(input, {
+      maximumBytes: EVIDENCE_LIMITS.maximumSourceBytes,
+      tooLargeCode: 'REPOSITORY_ACTIVITY_TOO_LARGE',
+      symlinkCode: 'REPOSITORY_ACTIVITY_SYMLINK_REFUSED',
+      notFileCode: 'REPOSITORY_ACTIVITY_NOT_FILE',
+      changedCode: 'REPOSITORY_ACTIVITY_CHANGED_DURING_OPEN',
+      readChangedCode: 'REPOSITORY_ACTIVITY_CHANGED_DURING_READ',
+      readCode: 'REPOSITORY_ACTIVITY_READ_FAILED',
+    });
+    const digest = sha256(bytes);
+    if (seenDigests.has(digest)) {
+      return { duplicate: true, summary: null, events: [], diagnostics: [] };
+    }
+    seenDigests.add(digest);
+    const sourceId = `source-${sha256(`activity-v1:${digest}`).slice(0, 12)}`;
+    const parsedBytes = parseHistoryBytes(bytes, {
+      maximumRecords: EVIDENCE_LIMITS.maximumActivityRecords,
+    });
+    const parsed = parseRepositoryActivity(parsedBytes.records, {
+      sourceId,
+      sourceDigest: `sha256:${digest}`,
+      skippedRecords: parsedBytes.skippedRecords,
+    });
+    const diagnostics = parsedBytes.issues.map((issue) =>
+      reportDiagnostic(parsed.summary, 'partial', 'activity', issue.code));
+    if (parsed.summary.status === 'partial' && diagnostics.length === 0) {
+      diagnostics.push(
+        reportDiagnostic(
+          parsed.summary,
+          'partial',
+          'activity',
+          'REPOSITORY_ACTIVITY_PARTIAL',
+        ),
+      );
+    }
+    return { ...parsed, diagnostics };
+  } catch (error) {
+    const summary = failedContextSummary(input, 'repository-activity');
+    const code =
+      error instanceof SafeReadError || error instanceof EvidenceValidationError
+        ? error.code
+        : 'REPOSITORY_ACTIVITY_READ_FAILED';
+    return {
+      duplicate: false,
+      summary,
+      events: [],
+      diagnostics: [reportDiagnostic(summary, 'failed', 'activity', code)],
+    };
+  }
 }
 
 function pathKey(value, platform = process.platform) {
@@ -1791,7 +2379,13 @@ export async function validateOutputScope(options, platform = process.platform) 
   }
 
   const outputKey = await canonicalFuturePath(options.output, platform);
-  for (const input of options.inputs ?? []) {
+  const selectedFiles = [
+    ...(options.inputs ?? []),
+    ...(options.activityInputs ?? []),
+    ...(options.capabilityCatalogs ?? []),
+    ...(options.estateManifest ? [options.estateManifest] : []),
+  ];
+  for (const input of selectedFiles) {
     if (outputKey === (await canonicalFuturePath(input, platform))) {
       throw new CliError(
         'OUTPUT_ALIASES_SOURCE',
@@ -1873,25 +2467,84 @@ export async function runObserveCli(argsOrOptions, io = {}) {
   await validateOutputScope(options);
   const writeStdout = ioWriter(io.stdout, (text) => process.stdout.write(text));
   const skillCatalog = await loadSkillCatalog(options.skillsRoots ?? []);
-  const digestOccurrences = new Map();
+  const seenSourceDigests = new Set();
   const sourceResults = [];
+  let remainingRecords = EVIDENCE_LIMITS.maximumTotalRecords;
   for (let index = 0; index < options.inputs.length; index += 1) {
-    sourceResults.push(
-      await readSource(options.inputs[index], options.source ?? 'auto', digestOccurrences),
+    const result =
+      remainingRecords === 0
+        ? totalRecordLimitResult(options.inputs[index], options.source ?? 'auto')
+        : await readSource(
+            options.inputs[index],
+            options.source ?? 'auto',
+            seenSourceDigests,
+            Math.min(EVIDENCE_LIMITS.maximumRecordsPerSource, remainingRecords),
+          );
+    sourceResults.push(result);
+    remainingRecords = Math.max(
+      0,
+      remainingRecords - result.attemptedRecords,
     );
   }
-  sourceResults.sort((left, right) =>
+  const duplicateSources = sourceResults.filter((result) => result.duplicate).length;
+  const uniqueSourceResults = sourceResults.filter((result) => !result.duplicate);
+  uniqueSourceResults.sort((left, right) =>
     left.source.sourceId.localeCompare(right.source.sourceId, 'en'),
   );
 
-  const sources = sourceResults.map((result) => result.source);
-  const normalizedEvents = sourceResults.flatMap((result) => result.events);
+  const estateResult = options.estateManifest
+    ? await readEstateContext(options.estateManifest)
+    : null;
+  const seenCatalogDigests = new Set();
+  const capabilityResults = [];
+  for (const input of options.capabilityCatalogs ?? []) {
+    capabilityResults.push(await readCapabilityContext(input, seenCatalogDigests));
+  }
+  const duplicateCatalogs = capabilityResults.filter((result) => result.duplicate).length;
+  const uniqueCapabilityResults = capabilityResults.filter((result) => !result.duplicate);
+  uniqueCapabilityResults.sort((left, right) =>
+    left.summary.sourceId.localeCompare(right.summary.sourceId, 'en'));
+
+  const seenActivityDigests = new Set();
+  const activityResults = [];
+  for (const input of options.activityInputs ?? []) {
+    activityResults.push(await readActivityContext(input, seenActivityDigests));
+  }
+  const duplicateActivitySources = activityResults.filter((result) => result.duplicate).length;
+  const uniqueActivityResults = activityResults.filter((result) => !result.duplicate);
+  uniqueActivityResults.sort((left, right) =>
+    left.summary.sourceId.localeCompare(right.summary.sourceId, 'en'));
+
+  const localCapabilities = skillCatalog.skills.map((skill) => ({ ...skill }));
+  const mergedCapabilities = mergeCapabilityCatalogs([
+    { capabilities: localCapabilities },
+    ...(estateResult ? [estateResult] : []),
+    ...uniqueCapabilityResults,
+  ]);
+  const capabilitySourceStatuses = [
+    ...(options.skillsRoots?.length > 0
+      ? [skillCatalog.skippedEntries > 0 ? 'partial' : 'ok']
+      : []),
+    ...(estateResult ? [estateResult.summary.status] : []),
+    ...uniqueCapabilityResults.map((result) => result.summary.status),
+  ];
+  const catalogCoverage =
+    capabilitySourceStatuses.length === 0
+      ? 'none'
+      : capabilitySourceStatuses.every((status) => status === 'ok')
+        ? 'complete'
+        : 'partial';
+
+  const sources = uniqueSourceResults.map((result) => result.source);
+  const normalizedEvents = uniqueSourceResults.flatMap((result) => result.events);
+  const activityEvents = uniqueActivityResults.flatMap((result) => result.events);
   const analysis = analyzeHistory(normalizedEvents, {
     sinceMs: options.sinceMs ?? null,
     untilMs: options.untilMs ?? null,
     minSessions: options.minSessions ?? 3,
     minDays: options.minDays ?? 2,
-    catalog: skillCatalog,
+    catalog: { capabilities: mergedCapabilities, coverage: catalogCoverage },
+    activityEvents,
   });
   const acceptedRecords = sources.reduce((total, source) => total + source.acceptedRecords, 0);
   const skippedRecords = sources.reduce((total, source) => total + source.skippedRecords, 0);
@@ -1899,12 +2552,28 @@ export async function runObserveCli(argsOrOptions, io = {}) {
   let status = anyAccepted ? 'ok' : 'failed';
   if (
     anyAccepted &&
-    (sources.some((source) => source.status !== 'ok') || skillCatalog.skippedEntries > 0)
+    (
+      sources.some((source) => source.status !== 'ok') ||
+      skillCatalog.skippedEntries > 0 ||
+      duplicateSources > 0 ||
+      duplicateCatalogs > 0 ||
+      duplicateActivitySources > 0 ||
+      capabilitySourceStatuses.some((sourceStatus) => sourceStatus !== 'ok') ||
+      uniqueActivityResults.some((result) => result.summary.status !== 'ok') ||
+      analysis.excluded.candidateCap > 0 ||
+      analysis.excluded.evidenceItems > 0 ||
+      analysis.excluded.workLimitEvents > 0
+    )
   ) {
     status = 'partial';
   }
 
-  const diagnostics = sourceResults.flatMap((result) => result.diagnostics);
+  const diagnostics = [
+    ...uniqueSourceResults.flatMap((result) => result.diagnostics),
+    ...(estateResult?.diagnostics ?? []),
+    ...uniqueCapabilityResults.flatMap((result) => result.diagnostics),
+    ...uniqueActivityResults.flatMap((result) => result.diagnostics),
+  ];
   if (skillCatalog.skippedEntries > 0 && sources.length > 0) {
     const source = sources[0];
     diagnostics.push(
@@ -1927,6 +2596,9 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       minimumSessions: options.minSessions ?? 3,
       minimumActiveDays: options.minDays ?? 2,
       skillsRootsCount: (options.skillsRoots ?? []).length,
+      repositoryActivityInputsCount: (options.activityInputs ?? []).length,
+      capabilityCatalogInputsCount: (options.capabilityCatalogs ?? []).length,
+      estateManifestProvided: options.estateManifest !== null,
     },
     sources,
     summary: {
@@ -1938,9 +2610,60 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       highConfidenceCandidateCount: analysis.candidates.filter(
         (candidate) => candidate.confidence === 'high',
       ).length,
+      selectedCandidateId: analysis.candidates[0]?.candidateId ?? null,
+      repositoryActivityRecords: uniqueActivityResults.reduce(
+        (total, result) => total + result.summary.acceptedRecords,
+        0,
+      ),
+      capabilitiesInspected: mergedCapabilities.length,
     },
     candidates: analysis.candidates,
-    excluded: analysis.excluded,
+    excluded: {
+      ...analysis.excluded,
+      duplicateSources,
+      duplicateCatalogs,
+      duplicateActivitySources,
+    },
+    context: {
+      estateManifest: estateResult?.summary ?? null,
+      capabilityCatalogs: uniqueCapabilityResults.map((result) => result.summary),
+      repositoryActivitySources: uniqueActivityResults.map((result) => result.summary),
+      catalogCoverage,
+    },
+    replay: {
+      analyzerVersion: '2',
+      analysisFingerprint: `sha256:${sha256(
+        stableStringify({
+          sources: sources.map((source) => source.sourceDigest).sort(),
+          estate: estateResult?.summary.sourceDigest ?? null,
+          catalogs: uniqueCapabilityResults
+            .map((result) => result.summary.sourceDigest)
+            .sort(),
+          localSkills: {
+            capabilities: localCapabilities
+              .map((capability) => ({
+                capabilityId: capability.capabilityId,
+                sourceIds: capability.sourceIds,
+              }))
+              .sort((left, right) =>
+                left.capabilityId.localeCompare(right.capabilityId, 'en')),
+            coverage: skillCatalog.coverage,
+            skippedEntries: skillCatalog.skippedEntries,
+            diagnostics: skillCatalog.diagnostics,
+          },
+          catalogCoverage,
+          activities: uniqueActivityResults
+            .map((result) => result.summary.sourceDigest)
+            .sort(),
+          scope: {
+            since: options.since ?? null,
+            until: options.until ?? null,
+            minSessions: options.minSessions ?? 3,
+            minDays: options.minDays ?? 2,
+          },
+        }),
+      )}`,
+    },
     diagnostics,
   };
   const text = `${stableStringify(report, options.pretty === true)}\n`;

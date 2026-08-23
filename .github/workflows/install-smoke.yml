@@ -177,4 +177,10 @@ jobs:
       - name: Copy install.sh to Docker context
         run: cp install.sh tests/install/docker/git-method/install.sh
       - name: Build and run git method test
-        run: docker build --no-cache -t openrappter-test-git tests/install/docker/git-method/
+        env:
+          MANIFEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          docker build --no-cache
+          --build-arg MANIFEST_REF="$MANIFEST_REF"
+          -t openrappter-test-git
+          tests/install/docker/git-method/

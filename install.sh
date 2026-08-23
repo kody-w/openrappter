@@ -979,10 +979,15 @@ NODE
 }
 
 resolve_ring_manifest() {
-    local ring="$1" repo manifest encoded
+    local ring="$1" repo manifest encoded manifest_ref
     repo="$(ring_repository "$ring")" || return 2
+    manifest_ref="${OPENRAPPTER_MANIFEST_REF:-main}"
+    if [[ "$manifest_ref" != "main" && ! "$manifest_ref" =~ ^[0-9a-f]{40}$ ]]; then
+        ui_error "OPENRAPPTER_MANIFEST_REF must be main or an immutable 40-hex commit"
+        return 2
+    fi
     manifest="$(mktempfile)"
-    download_file "https://raw.githubusercontent.com/${repo}/main/.ring/manifest.json" "$manifest" ||
+    download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/manifest.json" "$manifest" ||
         { ui_error "Could not reach ${ring} ring manifest"; return 1; }
     encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
     IFS=$'\t' read -r _rv _ra _rs _rc _rst _rr <<< "$encoded"
@@ -1053,6 +1058,7 @@ Environment variables:
   OPENRAPPTER_RING=beta             Release ring (preferred environment selector)
   OPENRAPPTER_CHANNEL=beta          Deprecated alias for OPENRAPPTER_RING
   OPENRAPPTER_ALLOW_DOWNGRADE=true  Permit an older exact manifest version
+  OPENRAPPTER_MANIFEST_REF=<40hex>  Audit/test a ring pointer at an immutable revision
   OPENRAPPTER_BETA=1                Deprecated alias for OPENRAPPTER_CHANNEL=beta
   OPENRAPPTER_NO_PROMPT=true        Non-interactive mode
   OPENRAPPTER_DRY_RUN=1             Dry run mode

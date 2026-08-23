@@ -5,6 +5,13 @@
   "description": "Public data-only descriptor for approved local application routes. Validation grants no capability or state access.",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "safeDisplayText": {
+      "type": "string",
+      "description": "Printable display prose only: no URLs or private hosts, authorization material, secret-shaped values, or private service namespaces.",
+      "pattern": "^(?![\\s\\S]*(?:https?|ftp|file):\\/\\/)(?![\\s\\S]*\\b(?:localhost|127(?:\\.\\d{1,3}){3}|10(?:\\.\\d{1,3}){3}|192\\.168(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[01])(?:\\.\\d{1,3}){2}|169\\.254(?:\\.\\d{1,3}){2}|\\[?::1\\]?|metadata\\.google\\.internal)\\b)(?![\\s\\S]*\\b(?:authorization|bearer|password|credential|api[ _-]?key|access[ _-]?token|client[ _-]?secret)\\b)(?![\\s\\S]*\\b(?:tenant|billing|admin|control[ _-]?plane|telemetry)\\b)(?![\\s\\S]*(?:ghp_|github_pat_|sk[-_][A-Za-z0-9]|xox[baprs]-|AKIA[A-Z0-9]{12}|eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}))[^\\u0000-\\u001F\\u007F]+$"
+    }
+  },
   "required": [
     "id",
     "title",
@@ -17,22 +24,21 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{1,63}$"
+      "pattern": "^(?!.*(?:tenant|billing|admin|control-plane|telemetry))[a-z][a-z0-9-]{1,63}$"
     },
     "title": {
-      "type": "string",
+      "$ref": "#/$defs/safeDisplayText",
       "minLength": 1,
       "maxLength": 80
     },
     "description": {
-      "type": "string",
+      "$ref": "#/$defs/safeDisplayText",
       "minLength": 1,
       "maxLength": 240
     },
     "glyph": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 4
+      "pattern": "^(?:[A-Z0-9]{1,3}|[+?@◇○▶↗]|···|>_|\\{ \\})$"
     },
     "routeId": {
       "type": "string",
@@ -60,7 +66,7 @@
     },
     "fragment": {
       "type": "string",
-      "pattern": "^#[a-z][a-z0-9-]{0,63}$"
+      "pattern": "^#(?!.*(?:tenant|billing|admin|control-plane|telemetry|token|secret|authorization))[a-z][a-z0-9-]{0,63}$"
     },
     "requiredCapability": {
       "type": "string",

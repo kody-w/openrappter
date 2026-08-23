@@ -18,6 +18,15 @@
       "fragment": "#overview",
       "requiredCapability": "system:read",
       "surfaceVersion": 1
+    },
+    {
+      "id": "language-guide",
+      "title": "Administration patterns",
+      "description": "A local guide to tokenization research and authoritative agent workflows.",
+      "glyph": "?",
+      "routeId": "help",
+      "requiredCapability": "ui:view",
+      "surfaceVersion": 1
     }
   ],
   "rejected": [
@@ -151,6 +160,67 @@
         "glyph": "S",
         "routeId": "agents",
         "fragment": "#token=secret",
+        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "title only contains authorization material",
+      "value": {
+        "id": "bad-title",
+        "title": "Authorization Bearer ghp_not-a-real-value",
+        "description": "Browse agents exposed by the local runtime.",
+        "glyph": "A",
+        "routeId": "agents",
+        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "description only contains a private host and namespace",
+      "value": {
+        "id": "bad-description",
+        "title": "System guide",
+        "description": "Open tenant admin telemetry at http://127.0.0.1/control-plane.",
+        "glyph": "?",
+        "routeId": "help",
+        "requiredCapability": "ui:view",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "glyph only is secret-shaped",
+      "value": {
+        "id": "bad-glyph",
+        "title": "Agent Explorer",
+        "description": "Browse agents exposed by the local runtime.",
+        "glyph": "sk-",
+        "routeId": "agents",
+        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "id only names a private namespace",
+      "value": {
+        "id": "tenant-console",
+        "title": "Agent Explorer",
+        "description": "Browse agents exposed by the local runtime.",
+        "glyph": "A",
+        "routeId": "agents",
+        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "fragment only contains secret material",
+      "value": {
+        "id": "agent-explorer",
+        "title": "Agent Explorer",
+        "description": "Browse agents exposed by the local runtime.",
+        "glyph": "A",
+        "routeId": "agents",
+        "fragment": "#access-token",
         "requiredCapability": "agent:read",
         "surfaceVersion": 1
       }

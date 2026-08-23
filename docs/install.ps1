@@ -348,13 +348,29 @@ function Resolve-RingManifest {
     param([string]$SelectedRing)
     if (-not $SelectedRing) { $SelectedRing = "stable" }
     $repo = Get-RingRepository $SelectedRing
-    $manifestRef = if ($env:OPENRAPPTER_MANIFEST_REF) { $env:OPENRAPPTER_MANIFEST_REF } else { "main" }
-    if ($manifestRef -ne "main" -and $manifestRef -notmatch "^[0-9a-f]{40}$") {
-        throw "OPENRAPPTER_MANIFEST_REF must be main or immutable 40-hex"
+    $authorityRef = if ($env:OPENRAPPTER_AUTHORITY_REF) { $env:OPENRAPPTER_AUTHORITY_REF } else { "main" }
+    if ($authorityRef -ne "main" -and $authorityRef -notmatch "^[0-9a-f]{40}$") {
+        throw "OPENRAPPTER_AUTHORITY_REF must be main or immutable 40-hex"
     }
-    $uri = "https://raw.githubusercontent.com/$repo/$manifestRef/.ring/manifest.json"
-    try { $m = Invoke-RestMethod -Uri $uri -Method Get }
-    catch { throw "Could not reach $SelectedRing ring manifest: $($_.Exception.Message)" }
+    try {
+        $head = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authorityRef/heads/$SelectedRing.json"
+    } catch { throw "Could not reach $SelectedRing authority head" }
+    $headKeys = @($head.PSObject.Properties.Name | Sort-Object) -join ","
+    if ($headKeys -ne "authority_commit,promotion_id,receipt_path,receipt_sha256,ring,schema,sequence,target_manifest_commit,target_manifest_sha256,target_repository" -or
+        $head.schema -ne "openrappter-ring-head/v1" -or $head.ring -ne $SelectedRing -or
+        $head.sequence -lt 1 -or $head.target_repository -ne $repo -or
+        $head.authority_commit -notmatch "^[0-9a-f]{40}$" -or
+        $head.target_manifest_commit -notmatch "^[0-9a-f]{40}$" -or
+        $head.promotion_id -notmatch "^[0-9a-f]{64}$" -or
+        $head.receipt_sha256 -notmatch "^[0-9a-f]{64}$" -or
+        $head.target_manifest_sha256 -notmatch "^[0-9a-f]{64}$" -or
+        $head.receipt_path -ne "receipts/$SelectedRing/$($head.promotion_id).json") {
+        throw "Authority head rejected"
+    }
+    try {
+        $receipt = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$($head.authority_commit)/$($head.receipt_path)"
+        $m = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$($head.target_manifest_commit)/.ring/manifest.json"
+    } catch { throw "Immutable authority receipt or target manifest unreachable" }
 
     $top = @($m.PSObject.Properties.Name | Sort-Object) -join ","
     $source = @($m.source.PSObject.Properties.Name | Sort-Object) -join ","
@@ -380,44 +396,13 @@ function Resolve-RingManifest {
     $releaseBound = $m.artifact.provenance -eq "github-release-download-sha256" -and $releasePrefix -and $m.artifact.url.StartsWith($releasePrefix) -and $m.artifact.install_url -eq $m.artifact.url
     if (-not $npmBound -and -not $releaseBound) { throw "Artifact is not bound to canonical package/version" }
 
-    $receiptPath = "receipts/$SelectedRing/$($m.promotion_id).json"
-    $pointer = $null
-    try { $pointer = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$manifestRef/.ring/authority.json" -Method Get } catch {}
-    $pointerValid = $false
-    if ($pointer) {
-        $pointerKeys = @($pointer.PSObject.Properties.Name | Sort-Object) -join ","
-        $pointerValid = $pointerKeys -eq "authority_commit,authority_repository,promotion_id,receipt_path,receipt_sha256,schema" -and
-            $pointer.schema -eq "openrappter-ring-authority/v1" -and
-            $pointer.authority_repository -eq "kody-w/openrappter-release-train" -and
-            $pointer.authority_commit -match "^[0-9a-f]{40}$" -and
-            $pointer.promotion_id -eq $m.promotion_id -and
-            $pointer.receipt_path -eq $receiptPath -and
-            $pointer.receipt_sha256 -match "^[0-9a-f]{64}$"
-    }
-    if ($pointerValid) {
-        $authorityCommit = $pointer.authority_commit
-        $expectedReceiptHash = $pointer.receipt_sha256
-    } else {
-        try {
-            $commits = Invoke-RestMethod -Uri "https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=$receiptPath&per_page=1"
-        } catch { throw "Finalized authority receipt is undiscoverable" }
-        $authorityCommit = $commits[0].sha
-        if ($authorityCommit -notmatch "^[0-9a-f]{40}$") { throw "No finalized authority receipt exists" }
-        $expectedReceiptHash = ""
-    }
-    $receiptUri = "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authorityCommit/$receiptPath"
-    try { $receipt = Invoke-RestMethod -Uri $receiptUri -Method Get }
-    catch { throw "Immutable authority receipt unreachable" }
-    if ($expectedReceiptHash -and (Get-CanonicalJsonHash $receipt) -ne $expectedReceiptHash) { throw "Authority receipt checksum mismatch" }
-    if ($receipt.target_manifest_commit -notmatch "^[0-9a-f]{40}$") { throw "Authority target commit malformed" }
-    try {
-        $immutable = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$($receipt.target_manifest_commit)/.ring/manifest.json" -Method Get
-    } catch { throw "Authority-bound target manifest unreachable" }
-    if ((Get-CanonicalJsonHash $m) -ne $receipt.target_manifest_sha256 -or
-        (Get-CanonicalJsonHash $immutable) -ne (Get-CanonicalJsonHash $m) -or
+    if ((Get-CanonicalJsonHash $receipt) -ne $head.receipt_sha256 -or
+        (Get-CanonicalJsonHash $m) -ne $head.target_manifest_sha256 -or
         $receipt.schema -ne "openrappter-promotion-receipt/v1" -or
         $receipt.target_repository -ne $repo -or $receipt.target_ring -ne $SelectedRing -or
-        $receipt.promotion_id -ne $m.promotion_id -or
+        $receipt.promotion_id -ne $head.promotion_id -or $m.promotion_id -ne $head.promotion_id -or
+        $receipt.target_manifest_commit -ne $head.target_manifest_commit -or
+        $receipt.target_manifest_sha256 -ne $head.target_manifest_sha256 -or
         $receipt.source_repository -ne $m.source.repository -or
         $receipt.source_commit -ne $m.source.commit -or
         $receipt.source_tag -ne $m.source.tag -or $receipt.version -ne $m.version -or
@@ -426,6 +411,20 @@ function Resolve-RingManifest {
         $receipt.artifact_sha256 -ne $m.artifact.sha256 -or
         $receipt.artifact_provenance -ne $m.artifact.provenance) {
         throw "Immutable authority receipt does not authorize manifest"
+    }
+    $sequenceFile = Join-Path $HOME_DIR "ring-head-sequences.json"
+    $sequences = @{}
+    if (Test-Path $sequenceFile) {
+        $stored = Get-Content $sequenceFile -Raw | ConvertFrom-Json
+        foreach ($property in $stored.PSObject.Properties) { $sequences[$property.Name] = [int]$property.Value }
+    }
+    $previousSequence = if ($sequences.ContainsKey($SelectedRing)) { $sequences[$SelectedRing] } else { 0 }
+    if ([int]$head.sequence -lt $previousSequence) { throw "Authority head sequence rollback" }
+    if ([int]$head.sequence -gt $previousSequence) {
+        $sequences[$SelectedRing] = [int]$head.sequence
+        $sequenceTemp = "$sequenceFile.$PID.new"
+        $sequences | ConvertTo-Json | Set-Content -Path $sequenceTemp -Encoding utf8NoBOM
+        Move-Item -Force $sequenceTemp $sequenceFile
     }
     if ($Version -and $Version -ne $m.version) { throw "Version must equal the ring's exact version $($m.version)" }
     return $m

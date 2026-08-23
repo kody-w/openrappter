@@ -186,9 +186,9 @@ jobs:
         run: cp install.sh tests/install/docker/git-method/install.sh
       - name: Build and run git method test
         env:
-          MANIFEST_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+          AUTHORITY_REF: 1985eb8cd4d3b80155bcc0c6bc0a0622de7f47ec
         run: >-
           docker build --no-cache
-          --build-arg MANIFEST_REF="$MANIFEST_REF"
+          --build-arg AUTHORITY_REF="$AUTHORITY_REF"
           -t openrappter-test-git
           tests/install/docker/git-method/

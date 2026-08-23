@@ -6,8 +6,8 @@ RUN apt-get update && apt-get install -y curl git build-essential && rm -rf /var
 # Resolve the manifest from the exact PR/head revision under test. This changes
 # only where the pointer document is read; release identity remains the closed
 # manifest's exact source commit and SHA-256.
-ARG MANIFEST_REF=main
-ENV OPENRAPPTER_MANIFEST_REF=$MANIFEST_REF
+ARG AUTHORITY_REF=main
+ENV OPENRAPPTER_AUTHORITY_REF=$AUTHORITY_REF
 
 # Copy the installer
 COPY install.sh /opt/openrappter-install.sh

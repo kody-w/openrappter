@@ -50,3 +50,7 @@ unpublished rings cannot be applied. The UI never downloads a package itself.
 The satellite repositories are maintained pointers, not source forks. Schema,
 promotion rules, and append-only receipts are owned by
 [`kody-w/openrappter-release-train`](https://github.com/kody-w/openrappter-release-train).
+Latest is resolved authority-first from that repository's monotonic
+`heads/<ring>.json`, then an immutable receipt, then the exact target commit.
+Target-repository `main` manifests and pointers are informational only and
+cannot override or replay the authority head.

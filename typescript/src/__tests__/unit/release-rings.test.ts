@@ -50,7 +50,10 @@ function canonicalDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
 
-function trustedFetch(manifest: typeof stable | Record<string, unknown>): typeof fetch {
+function trustedFetch(
+  manifest: typeof stable | Record<string, unknown>,
+  targetMainReplay?: Record<string, unknown>,
+) {
   const ring = String(manifest.ring);
   const repo = ring === 'stable' ? 'kody-w/openrappter' : `kody-w/openrappter-${ring}`;
   const receipt = {
@@ -73,19 +76,27 @@ function trustedFetch(manifest: typeof stable | Record<string, unknown>): typeof
     emitted_at: '2026-08-23T20:00:00Z',
   };
   const bodies = [
-    manifest,
     {
-      schema: 'openrappter-ring-authority/v1',
-      authority_repository: 'kody-w/openrappter-release-train',
+      schema: 'openrappter-ring-head/v1',
+      ring,
+      sequence: 7,
+      promotion_id: manifest.promotion_id,
       authority_commit: 'd'.repeat(40),
       receipt_path: `receipts/${ring}/${manifest.promotion_id}.json`,
       receipt_sha256: canonicalDigest(receipt),
-      promotion_id: manifest.promotion_id,
+      target_repository: repo,
+      target_manifest_commit: 'c'.repeat(40),
+      target_manifest_sha256: canonicalDigest(manifest),
     },
     receipt,
     manifest,
   ];
-  return vi.fn(async () => response(bodies.shift()));
+  return vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (targetMainReplay && String(input) === RING_MANIFEST_URLS[ring as keyof typeof RING_MANIFEST_URLS]) {
+      return response(targetMainReplay);
+    }
+    return response(bodies.shift());
+  });
 }
 
 describe('ring selection', () => {
@@ -184,11 +195,33 @@ describe('closed manifests', () => {
 });
 
 describe('resolution', () => {
-  it('fetches only the hardcoded ring URL and exact ref', async () => {
+  it('resolves authority head before immutable receipt and target commit', async () => {
     const fetchImpl = trustedFetch(stable);
     const manifest = await fetchRingManifest('stable', { fetchImpl: fetchImpl as typeof fetch });
-    expect(fetchImpl).toHaveBeenCalledWith(RING_MANIFEST_URLS.stable, expect.anything());
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/stable.json',
+      expect.anything(),
+    );
+    const urls = fetchImpl.mock.calls.map(call => String(call[0]));
+    expect(urls).not.toContain(RING_MANIFEST_URLS.stable);
+    expect(urls[2]).toContain(`${'c'.repeat(40)}/.ring/manifest.json`);
     expect(manifest.source.commit).toBe('a'.repeat(40));
+  });
+  it('ignores a coherent older target-main manifest and pointer replay', async () => {
+    const older = {
+      ...stable,
+      version: '1.9.7',
+      source: { ...stable.source, commit: 'b'.repeat(40), tag: 'v1.9.7' },
+      promotion_id: '9'.repeat(64),
+    };
+    const fetchImpl = trustedFetch(stable, older);
+    const resolved = await fetchRingManifest('stable', { fetchImpl });
+    expect(resolved.version).toBe('1.9.8');
+    expect(resolved.source.commit).toBe('a'.repeat(40));
+    expect(fetchImpl.mock.calls.map(call => String(call[0]))).not.toContain(
+      RING_MANIFEST_URLS.stable,
+    );
   });
   it('fails on unreachable and nonpublished rings', async () => {
     await expect(fetchRingManifest('stable', { fetchImpl: vi.fn(async () => response({}, false)) as typeof fetch })).rejects.toThrow('could not reach');

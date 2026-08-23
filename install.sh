@@ -993,16 +993,38 @@ NODE
 }
 
 resolve_ring_manifest() {
-    local ring="$1" repo manifest encoded manifest_ref pointer pointer_info receipt immutable
+    local ring="$1" repo head receipt manifest encoded authority_ref head_info
     repo="$(ring_repository "$ring")" || return 2
-    manifest_ref="${OPENRAPPTER_MANIFEST_REF:-main}"
-    if [[ "$manifest_ref" != "main" && ! "$manifest_ref" =~ ^[0-9a-f]{40}$ ]]; then
-        ui_error "OPENRAPPTER_MANIFEST_REF must be main or an immutable 40-hex commit"
+    authority_ref="${OPENRAPPTER_AUTHORITY_REF:-main}"
+    if [[ "$authority_ref" != "main" && ! "$authority_ref" =~ ^[0-9a-f]{40}$ ]]; then
+        ui_error "OPENRAPPTER_AUTHORITY_REF must be main or an immutable 40-hex commit"
         return 2
     fi
+    head="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_ref}/heads/${ring}.json" "$head" ||
+        { ui_error "Could not reach ${ring} authority head"; return 1; }
+    head_info="$(node - "$head" "$ring" "$repo" <<'NODE'
+const fs=require('node:fs'),[file,ring,repo]=process.argv.slice(2),h=JSON.parse(fs.readFileSync(file));
+const keys=['authority_commit','promotion_id','receipt_path','receipt_sha256','ring','schema','sequence','target_manifest_commit','target_manifest_sha256','target_repository'];
+if(JSON.stringify(Object.keys(h).sort())!==JSON.stringify(keys)||h.schema!=='openrappter-ring-head/v1'||h.ring!==ring||!Number.isSafeInteger(h.sequence)||h.sequence<1||h.target_repository!==repo||!/^[0-9a-f]{40}$/.test(h.authority_commit)||!/^[0-9a-f]{40}$/.test(h.target_manifest_commit)||!/^[0-9a-f]{64}$/.test(h.promotion_id)||!/^[0-9a-f]{64}$/.test(h.receipt_sha256)||!/^[0-9a-f]{64}$/.test(h.target_manifest_sha256)||h.receipt_path!==`receipts/${ring}/${h.promotion_id}.json`)process.exit(1);
+process.stdout.write([h.authority_commit,h.receipt_path,h.receipt_sha256,h.target_manifest_commit,h.target_manifest_sha256,h.promotion_id,String(h.sequence)].map(v=>Buffer.from(v).toString('base64')).join('|'));
+NODE
+    )" || { ui_error "Authority head rejected"; return 1; }
+    IFS='|' read -r _ac _rp _rsha _tc _msha _pid _seq <<< "$head_info"
+    local authority_commit receipt_path receipt_sha target_commit manifest_sha promotion_id sequence
+    authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
+    receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
+    receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
+    target_commit="$(printf '%s' "$_tc"|base64 --decode)"
+    manifest_sha="$(printf '%s' "$_msha"|base64 --decode)"
+    promotion_id="$(printf '%s' "$_pid"|base64 --decode)"
+    sequence="$(printf '%s' "$_seq"|base64 --decode)"
+    receipt="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
+        { ui_error "Immutable authority receipt unreachable"; return 1; }
     manifest="$(mktempfile)"
-    download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/manifest.json" "$manifest" ||
-        { ui_error "Could not reach ${ring} ring manifest"; return 1; }
+    download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$manifest" ||
+        { ui_error "Immutable authority target manifest unreachable"; return 1; }
     encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
     IFS='|' read -r _rv _ra _rs _rc _rst _rr _rpid <<< "$encoded"
     RESOLVED_RING_VERSION="$(printf '%s' "$_rv" | base64 --decode)"
@@ -1011,51 +1033,18 @@ resolve_ring_manifest() {
     RESOLVED_RING_COMMIT="$(printf '%s' "$_rc" | base64 --decode)"
     RESOLVED_RING_STATUS="$(printf '%s' "$_rst" | base64 --decode)"
     RESOLVED_RING_REASON="$(printf '%s' "$_rr" | base64 --decode)"
-    RESOLVED_RING_PROMOTION_ID="$(printf '%s' "$_rpid" | base64 --decode)"
-    pointer="$(mktempfile)"
-    pointer_info=""
-    if download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/authority.json" "$pointer"; then
-        pointer_info="$(node - "$pointer" "$ring" "$RESOLVED_RING_PROMOTION_ID" <<'NODE' || true
-const fs=require('node:fs'), [file,ring,id]=process.argv.slice(2), p=JSON.parse(fs.readFileSync(file));
-const keys=['authority_commit','authority_repository','promotion_id','receipt_path','receipt_sha256','schema'];
-if(JSON.stringify(Object.keys(p).sort())!==JSON.stringify(keys)||p.schema!=='openrappter-ring-authority/v1'||p.authority_repository!=='kody-w/openrappter-release-train'||!/^[0-9a-f]{40}$/.test(p.authority_commit)||p.promotion_id!==id||p.receipt_path!==`receipts/${ring}/${id}.json`||!/^[0-9a-f]{64}$/.test(p.receipt_sha256))process.exit(1);
-process.stdout.write([p.authority_commit,p.receipt_path,p.receipt_sha256].map(v=>Buffer.from(v).toString('base64')).join('|'));
-NODE
-        )"
-    fi
-    local authority_commit receipt_path receipt_sha target_commit
-    if [[ -n "$pointer_info" ]]; then
-        IFS='|' read -r _ac _rp _rsha <<< "$pointer_info"
-        authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
-        receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
-        receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
-    else
-        receipt_path="receipts/${ring}/${RESOLVED_RING_PROMOTION_ID}.json"
-        local discovery
-        discovery="$(mktempfile)"
-        download_file "https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=${receipt_path}&per_page=1" "$discovery" ||
-            { ui_error "Finalized authority receipt is undiscoverable"; return 1; }
-        authority_commit="$(node -e 'const fs=require("node:fs"),v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")),s=v[0]?.sha;if(!/^[0-9a-f]{40}$/.test(s))process.exit(1);process.stdout.write(s)' "$discovery")" ||
-            { ui_error "No finalized authority receipt exists"; return 1; }
-        receipt_sha=""
-        printf '{}\n' > "$pointer"
-    fi
-    receipt="$(mktempfile)"
-    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
-        { ui_error "Immutable authority receipt unreachable"; return 1; }
-    target_commit="$(node -e 'const fs=require("node:fs"),r=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(!/^[0-9a-f]{40}$/.test(r.target_manifest_commit))process.exit(1);process.stdout.write(r.target_manifest_commit)' "$receipt")" ||
-        { ui_error "Authority receipt target commit rejected"; return 1; }
-    immutable="$(mktempfile)"
-    download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$immutable" ||
-        { ui_error "Authority-bound target manifest unreachable"; return 1; }
-    if ! node - "$manifest" "$pointer" "$receipt" "$immutable" "$ring" "$repo" "$receipt_sha" <<'NODE'
+    local manifest_promotion_id
+    manifest_promotion_id="$(printf '%s' "$_rpid" | base64 --decode)"
+    [[ "$manifest_promotion_id" == "$promotion_id" ]] ||
+        { ui_error "Authority head promotion id differs from immutable manifest"; return 1; }
+    if ! node - "$manifest" "$receipt" "$ring" "$repo" "$receipt_sha" "$manifest_sha" "$promotion_id" "$target_commit" <<'NODE'
 const fs=require('node:fs'),crypto=require('node:crypto');
-const [mf,pf,rf,imf,ring,repo,receiptSha]=process.argv.slice(2);
-const [m,p,r,im]=[mf,pf,rf,imf].map(f=>JSON.parse(fs.readFileSync(f)));
+const [mf,rf,ring,repo,receiptSha,manifestSha,promotionId,targetCommit]=process.argv.slice(2);
+const [m,r]=[mf,rf].map(f=>JSON.parse(fs.readFileSync(f)));
 const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
 const digest=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
-if((receiptSha&&digest(r)!==receiptSha)||digest(m)!==r.target_manifest_sha256||digest(im)!==digest(m))throw Error('authority digest mismatch');
-if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==m.promotion_id||(p.promotion_id&&p.promotion_id!==m.promotion_id))throw Error('authority target mismatch');
+if(digest(r)!==receiptSha||digest(m)!==manifestSha||r.target_manifest_sha256!==manifestSha)throw Error('authority digest mismatch');
+if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==promotionId||m.promotion_id!==promotionId||r.target_manifest_commit!==targetCommit)throw Error('authority target mismatch');
 const a=m.artifact,s=m.source;
 if(r.source_repository!==s.repository||r.source_commit!==s.commit||r.source_tag!==s.tag||r.version!==m.version||r.artifact_url!==a.url||r.install_url!==a.install_url||r.artifact_sha256!==a.sha256||r.artifact_provenance!==a.provenance)throw Error('authority identity mismatch');
 NODE
@@ -1063,6 +1052,15 @@ NODE
         ui_error "Immutable authority receipt does not authorize manifest"
         return 1
     fi
+    local sequences_file
+    sequences_file="${INSTALL_DIR}/ring-head-sequences.json"
+    mkdir -p "$INSTALL_DIR"
+    node - "$sequences_file" "$ring" "$sequence" <<'NODE'
+const fs=require('node:fs'),path=require('node:path'),[file,ring,raw]=process.argv.slice(2),sequence=Number(raw);
+let state={};if(fs.existsSync(file))state=JSON.parse(fs.readFileSync(file));
+const previous=state[ring]??0;if(sequence<previous)throw Error('authority head sequence rollback');
+if(sequence>previous){state[ring]=sequence;const tmp=`${file}.${process.pid}.new`;fs.writeFileSync(tmp,JSON.stringify(state,null,2)+'\n',{mode:0o600});fs.renameSync(tmp,file);}
+NODE
     if [[ "$RESOLVED_RING_STATUS" != "published" ]]; then
         ui_error "${ring} is ${RESOLVED_RING_STATUS}: ${RESOLVED_RING_REASON}"
         return 1
@@ -1124,7 +1122,7 @@ Environment variables:
   OPENRAPPTER_RING=beta             Release ring (preferred environment selector)
   OPENRAPPTER_CHANNEL=beta          Deprecated alias for OPENRAPPTER_RING
   OPENRAPPTER_ALLOW_DOWNGRADE=true  Permit an older exact manifest version
-  OPENRAPPTER_MANIFEST_REF=<40hex>  Audit/test a ring pointer at an immutable revision
+  OPENRAPPTER_AUTHORITY_REF=<40hex> Audit/test an authority head at an immutable revision
   OPENRAPPTER_BETA=1                Deprecated alias for OPENRAPPTER_CHANNEL=beta
   OPENRAPPTER_NO_PROMPT=true        Non-interactive mode
   OPENRAPPTER_DRY_RUN=1             Dry run mode

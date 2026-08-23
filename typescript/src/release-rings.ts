@@ -44,15 +44,6 @@ export interface RingManifest {
   promotion_id: string | null;
 }
 
-interface AuthorityPointer {
-  schema: 'openrappter-ring-authority/v1';
-  authority_repository: 'kody-w/openrappter-release-train';
-  authority_commit: string;
-  receipt_path: string;
-  receipt_sha256: string;
-  promotion_id: string;
-}
-
 const TOP_KEYS = ['artifact', 'predecessor', 'promoted_at', 'promotion_id', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
 const SOURCE_KEYS = ['commit', 'repository', 'tag'];
 const ARTIFACT_KEYS = ['install_url', 'provenance', 'sha256', 'url'];
@@ -207,92 +198,6 @@ function canonicalDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
 
-async function requireAuthority(
-  ring: RingName,
-  manifest: RingManifest,
-  fetchImpl: typeof fetch,
-): Promise<void> {
-  if (!manifest.promotion_id) throw new Error(`${ring} manifest has no authority promotion id`);
-  const repository = RING_REPOSITORIES[ring];
-  const receiptPath = `receipts/${ring}/${manifest.promotion_id}.json`;
-  let authorityCommit: string | null = null;
-  let expectedReceiptSha: string | null = null;
-  const pointerResponse = await fetchImpl(
-    `https://raw.githubusercontent.com/${repository}/main/.ring/authority.json`,
-    { headers: { accept: 'application/json' } },
-  );
-  if (pointerResponse.ok) {
-    const pointer = await pointerResponse.json() as AuthorityPointer;
-    const pointerKeys = ['authority_commit', 'authority_repository', 'promotion_id', 'receipt_path', 'receipt_sha256', 'schema'];
-    if (isClosed(pointer, pointerKeys)
-      && pointer.schema === 'openrappter-ring-authority/v1'
-      && pointer.authority_repository === 'kody-w/openrappter-release-train'
-      && /^[0-9a-f]{40}$/.test(pointer.authority_commit)
-      && pointer.promotion_id === manifest.promotion_id
-      && /^[0-9a-f]{64}$/.test(pointer.receipt_sha256)
-      && pointer.receipt_path === receiptPath) {
-      authorityCommit = pointer.authority_commit;
-      expectedReceiptSha = pointer.receipt_sha256;
-    }
-  }
-  if (!authorityCommit) {
-    const discovery = await fetchImpl(
-      `https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=${encodeURIComponent(receiptPath)}&per_page=1`,
-      { headers: { accept: 'application/vnd.github+json' } },
-    );
-    if (!discovery.ok) throw new Error(`${ring} finalized authority receipt is undiscoverable`);
-    const commits = await discovery.json() as Array<{ sha?: unknown }>;
-    const sha = commits[0]?.sha;
-    if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) {
-      throw new Error(`${ring} has no finalized authority receipt`);
-    }
-    authorityCommit = sha;
-  }
-  const receiptResponse = await fetchImpl(
-    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authorityCommit}/${receiptPath}`,
-    { headers: { accept: 'application/json' } },
-  );
-  if (!receiptResponse.ok) throw new Error(`${ring} immutable authority receipt is unreachable`);
-  const receipt = await receiptResponse.json() as Record<string, unknown>;
-  if (expectedReceiptSha && canonicalDigest(receipt) !== expectedReceiptSha) {
-    throw new Error(`${ring} authority receipt checksum mismatch`);
-  }
-  const expectedKeys = [
-    'artifact_provenance', 'artifact_sha256', 'artifact_url', 'emitted_at',
-    'install_url', 'predecessor_manifest_sha256', 'promotion_id', 'receipt_kind', 'schema',
-    'source_commit', 'source_repository', 'source_tag', 'target_manifest_commit',
-    'target_manifest_sha256', 'target_repository', 'target_ring', 'version',
-  ];
-  if (!isClosed(receipt, expectedKeys)
-    || receipt.schema !== 'openrappter-promotion-receipt/v1'
-    || !['bootstrap', 'promotion'].includes(String(receipt.receipt_kind))
-    || receipt.promotion_id !== manifest.promotion_id
-    || receipt.target_repository !== repository
-    || receipt.target_ring !== ring
-    || receipt.target_manifest_sha256 !== canonicalDigest(manifest)
-    || receipt.source_repository !== manifest.source.repository
-    || receipt.source_commit !== manifest.source.commit
-    || receipt.source_tag !== manifest.source.tag
-    || receipt.version !== manifest.version
-    || receipt.artifact_url !== manifest.artifact.url
-    || receipt.install_url !== manifest.artifact.install_url
-    || receipt.artifact_sha256 !== manifest.artifact.sha256
-    || receipt.artifact_provenance !== manifest.artifact.provenance
-    || typeof receipt.target_manifest_commit !== 'string'
-    || !/^[0-9a-f]{40}$/.test(receipt.target_manifest_commit)) {
-    throw new Error(`${ring} authority receipt does not authorize this manifest`);
-  }
-  const immutableResponse = await fetchImpl(
-    `https://raw.githubusercontent.com/${repository}/${receipt.target_manifest_commit}/.ring/manifest.json`,
-    { headers: { accept: 'application/json' } },
-  );
-  if (!immutableResponse.ok) throw new Error(`${ring} immutable target manifest is unreachable`);
-  const immutable = validateRingManifest(await immutableResponse.json(), ring);
-  if (canonicalDigest(immutable) !== canonicalDigest(manifest)) {
-    throw new Error(`${ring} mutable manifest differs from authority-confirmed target commit`);
-  }
-}
-
 interface ParsedSemVer {
   core: [number, number, number];
   prerelease: string[] | null;
@@ -342,14 +247,86 @@ export function isVersionDowngrade(current: string, target: string): boolean {
 
 export async function fetchRingManifest(
   ring: RingName,
-  options: { fetchImpl?: typeof fetch; now?: Date } = {},
+  options: { fetchImpl?: typeof fetch; now?: Date; persistSequence?: boolean } = {},
 ): Promise<RingManifest> {
-  const response = await (options.fetchImpl ?? fetch)(RING_MANIFEST_URLS[ring], {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) throw new Error(`could not reach ${ring} manifest (${response.status})`);
-  const manifest = validateRingManifest(await response.json(), ring, options.now);
-  await requireAuthority(ring, manifest, options.fetchImpl ?? fetch);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const headResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/${ring}.json`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!headResponse.ok) throw new Error(`could not reach ${ring} authority head (${headResponse.status})`);
+  const head = await headResponse.json() as Record<string, unknown>;
+  const headKeys = [
+    'authority_commit', 'promotion_id', 'receipt_path', 'receipt_sha256',
+    'ring', 'schema', 'sequence', 'target_manifest_commit',
+    'target_manifest_sha256', 'target_repository',
+  ];
+  const repository = RING_REPOSITORIES[ring];
+  if (
+    !isClosed(head, headKeys)
+    || head.schema !== 'openrappter-ring-head/v1'
+    || head.ring !== ring
+    || !Number.isSafeInteger(head.sequence)
+    || Number(head.sequence) < 1
+    || typeof head.promotion_id !== 'string'
+    || !/^[0-9a-f]{64}$/.test(head.promotion_id)
+    || typeof head.authority_commit !== 'string'
+    || !/^[0-9a-f]{40}$/.test(head.authority_commit)
+    || head.receipt_path !== `receipts/${ring}/${head.promotion_id}.json`
+    || typeof head.receipt_sha256 !== 'string'
+    || !/^[0-9a-f]{64}$/.test(head.receipt_sha256)
+    || head.target_repository !== repository
+    || typeof head.target_manifest_commit !== 'string'
+    || !/^[0-9a-f]{40}$/.test(head.target_manifest_commit)
+    || typeof head.target_manifest_sha256 !== 'string'
+    || !/^[0-9a-f]{64}$/.test(head.target_manifest_sha256)
+  ) throw new Error(`${ring} authority head is malformed`);
+  const receiptResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/${head.authority_commit}/${head.receipt_path}`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!receiptResponse.ok) throw new Error(`${ring} immutable authority receipt is unreachable`);
+  const receipt = await receiptResponse.json() as Record<string, unknown>;
+  if (canonicalDigest(receipt) !== head.receipt_sha256) {
+    throw new Error(`${ring} authority receipt checksum mismatch`);
+  }
+  const manifestResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/${repository}/${head.target_manifest_commit}/.ring/manifest.json`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!manifestResponse.ok) throw new Error(`${ring} immutable target manifest is unreachable`);
+  const manifest = validateRingManifest(await manifestResponse.json(), ring, options.now);
+  if (
+    canonicalDigest(manifest) !== head.target_manifest_sha256
+    || receipt.promotion_id !== head.promotion_id
+    || receipt.target_repository !== repository
+    || receipt.target_ring !== ring
+    || receipt.target_manifest_commit !== head.target_manifest_commit
+    || receipt.target_manifest_sha256 !== head.target_manifest_sha256
+    || receipt.source_commit !== manifest.source.commit
+    || receipt.source_tag !== manifest.source.tag
+    || receipt.version !== manifest.version
+    || receipt.artifact_url !== manifest.artifact.url
+    || receipt.install_url !== manifest.artifact.install_url
+    || receipt.artifact_sha256 !== manifest.artifact.sha256
+    || receipt.artifact_provenance !== manifest.artifact.provenance
+  ) throw new Error(`${ring} authority head does not authorize immutable target manifest`);
+  if (options.persistSequence ?? (options.fetchImpl === undefined)) {
+    const sequencePath = openrappterPath('ring-head-sequences.json');
+    let sequences: Record<string, number> = {};
+    if (fs.existsSync(sequencePath)) {
+      sequences = JSON.parse(fs.readFileSync(sequencePath, 'utf8')) as Record<string, number>;
+    }
+    const previous = sequences[ring] ?? 0;
+    if (Number(head.sequence) < previous) throw new Error(`${ring} authority head sequence rolled back`);
+    if (Number(head.sequence) > previous) {
+      sequences[ring] = Number(head.sequence);
+      const staging = `${sequencePath}.${process.pid}.new`;
+      fs.mkdirSync(path.dirname(sequencePath), { recursive: true });
+      fs.writeFileSync(staging, `${JSON.stringify(sequences, null, 2)}\n`, { mode: 0o600 });
+      fs.renameSync(staging, sequencePath);
+    }
+  }
   return manifest;
 }
 

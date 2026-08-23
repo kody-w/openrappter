@@ -5,7 +5,7 @@ on:
     paths:
       - ".github/workflows/rappid-card.yml"
       - "contracts/rappid-card*.json"
-      - "tests/vectors/rapp-1-08893fd/rappid-card/**"
+      - "tests/vectors/rapp-1-2167c34/rappid-card/**"
       - "python/openrappter/rappid_card/**"
       - "python/scripts/rappid_card_wheel_smoke.py"
       - "python/tests/test_rappid_card.py"
@@ -23,7 +23,7 @@ on:
     paths:
       - ".github/workflows/rappid-card.yml"
       - "contracts/rappid-card*.json"
-      - "tests/vectors/rapp-1-08893fd/rappid-card/**"
+      - "tests/vectors/rapp-1-2167c34/rappid-card/**"
       - "python/openrappter/rappid_card/**"
       - "python/scripts/rappid_card_wheel_smoke.py"
       - "python/tests/test_rappid_card.py"
@@ -87,9 +87,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq zbar-tools
           node typescript/dist/index.js rappid-card qr \
-            tests/vectors/rapp-1-08893fd/rappid-card/physical-payload.txt \
+            tests/vectors/rapp-1-2167c34/rappid-card/physical-payload.txt \
             .rappid-card-physical.png --format png
           zbarimg --quiet --raw .rappid-card-physical.png > .decoded-link.txt
           diff -u \
-            tests/vectors/rapp-1-08893fd/rappid-card/physical-payload.txt \
+            tests/vectors/rapp-1-2167c34/rappid-card/physical-payload.txt \
             .decoded-link.txt

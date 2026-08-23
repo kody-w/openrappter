@@ -172,8 +172,8 @@ try {
     readFileSync(path.join(vectorRoot, "PROVENANCE.json"), "utf8"),
   );
   if (
-    provenance.source_commit !== "08893fdf8d495f9da8c202cd004fc1587082816c"
-    || provenance.deck_schema !== "rappid-card-vectors/3"
+    provenance.source_commit !== "2167c34babdb307411b5ba0c5d68dbd102d3973b"
+    || provenance.deck_schema !== "rappid-card-vectors/4"
   ) {
     throw new Error("Packaged RAPPID card provenance is wrong");
   }
@@ -199,6 +199,7 @@ try {
     });
   } finally {
     renameSync(hiddenVectors, vectorRoot);
+  }
   const cleverGirlAssets = [
     [
       path.join("scripts", "rapter-clever-girl.mjs"),

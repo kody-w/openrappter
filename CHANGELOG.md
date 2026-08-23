@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added the dual-runtime RAPP/1 §7.10 Calling Card / Debug Card verifier,
-  reconciled byte-for-byte with `rapp-1` commit `08893fd`. The virtual resource
+  reconciled byte-for-byte with `rapp-1` commit `2167c34`. The virtual resource
   is the canonical eleven-key frame; production is `body.calling-card` +
   `rappid-card/1`, debug is `body.debug-card` + `rappid-card-test/1`; signatures
   are detached unencoded EdDSA JWS with SPKI→RAPPID binding. Signed runtime

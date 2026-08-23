@@ -52,7 +52,7 @@ from openrappter.rappid_card import (
 from openrappter.rappid_card import protocol_reference as R
 
 ROOT = Path(__file__).resolve().parents[2]
-VECTOR_ROOT = ROOT / "tests" / "vectors" / "rapp-1-08893fd" / "rappid-card"
+VECTOR_ROOT = ROOT / "tests" / "vectors" / "rapp-1-2167c34" / "rappid-card"
 
 MANDATORY = (
     "valid-test", "valid-production", "expired", "manifest-revoked", "key-revoked",
@@ -60,7 +60,8 @@ MANDATORY = (
     "oversized-payload", "newline-rappid", "newline-manifest-hash",
     "newline-lclabel", "newline-profile-token", "newline-connection-id",
     "unknown-signing-key",
-    "attacker-key-impersonation", "delegation-expired", "delegation-revoked",
+    "attacker-key-impersonation", "subject-not-yet-effective",
+    "delegation-not-yet-effective", "delegation-expired", "delegation-revoked",
     "forged-revocation-view", "stale-revocation-view", "unavailable-revocation-view",
     "rollback-revocation-view", "protocol-incompatible", "runtime-incompatible",
     "unsupported-feature", "feature-superset", "classification-violation",
@@ -74,8 +75,10 @@ MANDATORY = (
     "endpoint-numeric-hex", "endpoint-numeric-short-private",
     "endpoint-loopback-literal", "endpoint-private-literal",
     "endpoint-link-local-literal", "endpoint-reserved-literal",
+    "endpoint-ipv4-multicast-literal", "endpoint-ipv6-multicast-literal",
     "endpoint-unapproved-origin", "endpoint-redirect-origin",
-    "endpoint-private-dns", "fetch-numeric-alias",
+    "endpoint-private-dns", "fetch-ipv4-multicast", "fetch-ipv6-multicast",
+    "fetch-numeric-alias",
     "secret-endpoint-password", "secret-password", "secret-api-key", "secret-cookie",
     "secret-bearer", "secret-private-memory",
     "secret-unicode-latin-adjacency", "secret-unicode-cjk-adjacency",
@@ -149,8 +152,8 @@ def test_protocol_tokens_and_key_sets_do_not_drift():
 def test_mandatory_scenario_names_and_order_do_not_drift():
     deck = load_rappid_card_deck()
     provenance = json.loads((VECTOR_ROOT / "PROVENANCE.json").read_text())
-    assert deck["schema"] == "rappid-card-vectors/3"
-    assert provenance["deck_schema"] == "rappid-card-vectors/3"
+    assert deck["schema"] == "rappid-card-vectors/4"
+    assert provenance["deck_schema"] == "rappid-card-vectors/4"
     assert tuple(deck["mandatory_scenarios"]) == MANDATORY
     assert tuple(vector["name"] for vector in deck["vectors"]) == MANDATORY
     assert RAPPID_CARD_FIXTURE_NAMES == MANDATORY
@@ -190,7 +193,7 @@ def test_vendored_vector_checksums_match_provenance():
     import hashlib
 
     provenance = json.loads((VECTOR_ROOT / "PROVENANCE.json").read_text())
-    assert provenance["source_commit"] == "08893fdf8d495f9da8c202cd004fc1587082816c"
+    assert provenance["source_commit"] == "2167c34babdb307411b5ba0c5d68dbd102d3973b"
     for name, expected in provenance["sha256"].items():
         assert hashlib.sha256((VECTOR_ROOT / name).read_bytes()).hexdigest() == expected
     package_root = (
@@ -238,6 +241,33 @@ def test_authoritative_depth_size_host_token_and_ascii_scanner_fixes():
         "rappid:@synthetic/x:" + "a" * 64 + "\n"
     )
     assert R._forbidden_card_material("épasswordé")
+
+
+def test_pre_hydration_refusals_never_invoke_confidential_reader():
+    names = (
+        "subject-not-yet-effective",
+        "delegation-not-yet-effective",
+        "classification-violation",
+        "insufficient-scope",
+        "reconnect-during-hydration",
+        "duplicate-replayed-nonce",
+        "fetch-ipv4-multicast",
+        "fetch-ipv6-multicast",
+    )
+    for name in names:
+        path = ROOT / f".protocol-no-hydration-{name}-{os.getpid()}.sqlite"
+        _remove_database(path)
+        calls = []
+        try:
+            verdict = simulate_rappid_card_fixture(
+                name,
+                str(path),
+                hydration_calls=calls,
+            )
+            assert not verdict.ok
+            assert calls == [], (name, calls)
+        finally:
+            _remove_database(path)
 
 
 def test_protocol_container_only_depth_at_63_64_and_65_arrays_and_objects():
@@ -349,9 +379,11 @@ def test_offline_inspection_never_mutates_supplied_sqlite_state():
             revocation_view=vector["revocation_view"],
             connection_id=vector["connection_id"],
             fetch_trace=vector["fetch_trace"],
-            hydrated={
-                part: parts[part] for part in vector["hydrated_parts"]
-            },
+            hydrate_part=lambda entry: (
+                parts[entry["part"]]
+                if entry["part"] in vector["hydrated_parts"]
+                else None
+            ),
             continuity=vector["continuity"],
         )
 
@@ -515,8 +547,8 @@ def test_qr_artifacts_and_fixture_cli():
     _remove_database(state)
     try:
         export = write_rappid_card_fixture_deck(str(directory), "svg")
-        assert export["fixtures"] == 63
-        assert "08893fdf8d495f9da8c202cd004fc1587082816c" in export["provenance"]
+        assert export["fixtures"] == 69
+        assert "2167c34babdb307411b5ba0c5d68dbd102d3973b" in export["provenance"]
         physical = directory / "physical-payload-reproduction"
         assert (physical / ".rappid-card.json").read_bytes() == physical_vector_bytes()[0]
         result = subprocess.run(
@@ -544,7 +576,7 @@ def test_qr_artifacts_and_fixture_cli():
         assert fixture_result["mode"] == "synthetic-conformance-fixture"
         assert fixture_result["live"] is False
         assert fixture_result["scenario"] == "physical-payload-reproduction"
-        assert fixture_result["protocol_source_commit"] == "08893fd"
+        assert fixture_result["protocol_source_commit"] == "2167c34"
         assert fixture_result["verdict"]["ok"] is True
         _remove_database(state)
         production_fixture = subprocess.run(
@@ -568,7 +600,7 @@ def test_qr_artifacts_and_fixture_cli():
         assert production_result["mode"] == "synthetic-conformance-fixture"
         assert production_result["live"] is False
         assert production_result["scenario"] == "valid-production"
-        assert production_result["protocol_source_commit"] == "08893fd"
+        assert production_result["protocol_source_commit"] == "2167c34"
         assert production_result["verdict"]["result"]["profile"] == "rappid-card/1"
         deck = load_rappid_card_deck()
         vector = build_rappid_card_fixture("physical-payload-reproduction").vector

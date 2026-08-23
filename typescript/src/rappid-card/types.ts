@@ -36,7 +36,8 @@ export const MANDATORY_CARD_SCENARIOS = [
   'subject-revoked', 'wrong-manifest-hash', 'deep-payload', 'oversized-payload',
   'newline-rappid', 'newline-manifest-hash', 'newline-lclabel',
   'newline-profile-token', 'newline-connection-id', 'unknown-signing-key',
-  'attacker-key-impersonation', 'delegation-expired', 'delegation-revoked',
+  'attacker-key-impersonation', 'subject-not-yet-effective',
+  'delegation-not-yet-effective', 'delegation-expired', 'delegation-revoked',
   'forged-revocation-view', 'stale-revocation-view', 'unavailable-revocation-view',
   'rollback-revocation-view', 'protocol-incompatible', 'runtime-incompatible',
   'unsupported-feature', 'feature-superset', 'classification-violation',
@@ -50,8 +51,9 @@ export const MANDATORY_CARD_SCENARIOS = [
   'endpoint-numeric-short-private',
   'endpoint-loopback-literal', 'endpoint-private-literal',
   'endpoint-link-local-literal', 'endpoint-reserved-literal',
+  'endpoint-ipv4-multicast-literal', 'endpoint-ipv6-multicast-literal',
   'endpoint-unapproved-origin', 'endpoint-redirect-origin', 'endpoint-private-dns',
-  'fetch-numeric-alias',
+  'fetch-ipv4-multicast', 'fetch-ipv6-multicast', 'fetch-numeric-alias',
   'secret-endpoint-password', 'secret-password', 'secret-api-key', 'secret-cookie',
   'secret-bearer', 'secret-private-memory', 'secret-unicode-latin-adjacency',
   'secret-unicode-cjk-adjacency',
@@ -371,7 +373,7 @@ export interface CardVector {
 }
 
 export interface CardDeck {
-  schema: 'rappid-card-vectors/3';
+  schema: 'rappid-card-vectors/4';
   production_profile: 'rappid-card/1';
   test_profile: 'rappid-card-test/1';
   virtual_suffix: '.rappid-card.json';

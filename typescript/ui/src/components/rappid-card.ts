@@ -52,7 +52,7 @@ interface CardRun {
   mode: 'synthetic-conformance-fixture';
   live: false;
   scenario: string;
-  protocol_source_commit: '08893fd';
+  protocol_source_commit: '2167c34';
   exact_link: string;
   qr_svg: string;
   frame: CardFrame;
@@ -238,7 +238,7 @@ export class OpenRappterRappidCard extends LitElement {
             <p>
               Exact eleven-key <code>body.debug-card</code> /
               <code>body.calling-card</code> verification against the vendored
-              <code>rapp-1</code> commit <code>08893fd</code> deck.
+              <code>rapp-1</code> commit <code>2167c34</code> deck.
             </p>
           </div>
           <div>

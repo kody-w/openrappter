@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from .protocol_reference import verify_card_link as _verify_card_link
 from .types import CardVectorResult
@@ -20,7 +20,7 @@ def verify_card_link(
     state: Any,
     connection_id: str,
     fetch_trace: Any,
-    hydrated: Dict[str, bytes],
+    hydrate_part: Callable[[Dict[str, Any]], Optional[bytes]],
     continuity: Dict[str, Any],
     head: Optional[Dict[str, Any]] = None,
 ) -> CardVectorResult:
@@ -35,7 +35,7 @@ def verify_card_link(
         state,
         connection_id,
         fetch_trace,
-        hydrated,
+        hydrate_part,
         continuity,
         head=head,
     )
@@ -67,7 +67,7 @@ def inspect_card_offline(
     revocation_view,
     connection_id,
     fetch_trace,
-    hydrated,
+    hydrate_part,
     continuity,
 ):
     verdict = verify_card_link(
@@ -81,7 +81,7 @@ def inspect_card_offline(
         _OfflineInspectionState(),
         connection_id,
         fetch_trace,
-        hydrated,
+        hydrate_part,
         continuity,
     )
     signature_index = CARD_VERIFY_STEPS.index("signature")

@@ -22,6 +22,7 @@ import type {
   CardContinuity,
   CardFetchHop,
   CardFrame,
+  CardInventoryEntry,
   CardPayload,
   CardRevocationEntry,
   CardRevocationView,
@@ -44,6 +45,7 @@ import {
   forbiddenUrlMaterial,
   hex64,
   ipIsGlobal,
+  ipIsMulticast,
   lclabel,
   parseCardLink,
   rappidValid,
@@ -211,8 +213,11 @@ function verifyFetchTrace(
     }
     if (forbiddenUrlMaterial(value.url)) return [false, 'fetch hop URL contains prohibited material'];
     if (!approvedOrigins.includes(info.origin)) return [false, 'fetch redirect crossed to an unapproved origin'];
-    if (!ipIsGlobal(value.resolved_ip)) {
-      return [false, 'fetch DNS/IP result is loopback/private/link-local/reserved'];
+    if (ipIsMulticast(value.resolved_ip) || !ipIsGlobal(value.resolved_ip)) {
+      return [
+        false,
+        'fetch DNS/IP result is loopback/private/link-local/reserved/multicast',
+      ];
     }
   }
   return [true, 'ok'];
@@ -312,7 +317,12 @@ function verifyAuthorityView(
       entry.role === 'subject'
         ? entry.subject_rappid === subject
         : entry.subject_rappid === null || entry.subject_rappid === subject;
-    return subjectOk && before <= issued && issued < after && now < after && (revoked === null || now < revoked);
+    return subjectOk
+      && before <= issued
+      && issued < after
+      && before <= now
+      && now < after
+      && (revoked === null || now < revoked);
   });
   return authorized
     ? [true, 'ok']
@@ -391,7 +401,9 @@ export interface VerifyCardInput {
   state: CardStateBackend;
   connection_id: string;
   fetch_trace: CardFetchHop[];
-  hydrated: Record<string, Uint8Array>;
+  hydrate_part: (
+    entry: Readonly<CardInventoryEntry>,
+  ) => Uint8Array | undefined;
   continuity: CardContinuity;
   head?: CardFrame | null;
 }
@@ -478,7 +490,7 @@ export function verifyCardLink(input: VerifyCardInput): CardVerificationResult {
     return { ok: false, step: 'replay-nonce', reason: `transactional nonce claim failed: ${error instanceof Error ? error.message : String(error)}`, result: null };
   }
   if (!verdict[0]) return { ok: false, step: 'replay-nonce', reason: verdict[1], result: null };
-  verdict = verifyHydration(input.frame.payload.inventory, input.hydrated);
+  verdict = verifyHydration(input.frame.payload.inventory, input.hydrate_part);
   if (!verdict[0]) return { ok: false, step: 'hydration', reason: verdict[1], result: null };
   if (!exactKeys(input.continuity, CARD_CONTINUITY_KEYS)) {
     return { ok: false, step: 'continuity', reason: 'continuity response has the wrong schema', result: null };

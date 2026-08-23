@@ -51,7 +51,7 @@ function response(verification?: {
     mode: 'synthetic-conformance-fixture',
     live: false,
     scenario: 'valid-test',
-    protocol_source_commit: '08893fd',
+    protocol_source_commit: '2167c34',
     exact_link:
       `rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A${'a'.repeat(64)}`
       + `?m=${'b'.repeat(64)}&e=https%3A%2F%2Fcards.example%2Fx.rappid-card.json`
@@ -64,7 +64,7 @@ function response(verification?: {
       reason: scenario.expected.reason_contains,
     },
     verdict: verification,
-    provenance: 'rapp-1 commit 08893fdf8d495f9da8c202cd004fc1587082816c',
+    provenance: 'rapp-1 commit 2167c34babdb307411b5ba0c5d68dbd102d3973b',
   };
 }
 

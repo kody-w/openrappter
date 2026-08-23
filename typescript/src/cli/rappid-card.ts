@@ -32,7 +32,7 @@ export function fixtureEnvelope(
     mode: 'synthetic-conformance-fixture',
     live: false,
     scenario,
-    protocol_source_commit: '08893fd',
+    protocol_source_commit: '2167c34',
     declared_expected: {
       ok: declared.ok,
       step: declared.step,
@@ -222,6 +222,12 @@ export function registerRappidCardCommand(program: Command): void {
           'bundle runtime-policy authority is not locally configured',
         );
       }
+      const parts = Object.fromEntries(
+        Object.entries(bundle.hydrated_parts_b64).map(([name, value]) => [
+          name,
+          Buffer.from(value, 'base64'),
+        ]),
+      );
       const inspection = inspectCardOffline({
         uri: inspected.link,
         frame: inspected.frame,
@@ -232,12 +238,7 @@ export function registerRappidCardCommand(program: Command): void {
         revocation_view: bundle.revocation_view,
         connection_id: bundle.connection_id,
         fetch_trace: bundle.fetch_trace,
-        hydrated: Object.fromEntries(
-          Object.entries(bundle.hydrated_parts_b64).map(([name, value]) => [
-            name,
-            Buffer.from(value, 'base64'),
-          ]),
-        ),
+        hydrate_part: (entry) => parts[entry.part],
         continuity: bundle.continuity,
       });
       print(inspection);

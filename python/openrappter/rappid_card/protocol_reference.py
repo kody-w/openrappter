@@ -1422,8 +1422,10 @@ def _card_url_info(value, suffix=None):
         expected_netloc = host
         literal = None
     else:
-        if not literal.is_global:
-            raise ValueError("loopback/private/link-local/reserved IP literals are forbidden")
+        if literal.is_multicast or not literal.is_global:
+            raise ValueError(
+                "loopback/private/link-local/reserved/multicast IP literals are forbidden"
+            )
         expected_netloc = f"[{literal.compressed}]" if literal.version == 6 else literal.compressed
     if parsed.netloc != expected_netloc:
         raise ValueError("HTTPS authority is not canonical")
@@ -2009,8 +2011,10 @@ def _verify_fetch_trace(trace, endpoint, approved_origins):
             return False, "fetch hop URL contains prohibited material"
         if info["origin"] not in approved_origins:
             return False, "fetch redirect crossed to an unapproved origin"
-        if not resolved.is_global:
-            return False, "fetch DNS/IP result is loopback/private/link-local/reserved"
+        if resolved.is_multicast or not resolved.is_global:
+            return False, (
+                "fetch DNS/IP result is loopback/private/link-local/reserved/multicast"
+            )
     return True, "ok"
 
 
@@ -2109,7 +2113,7 @@ def _verify_authority_view(view, policy, trust, now, state, frame, link, fetch_t
             if entry["role"] == "subject"
             else entry["subject_rappid"] in (None, subject)
         )
-        if (subject_ok and before <= issued < after and now < after
+        if (subject_ok and before <= issued < after and before <= now < after
                 and (revoked is None or now < revoked)):
             authorized = True
             break
@@ -2185,40 +2189,51 @@ def _verify_revocation_view(view, policy, trust, now, state, payload, manifest_h
     return True, "ok"
 
 
-def _verify_card_hydration(inventory, hydrated):
-    if not isinstance(hydrated, dict):
-        return False, "hydrated parts must be an object of part name to octets"
-    if not all(_lclabel(part) for part in hydrated):
-        return False, "hydrated part names must be lclabels"
-    permitted = {entry["part"]: entry for entry in inventory}
-    extra = sorted(set(hydrated) - set(permitted))
-    if extra:
-        return False, f"hydration attempted unpermitted part {extra[0]!r}"
-    missing = sorted(
-        entry["part"] for entry in inventory
-        if entry["required"] and entry["part"] not in hydrated)
-    if missing:
-        return False, f"required hydration part missing: {missing[0]}"
-    for part in sorted(hydrated):
-        octets = hydrated[part]
-        entry = permitted[part]
+def _hydrate_card_inventory(inventory, hydrate_part):
+    """Invoke a bounded lazy reader only for signed inventory entries.
+
+    The verifier calls this function only after policy/scope checks and the durable
+    ``hydrating`` nonce claim. Each callback invocation is bounded by one signed entry
+    and carries its exact expected byte count and content address.
+    """
+    if not callable(hydrate_part):
+        return False, "hydrate_part must be a lazy callable"
+    for entry in inventory:
+        request = {
+            "part": entry["part"],
+            "space": entry["space"],
+            "hash": entry["hash"],
+            "bytes": entry["bytes"],
+            "required": entry["required"],
+        }
+        try:
+            octets = hydrate_part(request)
+        except Exception as ex:
+            return False, f"hydration callback failed for {entry['part']!r}: {ex}"
+        if octets is None:
+            if entry["required"]:
+                return False, f"required hydration part missing: {entry['part']}"
+            continue
         if not isinstance(octets, bytes):
-            return False, f"hydrated part {part!r} is not bytes"
+            return False, f"hydrated part {entry['part']!r} is not bytes"
         if len(octets) != entry["bytes"] or Hb(entry["space"], octets) != entry["hash"]:
-            return False, f"hydrated part {part!r} does not match its permitted address"
+            return False, (
+                f"hydrated part {entry['part']!r} does not match its permitted address"
+            )
     return True, "ok"
 
 
 def verify_card_link(uri, frame, trust, now_utc, runtime_policy, authority_view,
                      revocation_view, state, connection_id, fetch_trace,
-                     hydrated, continuity, head=None):
+                     hydrate_part, continuity, head=None):
     """Run the §7.10 verification order. Returns (ok, step, reason, result).
 
     Runtime facts and local scope are authenticated by `runtime_policy`; issuer delegation
     and endpoint origins by `authority_view`; revocation by `revocation_view`. `fetch_trace`
     is the fetcher's observed URL/IP chain and is revalidated against signed origins.
-    `state` must be a transactional CardStateBackend. It linearizes hydrating before any
-    part is touched and awake before success is returned.
+    `state` must be a transactional CardStateBackend. It linearizes hydrating before the
+    bounded `hydrate_part(signed_inventory_entry)` callback is invoked and awake before
+    success is returned. Pre-hydrated confidential byte maps are not accepted.
     """
     try:
         link = parse_card_link(uri)
@@ -2309,7 +2324,8 @@ def verify_card_link(uri, frame, trust, now_utc, runtime_policy, authority_view,
     if not ok:
         return False, "replay-nonce", reason, None
 
-    ok, reason = _verify_card_hydration(frame["payload"]["inventory"], hydrated)
+    ok, reason = _hydrate_card_inventory(
+        frame["payload"]["inventory"], hydrate_part)
     if not ok:
         return False, "hydration", reason, None
 

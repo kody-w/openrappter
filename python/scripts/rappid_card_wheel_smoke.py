@@ -53,7 +53,7 @@ def main() -> None:
             "-c",
             (
                 "from openrappter.rappid_card import load_rappid_card_deck; "
-                "assert len(load_rappid_card_deck()['vectors']) == 63"
+                "assert len(load_rappid_card_deck()['vectors']) == 69"
             ),
         ]
     )

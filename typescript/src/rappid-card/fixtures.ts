@@ -13,11 +13,11 @@ import type {
 import { MANDATORY_CARD_SCENARIOS } from './types.js';
 
 export const PROVENANCE_COMMIT =
-  '08893fdf8d495f9da8c202cd004fc1587082816c';
+  '2167c34babdb307411b5ba0c5d68dbd102d3973b';
 
 function vectorRoot(): string {
   const source = fileURLToPath(
-    new URL('../../../tests/vectors/rapp-1-08893fd/rappid-card/', import.meta.url),
+    new URL('../../../tests/vectors/rapp-1-2167c34/rappid-card/', import.meta.url),
   );
   if (existsSync(source)) return source;
   const packaged = fileURLToPath(new URL('./test-vectors/', import.meta.url));
@@ -84,11 +84,13 @@ export async function simulateRappidCardFixture(
   name: string,
   statePath: string,
   hydratedParts?: string[],
+  hydrationCalls: string[] = [],
 ): Promise<{ verdict: CardVerificationResult; state: SQLiteCardState }> {
   const vector = buildRappidCardFixture(name);
   const state = await stateForVector(vector, statePath);
   const parts = cardParts();
   const selected = hydratedParts ?? vector.hydrated_parts;
+  const selectedParts = new Set(selected);
   let frame = vector.frame;
   if (vector.runtime_mutation !== null) {
     const payload: Record<string, unknown> = { ...frame.payload };
@@ -114,7 +116,10 @@ export async function simulateRappidCardFixture(
     state,
     connection_id: vector.connection_id,
     fetch_trace: vector.fetch_trace,
-    hydrated: Object.fromEntries(selected.map((part) => [part, parts[part]])),
+    hydrate_part: (entry) => {
+      hydrationCalls.push(entry.part);
+      return selectedParts.has(entry.part) ? parts[entry.part] : undefined;
+    },
     continuity: vector.continuity,
   });
   return { verdict, state };

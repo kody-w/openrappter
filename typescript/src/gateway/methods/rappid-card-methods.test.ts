@@ -55,10 +55,10 @@ describe('RAPP/1 §7.10 RAPPID card gateway methods', () => {
     });
   });
 
-  it('lists all 63 scenarios and previews exact frame/link/QR wire names', async () => {
+  it('lists all 69 scenarios and previews exact frame/link/QR wire names', async () => {
     const { methods } = registrar();
     const scenarios = await methods.get('rappid.card.scenarios')!({}) as unknown[];
-    expect(scenarios).toHaveLength(63);
+    expect(scenarios).toHaveLength(69);
     const preview = await methods.get('rappid.card.preview')!({
       scenario: 'physical-payload-reproduction',
     }) as Record<string, unknown>;
@@ -66,8 +66,8 @@ describe('RAPP/1 §7.10 RAPPID card gateway methods', () => {
       mode: 'synthetic-conformance-fixture',
       live: false,
       scenario: 'physical-payload-reproduction',
-      protocol_source_commit: '08893fd',
-      provenance: 'rapp-1 commit 08893fdf8d495f9da8c202cd004fc1587082816c',
+      protocol_source_commit: '2167c34',
+      provenance: 'rapp-1 commit 2167c34babdb307411b5ba0c5d68dbd102d3973b',
       declared_expected: { ok: true, step: null },
       frame: { kind: 'body.debug-card', spec: 'rapp/1' },
     });
@@ -97,7 +97,7 @@ describe('RAPP/1 §7.10 RAPPID card gateway methods', () => {
       mode: 'synthetic-conformance-fixture',
       live: false,
       scenario: 'valid-production',
-      protocol_source_commit: '08893fd',
+      protocol_source_commit: '2167c34',
     });
   });
 });

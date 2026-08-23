@@ -16,6 +16,8 @@
     "newline-connection-id",
     "unknown-signing-key",
     "attacker-key-impersonation",
+    "subject-not-yet-effective",
+    "delegation-not-yet-effective",
     "delegation-expired",
     "delegation-revoked",
     "forged-revocation-view",
@@ -51,9 +53,13 @@
     "endpoint-private-literal",
     "endpoint-link-local-literal",
     "endpoint-reserved-literal",
+    "endpoint-ipv4-multicast-literal",
+    "endpoint-ipv6-multicast-literal",
     "endpoint-unapproved-origin",
     "endpoint-redirect-origin",
     "endpoint-private-dns",
+    "fetch-ipv4-multicast",
+    "fetch-ipv6-multicast",
     "fetch-numeric-alias",
     "secret-endpoint-password",
     "secret-password",
@@ -70,7 +76,7 @@
     "soul": "IyBTeW50aGV0aWMgQ2FyZCBTb3VsCkZpeHR1cmUgb25seS4gTm8gcHJpdmF0ZSBtZW1vcnkuCg=="
   },
   "production_profile": "rappid-card/1",
-  "schema": "rappid-card-vectors/3",
+  "schema": "rappid-card-vectors/4",
   "test_profile": "rappid-card-test/1",
   "trust": [
     {
@@ -2802,6 +2808,348 @@
       ],
       "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=2053a43ec677140e1d693a37a1c79582042186a1543e51c029a8b849d8722f85&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=attacker-card-nonce-01",
       "name": "attacker-key-impersonation",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T13:00:00.000Z",
+            "not_before_utc": "2026-08-21T13:00:00.000Z",
+            "revoked_utc": null,
+            "role": "subject",
+            "subject_rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7"
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..M3IsSkdzaL5U35lVs-7ndoyXElZfBLCnczlF72FcqUnXGu3KVirynh7DvZPfT4KyJsYjrBhwirwydyMHicLiAA",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "subject-future-tenure-1",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": "no current signed authorization",
+        "step": "signature"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "93.184.216.34",
+          "url": "https://cards.example/physical.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "19765ec744a6fa0b21f12a74c55256126fc2943393a8ebc4ed86c24833ce12ac",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "95e0074e617b23d0afdd3d68f5b0da6a64b1fda588d86263b279b4553dcc6ad1"
+        },
+        "payload_hash": "347b10fb8013b48d0e00152889dcb5de5a7ceb4a0b6ee631918ea0e220772bd1",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..3jYbQnMxDJSsyZkGnxYiRRyuaENvkIvAqTcjsG7BxPcrTz0D7qpbPlN0VETHqbld92OzFcTTkaliKKccusWGDQ",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T13:05:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=347b10fb8013b48d0e00152889dcb5de5a7ceb4a0b6ee631918ea0e220772bd1&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=subject-future-tenure-1",
+      "name": "subject-not-yet-effective",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T13:00:00.000Z",
+            "not_before_utc": "2026-08-21T13:00:00.000Z",
+            "revoked_utc": null,
+            "role": "card-issuer",
+            "subject_rappid": null
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..YPu2B88gXvVYHrSQBbE7CFTPvqkqkap4dx1Atb-jXCaHxKDO_t0kQnQeGVk2n26Nyb3XmHtNI0ccELX6mNflAg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "delegation-future-001",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": "no current signed authorization",
+        "step": "signature"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "93.184.216.34",
+          "url": "https://cards.example/physical.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "d7f9b7dd70cdbf9b8662373978395983c978c9ba1ed2aaf61d32409174448dac",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "af13d0840a8c71f4e26d02fa5f8995aefd3a640489b73bd2e088cae97b69d142"
+        },
+        "payload_hash": "a2fc040268b8134b180dbbd750b5cd05726476e20f3bd56acb54b2fd43e10eb6",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..0HvC9419HR2qAKHAt3ZzZ8APzF023jQroYT1-togF9wIhwoYB8zvedFu0Mh9E-qbksToysdOFy1dLczJWsPmBg",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T13:05:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=a2fc040268b8134b180dbbd750b5cd05726476e20f3bd56acb54b2fd43e10eb6&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=delegation-future-001",
+      "name": "delegation-not-yet-effective",
       "now_utc": "2026-08-21T12:30:00.000Z",
       "physical": false,
       "revocation_view": {
@@ -8883,6 +9231,348 @@
       "connection_id": "fixture-connection",
       "continuity": {
         "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "endpoint-ipv4-multicast-literal-01",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": null,
+        "step": "parse"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "93.184.216.34",
+          "url": "https://224.0.0.1/x.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "f75931e3de5a908694421b9e434e2042e9e5739938ffa37db587d0157374e236",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "231e76fdfd05145d4d0262ef0344f294b1cea54481bcc4587e3a11061ac01f00"
+        },
+        "payload_hash": "949bbc029143a1ecbb62873596145da10c6162ec3751cad7413e1e3714dfe106",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..e5HwGfK7vE4zrB2rUqjrDp419Uq10P5xjvDjqVFcqzyTNLgE3d17_rpcZi3uBB6O0bXPjjCKGa4-sj8CE46VCA",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T12:00:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=949bbc029143a1ecbb62873596145da10c6162ec3751cad7413e1e3714dfe106&e=https%3A%2F%2F224.0.0.1%2Fx.rappid-card.json&n=endpoint-ipv4-multicast-literal-01",
+      "name": "endpoint-ipv4-multicast-literal",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T00:00:00.000Z",
+            "not_before_utc": "2026-08-01T00:00:00.000Z",
+            "revoked_utc": null,
+            "role": "subject",
+            "subject_rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7"
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..LU1eqv_4NrgiNaStARtY9WMo3rf9Mm-PAZfIDkUcYIwzj_O63Rbjzz2JcvXUDvBreNqlflQqYdZSzRpnISyOBg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "endpoint-ipv6-multicast-literal-01",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": null,
+        "step": "parse"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "93.184.216.34",
+          "url": "https://[ff02::1]/x.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "64e45a8d11de8b75e413e27fbbcc38b0e577c6881542f3a70342d33b0da840b8",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "6485623ac991492796d6116e22e7570089da458f802a060cfcfc650c9560b317"
+        },
+        "payload_hash": "e92c0946a55c7239a7ef2aa23121d21048658ac54a40160c6bf2cd5af1da3bd4",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..FhVKK-yW0fon6ocM72McVpjV9iW55f4Lmp_MWUOBkD9-7rb7OeBPMVigcDZiUmWnzJcitGlIQ61_CT7BCfKLAA",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T12:00:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=e92c0946a55c7239a7ef2aa23121d21048658ac54a40160c6bf2cd5af1da3bd4&e=https%3A%2F%2F%5Bff02%3A%3A1%5D%2Fx.rappid-card.json&n=endpoint-ipv6-multicast-literal-01",
+      "name": "endpoint-ipv6-multicast-literal",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T00:00:00.000Z",
+            "not_before_utc": "2026-08-01T00:00:00.000Z",
+            "revoked_utc": null,
+            "role": "subject",
+            "subject_rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7"
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..LU1eqv_4NrgiNaStARtY9WMo3rf9Mm-PAZfIDkUcYIwzj_O63Rbjzz2JcvXUDvBreNqlflQqYdZSzRpnISyOBg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
         "nonce": "unapproved-origin-0001",
         "parent": null,
         "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
@@ -9313,6 +10003,348 @@
       ],
       "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=655f72982c0f88bb17f826846da4a9a51da938a867fef65d3941c2ff7dd0ce5d&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=private-dns-nonce-0001",
       "name": "endpoint-private-dns",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T00:00:00.000Z",
+            "not_before_utc": "2026-08-01T00:00:00.000Z",
+            "revoked_utc": null,
+            "role": "subject",
+            "subject_rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7"
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..LU1eqv_4NrgiNaStARtY9WMo3rf9Mm-PAZfIDkUcYIwzj_O63Rbjzz2JcvXUDvBreNqlflQqYdZSzRpnISyOBg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "fetch-ipv4-multicast-0001",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": "multicast",
+        "step": "signature"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "239.1.2.3",
+          "url": "https://cards.example/physical.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "7bbb706a2a7b84ad08ab88e4dc3072d64428de37ea1a8401230089cf197842bb",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "dd39d45798ab40443acc82e519a83191daca4efdafddcd59d7fe573ab69a22be"
+        },
+        "payload_hash": "ec33e823f4a1a992325519b63bf9e15bfc050db15a869d6b7abe8e47402ffad2",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..hGXXNG4y6xLF1pNug1UFbynmp1j8mZhn3kF0cQYJQV3O-KCoTxc8hR0SYSc1QvOflzqiYvYSsM-piWe3S-4mCw",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T12:00:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=ec33e823f4a1a992325519b63bf9e15bfc050db15a869d6b7abe8e47402ffad2&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=fetch-ipv4-multicast-0001",
+      "name": "fetch-ipv4-multicast",
+      "now_utc": "2026-08-21T12:30:00.000Z",
+      "physical": false,
+      "revocation_view": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "entries": [],
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/revocations.json"
+        },
+        "registry_seq": 13,
+        "schema": "rappid-card-revocations/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..nRqMtcgYlzKMyO0loH-9out-7TflE0DU01dAfPPGLTw6FJQlKVwqblcnecNp1189hmV68FqVsmqVOISazvZTAw",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_mutation": null,
+      "runtime_policy": {
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "card_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "features": [
+          "content-hydration/1",
+          "rappid-card-test/1",
+          "safe-wake/1"
+        ],
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "granted_scope": [
+          "memory-read",
+          "reflex-run"
+        ],
+        "max_classification": "internal",
+        "max_registry_age_seconds": 3600,
+        "policy_seq": 7,
+        "profiles": [
+          "rappid-card-test/1"
+        ],
+        "protocol": "rapp/1",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/runtime-policy.json"
+        },
+        "runtime": "rapp-ref/1",
+        "schema": "rappid-card-runtime-policy/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..902Hgj7W2xK0hoUlXLSf1w160zKONKFREPX3luWTHbGC5SM7eD-d-tGEkMvPwxje_JDomi_7RoSFt6rP0juHCg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "runtime_policy_authority": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+      "scanner_control": false,
+      "state_seed": {
+        "nonces": [],
+        "sequences": []
+      }
+    },
+    {
+      "authority_view": {
+        "approved_origins": [
+          "https://cards.example"
+        ],
+        "authority_rappid": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa",
+        "authorizations": [
+          {
+            "issuer_key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+            "not_after_utc": "2026-09-21T00:00:00.000Z",
+            "not_before_utc": "2026-08-01T00:00:00.000Z",
+            "revoked_utc": null,
+            "role": "subject",
+            "subject_rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7"
+          }
+        ],
+        "effective_utc": "2026-08-21T00:00:00.000Z",
+        "expires_utc": "2026-08-22T00:00:00.000Z",
+        "generated_utc": "2026-08-21T12:20:00.000Z",
+        "provenance": {
+          "channel": "canonical",
+          "source": "https://cards.example/authority.json"
+        },
+        "registry_seq": 11,
+        "schema": "rappid-card-authority/1",
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL2NhcmQtcG9saWN5LXRlc3Q6MmY0ZGNlZmMyNGI3ZTY3ZjJhOWUxMDc4MGY3NDBjNTdmZGY4ZmI3MTYwZjdkNDM1NWViNGEwMWU1MzFmZTlhYSJ9..LU1eqv_4NrgiNaStARtY9WMo3rf9Mm-PAZfIDkUcYIwzj_O63Rbjzz2JcvXUDvBreNqlflQqYdZSzRpnISyOBg",
+        "signer_key_id": "rappid:@synthetic/card-policy-test:2f4dcefc24b7e67f2a9e10780f740c57fdf8fb7160f7d4355eb4a01e531fe9aa"
+      },
+      "connection_id": "fixture-connection",
+      "continuity": {
+        "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+        "nonce": "fetch-ipv6-multicast-0001",
+        "parent": null,
+        "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+        "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819"
+      },
+      "expected": {
+        "ok": false,
+        "reason_contains": "multicast",
+        "step": "signature"
+      },
+      "fetch_trace": [
+        {
+          "resolved_ip": "ff02::1",
+          "url": "https://cards.example/physical.rappid-card.json"
+        }
+      ],
+      "frame": {
+        "frame_hash": "29390914f75b08e823f0075f4c1fa7c490335e5b8c6a7e37c2aeb5f66969bb85",
+        "kind": "body.debug-card",
+        "payload": {
+          "classification": "public",
+          "compatibility": {
+            "features": [
+              "content-hydration/1",
+              "rappid-card-test/1"
+            ],
+            "protocol": "rapp/1",
+            "runtime": "rapp-ref/1"
+          },
+          "endpoint_origin": "https://cards.example",
+          "engram_root": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+          "expires_utc": "2026-09-21T12:00:00.000Z",
+          "inventory": [
+            {
+              "bytes": 74,
+              "hash": "d1243d92e8b739e5861d2fa41425ce8dbcfd9bfaa726b4f682a22c5b874b76b9",
+              "part": "engram",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 67,
+              "hash": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+              "part": "reflex-capability",
+              "required": true,
+              "space": "rapp/1:egg"
+            },
+            {
+              "bytes": 55,
+              "hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+              "part": "soul",
+              "required": true,
+              "space": "rapp/1:egg"
+            }
+          ],
+          "key_id": "rappid:@synthetic/rappid-card-test:ba71c721cbd5605b7e155f20d25efb77fecf935449bfc5bf7849da6d577773c4",
+          "parent": null,
+          "profile": "rappid-card-test/1",
+          "rappid": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+          "reflex_capability_root": "55b21a79294664c55dd78afb4700f21466c315a7cf9f6047b3a76b3c00490424",
+          "requested_scope": [
+            "memory-read"
+          ],
+          "revocation_url": "https://cards.example/revocations.json",
+          "soul_hash": "5fb61e61bd4886c763d2ae358b7cbc0a11e27c5a2756572665bc33c94224d819",
+          "wake_challenge": "59185593898d22d969ed140404d3f5eb76a93960b4ad341096e1fe2bbcc97a59"
+        },
+        "payload_hash": "6f330063d8d79c8bb1468a4f88cf9e475ff916724349a555eb94e83ace0fa9e4",
+        "prev": null,
+        "prev_wave": null,
+        "seq": 0,
+        "sig": "eyJhbGciOiJFZERTQSIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il0sImtpZCI6InJhcHBpZDpAc3ludGhldGljL3JhcHBpZC1jYXJkLXRlc3Q6YmE3MWM3MjFjYmQ1NjA1YjdlMTU1ZjIwZDI1ZWZiNzdmZWNmOTM1NDQ5YmZjNWJmNzg0OWRhNmQ1Nzc3NzNjNCJ9..Nn7SzEMpSDLN9EoaZxXx02V8Ss4zPs5cOGG3yLiVn8cUMR5RqMkPB44Ie8aCfs33AZ0ESxR4cHfjx48BzSh5Aw",
+        "spec": "rapp/1",
+        "stream_id": "rappid:@synthetic/card-subject:3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7",
+        "utc": "2026-08-21T12:00:00.000Z"
+      },
+      "hydrated_parts": [
+        "engram",
+        "reflex-capability",
+        "soul"
+      ],
+      "link": "rappid://link/rappid%3A%40synthetic%2Fcard-subject%3A3edc8783b43579d59a123b50a00c7faf78963a415eac9f05f80ecc826fc756f7?m=6f330063d8d79c8bb1468a4f88cf9e475ff916724349a555eb94e83ace0fa9e4&e=https%3A%2F%2Fcards.example%2Fphysical.rappid-card.json&n=fetch-ipv6-multicast-0001",
+      "name": "fetch-ipv6-multicast",
       "now_utc": "2026-08-21T12:30:00.000Z",
       "physical": false,
       "revocation_view": {

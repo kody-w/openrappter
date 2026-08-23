@@ -135,7 +135,7 @@ use `body.debug-card` + `rappid-card-test/1`. Detached EdDSA JWS, keyed
 SPKI→RAPPID binding, signed runtime policy, authority and revocation views,
 globally routable HTTPS endpoint evidence, transactional replay state,
 `rapp/1:egg` inventory, and particle continuity follow protocol PR #12 commit
-`08893fdf8d495f9da8c202cd004fc1587082816c`.
+`2167c34babdb307411b5ba0c5d68dbd102d3973b`.
 
 See [Virtual RAPPID Debug Card](./rappid-debug-card.md).
 

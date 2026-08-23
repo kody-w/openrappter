@@ -78,7 +78,7 @@ def _fixture_envelope(scenario, declared, verdict):
         "mode": "synthetic-conformance-fixture",
         "live": False,
         "scenario": scenario,
-        "protocol_source_commit": "08893fd",
+        "protocol_source_commit": "2167c34",
         "declared_expected": {
             "ok": declared["ok"],
             "step": declared["step"],
@@ -192,6 +192,10 @@ def handle_rappid_card_command(args: Any) -> bool:
             raise ValueError(
                 "bundle runtime-policy authority is not locally configured"
             )
+        parts = {
+            name: base64.b64decode(value)
+            for name, value in bundle["hydrated_parts_b64"].items()
+        }
         inspection = inspect_card_offline(
             uri=inspected["link"],
             frame=inspected["frame"],
@@ -202,10 +206,7 @@ def handle_rappid_card_command(args: Any) -> bool:
             revocation_view=bundle["revocation_view"],
             connection_id=bundle["connection_id"],
             fetch_trace=bundle["fetch_trace"],
-            hydrated={
-                name: base64.b64decode(value)
-                for name, value in bundle["hydrated_parts_b64"].items()
-            },
+            hydrate_part=lambda entry: parts.get(entry["part"]),
             continuity=bundle["continuity"],
         )
         _print(inspection)

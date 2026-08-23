@@ -71,7 +71,8 @@ const mandatory = [
   'subject-revoked', 'wrong-manifest-hash', 'deep-payload', 'oversized-payload',
   'newline-rappid', 'newline-manifest-hash', 'newline-lclabel',
   'newline-profile-token', 'newline-connection-id', 'unknown-signing-key',
-  'attacker-key-impersonation', 'delegation-expired', 'delegation-revoked',
+  'attacker-key-impersonation', 'subject-not-yet-effective',
+  'delegation-not-yet-effective', 'delegation-expired', 'delegation-revoked',
   'forged-revocation-view', 'stale-revocation-view', 'unavailable-revocation-view',
   'rollback-revocation-view', 'protocol-incompatible', 'runtime-incompatible',
   'unsupported-feature', 'feature-superset', 'classification-violation',
@@ -85,8 +86,9 @@ const mandatory = [
   'endpoint-numeric-short-private',
   'endpoint-loopback-literal', 'endpoint-private-literal',
   'endpoint-link-local-literal', 'endpoint-reserved-literal',
+  'endpoint-ipv4-multicast-literal', 'endpoint-ipv6-multicast-literal',
   'endpoint-unapproved-origin', 'endpoint-redirect-origin', 'endpoint-private-dns',
-  'fetch-numeric-alias',
+  'fetch-ipv4-multicast', 'fetch-ipv6-multicast', 'fetch-numeric-alias',
   'secret-endpoint-password', 'secret-password', 'secret-api-key', 'secret-cookie',
   'secret-bearer', 'secret-private-memory', 'secret-unicode-latin-adjacency',
   'secret-unicode-cjk-adjacency',
@@ -160,14 +162,14 @@ describe('RAPP/1 §7.10 contract drift', () => {
     const provenance = JSON.parse(
       readFileSync(
         new URL(
-          '../../../tests/vectors/rapp-1-08893fd/rappid-card/PROVENANCE.json',
+          '../../../tests/vectors/rapp-1-2167c34/rappid-card/PROVENANCE.json',
           import.meta.url,
         ),
         'utf8',
       ),
     ) as { deck_schema: string };
-    expect(deck.schema).toBe('rappid-card-vectors/3');
-    expect(provenance.deck_schema).toBe('rappid-card-vectors/3');
+    expect(deck.schema).toBe('rappid-card-vectors/4');
+    expect(provenance.deck_schema).toBe('rappid-card-vectors/4');
     expect(deck.mandatory_scenarios).toEqual(mandatory);
     expect(deck.vectors.map((vector) => vector.name)).toEqual(mandatory);
     expect(RAPPID_CARD_FIXTURE_NAMES).toEqual(mandatory);
@@ -177,9 +179,10 @@ describe('RAPP/1 §7.10 contract drift', () => {
     expect(ipIsGlobal('8.8.8.8')).toBe(true);
     expect(ipIsGlobal('192.0.0.9')).toBe(true);
     expect(ipIsGlobal('192.0.2.1')).toBe(false);
-    expect(ipIsGlobal('224.0.0.1')).toBe(true);
+    expect(ipIsGlobal('224.0.0.1')).toBe(false);
     expect(ipIsGlobal('2001:4860:4860::8888')).toBe(true);
     expect(ipIsGlobal('2001:db8::1')).toBe(false);
+    expect(ipIsGlobal('ff02::1')).toBe(false);
     expect(ipIsGlobal('::ffff:10.0.0.1')).toBe(false);
     expect(ipIsGlobal('::ffff:8.8.8.8')).toBe(true);
   });
@@ -242,7 +245,7 @@ describe('RAPP/1 §7.10 mandatory deck', () => {
       mode: 'synthetic-conformance-fixture',
       live: false,
       scenario: 'valid-production',
-      protocol_source_commit: '08893fd',
+      protocol_source_commit: '2167c34',
       declared_expected: { ok: true, step: null, reason: null },
       verdict: { ok: true, result: { profile: 'rappid-card/1' } },
     });
@@ -257,6 +260,29 @@ describe('RAPP/1 §7.10 mandatory deck', () => {
     expect(verdict.step).toBe(vector.expected.step);
     if (vector.expected.reason_contains !== null) {
       expect(verdict.reason).toContain(vector.expected.reason_contains);
+    }
+  });
+
+  it('touches no confidential bytes before policy, network, and nonce gates pass', async () => {
+    for (const name of [
+      'subject-not-yet-effective',
+      'delegation-not-yet-effective',
+      'classification-violation',
+      'insufficient-scope',
+      'reconnect-during-hydration',
+      'duplicate-replayed-nonce',
+      'fetch-ipv4-multicast',
+      'fetch-ipv6-multicast',
+    ]) {
+      const calls: string[] = [];
+      const { verdict } = await simulateRappidCardFixture(
+        name,
+        statePath(`no-hydration-${name}`),
+        undefined,
+        calls,
+      );
+      expect(verdict.ok, name).toBe(false);
+      expect(calls, name).toEqual([]);
     }
   });
 
@@ -339,9 +365,10 @@ describe('detached JWS, content roots, and durable state', () => {
         revocation_view: vector.revocation_view,
         connection_id: vector.connection_id,
         fetch_trace: vector.fetch_trace,
-        hydrated: Object.fromEntries(
-          vector.hydrated_parts.map((part) => [part, parts[part]]),
-        ),
+        hydrate_part: (entry) =>
+          vector.hydrated_parts.includes(entry.part)
+            ? parts[entry.part]
+            : undefined,
         continuity: vector.continuity,
       });
     };
@@ -451,9 +478,10 @@ describe('detached JWS, content roots, and durable state', () => {
         state,
         connection_id: vector.connection_id,
         fetch_trace: vector.fetch_trace,
-        hydrated: Object.fromEntries(
-          vector.hydrated_parts.map((part) => [part, parts[part]]),
-        ),
+        hydrate_part: (entry) =>
+          vector.hydrated_parts.includes(entry.part)
+            ? parts[entry.part]
+            : undefined,
         continuity: vector.continuity,
       });
       expect(verdict.ok, `${vector.name}: ${verdict.reason}`).toBe(true);
@@ -490,14 +518,14 @@ describe('detached JWS, content roots, and durable state', () => {
 });
 
 describe('artifact export', () => {
-  it('exports all 63 canonical frame/link/trust fixtures with provenance', async () => {
+  it('exports all 69 canonical frame/link/trust fixtures with provenance', async () => {
     const directory = join(process.cwd(), `.protocol-card-export-${process.pid}`);
     generated.push(directory);
     const result = await writeRappidCardFixtureDeck(directory, 'svg');
-    expect(result.fixtures).toBe(63);
-    expect(result.provenance).toContain('08893fdf8d495f9da8c202cd004fc1587082816c');
+    expect(result.fixtures).toBe(69);
+    expect(result.provenance).toContain('2167c34babdb307411b5ba0c5d68dbd102d3973b');
     expect(result.files.filter((file) => file.endsWith('/.rappid-card.json')))
-      .toHaveLength(63);
+      .toHaveLength(69);
     const physical = readFileSync(
       join(directory, 'physical-payload-reproduction', '.rappid-card.json'),
     );

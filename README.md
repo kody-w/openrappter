@@ -82,7 +82,7 @@ Details: [`docs/RAPP.md`](docs/RAPP.md)
 ### Virtual RAPPID Debug Card
 
 The authenticated Habitat includes the RAPP/1 §7.10 Calling Card / Debug Card
-verifier from `kody-w/rapp-1` PR #12 commit `08893fd`. Production uses
+verifier from `kody-w/rapp-1` PR #12 commit `2167c34`. Production uses
 `body.calling-card` + `rappid-card/1`; test-only debug uses
 `body.debug-card` + `rappid-card-test/1`. Both runtimes enforce detached
 unencoded EdDSA JWS with SPKI→RAPPID binding, signed runtime, authority and

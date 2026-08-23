@@ -14,7 +14,7 @@ from .simulator import verify_card_link
 from .types import CardVectorResult
 from .types import MANDATORY_CARD_SCENARIOS
 
-PROVENANCE_COMMIT = "08893fdf8d495f9da8c202cd004fc1587082816c"
+PROVENANCE_COMMIT = "2167c34babdb307411b5ba0c5d68dbd102d3973b"
 
 
 def _vector_root() -> Path:
@@ -22,7 +22,7 @@ def _vector_root() -> Path:
         Path(__file__).resolve().parents[3]
         / "tests"
         / "vectors"
-        / "rapp-1-08893fd"
+        / "rapp-1-2167c34"
         / "rappid-card"
     )
     if source.is_dir():
@@ -111,10 +111,13 @@ def simulate_rappid_card_fixture(
     name: str,
     state_path: str,
     hydrated_parts: List[str] | None = None,
+    hydration_calls: List[str] | None = None,
 ) -> CardVectorResult:
     vector = build_rappid_card_fixture(name).vector
     state = state_for_vector(vector, state_path)
     selected = vector["hydrated_parts"] if hydrated_parts is None else hydrated_parts
+    selected_parts = set(selected)
+    calls = [] if hydration_calls is None else hydration_calls
     parts = _parts()
     frame = vector["frame"]
     mutation = vector.get("runtime_mutation")
@@ -141,7 +144,14 @@ def simulate_rappid_card_fixture(
         state,
         vector["connection_id"],
         vector["fetch_trace"],
-        {part: parts[part] for part in selected},
+        lambda entry: (
+            calls.append(entry["part"])
+            or (
+                parts[entry["part"]]
+                if entry["part"] in selected_parts
+                else None
+            )
+        ),
         vector["continuity"],
     )
 

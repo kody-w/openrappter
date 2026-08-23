@@ -359,6 +359,7 @@ function ipv6InRange(value: bigint, base: string, prefix: number): boolean {
 export function ipIsGlobal(host: string): boolean {
   const version = isIP(host);
   if (version === 0) return false;
+  if (ipIsMulticast(host)) return false;
   if (version === 6) {
     const value = ipv6BigInt(host);
     if (ipv6InRange(value, '::ffff:0:0', 96)) {
@@ -413,6 +414,17 @@ export function ipIsGlobal(host: string): boolean {
   if (value === 0xc0000009 || value === 0xc000000a) return true;
   if (inRange(value, 0xc0000000, 24)) return false;
   return !blocked.some(([base, prefix]) => inRange(value, base, prefix));
+}
+
+export function ipIsMulticast(host: string): boolean {
+  const version = isIP(host);
+  if (version === 4) {
+    return inRange(ipv4Number(host)!, 0xe0000000, 4);
+  }
+  if (version === 6) {
+    return ipv6InRange(ipv6BigInt(host), 'ff00::', 8);
+  }
+  return false;
 }
 
 export interface CardUrlInfo {
@@ -493,8 +505,10 @@ export function cardUrlInfo(value: string, suffix?: string): CardUrlInfo {
     }
     expectedNetloc = host;
   } else {
-    if (!ipIsGlobal(host)) {
-      throw new Error('loopback/private/link-local/reserved IP literals are forbidden');
+    if (ipIsMulticast(host) || !ipIsGlobal(host)) {
+      throw new Error(
+        'loopback/private/link-local/reserved/multicast IP literals are forbidden',
+      );
     }
     literal = host;
     expectedNetloc = ipVersion === 6 ? `[${host}]` : host;
@@ -867,23 +881,37 @@ export function cardPayloadError(
 
 export function verifyHydration(
   inventory: CardInventoryEntry[],
-  hydrated: Record<string, Uint8Array>,
+  hydratePart: (
+    entry: Readonly<CardInventoryEntry>,
+  ) => Uint8Array | undefined,
 ): [boolean, string] {
-  if (hydrated === null || typeof hydrated !== 'object' || Array.isArray(hydrated)) {
-    return [false, 'hydrated parts must be an object of part name to octets'];
+  if (typeof hydratePart !== 'function') {
+    return [false, 'hydrate_part must be a lazy callable'];
   }
-  if (!Object.keys(hydrated).every(lclabel)) return [false, 'hydrated part names must be lclabels'];
-  const permitted = new Map(inventory.map((entry) => [entry.part, entry]));
-  const extra = Object.keys(hydrated).filter((part) => !permitted.has(part)).sort();
-  if (extra.length) return [false, `hydration attempted unpermitted part ${JSON.stringify(extra[0])}`];
-  const missing = inventory.filter((entry) => entry.required && !(entry.part in hydrated)).map((entry) => entry.part).sort();
-  if (missing.length) return [false, `required hydration part missing: ${missing[0]}`];
-  for (const part of Object.keys(hydrated).sort()) {
-    const bytes = hydrated[part];
-    const entry = permitted.get(part)!;
-    if (!(bytes instanceof Uint8Array)) return [false, `hydrated part ${JSON.stringify(part)} is not bytes`];
+  for (const entry of inventory) {
+    let bytes: Uint8Array | undefined;
+    try {
+      bytes = hydratePart(Object.freeze({ ...entry }));
+    } catch (error) {
+      return [
+        false,
+        `hydration callback failed for ${JSON.stringify(entry.part)}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ];
+    }
+    if (bytes === undefined) {
+      if (entry.required) return [false, `required hydration part missing: ${entry.part}`];
+      continue;
+    }
+    if (!(bytes instanceof Uint8Array)) {
+      return [false, `hydrated part ${JSON.stringify(entry.part)} is not bytes`];
+    }
     if (bytes.byteLength !== entry.bytes || Hb(entry.space, bytes) !== entry.hash) {
-      return [false, `hydrated part ${JSON.stringify(part)} does not match its permitted address`];
+      return [
+        false,
+        `hydrated part ${JSON.stringify(entry.part)} does not match its permitted address`,
+      ];
     }
   }
   return [true, 'ok'];

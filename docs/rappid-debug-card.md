@@ -2,7 +2,7 @@
 
 OpenRappter implements RAPP/1 SPEC §7.10 exactly as retargeted in
 [`kody-w/rapp-1` PR #12](https://github.com/kody-w/rapp-1/pull/12), commit
-`08893fdf8d495f9da8c202cd004fc1587082816c`.
+`2167c34babdb307411b5ba0c5d68dbd102d3973b`.
 
 There is no private card envelope. A `.rappid-card.json` resource is canonical
 JSON for one ordinary eleven-key RAPP/1 frame:
@@ -136,6 +136,8 @@ not_before_utc, not_after_utc, revoked_utc
 Role is `subject` or `card-issuer`. Production's positive vector uses explicit
 non-synthetic `card-issuer` delegation. Debug profile and policy authorities
 must be visibly owned by `synthetic`; production refuses them.
+Both the signed frame `utc` and verifier `now` must independently fall inside
+`[not_before_utc, not_after_utc)`; future authorization is not yet effective.
 
 ### `rappid-card-revocations/1`
 
@@ -181,20 +183,30 @@ reflex_capability_root, nonce
 Both the signed `wake_challenge` and hydrated response must equal
 `H("rapp/1:particle", continuity)`.
 
+Hydration is exposed only as a bounded lazy per-inventory callback. Runtime
+policy, signed scope/classification, endpoint evidence, revocation, and the
+durable `hydrating` nonce claim all complete before that callback can touch a
+confidential byte. Rejection and contention vectors assert zero callback
+invocations.
+
+IPv4 and IPv6 multicast are refused explicitly both as endpoint literals and
+as observed DNS/fetch results, alongside loopback, private, link-local and
+reserved space.
+
 ## Authoritative vectors
 
 OpenRappter vendors byte-identical RAPP/1 §7.10 artifacts under:
 
 ```text
-tests/vectors/rapp-1-08893fd/rappid-card/
+tests/vectors/rapp-1-2167c34/rappid-card/
 ```
 
-- `deck.json`: 63 mandatory named scenarios in exact order.
+- `deck.json`: 69 mandatory named scenarios in exact order.
 - `physical.rappid-card.json`: canonical eleven-key debug frame bytes.
 - `physical-payload.txt`: exact compact physical URI.
 - `PROVENANCE.json`: source commit and SHA-256 attestations.
 
-Both TypeScript and Python consume this deck. All 63 scenario verdicts plus the
+Both TypeScript and Python consume this deck. All 69 scenario verdicts plus the
 separate physical byte/link reproduction assertion are checked. Drift tests
 pin all schema tokens, key sets, scenario names, and order. The authoritative
 follow-up includes deterministic depth-64 / 1 MiB failures, numeric-host-alias
@@ -243,7 +255,7 @@ Every `--scenario` verification and `simulate` response is wrapped as:
   "mode": "synthetic-conformance-fixture",
   "live": false,
   "scenario": "valid-production",
-  "protocol_source_commit": "08893fd",
+  "protocol_source_commit": "2167c34",
   "declared_expected": {"ok":true,"step":null,"reason":null},
   "verdict": {"ok":true}
 }

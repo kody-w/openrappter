@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Windows XPedition now includes The Living Company Desktop as first-class
+  product UI. Seven durable registered company windows consume real
+  gateway/storage seams; a deterministic Monday–Friday fixture harness emits a
+  redacted evidence ledger, private CEO memo/meme/docs drafts, a review-ready
+  never-submitted expense draft, and approval-bound fixture receipts while
+  proving sends, publishes, submissions, and external side effects remain zero.
+
 - Rapter's Clever Girl Edition (`rapters-clevergirledition`) is now the default
   hosted and Electron interface. Windows XPedition provides an original
   local-first desktop, truthful first-run onboarding, typed release-ring seam,

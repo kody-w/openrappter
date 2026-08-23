@@ -4,6 +4,11 @@ Windows XPedition is the default OpenRappter interface on the hosted dashboard
 and in Electron. Its user slug is `rapters-clevergirledition`; the edition name
 is `windows-xpedition`.
 
+Its required operating layer is
+[The Living Company Desktop](./living-company-desktop.md): seven registered
+company applications, draft-only automation hooks, action-bound approval
+gates, and a deterministic zero-side-effect work-week harness.
+
 It is a desktop shell, not a static demonstration. Every operational window
 mounts an existing Lit product surface and uses the existing authenticated
 gateway client. The shell does not replace gateway RPC, approval, channel,
@@ -96,9 +101,12 @@ focus_window      windowId from desktop_state
 close_window      windowId from desktop_state
 onboarding_step   step: welcome|privacy|gateway|release|skills|channels|health
 switch_shell      shell: xpedition|legacy
+company_state
+company_scenario  operation: start|step|run|reset|replay
 ```
 
 These actions only operate visible shell state. They cannot read secrets,
 approve tools, install agents, bypass gateway authentication, or bypass native
-consent. Existing element-ref commands and their private/sensitive subtree
-guards are unchanged.
+consent. `company_approve` is withheld from agents and requires an exact
+action-bound human confirmation on the trusted renderer plane. Existing
+element-ref commands and their private/sensitive subtree guards are unchanged.

@@ -1,3 +1,8 @@
+import {
+  COMPANY_APP_IDS,
+  COMPANY_APP_REGISTRATIONS,
+} from './company-app-registry.js';
+
 export const XPEDITION_APP_IDS = [
   'observe',
   'chat',
@@ -18,6 +23,7 @@ export const XPEDITION_APP_IDS = [
   'settings',
   'terminal',
   'help',
+  ...COMPANY_APP_IDS,
 ] as const;
 
 export type XpeditionAppId = (typeof XPEDITION_APP_IDS)[number];
@@ -223,6 +229,7 @@ export const XPEDITION_APPS: readonly XpeditionApp[] = [
     glyph: '?',
     desktop: false,
   },
+  ...COMPANY_APP_REGISTRATIONS,
 ] as const;
 
 export function isXpeditionAppId(value: unknown): value is XpeditionAppId {

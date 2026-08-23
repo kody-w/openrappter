@@ -8,6 +8,10 @@ import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
 import { createConfigState, loadConfig, saveConfig, updateConfigRaw, type ConfigState } from '../services/config.js';
 import * as YAML from 'yaml';
+import {
+  ActionBoundApprovalGate,
+  type CompanyApprovalRequest,
+} from '../services/living-company.js';
 
 // ── Section metadata ──
 
@@ -158,6 +162,10 @@ export class OpenRappterConfig extends LitElement {
     }
     .callout.danger { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
     .callout.success { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; }
+    .callout.approval {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+      border: 1px solid var(--warning); background: rgba(245, 158, 11, 0.12);
+    }
 
     .loading { display: flex; justify-content: center; padding: 2rem; color: var(--text-secondary); }
 
@@ -260,6 +268,8 @@ export class OpenRappterConfig extends LitElement {
   @state() private mode: ViewMode = 'form';
   @state() private searchQuery = '';
   @state() private expandedSections: Set<string> = new Set();
+  @state() private pendingSaveApproval: CompanyApprovalRequest | null = null;
+  private readonly saveApprovals = new ActionBoundApprovalGate();
 
   connectedCallback() {
     super.connectedCallback();
@@ -268,12 +278,33 @@ export class OpenRappterConfig extends LitElement {
   }
 
   private async doLoad() {
+    this.pendingSaveApproval = null;
     await loadConfig(this.configState);
     this.originalRaw = this.configState.raw;
     this.requestUpdate();
   }
 
-  private async handleSave() {
+  private requestSaveApproval() {
+    if (!this.configState.dirty || this.configState.saving) return;
+    this.pendingSaveApproval = this.saveApprovals.request(
+      'credential.change',
+      'Save authenticated OpenRappter configuration',
+    );
+  }
+
+  private async handleApprovedSave() {
+    if (!this.pendingSaveApproval) return;
+    this.saveApprovals.resolve(
+      this.pendingSaveApproval.id,
+      'credential.change',
+      true,
+      true,
+    );
+    this.saveApprovals.consume(
+      this.pendingSaveApproval.id,
+      'credential.change',
+    );
+    this.pendingSaveApproval = null;
     const ok = await saveConfig(this.configState);
     if (ok) {
       this.originalRaw = this.configState.raw;
@@ -285,7 +316,20 @@ export class OpenRappterConfig extends LitElement {
     if (ok) setTimeout(() => { this.saveMessage = null; this.requestUpdate(); }, 3000);
   }
 
+  private rejectSave() {
+    if (!this.pendingSaveApproval) return;
+    this.saveApprovals.resolve(
+      this.pendingSaveApproval.id,
+      'credential.change',
+      false,
+      true,
+    );
+    this.pendingSaveApproval = null;
+    this.saveMessage = 'Configuration save rejected. Nothing changed.';
+  }
+
   private handleReset() {
+    this.pendingSaveApproval = null;
     updateConfigRaw(this.configState, this.originalRaw);
     this.configState.dirty = false;
     this.configState.error = null;
@@ -301,7 +345,7 @@ export class OpenRappterConfig extends LitElement {
   private handleKeyDown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
-      this.handleSave();
+      this.requestSaveApproval();
     }
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -320,7 +364,7 @@ export class OpenRappterConfig extends LitElement {
   private handleFormKeyDown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
-      this.handleSave();
+      this.requestSaveApproval();
     }
   }
 
@@ -380,6 +424,25 @@ export class OpenRappterConfig extends LitElement {
         ? html`<div class="callout success">${this.saveMessage}</div>`
         : nothing}
 
+      ${this.pendingSaveApproval
+        ? html`
+            <div class="callout approval" role="alert">
+              <strong>Action-bound human confirmation required.</strong>
+              <span>${this.pendingSaveApproval.actionFingerprint}</span>
+              <button
+                class="btn primary"
+                data-desktop-sensitive="company-approval"
+                @click=${() => void this.handleApprovedSave()}
+              >Confirm configuration save</button>
+              <button
+                class="btn"
+                data-desktop-sensitive="company-approval"
+                @click=${this.rejectSave}
+              >Reject</button>
+            </div>
+          `
+        : nothing}
+
       <div class="toolbar">
         <div class="toolbar-left">
           <div class="mode-toggle">
@@ -400,8 +463,8 @@ export class OpenRappterConfig extends LitElement {
         <div class="toolbar-right">
           <button class="btn" @click=${this.doLoad} ?disabled=${this.configState.saving}>Reload</button>
           <button class="btn" @click=${this.handleReset} ?disabled=${!this.configState.dirty || this.configState.saving}>Reset</button>
-          <button class="btn primary" @click=${this.handleSave} ?disabled=${!this.configState.dirty || this.configState.saving}>
-            ${this.configState.saving ? 'Saving…' : 'Save'}
+          <button class="btn primary" @click=${this.requestSaveApproval} ?disabled=${!this.configState.dirty || this.configState.saving}>
+            ${this.configState.saving ? 'Saving…' : 'Request Save'}
           </button>
         </div>
       </div>

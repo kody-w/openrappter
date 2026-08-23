@@ -11,6 +11,10 @@ import {
   type ReleaseRing,
   type ReleaseRingAdapter,
 } from '../services/xpedition.js';
+import {
+  ActionBoundApprovalGate,
+  type CompanyApprovalRequest,
+} from '../services/living-company.js';
 
 interface HealthResult {
   status: 'ok' | 'degraded' | 'error';
@@ -282,6 +286,9 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
   @state() private appliedRing: ReleaseRing = 'stable';
   @state() private ringMessage = '';
   @state() private ringMessageKind: 'ok' | 'error' | 'warning' | '' = '';
+  @state() private pendingRingApproval:
+    | { request: CompanyApprovalRequest; ring: ReleaseRing }
+    | null = null;
   @state() private skillsState: 'idle' | 'loading' | 'success' | 'error' = 'idle';
   @state() private skillsMessage = '';
   @state() private healthState: 'idle' | 'loading' | 'success' | 'error' = 'idle';
@@ -343,7 +350,19 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
   }
 
   private async applyRing(): Promise<void> {
-    const result = await this.ringAdapter.apply(this.ring);
+    if (!this.pendingRingApproval) return;
+    const pending = this.pendingRingApproval;
+    this.releaseApprovals.resolve(
+      pending.request.id,
+      'release.apply',
+      true,
+      true,
+    );
+    this.releaseApprovals.consume(
+      pending.request.id,
+      'release.apply',
+    );
+    const result = await this.ringAdapter.apply(pending.ring);
     this.ringMessage = result.message;
     this.ringMessageKind = result.status === 'applied'
       ? 'ok'
@@ -358,6 +377,32 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
         composed: true,
       }));
     }
+    this.pendingRingApproval = null;
+  }
+
+  private readonly releaseApprovals = new ActionBoundApprovalGate();
+
+  private requestRingApproval(): void {
+    this.pendingRingApproval = {
+      request: this.releaseApprovals.request(
+        'release.apply',
+        `Apply ${this.ring} release ring during onboarding`,
+      ),
+      ring: this.ring,
+    };
+  }
+
+  private rejectRingApproval(): void {
+    if (!this.pendingRingApproval) return;
+    this.releaseApprovals.resolve(
+      this.pendingRingApproval.request.id,
+      'release.apply',
+      false,
+      true,
+    );
+    this.ringMessage = 'Release-ring Apply / Update was rejected. Nothing changed.';
+    this.ringMessageKind = 'warning';
+    this.pendingRingApproval = null;
   }
 
   private async runHealth(): Promise<void> {
@@ -448,6 +493,7 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
             Release ring
             <select
               aria-label="Release ring"
+              ?disabled=${Boolean(this.pendingRingApproval)}
               .value=${this.ring}
               @change=${(event: Event) => {
                 const value = (event.target as HTMLSelectElement).value;
@@ -469,10 +515,28 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
               `
             : nothing}
           ${this.ring !== this.appliedRing
-            ? html`<button @click=${() => void this.applyRing()}>Apply / Update ${this.ring}</button>`
+            ? html`<button @click=${this.requestRingApproval}>Request Apply / Update ${this.ring}</button>`
             : nothing}
           ${this.ringMessage
             ? html`<div class="status ${this.ringMessageKind}" role="status" aria-live="polite">${this.ringMessage}</div>`
+            : nothing}
+          ${this.pendingRingApproval
+            ? html`
+                <div class="status warning" role="alert">
+                  <div>
+                    <strong>Action-bound confirmation</strong>
+                    <p><code>${this.pendingRingApproval.request.actionFingerprint}</code></p>
+                    <button
+                      data-desktop-sensitive="company-approval"
+                      @click=${() => void this.applyRing()}
+                    >Confirm Apply / Update</button>
+                    <button
+                      data-desktop-sensitive="company-approval"
+                      @click=${this.rejectRingApproval}
+                    >Reject</button>
+                  </div>
+                </div>
+              `
             : nothing}
         `;
       case 'skills':

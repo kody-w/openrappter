@@ -18,6 +18,12 @@ describe('Windows XPedition build and accessibility contract', () => {
   };
   const desktopMain = read('../../../desktop/src/main.ts');
   const desktopActions = read('../../../src/desktop-control/types.ts');
+  const companyRegistry = read('../services/company-app-registry.ts');
+  const companyRuntime = read('../services/living-company.ts');
+  const companyComponent = read('../components/company-app.ts');
+  const configComponent = read('../components/config.ts');
+  const cronComponent = read('../components/cron.ts');
+  const sessionsComponent = read('../components/sessions.ts');
 
   it('boots XPedition by default while retaining a reversible legacy route', () => {
     expect(app).toContain("private shell: ShellPreference = 'xpedition'");
@@ -61,9 +67,39 @@ describe('Windows XPedition build and accessibility contract', () => {
       'close_window',
       'onboarding_step',
       'switch_shell',
+      'company_state',
+      'company_scenario',
+      'company_approve',
     ]) {
       expect(desktopActions).toContain(`'${action}'`);
     }
     expect(desktopActions).toContain("'install_agent'");
+  });
+
+  it('registers Living Company apps through one generic window renderer', () => {
+    for (const id of [
+      'engineering',
+      'release-operations',
+      'customer-signals',
+      'documentation',
+      'expenses',
+      'decisions',
+      'rapp-estate-health',
+    ]) {
+      expect(companyRegistry).toContain(`'${id}'`);
+    }
+    expect(shell).toContain('isCompanyAppId(app.id)');
+    expect(shell).toContain('<openrappter-company-app');
+    expect(companyComponent).toContain("data-desktop-sensitive=\"company-approval\"");
+    expect(configComponent).toContain("this.saveApprovals.request(");
+    expect(configComponent).toContain("'credential.change'");
+    expect(configComponent).toContain('data-desktop-sensitive="company-approval"');
+    expect(cronComponent).toContain("'irreversible.action'");
+    expect(cronComponent).toContain('data-desktop-sensitive="company-approval"');
+    expect(sessionsComponent).toContain("'irreversible.action'");
+    expect(sessionsComponent).not.toContain("confirm('Delete this session?");
+    expect(companyRuntime).not.toContain("call('channels.send'");
+    expect(companyRuntime).not.toContain("call('config.set'");
+    expect(companyRuntime).not.toContain("call('exec.respond'");
   });
 });

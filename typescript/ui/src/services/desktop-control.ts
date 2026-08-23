@@ -1,3 +1,9 @@
+import { XPEDITION_APP_IDS } from './xpedition.js';
+import {
+  APPROVAL_REQUIRED_ACTIONS,
+  type ExternalAction,
+} from './living-company.js';
+
 interface DesktopElementSnapshot {
   ref: string;
   tag: string;
@@ -25,6 +31,16 @@ interface XpeditionControllableApp extends HTMLElement {
   closeDesktopWindow(id: string): Record<string, unknown>;
   selectOnboardingStep(step: string): Record<string, unknown>;
   switchShell(shell: 'xpedition' | 'legacy'): void;
+  companyState(): Record<string, unknown>;
+  runCompanyScenario(
+    operation: 'start' | 'step' | 'run' | 'reset' | 'replay',
+  ): Promise<Record<string, unknown>>;
+  approveCompanyAction(
+    requestId: string,
+    action: ExternalAction,
+    approved: boolean,
+    humanConfirmed: boolean,
+  ): Record<string, unknown>;
   updateComplete?: Promise<unknown>;
 }
 
@@ -318,27 +334,11 @@ export async function handleDesktopUiCommand(
     case 'desktop_state':
       return controllableApp().getDesktopState();
     case 'open_app': {
-      const appId = boundedString(args.appId, 'XPedition app', [
-        'observe',
-        'chat',
-        'show-and-tell',
-        'agents',
-        'showcase',
-        'flight',
-        'skills',
-        'channels',
-        'sessions',
-        'cron',
-        'devices',
-        'presence',
-        'debug',
-        'zen',
-        'accounts',
-        'memory',
-        'settings',
-        'terminal',
-        'help',
-      ]);
+      const appId = boundedString(
+        args.appId,
+        'XPedition app',
+        XPEDITION_APP_IDS,
+      );
       return await controllableApp().openDesktopApp(appId);
     }
     case 'focus_window':
@@ -371,6 +371,35 @@ export async function handleDesktopUiCommand(
       app.switchShell(shell);
       await app.updateComplete;
       return app.getDesktopState();
+    }
+    case 'company_state':
+      return controllableApp().companyState();
+    case 'company_scenario': {
+      const operation = boundedString(
+        args.operation,
+        'Living Company scenario operation',
+        ['start', 'step', 'run', 'reset', 'replay'],
+      ) as 'start' | 'step' | 'run' | 'reset' | 'replay';
+      return await controllableApp().runCompanyScenario(operation);
+    }
+    case 'company_approve': {
+      const action = boundedString(
+        args.companyAction,
+        'Living Company external action',
+        APPROVAL_REQUIRED_ACTIONS,
+      ) as ExternalAction;
+      if (typeof args.approved !== 'boolean') {
+        throw new Error('company_approve requires an explicit boolean approved decision.');
+      }
+      if (args.humanConfirmed !== true) {
+        throw new Error('company_approve requires action-bound human confirmation.');
+      }
+      return controllableApp().approveCompanyAction(
+        boundedString(args.requestId, 'company approval request id'),
+        action,
+        args.approved,
+        true,
+      );
     }
     case 'click': {
       const element = requireRef(args.ref);

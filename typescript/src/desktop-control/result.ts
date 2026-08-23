@@ -17,6 +17,8 @@ const permitted = new Set<DesktopControlAction>([
   'close_window',
   'onboarding_step',
   'switch_shell',
+  'company_state',
+  'company_scenario',
 ]);
 
 let sharedQueue: DesktopCommandQueue | undefined;

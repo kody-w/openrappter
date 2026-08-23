@@ -18,6 +18,7 @@ import {
   type XpeditionPreferences,
 } from '../services/xpedition.js';
 import type { OpenRappterXpeditionShell } from './xpedition-shell.js';
+import type { ExternalAction } from '../services/living-company.js';
 
 type View = OpenRappterView;
 
@@ -308,6 +309,40 @@ export class OpenRappterApp extends LitElement {
     const surface = this.xpeditionSurface();
     if (!surface) throw new Error('XPedition desktop is not mounted.');
     return surface.selectOnboardingStep(step);
+  }
+
+  companyState(): Record<string, unknown> {
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.companyState();
+  }
+
+  async runCompanyScenario(
+    operation: 'start' | 'step' | 'run' | 'reset' | 'replay',
+  ): Promise<Record<string, unknown>> {
+    if (this.shell !== 'xpedition') {
+      this.switchShell('xpedition');
+      await this.updateComplete;
+    }
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.runCompanyScenario(operation);
+  }
+
+  approveCompanyAction(
+    requestId: string,
+    action: ExternalAction,
+    approved: boolean,
+    humanConfirmed: boolean,
+  ): Record<string, unknown> {
+    const surface = this.xpeditionSurface();
+    if (!surface) throw new Error('XPedition desktop is not mounted.');
+    return surface.approveCompanyAction(
+      requestId,
+      action,
+      approved,
+      humanConfirmed,
+    );
   }
 
   switchShell(shell: ShellPreference): void {

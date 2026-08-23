@@ -6,6 +6,10 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
+import {
+  ActionBoundApprovalGate,
+  type CompanyApprovalRequest,
+} from '../services/living-company.js';
 
 interface SessionSummary {
   id: string;
@@ -52,6 +56,13 @@ export class OpenRappterSessions extends LitElement {
       gap: 0.75rem;
       margin-bottom: 1.25rem;
     }
+
+    .approval {
+      margin-bottom: 1rem; padding: 0.75rem; border: 1px solid var(--warning);
+      border-radius: 0.45rem; background: rgba(245, 158, 11, 0.12);
+      font-size: 0.8rem;
+    }
+    .approval .actions { margin-top: 0.55rem; }
 
     .search-input {
       flex: 1;
@@ -184,6 +195,10 @@ export class OpenRappterSessions extends LitElement {
   @state() private sessions: SessionSummary[] = [];
   @state() private loading = true;
   @state() private searchQuery = '';
+  @state() private pendingDelete:
+    | { sessionId: string; approval: CompanyApprovalRequest }
+    | null = null;
+  private readonly deleteApprovals = new ActionBoundApprovalGate();
 
   connectedCallback() {
     super.connectedCallback();
@@ -201,13 +216,45 @@ export class OpenRappterSessions extends LitElement {
   }
 
   private async deleteSession(id: string) {
-    if (!confirm('Delete this session? This cannot be undone.')) return;
+    if (!this.pendingDelete || this.pendingDelete.sessionId !== id) return;
+    this.deleteApprovals.resolve(
+      this.pendingDelete.approval.id,
+      'irreversible.action',
+      true,
+      true,
+    );
+    this.deleteApprovals.consume(
+      this.pendingDelete.approval.id,
+      'irreversible.action',
+    );
+    this.pendingDelete = null;
     try {
       await gateway.call('chat.delete', { sessionId: id });
       this.sessions = this.sessions.filter((s) => s.id !== id);
     } catch (error) {
       console.error('Failed to delete session:', error);
     }
+  }
+
+  private requestDelete(id: string): void {
+    this.pendingDelete = {
+      sessionId: id,
+      approval: this.deleteApprovals.request(
+        'irreversible.action',
+        `Delete chat session ${id}`,
+      ),
+    };
+  }
+
+  private rejectDelete(): void {
+    if (!this.pendingDelete) return;
+    this.deleteApprovals.resolve(
+      this.pendingDelete.approval.id,
+      'irreversible.action',
+      false,
+      true,
+    );
+    this.pendingDelete = null;
   }
 
   private formatDate(timestamp: string): string {
@@ -259,6 +306,27 @@ export class OpenRappterSessions extends LitElement {
           <h2>Chat Sessions</h2>
           <div class="sub">${this.sessions.length} session${this.sessions.length !== 1 ? 's' : ''} stored.</div>
         </div>
+
+        ${this.pendingDelete
+          ? html`
+              <div class="approval" role="alert">
+                <strong>Confirm irreversible deletion:</strong>
+                ${this.pendingDelete.approval.actionFingerprint}
+                <div class="actions">
+                  <button
+                    class="btn danger"
+                    data-desktop-sensitive="company-approval"
+                    @click=${() => void this.deleteSession(this.pendingDelete!.sessionId)}
+                  >Confirm delete</button>
+                  <button
+                    class="btn"
+                    data-desktop-sensitive="company-approval"
+                    @click=${this.rejectDelete}
+                  >Reject</button>
+                </div>
+              </div>
+            `
+          : nothing}
         <button class="btn" @click=${this.loadSessions} ?disabled=${this.loading}>
           ${this.loading ? 'Loading…' : 'Refresh'}
         </button>
@@ -314,7 +382,7 @@ export class OpenRappterSessions extends LitElement {
                       </td>
                       <td class="actions">
                         <button class="btn" @click=${() => this.viewSession(s.id)}>View</button>
-                        <button class="btn danger" @click=${() => this.deleteSession(s.id)}>Delete</button>
+                        <button class="btn danger" @click=${() => this.requestDelete(s.id)}>Delete</button>
                       </td>
                     </tr>
                   `,

@@ -13,7 +13,7 @@
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
 
-[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
+[Skills Reference](./skills.md) | [Documentation](./docs) | [Windows XPedition](./docs/windows-xpedition.md) | [Living Company Desktop](./docs/living-company-desktop.md) | [Architecture](./docs/architecture.html) | [Electron Desktop](./docs/electron-desktop.md) | [Flight Recorder](./docs/flight-recorder.md) | [Show-and-Tell](./docs/show-and-tell.md) | [Clever Girl Observe](./docs/rapter-clever-girl.md) | [v1.13.0 Release Notes](./docs/release-notes-1.13.0-evolution.html) | [RappterHub](https://github.com/rappterhub/rappterhub)
 
 [TypeScript macOS iMessage assistant setup](./docs/typescript-imessage.md) ·
 [iMessage reliability contract](./docs/imessage-reliability.md)
@@ -115,6 +115,14 @@ truthful health check. Existing users can choose
 **Start → Legacy OpenRappter** for the previous shell without deleting saved
 state. See [Windows XPedition](./docs/windows-xpedition.md) for onboarding,
 release-ring behavior, keyboard controls, semantic automation, and migration.
+
+Windows XPedition also includes
+[The Living Company Desktop](./docs/living-company-desktop.md) as required
+product scope: Engineering, Release Operations, Customer Signals,
+Documentation, Expenses, Decisions, and RAPP Estate Health. These windows read
+only registered gateway/storage seams, preserve explicit unavailable/offline
+states, produce private drafts, and require action-bound human confirmation for
+every external or irreversible operation.
 
 ### Flight Recorder: one truthful local execution history
 

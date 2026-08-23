@@ -46,6 +46,8 @@ export class DesktopControlAgent extends BasicAgent {
               'close_window',
               'onboarding_step',
               'switch_shell',
+              'company_state',
+              'company_scenario',
               'install_agent',
             ],
             description: 'Typed UI operation.',
@@ -98,6 +100,13 @@ export class DesktopControlAgent extends BasicAgent {
               'settings',
               'terminal',
               'help',
+              'engineering',
+              'release-operations',
+              'customer-signals',
+              'documentation',
+              'expenses',
+              'decisions',
+              'rapp-estate-health',
             ],
             description: 'Bounded XPedition app id for open_app.',
           },
@@ -122,6 +131,12 @@ export class DesktopControlAgent extends BasicAgent {
             type: 'string',
             enum: ['xpedition', 'legacy'],
             description: 'Migration shell for switch_shell.',
+          },
+          operation: {
+            type: 'string',
+            enum: ['start', 'step', 'run', 'reset', 'replay'],
+            description:
+              'Fixture-only Living Company Week operation for company_scenario.',
           },
           filename: {
             type: 'string',
@@ -166,12 +181,20 @@ export class DesktopControlAgent extends BasicAgent {
         action: 'snapshot',
         message:
           'DesktopControl takes a typed action, not a natural-language query. ' +
-          'Use action with one of: snapshot, navigate, click, input, select, scroll, wait, desktop_state, open_app, focus_window, close_window, onboarding_step, switch_shell, install_agent.',
+          'Use action with one of: snapshot, navigate, click, input, select, scroll, wait, desktop_state, open_app, focus_window, close_window, onboarding_step, switch_shell, company_state, company_scenario, install_agent.',
       });
     }
     const action = (
       typeof kwargs.action === 'string' ? kwargs.action : 'snapshot'
     ) as DesktopControlAction;
+    if (action === 'company_approve') {
+      return JSON.stringify({
+        status: 'error',
+        action,
+        message:
+          'company_approve is human-only and cannot be invoked through DesktopControlAgent.',
+      });
+    }
     const args: Record<string, unknown> = {};
     for (const key of [
       'view',
@@ -184,6 +207,7 @@ export class DesktopControlAgent extends BasicAgent {
       'windowId',
       'step',
       'shell',
+      'operation',
       'filename',
       'source',
     ]) {

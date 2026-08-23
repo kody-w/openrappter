@@ -24,6 +24,16 @@ import {
   type XpeditionWindowState,
 } from '../services/xpedition.js';
 import type { OpenRappterXpeditionOnboarding } from './xpedition-onboarding.js';
+import {
+  isCompanyAppId,
+  type CompanyAppId,
+} from '../services/company-app-registry.js';
+import {
+  ActionBoundApprovalGate,
+  livingCompanyScenario,
+  type CompanyApprovalRequest,
+  type ExternalAction,
+} from '../services/living-company.js';
 
 interface DragState {
   id: string;
@@ -681,6 +691,9 @@ export class OpenRappterXpeditionShell extends LitElement {
   };
   @state() private pendingRing: ReleaseRing = 'stable';
   @state() private ringMessage = '';
+  @state() private pendingRingApproval:
+    | { request: CompanyApprovalRequest; ring: ReleaseRing }
+    | null = null;
   private manager = new XpeditionWindowManager((state) => {
     this.desktopState = state;
   });
@@ -727,6 +740,7 @@ export class OpenRappterXpeditionShell extends LitElement {
         maximized: window.maximized,
         active: window.id === this.desktopState.activeWindowId,
       })),
+      livingCompany: livingCompanyScenario.snapshot(),
     };
   }
 
@@ -766,6 +780,42 @@ export class OpenRappterXpeditionShell extends LitElement {
     return this.getDesktopState();
   }
 
+  companyState(): Record<string, unknown> {
+    return livingCompanyScenario.snapshot() as unknown as Record<string, unknown>;
+  }
+
+  async runCompanyScenario(
+    operation: 'start' | 'step' | 'run' | 'reset' | 'replay',
+  ): Promise<Record<string, unknown>> {
+    if (operation === 'start') livingCompanyScenario.start();
+    if (operation === 'step') await livingCompanyScenario.step();
+    if (operation === 'run') await livingCompanyScenario.runUntilBlocked();
+    if (operation === 'reset') livingCompanyScenario.reset();
+    if (operation === 'replay') {
+      livingCompanyScenario.reset();
+      livingCompanyScenario.start();
+      await livingCompanyScenario.runUntilBlocked();
+    }
+    this.notifyCompanyChange();
+    return livingCompanyScenario.snapshot() as unknown as Record<string, unknown>;
+  }
+
+  approveCompanyAction(
+    requestId: string,
+    action: ExternalAction,
+    approved: boolean,
+    humanConfirmed: boolean,
+  ): Record<string, unknown> {
+    const result = livingCompanyScenario.approve(
+      requestId,
+      action,
+      approved,
+      humanConfirmed,
+    );
+    this.notifyCompanyChange();
+    return result as unknown as Record<string, unknown>;
+  }
+
   private persistPreferences(changes: Partial<XpeditionPreferences>): void {
     this.preferences = { ...this.preferences, ...changes, version: 1 };
     saveXpeditionPreferences(this.storage, this.preferences);
@@ -775,6 +825,13 @@ export class OpenRappterXpeditionShell extends LitElement {
       bubbles: true,
       composed: true,
     }));
+  }
+
+  private notifyCompanyChange(): void {
+    globalThis.dispatchEvent(
+      new CustomEvent('openrappter-living-company-change'),
+    );
+    this.requestUpdate();
   }
 
   private finishOnboarding(event: CustomEvent<{ releaseRing: ReleaseRing }>): void {
@@ -801,12 +858,48 @@ export class OpenRappterXpeditionShell extends LitElement {
   }
 
   private async applyReleaseRing(): Promise<void> {
-    if (!isReleaseRing(this.pendingRing)) return;
-    const result = await this.ringAdapter.apply(this.pendingRing);
+    if (!this.pendingRingApproval) return;
+    const pending = this.pendingRingApproval;
+    this.settingsApprovals.resolve(
+      pending.request.id,
+      'release.apply',
+      true,
+      true,
+    );
+    this.settingsApprovals.consume(
+      pending.request.id,
+      'release.apply',
+    );
+    const result = await this.ringAdapter.apply(pending.ring);
     this.ringMessage = result.message;
     if (result.status === 'applied') {
       this.persistPreferences({ releaseRing: result.ring });
     }
+    this.pendingRingApproval = null;
+  }
+
+  private readonly settingsApprovals = new ActionBoundApprovalGate();
+
+  private requestReleaseRingApproval(): void {
+    this.pendingRingApproval = {
+      request: this.settingsApprovals.request(
+        'release.apply',
+        `Apply ${this.pendingRing} release ring`,
+      ),
+      ring: this.pendingRing,
+    };
+  }
+
+  private rejectReleaseRingApproval(): void {
+    if (!this.pendingRingApproval) return;
+    this.settingsApprovals.resolve(
+      this.pendingRingApproval.request.id,
+      'release.apply',
+      false,
+      true,
+    );
+    this.ringMessage = 'Release-ring Apply / Update was rejected. Nothing changed.';
+    this.pendingRingApproval = null;
   }
 
   private handleDesktopKeydown(event: KeyboardEvent): void {
@@ -879,6 +972,18 @@ export class OpenRappterXpeditionShell extends LitElement {
         </div>
       `;
     }
+    if (isCompanyAppId(app.id)) {
+      return html`
+        <openrappter-company-app
+          .appId=${app.id as CompanyAppId}
+          @open-xpedition-app=${(event: CustomEvent<{ appId: XpeditionAppId }>) => {
+            if (isXpeditionAppId(event.detail.appId)) {
+              this.openApp(event.detail.appId);
+            }
+          }}
+        ></openrappter-company-app>
+      `;
+    }
     if (app.id === 'help') {
       return html`
         <article class="about">
@@ -928,6 +1033,7 @@ export class OpenRappterXpeditionShell extends LitElement {
           <label id="ring-heading">
             Release ring
             <select
+              ?disabled=${Boolean(this.pendingRingApproval)}
               .value=${this.pendingRing}
               @change=${(event: Event) => {
                 const value = (event.target as HTMLSelectElement).value;
@@ -944,8 +1050,8 @@ export class OpenRappterXpeditionShell extends LitElement {
           </label>
           <button
             ?disabled=${this.pendingRing === this.preferences.releaseRing}
-            @click=${() => void this.applyReleaseRing()}
-          >Apply / Update</button>
+            @click=${this.requestReleaseRingApproval}
+          >Request Apply / Update</button>
           ${this.pendingRing !== 'stable'
             ? html`
                 <div class="warning" role="alert">
@@ -956,6 +1062,24 @@ export class OpenRappterXpeditionShell extends LitElement {
             : nothing}
           ${this.ringMessage
             ? html`<div class="ring-message" role="status" aria-live="polite">${this.ringMessage}</div>`
+            : nothing}
+          ${this.pendingRingApproval
+            ? html`
+                <div class="warning" role="alert">
+                  Confirm the action-bound request:
+                  <code>${this.pendingRingApproval.request.actionFingerprint}</code>
+                  <div class="actions" style="margin-top:.5rem">
+                    <button
+                      data-desktop-sensitive="company-approval"
+                      @click=${() => void this.applyReleaseRing()}
+                    >Confirm Apply / Update</button>
+                    <button
+                      data-desktop-sensitive="company-approval"
+                      @click=${this.rejectReleaseRingApproval}
+                    >Reject</button>
+                  </div>
+                </div>
+              `
             : nothing}
         </section>
         ${surface}
@@ -1053,7 +1177,7 @@ export class OpenRappterXpeditionShell extends LitElement {
           <span class="profile-mark" aria-hidden="true">R</span>
           <span>
             <strong>Rapter's Clever Girl Edition</strong>
-            Windows XPedition
+            Windows XPedition · Living Company Desktop
           </span>
         </header>
         <div class="start-grid">
@@ -1097,7 +1221,7 @@ export class OpenRappterXpeditionShell extends LitElement {
       >
         <div class="brand" aria-hidden="true">
           <strong>Rapter's Clever Girl Edition</strong>
-          <span>Windows XPedition</span>
+          <span>Windows XPedition · Living Company Desktop</span>
         </div>
 
         ${!this.connected && this.preferences.onboardingCompleted

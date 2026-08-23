@@ -15,6 +15,9 @@ export type DesktopControlAction =
   | 'close_window'
   | 'onboarding_step'
   | 'switch_shell'
+  | 'company_state'
+  | 'company_scenario'
+  | 'company_approve'
   | 'install_agent';
 
 export interface DesktopCommand {

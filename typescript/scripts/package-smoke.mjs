@@ -184,6 +184,17 @@ try {
       "Installed package does not contain the exact original XPedition landscape",
     );
   }
+  const installedUiAssets = path.join(installedRoot, "ui", "dist", "assets");
+  const livingCompanyBundled = readdirSync(installedUiAssets)
+    .filter((name) => name.endsWith(".js"))
+    .some((name) =>
+      readFileSync(path.join(installedUiAssets, name), "utf8")
+        .includes("Living Company Week"));
+  if (!livingCompanyBundled) {
+    throw new Error(
+      "Installed package does not contain the Living Company Desktop runtime",
+    );
+  }
 
   const cleverGirlAssets = [
     [
@@ -739,7 +750,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes Windows XPedition, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
+    `Package smoke passed: ${artifact.filename} includes Windows XPedition, Living Company Desktop, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2`,
   );
 } finally {
   rmSync(scratch, {

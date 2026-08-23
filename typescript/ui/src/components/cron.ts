@@ -6,6 +6,10 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
+import {
+  ActionBoundApprovalGate,
+  type CompanyApprovalRequest,
+} from '../services/living-company.js';
 
 const CRON_RUN_TIMEOUT_MS = 15 * 60_000;
 
@@ -527,6 +531,10 @@ export class OpenRappterCron extends LitElement {
 
   /* ---- channels for delivery ---- */
   @state() private channels: string[] = [];
+  @state() private pendingRemoval:
+    | { job: CronJob; approval: CompanyApprovalRequest }
+    | null = null;
+  private readonly removalApprovals = new ActionBoundApprovalGate();
 
   connectedCallback() {
     super.connectedCallback();
@@ -604,6 +612,23 @@ export class OpenRappterCron extends LitElement {
   }
 
   private async removeJob(job: CronJob) {
+    if (
+      !this.pendingRemoval ||
+      this.pendingRemoval.job.id !== job.id
+    ) {
+      return;
+    }
+    this.removalApprovals.resolve(
+      this.pendingRemoval.approval.id,
+      'irreversible.action',
+      true,
+      true,
+    );
+    this.removalApprovals.consume(
+      this.pendingRemoval.approval.id,
+      'irreversible.action',
+    );
+    this.pendingRemoval = null;
     this.busy = true;
     try {
       await gateway.call('cron.remove', { jobId: job.id });
@@ -616,6 +641,27 @@ export class OpenRappterCron extends LitElement {
       console.error('Failed to remove job:', e);
     }
     this.busy = false;
+  }
+
+  private requestRemove(job: CronJob): void {
+    this.pendingRemoval = {
+      job,
+      approval: this.removalApprovals.request(
+        'irreversible.action',
+        `Remove cron job ${job.name || job.id}`,
+      ),
+    };
+  }
+
+  private rejectRemove(): void {
+    if (!this.pendingRemoval) return;
+    this.removalApprovals.resolve(
+      this.pendingRemoval.approval.id,
+      'irreversible.action',
+      false,
+      true,
+    );
+    this.pendingRemoval = null;
   }
 
   private buildSchedule(): CronSchedule {
@@ -688,6 +734,29 @@ export class OpenRappterCron extends LitElement {
         <h2>Cron Jobs</h2>
         <p>Scheduled tasks and automation.</p>
       </div>
+
+      ${this.pendingRemoval
+        ? html`
+            <section class="card" role="alert" style="margin-bottom:16px">
+              <div class="card-title">Confirm irreversible removal</div>
+              <div class="card-sub">
+                ${this.pendingRemoval.approval.actionFingerprint}
+              </div>
+              <div class="row" style="margin-top:12px">
+                <button
+                  class="btn danger"
+                  data-desktop-sensitive="company-approval"
+                  @click=${() => void this.removeJob(this.pendingRemoval!.job)}
+                >Confirm remove</button>
+                <button
+                  class="btn"
+                  data-desktop-sensitive="company-approval"
+                  @click=${this.rejectRemove}
+                >Reject</button>
+              </div>
+            </section>
+          `
+        : nothing}
 
       <section class="grid-cols-2">
         ${this.renderStatusCard()}
@@ -939,7 +1008,7 @@ export class OpenRappterCron extends LitElement {
               Runs
             </button>
             <button class="btn danger" ?disabled=${this.busy}
-              @click=${(ev: Event) => { ev.stopPropagation(); this.removeJob(job); }}>
+              @click=${(ev: Event) => { ev.stopPropagation(); this.requestRemove(job); }}>
               Remove
             </button>
           </div>

@@ -152,8 +152,10 @@ describe('agent-reachable UI action boundary', () => {
     'close_window',
     'onboarding_step',
     'switch_shell',
+    'company_state',
+    'company_scenario',
   ];
-  const WITHHELD_FROM_AGENTS = ['install_agent'];
+  const WITHHELD_FROM_AGENTS = ['install_agent', 'company_approve'];
 
   async function withQueueRoot<T>(
     prefix: string,
@@ -200,6 +202,30 @@ describe('agent-reachable UI action boundary', () => {
       expect(result.status).toBe('error');
       // The strongest form: the command never became a queue entry at all, so
       // the Electron approval dialog is never even asked to appear.
+      expect(consumer.claimNext()).toBeFalsy();
+    });
+  });
+
+  it('refuses company_approve from an agent result and never enqueues it', async () => {
+    await withQueueRoot('desktop-company-approval-withheld-', async (root) => {
+      vi.resetModules();
+      const { dispatchAgentUiCommands: dispatchFresh } = await import(
+        './result.js'
+      );
+      const consumer = new DesktopCommandQueue(root);
+      const result = JSON.parse(
+        await dispatchFresh(JSON.stringify({
+          status: 'success',
+          ui_commands: [{
+            action: 'company_approve',
+            requestId: 'company-approval-1',
+            companyAction: 'release.apply',
+            approved: true,
+          }],
+        })),
+      );
+      expect(result.status).toBe('error');
+      expect(result.ui_results[0].error).toContain('company_approve');
       expect(consumer.claimNext()).toBeFalsy();
     });
   });
@@ -309,6 +335,25 @@ describe('DesktopControl parameter contract', () => {
 
   it('does not advertise the unimplemented natural-language query parameter', () => {
     expect(advertisedParameters()).not.toContain('query');
+  });
+
+  it('refuses the human-only company approval action without enqueuing it', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'desktop-company-approval-'));
+    try {
+      const queue = new DesktopCommandQueue(root);
+      const agent = new DesktopControlAgent(queue);
+      const result = JSON.parse(await agent.perform({
+        action: 'company_approve',
+        requestId: 'company-approval-1',
+        companyAction: 'release.apply',
+        approved: true,
+      }));
+      expect(result.status).toBe('error');
+      expect(result.message).toMatch(/human-only/);
+      expect(queue.claimNext()).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('refuses a prose-only call instead of substituting a snapshot and reporting success', async () => {

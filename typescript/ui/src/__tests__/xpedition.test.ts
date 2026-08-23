@@ -51,6 +51,30 @@ async function renderShell(completed = true) {
 }
 
 describe('XPedition window manager', () => {
+  it('maps every existing product route exactly once', () => {
+    const expectedViews = [
+      'surgeon',
+      'chat',
+      'show-and-tell',
+      'channels',
+      'sessions',
+      'cron',
+      'config',
+      'logs',
+      'agents',
+      'skills',
+      'devices',
+      'presence',
+      'debug',
+      'showcase',
+      'zen',
+      'accounts',
+    ];
+    const mappedViews = XPEDITION_APPS.flatMap((app) => app.view ? [app.view] : []);
+    expect([...new Set(mappedViews)].sort()).toEqual(expectedViews.sort());
+    expect(new Set(XPEDITION_APPS.map((app) => app.id)).size).toBe(XPEDITION_APPS.length);
+  });
+
   it('opens one window per app and maintains focus, z-order, minimize, maximize, and close', () => {
     const changes: unknown[] = [];
     const manager = new XpeditionWindowManager((state) => changes.push(state));
@@ -318,6 +342,10 @@ describe('agent-operable semantic XPedition controls', () => {
       action: 'open_app',
       args: { appId: 'chat' },
     })).resolves.toEqual({ appId: 'chat' });
+    await expect(handleDesktopUiCommand({
+      action: 'open_app',
+      args: { appId: 'show-and-tell' },
+    })).resolves.toEqual({ appId: 'show-and-tell' });
     await expect(handleDesktopUiCommand({
       action: 'focus_window',
       args: { windowId: 'xpedition-chat' },

@@ -905,11 +905,19 @@ export class OpenRappterXpeditionShell extends LitElement {
       switch (app.view) {
         case 'surgeon': return html`<openrappter-surgeon></openrappter-surgeon>`;
         case 'chat': return html`<openrappter-chat></openrappter-chat>`;
+        case 'show-and-tell': return html`<openrappter-show-and-tell></openrappter-show-and-tell>`;
         case 'agents': return html`<openrappter-agents></openrappter-agents>`;
         case 'showcase': return html`<openrappter-showcase></openrappter-showcase>`;
         case 'logs': return html`<openrappter-logs></openrappter-logs>`;
         case 'skills': return html`<openrappter-skills></openrappter-skills>`;
         case 'channels': return html`<openrappter-channels></openrappter-channels>`;
+        case 'sessions': return html`<openrappter-sessions></openrappter-sessions>`;
+        case 'cron': return html`<openrappter-cron></openrappter-cron>`;
+        case 'devices': return html`<openrappter-devices></openrappter-devices>`;
+        case 'presence': return html`<openrappter-presence></openrappter-presence>`;
+        case 'debug': return html`<openrappter-debug></openrappter-debug>`;
+        case 'zen': return html`<openrappter-zen></openrappter-zen>`;
+        case 'accounts': return html`<openrappter-accounts></openrappter-accounts>`;
         case 'config': return html`<openrappter-config></openrappter-config>`;
         default: return html`<div class="unavailable">No product surface is registered for ${app.title}.</div>`;
       }

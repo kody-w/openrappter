@@ -1134,7 +1134,9 @@ function createWindow(): BrowserWindow {
             await appElement.updateComplete;
             recorder = appElement.shadowRoot.querySelector(
               'openrappter-show-and-tell'
-            );
+            ) || appElement.shadowRoot
+              .querySelector('openrappter-xpedition-shell')
+              ?.shadowRoot?.querySelector('openrappter-show-and-tell');
             await recorder?.updateComplete;
           }
           const info = await window.openrappterDesktop.getInfo();

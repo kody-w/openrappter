@@ -91,7 +91,7 @@ bounded actions:
 
 ```text
 desktop_state
-open_app          appId: observe|chat|agents|showcase|flight|skills|channels|memory|settings|terminal|help
+open_app          appId from the exported, closed XPEDITION_APP_IDS catalog
 focus_window      windowId from desktop_state
 close_window      windowId from desktop_state
 onboarding_step   step: welcome|privacy|gateway|release|skills|channels|health

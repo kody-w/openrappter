@@ -651,11 +651,11 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   );
   assert.match(
     workflow,
-    /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts\]/,
+    /publish-registries:[\s\S]*?needs: \[preflight, smoke-artifacts, build-electron-artifacts, release-constitution\]/,
   );
   assert.match(
     workflow,
-    /needs: \[preflight, publish-registries, build-electron-artifacts\]/,
+    /needs: \[preflight, publish-registries, build-electron-artifacts, release-constitution\]/,
   );
   assert.match(workflow, /node scripts\/pack-locked\.mjs/);
   const desktopJob = workflow.slice(
@@ -685,11 +685,11 @@ test('parsed release workflow preserves the privileged dependency graph', () => 
   ));
   assert.deepEqual(
     workflow.jobs['publish-registries'].needs,
-    ['preflight', 'smoke-artifacts', 'build-electron-artifacts'],
+    ['preflight', 'smoke-artifacts', 'build-electron-artifacts', 'release-constitution'],
   );
   assert.deepEqual(
     workflow.jobs['github-release'].needs,
-    ['preflight', 'publish-registries', 'build-electron-artifacts'],
+    ['preflight', 'publish-registries', 'build-electron-artifacts', 'release-constitution'],
   );
   assert.equal(
     workflow.jobs.preflight.steps.some(

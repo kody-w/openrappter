@@ -19,10 +19,10 @@ guess where an assistant stores history.
 
 ```bash
 openrappter clever-girl observe \
-  --input <explicit path> \
-  --activity <explicit repository-activity export> \
-  --estate-manifest <explicit rapp-monorepo MANIFEST.json> \
-  --capability-catalog <explicit catalog.json> \
+  --input <path> \
+  --activity <activity-path> \
+  --estate-manifest <manifest-path> \
+  --capability-catalog <catalog-path> \
   --skills-root .claude/skills \
   --pretty
 ```

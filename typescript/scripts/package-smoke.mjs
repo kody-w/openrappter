@@ -124,6 +124,7 @@ try {
     "dist/clever-girl/rapter-clever-girl-context.mjs",
     "dist/clever-girl/rapter-clever-girl-observe-v2.json",
     "dist/clever-girl/SKILL.md",
+    "dist/cli/clever-girl.js",
     "dist/desktop-control/queue.js",
     "dist/show-and-tell/store.js",
     "dist/show-and-tell/worker.js",

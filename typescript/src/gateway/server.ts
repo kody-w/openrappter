@@ -32,6 +32,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { registerEstateBuddyMethods } from './methods/estate-buddy-methods.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -3379,6 +3380,11 @@ export class GatewayServer {
 
     // Backup & restore methods
     registerBackupMethods(this, { dataDir: this.dataDir });
+
+    // The local-network estate remains owned by RAPP-Herdr. The gateway
+    // exposes its verified roster/chat/create receipts without duplicating
+    // device credentials or SSH routing in OpenRappter.
+    registerEstateBuddyMethods(this);
 
     // Zen streaming (live terminal screens relayed to browsers).
     //

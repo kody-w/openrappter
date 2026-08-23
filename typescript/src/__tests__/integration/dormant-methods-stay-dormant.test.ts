@@ -6,7 +6,8 @@ import { GatewayServer } from '../../gateway/server.js';
 /**
  * The dormant method modules stay dormant.
  *
- * `gateway/methods/*.ts` holds 25 standalone RPC modules. Only 5 are invoked by
+ * `gateway/methods/*.ts` holds standalone RPC modules. Only the explicit
+ * production allowlist below is invoked by
  * `GatewayServer`; the rest declare the same method names against their own
  * disconnected dependencies. The doc comment on `registerBuiltInMethods` warns
  * that wiring them would "silently duplicate or override the real, wired
@@ -40,6 +41,7 @@ const SERVER = resolve(__dirname, '../../gateway/server.ts');
 const INTENTIONALLY_INVOKED = new Set([
   'registerAuthMethods',
   'registerBackupMethods',
+  'registerEstateBuddyMethods',
   'registerRappterMethods',
   'registerRappidMethods',
   'registerShowcaseMethods',

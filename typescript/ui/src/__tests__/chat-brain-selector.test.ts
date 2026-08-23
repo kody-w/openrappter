@@ -19,11 +19,19 @@ import { gateway } from '../services/gateway.js';
  */
 
 interface TestChatElement extends HTMLElement {
-  chatTarget: 'openrappter' | 'brainstem';
+  chatTarget: 'openrappter' | 'brainstem' | 'estate';
   sessionKey: string | null;
   inputValue: string;
   sending: boolean;
+  selectedEstateBuddyId: string;
+  estateCreateDevice: string;
+  estateCreateName: string;
+  estateCreateRole: string;
+  estateCreateUi: 'auto' | 'chat' | 'rapplication';
+  estateCreateStatus: string;
+  messages: Array<{ role: string; content: string }>;
   handleSend(): Promise<void>;
+  handleCreateEstateBuddy(event: Event): Promise<void>;
   handleTargetChange(event: Event): void;
   restoreChatTarget(): void;
 }
@@ -35,7 +43,7 @@ function makeChat(): TestChatElement {
 /** A change event from a <select>, as the component receives it. */
 function selectEvent(value: string): Event {
   const select = document.createElement('select');
-  for (const option of ['openrappter', 'brainstem']) {
+  for (const option of ['openrappter', 'brainstem', 'estate']) {
     const element = document.createElement('option');
     element.value = option;
     select.append(element);
@@ -121,6 +129,130 @@ describe('chat brain selector', () => {
     expect(params.target).toBe('openrappter');
   });
 
+  it('chats with the selected estate Twin instead of the local runtime', async () => {
+    const chat = makeChat();
+    chat.chatTarget = 'estate';
+    chat.selectedEstateBuddyId = 'barry';
+    chat.inputValue = 'Are you alive?';
+
+    const request = vi.spyOn(gateway, 'request').mockResolvedValue({
+      ok: true,
+      buddy: {
+        id: 'barry',
+        name: 'Barry',
+        device: 'local-mac',
+        rappid: null,
+        presence: 'online',
+        status: 'ready',
+        transport: 'local',
+        via_probe: false,
+      },
+      response: 'Barry READY',
+      session_id: 'barry-session',
+    } as never);
+
+    await chat.handleSend();
+
+    expect(request).toHaveBeenCalledWith(
+      'estate.buddies.chat',
+      {
+        buddyId: 'barry',
+        message: 'Are you alive?',
+      },
+      { timeoutMs: 10 * 60_000 },
+    );
+    expect(request.mock.calls.some(([method]) => method === 'chat.send')).toBe(false);
+    expect(chat.messages.at(-1)?.content).toBe('Barry READY');
+    expect(chat.sending).toBe(false);
+  });
+
+  it('creates, verifies, refreshes, and selects a new estate Twin', async () => {
+    const chat = makeChat();
+    chat.chatTarget = 'estate';
+    chat.estateCreateDevice = 'rappter-two';
+    chat.estateCreateName = 'Map Maker';
+    chat.estateCreateRole = 'Build a visual estate map.';
+    chat.estateCreateUi = 'rapplication';
+
+    const request = vi.spyOn(gateway, 'request').mockImplementation(
+      async (method: string) => {
+        if (method === 'estate.buddies.create') {
+          return {
+            ok: true,
+            device: 'rappter-two',
+            presence: 'online',
+            created: {
+              name: 'Map Maker',
+              rappid: 'rappid:@test/map-maker:' + 'a'.repeat(64),
+              ui: 'rapplication',
+            },
+            handshake: { ready: true, response: 'Map Maker READY' },
+          } as never;
+        }
+        return {
+          ok: true,
+          estate: 'Test Estate',
+          devices: ['rappter-two'],
+          buddies: [
+            {
+              id: 'old-map-maker',
+              name: 'Map Maker',
+              device: 'rappter-two',
+              rappid: 'rappid:@test/map-maker:' + 'b'.repeat(64),
+              presence: 'online',
+              status: 'ready',
+              transport: 'ssh-posix',
+              via_probe: false,
+              ui: 'rapplication',
+            },
+            {
+              id: 'map-maker',
+              name: 'Map Maker',
+              device: 'rappter-two',
+              rappid: 'rappid:@test/map-maker:' + 'a'.repeat(64),
+              presence: 'online',
+              status: 'ready',
+              transport: 'ssh-posix',
+              via_probe: false,
+              ui: 'rapplication',
+            },
+          ],
+        } as never;
+      },
+    );
+    const submit = new Event('submit');
+    vi.spyOn(submit, 'preventDefault');
+
+    await chat.handleCreateEstateBuddy(submit);
+
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      'estate.buddies.create',
+      'estate.buddies.list',
+    ]);
+    expect(request.mock.calls[0][1]).toEqual({
+      deviceId: 'rappter-two',
+      name: 'Map Maker',
+      role: 'Build a visual estate map.',
+      ui: 'rapplication',
+    });
+    expect(chat.selectedEstateBuddyId).toBe('map-maker');
+    expect(chat.estateCreateStatus).toContain('online and ready');
+    expect(chat.estateCreateStatus).toContain('default fallback');
+  });
+
+  it('does not create a buddy while an estate chat is in flight', async () => {
+    const chat = makeChat();
+    chat.sending = true;
+    chat.estateCreateDevice = 'rappter-two';
+    chat.estateCreateName = 'Racing Buddy';
+    chat.estateCreateRole = 'Should not start.';
+    const request = vi.spyOn(gateway, 'request');
+
+    await chat.handleCreateEstateBuddy(new Event('submit'));
+
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('remembers the choice across a reload', () => {
     const chat = makeChat();
     chat.handleTargetChange(selectEvent('brainstem'));
@@ -130,6 +262,13 @@ describe('chat brain selector', () => {
     const reopened = makeChat();
     reopened.restoreChatTarget();
     expect(reopened.chatTarget).toBe('brainstem');
+  });
+
+  it('restores the estate target across a reload', () => {
+    localStorage.setItem('openrappter.chat.target', 'estate');
+    const reopened = makeChat();
+    reopened.restoreChatTarget();
+    expect(reopened.chatTarget).toBe('estate');
   });
 
   it('ignores a stored value that is not a brain', () => {

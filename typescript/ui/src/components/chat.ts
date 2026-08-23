@@ -12,6 +12,12 @@ import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import { desktopBridge } from '../services/desktop.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
+import {
+  chatWithEstateBuddy,
+  createEstateBuddy,
+  listEstateBuddies,
+  type EstateBuddy,
+} from '../services/estate-buddies.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
@@ -691,6 +697,91 @@ export class OpenRappterChat extends LitElement {
       cursor: not-allowed;
     }
 
+    .estate-toolbar,
+    .estate-create {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      padding-bottom: 0.75rem;
+    }
+
+    .estate-toolbar .buddy-select {
+      min-width: 220px;
+      flex: 1;
+    }
+
+    .presence-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--error);
+      flex-shrink: 0;
+    }
+
+    .presence-dot.online {
+      background: #22c55e;
+      box-shadow: 0 0 6px rgb(34 197 94 / 60%);
+    }
+
+    .estate-create {
+      align-items: stretch;
+      flex-wrap: wrap;
+      padding: 0.75rem;
+      margin-bottom: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      background: var(--bg-tertiary);
+    }
+
+    .estate-create input,
+    .estate-create select {
+      min-height: 36px;
+      padding: 0.4rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+      font: inherit;
+    }
+
+    .estate-create input[name="role"] {
+      flex: 2 1 280px;
+    }
+
+    .estate-create button,
+    .estate-toolbar button,
+    .estate-toolbar a {
+      min-height: 36px;
+      padding: 0 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+      font: inherit;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .estate-create button:hover,
+    .estate-toolbar button:hover,
+    .estate-toolbar a:hover {
+      border-color: var(--accent);
+    }
+
+    .estate-create-status {
+      flex-basis: 100%;
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+    }
+
+    .estate-note {
+      color: var(--text-secondary);
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+
     .attach-btn {
       display: flex;
       align-items: center;
@@ -922,7 +1013,19 @@ export class OpenRappterChat extends LitElement {
    * so both replies render through this one component instead of needing a
    * second chat window open beside it.
    */
-  @state() private chatTarget: 'openrappter' | 'brainstem' = 'openrappter';
+  @state() private chatTarget: 'openrappter' | 'brainstem' | 'estate' = 'openrappter';
+  @state() private estateBuddies: EstateBuddy[] = [];
+  @state() private estateDeviceIds: string[] = [];
+  @state() private estateLoading = false;
+  @state() private selectedEstateBuddyId = '';
+  @state() private showEstateCreate = false;
+  @state() private creatingEstateBuddy = false;
+  @state() private estateCreateName = '';
+  @state() private estateCreateRole = '';
+  @state() private estateCreateDevice = '';
+  @state() private estateCreateUi: 'auto' | 'chat' | 'rapplication' = 'auto';
+  @state() private estateCreateStatus = '';
+  private estateSessions = new Map<string, string>();
   @state() private sending = false;
   @state() private speechEnabled = false;
   @state() private speechStatus = 'idle';
@@ -981,6 +1084,7 @@ export class OpenRappterChat extends LitElement {
     super.connectedCallback();
     this.restoreChatTarget();
     this.loadSessions();
+    if (this.chatTarget === 'estate') void this.loadEstateBuddies();
 
     // Listen for chat events (streaming deltas + finals)
     gateway.on('chat', this.handleChatEvent);
@@ -1483,6 +1587,10 @@ export class OpenRappterChat extends LitElement {
 
   private async handleSend() {
     if (this.sessionTransitioning) return;
+    if (this.creatingEstateBuddy) {
+      this.error = 'Wait for estate buddy creation to finish before sending.';
+      return;
+    }
     const content = this.inputValue.trim();
     // Allow queueing if busy
     if (this.sending && content) {
@@ -1491,6 +1599,14 @@ export class OpenRappterChat extends LitElement {
       return;
     }
     if (!content) return;
+    if (this.chatTarget === 'estate' && !this.selectedEstateBuddyId) {
+      this.error = 'Choose an online estate buddy before sending.';
+      return;
+    }
+    if (this.chatTarget === 'estate' && this.attachments.length > 0) {
+      this.error = 'Estate buddy chat currently accepts text only.';
+      return;
+    }
 
     this.sending = true;
     const sendGeneration = ++this.sendGeneration;
@@ -1510,6 +1626,11 @@ export class OpenRappterChat extends LitElement {
     };
     this.messages = [...this.messages, userMessage];
     this.scrollToBottom();
+
+    if (this.chatTarget === 'estate') {
+      await this.sendEstateBuddyMessage(content, sendGeneration);
+      return;
+    }
 
     try {
       const sessionKey = this.sessionKey ?? `session_${Date.now()}`;
@@ -1581,6 +1702,50 @@ export class OpenRappterChat extends LitElement {
       if (sendGeneration !== this.sendGeneration) return;
       this.error = (err as Error).message;
       this.sending = false;
+    }
+  }
+
+  private async sendEstateBuddyMessage(
+    content: string,
+    sendGeneration: number,
+  ): Promise<void> {
+    const buddyId = this.selectedEstateBuddyId;
+    const sessionId = this.estateSessions.get(buddyId);
+    try {
+      const result = await chatWithEstateBuddy({
+        buddyId,
+        message: content,
+        ...(sessionId ? { sessionId } : {}),
+      });
+      if (sendGeneration !== this.sendGeneration) return;
+      if (result.session_id) {
+        this.estateSessions.set(buddyId, result.session_id);
+      }
+      this.estateBuddies = this.estateBuddies.map((buddy) =>
+        buddy.id === result.buddy.id ? result.buddy : buddy
+      );
+      this.messages = [
+        ...this.messages,
+        {
+          id: `estate_${Date.now()}`,
+          role: 'assistant',
+          content: result.response,
+          timestamp: Date.now(),
+          streaming: false,
+          commitState: 'committed',
+        },
+      ];
+      this.scrollToBottom();
+    } catch (err) {
+      if (sendGeneration !== this.sendGeneration) return;
+      this.error = (err as Error).message;
+    } finally {
+      if (sendGeneration === this.sendGeneration) {
+        this.sending = false;
+        if (this.messageQueue.length > 0) {
+          setTimeout(() => this.flushQueue(), 100);
+        }
+      }
     }
   }
 
@@ -1837,9 +2002,15 @@ export class OpenRappterChat extends LitElement {
    * believing the brainstem said something it never said.
    */
   private handleTargetChange(e: Event) {
+    if (this.sending || this.creatingEstateBuddy) return;
     const value = (e.target as HTMLSelectElement).value;
-    if (value !== 'openrappter' && value !== 'brainstem') return;
+    if (
+      value !== 'openrappter'
+      && value !== 'brainstem'
+      && value !== 'estate'
+    ) return;
     this.chatTarget = value;
+    if (value === 'estate') void this.loadEstateBuddies();
     try {
       localStorage.setItem(CHAT_TARGET_STORAGE_KEY, value);
     } catch {
@@ -1850,9 +2021,96 @@ export class OpenRappterChat extends LitElement {
   private restoreChatTarget() {
     try {
       const stored = localStorage.getItem(CHAT_TARGET_STORAGE_KEY);
-      if (stored === 'openrappter' || stored === 'brainstem') this.chatTarget = stored;
+      if (
+        stored === 'openrappter'
+        || stored === 'brainstem'
+        || stored === 'estate'
+      ) this.chatTarget = stored;
     } catch {
       // Unreadable storage just means the default.
+    }
+  }
+
+  private async loadEstateBuddies(): Promise<void> {
+    if (this.estateLoading) return;
+    this.estateLoading = true;
+    try {
+      const result = await listEstateBuddies();
+      this.estateBuddies = result.buddies;
+      this.estateDeviceIds = result.devices;
+      const selected = result.buddies.find(
+        (buddy) => buddy.id === this.selectedEstateBuddyId,
+      );
+      if (!selected || selected.presence !== 'online') {
+        this.selectedEstateBuddyId = result.buddies.find(
+          (buddy) => buddy.presence === 'online',
+        )?.id ?? '';
+      }
+      if (!this.estateCreateDevice) {
+        this.estateCreateDevice = result.devices[0] ?? '';
+      }
+      this.error = null;
+    } catch (err) {
+      this.error = `Could not load estate buddies: ${(err as Error).message}`;
+    } finally {
+      this.estateLoading = false;
+    }
+  }
+
+  private handleEstateBuddyChange(e: Event): void {
+    if (this.sending || this.creatingEstateBuddy) return;
+    this.selectedEstateBuddyId = (e.target as HTMLSelectElement).value;
+  }
+
+  private estateDevices(): string[] {
+    return this.estateDeviceIds;
+  }
+
+  private async handleCreateEstateBuddy(e: Event): Promise<void> {
+    e.preventDefault();
+    if (this.creatingEstateBuddy || this.sending) return;
+    this.creatingEstateBuddy = true;
+    this.estateCreateStatus = 'Creating, starting, and verifying the new Twin…';
+    this.error = null;
+    try {
+      const result = await createEstateBuddy({
+        deviceId: this.estateCreateDevice,
+        name: this.estateCreateName,
+        role: this.estateCreateRole,
+        ui: this.estateCreateUi,
+      });
+      await this.loadEstateBuddies();
+      const created = this.estateBuddies.find(
+        (buddy) => buddy.rappid === result.created.rappid,
+      );
+      if (!created || created.presence !== 'online') {
+        throw new Error('The verified buddy did not appear in the live roster');
+      }
+      this.selectedEstateBuddyId = created.id;
+      this.showEstateCreate = false;
+      this.estateCreateStatus =
+        `${created.name} is online and ready on ${created.device}. `
+        + (
+          result.created.ui === 'rapplication'
+            ? 'Its custom UI is active; this chat remains the default fallback.'
+            : 'Default chat is active.'
+        );
+      this.estateCreateName = '';
+      this.estateCreateRole = '';
+      this.messages = [
+        ...this.messages,
+        {
+          id: `estate_created_${Date.now()}`,
+          role: 'system',
+          content: this.estateCreateStatus,
+          timestamp: Date.now(),
+        },
+      ];
+    } catch (err) {
+      this.error = `Could not create estate buddy: ${(err as Error).message}`;
+      this.estateCreateStatus = '';
+    } finally {
+      this.creatingEstateBuddy = false;
     }
   }
 
@@ -2052,6 +2310,136 @@ export class OpenRappterChat extends LitElement {
     `;
   }
 
+  private renderEstateControls() {
+    if (this.chatTarget !== 'estate') return nothing;
+    const selected = this.estateBuddies.find(
+      (buddy) => buddy.id === this.selectedEstateBuddyId,
+    );
+    const devices = this.estateDevices();
+    return html`
+      <div class="estate-toolbar">
+        <span class="presence-dot ${selected?.presence === 'online' ? 'online' : ''}"></span>
+        <select
+          class="brain-select buddy-select"
+          aria-label="Estate buddy"
+          .value=${this.selectedEstateBuddyId}
+          @change=${this.handleEstateBuddyChange}
+          ?disabled=${this.sending
+            || this.creatingEstateBuddy
+            || this.estateLoading}
+        >
+          ${this.estateLoading
+            ? html`<option value="">Refreshing estate…</option>`
+            : this.estateBuddies.length === 0
+              ? html`<option value="">No buddies available</option>`
+              : this.estateBuddies.map((buddy) => html`
+                  <option
+                    value=${buddy.id}
+                    ?disabled=${buddy.presence !== 'online'}
+                  >${buddy.presence === 'online' ? '●' : '○'}
+                    ${buddy.name} · ${buddy.device}</option>
+                `)}
+        </select>
+        <button
+          type="button"
+          @click=${this.loadEstateBuddies}
+          ?disabled=${this.estateLoading
+            || this.sending
+            || this.creatingEstateBuddy}
+          title="Refresh verified RAPP-Herdr presence"
+        >↻</button>
+        <button
+          type="button"
+          @click=${() => (this.showEstateCreate = !this.showEstateCreate)}
+          ?disabled=${this.sending || this.creatingEstateBuddy}
+        >+ Create AI</button>
+        ${selected?.application_url
+          ? html`<a
+              href=${selected.application_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open custom UI</a>`
+          : selected?.ui === 'rapplication'
+            ? html`<span class="estate-note">Custom UI on ${selected.device}</span>`
+            : nothing}
+        ${selected
+          ? html`<span class="estate-note">Default chat fallback active</span>`
+          : nothing}
+      </div>
+      ${this.showEstateCreate
+        ? html`
+            <form class="estate-create" @submit=${this.handleCreateEstateBuddy}>
+              <select
+                aria-label="Buddy device"
+                .value=${this.estateCreateDevice}
+                @change=${(event: Event) => {
+                  this.estateCreateDevice = (event.target as HTMLSelectElement).value;
+                }}
+                ?disabled=${this.creatingEstateBuddy || this.sending}
+                required
+              >
+                ${devices.map((device) => html`
+                  <option value=${device}>${device}</option>
+                `)}
+              </select>
+              <input
+                name="name"
+                aria-label="Buddy name"
+                placeholder="Buddy name"
+                maxlength="80"
+                .value=${this.estateCreateName}
+                @input=${(event: Event) => {
+                  this.estateCreateName = (event.target as HTMLInputElement).value;
+                }}
+                ?disabled=${this.creatingEstateBuddy || this.sending}
+                required
+              />
+              <input
+                name="role"
+                aria-label="Buddy role"
+                placeholder="What should this Twin do?"
+                maxlength="4000"
+                .value=${this.estateCreateRole}
+                @input=${(event: Event) => {
+                  this.estateCreateRole = (event.target as HTMLInputElement).value;
+                }}
+                ?disabled=${this.creatingEstateBuddy || this.sending}
+                required
+              />
+              <select
+                aria-label="Buddy interface"
+                .value=${this.estateCreateUi}
+                @change=${(event: Event) => {
+                  const value = (event.target as HTMLSelectElement).value;
+                  if (
+                    value === 'auto'
+                    || value === 'chat'
+                    || value === 'rapplication'
+                  ) this.estateCreateUi = value;
+                }}
+                ?disabled=${this.creatingEstateBuddy || this.sending}
+              >
+                <option value="auto">Auto UI</option>
+                <option value="chat">Default chat</option>
+                <option value="rapplication">Custom rapplication</option>
+              </select>
+              <button
+                type="submit"
+                ?disabled=${this.creatingEstateBuddy
+                  || this.sending
+                  || !this.estateCreateDevice
+                  || !this.estateCreateName.trim()
+                  || !this.estateCreateRole.trim()}
+              >${this.creatingEstateBuddy ? 'Verifying…' : 'Create + verify'}</button>
+              ${this.estateCreateStatus
+                ? html`<span class="estate-create-status">${this.estateCreateStatus}</span>`
+                : nothing}
+            </form>
+          `
+        : nothing}
+    `;
+  }
+
   render() {
     const groups = this.groupMessages(this.messages);
     const hasToolCalls = this.toolCalls.length > 0;
@@ -2092,10 +2480,13 @@ export class OpenRappterChat extends LitElement {
             ${groups.length === 0
               ? html`
                   <div class="empty-state">
-                    <div class="empty-state-icon">🦖</div>
+                    <div class="empty-state-icon">${this.chatTarget === 'estate' ? '💬' : '🦖'}</div>
                     <div class="empty-state-text">
-                      Start a conversation with OpenRappter.<br />
-                      Ask questions, run commands, or just chat!
+                      ${this.chatTarget === 'estate'
+                        ? html`Choose a verified estate buddy and start chatting.<br />
+                            A reply means that Twin is live, online, and ready.`
+                        : html`Start a conversation with OpenRappter.<br />
+                            Ask questions, run commands, or just chat!`}
                     </div>
                   </div>
                 `
@@ -2128,6 +2519,7 @@ export class OpenRappterChat extends LitElement {
             : nothing}
 
           <div class="input-area">
+            ${this.renderEstateControls()}
             ${this.renderAttachmentStrip()}
             <div class="input-container">
               <select
@@ -2135,16 +2527,21 @@ export class OpenRappterChat extends LitElement {
                 title="Which brain answers"
                 .value=${this.chatTarget}
                 @change=${this.handleTargetChange}
-                ?disabled=${this.sessionTransitioning}
+                ?disabled=${this.sessionTransitioning
+                  || this.sending
+                  || this.creatingEstateBuddy}
               >
                 <option value="openrappter">🦖 OpenRappter</option>
                 <option value="brainstem">🧠 Brainstem</option>
+                <option value="estate">💬 RAPP Estate</option>
               </select>
-              <button
-                class="attach-btn"
-                @click=${this.handleAttachClick}
-                title="Attach files"
-              >📎</button>
+              ${this.chatTarget !== 'estate'
+                ? html`<button
+                    class="attach-btn"
+                    @click=${this.handleAttachClick}
+                    title="Attach files"
+                  >📎</button>`
+                : nothing}
               <input
                 class="hidden-input"
                 type="file"
@@ -2153,7 +2550,11 @@ export class OpenRappterChat extends LitElement {
               />
               <textarea
                 class="${this.draggingOver ? 'drag-over' : ''}"
-                placeholder=${this.sending ? 'Type to queue a message...' : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
+                placeholder=${this.sending
+                  ? 'Type to queue a message...'
+                  : this.chatTarget === 'estate'
+                    ? 'Message this estate Twin (↩ to send)'
+                    : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
                 .value=${this.inputValue}
                 @input=${this.handleInput}
                 @keydown=${this.handleKeyDown}
@@ -2161,7 +2562,8 @@ export class OpenRappterChat extends LitElement {
                 @dragover=${this.handleDragOver}
                 @dragleave=${this.handleDragLeave}
                 @drop=${this.handleDrop}
-                ?disabled=${this.sessionTransitioning}
+                ?disabled=${this.sessionTransitioning
+                  || this.creatingEstateBuddy}
                 rows="1"
               ></textarea>
               ${this.sending && this.activeRunId
@@ -2170,7 +2572,10 @@ export class OpenRappterChat extends LitElement {
               <button
                 class="send-btn"
                 @click=${this.handleSend}
-                ?disabled=${this.sessionTransitioning || (!this.inputValue.trim() && !this.sending)}
+                ?disabled=${this.sessionTransitioning
+                  || this.creatingEstateBuddy
+                  || (this.chatTarget === 'estate' && !this.selectedEstateBuddyId)
+                  || (!this.inputValue.trim() && !this.sending)}
               >
                 ${this.sending ? 'Queue' : 'Send'}<span class="btn-kbd">↵</span>
               </button>

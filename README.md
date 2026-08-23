@@ -232,6 +232,13 @@ runtimes are tested against -- its `required` arrays drive the assertions in
 `typescript/src/__tests__/integration/rapp-chat-contract.test.ts`, so a key
 added there fails both suites until both runtimes emit it.
 
+The chat target picker can also project a RAPP-Herdr estate. It lists verified
+Twins, chats through Herdr's central routing, and creates a device-local Twin
+with default chat or a generated rapplication. A buddy is shown online only
+after its identity, health, and chat handshake succeeds. The gateway reads
+`~/.config/rapp-herdr/estate.json` and `~/.local/bin/rapp-herdr` by default;
+override those paths with `RAPP_HERDR_ESTATE` and `RAPP_HERDR_BIN`.
+
 ```bash
 # Install and go
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash

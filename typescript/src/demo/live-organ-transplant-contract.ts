@@ -52,6 +52,11 @@ export const REQUIRED_TRANSPLANT_CAUSAL_STEPS = [
     status: "started",
   },
   {
+    id: "valid-import-commit-started",
+    kind: "agent.import.commit.started",
+    status: "started",
+  },
+  {
     id: "valid-import-completed",
     kind: "agent.import.completed",
     status: "success",
@@ -1892,6 +1897,7 @@ export function evaluateTransplantCausalTrace(
   const gatewayCompleted = byKind("gateway.agent.import.completed");
   const gatewayFailed = byKind("gateway.agent.import.failed");
   const importStarts = byKind("agent.import.started");
+  const importCommitStarts = byKind("agent.import.commit.started");
   const importCompleted = byKind("agent.import.completed");
   const executeStarts = byKind("agent.execute.started");
   const executeCompleted = byKind("agent.execute.completed");
@@ -1922,6 +1928,10 @@ export function evaluateTransplantCausalTrace(
     "expected exactly one gateway.agent.import.failed",
   );
   fail(importStarts.length === 2, "expected exactly two agent.import.started");
+  fail(
+    importCommitStarts.length === 1,
+    "expected exactly one agent.import.commit.started",
+  );
   fail(
     importCompleted.length === 1,
     "expected exactly one agent.import.completed",
@@ -1973,6 +1983,11 @@ export function evaluateTransplantCausalTrace(
       metadataString(event, "candidateSourceSha256") ===
       expected.validFixtureSha256,
   );
+  const validImportCommitStarted = importCommitStarts.find(
+    (event) =>
+      metadataString(event, "candidateSourceSha256") ===
+      expected.validFixtureSha256,
+  );
   const validGatewayCompleted = gatewayCompleted[0];
   const invalidGatewayFailed = gatewayFailed[0];
   const invalidImportStarted = importStarts.find(
@@ -2000,6 +2015,10 @@ export function evaluateTransplantCausalTrace(
     },
     { id: "valid-gateway-started", event: validGatewayStarted },
     { id: "valid-import-started", event: validImportStarted },
+    {
+      id: "valid-import-commit-started",
+      event: validImportCommitStarted,
+    },
     { id: "valid-import-completed", event: validImportCompleted },
     { id: "valid-gateway-completed", event: validGatewayCompleted },
     { id: "first-execute-started", event: firstExecuteStarted },
@@ -2100,8 +2119,9 @@ export function evaluateTransplantCausalTrace(
     "import starts must be children of their gateway request starts",
   );
   fail(
-    validImportCompleted?.parentId === validImportStarted?.id,
-    "valid import completion is not parented by its start",
+    validImportCommitStarted?.parentId === validImportStarted?.id &&
+      validImportCompleted?.parentId === validImportStarted?.id,
+    "valid import commit evidence or completion is not parented by its start",
   );
   fail(
     firstExecuteCompleted?.parentId === firstExecuteStarted?.id,
@@ -2188,6 +2208,8 @@ export function evaluateTransplantCausalTrace(
   );
   fail(
     metadataString(validImportStarted, "requestId") === validRequestId &&
+      metadataString(validImportCommitStarted, "requestId") ===
+        validRequestId &&
       metadataString(validImportCompleted, "requestId") === validRequestId &&
       metadataString(invalidImportStarted, "requestId") === invalidRequestId &&
       metadataString(invalidImportFailed, "requestId") === invalidRequestId,
@@ -2195,8 +2217,10 @@ export function evaluateTransplantCausalTrace(
   );
   fail(
     metadataString(validImportStarted, "candidateSourceSha256") ===
-      expected.validFixtureSha256,
-    "valid import start candidate hash mismatch",
+      expected.validFixtureSha256 &&
+      metadataString(validImportCommitStarted, "candidateSourceSha256") ===
+        expected.validFixtureSha256,
+    "valid import start or commit-barrier candidate hash mismatch",
   );
   fail(
     metadataString(validImportCompleted, "candidateSourceSha256") ===

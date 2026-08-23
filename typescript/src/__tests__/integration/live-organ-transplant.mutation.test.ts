@@ -241,6 +241,7 @@ const PINNED_MUTATION_IDS = [
   "causal-missing-demo-started",
   "causal-missing-valid-gateway-started",
   "causal-missing-valid-import-started",
+  "causal-missing-valid-import-commit-started",
   "causal-missing-valid-import-completed",
   "causal-missing-valid-gateway-completed",
   "causal-missing-first-execute-started",
@@ -406,7 +407,7 @@ function makeFlightEvent(
     traceId: "transplant-trace",
     parentId: options.parentId,
     timestamp:
-      sequence === 10
+      sequence === 11
         ? "2026-08-22T01:40:00.000Z"
         : `2026-08-22T01:41:${String(sequence).padStart(2, "0")}.000Z`,
     kind,
@@ -469,7 +470,14 @@ function makeFlightEvents(
         requestId: validRequestId,
       },
     }),
-    makeFlightEvent(6, "agent.import.completed", "success", {
+    makeFlightEvent(6, "agent.import.commit.started", "started", {
+      parentId: "flight-event-5",
+      metadata: {
+        candidateSourceSha256: validHash,
+        requestId: validRequestId,
+      },
+    }),
+    makeFlightEvent(7, "agent.import.completed", "success", {
       parentId: "flight-event-5",
       agentName: "ChecksumAgent",
       metadata: {
@@ -479,7 +487,7 @@ function makeFlightEvents(
         requestId: validRequestId,
       },
     }),
-    makeFlightEvent(7, "gateway.agent.import.completed", "success", {
+    makeFlightEvent(8, "gateway.agent.import.completed", "success", {
       parentId: "flight-event-4",
       source: "gateway",
       metadata: {
@@ -490,13 +498,13 @@ function makeFlightEvents(
         requestId: validRequestId,
       },
     }),
-    makeFlightEvent(8, "agent.execute.started", "started", {
+    makeFlightEvent(9, "agent.execute.started", "started", {
       parentId: root,
       source: "basic-agent",
       agentName: "ChecksumAgent",
     }),
-    makeFlightEvent(9, "agent.execute.completed", "success", {
-      parentId: "flight-event-8",
+    makeFlightEvent(10, "agent.execute.completed", "success", {
+      parentId: "flight-event-9",
       source: "basic-agent",
       agentName: "ChecksumAgent",
       payload: {
@@ -506,7 +514,7 @@ function makeFlightEvents(
         },
       },
     }),
-    makeFlightEvent(10, "gateway.agent.import.started", "started", {
+    makeFlightEvent(11, "gateway.agent.import.started", "started", {
       parentId: root,
       source: "gateway",
       metadata: {
@@ -520,15 +528,15 @@ function makeFlightEvents(
         requestId: invalidRequestId,
       },
     }),
-    makeFlightEvent(11, "agent.import.started", "started", {
-      parentId: "flight-event-10",
+    makeFlightEvent(12, "agent.import.started", "started", {
+      parentId: "flight-event-11",
       metadata: {
         candidateSourceSha256: invalidHash,
         requestId: invalidRequestId,
       },
     }),
-    makeFlightEvent(12, "agent.import.failed", "error", {
-      parentId: "flight-event-11",
+    makeFlightEvent(13, "agent.import.failed", "error", {
+      parentId: "flight-event-12",
       agentName: "ChecksumAgent",
       metadata: {
         candidateSourceSha256: invalidHash,
@@ -537,8 +545,8 @@ function makeFlightEvents(
         requestId: invalidRequestId,
       },
     }),
-    makeFlightEvent(13, "gateway.agent.import.failed", "error", {
-      parentId: "flight-event-10",
+    makeFlightEvent(14, "gateway.agent.import.failed", "error", {
+      parentId: "flight-event-11",
       source: "gateway",
       metadata: {
         httpStatus: 400,
@@ -550,13 +558,13 @@ function makeFlightEvents(
         requestId: invalidRequestId,
       },
     }),
-    makeFlightEvent(14, "agent.execute.started", "started", {
+    makeFlightEvent(15, "agent.execute.started", "started", {
       parentId: root,
       source: "basic-agent",
       agentName: "ChecksumAgent",
     }),
-    makeFlightEvent(15, "agent.execute.completed", "success", {
-      parentId: "flight-event-14",
+    makeFlightEvent(16, "agent.execute.completed", "success", {
+      parentId: "flight-event-15",
       source: "basic-agent",
       agentName: "ChecksumAgent",
       payload: {
@@ -566,16 +574,16 @@ function makeFlightEvents(
         },
       },
     }),
-    makeFlightEvent(16, "agent.import.authorization.completed", "success", {
+    makeFlightEvent(17, "agent.import.authorization.completed", "success", {
       parentId: root,
       source: "agent-import-authorizer",
       metadata: { nonce, mode: "caller-supplied" },
     }),
-    makeFlightEvent(17, "demo.transplant.completed", "success", {
+    makeFlightEvent(18, "demo.transplant.completed", "success", {
       parentId: root,
       metadata: { nonce },
     }),
-    makeFlightEvent(18, "trace.completed", "success", {
+    makeFlightEvent(19, "trace.completed", "success", {
       parentId: root,
       source: "runtime",
     }),
@@ -1077,6 +1085,7 @@ function createBaseline(): LiveOrganTransplantEvaluationInput {
           "import-authorization-started",
           "valid-gateway-started",
           "valid-import-started",
+          "valid-import-commit-started",
           "valid-import-completed",
           "valid-gateway-completed",
           "first-execute-started",
@@ -2288,7 +2297,7 @@ const MUTATIONS: readonly MutationProbe[] = [
     (input) => {
       const events =
         requireObservations(input).exactCommandFlight.databaseEvents;
-      [events[5], events[7]] = [events[7]!, events[5]!];
+      [events[6], events[8]] = [events[8]!, events[6]!];
     },
     {
       exactFailureIds: [
@@ -2391,7 +2400,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.import.started" && event.sequence === 11,
+          event.kind === "agent.import.started" && event.sequence === 12,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -2444,7 +2453,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 9,
+          event.kind === "agent.execute.completed" && event.sequence === 10,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -2468,7 +2477,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 15,
+          event.kind === "agent.execute.completed" && event.sequence === 16,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -2837,7 +2846,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 9,
+          event.kind === "agent.execute.completed" && event.sequence === 10,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -2865,7 +2874,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 9,
+          event.kind === "agent.execute.completed" && event.sequence === 10,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return { ...body, source: "helper" };
@@ -2886,7 +2895,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 9,
+          event.kind === "agent.execute.completed" && event.sequence === 10,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -2918,7 +2927,7 @@ const MUTATIONS: readonly MutationProbe[] = [
       mutateExactCommandEvent(
         input,
         (event) =>
-          event.kind === "agent.execute.completed" && event.sequence === 9,
+          event.kind === "agent.execute.completed" && event.sequence === 10,
         (event) => {
           const { contentHash: _hash, ...body } = event;
           return {
@@ -3133,6 +3142,12 @@ const MUTATIONS: readonly MutationProbe[] = [
         false,
       ],
       ["causal-missing-valid-import-started", "agent.import.started", 0, false],
+      [
+        "causal-missing-valid-import-commit-started",
+        "agent.import.commit.started",
+        0,
+        false,
+      ],
       [
         "causal-missing-valid-import-completed",
         "agent.import.completed",
@@ -4119,8 +4134,8 @@ describe("live organ transplant mutation gate", () => {
     const input = createBaseline();
     const observations = requireObservations(input);
     const events = observations.exactCommandFlight.databaseEvents;
-    expect(events[9]!.timestamp < events[8]!.timestamp).toBe(true);
-    expect(events[9]!.sequence).toBeGreaterThan(events[8]!.sequence);
+    expect(events[10]!.timestamp < events[9]!.timestamp).toBe(true);
+    expect(events[10]!.sequence).toBeGreaterThan(events[9]!.sequence);
     expect(evaluateLiveOrganTransplant(input).pass).toBe(true);
   });
 

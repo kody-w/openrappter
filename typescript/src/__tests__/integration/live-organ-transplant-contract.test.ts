@@ -104,6 +104,7 @@ const PINNED_CAUSAL_STEP_IDS = [
   "import-authorization-started",
   "valid-gateway-started",
   "valid-import-started",
+  "valid-import-commit-started",
   "valid-import-completed",
   "valid-gateway-completed",
   "first-execute-started",

@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { extname, resolve } from 'node:path';
+import { basename, dirname, extname, resolve } from 'node:path';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../../..');
@@ -8,199 +9,307 @@ const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
 const boundary = read('docs/openrappter-personal-and-hosted-services.md');
 const notice = read('NOTICE');
 const seamText = read('contracts/xpedition-extension-v1.json');
-const seam = JSON.parse(seamText) as Schema;
+const seam = JSON.parse(seamText) as {
+  additionalProperties: boolean;
+  required: string[];
+  properties: Record<string, unknown>;
+};
 const fixtures = JSON.parse(
   read('contracts/xpedition-extension-v1-fixtures.json'),
 ) as {
   accepted: Record<string, unknown>[];
   rejected: { reason: string; value: Record<string, unknown> }[];
 };
+const ajv = new Ajv2020({ allErrors: true, strict: true });
+const validateDescriptor = ajv.compile(seam);
 
-interface SchemaProperty {
-  $ref?: string;
-  type?: string;
-  const?: number;
-  pattern?: string;
-  enum?: string[];
-  minLength?: number;
-  maxLength?: number;
+interface TrackedEntry {
+  mode: string;
+  path: string;
 }
 
-interface Schema {
-  additionalProperties: boolean;
-  $defs: Record<string, SchemaProperty>;
-  required: string[];
-  properties: Record<string, SchemaProperty>;
-}
-
-function trackedFiles(): string[] {
-  return execFileSync('git', ['ls-files', '-z'], {
+function trackedEntries(): TrackedEntry[] {
+  return execFileSync('git', ['ls-files', '--stage', '-z'], {
     cwd: root,
     encoding: 'utf8',
-  }).split('\0').filter(Boolean);
+  }).split('\0').filter(Boolean).map((entry) => {
+    const match = /^(\d{6}) [0-9a-f]+ \d\t(.+)$/.exec(entry);
+    if (!match) throw new Error(`Unexpected git ls-files entry: ${entry}`);
+    return { mode: match[1], path: match[2] };
+  });
 }
 
-const SHIPPING_EXTENSIONS = new Set([
+const repositoryEntries = trackedEntries();
+const repositoryFiles = repositoryEntries.map(({ path }) => path);
+const trackedExecutablePaths = new Set(
+  repositoryEntries
+    .filter(({ mode }) => mode === '100755')
+    .map(({ path }) => path),
+);
+
+function trackedFiles(): string[] {
+  return [...repositoryFiles];
+}
+
+const EXECUTABLE_SOURCE_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
   '.cts',
   '.js',
+  '.jsx',
   '.cjs',
   '.mjs',
   '.py',
   '.swift',
   '.sh',
   '.ps1',
+  '.bat',
+  '.cmd',
   '.rb',
+  '.scpt',
   '.html',
   '.css',
 ]);
 
-const DELIBERATE_EXCLUSIONS = [
-  '/__tests__/',
-  '/tests/',
-  '/fixtures/',
-  '/__fixtures__/',
-  '/node_modules/',
-  '/vendor/',
-  '/dist/',
-  '/build/',
-];
+const PACKAGED_TEXT_EXTENSIONS = new Set([
+  ...EXECUTABLE_SOURCE_EXTENSIONS,
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.txt',
+  '.md',
+]);
 
-interface InventoryGroup {
-  name: string;
-  includes(path: string): boolean;
+const MANIFEST_PATTERN =
+  /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|requirements[^/]*\.txt|Pipfile(?:\.lock)?|poetry\.lock|Package\.(?:swift|resolved)|Cargo\.(?:toml|lock)|go\.(?:mod|sum)|Gemfile(?:\.lock)?)$/;
+
+const PUBLIC_BOUNDARY_FILES = new Set([
+  'contracts/xpedition-extension-v1.json',
+  'contracts/xpedition-extension-v1-fixtures.json',
+  'docs/openrappter-personal-and-hosted-services.md',
+  'typescript/src/__tests__/docs/open-commercial-boundary.test.ts',
+]);
+
+interface ExclusionRule {
+  reason: string;
+  matches(path: string): boolean;
 }
 
-const SHIPPING_SURFACES: InventoryGroup[] = [
-  { name: 'typescript-core', includes: (path) => path.startsWith('typescript/src/') },
-  { name: 'typescript-ui', includes: (path) => path.startsWith('typescript/ui/src/') },
+const AUDITED_EXCLUSIONS: ExclusionRule[] = [
   {
-    name: 'typescript-desktop',
-    includes: (path) => path.startsWith('typescript/desktop/src/'),
+    reason:
+      'boundary documentation and adversarial fixtures may name the private service descriptively',
+    matches: (path) =>
+      path === 'docs/openrappter-personal-and-hosted-services.md' ||
+      path === 'contracts/xpedition-extension-v1-fixtures.json',
   },
-  { name: 'beta-electron', includes: (path) => path.startsWith('beta/electron/') },
-  { name: 'beta-frontier', includes: (path) => path.startsWith('beta/frontier/') },
-  { name: 'beta-scripts', includes: (path) => path.startsWith('beta/scripts/') },
-  { name: 'beta-ui', includes: (path) => path.startsWith('beta/ui/') },
   {
-    name: 'python-runtime',
-    includes: (path) =>
+    reason: 'test code is not shipped as runtime or installer code',
+    matches: (path) =>
+      /(^|\/)(?:tests?|__tests__)(\/|$)/.test(path) ||
+      /(?:^|\/)[^/]+\.test\.[^.]+$/.test(path),
+  },
+  {
+    reason: 'fixture corpora are inert test inputs, not packaged runtime code',
+    matches: (path) => /(^|\/)(?:fixtures?|__fixtures__)(\/|$)/.test(path),
+  },
+  {
+    reason: 'generated build output is checked through its authored source',
+    matches: (path) =>
+      /(^|\/)(?:dist|release|coverage|generated)(\/|$)/.test(path),
+  },
+  {
+    reason: 'vendored dependencies are governed by dependency manifests',
+    matches: (path) => /(^|\/)(?:node_modules|vendor)(\/|$)/.test(path),
+  },
+];
+
+interface PackageShipRules {
+  base: string;
+  include: RegExp[];
+  exclude: RegExp[];
+}
+
+function fileRuleRegex(rule: string): RegExp {
+  const escaped = rule
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replaceAll('**', '\0')
+    .replaceAll('*', '[^/]*')
+    .replaceAll('\0', '.*');
+  return new RegExp(`^${escaped}${rule.endsWith('/') ? '.*' : ''}$`);
+}
+
+const packageShipRules: PackageShipRules[] = repositoryFiles
+  .filter((path) => basename(path) === 'package.json')
+  .flatMap((path) => {
+    const manifest = JSON.parse(read(path)) as {
+      files?: string[];
+      build?: { files?: string[] };
+    };
+    const rules = [...(manifest.files ?? []), ...(manifest.build?.files ?? [])]
+      .filter((rule) => !rule.startsWith('node_modules/'));
+    if (rules.length === 0) return [];
+    return [{
+      base: dirname(path) === '.' ? '' : `${dirname(path)}/`,
+      include: rules
+        .filter((rule) => !rule.startsWith('!'))
+        .map(fileRuleRegex),
+      exclude: rules
+        .filter((rule) => rule.startsWith('!'))
+        .map((rule) => fileRuleRegex(rule.slice(1))),
+    }];
+  });
+
+function packageShips(path: string): boolean {
+  return packageShipRules.some(({ base, include, exclude }) => {
+    if (!path.startsWith(base)) return false;
+    const relative = path.slice(base.length);
+    return include.some((pattern) => pattern.test(relative)) &&
+      !exclude.some((pattern) => pattern.test(relative));
+  });
+}
+
+function isEligibleTrackedPath(path: string): boolean {
+  if (PUBLIC_BOUNDARY_FILES.has(path)) return true;
+  if (MANIFEST_PATTERN.test(path)) return true;
+  if (trackedExecutablePaths.has(path)) return true;
+  if (EXECUTABLE_SOURCE_EXTENSIONS.has(extname(path))) return true;
+  return packageShips(path) && PACKAGED_TEXT_EXTENSIONS.has(extname(path));
+}
+
+function exclusionFor(path: string): ExclusionRule | undefined {
+  return AUDITED_EXCLUSIONS.find((rule) => rule.matches(path));
+}
+
+interface Inventory {
+  eligible: string[];
+  scanned: string[];
+  excluded: Map<string, string>;
+}
+
+function buildInventory(paths: string[]): Inventory {
+  const eligible = paths.filter(isEligibleTrackedPath);
+  const excluded = new Map<string, string>();
+  const scanned: string[] = [];
+  for (const path of eligible) {
+    if (MANIFEST_PATTERN.test(path)) {
+      scanned.push(path);
+      continue;
+    }
+    const exclusion = exclusionFor(path);
+    if (exclusion) excluded.set(path, exclusion.reason);
+    else scanned.push(path);
+  }
+  return { eligible, scanned, excluded };
+}
+
+function unclassifiedEligiblePaths(
+  paths: string[],
+  scanned: ReadonlySet<string>,
+  excluded: ReadonlySet<string>,
+): string[] {
+  return paths.filter((path) =>
+    isEligibleTrackedPath(path) &&
+    !scanned.has(path) &&
+    !excluded.has(path)
+  );
+}
+
+interface RootAssertion {
+  name: string;
+  matches(path: string): boolean;
+}
+
+// Assertions only: these do not decide what gets scanned. Eligibility is
+// extension/package driven, so a new executable path is covered by default.
+const KNOWN_SHIPPING_ROOTS: RootAssertion[] = [
+  { name: 'TypeScript runtime', matches: (path) => path.startsWith('typescript/src/') },
+  { name: 'TypeScript UI', matches: (path) => path.startsWith('typescript/ui/src/') },
+  {
+    name: 'TypeScript desktop',
+    matches: (path) => path.startsWith('typescript/desktop/src/'),
+  },
+  { name: 'beta Electron', matches: (path) => path.startsWith('beta/electron/') },
+  { name: 'beta frontier', matches: (path) => path.startsWith('beta/frontier/') },
+  { name: 'beta scripts', matches: (path) => path.startsWith('beta/scripts/') },
+  { name: 'beta UI', matches: (path) => path.startsWith('beta/ui/') },
+  { name: 'beta packaged resources', matches: (path) => path.startsWith('beta/resources/') },
+  {
+    name: 'TypeScript packaged skills',
+    matches: (path) => path.startsWith('typescript/skills/'),
+  },
+  {
+    name: 'Python runtime',
+    matches: (path) =>
       path.startsWith('python/openrappter/') ||
       path.startsWith('python/nanorappter/'),
   },
+  { name: 'brainstem runtime', matches: (path) => path.startsWith('rapp_brainstem/') },
+  { name: 'macOS Swift', matches: (path) => path.startsWith('macos/Sources/') },
+  { name: 'root tools', matches: (path) => path.startsWith('tools/') },
+  { name: 'root scripts', matches: (path) => path.startsWith('scripts/') },
   {
-    name: 'brainstem-runtime',
-    includes: (path) => path.startsWith('rapp_brainstem/'),
-  },
-  { name: 'macos-swift', includes: (path) => path.startsWith('macos/Sources/') },
-  {
-    name: 'installers-and-scripts',
-    includes: (path) =>
-      path.startsWith('scripts/') ||
-      path.startsWith('typescript/bin/') ||
-      path.startsWith('typescript/scripts/') ||
-      path.startsWith('typescript/desktop/scripts/') ||
-      path.startsWith('python/scripts/') ||
+    name: 'installers',
+    matches: (path) =>
+      /(^|\/)(?:install|install-pinned)\.(?:sh|ps1|bat|cmd)$/.test(path) ||
       path.startsWith('macos/scripts/') ||
-      path.startsWith('macos/homebrew/') ||
-      path === 'install.sh' ||
-      path === 'install.ps1' ||
-      path === 'install-pinned.sh' ||
-      path === 'beta/install.sh' ||
-      path === 'docs/install.sh' ||
-      path === 'docs/install.ps1',
+      path.startsWith('typescript/desktop/scripts/'),
   },
 ];
 
-const MANIFEST_PATTERN =
-  /(^|\/)(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|pyproject\.toml|requirements[^/]*\.txt|Package\.swift)$/;
-
-const MANIFEST_GROUPS: InventoryGroup[] = [
+const KNOWN_MANIFEST_ROOTS: RootAssertion[] = [
   {
-    name: 'typescript-package',
-    includes: (path) => /^typescript\/(?:package|npm-shrinkwrap)/.test(path),
+    name: 'TypeScript package',
+    matches: (path) => /^typescript\/(?:package|npm-shrinkwrap)/.test(path),
   },
   {
-    name: 'typescript-ui-package',
-    includes: (path) => path.startsWith('typescript/ui/package'),
+    name: 'TypeScript UI package',
+    matches: (path) => path.startsWith('typescript/ui/package'),
   },
   {
-    name: 'typescript-desktop-package',
-    includes: (path) => path.startsWith('typescript/desktop/package'),
+    name: 'TypeScript desktop package',
+    matches: (path) => path.startsWith('typescript/desktop/package'),
   },
+  { name: 'beta package', matches: (path) => /^beta\/package/.test(path) },
   {
-    name: 'beta-package',
-    includes: (path) => /^beta\/package/.test(path),
+    name: 'beta e2e package',
+    matches: (path) => path === 'beta/tests/e2e/package.json',
   },
+  { name: 'Python package', matches: (path) => path === 'python/pyproject.toml' },
   {
-    name: 'beta-e2e-package',
-    includes: (path) => path === 'beta/tests/e2e/package.json',
+    name: 'brainstem requirements',
+    matches: (path) => path.startsWith('rapp_brainstem/requirements'),
   },
-  {
-    name: 'python-package',
-    includes: (path) => path === 'python/pyproject.toml',
-  },
-  {
-    name: 'brainstem-package',
-    includes: (path) => path.startsWith('rapp_brainstem/requirements'),
-  },
-  {
-    name: 'macos-package',
-    includes: (path) => path === 'macos/Package.swift',
-  },
+  { name: 'macOS package', matches: (path) => path === 'macos/Package.swift' },
 ];
 
-const FORBIDDEN_RUNTIME_PATTERNS: { name: string; pattern: RegExp }[] = [
+interface LeakagePattern {
+  name: string;
+  pattern: RegExp;
+}
+
+const FORBIDDEN_RUNTIME_PATTERNS: LeakagePattern[] = [
   {
-    name: 'proprietary package scope',
-    pattern: /@(?:rapterbox|rapteros)\//i,
+    name: 'RapterOS or RapterBox private identity',
+    pattern: /rapteros|rapterbox/i,
   },
   {
-    name: 'proprietary Python import',
-    pattern: /(?:from|import)\s+rapteros(?:[.\s]|$)/i,
-  },
-  {
-    name: 'private service URL',
+    name: 'private tenant/billing/control-plane contract',
     pattern:
-      /https?:\/\/(?:[^/"'\s]*\.)?(?:rapteros|rapterbox)\.|https?:\/\/github\.com\/(?:rapterbox|rapteros)(?:\/|$)/i,
+      /\b(?:TenantContext|TenantRepository|TenantStore|TenantScoped(?:Query|Repository)|BillingProvider|BillingWebhook|Entitlement(?:Contract|Provider|Service)|ControlPlane(?:Client|Server|Service|Repository))\b/i,
   },
   {
-    name: 'private API path',
+    name: 'private API endpoint marker',
     pattern:
-      /['"`]\/(?:(?:api\/)?v\d+\/)?(?:tenants?|billing|entitlements?|control-plane)(?:\/|['"`])/i,
+      /['"`]\/(?:(?:api\/)?v\d+\/)(?:tenants?|billing|entitlements?|control-plane)(?:\/|['"`])/i,
   },
   {
-    name: 'private runtime artifact',
+    name: 'private telemetry hook',
     pattern:
-      /\b(?:RapterOSClient|RapterOSTenant|RapterOSBilling|RapterOSControlPlane|rapterosTelemetry)\b/,
-  },
-  {
-    name: 'private environment hook',
-    pattern: /\bRAPTEROS_(?:TOKEN|API|TENANT|BILLING|TELEMETRY|CONTROL_PLANE)\b/,
-  },
-  {
-    name: 'private telemetry endpoint',
-    pattern: /\btelemetry\.(?:rapteros|rapterbox)\b/i,
+      /\b(?:TenantTelemetryHook|BillingTelemetryHook|ControlPlaneTelemetry|CommercialTelemetryHook|PrivateTelemetryHook)\b/i,
   },
 ];
-
-function deliberatelyExcluded(path: string): boolean {
-  return DELIBERATE_EXCLUSIONS.some((part) => path.includes(part)) ||
-    /(?:^|\/)[^/]+\.test\.[^.]+$/.test(path);
-}
-
-function shippingGroupsFor(path: string): InventoryGroup[] {
-  if (!SHIPPING_EXTENSIONS.has(extname(path)) || deliberatelyExcluded(path)) {
-    return [];
-  }
-  return SHIPPING_SURFACES.filter((surface) => surface.includes(path));
-}
-
-function manifestGroupsFor(path: string): InventoryGroup[] {
-  if (!MANIFEST_PATTERN.test(path)) return [];
-  return MANIFEST_GROUPS.filter((group) => group.includes(path));
-}
 
 function findLeakage(content: string): string[] {
   return FORBIDDEN_RUNTIME_PATTERNS
@@ -208,44 +317,45 @@ function findLeakage(content: string): string[] {
     .map(({ name }) => name);
 }
 
-function validatesDescriptor(value: Record<string, unknown>): boolean {
-  const allowed = new Set(Object.keys(seam.properties));
-  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
-  if (seam.required.some((key) => !(key in value))) return false;
-  for (const [key, rule] of Object.entries(seam.properties)) {
-    const candidate = value[key];
-    if (candidate === undefined) continue;
-    const referenced = rule.$ref
-      ? seam.$defs[rule.$ref.replace('#/$defs/', '')]
-      : undefined;
-    const effective = { ...referenced, ...rule };
-    if (effective.const !== undefined && candidate !== effective.const) return false;
-    if (effective.type && typeof candidate !== effective.type) return false;
-    if (
-      effective.enum &&
-      (typeof candidate !== 'string' || !effective.enum.includes(candidate))
-    ) return false;
-    if (
-      effective.pattern &&
-      (typeof candidate !== 'string' ||
-        !new RegExp(effective.pattern).test(candidate))
-    ) return false;
-    if (
-      typeof candidate === 'string' &&
-      effective.minLength !== undefined &&
-      candidate.length < effective.minLength
-    ) return false;
-    if (
-      typeof candidate === 'string' &&
-      effective.maxLength !== undefined &&
-      candidate.length > effective.maxLength
-    ) return false;
+const DEPENDENCY_MAP_KEYS = new Set([
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+  'bundledDependencies',
+]);
+
+function dependencyEntries(value: unknown): [string, string][] {
+  if (!value || typeof value !== 'object') return [];
+  const entries: [string, string][] = [];
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (DEPENDENCY_MAP_KEYS.has(key) && child && typeof child === 'object') {
+      for (const [name, specifier] of Object.entries(
+        child as Record<string, unknown>,
+      )) {
+        entries.push([name, String(specifier)]);
+      }
+    }
+    entries.push(...dependencyEntries(child));
   }
-  return true;
+  return entries;
+}
+
+function inspectManifest(path: string, content: string): string[] {
+  const findings = new Set(findLeakage(content));
+  if (basename(path).endsWith('.json')) {
+    const parsed = JSON.parse(content) as unknown;
+    for (const [name, specifier] of dependencyEntries(parsed)) {
+      for (const finding of findLeakage(`${name}\n${specifier}`)) {
+        findings.add(`dependency: ${finding}`);
+      }
+    }
+  }
+  return [...findings];
 }
 
 describe('open core and separately operated service boundary', () => {
-  it('accurately scopes the repository license and its imported carve-outs', () => {
+  it('accurately scopes the repository license and imported carve-outs', () => {
     expect(read('LICENSE')).toContain('Apache License');
     expect(JSON.parse(read('typescript/package.json')).license).toBe('Apache-2.0');
     expect(boundary).toContain('OpenRappter-authored');
@@ -259,168 +369,168 @@ describe('open core and separately operated service boundary', () => {
     expect(read('licenses/aibast-agents-library-MIT.txt')).toContain('MIT License');
   });
 
-  it('preserves open self-host rights without promising hosted entitlement', () => {
-    expect(boundary).toContain('self-host or mutate their fork');
-    expect(boundary).toContain('do not automatically create');
-    expect(boundary).toContain('implementation, service, and data');
-    expect(boundary).toContain('not legal advice');
-  });
-
-  it('accepts only closed local routes and public read/view capabilities', () => {
+  it('uses only closed trusted-registry selector fields', () => {
     expect(seam.additionalProperties).toBe(false);
-    expect(seam.required).toContain('routeId');
-    expect(seam.required).not.toContain('href');
-    expect(seam.properties.routeId?.enum).toHaveLength(19);
-    expect(seam.properties.requiredCapability?.enum).toEqual([
-      'ui:view',
-      'agent:read',
-      'channel:read',
-      'session:read',
-      'skill:read',
-      'system:read',
-      'memory:read',
+    expect(seam.required).toEqual(['appId', 'surfaceVersion']);
+    expect(Object.keys(seam.properties).sort()).toEqual([
+      'appId',
+      'capabilityIds',
+      'order',
+      'surfaceVersion',
     ]);
-    expect(seam.properties.fragment?.pattern).toBe(
-      '^#(?!.*(?:tenant|billing|admin|control-plane|telemetry|token|secret|authorization))[a-z][a-z0-9-]{0,63}$',
-    );
-    expect(seam.properties.title?.$ref).toBe('#/$defs/safeDisplayText');
-    expect(seam.properties.description?.$ref).toBe('#/$defs/safeDisplayText');
-    for (const fixture of fixtures.accepted) {
-      expect(validatesDescriptor(fixture), JSON.stringify(fixture)).toBe(true);
+    for (const forbiddenField of [
+      'id',
+      'title',
+      'description',
+      'glyph',
+      'href',
+      'url',
+      'fragment',
+      'routeId',
+      'code',
+    ]) {
+      expect(seam.properties).not.toHaveProperty(forbiddenField);
     }
+    expect(boundary).toMatch(
+      /trusted\s+OpenRappter host registry supplies/,
+    );
+    expect(boundary).toMatch(
+      /future, separately reviewed and sandboxed contract/,
+    );
   });
 
-  it('rejects unsafe values in every descriptor string', () => {
-    expect(fixtures.rejected.length).toBeGreaterThanOrEqual(10);
+  it('accepts registered selectors and rejects every former payload shape', () => {
+    for (const fixture of fixtures.accepted) {
+      expect(validateDescriptor(fixture), JSON.stringify(validateDescriptor.errors))
+        .toBe(true);
+    }
+    expect(fixtures.rejected.length).toBeGreaterThanOrEqual(15);
     for (const fixture of fixtures.rejected) {
       expect(
-        validatesDescriptor(fixture.value),
+        validateDescriptor(fixture.value),
         `${fixture.reason}: ${JSON.stringify(fixture.value)}`,
       ).toBe(false);
     }
-
-    const titleOnly = fixtures.rejected.find(({ reason }) =>
-      reason.startsWith('title only')
-    );
-    const descriptionOnly = fixtures.rejected.find(({ reason }) =>
-      reason.startsWith('description only')
-    );
-    expect(titleOnly).toBeDefined();
-    expect(descriptionOnly).toBeDefined();
-    expect(validatesDescriptor({
-      ...titleOnly!.value,
-      title: 'Agent Explorer',
-    })).toBe(true);
-    expect(validatesDescriptor({
-      ...descriptionOnly!.value,
-      description: 'Inspect local runtime health and agent workflows.',
-    })).toBe(true);
   });
 
-  it('contains no private dependency or URL in the public seam or packages', () => {
-    expect(seamText).not.toMatch(
-      /@(?:rapterbox|rapteros)\/|https?:\/\/(?:[^/"'\s]*\.)?(?:rapteros|rapterbox)\./i,
-    );
-    const schemaUrls = [...seamText.matchAll(/https?:\/\/[^"\s]+/g)]
-      .map((match) => new URL(match[0]));
-    expect(schemaUrls.length).toBeGreaterThan(0);
-    for (const url of schemaUrls) {
-      expect(['json-schema.org', 'openrappter.dev']).toContain(url.hostname);
-      expect(url.username).toBe('');
-      expect(url.password).toBe('');
-      expect(url.search).toBe('');
-    }
-
-    const manifests = trackedFiles().filter((path) => MANIFEST_PATTERN.test(path));
-    expect(manifests.length).toBeGreaterThan(10);
-    for (const path of manifests) {
-      expect(manifestGroupsFor(path).length, `${path} is not inventoried`)
-        .toBeGreaterThan(0);
-      expect(findLeakage(read(path)), path).toEqual([]);
-    }
-  });
-
-  it('inventories every tracked shipping root and dependency package', () => {
+  it('builds a default-cover inventory with audited exclusions only', () => {
     const tracked = trackedFiles();
-    for (const surface of SHIPPING_SURFACES) {
-      const files = tracked.filter((path) =>
-        surface.includes(path) &&
-        SHIPPING_EXTENSIONS.has(extname(path)) &&
-        !deliberatelyExcluded(path)
-      );
-      expect(files.length, `${surface.name} has no scanned files`)
+    const inventory = buildInventory(tracked);
+    expect(inventory.scanned.length).toBeGreaterThan(700);
+    expect(inventory.excluded.size).toBeGreaterThan(100);
+    expect(
+      unclassifiedEligiblePaths(
+        tracked,
+        new Set(inventory.scanned),
+        new Set(inventory.excluded.keys()),
+      ),
+    ).toEqual([]);
+
+    for (const rootAssertion of KNOWN_SHIPPING_ROOTS) {
+      const count = inventory.scanned.filter(rootAssertion.matches).length;
+      expect(count, `${rootAssertion.name} contributed no scanned files`)
         .toBeGreaterThan(0);
     }
-    for (const group of MANIFEST_GROUPS) {
-      const manifests = tracked.filter((path) =>
-        MANIFEST_PATTERN.test(path) && group.includes(path)
-      );
-      expect(manifests.length, `${group.name} has no scanned manifests`)
+    for (const manifestAssertion of KNOWN_MANIFEST_ROOTS) {
+      const count = inventory.scanned.filter((path) =>
+        MANIFEST_PATTERN.test(path) && manifestAssertion.matches(path)
+      ).length;
+      expect(count, `${manifestAssertion.name} contributed no manifest`)
         .toBeGreaterThan(0);
     }
-    for (const extension of [
-      '.ts', '.tsx', '.js', '.cjs', '.mjs', '.py', '.swift',
-    ]) {
-      expect(SHIPPING_EXTENSIONS.has(extension), `${extension} unsupported`)
-        .toBe(true);
+    for (const [path, reason] of inventory.excluded) {
+      expect(reason.length, `${path} has no audited exclusion reason`)
+        .toBeGreaterThan(10);
+    }
+    expect(
+      inventory.excluded.get(
+        'docs/openrappter-personal-and-hosted-services.md',
+      ),
+    ).toContain('boundary documentation');
+    expect(
+      inventory.excluded.get(
+        'contracts/xpedition-extension-v1-fixtures.json',
+      ),
+    ).toContain('adversarial fixtures');
+  });
+
+  it('scans every eligible runtime source and dependency manifest', () => {
+    const inventory = buildInventory(trackedFiles());
+    for (const path of inventory.scanned) {
+      const content = read(path);
+      const findings = MANIFEST_PATTERN.test(path)
+        ? inspectManifest(path, content)
+        : findLeakage(content);
+      expect(findings, path).toEqual([]);
     }
   });
 
-  it('scans all inventoried tracked runtime sources for proprietary leakage', () => {
-    const files = trackedFiles().filter((path) =>
-      shippingGroupsFor(path).length > 0
-    );
-    expect(files.length).toBeGreaterThan(300);
-    for (const path of files) {
-      expect(findLeakage(read(path)), path).toEqual([]);
+  it('trips for every omitted surface and private dependency syntax', () => {
+    const runtimeFixtures = [
+      ['typescript/desktop/src/private.tsx', "import('@RapterBox/private')"],
+      ['beta/electron/private.cjs', "require('RapterOS-control-plane')"],
+      ['beta/frontier/private.py', 'from rapteros.private import Client'],
+      ['beta/scripts/private.mjs', "fetch('/v1/billing/subscription')"],
+      ['beta/ui/private.js', 'const context = new TenantContext()'],
+      ['beta/resources/private.json', '{"hook":"BillingTelemetryHook"}'],
+      ['python/openrappter/private.py', 'provider: BillingProvider'],
+      ['macos/Sources/OpenRappterBar/Private.swift', 'ControlPlaneClient()'],
+      ['tools/private.mjs', "import('RAPTEROS/private')"],
+      ['install-private.bat', 'curl //api.RapterBox.example/control-plane'],
+    ] as const;
+    for (const [path, content] of runtimeFixtures) {
+      expect(isEligibleTrackedPath(path), `${path} is not eligible`).toBe(true);
+      expect(exclusionFor(path), `${path} was unexpectedly excluded`).toBeUndefined();
+      expect(findLeakage(content), path).not.toEqual([]);
+    }
+
+    const dependencyFixtures = [
+      ['package.json', '{"dependencies":{"@RapterBox/sdk":"1.0.0"}}'],
+      [
+        'package-lock.json',
+        '{"packages":{"":{"dependencies":{"rapteros-sdk":"RapterBox/private"}}}}',
+      ],
+      [
+        'npm-shrinkwrap.json',
+        '{"dependencies":{"private":{"version":"git+ssh://git@github.com/RapterOS/private.git"}}}',
+      ],
+      [
+        'python/pyproject.toml',
+        'dependencies = ["private @ git+ssh://git@github.com/RapterBox/private.git"]',
+      ],
+      [
+        'rapp_brainstem/requirements.txt',
+        'private @ git+ssh://git@github.com/RapterOS/private.git',
+      ],
+      [
+        'macos/Package.swift',
+        '.package(url: "git@github.com:RapterBox/private.git", from: "1.0.0")',
+      ],
+      [
+        'typescript/package.json',
+        '{"dependencies":{"private":"github:RapterOS/private"}}',
+      ],
+    ] as const;
+    for (const [path, content] of dependencyFixtures) {
+      expect(MANIFEST_PATTERN.test(path), `${path} is not a manifest`).toBe(true);
+      expect(inspectManifest(path, content), path).not.toEqual([]);
     }
   });
 
-  it('trips on every previously omitted shipping surface', () => {
-    const forbiddenFixtures = [
-      {
-        path: 'typescript/desktop/src/private.tsx',
-        content: "import client from '@rapterbox/private';",
-      },
-      {
-        path: 'beta/electron/private.cjs',
-        content: "require('@rapteros/control-plane');",
-      },
-      {
-        path: 'beta/frontier/private.py',
-        content: 'from rapteros.private import Client',
-      },
-      {
-        path: 'beta/scripts/private.mjs',
-        content: "fetch('/v1/billing/subscription');",
-      },
-      {
-        path: 'beta/ui/private.js',
-        content: 'const rapterosTelemetry = () => true;',
-      },
-      {
-        path: 'macos/Sources/OpenRappterBar/Private.swift',
-        content: 'let client = RapterOSClient()',
-      },
-      {
-        path: 'scripts/install-private.sh',
-        content: 'curl https://api.rapteros.example/control-plane',
-      },
-    ];
-    for (const fixture of forbiddenFixtures) {
-      expect(
-        shippingGroupsFor(fixture.path).length,
-        `${fixture.path} is outside shipping inventory`,
-      ).toBeGreaterThan(0);
-      expect(findLeakage(fixture.content), fixture.path).not.toEqual([]);
-    }
+  it('reverse inventory fails when a new eligible tracked path is unaccounted', () => {
+    const tracked = trackedFiles();
+    const inventory = buildInventory(tracked);
+    const injected = 'future/new-runtime/private-surface.ts';
+    expect(isEligibleTrackedPath(injected)).toBe(true);
+    expect(
+      unclassifiedEligiblePaths(
+        [...tracked, injected],
+        new Set(inventory.scanned),
+        new Set(inventory.excluded.keys()),
+      ),
+    ).toEqual([injected]);
 
-    const manifestFixture = {
-      path: 'macos/Package.swift',
-      content:
-        '.package(url: "https://github.com/rapterbox/private", from: "1.0.0")',
-    };
-    expect(manifestGroupsFor(manifestFixture.path).length).toBeGreaterThan(0);
-    expect(findLeakage(manifestFixture.content)).not.toEqual([]);
+    const refreshed = buildInventory([...tracked, injected]);
+    expect(refreshed.scanned).toContain(injected);
   });
 });

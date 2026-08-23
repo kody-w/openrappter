@@ -1,227 +1,156 @@
 {
   "accepted": [
     {
-      "id": "agent-explorer",
-      "title": "Agent Explorer",
-      "description": "Browse agents exposed by the local runtime.",
-      "glyph": "A",
-      "routeId": "agents",
-      "requiredCapability": "agent:read",
+      "appId": "agents",
+      "capabilityIds": [
+        "agent:read"
+      ],
+      "order": 20,
       "surfaceVersion": 1
     },
     {
-      "id": "system-health",
-      "title": "System Health",
-      "description": "Inspect local runtime health.",
-      "glyph": "+",
-      "routeId": "presence",
-      "fragment": "#overview",
-      "requiredCapability": "system:read",
-      "surfaceVersion": 1
-    },
-    {
-      "id": "language-guide",
-      "title": "Administration patterns",
-      "description": "A local guide to tokenization research and authoritative agent workflows.",
-      "glyph": "?",
-      "routeId": "help",
-      "requiredCapability": "ui:view",
+      "appId": "help",
       "surfaceVersion": 1
     }
   ],
   "rejected": [
     {
-      "reason": "arbitrary external URL",
+      "reason": "caller title is not part of the selector",
       "value": {
-        "id": "remote",
-        "title": "Remote",
-        "description": "Must not navigate outside approved local routes.",
-        "glyph": "R",
-        "href": "https://example.com/app",
-        "requiredCapability": "ui:view",
+        "appId": "agents",
+        "title": "Agent Explorer",
         "surfaceVersion": 1
       }
     },
     {
-      "reason": "credential-bearing URL",
+      "reason": "caller description is not part of the selector",
       "value": {
-        "id": "credential",
-        "title": "Credential",
-        "description": "Must not contain URL credentials.",
-        "glyph": "C",
-        "href": "https://user:secret@example.com/",
-        "requiredCapability": "ui:view",
+        "appId": "agents",
+        "description": "Browse local agents.",
         "surfaceVersion": 1
       }
     },
     {
-      "reason": "query secret",
+      "reason": "caller glyph is not part of the selector",
       "value": {
-        "id": "query-secret",
-        "title": "Query secret",
-        "description": "Must not contain query credentials.",
-        "glyph": "Q",
-        "href": "https://example.com/?token=secret",
-        "requiredCapability": "ui:view",
+        "appId": "agents",
+        "glyph": "A",
         "surfaceVersion": 1
       }
     },
     {
-      "reason": "loopback host",
+      "reason": "caller id is not part of the selector",
       "value": {
-        "id": "loopback",
-        "title": "Loopback",
-        "description": "Must not name a loopback host.",
-        "glyph": "L",
-        "href": "http://127.0.0.1/private",
-        "requiredCapability": "ui:view",
+        "appId": "agents",
+        "id": "custom-agent-explorer",
         "surfaceVersion": 1
       }
     },
     {
-      "reason": "link-local host",
+      "reason": "caller route is supplied by the trusted registry",
       "value": {
-        "id": "metadata",
-        "title": "Metadata",
-        "description": "Must not name a link-local host.",
-        "glyph": "M",
-        "href": "http://169.254.169.254/latest/meta-data",
-        "requiredCapability": "ui:view",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "control-plane path",
-      "value": {
-        "id": "control",
-        "title": "Control",
-        "description": "Must not name a control-plane route.",
-        "glyph": "C",
-        "routeId": "/control-plane/admin",
-        "requiredCapability": "system:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "tenant capability",
-      "value": {
-        "id": "tenant-admin",
-        "title": "Tenant admin",
-        "description": "Must not express tenant authority.",
-        "glyph": "T",
+        "appId": "agents",
         "routeId": "settings",
-        "requiredCapability": "tenant:admin",
         "surfaceVersion": 1
       }
     },
     {
-      "reason": "billing capability",
+      "reason": "fragment navigation is not caller-controlled",
       "value": {
-        "id": "billing",
-        "title": "Billing",
-        "description": "Must not express billing authority.",
-        "glyph": "B",
-        "routeId": "settings",
-        "requiredCapability": "billing:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "private package capability",
-      "value": {
-        "id": "private-package",
-        "title": "Private package",
-        "description": "Must not express private package authority.",
-        "glyph": "P",
-        "routeId": "skills",
-        "requiredCapability": "private-package:load",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "telemetry hook",
-      "value": {
-        "id": "telemetry",
-        "title": "Telemetry",
-        "description": "Must not add out-of-contract telemetry.",
-        "glyph": "T",
-        "routeId": "presence",
-        "requiredCapability": "system:read",
-        "surfaceVersion": 1,
-        "telemetryEndpoint": "https://telemetry.example/collect"
-      }
-    },
-    {
-      "reason": "secret-shaped fragment",
-      "value": {
-        "id": "secret-fragment",
-        "title": "Secret fragment",
-        "description": "Fragments are local identifiers, not query data.",
-        "glyph": "S",
-        "routeId": "agents",
-        "fragment": "#token=secret",
-        "requiredCapability": "agent:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "title only contains authorization material",
-      "value": {
-        "id": "bad-title",
-        "title": "Authorization Bearer ghp_not-a-real-value",
-        "description": "Browse agents exposed by the local runtime.",
-        "glyph": "A",
-        "routeId": "agents",
-        "requiredCapability": "agent:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "description only contains a private host and namespace",
-      "value": {
-        "id": "bad-description",
-        "title": "System guide",
-        "description": "Open tenant admin telemetry at http://127.0.0.1/control-plane.",
-        "glyph": "?",
-        "routeId": "help",
-        "requiredCapability": "ui:view",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "glyph only is secret-shaped",
-      "value": {
-        "id": "bad-glyph",
-        "title": "Agent Explorer",
-        "description": "Browse agents exposed by the local runtime.",
-        "glyph": "sk-",
-        "routeId": "agents",
-        "requiredCapability": "agent:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "id only names a private namespace",
-      "value": {
-        "id": "tenant-console",
-        "title": "Agent Explorer",
-        "description": "Browse agents exposed by the local runtime.",
-        "glyph": "A",
-        "routeId": "agents",
-        "requiredCapability": "agent:read",
-        "surfaceVersion": 1
-      }
-    },
-    {
-      "reason": "fragment only contains secret material",
-      "value": {
-        "id": "agent-explorer",
-        "title": "Agent Explorer",
-        "description": "Browse agents exposed by the local runtime.",
-        "glyph": "A",
-        "routeId": "agents",
+        "appId": "agents",
         "fragment": "#access-token",
-        "requiredCapability": "agent:read",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "HTTPS URL property is structurally impossible",
+      "value": {
+        "appId": "agents",
+        "href": "https://example.com/app",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "uppercase URL scheme is structurally impossible",
+      "value": {
+        "appId": "HTTPS://EXAMPLE.COM/APP",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "mailto navigation is structurally impossible",
+      "value": {
+        "appId": "mailto:operator@example.com",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "protocol-relative navigation is structurally impossible",
+      "value": {
+        "appId": "//example.com/app",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "loopback host is not a registered app",
+      "value": {
+        "appId": "http://127.0.0.1/private",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "link-local host is not a registered app",
+      "value": {
+        "appId": "http://169.254.169.254/latest/meta-data",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "localhost is not a registered app",
+      "value": {
+        "appId": "localhost",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "secret-shaped selector is not a registered app",
+      "value": {
+        "appId": "github_pat_not-a-real-value",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "case variation cannot escape the closed registry",
+      "value": {
+        "appId": "Agents",
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "private capability is outside the public vocabulary",
+      "value": {
+        "appId": "settings",
+        "capabilityIds": [
+          "tenant:admin"
+        ],
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "free-form capability is outside the public vocabulary",
+      "value": {
+        "appId": "settings",
+        "capabilityIds": [
+          "billing:read"
+        ],
+        "surfaceVersion": 1
+      }
+    },
+    {
+      "reason": "order is bounded",
+      "value": {
+        "appId": "agents",
+        "order": 1001,
         "surfaceVersion": 1
       }
     }

@@ -39,12 +39,17 @@ Apache-2.0:
   clean customer baseline;
 - interoperability uses public, versioned, data-only contracts.
 
-The public `contracts/xpedition-extension-v1.json` schema is one such seam. It
-describes display metadata, an approved local route and optional fragment, and
-a capability selected from a closed public vocabulary. It cannot name an
-external endpoint or private control-plane scope. A descriptor does not grant
-that capability, inherit authentication, read local state, or bundle
-hosted-service access.
+The public `contracts/xpedition-extension-v1.json` schema is one such seam. A
+caller can select only a registered public `appId`, optional capability IDs
+from a closed public vocabulary, and a bounded numeric order. The trusted
+OpenRappter host registry supplies the title, description, icon, and route.
+Caller-provided display text, identifiers, URLs, fragments, executable code,
+and arbitrary navigation do not exist in this contract.
+
+A descriptor does not grant capability, inherit authentication, read local
+state, or bundle hosted-service access. Custom display or executable extensions
+would require a future, separately reviewed and sandboxed contract; this v1
+selector is deliberately not that contract.
 
 Product, pricing, privacy, and legal terms for any separately operated service
 belong in that service and require its owner and qualified-counsel review. This

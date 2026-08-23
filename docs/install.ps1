@@ -52,7 +52,10 @@ param(
 
     [string]$Version = "",
     [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
-    [string]$Channel = ""
+    [string]$Channel = "",
+    [ValidateSet("canary", "nightly", "alpha", "beta", "stable")]
+    [string]$Ring = "",
+    [switch]$AllowDowngrade
 )
 
 # ── Strict mode ──────────────────────────────────────────────────────────────
@@ -99,10 +102,13 @@ $INSTALL_TOTAL  = 4
 # ── Environment variable overrides ──────────────────────────────────────────
 if ($env:OPENRAPPTER_INSTALL_METHOD) { $Method  = $env:OPENRAPPTER_INSTALL_METHOD }
 if ($env:OPENRAPPTER_VERSION)        { $Version = $env:OPENRAPPTER_VERSION }
-if (-not $Channel -and $env:OPENRAPPTER_CHANNEL) { $Channel = $env:OPENRAPPTER_CHANNEL }
+if (-not $Ring -and $Channel) { $Ring = $Channel }
+if (-not $Ring -and $env:OPENRAPPTER_RING) { $Ring = $env:OPENRAPPTER_RING }
+if (-not $Ring -and $env:OPENRAPPTER_CHANNEL) { $Ring = $env:OPENRAPPTER_CHANNEL }
 # OPENRAPPTER_BETA predates rings and resolved a dist-tag nothing published,
 # so it silently failed. Keep it working as an alias for the beta ring.
-if (-not $Channel -and $env:OPENRAPPTER_BETA -eq "1") { $Channel = "beta" }
+if (-not $Ring -and $env:OPENRAPPTER_BETA -eq "1") { $Ring = "beta" }
+if ($env:OPENRAPPTER_ALLOW_DOWNGRADE -eq "true") { $AllowDowngrade = $true }
 if ($env:OPENRAPPTER_HOME)           { $InstallDir = $env:OPENRAPPTER_HOME }
 if ($env:OPENRAPPTER_NO_PROMPT -eq "true") { $NoPrompt = $true }
 if (-not $InstallDir) { $InstallDir = $HOME_DIR }
@@ -292,48 +298,96 @@ function Get-ExistingInstall {
 
 # ── npm install ──────────────────────────────────────────────────────────────
 
-# Ring -> npm dist-tag. Only `stable` owns `latest`, so a prerelease ring can
-# never be served to a plain `npm install openrappter`.
-function Get-RingDistTag {
+# Ring repositories are an allowlist. A manifest fetched through its current
+# pointer is accepted only after its exact source, artifact host, version,
+# timestamp and SHA-256 are validated.
+function Get-RingRepository {
     param([string]$Ring)
     switch ($Ring) {
-        "canary"  { return "canary" }
-        "nightly" { return "nightly" }
-        "alpha"   { return "alpha" }
-        "beta"    { return "beta" }
-        "stable"  { return "latest" }
-        default   { return "latest" }
+        "stable"  { return "kody-w/openrappter" }
+        "beta"    { return "kody-w/openrappter-beta" }
+        "canary"  { return "kody-w/openrappter-canary" }
+        "alpha"   { return "kody-w/openrappter-alpha" }
+        "nightly" { return "kody-w/openrappter-nightly" }
+        default   { throw "Unknown release ring: $Ring" }
     }
 }
 
+function Resolve-RingManifest {
+    param([string]$SelectedRing)
+    if (-not $SelectedRing) { $SelectedRing = "stable" }
+    $repo = Get-RingRepository $SelectedRing
+    $uri = "https://raw.githubusercontent.com/$repo/main/.ring/manifest.json"
+    try { $m = Invoke-RestMethod -Uri $uri -Method Get }
+    catch { throw "Could not reach $SelectedRing ring manifest: $($_.Exception.Message)" }
+
+    $top = @($m.PSObject.Properties.Name | Sort-Object) -join ","
+    $source = @($m.source.PSObject.Properties.Name | Sort-Object) -join ","
+    $artifact = @($m.artifact.PSObject.Properties.Name | Sort-Object) -join ","
+    if ($top -ne "artifact,predecessor,promoted_at,reason,receipt,ring,schema,source,status,version") { throw "Ring manifest is not closed" }
+    if ($source -ne "commit,repository,tag" -or $artifact -ne "install_url,provenance,sha256,url") { throw "Ring manifest children are not closed" }
+    if ($m.schema -ne "openrappter-ring/v1" -or $m.ring -ne $SelectedRing) { throw "Wrong manifest schema or ring" }
+    if ($m.source.repository -ne "kody-w/openrappter" -or $m.source.commit -notmatch "^[0-9a-f]{40}$") { throw "Unauthorized source identity" }
+    if ($m.version -notmatch "^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$") { throw "Malformed exact version" }
+    if ($m.artifact.sha256 -notmatch "^[0-9a-f]{64}$") { throw "Malformed artifact SHA-256" }
+    foreach ($value in @($m.artifact.url, $m.artifact.install_url)) {
+        if (-not $value) { continue }
+        $parsed = [Uri]$value
+        if ($parsed.Scheme -ne "https" -or $parsed.Host -notin @("github.com", "registry.npmjs.org")) { throw "Unauthorized artifact URL" }
+    }
+    if ([DateTimeOffset]$m.promoted_at -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { throw "Future ring manifest" }
+    if ($m.status -ne "published") { throw "$SelectedRing is $($m.status): $($m.reason)" }
+    if (-not $m.artifact.install_url) { throw "Published manifest has no install URL" }
+    if ($Version -and $Version -ne $m.version) { throw "Version must equal the ring's exact version $($m.version)" }
+    return $m
+}
+
 function Install-ViaNpm {
-    # Precedence: explicit version > ring dist-tag > stable.
-    $pkg = $NPM_PACKAGE
-    if ($Version) {
-        $pkg = "${NPM_PACKAGE}@${Version}"
-    } else {
-        $ring = if ($Channel) { $Channel } else { "stable" }
-        $pkg = "${NPM_PACKAGE}@$(Get-RingDistTag $ring)"
-        Write-Info "Release ring: $ring"
+    $selected = if ($Ring) { $Ring } else { "stable" }
+    $manifest = Resolve-RingManifest $selected
+    Write-Info "Release ring: $selected -> $($manifest.version) @ $($manifest.source.commit)"
+
+    $current = ""
+    try {
+        $listed = Invoke-Npm list -g openrappter --depth=0 --json | ConvertFrom-Json
+        $current = $listed.dependencies.openrappter.version
+    } catch {}
+    if ($current -and -not $AllowDowngrade) {
+        $a = @($current.Split("-")[0].Split(".") | ForEach-Object { [int]$_ })
+        $b = @($manifest.version.Split("-")[0].Split(".") | ForEach-Object { [int]$_ })
+        for ($i = 0; $i -lt 3; $i++) {
+            if ($b[$i] -lt $a[$i]) { throw "Refusing downgrade $current -> $($manifest.version); pass -AllowDowngrade" }
+            if ($b[$i] -gt $a[$i]) { break }
+        }
     }
 
-    Write-Info "Running: npm install -g $pkg"
     if ($DryRun) {
-        Write-Info "[dry-run] Would run: npm install -g $pkg"
+        Write-Info "[dry-run] Would verify and install $($manifest.artifact.url)"
         return
     }
 
+    $downloads = Join-Path $HOME_DIR ".downloads"
+    New-Item -ItemType Directory -Path $downloads -Force | Out-Null
+    $artifact = Join-Path $downloads "openrappter-$($manifest.version).tgz"
+    Invoke-WebRequest -Uri $manifest.artifact.url -OutFile $artifact
+    $actual = (Get-FileHash -Algorithm SHA256 -Path $artifact).Hash.ToLowerInvariant()
+    if ($actual -ne $manifest.artifact.sha256) {
+        Remove-Item $artifact -Force -ErrorAction SilentlyContinue
+        throw "Artifact checksum mismatch (expected $($manifest.artifact.sha256), got $actual)"
+    }
+
+    Write-Info "Running: npm install -g verified artifact"
     # Set SHARP_IGNORE_GLOBAL_LIBVIPS to prevent native module download issues
     $env:SHARP_IGNORE_GLOBAL_LIBVIPS = "1"
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        Invoke-Npm install -g $pkg | ForEach-Object { Write-Info "$_" }
+        Invoke-Npm install -g $artifact | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
     } catch {
         Write-Warn "npm install failed. Retrying..."
-        Invoke-Npm install -g $pkg --omit=optional | ForEach-Object { Write-Info "$_" }
+        Invoke-Npm install -g $artifact --omit=optional | ForEach-Object { Write-Info "$_" }
         if ($LASTEXITCODE -ne 0) {
             throw "npm install failed after retry"
         }
@@ -353,16 +407,18 @@ function Install-ViaNpm {
 # ── git install ──────────────────────────────────────────────────────────────
 
 function Install-ViaGit {
+    $selected = if ($Ring) { $Ring } else { "stable" }
+    $manifest = Resolve-RingManifest $selected
     if (-not (Test-GitAvailable)) {
         Install-Git
     }
 
     if (Test-Path (Join-Path $InstallDir ".git")) {
-        Write-Info "Existing git clone found at $InstallDir -- pulling latest..."
+        Write-Info "Existing git clone found at $InstallDir -- fetching exact source..."
         if (-not $DryRun) {
             Push-Location $InstallDir
             try {
-                & git pull --ff-only 2>&1 | ForEach-Object { Write-Info $_ }
+                & git fetch --depth 1 origin $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
             } finally {
                 Pop-Location
             }
@@ -370,8 +426,14 @@ function Install-ViaGit {
     } else {
         Write-Info "Cloning $REPO_URL to $InstallDir..."
         if (-not $DryRun) {
-            & git clone $REPO_URL $InstallDir 2>&1 | ForEach-Object { Write-Info $_ }
+            & git clone --no-checkout --filter=blob:none $REPO_URL $InstallDir 2>&1 | ForEach-Object { Write-Info $_ }
+            & git -C $InstallDir fetch --depth 1 origin $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
         }
+    }
+    if (-not $DryRun) {
+        & git -C $InstallDir checkout --detach $manifest.source.commit 2>&1 | ForEach-Object { Write-Info $_ }
+        $head = (& git -C $InstallDir rev-parse HEAD).Trim()
+        if ($head -ne $manifest.source.commit) { throw "Exact source checkout verification failed" }
     }
 
     if ($DryRun) {

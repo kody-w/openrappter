@@ -8,6 +8,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_SCRIPT="$REPO_ROOT/install.sh"
+TEST_SCRATCH="$REPO_ROOT/.test-work"
+rm -rf "$TEST_SCRATCH"
+mkdir -p "$TEST_SCRATCH"
+trap 'rm -rf "$TEST_SCRATCH"' EXIT
 
 # ── Test Framework ──────────────────────────────────────────
 TESTS_RUN=0
@@ -86,6 +90,23 @@ if diff -q "$INSTALL_SCRIPT" "$REPO_ROOT/docs/install.sh" &>/dev/null; then
 else
   fail "docs/install.sh does not match root install.sh"
 fi
+
+# ── Release ring selection and closed manifest ──
+printf "\n\033[1m▸ Release rings\033[0m\n"
+saved_channel="$CHANNEL"
+saved_channel_file="$CHANNEL_FILE"
+CHANNEL=""
+CHANNEL_FILE="$REPO_ROOT/tests/.missing-ring-selection"
+assert_eq "$(effective_channel)" "stable" "stable is the behavior-safe default"
+CHANNEL="beta"
+assert_eq "$(effective_channel)" "beta" "explicit selector wins over persisted/default ring"
+for ring in stable beta canary alpha nightly; do
+  assert_contains "$(ring_repository "$ring")" "kody-w/openrappter" "$ring maps to an allowlisted repository"
+done
+manifest_fields="$(validate_ring_manifest_file "$REPO_ROOT/.ring/manifest.json" stable)"
+assert_not_empty "$manifest_fields" "stable closed manifest validates"
+CHANNEL="$saved_channel"
+CHANNEL_FILE="$saved_channel_file"
 
 # ── OS Detection ──
 printf "\n\033[1m▸ OS detection\033[0m\n"
@@ -235,8 +256,8 @@ fi
 # ── Launcher Script ──
 printf "\n\033[1m▸ Launcher script generation\033[0m\n"
 
-TEMP_BIN="$(mktemp -d)"
-trap 'rm -rf "$TEMP_BIN"' EXIT
+TEMP_BIN="$TEST_SCRATCH/bin"
+mkdir -p "$TEMP_BIN"
 
 create_launcher "$TEMP_BIN"
 assert_file_exists "$TEMP_BIN/$BIN_NAME" "launcher script is created"
@@ -350,9 +371,9 @@ assert_contains "$script_content" ".venv/bin/python" "launcher uses the isolated
 assert_contains "$script_content" "-m venv" "installer creates an isolated Python environment"
 assert_contains "$script_content" "--status" "script verifies with --status"
 assert_contains "$script_content" "OPENRAPPTER_INSTALL_SH_NO_RUN" "script supports no-run mode for testing"
-assert_contains "$script_content" "git pull" "script handles updates (idempotent)"
+assert_contains "$script_content" "fetch --depth 1 origin" "script handles exact source updates"
 assert_contains "$script_content" "--untracked-files=no" "runtime state does not block git updates"
-assert_contains "$script_content" "pull --ff-only" "git updates fail safely without rebasing"
+assert_contains "$script_content" "checkout --detach" "git installs detach at exact manifest commit"
 assert_contains "$script_content" "gum" "script supports gum UI"
 assert_contains "$script_content" "run_with_spinner" "script has spinner support"
 assert_contains "$script_content" "run_quiet_step" "script has quiet step support"
@@ -596,14 +617,16 @@ ck_hash() {
 ck_run() {
   # $1 = checksums body, $2 = target name; asset file is always created
   local dir
-  dir="$(mktemp -d)"
+  dir="$TEST_SCRATCH/check-$RANDOM-$TESTS_RUN"
+  mkdir -p "$dir"
   printf 'pretend tarball\n' > "$dir/$ck_asset"
   printf '%s' "$1" > "$dir/checksums.txt"
   ( cd "$dir" && verify_sha256sum_file checksums.txt "$2" ) && echo 0 || echo 1
   rm -rf "$dir"
 }
 
-ck_tmp="$(mktemp -d)"
+ck_tmp="$TEST_SCRATCH/checksum"
+mkdir -p "$ck_tmp"
 printf 'pretend tarball\n' > "$ck_tmp/$ck_asset"
 ck_good="$(ck_hash "$ck_tmp/$ck_asset")"
 rm -rf "$ck_tmp"

@@ -53,21 +53,25 @@ export function registerReleaseRingMethods(
   const fetchManifest = deps.fetchManifest ?? ((ring) => fetchRingManifest(ring));
   const persistRing = deps.persistRing ?? writePersistedRing;
 
+  const summarize = (ring: RingName, manifest: RingManifest): RingStatus => {
+    const olderThanCurrent = isVersionDowngrade(currentVersion, manifest.version);
+    return {
+      ring,
+      version: manifest.version,
+      commit: manifest.source.commit,
+      status: manifest.status,
+      reason: manifest.reason,
+      selected: ring === selectedRing(),
+      nonStable: ring !== 'stable',
+      olderThanCurrent,
+      canApply: manifest.status === 'published',
+    };
+  };
+
   const inspect = async (ring: RingName): Promise<RingStatus> => {
     try {
       const manifest = await fetchManifest(ring);
-      const olderThanCurrent = isVersionDowngrade(currentVersion, manifest.version);
-      return {
-        ring,
-        version: manifest.version,
-        commit: manifest.source.commit,
-        status: manifest.status,
-        reason: manifest.reason,
-        selected: ring === selectedRing(),
-        nonStable: ring !== 'stable',
-        olderThanCurrent,
-        canApply: manifest.status === 'published',
-      };
+      return summarize(ring, manifest);
     } catch (error) {
       return {
         ring,
@@ -119,7 +123,8 @@ export function registerReleaseRingMethods(
         `refusing downgrade ${currentVersion} -> ${manifest.version}; explicit downgrade approval is required`,
       );
     }
+    const resolved = { ...summarize(ring, manifest), selected: true };
     persistRing(ring);
-    return { applied: true, selectedRing: ring, resolved: await inspect(ring) };
+    return { applied: true, selectedRing: ring, resolved };
   }, { requiresAuth: true });
 }

@@ -34,16 +34,26 @@ export interface RingManifest {
     url: string;
     install_url: string | null;
     sha256: string;
-    provenance: 'github-commit-archive-sha256' | 'npm-registry-download-sha256';
+    provenance: 'github-commit-archive-sha256' | 'npm-registry-download-sha256' | 'github-release-download-sha256';
   };
   promoted_at: string;
   predecessor: Exclude<RingName, 'stable'> | null;
   status: 'published' | 'unpublished' | 'disabled';
   reason: string | null;
   receipt: string | null;
+  promotion_id: string | null;
 }
 
-const TOP_KEYS = ['artifact', 'predecessor', 'promoted_at', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
+interface AuthorityPointer {
+  schema: 'openrappter-ring-authority/v1';
+  authority_repository: 'kody-w/openrappter-release-train';
+  authority_commit: string;
+  receipt_path: string;
+  receipt_sha256: string;
+  promotion_id: string;
+}
+
+const TOP_KEYS = ['artifact', 'predecessor', 'promoted_at', 'promotion_id', 'reason', 'receipt', 'ring', 'schema', 'source', 'status', 'version'];
 const SOURCE_KEYS = ['commit', 'repository', 'tag'];
 const ARTIFACT_KEYS = ['install_url', 'provenance', 'sha256', 'url'];
 const ALLOWED_HOSTS = new Set(['github.com', 'registry.npmjs.org']);
@@ -126,17 +136,15 @@ export function validateRingManifest(
   if (value.source.tag !== null && (
     typeof value.source.tag !== 'string' || !/^v[0-9][0-9A-Za-z.+-]*$/.test(value.source.tag)
   )) throw new Error('source tag is malformed');
-  if (typeof value.version !== 'string'
-    || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.version)) {
-    throw new Error('version is not strict semver');
-  }
+  if (typeof value.version !== 'string') throw new Error('version is not strict semver');
+  parseSemVer(value.version);
   if (!isClosed(value.artifact, ARTIFACT_KEYS)) throw new Error('manifest artifact is not closed');
   requireHttps(value.artifact.url, 'artifact URL');
   if (value.artifact.install_url !== null) requireHttps(value.artifact.install_url, 'install URL');
   if (typeof value.artifact.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.artifact.sha256)) {
     throw new Error('artifact SHA-256 is malformed');
   }
-  if (!['github-commit-archive-sha256', 'npm-registry-download-sha256'].includes(
+  if (!['github-commit-archive-sha256', 'npm-registry-download-sha256', 'github-release-download-sha256'].includes(
     String(value.artifact.provenance),
   )) throw new Error('checksum provenance is unknown');
   if (!['published', 'unpublished', 'disabled'].includes(String(value.status))) {
@@ -160,22 +168,158 @@ export function validateRingManifest(
     typeof value.receipt !== 'string'
     || !/^https:\/\/github\.com\/kody-w\/openrappter-release-train\/blob\/[0-9a-f]{40}\/receipts\/.+\.json$/.test(value.receipt)
   )) throw new Error('manifest receipt is not immutable');
+  if (value.promotion_id !== null && (
+    typeof value.promotion_id !== 'string' || !/^[0-9a-f]{64}$/.test(value.promotion_id)
+  )) throw new Error('manifest promotion_id is malformed');
+  const npmUrl = `https://registry.npmjs.org/openrappter/-/openrappter-${value.version}.tgz`;
+  const tag = value.source.tag;
+  const releasePrefix = tag
+    ? `https://github.com/kody-w/openrappter/releases/download/${tag}/`
+    : '';
+  if (value.status === 'published') {
+    const npm = value.artifact.provenance === 'npm-registry-download-sha256'
+      && value.artifact.url === npmUrl
+      && value.artifact.install_url === npmUrl;
+    const release = value.artifact.provenance === 'github-release-download-sha256'
+      && releasePrefix !== ''
+      && String(value.artifact.url).startsWith(releasePrefix)
+      && value.artifact.install_url === value.artifact.url;
+    if (!npm && !release) throw new Error('published artifact is not bound to canonical package/version');
+  } else if (
+    value.artifact.url !== `https://github.com/kody-w/openrappter/archive/${value.source.commit}.tar.gz`
+    || value.artifact.install_url !== null
+  ) throw new Error('nonpublished artifact is not exact canonical source');
   return value as unknown as RingManifest;
 }
 
-function semverCore(version: string): [number, number, number] {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
-  if (!match) throw new Error(`cannot compare version ${version}`);
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+function canonicalDigest(value: unknown): string {
+  const canonical = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(canonical);
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, child]) => [key, canonical(child)]),
+      );
+    }
+    return input;
+  };
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
+
+async function requireAuthority(
+  ring: RingName,
+  manifest: RingManifest,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  if (!manifest.promotion_id) throw new Error(`${ring} manifest has no authority promotion id`);
+  const repository = RING_REPOSITORIES[ring];
+  const pointerResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/${repository}/main/.ring/authority.json`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!pointerResponse.ok) throw new Error(`${ring} authority pointer is unreachable`);
+  const pointer = await pointerResponse.json() as AuthorityPointer;
+  const pointerKeys = ['authority_commit', 'authority_repository', 'promotion_id', 'receipt_path', 'receipt_sha256', 'schema'];
+  if (!isClosed(pointer, pointerKeys)
+    || pointer.schema !== 'openrappter-ring-authority/v1'
+    || pointer.authority_repository !== 'kody-w/openrappter-release-train'
+    || !/^[0-9a-f]{40}$/.test(pointer.authority_commit)
+    || pointer.promotion_id !== manifest.promotion_id
+    || !/^[0-9a-f]{64}$/.test(pointer.receipt_sha256)
+    || pointer.receipt_path !== `receipts/${ring}/${manifest.promotion_id}.json`) {
+    throw new Error(`${ring} authority pointer is malformed`);
+  }
+  const receiptResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/${pointer.authority_commit}/${pointer.receipt_path}`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!receiptResponse.ok) throw new Error(`${ring} immutable authority receipt is unreachable`);
+  const receipt = await receiptResponse.json() as Record<string, unknown>;
+  if (canonicalDigest(receipt) !== pointer.receipt_sha256) {
+    throw new Error(`${ring} authority receipt checksum mismatch`);
+  }
+  const expectedKeys = [
+    'artifact_provenance', 'artifact_sha256', 'artifact_url', 'emitted_at',
+    'install_url', 'predecessor_manifest_sha256', 'promotion_id', 'receipt_kind', 'schema',
+    'source_commit', 'source_repository', 'source_tag', 'target_manifest_commit',
+    'target_manifest_sha256', 'target_repository', 'target_ring', 'version',
+  ];
+  if (!isClosed(receipt, expectedKeys)
+    || receipt.schema !== 'openrappter-promotion-receipt/v1'
+    || !['bootstrap', 'promotion'].includes(String(receipt.receipt_kind))
+    || receipt.promotion_id !== manifest.promotion_id
+    || receipt.target_repository !== repository
+    || receipt.target_ring !== ring
+    || receipt.target_manifest_sha256 !== canonicalDigest(manifest)
+    || receipt.source_repository !== manifest.source.repository
+    || receipt.source_commit !== manifest.source.commit
+    || receipt.source_tag !== manifest.source.tag
+    || receipt.version !== manifest.version
+    || receipt.artifact_url !== manifest.artifact.url
+    || receipt.install_url !== manifest.artifact.install_url
+    || receipt.artifact_sha256 !== manifest.artifact.sha256
+    || receipt.artifact_provenance !== manifest.artifact.provenance
+    || typeof receipt.target_manifest_commit !== 'string'
+    || !/^[0-9a-f]{40}$/.test(receipt.target_manifest_commit)) {
+    throw new Error(`${ring} authority receipt does not authorize this manifest`);
+  }
+  const immutableResponse = await fetchImpl(
+    `https://raw.githubusercontent.com/${repository}/${receipt.target_manifest_commit}/.ring/manifest.json`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!immutableResponse.ok) throw new Error(`${ring} immutable target manifest is unreachable`);
+  const immutable = validateRingManifest(await immutableResponse.json(), ring);
+  if (canonicalDigest(immutable) !== canonicalDigest(manifest)) {
+    throw new Error(`${ring} mutable manifest differs from authority-confirmed target commit`);
+  }
+}
+
+interface ParsedSemVer {
+  core: [number, number, number];
+  prerelease: string[] | null;
+}
+
+function parseSemVer(version: string): ParsedSemVer {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
+  if (!match) throw new Error(`cannot compare invalid SemVer ${JSON.stringify(version)}`);
+  const prerelease = match[4]?.split('.') ?? null;
+  if (prerelease?.some((identifier) => /^\d+$/.test(identifier) && /^0\d+/.test(identifier))) {
+    throw new Error(`cannot compare invalid SemVer ${JSON.stringify(version)}`);
+  }
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease,
+  };
+}
+
+export function compareSemVer(leftVersion: string, rightVersion: string): -1 | 0 | 1 {
+  const left = parseSemVer(leftVersion);
+  const right = parseSemVer(rightVersion);
+  for (let i = 0; i < 3; i += 1) {
+    if (left.core[i] !== right.core[i]) return left.core[i] < right.core[i] ? -1 : 1;
+  }
+  if (left.prerelease === null && right.prerelease === null) return 0;
+  if (left.prerelease === null) return 1;
+  if (right.prerelease === null) return -1;
+  const length = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let i = 0; i < length; i += 1) {
+    const a = left.prerelease[i];
+    const b = right.prerelease[i];
+    if (a === undefined) return -1;
+    if (b === undefined) return 1;
+    if (a === b) continue;
+    const aNumeric = /^\d+$/.test(a);
+    const bNumeric = /^\d+$/.test(b);
+    if (aNumeric && bNumeric) return BigInt(a) < BigInt(b) ? -1 : 1;
+    if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+    return a < b ? -1 : 1;
+  }
+  return 0;
 }
 
 export function isVersionDowngrade(current: string, target: string): boolean {
-  const left = semverCore(current);
-  const right = semverCore(target);
-  for (let i = 0; i < 3; i += 1) {
-    if (right[i] !== left[i]) return right[i] < left[i];
-  }
-  return false;
+  return compareSemVer(target, current) < 0;
 }
 
 export async function fetchRingManifest(
@@ -186,7 +330,9 @@ export async function fetchRingManifest(
     headers: { accept: 'application/json' },
   });
   if (!response.ok) throw new Error(`could not reach ${ring} manifest (${response.status})`);
-  return validateRingManifest(await response.json(), ring, options.now);
+  const manifest = validateRingManifest(await response.json(), ring, options.now);
+  await requireAuthority(ring, manifest, options.fetchImpl ?? fetch);
+  return manifest;
 }
 
 export async function resolveRing(

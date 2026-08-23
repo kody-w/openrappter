@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../services/release-rings.js', () => ({
   RELEASE_RINGS: ['stable', 'beta', 'canary', 'alpha', 'nightly'],
+  compareSemVer: vi.fn(),
   ...mocks,
 }));
 

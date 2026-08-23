@@ -32,6 +32,14 @@ permissions:
   contents: read
 
 jobs:
+  powershell-contract:
+    name: PowerShell precedence and SemVer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./tests/test_install_ps1.ps1
+
   unit-tests:
     name: Unit tests (install.sh functions)
     runs-on: ubuntu-latest

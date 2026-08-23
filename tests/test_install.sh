@@ -115,6 +115,9 @@ for ring in stable beta canary alpha nightly; do
 done
 manifest_fields="$(validate_ring_manifest_file "$REPO_ROOT/.ring/manifest.json" stable)"
 assert_not_empty "$manifest_fields" "stable closed manifest validates"
+assert_eq "$(compare_semver 1.9.8-beta.1 1.9.8)" "-1" "same-core prerelease is older than release"
+assert_eq "$(compare_semver 1.9.8-beta.2 1.9.8-beta.10)" "-1" "numeric prerelease identifiers compare numerically"
+assert_eq "$(compare_semver 1.9.8-2 1.9.8-beta)" "-1" "numeric prerelease identifier precedes lexical"
 CHANNEL="$saved_channel"
 CHANNEL_FILE="$saved_channel_file"
 LEGACY_CHANNEL_FILE="$saved_legacy_channel_file"

@@ -961,13 +961,14 @@ const closed = (v, keys, label) => {
 };
 try {
   const m = JSON.parse(fs.readFileSync(file, 'utf8'));
-  closed(m, ['artifact','predecessor','promoted_at','reason','receipt','ring','schema','source','status','version'], 'manifest');
+  closed(m, ['artifact','predecessor','promoted_at','promotion_id','reason','receipt','ring','schema','source','status','version'], 'manifest');
   closed(m.source, ['commit','repository','tag'], 'source');
   closed(m.artifact, ['install_url','provenance','sha256','url'], 'artifact');
   if (m.schema !== 'openrappter-ring/v1' || m.ring !== expected) throw new Error('wrong schema or ring');
   if (m.source.repository !== 'kody-w/openrappter' || !/^[0-9a-f]{40}$/.test(m.source.commit)) throw new Error('unauthorized source');
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(m.version)) throw new Error('bad version');
   if (!/^[0-9a-f]{64}$/.test(m.artifact.sha256)) throw new Error('bad SHA-256');
+  if (!/^[0-9a-f]{64}$/.test(m.promotion_id)) throw new Error('missing authority promotion id');
   for (const u of [m.artifact.url, m.artifact.install_url].filter(Boolean)) {
     const parsed = new URL(u);
     if (parsed.protocol !== 'https:' || !['github.com','registry.npmjs.org'].includes(parsed.hostname)) throw new Error('unauthorized URL');
@@ -975,7 +976,14 @@ try {
   if (!['published','unpublished','disabled'].includes(m.status)) throw new Error('bad status');
   if (new Date(m.promoted_at) > new Date(Date.now() + 300000)) throw new Error('future manifest');
   if (m.status === 'published' && !m.artifact.install_url) throw new Error('published manifest has no install URL');
-  const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || ''];
+  const npmUrl = `https://registry.npmjs.org/openrappter/-/openrappter-${m.version}.tgz`;
+  const releasePrefix = m.source.tag ? `https://github.com/kody-w/openrappter/releases/download/${m.source.tag}/` : '';
+  if (m.status === 'published') {
+    const npm = m.artifact.provenance === 'npm-registry-download-sha256' && m.artifact.url === npmUrl && m.artifact.install_url === npmUrl;
+    const release = m.artifact.provenance === 'github-release-download-sha256' && releasePrefix && m.artifact.url.startsWith(releasePrefix) && m.artifact.install_url === m.artifact.url;
+    if (!npm && !release) throw new Error('artifact is not bound to canonical package/version');
+  }
+  const fields = [m.version, m.artifact.url, m.artifact.sha256, m.source.commit, m.status, m.reason || '', m.promotion_id];
   process.stdout.write(fields.map((v) => Buffer.from(String(v)).toString('base64')).join('\t'));
 } catch (error) {
   console.error(`ring manifest rejected: ${error.message}`);
@@ -985,7 +993,7 @@ NODE
 }
 
 resolve_ring_manifest() {
-    local ring="$1" repo manifest encoded manifest_ref
+    local ring="$1" repo manifest encoded manifest_ref pointer pointer_info receipt immutable
     repo="$(ring_repository "$ring")" || return 2
     manifest_ref="${OPENRAPPTER_MANIFEST_REF:-main}"
     if [[ "$manifest_ref" != "main" && ! "$manifest_ref" =~ ^[0-9a-f]{40}$ ]]; then
@@ -996,13 +1004,52 @@ resolve_ring_manifest() {
     download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/manifest.json" "$manifest" ||
         { ui_error "Could not reach ${ring} ring manifest"; return 1; }
     encoded="$(validate_ring_manifest_file "$manifest" "$ring")" || return 1
-    IFS=$'\t' read -r _rv _ra _rs _rc _rst _rr <<< "$encoded"
+    IFS=$'\t' read -r _rv _ra _rs _rc _rst _rr _rpid <<< "$encoded"
     RESOLVED_RING_VERSION="$(printf '%s' "$_rv" | base64 --decode)"
     RESOLVED_RING_ARTIFACT="$(printf '%s' "$_ra" | base64 --decode)"
     RESOLVED_RING_SHA256="$(printf '%s' "$_rs" | base64 --decode)"
     RESOLVED_RING_COMMIT="$(printf '%s' "$_rc" | base64 --decode)"
     RESOLVED_RING_STATUS="$(printf '%s' "$_rst" | base64 --decode)"
     RESOLVED_RING_REASON="$(printf '%s' "$_rr" | base64 --decode)"
+    RESOLVED_RING_PROMOTION_ID="$(printf '%s' "$_rpid" | base64 --decode)"
+    pointer="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/authority.json" "$pointer" ||
+        { ui_error "Could not reach immutable authority pointer for ${ring}"; return 1; }
+    pointer_info="$(node - "$pointer" "$ring" "$RESOLVED_RING_PROMOTION_ID" <<'NODE'
+const fs=require('node:fs'), [file,ring,id]=process.argv.slice(2), p=JSON.parse(fs.readFileSync(file));
+const keys=['authority_commit','authority_repository','promotion_id','receipt_path','receipt_sha256','schema'];
+if(JSON.stringify(Object.keys(p).sort())!==JSON.stringify(keys)||p.schema!=='openrappter-ring-authority/v1'||p.authority_repository!=='kody-w/openrappter-release-train'||!/^[0-9a-f]{40}$/.test(p.authority_commit)||p.promotion_id!==id||p.receipt_path!==`receipts/${ring}/${id}.json`||!/^[0-9a-f]{64}$/.test(p.receipt_sha256))process.exit(1);
+process.stdout.write([p.authority_commit,p.receipt_path,p.receipt_sha256].map(v=>Buffer.from(v).toString('base64')).join('\t'));
+NODE
+    )" || { ui_error "Authority pointer rejected"; return 1; }
+    IFS=$'\t' read -r _ac _rp _rsha <<< "$pointer_info"
+    local authority_commit receipt_path receipt_sha target_commit
+    authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
+    receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
+    receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
+    receipt="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
+        { ui_error "Immutable authority receipt unreachable"; return 1; }
+    target_commit="$(node -e 'const r=require(process.argv[1]);if(!/^[0-9a-f]{40}$/.test(r.target_manifest_commit))process.exit(1);process.stdout.write(r.target_manifest_commit)' "$receipt")" ||
+        { ui_error "Authority receipt target commit rejected"; return 1; }
+    immutable="$(mktempfile)"
+    download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$immutable" ||
+        { ui_error "Authority-bound target manifest unreachable"; return 1; }
+    if ! node - "$manifest" "$pointer" "$receipt" "$immutable" "$ring" "$repo" "$receipt_sha" <<'NODE'
+const fs=require('node:fs'),crypto=require('node:crypto');
+const [mf,pf,rf,imf,ring,repo,receiptSha]=process.argv.slice(2);
+const [m,p,r,im]=[mf,pf,rf,imf].map(f=>JSON.parse(fs.readFileSync(f)));
+const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
+const digest=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
+if(digest(r)!==receiptSha||digest(m)!==r.target_manifest_sha256||digest(im)!==digest(m))throw Error('authority digest mismatch');
+if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==m.promotion_id||p.promotion_id!==m.promotion_id)throw Error('authority target mismatch');
+const a=m.artifact,s=m.source;
+if(r.source_repository!==s.repository||r.source_commit!==s.commit||r.source_tag!==s.tag||r.version!==m.version||r.artifact_url!==a.url||r.install_url!==a.install_url||r.artifact_sha256!==a.sha256||r.artifact_provenance!==a.provenance)throw Error('authority identity mismatch');
+NODE
+    then
+        ui_error "Immutable authority receipt does not authorize manifest"
+        return 1
+    fi
     if [[ "$RESOLVED_RING_STATUS" != "published" ]]; then
         ui_error "${ring} is ${RESOLVED_RING_STATUS}: ${RESOLVED_RING_REASON}"
         return 1
@@ -1756,6 +1803,40 @@ ensure_build_tools() {
 }
 
 # ── npm Global Install ─────────────────────────────────────
+compare_semver() {
+    node - "$1" "$2" <<'NODE'
+const parse = (value) => {
+  const m = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
+  if (!m) throw new Error(`invalid SemVer: ${value}`);
+  const pre = m[4]?.split('.') ?? null;
+  if (pre?.some((id) => /^\d+$/.test(id) && /^0\d+/.test(id))) throw new Error(`invalid SemVer: ${value}`);
+  return { core: m.slice(1, 4).map(Number), pre };
+};
+const a = parse(process.argv[2]);
+const b = parse(process.argv[3]);
+let result = 0;
+for (let i = 0; i < 3 && result === 0; i++) {
+  if (a.core[i] !== b.core[i]) result = a.core[i] < b.core[i] ? -1 : 1;
+}
+if (result === 0 && (a.pre !== null || b.pre !== null)) {
+  if (a.pre === null) result = 1;
+  else if (b.pre === null) result = -1;
+  else for (let i = 0; i < Math.max(a.pre.length, b.pre.length) && result === 0; i++) {
+    const x = a.pre[i], y = b.pre[i];
+    if (x === undefined) result = -1;
+    else if (y === undefined) result = 1;
+    else if (x !== y) {
+      const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y);
+      if (xn && yn) result = BigInt(x) < BigInt(y) ? -1 : 1;
+      else if (xn !== yn) result = xn ? -1 : 1;
+      else result = x < y ? -1 : 1;
+    }
+  }
+}
+process.stdout.write(String(result));
+NODE
+}
+
 install_via_npm() {
     ui_info "Installing openrappter via npm (global)"
 
@@ -1769,14 +1850,7 @@ install_via_npm() {
     current_version="$(npm list -g openrappter --depth=0 --json 2>/dev/null |
         node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).dependencies?.openrappter?.version||"")}catch{}})' || true)"
     if [[ -n "$current_version" && "$OPT_ALLOW_DOWNGRADE" != "true" ]]; then
-        if node - "$current_version" "$RESOLVED_RING_VERSION" <<'NODE'
-const a=process.argv[2].match(/^\d+\.\d+\.\d+/)?.[0].split('.').map(Number);
-const b=process.argv[3].match(/^\d+\.\d+\.\d+/)?.[0].split('.').map(Number);
-if (!a || !b) process.exit(2);
-for (let i=0;i<3;i++) { if (b[i] !== a[i]) process.exit(b[i] < a[i] ? 0 : 1); }
-process.exit(1);
-NODE
-        then
+        if [[ "$(compare_semver "$RESOLVED_RING_VERSION" "$current_version")" == "-1" ]]; then
             ui_error "Refusing downgrade ${current_version} → ${RESOLVED_RING_VERSION}; pass --allow-downgrade"
             exit 2
         fi

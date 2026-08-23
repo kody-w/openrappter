@@ -4,6 +4,13 @@
   "description": "\ud83e\udd96 Local-first AI agent powered by GitHub Copilot SDK \u2014 no API keys required",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./release-ring-selector": {
+      "types": "./ui/dist/release-ring-selector.d.ts",
+      "import": "./ui/dist/release-ring-selector.js"
+    }
+  },
   "bin": {
     "openrappter": "./bin/openrappter.mjs"
   },

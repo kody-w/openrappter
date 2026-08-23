@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { JSDOM } from "jsdom";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -116,6 +117,14 @@ try {
   if (!packedFiles.has("npm-shrinkwrap.json")) {
     throw new Error("Tarball does not contain the reviewed dependency lock");
   }
+  for (const selectorFile of [
+    "ui/dist/release-ring-selector.js",
+    "ui/dist/release-ring-selector.d.ts",
+  ]) {
+    if (!packedFiles.has(selectorFile)) {
+      throw new Error(`Tarball does not contain ${selectorFile}`);
+    }
+  }
   for (const required of [
     "dist/agents/ShowAndTellAgent.js",
     "dist/agents/DesktopControlAgent.js",
@@ -163,6 +172,23 @@ try {
     .join("\n");
   if (!uiJavascript.includes("Apply for next update")) {
     throw new Error("Installed UI does not contain the release-ring switcher");
+  }
+  const dom = new JSDOM("<!doctype html><body></body>", { url: "http://localhost" });
+  for (const key of [
+    "window", "document", "customElements", "HTMLElement", "Element",
+    "ShadowRoot", "Event", "CustomEvent", "Node", "Document", "CSSStyleSheet",
+  ]) {
+    globalThis[key] = dom.window[key] ?? class {};
+  }
+  const selectorEntry = await import(
+    `${pathToFileURL(path.join(installedRoot, "ui", "dist", "release-ring-selector.js")).href}?smoke=${Date.now()}`
+  );
+  const selector = document.createElement("openrappter-release-ring-switcher");
+  if (!(selector instanceof selectorEntry.OpenRappterReleaseRingSwitcher)) {
+    throw new Error("Packed release-ring selector entry could not be instantiated");
+  }
+  if (selectorEntry.RELEASE_RINGS.join(",") !== "stable,beta,canary,alpha,nightly") {
+    throw new Error("Packed release-ring selector exports an unsafe ring vocabulary");
   }
 
   const cli = run(

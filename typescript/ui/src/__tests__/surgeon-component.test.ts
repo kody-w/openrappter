@@ -14,9 +14,21 @@ const mocks = vi.hoisted(() => ({
   approveProcedure: vi.fn(),
   rejectProcedure: vi.fn(),
   operate: vi.fn(),
+  loadCopilotAuthState: vi.fn(),
+  retryCopilotAuth: vi.fn(),
+  beginCopilotSignIn: vi.fn(),
+  pollCopilotSignIn: vi.fn(),
+  cancelCopilotSignIn: vi.fn(),
 }));
 
 vi.mock('../services/surgeon.js', () => mocks);
+vi.mock('../services/copilot-auth.js', () => ({
+  loadCopilotAuthState: mocks.loadCopilotAuthState,
+  retryCopilotAuth: mocks.retryCopilotAuth,
+  beginCopilotSignIn: mocks.beginCopilotSignIn,
+  pollCopilotSignIn: mocks.pollCopilotSignIn,
+  cancelCopilotSignIn: mocks.cancelCopilotSignIn,
+}));
 
 import '../components/surgeon.js';
 
@@ -99,6 +111,12 @@ describe('openrappter-surgeon', () => {
     mocks.loadPatient.mockResolvedValue(patient);
     mocks.loadCases.mockResolvedValue([]);
     mocks.sendTurn.mockResolvedValue(result());
+    mocks.loadCopilotAuthState.mockResolvedValue({
+      status: 'ready',
+      code: 'COPILOT_READY',
+      message: 'GitHub Copilot is ready.',
+      retryable: false,
+    });
   });
 
   afterEach(() => {
@@ -129,11 +147,25 @@ describe('openrappter-surgeon', () => {
     expect(element.shadowRoot?.textContent).toContain('Inspect memory');
   });
 
-  it('turns missing Copilot auth into an inline account action', async () => {
-    mocks.sendTurn.mockRejectedValueOnce(new Error('Copilot CLI is not authenticated'));
+  it('turns the production HTTP 401 into inline reauthentication without a fake answer', async () => {
+    mocks.sendTurn.mockRejectedValueOnce(new Error(
+      'GitHub token does not have Copilot API access (HTTP 401). Sign in with a GitHub account that has Copilot enabled.',
+    ));
+    mocks.loadCopilotAuthState
+      .mockResolvedValueOnce({
+        status: 'ready',
+        code: 'COPILOT_READY',
+        message: 'GitHub Copilot is ready.',
+        retryable: false,
+      })
+      .mockResolvedValue({
+        status: 'needs-sign-in',
+        code: 'COPILOT_HTTP_401',
+        message: 'GitHub rejected this credential (HTTP 401). Sign in again to use Copilot.',
+        retryable: true,
+        action: 'sign-in',
+      });
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
-    const navigate = vi.fn();
-    element.addEventListener('navigate', navigate);
     document.body.append(element);
     await settle(element);
 
@@ -141,14 +173,37 @@ describe('openrappter-surgeon', () => {
     await settle(element);
 
     const connect = Array.from(
-      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.error-banner button') ?? [],
-    ).find(button => button.textContent?.includes('Connect GitHub'));
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.auth-banner button') ?? [],
+    ).find(button => button.textContent?.includes('Sign in with GitHub Copilot'));
     expect(connect).toBeTruthy();
-    connect!.click();
-    expect(navigate).toHaveBeenCalledOnce();
-    expect((navigate.mock.calls[0][0] as CustomEvent).detail).toEqual({
-      view: 'accounts',
+    expect(element.shadowRoot?.textContent).not.toContain(
+      'The patient is stable and ready for deeper inspection.',
+    );
+    expect(element.shadowRoot?.querySelector<HTMLButtonElement>('.send')?.disabled).toBe(true);
+  });
+
+  it('labels earlier Copilot turns as cached and leaves local patient mode usable offline', async () => {
+    const previous = result();
+    mocks.loadCases.mockResolvedValue([previous.case]);
+    mocks.loadCopilotAuthState.mockResolvedValue({
+      status: 'offline',
+      code: 'COPILOT_OFFLINE',
+      message: 'Copilot could not be reached. Local health and estate tools remain available.',
+      retryable: true,
+      action: 'retry',
     });
+    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    document.body.append(element);
+    await settle(element);
+
+    expect(element.shadowRoot?.textContent).toContain('Cached Copilot consultation');
+    const patientMode = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
+    ).find(button => button.textContent?.includes('Patient'));
+    patientMode!.click();
+    await settle(element);
+    expect(element.shadowRoot?.querySelector<HTMLTextAreaElement>('textarea')?.disabled)
+      .toBe(false);
   });
 });
 
@@ -159,6 +214,12 @@ describe('openrappter-surgeon superseded proposals', () => {
   });
 
   it('never offers approval for a proposal the case has moved past', async () => {
+    mocks.loadCopilotAuthState.mockResolvedValue({
+      status: 'ready',
+      code: 'COPILOT_READY',
+      message: 'GitHub Copilot is ready.',
+      retryable: false,
+    });
     const first = result();
     const supersededProcedure = {
       id: 'procedure-old',

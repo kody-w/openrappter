@@ -555,6 +555,7 @@ async function startGatewayInProcess(opts?: {
   ]);
   const surgeonService = new SurgeonService({
     dataDir: HOME_DIR,
+    authState: server.getCopilotAuthStateService(),
     provider: backend.provider ?? new CopilotProvider({
       allowAmbientCredentials: !desktopProfileAuthority,
     }),

@@ -9,6 +9,15 @@ import {
   sendTurn as requestSurgeonTurn,
 } from '../services/surgeon.js';
 import { askPatient } from '../services/patient.js';
+import {
+  beginCopilotSignIn,
+  cancelCopilotSignIn,
+  loadCopilotAuthState,
+  pollCopilotSignIn,
+  retryCopilotAuth,
+  type CopilotAuthState,
+  type CopilotLoginFlow,
+} from '../services/copilot-auth.js';
 import type {
   SurgeonCase,
   SurgeonOption,
@@ -795,6 +804,54 @@ export class OpenRappterSurgeon extends LitElement {
       font-size: 10px;
     }
 
+    .auth-banner {
+      max-width: 780px;
+      margin: 0 auto 15px;
+      padding: 14px;
+      border: 1px solid rgba(111,168,255,.3);
+      border-radius: 12px;
+      background: rgba(8,16,34,.92);
+      color: #dbe7ff;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .auth-banner b, .auth-banner span { display: block; }
+    .auth-banner span { color: #9eabc5; margin: 3px 0 10px; }
+    .auth-banner button { margin-right: 8px; }
+
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.7);
+    }
+
+    .auth-dialog {
+      width: min(420px, calc(100vw - 32px));
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #0b1020;
+      text-align: center;
+    }
+
+    .device-code {
+      margin: 16px 0;
+      padding: 12px;
+      border: 1px dashed var(--blue);
+      border-radius: 8px;
+      color: var(--cyan);
+      font: 700 24px ui-monospace, monospace;
+      letter-spacing: .16em;
+      user-select: all;
+    }
+
+    .auth-dialog a { color: var(--cyan); }
+    .auth-dialog .actions { margin-top: 18px; }
+
     .composer-wrap {
       padding: 16px clamp(20px, 3vw, 38px) 22px;
       border-top: 1px solid var(--line);
@@ -988,6 +1045,14 @@ export class OpenRappterSurgeon extends LitElement {
   @state() private mode: 'surgeon' | 'patient' = 'surgeon';
   @state() private patientTurns: Array<{ q: string; a: string; model?: string }> = [];
   @state() private patientSession = '';
+  @state() private copilotAuth: CopilotAuthState = {
+    status: 'checking',
+    code: 'COPILOT_AUTH_CHECKING',
+    message: 'Verifying GitHub Copilot access…',
+    retryable: false,
+  };
+  @state() private loginFlow: CopilotLoginFlow | null = null;
+  private authPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly starterOptions: SurgeonOption[] = [
     {
@@ -1013,11 +1078,21 @@ export class OpenRappterSurgeon extends LitElement {
     void this.hydrate();
   }
 
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    if (this.authPollTimer) clearTimeout(this.authPollTimer);
+  }
+
   private async hydrate(): Promise<void> {
     try {
-      const [patient, cases] = await Promise.all([loadPatient(), loadCases()]);
+      const [patient, cases, copilotAuth] = await Promise.all([
+        loadPatient(),
+        loadCases(),
+        loadCopilotAuthState(),
+      ]);
       this.patient = patient;
       this.patientCase = cases[0] ?? null;
+      this.copilotAuth = copilotAuth;
       this.error = null;
     } catch (error) {
       this.error = (error as Error).message;
@@ -1064,7 +1139,7 @@ export class OpenRappterSurgeon extends LitElement {
   private async sendTurn(value = this.input): Promise<void> {
     if (this.mode === 'patient') return this.askThePatient(value);
     const userInput = value.trim();
-    if (!userInput || this.busy) return;
+    if (!userInput || this.busy || this.copilotAuth.status !== 'ready') return;
     this.busy = true;
     this.error = null;
     this.input = '';
@@ -1081,9 +1156,96 @@ export class OpenRappterSurgeon extends LitElement {
       });
     } catch (error) {
       this.error = (error as Error).message;
+      this.copilotAuth = await loadCopilotAuthState();
     } finally {
       this.busy = false;
     }
+  }
+
+  private async startCopilotSignIn(): Promise<void> {
+      if (this.loginFlow) return;
+      try {
+        this.error = null;
+        this.loginFlow = await beginCopilotSignIn();
+        this.scheduleAuthPoll();
+      } catch {
+        this.copilotAuth = await loadCopilotAuthState();
+        this.error = 'Could not launch GitHub sign-in. Check the connection and try again.';
+      }
+  }
+
+  private scheduleAuthPoll(): void {
+      if (!this.loginFlow || this.authPollTimer) return;
+      this.authPollTimer = setTimeout(async () => {
+        this.authPollTimer = null;
+        if (!this.loginFlow) return;
+        try {
+          const result = await pollCopilotSignIn(this.loginFlow);
+          this.copilotAuth = result.auth;
+          if (result.status === 'pending') {
+            this.scheduleAuthPoll();
+          } else {
+            this.loginFlow = null;
+            if (result.status === 'error') this.error = result.error ?? result.auth.message;
+          }
+        } catch {
+          this.copilotAuth = await loadCopilotAuthState();
+          this.scheduleAuthPoll();
+        }
+      }, 1000);
+  }
+
+  private async cancelSignIn(): Promise<void> {
+      if (!this.loginFlow) return;
+      const flow = this.loginFlow;
+      this.loginFlow = null;
+      if (this.authPollTimer) clearTimeout(this.authPollTimer);
+      this.authPollTimer = null;
+      await cancelCopilotSignIn(flow).catch(() => undefined);
+      this.copilotAuth = await loadCopilotAuthState();
+  }
+
+  private renderCopilotAuth(): unknown {
+      if (this.mode !== 'surgeon' || this.copilotAuth.status === 'ready') return nothing;
+      const signIn = this.copilotAuth.action === 'sign-in'
+        || this.copilotAuth.status === 'needs-sign-in'
+        || this.copilotAuth.status === 'no-entitlement';
+      return html`
+        <div class="auth-banner" role="status" data-auth-status=${this.copilotAuth.status}>
+          <b>Copilot unavailable</b>
+          <span>${this.copilotAuth.message}</span>
+          ${signIn ? html`
+            <button @click=${this.startCopilotSignIn}>Sign in with GitHub Copilot</button>
+          ` : html`
+            <button @click=${async () => {
+              this.copilotAuth = await retryCopilotAuth();
+            }}>Retry Copilot</button>
+          `}
+          <button @click=${() => { this.mode = 'patient'; this.error = null; }}>
+            Use local patient tools
+          </button>
+        </div>
+      `;
+  }
+
+  private renderLoginDialog(): unknown {
+      if (!this.loginFlow) return nothing;
+      return html`
+        <div class="auth-overlay" role="presentation">
+          <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="copilot-login-title">
+            <h3 id="copilot-login-title">Sign in with GitHub Copilot</h3>
+            <p>Use the Copilot-enabled GitHub account you want OpenRappter to verify.</p>
+            <div class="device-code">${this.loginFlow.userCode}</div>
+            <a href=${this.loginFlow.verificationUri} target="_blank" rel="noopener">
+              Open GitHub sign-in
+            </a>
+            <p>Waiting for GitHub authorization and Copilot entitlement verification…</p>
+            <div class="actions">
+              <button @click=${this.cancelSignIn}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      `;
   }
 
   private onComposerKeydown(event: KeyboardEvent): void {
@@ -1094,7 +1256,11 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private async approve(procedure: SurgeonProcedure): Promise<void> {
-    if (!this.patientCase || this.busy) return;
+    if (
+      !this.patientCase
+      || this.busy
+      || this.copilotAuth.status !== 'ready'
+    ) return;
     this.busy = true;
     this.error = null;
     try {
@@ -1124,7 +1290,11 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private async startOperation(procedure: SurgeonProcedure): Promise<void> {
-    if (!this.patientCase || this.busy) return;
+    if (
+      !this.patientCase
+      || this.busy
+      || this.copilotAuth.status !== 'ready'
+    ) return;
     this.busy = true;
     this.error = null;
     try {
@@ -1189,12 +1359,13 @@ export class OpenRappterSurgeon extends LitElement {
   }
 
   private renderTurn(userInput: string, turn: SurgeonTurn): unknown {
+    const cached = this.copilotAuth.status !== 'ready';
     return html`
       <section class="exchange">
         <div class="user-line">${userInput}</div>
         <article class="surgeon-line ${turn.kind === 'error' ? 'error' : ''}">
           <div class="turn-meta">
-            <span>Copilot surgeon</span>
+            <span>${cached ? 'Cached Copilot consultation' : 'Copilot surgeon'}</span>
             <span>·</span>
             <span>${turn.kind}</span>
           </div>
@@ -1213,7 +1384,7 @@ export class OpenRappterSurgeon extends LitElement {
               ${turn.options.map(option => html`
                 <button
                   class="portal"
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
                   @click=${() => this.sendTurn(option.value)}
                 >
                   <span>${option.label}</span>
@@ -1266,12 +1437,16 @@ export class OpenRappterSurgeon extends LitElement {
           <div class="procedure-actions">
             <button
               class="primary"
-              ?disabled=${this.busy || !highRiskReady}
+              ?disabled=${this.busy || !highRiskReady || this.copilotAuth.status !== 'ready'}
+              title=${this.copilotAuth.status === 'ready'
+                ? 'Approve this exact procedure'
+                : this.copilotAuth.message}
               @click=${() => this.approve(current)}
             >Approve exact procedure</button>
             <button
               class="danger"
               ?disabled=${this.busy}
+              title="Reject this procedure without contacting Copilot"
               @click=${() => this.reject(current)}
             >Reject</button>
           </div>
@@ -1279,7 +1454,10 @@ export class OpenRappterSurgeon extends LitElement {
           <div class="procedure-actions">
             <button
               class="primary"
-              ?disabled=${this.busy}
+              ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
+              title=${this.copilotAuth.status === 'ready'
+                ? 'Start the approved operation'
+                : this.copilotAuth.message}
               @click=${() => this.startOperation(current)}
             >Start approved operation</button>
           </div>
@@ -1364,7 +1542,10 @@ export class OpenRappterSurgeon extends LitElement {
             ${this.starterOptions.map(option => html`
               <button
                 class="portal"
-                ?disabled=${this.busy}
+                ?disabled=${this.busy || this.copilotAuth.status !== 'ready'}
+                title=${this.copilotAuth.status === 'ready'
+                  ? option.label
+                  : this.copilotAuth.message}
                 @click=${() => this.sendTurn(option.value)}
               >
                 <span>${option.label}</span>
@@ -1380,13 +1561,6 @@ export class OpenRappterSurgeon extends LitElement {
       ${turns.map(entry => this.renderTurn(entry.userInput, entry.turn))}
       ${this.renderOutcome()}
     `;
-  }
-
-  private errorNeedsAuthentication(): boolean {
-    const message = this.error?.toLowerCase() ?? '';
-    return message.includes('not authenticated')
-      || message.includes('copilot token')
-      || message.includes('authentication required');
   }
 
   render(): unknown {
@@ -1464,14 +1638,10 @@ export class OpenRappterSurgeon extends LitElement {
             </header>
 
             <div class="transcript">
+              ${this.renderCopilotAuth()}
               ${this.error ? html`
                 <div class="error-banner">
                   ${this.error}
-                  ${this.errorNeedsAuthentication() ? html`
-                    <button @click=${() => this.navigate('accounts')}>
-                      Connect GitHub
-                    </button>
-                  ` : nothing}
                 </div>
               ` : nothing}
               ${this.renderTranscript()}
@@ -1491,7 +1661,9 @@ export class OpenRappterSurgeon extends LitElement {
                     ? 'Ask OpenRappter itself…'
                     : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || (
+                    this.mode === 'surgeon' && this.copilotAuth.status !== 'ready'
+                  )}
                   @input=${(event: Event) => {
                     this.input = (event.target as HTMLTextAreaElement).value;
                   }}
@@ -1500,7 +1672,9 @@ export class OpenRappterSurgeon extends LitElement {
                 <button
                   class="send"
                   aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
-                  ?disabled=${this.busy || !this.input.trim()}
+                  ?disabled=${this.busy || !this.input.trim() || (
+                    this.mode === 'surgeon' && this.copilotAuth.status !== 'ready'
+                  )}
                   @click=${() => this.sendTurn()}
                 >↑</button>
               </div>
@@ -1516,6 +1690,7 @@ export class OpenRappterSurgeon extends LitElement {
             </footer>
           </section>
         </main>
+        ${this.renderLoginDialog()}
       </div>
     `;
   }

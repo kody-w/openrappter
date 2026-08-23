@@ -5,6 +5,7 @@ import { CopilotCliDirectProvider } from '../providers/copilot-cli-direct.js';
 import { chatWithFlightRecorder } from '../providers/recorded-chat.js';
 import { getFlightRecorder } from '../flight-recorder/index.js';
 import type { LLMProvider, Message } from '../providers/types.js';
+import type { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
 import type {
   SurgeonCase,
   SurgeonCaseStatus,
@@ -32,6 +33,7 @@ interface SurgeonServiceOptions {
   ) => Promise<SurgeonProcedureExecutionEvidence>;
   now?: () => Date;
   idFactory?: () => string;
+  authState?: CopilotAuthStateService;
 }
 
 interface ModelProcedure {
@@ -99,6 +101,7 @@ export class SurgeonService {
   private readonly operatingCases = new Set<string>();
   private readonly consultingCases = new Set<string>();
   private persistenceError?: Error;
+  private readonly authState?: CopilotAuthStateService;
 
   constructor(options: SurgeonServiceOptions) {
     this.provider = options.provider ?? new CopilotCliDirectProvider({
@@ -108,6 +111,7 @@ export class SurgeonService {
     this.executeProcedure = options.executeProcedure;
     this.now = options.now ?? (() => new Date());
     this.idFactory = options.idFactory ?? randomUUID;
+    this.authState = options.authState;
     this.storePath = path.join(options.dataDir, CASES_FILE);
 
     fs.mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -165,6 +169,7 @@ export class SurgeonService {
     patient: SurgeonPatientSnapshot,
     current: SurgeonCase,
   ): Promise<SurgeonConsultResult> {
+    this.authState?.requireReady();
     this.assertCaseNotInSurgery(current);
     if (this.consultingCases.has(current.id)) {
       throw new Error('This patient case is already being examined');
@@ -207,6 +212,9 @@ export class SurgeonService {
         });
         parsed = parseModelTurn(repair.content);
       }
+    } catch (error) {
+      this.authState?.reportFailure(error);
+      throw error;
     } finally {
       this.consultingCases.delete(current.id);
     }
@@ -302,6 +310,7 @@ export class SurgeonService {
     approval: SurgeonProcedureApproval,
     current: SurgeonCase,
   ): Promise<SurgeonCase> {
+    this.authState?.requireReady();
     const procedure = this.requireProcedure(current, approval);
     if (current.status === 'recovered' && procedure.status === 'recovered') {
       return cloneCase(current);

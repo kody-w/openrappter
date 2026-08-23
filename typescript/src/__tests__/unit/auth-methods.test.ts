@@ -1,8 +1,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerAuthMethods } from '../../gateway/methods/auth-methods.js';
+import { CopilotAuthStateService } from '../../auth/copilot-auth-state.js';
+import { CopilotTokenError } from '../../providers/copilot-token.js';
 
 type Handler = (params: unknown, connection: unknown) => Promise<unknown>;
 
@@ -68,10 +70,12 @@ describe('auth.remove live token updates', () => {
       },
       {
         dataDir,
+        copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
         onAuthTokenUpdate: (token: string | null) => tokenUpdates.push(token),
       },
     );
 
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(tokenUpdates).toEqual(['token-first']);
     tokenUpdates.length = 0;
 
@@ -156,6 +160,7 @@ describe('auth.remove live token updates', () => {
         }),
         pollForAccessToken: async () => 'completed-token',
         fetchGitHubUsername: async () => 'completed-user',
+        copilotAuthStateService: new CopilotAuthStateService(async () => undefined),
         onAuthTokenUpdate: (token: string | null) => tokenUpdates.push(token),
       },
     );
@@ -172,5 +177,92 @@ describe('auth.remove live token updates', () => {
       id: 'completed-user',
     });
     expect(tokenUpdates).toEqual(['completed-token']);
+  });
+
+  it('keeps a wrong account inactive and reports no entitlement without returning its token', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-wrong-account-'));
+    cleanup.push(dataDir);
+    const methods = new Map<string, Handler>();
+    const tokenUpdates: Array<string | null> = [];
+    registerAuthMethods(
+      {
+        registerMethod(name, handler) {
+          methods.set(name, handler as Handler);
+        },
+      },
+      {
+        dataDir,
+        requestDeviceCode: async () => ({
+          device_code: 'wrong-account-device',
+          user_code: 'WRONG-ONE',
+          verification_uri: 'https://github.com/login/device',
+          expires_in: 900,
+          interval: 1,
+        }),
+        pollForAccessToken: async () => 'wrong-account-secret-token',
+        fetchGitHubUsername: async () => 'wrong-account',
+        copilotAuthStateService: new CopilotAuthStateService(async () => {
+          throw new CopilotTokenError('no-entitlement', 403);
+        }),
+        onAuthTokenUpdate: (token: string | null) => tokenUpdates.push(token),
+      },
+    );
+
+    await methods.get('auth.login')?.({}, {});
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const result = await methods.get('auth.poll')?.(
+      { deviceCode: 'wrong-account-device' },
+      {},
+    ) as Record<string, unknown>;
+
+    expect(result).toMatchObject({
+      status: 'error',
+      auth: {
+        status: 'no-entitlement',
+        code: 'COPILOT_NO_ENTITLEMENT',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('wrong-account-secret-token');
+    expect(await methods.get('auth.active')?.({}, {})).toBeNull();
+    expect(await methods.get('auth.profiles')?.({}, {})).toEqual([
+      expect.objectContaining({ id: 'wrong-account', default: false }),
+    ]);
+    expect(tokenUpdates).toEqual([]);
+  });
+
+  it('reuses one pending device flow instead of opening duplicate dialogs', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'openrappter-auth-dedupe-'));
+    cleanup.push(dataDir);
+    const methods = new Map<string, Handler>();
+    const requestDeviceCode = vi.fn(async () => ({
+      device_code: 'dedupe-device',
+      user_code: 'ONE-FLOW',
+      verification_uri: 'https://github.com/login/device',
+      expires_in: 900,
+      interval: 1,
+    }));
+    registerAuthMethods(
+      {
+        registerMethod(name, handler) {
+          methods.set(name, handler as Handler);
+        },
+      },
+      {
+        dataDir,
+        requestDeviceCode,
+        pollForAccessToken: async (params: { signal?: AbortSignal }) =>
+          new Promise<never>((_, reject) => {
+            params.signal?.addEventListener('abort', () => reject(
+              new DOMException('cancelled', 'AbortError'),
+            ), { once: true });
+          }),
+      },
+    );
+
+    const first = await methods.get('auth.login')?.({}, {});
+    const second = await methods.get('auth.login')?.({}, {});
+    expect(second).toEqual(first);
+    expect(requestDeviceCode).toHaveBeenCalledOnce();
+    await methods.get('auth.cancel')?.({ deviceCode: 'dedupe-device' }, {});
   });
 });

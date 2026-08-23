@@ -30,7 +30,10 @@ export class AuthProfileStore {
     }
   }
 
-  add(profile: Omit<AuthProfile, 'createdAt'>): AuthProfile {
+  add(
+    profile: Omit<AuthProfile, 'createdAt'>,
+    options: { autoDefault?: boolean } = {},
+  ): AuthProfile {
     const newProfile: AuthProfile = {
       ...profile,
       createdAt: new Date().toISOString(),
@@ -49,7 +52,7 @@ export class AuthProfileStore {
     const existingForProvider = this.profiles.filter(
       (p) => p.provider === newProfile.provider
     );
-    if (existingForProvider.length === 0) {
+    if (existingForProvider.length === 0 && options.autoDefault !== false) {
       newProfile.default = true;
     }
 

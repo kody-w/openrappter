@@ -7,6 +7,12 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { gateway } from '../services/gateway.js';
+import {
+  beginCopilotSignIn,
+  cancelCopilotSignIn,
+  pollCopilotSignIn,
+  type CopilotLoginFlow,
+} from '../services/copilot-auth.js';
 
 interface ProfileInfo {
   id: string;
@@ -15,12 +21,6 @@ interface ProfileInfo {
   username?: string;
   default: boolean;
   createdAt: string;
-}
-
-interface LoginFlow {
-  userCode: string;
-  verificationUri: string;
-  deviceCode: string;
 }
 
 @customElement('openrappter-accounts')
@@ -276,7 +276,7 @@ export class OpenRappterAccounts extends LitElement {
 
   @state() private profiles: ProfileInfo[] = [];
   @state() private loading = true;
-  @state() private loginFlow: LoginFlow | null = null;
+  @state() private loginFlow: CopilotLoginFlow | null = null;
   @state() private loginStatus: 'idle' | 'pending' | 'success' | 'error' = 'idle';
   @state() private loginMessage = '';
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -303,7 +303,7 @@ export class OpenRappterAccounts extends LitElement {
 
   private async startLogin() {
     try {
-      this.loginFlow = await gateway.call<LoginFlow>('auth.login');
+      this.loginFlow = await beginCopilotSignIn();
       this.loginStatus = 'pending';
       this.loginMessage = 'Waiting for you to authorize…';
 
@@ -319,10 +319,7 @@ export class OpenRappterAccounts extends LitElement {
     if (!this.loginFlow) return;
 
     try {
-      const result = await gateway.call<{ status: string; username?: string; error?: string }>(
-        'auth.poll',
-        { deviceCode: this.loginFlow.deviceCode }
-      );
+      const result = await pollCopilotSignIn(this.loginFlow);
 
       if (result.status === 'success') {
         this.loginStatus = 'success';
@@ -345,11 +342,13 @@ export class OpenRappterAccounts extends LitElement {
     }
   }
 
-  private cancelLogin() {
+  private async cancelLogin() {
+    const flow = this.loginFlow;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.loginFlow = null;
     this.loginStatus = 'idle';
     this.loginMessage = '';
+    if (flow) await cancelCopilotSignIn(flow).catch(() => undefined);
   }
 
   private async switchAccount(id: string) {
@@ -391,7 +390,7 @@ export class OpenRappterAccounts extends LitElement {
 
       <div class="toolbar">
         <span class="count-badge">${this.profiles.length} account${this.profiles.length !== 1 ? 's' : ''}</span>
-        <button class="btn btn-primary" @click=${() => this.startLogin()}>+ Add Account</button>
+        <button class="btn btn-primary" @click=${() => this.startLogin()}>+ Sign in with GitHub Copilot</button>
         <button class="btn" @click=${() => this.loadProfiles()}>Refresh</button>
       </div>
 

@@ -15,6 +15,8 @@ import {
 import type { FlightEvent } from '../flight-recorder/types.js';
 import { SurgeonService } from './service.js';
 import type { SurgeonPatientSnapshot } from './types.js';
+import { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
+import { CopilotTokenError } from '../providers/copilot-token.js';
 
 class ScriptedProvider implements LLMProvider {
   readonly id = 'scripted';
@@ -522,5 +524,32 @@ describe('SurgeonService', () => {
     ).toHaveLength(2);
     expect(events[0].kind).toBe('trace.started');
     expect(events.at(-1)?.kind).toBe('trace.completed');
+  });
+
+  it('does not persist a success-shaped consultation when Copilot returns 401', async () => {
+    const authState = new CopilotAuthStateService(async () => undefined);
+    await authState.check('mock-token');
+    const provider: LLMProvider = {
+      id: 'rejected-copilot',
+      name: 'Rejected Copilot',
+      isAvailable: async () => true,
+      chat: async () => {
+        throw new CopilotTokenError('expired-token', 401);
+      },
+    };
+    const service = new SurgeonService({
+      dataDir: tempRoot(),
+      provider,
+      authState,
+      inspectPatient: async () => patient(),
+    });
+
+    await expect(service.consult({ userInput: 'Examine the patient' }))
+      .rejects.toMatchObject({ reason: 'expired-token', status: 401 });
+    expect(authState.current()).toMatchObject({
+      status: 'needs-sign-in',
+      code: 'COPILOT_TOKEN_EXPIRED',
+    });
+    expect(service.listCases()).toEqual([]);
   });
 });

@@ -147,6 +147,16 @@ test('desktop reuses the packaged OpenRappter gateway and core', () => {
   assert.match(main, /customElements\.whenDefined\('openrappter-show-and-tell'\)/);
 });
 
+test('GitHub device authentication opens in the OS browser without relaxing renderer isolation', () => {
+  assert.match(main, /setWindowOpenHandler/);
+  assert.match(main, /shell\.openExternal\(url\)/);
+  assert.match(
+    main,
+    /setWindowOpenHandler\(\(\{ url \}\) => \{[\s\S]*return \{ action: 'deny' \}/,
+  );
+  assert.match(runtimeEntry, /getCopilotAuthStateService/);
+});
+
 // OPENRAPPTER_DESKTOP_SMOKE is a process-wide launch flag, and the release
 // workflow sets it on the packaged, signed binary -- so whatever it switches
 // off is switched off in the shipped app, not just in a dev build.

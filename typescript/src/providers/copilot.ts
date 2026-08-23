@@ -20,6 +20,7 @@ import type {
 import {
   resolveCopilotApiToken,
   clearCachedCopilotToken,
+  CopilotTokenError,
   type ResolvedCopilotToken,
 } from "./copilot-token.js";
 
@@ -155,13 +156,21 @@ export class CopilotProvider implements LLMProvider {
   private githubToken: string | null = null;
   private resolvedToken: ResolvedCopilotToken | null = null;
   private allowAmbientCredentials: boolean;
+  private readonly resolveToken: typeof resolveCopilotApiToken;
+  private readonly clearTokenCache: () => void;
 
   constructor(options?: {
     githubToken?: string;
     allowAmbientCredentials?: boolean;
+    /** Test/embedding seam; production uses the shared credential cache. */
+    tokenResolver?: typeof resolveCopilotApiToken;
+    /** Test/embedding seam paired with tokenResolver. */
+    clearTokenCache?: () => void;
   }) {
     this.githubToken = options?.githubToken ?? null;
     this.allowAmbientCredentials = options?.allowAmbientCredentials ?? true;
+    this.resolveToken = options?.tokenResolver ?? resolveCopilotApiToken;
+    this.clearTokenCache = options?.clearTokenCache ?? clearCachedCopilotToken;
   }
 
   /**
@@ -194,7 +203,7 @@ export class CopilotProvider implements LLMProvider {
   /** Invalidate the cached Copilot API token so the next call re-exchanges */
   invalidateToken(): void {
     this.resolvedToken = null;
-    clearCachedCopilotToken();
+    this.clearTokenCache();
   }
 
   /** Get a valid Copilot API token, exchanging if needed */
@@ -214,7 +223,7 @@ export class CopilotProvider implements LLMProvider {
       );
     }
 
-    this.resolvedToken = await resolveCopilotApiToken({ githubToken });
+    this.resolvedToken = await this.resolveToken({ githubToken });
     return this.resolvedToken;
   }
 
@@ -302,7 +311,6 @@ export class CopilotProvider implements LLMProvider {
     });
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
       // On auth errors, invalidate the cached Copilot token and retry once.
       // The GitHub token may still be valid — just the short-lived Copilot API
       // token expired or was revoked server-side.
@@ -313,9 +321,13 @@ export class CopilotProvider implements LLMProvider {
           _isRetry: true,
         } as ChatOptions);
       }
-      throw new Error(
-        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
-      );
+      if (res.status === 401) {
+        throw new CopilotTokenError("expired-token", res.status);
+      }
+      if (res.status === 403) {
+        throw new CopilotTokenError("no-entitlement", res.status);
+      }
+      throw new Error(`Copilot API request failed (HTTP ${res.status}).`);
     }
 
     const data = (await res.json()) as OpenAIChatResponse;
@@ -397,7 +409,6 @@ export class CopilotProvider implements LLMProvider {
     });
 
     if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
       if ((res.status === 401 || res.status === 403) && !options?._isRetry) {
         this.invalidateToken();
         yield* this.chatStream(messages, {
@@ -406,9 +417,13 @@ export class CopilotProvider implements LLMProvider {
         } as ChatOptions);
         return;
       }
-      throw new Error(
-        `Copilot API error: HTTP ${res.status}${errBody ? ` — ${errBody}` : ""}`,
-      );
+      if (res.status === 401) {
+        throw new CopilotTokenError("expired-token", res.status);
+      }
+      if (res.status === 403) {
+        throw new CopilotTokenError("no-entitlement", res.status);
+      }
+      throw new Error(`Copilot API request failed (HTTP ${res.status}).`);
     }
 
     if (!res.body) {

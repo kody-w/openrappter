@@ -31,6 +31,7 @@ import { registerRappterMethods } from './methods/rappter-methods.js';
 import { registerAuthMethods } from './methods/auth-methods.js';
 import { registerBackupMethods } from './methods/backup-methods.js';
 import { registerSurgeonMethods } from './methods/surgeon-methods.js';
+import { CopilotAuthStateService } from '../auth/copilot-auth-state.js';
 import { getSharedExecSafety } from '../security/exec-safety.js';
 import type { ExecSafety } from '../security/exec-safety.js';
 import {
@@ -418,6 +419,7 @@ export class GatewayServer {
   private agentList?: () => { id: string; type: string; description?: string; capabilities?: string[]; tools?: { name: string; description?: string }[]; channels?: { type: string; connected: boolean }[] }[];
   private cronStore: Record<string, unknown>[] = [];
   private surgeonService?: SurgeonService;
+  private readonly copilotAuthState = new CopilotAuthStateService();
   /**
    * The approval queue `exec.pending`/`exec.respond` serve.
    *
@@ -759,6 +761,10 @@ export class GatewayServer {
 
   setSurgeonService(service: SurgeonService): void {
     this.surgeonService = service;
+  }
+
+  getCopilotAuthStateService(): CopilotAuthStateService {
+    return this.copilotAuthState;
   }
 
   /** Override the approval engine served by `exec.*` (tests, embedders). */
@@ -3373,6 +3379,7 @@ export class GatewayServer {
     registerAuthMethods(this, {
       onAuthTokenUpdate: (token: string | null) => this.onAuthTokenUpdate?.(token),
       dataDir: this.dataDir,
+      copilotAuthStateService: this.copilotAuthState,
     });
 
     // Backup & restore methods

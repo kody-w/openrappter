@@ -72,6 +72,19 @@ secrets. Windows releases require `WINDOWS_CERTIFICATE_P12_BASE64` and
 - recording, active-window capture, approval, and deletion require native
   main-process confirmation
 
+These settings sandbox only the Electron renderer. They do not contain the
+gateway runtime: approved shell commands and installed, generated, or
+hot-loaded agents execute outside the renderer sandbox with the logged-in OS
+user's authority.
+
+For Python agents, compatibility inspection launches Python, imports the file,
+and constructs each discovered agent class. Each invocation launches a fresh
+Python process. That code can access the filesystem, network, environment, and
+subprocesses as the logged-in OS user. The subprocess provides crash and time
+isolation, not a security boundary. Restoring the prior file after a failed
+registration cannot undo side effects from import, class construction, or
+invocation.
+
 ## Autonomous chat control
 
 The packaged gateway exposes a `DesktopControl` agent to ordinary OpenRappter
@@ -100,7 +113,10 @@ Hot-loaded Python and TypeScript agents may return:
 Agent installation is a different, higher-risk action. The Electron main
 process scans declared/implied capabilities, shows the SHA-256 and capability
 summary in a native dialog, compiles `*_agent.ts` to the factory-based
-`*_agent.js` format, and delegates to OpenRappter's rollback-safe hot loader.
+`*_agent.js` format, and delegates to OpenRappter's hot loader, which can
+restore prior file bytes after a failed registration. The scan and digest are
+review aids, not a signature, provenance proof, safety verdict, or execution
+sandbox.
 
 ## Local narration and voice
 

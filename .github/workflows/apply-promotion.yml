@@ -1,0 +1,31 @@
+name: Apply stable promotion request
+on:
+  workflow_dispatch:
+    inputs:
+      request_commit: { required: false, type: string }
+      request_path: { required: false, type: string }
+  schedule: [{ cron: '37 * * * *' }]
+permissions: { contents: write }
+concurrency: { group: apply-stable, cancel-in-progress: false }
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs: { commit: '${{ steps.find.outputs.commit }}', path: '${{ steps.find.outputs.path }}' }
+    steps:
+      - id: find
+        env: { GH_TOKEN: '${{ github.token }}', INPUT_COMMIT: '${{ inputs.request_commit }}', INPUT_PATH: '${{ inputs.request_path }}' }
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_COMMIT:-}" ] || [ -n "${INPUT_PATH:-}" ]; then
+            printf '%s' "$INPUT_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; printf '%s' "$INPUT_PATH" | grep -Eq '^requests/stable/[0-9a-f]{64}\.json$'
+            commit="$INPUT_COMMIT"; path="$INPUT_PATH"
+          else
+            path="$(gh api repos/kody-w/openrappter-release-train/contents/requests/stable?ref=main --jq '.[].path' 2>/dev/null | sort | tail -1 || true)"; [ -n "$path" ] || exit 0
+            commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$path&per_page=1" --jq '.[0].sha')"
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"; echo "path=$path" >> "$GITHUB_OUTPUT"
+  apply:
+    needs: discover
+    if: needs.discover.outputs.commit != ''
+    uses: kody-w/openrappter-release-train/.github/workflows/apply-request.yml@4421bd0f63a4a632fc8745e01d1855cce2969efe
+    with: { request_commit: '${{ needs.discover.outputs.commit }}', request_path: '${{ needs.discover.outputs.path }}', target_ring: stable, target_repository: kody-w/openrappter }

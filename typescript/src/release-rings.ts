@@ -214,29 +214,47 @@ async function requireAuthority(
 ): Promise<void> {
   if (!manifest.promotion_id) throw new Error(`${ring} manifest has no authority promotion id`);
   const repository = RING_REPOSITORIES[ring];
+  const receiptPath = `receipts/${ring}/${manifest.promotion_id}.json`;
+  let authorityCommit: string | null = null;
+  let expectedReceiptSha: string | null = null;
   const pointerResponse = await fetchImpl(
     `https://raw.githubusercontent.com/${repository}/main/.ring/authority.json`,
     { headers: { accept: 'application/json' } },
   );
-  if (!pointerResponse.ok) throw new Error(`${ring} authority pointer is unreachable`);
-  const pointer = await pointerResponse.json() as AuthorityPointer;
-  const pointerKeys = ['authority_commit', 'authority_repository', 'promotion_id', 'receipt_path', 'receipt_sha256', 'schema'];
-  if (!isClosed(pointer, pointerKeys)
-    || pointer.schema !== 'openrappter-ring-authority/v1'
-    || pointer.authority_repository !== 'kody-w/openrappter-release-train'
-    || !/^[0-9a-f]{40}$/.test(pointer.authority_commit)
-    || pointer.promotion_id !== manifest.promotion_id
-    || !/^[0-9a-f]{64}$/.test(pointer.receipt_sha256)
-    || pointer.receipt_path !== `receipts/${ring}/${manifest.promotion_id}.json`) {
-    throw new Error(`${ring} authority pointer is malformed`);
+  if (pointerResponse.ok) {
+    const pointer = await pointerResponse.json() as AuthorityPointer;
+    const pointerKeys = ['authority_commit', 'authority_repository', 'promotion_id', 'receipt_path', 'receipt_sha256', 'schema'];
+    if (isClosed(pointer, pointerKeys)
+      && pointer.schema === 'openrappter-ring-authority/v1'
+      && pointer.authority_repository === 'kody-w/openrappter-release-train'
+      && /^[0-9a-f]{40}$/.test(pointer.authority_commit)
+      && pointer.promotion_id === manifest.promotion_id
+      && /^[0-9a-f]{64}$/.test(pointer.receipt_sha256)
+      && pointer.receipt_path === receiptPath) {
+      authorityCommit = pointer.authority_commit;
+      expectedReceiptSha = pointer.receipt_sha256;
+    }
+  }
+  if (!authorityCommit) {
+    const discovery = await fetchImpl(
+      `https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=${encodeURIComponent(receiptPath)}&per_page=1`,
+      { headers: { accept: 'application/vnd.github+json' } },
+    );
+    if (!discovery.ok) throw new Error(`${ring} finalized authority receipt is undiscoverable`);
+    const commits = await discovery.json() as Array<{ sha?: unknown }>;
+    const sha = commits[0]?.sha;
+    if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) {
+      throw new Error(`${ring} has no finalized authority receipt`);
+    }
+    authorityCommit = sha;
   }
   const receiptResponse = await fetchImpl(
-    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/${pointer.authority_commit}/${pointer.receipt_path}`,
+    `https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authorityCommit}/${receiptPath}`,
     { headers: { accept: 'application/json' } },
   );
   if (!receiptResponse.ok) throw new Error(`${ring} immutable authority receipt is unreachable`);
   const receipt = await receiptResponse.json() as Record<string, unknown>;
-  if (canonicalDigest(receipt) !== pointer.receipt_sha256) {
+  if (expectedReceiptSha && canonicalDigest(receipt) !== expectedReceiptSha) {
     throw new Error(`${ring} authority receipt checksum mismatch`);
   }
   const expectedKeys = [

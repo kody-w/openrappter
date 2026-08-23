@@ -1013,20 +1013,33 @@ resolve_ring_manifest() {
     RESOLVED_RING_REASON="$(printf '%s' "$_rr" | base64 --decode)"
     RESOLVED_RING_PROMOTION_ID="$(printf '%s' "$_rpid" | base64 --decode)"
     pointer="$(mktempfile)"
-    download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/authority.json" "$pointer" ||
-        { ui_error "Could not reach immutable authority pointer for ${ring}"; return 1; }
-    pointer_info="$(node - "$pointer" "$ring" "$RESOLVED_RING_PROMOTION_ID" <<'NODE'
+    pointer_info=""
+    if download_file "https://raw.githubusercontent.com/${repo}/${manifest_ref}/.ring/authority.json" "$pointer"; then
+        pointer_info="$(node - "$pointer" "$ring" "$RESOLVED_RING_PROMOTION_ID" <<'NODE' || true
 const fs=require('node:fs'), [file,ring,id]=process.argv.slice(2), p=JSON.parse(fs.readFileSync(file));
 const keys=['authority_commit','authority_repository','promotion_id','receipt_path','receipt_sha256','schema'];
 if(JSON.stringify(Object.keys(p).sort())!==JSON.stringify(keys)||p.schema!=='openrappter-ring-authority/v1'||p.authority_repository!=='kody-w/openrappter-release-train'||!/^[0-9a-f]{40}$/.test(p.authority_commit)||p.promotion_id!==id||p.receipt_path!==`receipts/${ring}/${id}.json`||!/^[0-9a-f]{64}$/.test(p.receipt_sha256))process.exit(1);
 process.stdout.write([p.authority_commit,p.receipt_path,p.receipt_sha256].map(v=>Buffer.from(v).toString('base64')).join('|'));
 NODE
-    )" || { ui_error "Authority pointer rejected"; return 1; }
-    IFS='|' read -r _ac _rp _rsha <<< "$pointer_info"
+        )"
+    fi
     local authority_commit receipt_path receipt_sha target_commit
-    authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
-    receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
-    receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
+    if [[ -n "$pointer_info" ]]; then
+        IFS='|' read -r _ac _rp _rsha <<< "$pointer_info"
+        authority_commit="$(printf '%s' "$_ac"|base64 --decode)"
+        receipt_path="$(printf '%s' "$_rp"|base64 --decode)"
+        receipt_sha="$(printf '%s' "$_rsha"|base64 --decode)"
+    else
+        receipt_path="receipts/${ring}/${RESOLVED_RING_PROMOTION_ID}.json"
+        local discovery
+        discovery="$(mktempfile)"
+        download_file "https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=${receipt_path}&per_page=1" "$discovery" ||
+            { ui_error "Finalized authority receipt is undiscoverable"; return 1; }
+        authority_commit="$(node -e 'const fs=require("node:fs"),v=JSON.parse(fs.readFileSync(process.argv[1],"utf8")),s=v[0]?.sha;if(!/^[0-9a-f]{40}$/.test(s))process.exit(1);process.stdout.write(s)' "$discovery")" ||
+            { ui_error "No finalized authority receipt exists"; return 1; }
+        receipt_sha=""
+        printf '{}\n' > "$pointer"
+    fi
     receipt="$(mktempfile)"
     download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
         { ui_error "Immutable authority receipt unreachable"; return 1; }
@@ -1041,8 +1054,8 @@ const [mf,pf,rf,imf,ring,repo,receiptSha]=process.argv.slice(2);
 const [m,p,r,im]=[mf,pf,rf,imf].map(f=>JSON.parse(fs.readFileSync(f)));
 const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
 const digest=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
-if(digest(r)!==receiptSha||digest(m)!==r.target_manifest_sha256||digest(im)!==digest(m))throw Error('authority digest mismatch');
-if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==m.promotion_id||p.promotion_id!==m.promotion_id)throw Error('authority target mismatch');
+if((receiptSha&&digest(r)!==receiptSha)||digest(m)!==r.target_manifest_sha256||digest(im)!==digest(m))throw Error('authority digest mismatch');
+if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==m.promotion_id||(p.promotion_id&&p.promotion_id!==m.promotion_id))throw Error('authority target mismatch');
 const a=m.artifact,s=m.source;
 if(r.source_repository!==s.repository||r.source_commit!==s.commit||r.source_tag!==s.tag||r.version!==m.version||r.artifact_url!==a.url||r.install_url!==a.install_url||r.artifact_sha256!==a.sha256||r.artifact_provenance!==a.provenance)throw Error('authority identity mismatch');
 NODE

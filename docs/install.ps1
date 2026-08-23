@@ -380,22 +380,35 @@ function Resolve-RingManifest {
     $releaseBound = $m.artifact.provenance -eq "github-release-download-sha256" -and $releasePrefix -and $m.artifact.url.StartsWith($releasePrefix) -and $m.artifact.install_url -eq $m.artifact.url
     if (-not $npmBound -and -not $releaseBound) { throw "Artifact is not bound to canonical package/version" }
 
-    try { $pointer = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$manifestRef/.ring/authority.json" -Method Get }
-    catch { throw "Could not reach immutable authority pointer for $SelectedRing" }
-    $pointerKeys = @($pointer.PSObject.Properties.Name | Sort-Object) -join ","
-    if ($pointerKeys -ne "authority_commit,authority_repository,promotion_id,receipt_path,receipt_sha256,schema" -or
-        $pointer.schema -ne "openrappter-ring-authority/v1" -or
-        $pointer.authority_repository -ne "kody-w/openrappter-release-train" -or
-        $pointer.authority_commit -notmatch "^[0-9a-f]{40}$" -or
-        $pointer.promotion_id -ne $m.promotion_id -or
-        $pointer.receipt_path -ne "receipts/$SelectedRing/$($m.promotion_id).json" -or
-        $pointer.receipt_sha256 -notmatch "^[0-9a-f]{64}$") {
-        throw "Authority pointer rejected"
+    $receiptPath = "receipts/$SelectedRing/$($m.promotion_id).json"
+    $pointer = $null
+    try { $pointer = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$manifestRef/.ring/authority.json" -Method Get } catch {}
+    $pointerValid = $false
+    if ($pointer) {
+        $pointerKeys = @($pointer.PSObject.Properties.Name | Sort-Object) -join ","
+        $pointerValid = $pointerKeys -eq "authority_commit,authority_repository,promotion_id,receipt_path,receipt_sha256,schema" -and
+            $pointer.schema -eq "openrappter-ring-authority/v1" -and
+            $pointer.authority_repository -eq "kody-w/openrappter-release-train" -and
+            $pointer.authority_commit -match "^[0-9a-f]{40}$" -and
+            $pointer.promotion_id -eq $m.promotion_id -and
+            $pointer.receipt_path -eq $receiptPath -and
+            $pointer.receipt_sha256 -match "^[0-9a-f]{64}$"
     }
-    $receiptUri = "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$($pointer.authority_commit)/$($pointer.receipt_path)"
+    if ($pointerValid) {
+        $authorityCommit = $pointer.authority_commit
+        $expectedReceiptHash = $pointer.receipt_sha256
+    } else {
+        try {
+            $commits = Invoke-RestMethod -Uri "https://api.github.com/repos/kody-w/openrappter-release-train/commits?path=$receiptPath&per_page=1"
+        } catch { throw "Finalized authority receipt is undiscoverable" }
+        $authorityCommit = $commits[0].sha
+        if ($authorityCommit -notmatch "^[0-9a-f]{40}$") { throw "No finalized authority receipt exists" }
+        $expectedReceiptHash = ""
+    }
+    $receiptUri = "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authorityCommit/$receiptPath"
     try { $receipt = Invoke-RestMethod -Uri $receiptUri -Method Get }
     catch { throw "Immutable authority receipt unreachable" }
-    if ((Get-CanonicalJsonHash $receipt) -ne $pointer.receipt_sha256) { throw "Authority receipt checksum mismatch" }
+    if ($expectedReceiptHash -and (Get-CanonicalJsonHash $receipt) -ne $expectedReceiptHash) { throw "Authority receipt checksum mismatch" }
     if ($receipt.target_manifest_commit -notmatch "^[0-9a-f]{40}$") { throw "Authority target commit malformed" }
     try {
         $immutable = Invoke-RestMethod -Uri "https://raw.githubusercontent.com/$repo/$($receipt.target_manifest_commit)/.ring/manifest.json" -Method Get

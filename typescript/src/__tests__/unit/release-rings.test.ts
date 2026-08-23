@@ -131,6 +131,18 @@ describe('ring selection', () => {
       fs.rmSync(home, { recursive: true, force: true });
     });
 
+    describe('pull-only promotion setup', () => {
+      it('contains no cross-repository token or dispatch dependency', () => {
+        const workflowDir = path.resolve('..', '.github', 'workflows');
+        const workflows = fs.readdirSync(workflowDir)
+          .filter(name => name.endsWith('.yml'))
+          .map(name => fs.readFileSync(path.join(workflowDir, name), 'utf8'))
+          .join('\n');
+        expect(workflows).not.toMatch(/RING_AUTHORITY_TOKEN|RING_ENABLED|repository_dispatch/);
+        expect(workflows).toMatch(/apply-request\.yml@[0-9a-f]{40}/);
+      });
+    });
+
     afterEach(() => {
       fs.rmSync(home, { recursive: true, force: true });
       if (previousHome === undefined) delete process.env.OPENRAPPTER_HOME;

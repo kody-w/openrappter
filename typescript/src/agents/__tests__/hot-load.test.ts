@@ -15,9 +15,15 @@ import path from 'path';
 
 import { importAgentFile, safeAgentFilename } from '../agent-import.js';
 import { AgentRegistry } from '../AgentRegistry.js';
+import {
+  FlightRecorder,
+  setFlightRecorder,
+} from '../../flight-recorder/recorder.js';
 
 let dir = '';
 let registry: AgentRegistry;
+let recorder: FlightRecorder;
+let previousRecorder: FlightRecorder;
 
 /** A grail-shaped agent: imports from `agents.basic_agent`, like RAR ships. */
 function grailAgent(cls: string, name: string, description: string, body?: string): Buffer {
@@ -44,9 +50,14 @@ beforeEach(async () => {
   // Point the registry's user directory at the temp dir. The built-in dir is
   // deliberately bogus so the sweep does not load the whole product.
   registry = new AgentRegistry(path.join(dir, '__no_builtins__'), dir);
+  recorder = new FlightRecorder({ enabled: true, inMemory: true });
+  await recorder.initialize();
+  previousRecorder = setFlightRecorder(recorder);
 });
 
 afterEach(async () => {
+  setFlightRecorder(previousRecorder);
+  await recorder.close();
   await fs.rm(dir, { recursive: true, force: true });
 });
 

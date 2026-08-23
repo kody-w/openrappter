@@ -41,6 +41,7 @@ import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
 } from '../flight-recorder/recorder.js';
+import { recordFlightEventDurably } from '../flight-recorder/durable-record.js';
 import type { FlightEvent } from '../flight-recorder/types.js';
 import { processMatchesIncarnation } from '../flight-recorder/process-owner.js';
 import {
@@ -207,6 +208,11 @@ interface CurrentAgentImportResult {
   commitState?: 'not-committed' | 'committed' | 'restored' | 'unknown';
   retrySafe?: boolean;
   warning?: string;
+}
+
+interface AgentImportHttpResponse {
+  statusCode: number;
+  body: Record<string, unknown>;
 }
 
 interface AgentImportRuntimeBoundary {
@@ -1839,34 +1845,32 @@ export class GatewayServer {
                 AgentImportProvenance,
                 'traceId' | 'scenarioNonce' | 'requestId'
               >,
-            ): Promise<void> => {
-            if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
-              writeJsonResponse(
-                res,
-                400,
-                {
+              callerSupplied: boolean,
+            ): Promise<AgentImportHttpResponse> => {
+            if (
+              callerSupplied
+              && !isLoopbackRemoteAddress(req.socket.remoteAddress)
+            ) {
+              return {
+                statusCode: 400,
+                body: {
                   status: 'error',
                   error: 'Import provenance is accepted only from a loopback request.',
                 },
-                corsHeaders,
-              );
-              return;
+              };
             }
 
             await ensureFlightRecorderFromEnv();
             const recorder = getFlightRecorder();
             const recorderHealth = await recorder.health();
             if (!recorderHealth.enabled || !recorderHealth.initialized) {
-              writeJsonResponse(
-                res,
-                400,
-                {
+              return {
+                statusCode: 503,
+                body: {
                   status: 'error',
                   error: 'Import provenance requires an available Flight Recorder trace.',
                 },
-                corsHeaders,
-              );
-              return;
+              };
             }
 
             let traceEvents: FlightEvent[];
@@ -1876,32 +1880,26 @@ export class GatewayServer {
                 order: 'asc',
               });
             } catch {
-              writeJsonResponse(
-                res,
-                400,
-                {
+              return {
+                statusCode: 400,
+                body: {
                   status: 'error',
                   error: 'The supplied traceId could not be resolved by the Flight Recorder.',
                 },
-                corsHeaders,
-              );
-              return;
+              };
             }
             const activeTrace = validateActiveImportTrace(
               traceEvents,
               provenanceValue.scenarioNonce,
             );
             if (!activeTrace.ok) {
-              writeJsonResponse(
-                res,
-                400,
-                {
+              return {
+                statusCode: 400,
+                body: {
                   status: 'error',
                   error: activeTrace.error,
                 },
-                corsHeaders,
-              );
-              return;
+              };
             }
 
             const root = activeTrace.root;
@@ -1909,10 +1907,10 @@ export class GatewayServer {
               .update(sourceBytes)
               .digest('hex');
             const authMode = this.config.auth?.mode ?? 'none';
-            await recorder.withTraceContext(
+            return recorder.withTraceContext(
               { traceId: provenanceValue.traceId, parentId: root.id },
               async () => {
-                const started = await recorder.record({
+                const started = await recordFlightEventDurably(recorder, {
                   kind: 'gateway.agent.import.started',
                   source: 'gateway',
                   status: 'started',
@@ -1929,16 +1927,13 @@ export class GatewayServer {
                   },
                 });
                 if (!started) {
-                  writeJsonResponse(
-                    res,
-                    503,
-                    {
+                  return {
+                    statusCode: 503,
+                    body: {
                       status: 'error',
                       error: 'Flight Recorder could not start import provenance.',
                     },
-                    corsHeaders,
-                  );
-                  return;
+                  };
                 }
 
                 let result: CurrentAgentImportResult;
@@ -1956,8 +1951,9 @@ export class GatewayServer {
                     ),
                   );
                 } catch {
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  const failureRecorded = await recorder.withParent(
+                    started.id,
+                    () => recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -1969,13 +1965,15 @@ export class GatewayServer {
                       },
                     }),
                   );
-                  writeJsonResponse(
-                    res,
-                    500,
-                    { status: 'error', error: 'Agent import failed unexpectedly.' },
-                    corsHeaders,
-                  );
-                  return;
+                  return {
+                    statusCode: failureRecorded ? 500 : 503,
+                    body: {
+                      status: 'error',
+                      error: failureRecorded
+                        ? 'Agent import failed unexpectedly.'
+                        : 'Agent import failed and its gateway terminal evidence could not be recorded.',
+                    },
+                  };
                 }
 
                 const evidence = validateAgentImportEvidence(
@@ -1983,8 +1981,9 @@ export class GatewayServer {
                   candidateSourceSha256,
                 );
                 if (evidence.kind === 'incomplete') {
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  const failureRecorded = await recorder.withParent(
+                    started.id,
+                    () => recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -1997,22 +1996,21 @@ export class GatewayServer {
                       },
                     }),
                   );
-                  writeJsonResponse(
-                    res,
-                    503,
-                    {
+                  return {
+                    statusCode: 503,
+                    body: {
                       status: 'error',
-                      error:
-                        'Agent import result lacked complete, consistent provenance evidence.',
+                      error: failureRecorded
+                        ? 'Agent import result lacked complete, consistent provenance evidence.'
+                        : 'Incomplete importer evidence could not be durably terminated.',
                     },
-                    corsHeaders,
-                  );
-                  return;
+                  };
                 }
 
                 if (!isJsonSerializable(result)) {
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  const failureRecorded = await recorder.withParent(
+                    started.id,
+                    () => recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -2024,23 +2022,23 @@ export class GatewayServer {
                       },
                     }),
                   );
-                  writeJsonResponse(
-                    res,
-                    503,
-                    {
+                  return {
+                    statusCode: 503,
+                    body: {
                       status: 'error',
-                      error: 'Import result could not be serialised',
+                      error: failureRecorded
+                        ? 'Import result could not be serialised'
+                        : 'Unserialisable importer evidence could not be durably terminated.',
                     },
-                    corsHeaders,
-                  );
-                  return;
+                  };
                 }
 
                 let httpStatus: number;
+                let terminalRecorded: FlightEvent | null;
                 if (evidence.kind === 'accepted') {
                   httpStatus = 200;
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  terminalRecorded = await recorder.withParent(started.id, () =>
+                    recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.completed',
                       source: 'gateway',
                       status: 'success',
@@ -2055,8 +2053,8 @@ export class GatewayServer {
                   );
                 } else if (evidence.kind === 'precommit-rejection') {
                   httpStatus = 400;
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  terminalRecorded = await recorder.withParent(started.id, () =>
+                    recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -2081,8 +2079,8 @@ export class GatewayServer {
                   );
                 } else if (evidence.kind === 'restored') {
                   httpStatus = 409;
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  terminalRecorded = await recorder.withParent(started.id, () =>
+                    recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -2108,8 +2106,8 @@ export class GatewayServer {
                   );
                 } else if (evidence.kind === 'committed-warning') {
                   httpStatus = 200;
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  terminalRecorded = await recorder.withParent(started.id, () =>
+                    recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.completed',
                       source: 'gateway',
                       status: 'success',
@@ -2131,8 +2129,8 @@ export class GatewayServer {
                   );
                 } else {
                   httpStatus = 500;
-                  await recorder.withParent(started.id, () =>
-                    recorder.record({
+                  terminalRecorded = await recorder.withParent(started.id, () =>
+                    recordFlightEventDurably(recorder, {
                       kind: 'gateway.agent.import.failed',
                       source: 'gateway',
                       status: 'error',
@@ -2159,14 +2157,20 @@ export class GatewayServer {
                   );
                 }
 
-                writeJsonResponse(
-                  res,
-                  httpStatus,
-                  result,
-                  corsHeaders,
-                  { status: 'error', error: 'Import result could not be serialised' },
-                  503,
-                );
+                if (!terminalRecorded) {
+                  return {
+                    statusCode: 503,
+                    body: {
+                      ...result,
+                      status: 'error',
+                      error:
+                        'Gateway terminal Flight evidence could not be durably recorded.',
+                      errorCode: 'IMPORT_GATEWAY_TERMINAL_FAILED',
+                      retrySafe: false,
+                    },
+                  };
+                }
+                return { statusCode: httpStatus, body: { ...result } };
               },
             );
             };
@@ -2194,24 +2198,24 @@ export class GatewayServer {
                 scenarioNonce: `agent-import-${randomUUID()}`,
                 requestId: `agent-import-${randomUUID()}`,
               };
+              const traceHealthBefore = await recorder.health();
+              let pendingResponse: AgentImportHttpResponse | undefined;
               await recorder.runTrace(
                 { traceId: automaticProvenance.traceId },
                 async () => {
                   const rootId = recorder.currentTrace()?.parentId;
                   if (!rootId) {
-                    writeJsonResponse(
-                      res,
-                      503,
-                      {
+                    pendingResponse = {
+                      statusCode: 503,
+                      body: {
                         status: 'error',
                         error:
                           'Flight Recorder could not establish import provenance.',
                       },
-                      corsHeaders,
-                    );
+                    };
                     return;
                   }
-                  const authorization = await recorder.record({
+                  const authorization = await recordFlightEventDurably(recorder, {
                     kind: 'agent.import.authorization.started',
                     source: 'agent-import-authorizer',
                     status: 'started',
@@ -2223,37 +2227,55 @@ export class GatewayServer {
                     },
                   });
                   if (!authorization) {
-                    writeJsonResponse(
-                      res,
-                      503,
-                      {
+                    pendingResponse = {
+                      statusCode: 503,
+                      body: {
                         status: 'error',
                         error:
                           'Flight Recorder could not record import authorization.',
                       },
-                      corsHeaders,
-                    );
+                    };
                     return;
                   }
 
                   try {
-                    await importWithProvenance(automaticProvenance);
-                    await recorder.record({
-                      kind: res.statusCode < 400
+                    pendingResponse = await importWithProvenance(
+                      automaticProvenance,
+                      false,
+                    );
+                    const authorizationTerminal =
+                      await recordFlightEventDurably(recorder, {
+                      kind: pendingResponse.statusCode < 400
                         ? 'agent.import.authorization.completed'
                         : 'agent.import.authorization.failed',
                       source: 'agent-import-authorizer',
-                      status: res.statusCode < 400 ? 'success' : 'error',
+                      status: pendingResponse.statusCode < 400
+                        ? 'success'
+                        : 'error',
                       parentId: rootId,
                       metadata: {
                         nonce: automaticProvenance.scenarioNonce,
                         requestId: automaticProvenance.requestId,
-                        httpStatus: res.statusCode,
+                        httpStatus: pendingResponse.statusCode,
                         mode: 'gateway-owned',
                       },
                     });
-                  } catch (error) {
-                    await recorder.record({
+                    if (!authorizationTerminal) {
+                      pendingResponse = {
+                        statusCode: 503,
+                        body: {
+                          ...pendingResponse.body,
+                          status: 'error',
+                          error:
+                            'Import authorization terminal evidence could not be durably recorded.',
+                          errorCode:
+                            'IMPORT_AUTHORIZATION_TERMINAL_FAILED',
+                          retrySafe: false,
+                        },
+                      };
+                    }
+                  } catch {
+                    await recordFlightEventDurably(recorder, {
                       kind: 'agent.import.authorization.failed',
                       source: 'agent-import-authorizer',
                       status: 'error',
@@ -2264,14 +2286,55 @@ export class GatewayServer {
                         mode: 'gateway-owned',
                       },
                     });
-                    throw error;
+                    pendingResponse = {
+                      statusCode: 503,
+                      body: {
+                        status: 'error',
+                        error:
+                          'Import authorization failed before a response could be completed.',
+                      },
+                    };
                   }
                 },
+              );
+              const traceHealthAfter = await recorder.health();
+              if (
+                !pendingResponse ||
+                !traceHealthAfter.enabled ||
+                !traceHealthAfter.initialized ||
+                traceHealthAfter.errorCount !== traceHealthBefore.errorCount
+              ) {
+                pendingResponse = {
+                  statusCode: 503,
+                  body: {
+                    ...(pendingResponse?.body ?? {}),
+                    status: 'error',
+                    error:
+                      'The gateway-owned import trace did not close durably.',
+                    errorCode: 'IMPORT_TRACE_TERMINAL_FAILED',
+                    retrySafe: false,
+                  },
+                };
+              }
+              writeJsonResponse(
+                res,
+                pendingResponse.statusCode,
+                pendingResponse.body,
+                corsHeaders,
               );
               return;
             }
 
-            await importWithProvenance(provenance.value);
+            const response = await importWithProvenance(
+              provenance.value,
+              true,
+            );
+            writeJsonResponse(
+              res,
+              response.statusCode,
+              response.body,
+              corsHeaders,
+            );
             return;
           }
 

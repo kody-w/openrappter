@@ -19,6 +19,7 @@ import {
   ensureFlightRecorderFromEnv,
   getFlightRecorder,
 } from "../flight-recorder/recorder.js";
+import { recordFlightEventDurably } from "../flight-recorder/durable-record.js";
 import type { FlightEvent } from "../flight-recorder/types.js";
 import { openrappterPath } from "../infra/openrappter-home.js";
 import { markAgentSourceFile, type AgentRegistry } from "./AgentRegistry.js";
@@ -103,6 +104,7 @@ interface ImportOutcome {
   result: ImportResult;
   agentName?: string;
   bridgeClass?: string;
+  terminalRecorded?: boolean;
 }
 
 interface PreviousGeneration {
@@ -711,18 +713,54 @@ async function previousGeneration(
   };
 }
 
-async function createPreviousGenerationBackup(target: string): Promise<string> {
+async function createPreviousGenerationBackup(
+  target: string,
+  bytes: Buffer,
+  expectedSha256: string,
+): Promise<string> {
   const directory = path.dirname(target);
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const backup = path.join(directory, `.agent-import-${randomUUID()}.backup`);
+    let handle: Awaited<ReturnType<typeof fs.open>>;
     try {
-      // A hard link preserves the exact old inode while rename installs the
-      // candidate at the target path.
-      await fs.link(target, backup);
-      return backup;
+      handle = await fs.open(backup, "wx", 0o600);
     } catch (error) {
       if (systemErrorCode(error) === "EEXIST") continue;
       throw error;
+    }
+
+    let closed = false;
+    try {
+      await handle.chmod(0o600);
+      await handle.writeFile(bytes);
+      await handle.sync();
+      await handle.close();
+      closed = true;
+      const snapshotSha256 = sha256(await fs.readFile(backup));
+      if (snapshotSha256 !== expectedSha256) {
+        throw new Error(
+          `previous-generation snapshot hash mismatch (${snapshotSha256} != ${expectedSha256})`,
+        );
+      }
+      return backup;
+    } catch (error) {
+      const failures: unknown[] = [error];
+      if (!closed) {
+        try {
+          await handle.close();
+        } catch (closeError) {
+          failures.push(closeError);
+        }
+      }
+      try {
+        await fs.rm(backup, { force: true });
+      } catch (cleanupError) {
+        failures.push(cleanupError);
+      }
+      throw new AggregateError(
+        failures,
+        `Could not create a private previous-generation snapshot for ${path.basename(target)}`,
+      );
     }
   }
   throw new Error(
@@ -824,10 +862,43 @@ async function rollbackCommittedCandidate(options: {
   try {
     if (options.previous.bytes === null) {
       await fs.rm(options.target, { force: true });
-    } else if (options.backup) {
-      await fs.rename(options.backup, options.target);
+      try {
+        await fs.lstat(options.target);
+        throw new Error("the newly installed target still exists after removal");
+      } catch (error) {
+        if (systemErrorCode(error) !== "ENOENT") throw error;
+      }
     } else {
-      throw new Error("the previous-generation backup is missing");
+      const expectedSha256 = options.previous.sourceSha256;
+      if (!expectedSha256) {
+        throw new Error("the previous-generation hash is missing");
+      }
+      let snapshot = options.backup;
+      if (snapshot) {
+        try {
+          const snapshotSha256 = sha256(await fs.readFile(snapshot));
+          if (snapshotSha256 !== expectedSha256) {
+            throw new Error(
+              `previous-generation snapshot hash mismatch (${snapshotSha256} != ${expectedSha256})`,
+            );
+          }
+        } catch (error) {
+          if (systemErrorCode(error) !== "ENOENT") throw error;
+          snapshot = undefined;
+        }
+      }
+      snapshot ??= await createPreviousGenerationBackup(
+        options.target,
+        options.previous.bytes,
+        expectedSha256,
+      );
+      await fs.rename(snapshot, options.target);
+      const restoredSha256 = sha256(await fs.readFile(options.target));
+      if (restoredSha256 !== expectedSha256) {
+        throw new Error(
+          `restored target hash mismatch (${restoredSha256} != ${expectedSha256})`,
+        );
+      }
     }
     diskRestored = true;
   } catch (error) {
@@ -1045,6 +1116,8 @@ async function performLockedImport(options: {
   contents: Buffer;
   candidateSourceSha256: string;
   javascript: boolean;
+  recordCommitStarted: () => Promise<boolean>;
+  recordTerminal: (outcome: ImportOutcome) => Promise<boolean>;
   registry: ImportRegistry;
   target: string;
 }): Promise<ImportOutcome> {
@@ -1146,7 +1219,22 @@ async function performLockedImport(options: {
   let backup: string | undefined;
   try {
     if (previous.bytes !== null) {
-      backup = await createPreviousGenerationBackup(options.target);
+      const currentTargetSha256 = sha256(await fs.readFile(options.target));
+      if (currentTargetSha256 !== previous.sourceSha256) {
+        return rejectBeforeCommit({
+          stage,
+          candidateSourceSha256: options.candidateSourceSha256,
+          activeSourceSha256: currentTargetSha256,
+          agentName: preservedAgentName,
+          errorCode: "IMPORT_TARGET_CHANGED",
+          error: `${options.filename} changed while its replacement was being prepared.`,
+        });
+      }
+      backup = await createPreviousGenerationBackup(
+        options.target,
+        previous.bytes,
+        previous.sourceSha256!,
+      );
       const backupBytes = await fs.readFile(backup);
       if (sha256(backupBytes) !== previous.sourceSha256) {
         return rejectBeforeCommit({
@@ -1176,10 +1264,24 @@ async function performLockedImport(options: {
 
   return withAgentSourceWriteLock(options.target, async () => {
     let committed = false;
+    let outcome: ImportOutcome;
+    if (!(await options.recordCommitStarted())) {
+      return rejectBeforeCommit({
+        stage,
+        backup,
+        candidateSourceSha256: options.candidateSourceSha256,
+        activeSourceSha256: previous.sourceSha256,
+        agentName: preservedAgentName,
+        errorCode: "IMPORT_PROVENANCE_COMMIT_FAILED",
+        error:
+          `${options.filename} was validated but not committed because ` +
+          "durable commit-phase Flight evidence could not be recorded.",
+      });
+    }
     try {
       await fs.rename(stage, options.target);
       committed = true;
-      return await activateCommittedCandidate({
+      outcome = await activateCommittedCandidate({
         backup,
         candidate,
         candidateSourceSha256: options.candidateSourceSha256,
@@ -1204,7 +1306,7 @@ async function performLockedImport(options: {
             `(${errorDescription(error)}).`,
         });
       }
-      return rollbackCommittedCandidate({
+      outcome = await rollbackCommittedCandidate({
         activationError:
           `${options.filename} was committed but activation threw unexpectedly ` +
           `(${errorDescription(error)})`,
@@ -1218,6 +1320,36 @@ async function performLockedImport(options: {
         target: options.target,
       });
     }
+
+    if (await options.recordTerminal(outcome)) {
+      outcome.terminalRecorded = true;
+      return outcome;
+    }
+
+    if (
+      outcome.result.status === "ok" ||
+      outcome.result.committed === true ||
+      outcome.result.commitState === "unknown"
+    ) {
+      const recovered = await rollbackCommittedCandidate({
+        activationError:
+          `${options.filename} reached activation, but durable terminal ` +
+          "Flight evidence could not be recorded.",
+        activationErrorCode: "IMPORT_PROVENANCE_TERMINAL_FAILED",
+        backup,
+        candidate,
+        candidateSourceSha256: options.candidateSourceSha256,
+        previous,
+        registry: options.registry,
+        registrySnapshot,
+        target: options.target,
+      });
+      recovered.terminalRecorded = await options.recordTerminal(recovered);
+      return recovered;
+    }
+
+    outcome.terminalRecorded = false;
+    return outcome;
   });
 }
 
@@ -1235,8 +1367,8 @@ async function recordImportTerminal(
   started: FlightEvent | null,
   outcome: ImportOutcome,
   provenance: AgentImportProvenance | undefined,
-): Promise<void> {
-  if (!started) return;
+): Promise<boolean> {
+  if (!started) return false;
   const recorder = getFlightRecorder();
   const result = outcome.result;
   const common = {
@@ -1251,7 +1383,7 @@ async function recordImportTerminal(
   };
 
   if (result.status === "ok") {
-    await recorder.record({
+    return (await recordFlightEventDurably(recorder, {
       kind: "agent.import.completed",
       source: "agent-import",
       status: "success",
@@ -1264,11 +1396,10 @@ async function recordImportTerminal(
         committed: result.committed ?? false,
         errorCode: result.errorCode,
       },
-    });
-    return;
+    })) !== null;
   }
 
-  await recorder.record({
+  return (await recordFlightEventDurably(recorder, {
     kind: "agent.import.failed",
     source: "agent-import",
     status: "error",
@@ -1281,7 +1412,7 @@ async function recordImportTerminal(
       rejectedBeforeCommit: result.rejectedBeforeCommit ?? false,
       errorCode: result.errorCode,
     },
-  });
+  })) !== null;
 }
 
 /**
@@ -1304,7 +1435,7 @@ export async function importAgentFile(
 
   await ensureFlightRecorderFromEnv();
   const recorder = getFlightRecorder();
-  const started = await recorder.record({
+  const started = await recordFlightEventDurably(recorder, {
     kind: "agent.import.started",
     source: "agent-import",
     status: "started",
@@ -1318,6 +1449,22 @@ export async function importAgentFile(
       candidateSourceSha256,
     },
   });
+  if (!started) {
+    const target = canonicalAgentSourcePath(path.resolve(dir, name));
+    const activeGeneration = await observeActiveGeneration(target);
+    return failureOutcome({
+      candidateSourceSha256,
+      ...activeGeneration,
+      errorCode: "IMPORT_PROVENANCE_START_FAILED",
+      rejectedBeforeCommit: true,
+      committed: false,
+      commitState: "not-committed",
+      retrySafe: true,
+      error:
+        `${name} was not inspected or changed because its durable ` +
+        "agent.import.started evidence could not be recorded.",
+    }).result;
+  }
 
   let outcome: ImportOutcome;
   if (!name.endsWith(".py") && !name.endsWith(".js")) {
@@ -1357,6 +1504,21 @@ export async function importAgentFile(
             contents,
             candidateSourceSha256,
             javascript: name.endsWith(".js"),
+            recordCommitStarted: async () =>
+              (await recordFlightEventDurably(recorder, {
+                kind: "agent.import.commit.started",
+                source: "agent-import",
+                status: "started",
+                traceId: started.traceId,
+                parentId: started.id,
+                agentName: name,
+                metadata: {
+                  ...provenanceMetadata(provenance),
+                  candidateSourceSha256,
+                },
+              })) !== null,
+            recordTerminal: (terminalOutcome) =>
+              recordImportTerminal(started, terminalOutcome, provenance),
             registry,
             target,
           }),
@@ -1373,6 +1535,28 @@ export async function importAgentFile(
     }
   }
 
-  await recordImportTerminal(started, outcome, provenance);
+  if (
+    outcome.terminalRecorded !== true &&
+    !(await recordImportTerminal(started, outcome, provenance))
+  ) {
+    const result = outcome.result;
+    return {
+      status: "error",
+      candidateSourceSha256,
+      activeGeneration: result.activeGeneration,
+      ...(result.activeSourceSha256 === undefined
+        ? {}
+        : { activeSourceSha256: result.activeSourceSha256 }),
+      errorCode: "IMPORT_PROVENANCE_TERMINAL_FAILED",
+      rejectedBeforeCommit: result.rejectedBeforeCommit ?? false,
+      committed: result.committed ?? false,
+      commitState:
+        result.status === "ok" ? "unknown" : result.commitState,
+      retrySafe: false,
+      error:
+        `${result.error ?? `${name} reached a terminal state`}, but its ` +
+        "durable terminal Flight evidence could not be recorded.",
+    };
+  }
   return outcome.result;
 }

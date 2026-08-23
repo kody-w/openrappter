@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   rmSync,
 } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -445,11 +446,12 @@ async function startServer(
     filename: string,
     contents: Buffer,
   ) => Promise<TestImportResult>,
+  options: { bind?: 'loopback' | 'all' } = {},
 ): Promise<void> {
   dataDirectory = mkdtempSync(path.join(SCRATCH, 'gateway-'));
   server = new GatewayServer({
     port: 0,
-    bind: 'loopback',
+    bind: options.bind ?? 'loopback',
     auth: { mode: 'token', tokens: [TOKEN] },
     heartbeatInterval: 60_000,
     dataDir: dataDirectory,
@@ -463,12 +465,13 @@ async function postImport(
   options: {
     authenticated?: boolean;
     query?: string;
+    origin?: string;
   } = {},
 ): Promise<Response> {
   if (!server) throw new Error('Gateway test server is not running.');
   const authenticated = options.authenticated ?? true;
   return fetch(
-    `http://127.0.0.1:${server.port}/agents/import${options.query ?? ''}`,
+    `${options.origin ?? `http://127.0.0.1:${server.port}`}/agents/import${options.query ?? ''}`,
     {
       method: 'POST',
       headers: {
@@ -611,6 +614,17 @@ afterAll(() => {
   rmSync(SCRATCH, { recursive: true, force: true });
 });
 
+function bindAllOrigin(port: number): string {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) {
+        return `http://${address.address}:${port}`;
+      }
+    }
+  }
+  throw new Error('No non-loopback IPv4 interface is available for bind-all testing.');
+}
+
 describe('POST /agents/import causal provenance', () => {
   it('authenticates before recording provenance or invoking the importer', async () => {
     let importerCalls = 0;
@@ -635,6 +649,150 @@ describe('POST /agents/import causal provenance', () => {
       ),
     ).toEqual([]);
   });
+
+  it('allows an authenticated bind-all client through gateway-owned provenance', async () => {
+    let importerCalls = 0;
+    await startServer(async (_filename, contents) => {
+      importerCalls += 1;
+      const hash = sha256(contents);
+      return {
+        status: 'ok',
+        file: 'remote_agent.py',
+        committed: true,
+        rejectedBeforeCommit: false,
+        candidateSourceSha256: hash,
+        activeSourceSha256: hash,
+        activeGeneration: 'present',
+        commitState: 'committed',
+        retrySafe: false,
+      };
+    }, { bind: 'all' });
+    const origin = bindAllOrigin(server!.port);
+    const body = {
+      filename: 'remote_agent.py',
+      contents: 'print("authenticated remote import")',
+    };
+
+    expect((await postImport(body, {
+      authenticated: false,
+      origin,
+    })).status).toBe(401);
+    expect(importerCalls).toBe(0);
+
+    const response = await postImport(body, { origin });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      status: 'ok',
+      committed: true,
+      activeGeneration: 'present',
+    });
+    expect(importerCalls).toBe(1);
+    expect((await recorder.query()).map((event) => event.kind)).toEqual(
+      expect.arrayContaining([
+        'agent.import.authorization.started',
+        'gateway.agent.import.started',
+        'gateway.agent.import.completed',
+        'agent.import.authorization.completed',
+      ]),
+    );
+  });
+
+  it('rejects caller-supplied provenance from a bind-all remote client', async () => {
+    let importerCalls = 0;
+    await startServer(async () => {
+      importerCalls += 1;
+      return { status: 'ok' };
+    }, { bind: 'all' });
+    const origin = bindAllOrigin(server!.port);
+    const traceId = 'remote-caller-provenance';
+    let response: Response | undefined;
+
+    await recorder.runTrace({ traceId }, async () => {
+      const root = (await recorder.query({
+        traceId,
+        kind: 'trace.started',
+      }))[0]!;
+      await recordImportAuthorization(root, 'import-operation-2');
+      response = await postImport(
+        provenanceBody(traceId, 'print("remote caller provenance")'),
+        { origin },
+      );
+    });
+
+    expect(response?.status).toBe(400);
+    expect(await response!.json()).toMatchObject({
+      status: 'error',
+      error: expect.stringContaining('loopback'),
+    });
+    expect(importerCalls).toBe(0);
+  });
+
+  it.each([
+    {
+      name: 'authorization start',
+      failedKind: 'agent.import.authorization.started',
+      expectedImporterCalls: 0,
+    },
+    {
+      name: 'gateway start',
+      failedKind: 'gateway.agent.import.started',
+      expectedImporterCalls: 0,
+    },
+    {
+      name: 'gateway terminal',
+      failedKind: 'gateway.agent.import.completed',
+      expectedImporterCalls: 1,
+    },
+    {
+      name: 'authorization terminal',
+      failedKind: 'agent.import.authorization.completed',
+      expectedImporterCalls: 1,
+    },
+  ])(
+    'fails closed when durable $name evidence returns null',
+    async ({ failedKind, expectedImporterCalls }) => {
+      let importerCalls = 0;
+      await startServer(async (_filename, contents) => {
+        importerCalls += 1;
+        const hash = sha256(contents);
+        return {
+          status: 'ok',
+          file: 'fault_agent.py',
+          committed: true,
+          rejectedBeforeCommit: false,
+          candidateSourceSha256: hash,
+          activeSourceSha256: hash,
+          activeGeneration: 'present',
+          commitState: 'committed',
+          retrySafe: false,
+        };
+      });
+      const realRecord = recorder.record.bind(recorder);
+      vi.spyOn(recorder, 'record').mockImplementation(async (input) =>
+        input.kind === failedKind ? null : realRecord(input),
+      );
+
+      const response = await postImport({
+        filename: 'fault_agent.py',
+        contents: `print(${JSON.stringify(failedKind)})`,
+      });
+      const body = await response.json() as Record<string, unknown>;
+
+      expect(response.status).toBe(503);
+      expect(body).toMatchObject({
+        status: 'error',
+        error: expect.any(String),
+      });
+      if (expectedImporterCalls > 0) {
+        expect(body).toMatchObject({
+          committed: true,
+          activeGeneration: 'present',
+          retrySafe: false,
+        });
+      }
+      expect(importerCalls).toBe(expectedImporterCalls);
+    },
+  );
 
   it.each(ACTIVE_TRACE_REJECTION_CASES)(
     'rejects $name before any importer side effect',

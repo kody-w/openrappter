@@ -17,6 +17,8 @@ type ImportResultValue = Awaited<ReturnType<typeof importAgentFile>>;
 
 let dir = "";
 let registry: AgentRegistry;
+let testRecorder: FlightRecorder;
+let previousTestRecorder: FlightRecorder;
 
 class ForeignSharedAgent extends BasicAgent {
   constructor() {
@@ -227,9 +229,14 @@ function wait(milliseconds: number): Promise<void> {
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "agent-import-transaction-"));
   registry = new AgentRegistry(path.join(dir, "__no_builtins__"), dir);
+  testRecorder = new FlightRecorder({ enabled: true, inMemory: true });
+  await testRecorder.initialize();
+  previousTestRecorder = setFlightRecorder(testRecorder);
 });
 
 afterEach(async () => {
+  setFlightRecorder(previousTestRecorder);
+  await testRecorder.close();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
@@ -1128,12 +1135,18 @@ describe("causal import events", () => {
       });
       expect(events.map((event) => event.kind)).toEqual([
         "agent.import.started",
+        "agent.import.commit.started",
         "agent.import.completed",
         "agent.import.started",
         "agent.import.failed",
       ]);
-      const [validStarted, validCompleted, invalidStarted, invalidFailed] =
-        events;
+      const [
+        validStarted,
+        validCommitStarted,
+        validCompleted,
+        invalidStarted,
+        invalidFailed,
+      ] = events;
       expect(validStarted).toMatchObject({
         parentId: validParent!.id,
         status: "started",
@@ -1157,6 +1170,14 @@ describe("causal import events", () => {
           activeGeneration: "present",
           commitState: "committed",
           retrySafe: false,
+        },
+      });
+      expect(validCommitStarted).toMatchObject({
+        parentId: validStarted!.id,
+        status: "started",
+        metadata: {
+          requestId: validRequestId,
+          candidateSourceSha256: digest(valid),
         },
       });
       expect(invalidStarted).toMatchObject({

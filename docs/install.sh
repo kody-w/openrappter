@@ -1030,7 +1030,7 @@ NODE
     receipt="$(mktempfile)"
     download_file "https://raw.githubusercontent.com/kody-w/openrappter-release-train/${authority_commit}/${receipt_path}" "$receipt" ||
         { ui_error "Immutable authority receipt unreachable"; return 1; }
-    target_commit="$(node -e 'const r=require(process.argv[1]);if(!/^[0-9a-f]{40}$/.test(r.target_manifest_commit))process.exit(1);process.stdout.write(r.target_manifest_commit)' "$receipt")" ||
+    target_commit="$(node -e 'const fs=require("node:fs"),r=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(!/^[0-9a-f]{40}$/.test(r.target_manifest_commit))process.exit(1);process.stdout.write(r.target_manifest_commit)' "$receipt")" ||
         { ui_error "Authority receipt target commit rejected"; return 1; }
     immutable="$(mktempfile)"
     download_file "https://raw.githubusercontent.com/${repo}/${target_commit}/.ring/manifest.json" "$immutable" ||

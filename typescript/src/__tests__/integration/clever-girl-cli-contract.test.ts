@@ -22,6 +22,13 @@ const fixture = path.join(
   "rapter-clever-girl",
   "normalized.jsonl",
 );
+const capabilityCatalog = path.join(
+  repositoryRoot,
+  "scripts",
+  "fixtures",
+  "rapter-clever-girl",
+  "capability-contract-catalog.json",
+);
 const environment = {
   ...process.env,
   HOME: path.join(repositoryRoot, ".clever-girl-test-home-not-created"),
@@ -61,13 +68,16 @@ describe("Clever Girl installed CLI contract", () => {
       "--min-sessions <count>",
       "--min-days <count>",
       "--output <path>",
+      "--facet-sidecar-output <path>",
+      "--report-version <version>",
       "--pretty",
     ]) {
       expect(result.stdout).toContain(option);
     }
+    expect(result.stdout).toContain('(default: "2")');
   });
 
-  it("emits byte-identical Observe Mode v2 JSON", () => {
+  it("keeps unflagged output byte-identical to explicit Observe Mode v2", () => {
     const observeArgs = [
       "observe",
       "--input",
@@ -77,14 +87,83 @@ describe("Clever Girl installed CLI contract", () => {
     ];
     const direct = run([engine, ...observeArgs]);
     const packagedInterface = run([binary, "clever-girl", ...observeArgs]);
+    const directExplicitV2 = run([
+      engine,
+      ...observeArgs,
+      "--report-version",
+      "2",
+    ]);
+    const packagedExplicitV2 = run([
+      binary,
+      "clever-girl",
+      ...observeArgs,
+      "--report-version",
+      "2",
+    ]);
+
+    expect(packagedInterface.status).toBe(direct.status);
+    expect(packagedInterface.stdout).toBe(direct.stdout);
+    expect(packagedInterface.stderr).toBe(direct.stderr);
+    expect(direct.stdout).toBe(directExplicitV2.stdout);
+    expect(direct.stderr).toBe(directExplicitV2.stderr);
+    expect(packagedInterface.stdout).toBe(packagedExplicitV2.stdout);
+    expect(packagedInterface.stderr).toBe(packagedExplicitV2.stderr);
+    expect(JSON.parse(packagedInterface.stdout)).toMatchObject({
+      schemaVersion: "rapter-clever-girl.observe.v2",
+      mode: "observe",
+      status: "ok",
+    });
+  });
+
+  it("allows data-dependent v3 selection only for explicit auto", () => {
+    const observeArgs = [
+      "observe",
+      "--input",
+      fixture,
+      "--source",
+      "normalized",
+      "--capability-catalog",
+      capabilityCatalog,
+      "--report-version",
+      "auto",
+    ];
+    const direct = run([engine, ...observeArgs]);
+    const packagedInterface = run([binary, "clever-girl", ...observeArgs]);
 
     expect(packagedInterface.status).toBe(direct.status);
     expect(packagedInterface.stdout).toBe(direct.stdout);
     expect(packagedInterface.stderr).toBe(direct.stderr);
     expect(JSON.parse(packagedInterface.stdout)).toMatchObject({
-      schemaVersion: "rapter-clever-girl.observe.v2",
+      schemaVersion: "rapter-clever-girl.observe.v3",
+      mode: "observe",
+    });
+  });
+
+  it("emits byte-identical Observe Mode v3 JSON with behavioral contracts", () => {
+    const observeArgs = [
+      "observe",
+      "--input",
+      fixture,
+      "--source",
+      "normalized",
+      "--capability-catalog",
+      capabilityCatalog,
+      "--report-version",
+      "3",
+    ];
+    const direct = run([engine, ...observeArgs]);
+    const packagedInterface = run([binary, "clever-girl", ...observeArgs]);
+
+    expect(packagedInterface.status).toBe(direct.status);
+    expect(packagedInterface.stdout).toBe(direct.stdout);
+    expect(packagedInterface.stderr).toBe(direct.stderr);
+    expect(JSON.parse(packagedInterface.stdout)).toMatchObject({
+      schemaVersion: "rapter-clever-girl.observe.v3",
       mode: "observe",
       status: "ok",
+      detector: {
+        unassignedRepairOccurrences: 0,
+      },
     });
   });
 
@@ -106,11 +185,22 @@ describe("Clever Girl installed CLI contract", () => {
       path.join(packageRoot, "bin", "clever-girl.mjs"),
       "utf8",
     );
+    const validator = readFileSync(
+      path.join(
+        repositoryRoot,
+        "scripts",
+        "rapter-clever-girl-schema-validator.mjs",
+      ),
+      "utf8",
+    );
 
     expect(observeRoute).not.toMatch(/child_process|src\/index|dist\/index/);
     expect(wrapper).not.toMatch(
       /node:(?:child_process|http|https|net|tls|dns|dgram)|\bfetch\s*\(/,
     );
     expect(wrapper).toContain("return engine.main(argv)");
+    expect(validator).not.toMatch(
+      /node:(?:child_process|http|https|net|tls|dns|dgram)|\bfetch\s*\(/,
+    );
   });
 });

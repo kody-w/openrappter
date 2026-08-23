@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openrappter.dev/contracts/rapter-clever-girl-repair-assignments-v1.json",
+  "title": "Rapter Clever Girl Closed Repair Assignment Sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mode",
+    "detector",
+    "summary",
+    "assignments",
+    "replay"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "rapter-clever-girl.repair-assignments.v1"
+    },
+    "mode": {
+      "const": "repair-assignment-sidecar"
+    },
+    "detector": {
+      "$ref": "rapter-clever-girl-observe-v3.json#/$defs/detector"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assignments", "sources", "sessions", "activeDays"],
+      "properties": {
+        "assignments": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "activeDays": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "assignments": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "$ref": "#/$defs/assignment"
+      }
+    },
+    "replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "analyzerVersion",
+        "analysisFingerprint",
+        "sidecarFingerprint"
+      ],
+      "properties": {
+        "analyzerVersion": {
+          "const": "3"
+        },
+        "analysisFingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "sidecarFingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "sourceId",
+        "sessionAlias",
+        "day",
+        "facet",
+        "domain",
+        "signalEvents",
+        "duplicateSignals",
+        "genericControl"
+      ],
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "pattern": "^assignment-[a-f0-9]{20}$"
+        },
+        "sourceId": {
+          "type": "string",
+          "pattern": "^source-[a-f0-9]{12}$"
+        },
+        "sessionAlias": {
+          "type": "string",
+          "pattern": "^session-[0-9]{3,}$"
+        },
+        "day": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "facet": {
+          "$ref": "rapter-clever-girl-observe-v3.json#/$defs/facet"
+        },
+        "domain": {
+          "$ref": "rapter-clever-girl-observe-v3.json#/$defs/domain"
+        },
+        "signalEvents": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duplicateSignals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "genericControl": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "x-openrappter-contract": {
+    "fileMode": "0600",
+    "rawText": false,
+    "nativeIdentifiers": false,
+    "paths": false
+  }
+}

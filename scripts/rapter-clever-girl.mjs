@@ -24,8 +24,15 @@ import {
   priorityBasisPoints,
   repositoryCorroboration,
 } from './rapter-clever-girl-context.mjs';
+import {
+  validateObserveReportShape,
+  validateRepairSidecarShape,
+} from './rapter-clever-girl-schema-validator.mjs';
 
-const SCHEMA_VERSION = 'rapter-clever-girl.observe.v2';
+const SCHEMA_VERSION_V2 = 'rapter-clever-girl.observe.v2';
+const SCHEMA_VERSION_V3 = 'rapter-clever-girl.observe.v3';
+const REPAIR_SIDECAR_SCHEMA_VERSION =
+  'rapter-clever-girl.repair-assignments.v1';
 const SOURCE_TYPES = new Set([
   'auto',
   'claude',
@@ -53,6 +60,56 @@ const RULE_IDS = Object.freeze({
   'delivery-workflow': 'detector.delivery-workflow.v1',
   'recurring-correction': 'detector.recurring-correction.v1',
   'tool-sequence': 'detector.tool-sequence.v1',
+});
+
+export const REPAIR_FACETS = Object.freeze([
+  'access-recovery',
+  'dependency-recovery',
+  'configuration-recovery',
+  'environment-bootstrap',
+  'deployment-recovery',
+  'runtime-recovery',
+  'filesystem-recovery',
+  'tool-integration-recovery',
+  'diagnostic-recovery',
+]);
+
+export const REPAIR_DOMAINS = Object.freeze([
+  'identity-access',
+  'dependencies',
+  'configuration',
+  'developer-environment',
+  'ci-build',
+  'deployment',
+  'runtime-service',
+  'filesystem',
+  'developer-tooling',
+  'general-workflow',
+]);
+
+const REPAIR_FACET_LABELS = Object.freeze({
+  'access-recovery': 'access recovery',
+  'dependency-recovery': 'dependency recovery',
+  'configuration-recovery': 'configuration recovery',
+  'environment-bootstrap': 'environment bootstrap',
+  'deployment-recovery': 'deployment recovery',
+  'runtime-recovery': 'runtime recovery',
+  'filesystem-recovery': 'filesystem recovery',
+  'tool-integration-recovery': 'tool integration recovery',
+  'diagnostic-recovery': 'diagnostic recovery',
+});
+
+const REPAIR_DOMAIN_LABELS = Object.freeze({
+  'identity-access': 'identity and access',
+  dependencies: 'dependency management',
+  configuration: 'configuration',
+  'developer-environment': 'developer environments',
+  'ci-build': 'CI and build',
+  deployment: 'deployment',
+  'runtime-service': 'runtime services',
+  filesystem: 'filesystem operations',
+  'developer-tooling': 'developer tooling',
+  'general-workflow': 'general workflows',
 });
 
 const CONFIDENCE_RANK = Object.freeze({ high: 3, medium: 2, low: 1 });
@@ -215,6 +272,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
     minDays: 2,
     pretty: false,
     output: null,
+    facetSidecarOutput: null,
+    reportVersion: '2',
   };
   const singletonOptions = new Set();
 
@@ -244,6 +303,8 @@ export function parseArgs(argv = process.argv.slice(2)) {
       '--min-sessions',
       '--min-days',
       '--output',
+      '--facet-sidecar-output',
+      '--report-version',
     ]);
     if (!supported.has(option)) {
       throw new CliError('UNKNOWN_OPTION', 'Configuration error: an unsupported option was provided.');
@@ -344,6 +405,24 @@ export function parseArgs(argv = process.argv.slice(2)) {
         }
         options.output = value;
         break;
+      case '--facet-sidecar-output':
+        if (value === '-') {
+          throw new CliError(
+            'INVALID_SIDECAR_OUTPUT',
+            'Configuration error: --facet-sidecar-output must explicitly name a file.',
+          );
+        }
+        options.facetSidecarOutput = value;
+        break;
+      case '--report-version':
+        if (!['auto', '2', '3'].includes(value)) {
+          throw new CliError(
+            'INVALID_REPORT_VERSION',
+            'Configuration error: --report-version must be auto, 2, or 3.',
+          );
+        }
+        options.reportVersion = value;
+        break;
       default:
         break;
     }
@@ -380,6 +459,12 @@ export function parseArgs(argv = process.argv.slice(2)) {
     throw new CliError(
       'INVALID_TIME_WINDOW',
       'Configuration error: --since must not be later than --until.',
+    );
+  }
+  if (options.reportVersion === '2' && options.facetSidecarOutput !== null) {
+    throw new CliError(
+      'SIDECAR_REQUIRES_V3',
+      'Configuration error: --facet-sidecar-output requires report version 3 or auto.',
     );
   }
   return options;
@@ -580,6 +665,83 @@ function hashTokens(text) {
   return hashTokensWithStatus(text).hashes;
 }
 
+function closedRepairFacetDomain(lower, signals) {
+  const access =
+    /\b(?:auth(?:enticate|entication|orization)?|login|sign[ -]?in|permission|denied|credential|token|access)\b/.test(
+      lower,
+    );
+  const dependency =
+    /\b(?:dependenc(?:y|ies)|package|module|library|install|installer|reinstall|version conflict)\b/.test(
+      lower,
+    );
+  const configuration =
+    /\b(?:config(?:ure|uration)?|setting|environment variable|env var|profile|preference)\b/.test(
+      lower,
+    );
+  const bootstrap =
+    /\b(?:setup|set up|bootstrap|first[- ]run|first time|environment|prerequisite)\b/.test(
+      lower,
+    );
+  const deployment =
+    /\b(?:deploy(?:ment)?|pipeline|release|publish|rollout)\b/.test(lower);
+  const runtime =
+    /\b(?:runtime|service|server|daemon|process|startup|start(?:ing|ed)?|launch(?:ing|ed)?|restart|timeout|stuck|stall(?:ed|ing)?|crash(?:ed|ing)?)\b/.test(
+      lower,
+    );
+  const filesystem =
+    /\b(?:file|path|directory|folder|disk|volume|workspace|worktree)\b/.test(lower);
+  const tooling =
+    /\b(?:tool|cli|command|shell|terminal|plugin|extension|integration)\b/.test(lower);
+  const build = /\b(?:build|compile|typecheck|type-check|lint|test|ci)\b/.test(lower);
+  const genericRepetition =
+    /\b(?:again|repeat(?:ed|ing)?|recurr(?:ed|ing)?|keeps?|every time)\b/.test(lower);
+
+  let facet;
+  if (access) facet = 'access-recovery';
+  else if (dependency) facet = 'dependency-recovery';
+  else if (configuration) facet = 'configuration-recovery';
+  else if (bootstrap) facet = 'environment-bootstrap';
+  else if (deployment) facet = 'deployment-recovery';
+  else if (runtime) facet = 'runtime-recovery';
+  else if (filesystem) facet = 'filesystem-recovery';
+  else if (tooling) facet = 'tool-integration-recovery';
+  else facet = 'diagnostic-recovery';
+
+  let domain;
+  if (access) domain = 'identity-access';
+  else if (dependency) domain = 'dependencies';
+  else if (configuration) domain = 'configuration';
+  else if (build) domain = 'ci-build';
+  else if (deployment) domain = 'deployment';
+  else if (runtime) domain = 'runtime-service';
+  else if (filesystem) domain = 'filesystem';
+  else if (tooling) domain = 'developer-tooling';
+  else if (bootstrap) domain = 'developer-environment';
+  else domain = 'general-workflow';
+
+  const hasSpecificSignal =
+    access ||
+    dependency ||
+    configuration ||
+    bootstrap ||
+    deployment ||
+    runtime ||
+    filesystem ||
+    tooling;
+  const genericControl =
+    !hasSpecificSignal &&
+    (signals.review || build || genericRepetition || signals.verification);
+  const setupCandidate =
+    !genericControl &&
+    [
+      'access-recovery',
+      'dependency-recovery',
+      'configuration-recovery',
+      'environment-bootstrap',
+    ].includes(facet);
+  return { facet, domain, genericControl, setupCandidate };
+}
+
 function classifyText(text) {
   const normalized = text.normalize('NFKC').trim();
   const lower = normalized.toLowerCase();
@@ -633,11 +795,21 @@ function classifyText(text) {
   if (/\b(?:tool|command|shell|terminal)\b/.test(lower)) correctionTopics.push('tooling');
   if (/\b(?:document|documentation|readme)\b/.test(lower)) correctionTopics.push('documentation');
 
-  const workflowSignal = setup || failure || repairAction || review || deliverySignals >= 2 || correction;
+  const repair =
+    (setup && (failure || repairAction)) || (failure && repairAction);
+  const repairAssignment = repair
+    ? closedRepairFacetDomain(lower, { review, verification })
+    : null;
+  const workflowSignal =
+    setup || failure || repairAction || review || deliverySignals >= 2 || correction;
   const tokenResult = hashTokensWithStatus(normalized);
   return {
     isControl: CONTROL_MESSAGE_RE.test(normalized),
-    repair: (setup && (failure || repairAction)) || (failure && repairAction),
+    repair,
+    repairFacet: repairAssignment?.facet ?? null,
+    repairDomain: repairAssignment?.domain ?? null,
+    genericRepairControl: repairAssignment?.genericControl ?? false,
+    setupCandidate: repairAssignment?.setupCandidate ?? false,
     review,
     delivery: deliverySignals >= 2,
     correction,
@@ -1394,6 +1566,9 @@ export async function loadSkillCatalog(roots = []) {
         tokenHashes: hashTokens(derivedText),
         sourceTypes: ['skill-root'],
         sourceIds: [`source-${sha256(`skill-source-v1:${sha256(bytes)}`).slice(0, 12)}`],
+        contractQualified: false,
+        contractVersion: null,
+        contractTestCount: 0,
       });
     } catch (error) {
       if (
@@ -1514,7 +1689,7 @@ function falsePositiveRisks(patternType) {
   }
 }
 
-function chooseCapabilities(patternType, catalog, events) {
+function chooseCapabilities(patternType, catalog, events, reportVersion = '2') {
   const capabilities = (
     Array.isArray(catalog?.capabilities)
       ? catalog.capabilities
@@ -1525,7 +1700,9 @@ function chooseCapabilities(patternType, catalog, events) {
   const candidateTokens = [
     ...new Set(events.flatMap((event) => event.features?.tokenHashes ?? [])),
   ].sort();
-  return matchCapabilities(patternType, capabilities, candidateTokens);
+  return matchCapabilities(patternType, capabilities, candidateTokens, {
+    requireBehavioralContract: reportVersion === '3',
+  });
 }
 
 function classificationFor(patternType, capabilityMatches, catalogCoverage) {
@@ -1561,6 +1738,177 @@ function activeFriction(candidateEvents, allEvents) {
     bySessionDay.get(key).push(event);
   }
 
+  return finishActiveFriction(evidenceKeys, bySessionDay);
+}
+
+function eventKey(event) {
+    return `${event.sourceId}:${event.sessionKey}:${event.ordinal}:${event.eventIndex}`;
+  }
+
+function repairOccurrenceClusters(candidateEvents, aliases) {
+    const grouped = groupEvidence(candidateEvents);
+    const assignments = [];
+    const clusters = new Map();
+    for (const group of grouped) {
+      const repairSignals = group.events.filter(
+        (event) =>
+          event.role === 'user' &&
+          event.features?.repair === true &&
+          REPAIR_FACETS.includes(event.features?.repairFacet) &&
+          REPAIR_DOMAINS.includes(event.features?.repairDomain),
+      );
+      if (repairSignals.length === 0) continue;
+      const pairCounts = new Map();
+      for (const event of repairSignals) {
+        const pair = `${event.features.repairFacet}:${event.features.repairDomain}`;
+        pairCounts.set(pair, (pairCounts.get(pair) ?? 0) + 1);
+      }
+      const [primaryPair] = [...pairCounts.entries()].sort((left, right) => {
+        if (left[1] !== right[1]) return right[1] - left[1];
+        const [leftFacet, leftDomain] = left[0].split(':');
+        const [rightFacet, rightDomain] = right[0].split(':');
+        const facetOrder =
+          REPAIR_FACETS.indexOf(leftFacet) - REPAIR_FACETS.indexOf(rightFacet);
+        if (facetOrder !== 0) return facetOrder;
+        return REPAIR_DOMAINS.indexOf(leftDomain) - REPAIR_DOMAINS.indexOf(rightDomain);
+      })[0];
+      const [facet, domain] = primaryPair.split(':');
+      const clusterKey = `${facet}:${domain}`;
+      const genericControl = repairSignals.every(
+        (event) => event.features.genericRepairControl === true,
+      );
+      const assignment = {
+        assignmentId: `assignment-${sha256(
+          `repair-assignment-v1:${group.sourceId}:${group.sessionKey}:${group.day}`,
+        ).slice(0, 20)}`,
+        sourceId: group.sourceId,
+        sessionAlias: aliases.get(group.sessionKey),
+        day: group.day,
+        facet,
+        domain,
+        signalEvents: group.events.length,
+        duplicateSignals: Math.max(0, group.events.length - 1),
+        genericControl,
+        group,
+        clusterKey,
+      };
+      assignments.push(assignment);
+      if (!clusters.has(clusterKey)) {
+        clusters.set(clusterKey, {
+          facet,
+          domain,
+          events: [],
+          evidenceGroups: [],
+          genericOccurrences: 0,
+        });
+      }
+      const cluster = clusters.get(clusterKey);
+      cluster.events.push(...group.events);
+      cluster.evidenceGroups.push(group);
+      if (genericControl) cluster.genericOccurrences += 1;
+    }
+    assignments.sort((left, right) =>
+      left.assignmentId.localeCompare(right.assignmentId, 'en'));
+    return {
+      assignments,
+      clusters: [...clusters.entries()]
+        .sort(([left], [right]) => left.localeCompare(right, 'en'))
+        .map(([clusterKey, cluster]) => ({ clusterKey, ...cluster })),
+    };
+  }
+
+function splitRepairFriction(assignments, allEvents) {
+    const assignmentByEvent = new Map();
+    for (const assignment of assignments) {
+      for (const event of assignment.group.events) {
+        assignmentByEvent.set(eventKey(event), assignment.clusterKey);
+      }
+    }
+    const bySessionDay = new Map();
+    for (const event of allEvents) {
+      if (event.timestampMs === null || !event.day) continue;
+      const key = `${event.sourceId}:${event.sessionKey}:${event.day}`;
+      if (!bySessionDay.has(key)) bySessionDay.set(key, []);
+      bySessionDay.get(key).push(event);
+    }
+
+    const perCluster = new Map();
+    let originalLowerSeconds = 0;
+    let originalUpperSeconds = 0;
+    let measuredIntervals = 0;
+    for (const events of bySessionDay.values()) {
+      events.sort(compareEvents);
+      for (let index = 1; index < events.length; index += 1) {
+        const previous = events[index - 1];
+        const current = events[index];
+        const previousCluster = assignmentByEvent.get(eventKey(previous));
+        const currentCluster = assignmentByEvent.get(eventKey(current));
+        if (!previousCluster && !currentCluster) continue;
+        const rawSeconds = Math.floor((current.timestampMs - previous.timestampMs) / 1000);
+        if (rawSeconds < 0) continue;
+        const capped = Math.min(rawSeconds, ACTIVE_GAP_CAP_SECONDS);
+        const clusterKey = [previousCluster, currentCluster]
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right, 'en'))[0];
+        if (!perCluster.has(clusterKey)) {
+          perCluster.set(clusterKey, {
+            lowerSeconds: 0,
+            upperSeconds: 0,
+            measuredIntervals: 0,
+          });
+        }
+        const cluster = perCluster.get(clusterKey);
+        cluster.upperSeconds += capped;
+        originalUpperSeconds += capped;
+        if (previousCluster && currentCluster) {
+          cluster.lowerSeconds += capped;
+          originalLowerSeconds += capped;
+        }
+        cluster.measuredIntervals += 1;
+        measuredIntervals += 1;
+      }
+    }
+
+    let unionLowerSeconds = 0;
+    let unionUpperSeconds = 0;
+    const frictionByCluster = new Map();
+    for (const [clusterKey, friction] of perCluster) {
+      unionLowerSeconds += friction.lowerSeconds;
+      unionUpperSeconds += friction.upperSeconds;
+      frictionByCluster.set(clusterKey, {
+        lowerSeconds: friction.lowerSeconds,
+        upperSeconds: friction.upperSeconds,
+        method: 'disjoint-capped-active-interval-union-v1',
+        confidence:
+          friction.measuredIntervals === 0
+            ? 'unavailable'
+            : friction.lowerSeconds > 0
+              ? 'medium'
+              : 'low',
+      });
+    }
+    return {
+      frictionByCluster,
+      summary: {
+        method: 'disjoint-capped-active-interval-union-v1',
+        measuredIntervals,
+        original: {
+          lowerSeconds: originalLowerSeconds,
+          upperSeconds: originalUpperSeconds,
+        },
+        union: {
+          lowerSeconds: unionLowerSeconds,
+          upperSeconds: unionUpperSeconds,
+        },
+        overlapSeconds: 0,
+        withinOriginalBounds:
+          unionLowerSeconds <= originalLowerSeconds &&
+          unionUpperSeconds <= originalUpperSeconds,
+      },
+    };
+  }
+
+function finishActiveFriction(evidenceKeys, bySessionDay) {
   let lowerSeconds = 0;
   let upperSeconds = 0;
   let measuredGaps = 0;
@@ -1632,6 +1980,11 @@ function buildCandidate({
   minSessions,
   minDays,
   activityEvents,
+  reportVersion = '2',
+  facet = null,
+  domain = null,
+  frictionOverride = null,
+  genericOccurrences = 0,
 }) {
   const sessions = new Set(evidenceGroups.map((group) => group.sessionKey)).size;
   const activeDays = new Set(evidenceGroups.map((group) => group.day)).size;
@@ -1644,13 +1997,52 @@ function buildCandidate({
     occurrences >= Math.max(minSessions, 3)
       ? 'high'
       : 'medium';
-  const capabilityMatches = chooseCapabilities(patternType, catalog, events);
+  const capabilityMatches = chooseCapabilities(
+    patternType,
+    catalog,
+    events,
+    reportVersion,
+  );
   const capability = capabilityMatches[0] ?? null;
   const repositoryEvidence = repositoryCorroboration(patternType, activityEvents);
-  const ruleId = RULE_IDS[patternType];
+  const ruleId =
+    reportVersion === '3' && patternType === 'repair-loop'
+      ? 'detector.repair-facet-domain.v1'
+      : RULE_IDS[patternType];
+  const sourceDistribution = [...new Map(
+    evidenceGroups.map((group) => [group.sourceId, 0]),
+  )].map(([sourceId]) => ({
+    sourceId,
+    occurrences: evidenceGroups.filter((group) => group.sourceId === sourceId).length,
+  })).sort((left, right) => left.sourceId.localeCompare(right.sourceId, 'en'));
+  const dominantSourceOccurrences = Math.max(
+    0,
+    ...sourceDistribution.map(({ occurrences: count }) => count),
+  );
+  const promotionBlockers = [];
+  if (confidence !== 'high') promotionBlockers.push('recurrence-threshold');
+  if (sourceDistribution.length < 2) promotionBlockers.push('single-source');
+  if (
+    ['reuse-existing', 'extend-existing', 'consolidate-existing'].includes(
+      classificationFor(patternType, capabilityMatches, catalog?.coverage ?? 'none'),
+    ) &&
+    !capabilityMatches.some(({ contractQualified }) => contractQualified === true)
+  ) {
+    promotionBlockers.push('behavioral-contract-required');
+  }
+  if (
+    reportVersion === '3' &&
+    patternType === 'repair-loop' &&
+    genericOccurrences === occurrences
+  ) {
+    promotionBlockers.push('generic-control');
+  }
   const candidate = {
     candidateId: `candidate-${sha256(`${patternType}:${clusterKey}`).slice(0, 16)}`,
-    label: LABELS[patternType],
+    label:
+      reportVersion === '3' && patternType === 'repair-loop'
+        ? `Repeated ${REPAIR_FACET_LABELS[facet]} in ${REPAIR_DOMAIN_LABELS[domain]}`
+        : LABELS[patternType],
     patternType,
     classification: classificationFor(
       patternType,
@@ -1662,11 +2054,23 @@ function buildCandidate({
     sessions,
     activeDays,
     evidence: makeEvidence(evidenceGroups, aliases, ruleId),
-    observedActiveFriction: activeFriction(events, allEvents),
+    observedActiveFriction:
+      frictionOverride ?? activeFriction(events, allEvents),
     existingCapability:
       capability === null
         ? null
-        : {
+        : reportVersion === '3'
+          ? {
+              name: capability.name,
+              match: capability.match,
+              reason: capability.reason,
+              contractQualified: capability.contractQualified,
+              contractConflict: capability.contractConflict,
+              contractVersion: capability.contractVersion,
+              contractTestCount: capability.contractTestCount,
+              contractDigest: capability.contractDigest,
+            }
+          : {
             name: capability.name,
             match: capability.match,
             reason: capability.reason,
@@ -1680,6 +2084,45 @@ function buildCandidate({
       evidenceGroups.length - MAX_EVIDENCE_PER_CANDIDATE,
     ),
   };
+  if (reportVersion === '3') {
+    candidate.facet = facet;
+    candidate.domain = domain;
+    candidate.deduplication = {
+      rawSignals: events.length,
+      uniqueOccurrences: occurrences,
+      duplicateSignals: Math.max(0, events.length - occurrences),
+      key: 'source-session-day',
+    };
+    candidate.sourceSkew = {
+      sourceCount: sourceDistribution.length,
+      dominantSourceOccurrences,
+      dominantSourceBasisPoints:
+        occurrences === 0
+          ? 0
+          : Math.floor((dominantSourceOccurrences * 10_000) / occurrences),
+      distribution: sourceDistribution,
+    };
+    candidate.controlProfile = {
+      genericOccurrences,
+      setupCandidate:
+        patternType === 'repair-loop' &&
+        genericOccurrences < occurrences &&
+        [
+          'access-recovery',
+          'dependency-recovery',
+          'configuration-recovery',
+          'environment-bootstrap',
+        ].includes(facet),
+    };
+    candidate.promotion = {
+      eligible: promotionBlockers.length === 0,
+      verdict:
+        promotionBlockers.length === 0
+          ? 'eligible-for-human-review'
+          : 'not-eligible',
+      blockers: promotionBlockers.sort(),
+    };
+  }
   candidate.priorityBasisPoints = priorityBasisPoints(candidate, repositoryEvidence);
   return candidate;
 }
@@ -1941,6 +2384,220 @@ export function analyzeHistory(records, options = {}) {
     activeDays: new Set(inWindow.map((event) => event.day).filter(Boolean)).size,
     candidates: candidates.slice(0, MAX_CANDIDATES),
     excluded,
+  };
+}
+
+/**
+ * Mine the v3 closed facet × domain detector without changing v2 semantics.
+ */
+export function analyzeHistoryV3(records, options = {}) {
+  const flattened = records.flatMap((record) => (Array.isArray(record) ? record : [record]));
+  const sinceMs = options.sinceMs ?? null;
+  const untilMs = options.untilMs ?? null;
+  const inWindow = flattened.filter((event) => {
+    if (!event || typeof event !== 'object' || typeof event.sessionKey !== 'string') return false;
+    if (event.timestampMs === null) return sinceMs === null && untilMs === null;
+    if (sinceMs !== null && event.timestampMs < sinceMs) return false;
+    if (untilMs !== null && event.timestampMs > untilMs) return false;
+    return true;
+  });
+
+  const sessionKeys = [...new Set(inWindow.map((event) => event.sessionKey))].sort();
+  const aliases = new Map(
+    sessionKeys.map((sessionKey, index) => [
+      sessionKey,
+      `session-${String(index + 1).padStart(3, '0')}`,
+    ]),
+  );
+  const excluded = {
+    controlMessages: 0,
+    belowEvidenceThreshold: 0,
+    intentionalVerificationLoops: 0,
+    candidateCap: 0,
+    evidenceItems: 0,
+    workLimitEvents: 0,
+  };
+  const candidateEvents = [];
+  for (const event of inWindow) {
+    if (event.features?.isControl) {
+      excluded.controlMessages += 1;
+      continue;
+    }
+    if (event.features?.verificationOnly) {
+      excluded.intentionalVerificationLoops += 1;
+      continue;
+    }
+    candidateEvents.push(event);
+  }
+
+  const userRepairEvents = candidateEvents.filter(
+    (event) => event.role === 'user' && event.features?.repair,
+  );
+  const repairContexts = new Set(
+    userRepairEvents.map(
+      (event) => `${event.sourceId}:${event.sessionKey}:${event.day ?? 'undated'}`,
+    ),
+  );
+  const repairEvents = candidateEvents.filter(
+    (event) =>
+      (event.role === 'user' && event.features?.repair) ||
+      (event.role === 'tool' &&
+        event.statusError &&
+        repairContexts.has(
+          `${event.sourceId}:${event.sessionKey}:${event.day ?? 'undated'}`,
+        )),
+  );
+  const repairStructure = repairOccurrenceClusters(repairEvents, aliases);
+  const repairFriction = splitRepairFriction(
+    repairStructure.assignments,
+    inWindow,
+  );
+  const definitions = repairStructure.clusters.map((cluster) => ({
+    patternType: 'repair-loop',
+    ...cluster,
+    explicitEvidenceGroups: cluster.evidenceGroups,
+    frictionOverride:
+      repairFriction.frictionByCluster.get(cluster.clusterKey) ?? {
+        lowerSeconds: 0,
+        upperSeconds: 0,
+        method: 'disjoint-capped-active-interval-union-v1',
+        confidence: 'unavailable',
+      },
+  }));
+  definitions.push(
+    {
+      patternType: 'review-workflow',
+      clusterKey: 'review-workflow-v1',
+      events: candidateEvents.filter(
+        (event) => event.role === 'user' && event.features?.review,
+      ),
+    },
+    {
+      patternType: 'delivery-workflow',
+      clusterKey: 'delivery-workflow-v1',
+      events: candidateEvents.filter(
+        (event) =>
+          event.role === 'user' && event.features?.delivery && !event.features?.review,
+      ),
+    },
+  );
+
+  const correctionEvents = candidateEvents
+    .filter((event) => event.role === 'user' && event.features?.correction)
+    .sort(compareEvents);
+  excluded.workLimitEvents += Math.max(
+    0,
+    correctionEvents.length - EVIDENCE_LIMITS.maximumCorrectionEvents,
+  );
+  for (const cluster of correctionClusters(
+    correctionEvents.slice(0, EVIDENCE_LIMITS.maximumCorrectionEvents),
+  )) {
+    definitions.push({
+      patternType: 'recurring-correction',
+      clusterKey: cluster.key,
+      events: cluster.events,
+    });
+  }
+
+  const orderedToolEvents = candidateEvents
+    .filter((event) => event.toolCategory)
+    .sort(compareEvents);
+  excluded.workLimitEvents += Math.max(
+    0,
+    orderedToolEvents.length - EVIDENCE_LIMITS.maximumToolEvents,
+  );
+  for (const sequence of toolSequenceClusters(
+    orderedToolEvents.slice(0, EVIDENCE_LIMITS.maximumToolEvents),
+  )) {
+    if (sequence.occurrences.length < 2) continue;
+    if (sequence.occurrences.every((occurrence) => occurrence.verificationOnly)) {
+      excluded.intentionalVerificationLoops += sequence.occurrences.length;
+      continue;
+    }
+    definitions.push({
+      patternType: 'tool-sequence',
+      clusterKey: sequence.key,
+      events: sequence.occurrences.flatMap((occurrence) => occurrence.events),
+      explicitEvidenceGroups: sequence.occurrences,
+    });
+  }
+
+  const candidates = [];
+  for (const definition of definitions) {
+    const evidenceGroups =
+      definition.explicitEvidenceGroups ?? groupEvidence(definition.events);
+    if (definition.events.length < 2) continue;
+    const candidate = buildCandidate({
+      ...definition,
+      evidenceGroups,
+      aliases,
+      allEvents: inWindow,
+      catalog: options.catalog ?? { skills: [] },
+      minSessions: options.minSessions ?? 3,
+      minDays: options.minDays ?? 2,
+      activityEvents: options.activityEvents ?? [],
+      reportVersion: '3',
+    });
+    if (candidate) {
+      excluded.evidenceItems += candidate._excludedEvidence;
+      delete candidate._excludedEvidence;
+      candidates.push(candidate);
+    } else {
+      excluded.belowEvidenceThreshold += 1;
+    }
+  }
+
+  candidates.sort((left, right) => {
+    if (left.priorityBasisPoints !== right.priorityBasisPoints) {
+      return right.priorityBasisPoints - left.priorityBasisPoints;
+    }
+    const confidenceOrder =
+      CONFIDENCE_RANK[right.confidence] - CONFIDENCE_RANK[left.confidence];
+    if (confidenceOrder !== 0) return confidenceOrder;
+    if (left.occurrences !== right.occurrences) return right.occurrences - left.occurrences;
+    if (left.sessions !== right.sessions) return right.sessions - left.sessions;
+    if (left.activeDays !== right.activeDays) return right.activeDays - left.activeDays;
+    return left.candidateId.localeCompare(right.candidateId, 'en');
+  });
+  excluded.candidateCap = Math.max(0, candidates.length - MAX_CANDIDATES);
+
+  const safeAssignments = repairStructure.assignments.map((assignment) => ({
+    assignmentId: assignment.assignmentId,
+    sourceId: assignment.sourceId,
+    sessionAlias: assignment.sessionAlias,
+    day: assignment.day,
+    facet: assignment.facet,
+    domain: assignment.domain,
+    signalEvents: assignment.signalEvents,
+    duplicateSignals: assignment.duplicateSignals,
+    genericControl: assignment.genericControl,
+  }));
+  return {
+    sessions: sessionKeys.length,
+    activeDays: new Set(inWindow.map((event) => event.day).filter(Boolean)).size,
+    candidates: candidates.slice(0, MAX_CANDIDATES),
+    excluded,
+    detector: {
+      facetTaxonomyVersion: 'closed-repair-facets.v1',
+      domainTaxonomyVersion: 'closed-repair-domains.v1',
+      eligibleRepairOccurrences: safeAssignments.length,
+      assignedRepairOccurrences: safeAssignments.length,
+      unassignedRepairOccurrences: 0,
+      rawRepairSignals: repairEvents.length,
+      duplicateRepairSignals: Math.max(0, repairEvents.length - safeAssignments.length),
+      facetDomainClusterCount: repairStructure.clusters.length,
+      facetDomainDistribution: repairStructure.clusters.map(
+        ({ facet, domain, events, evidenceGroups, genericOccurrences }) => ({
+          facet,
+          domain,
+          occurrences: evidenceGroups.length,
+          rawSignals: events.length,
+          genericOccurrences,
+        }),
+      ),
+      splitFriction: repairFriction.summary,
+    },
+    repairAssignments: safeAssignments,
   };
 }
 
@@ -2370,7 +3027,8 @@ function pathIsWithin(child, parent) {
 }
 
 export async function validateOutputScope(options, platform = process.platform) {
-  if (!options?.output) return;
+  const outputs = [options?.output, options?.facetSidecarOutput].filter(Boolean);
+  if (outputs.length === 0) return;
   if (platform === 'win32') {
     throw new CliError(
       'OUTPUT_UNSUPPORTED_ON_WINDOWS',
@@ -2378,43 +3036,56 @@ export async function validateOutputScope(options, platform = process.platform) 
     );
   }
 
-  const outputKey = await canonicalFuturePath(options.output, platform);
+  const outputKeys = [];
+  for (const output of outputs) {
+    outputKeys.push(await canonicalFuturePath(output, platform));
+  }
+  if (new Set(outputKeys).size !== outputKeys.length) {
+    throw new CliError(
+      'OUTPUTS_ALIAS',
+      'Output error: report and sidecar destinations must be distinct.',
+    );
+  }
   const selectedFiles = [
     ...(options.inputs ?? []),
     ...(options.activityInputs ?? []),
     ...(options.capabilityCatalogs ?? []),
     ...(options.estateManifest ? [options.estateManifest] : []),
   ];
-  for (const input of selectedFiles) {
-    if (outputKey === (await canonicalFuturePath(input, platform))) {
-      throw new CliError(
-        'OUTPUT_ALIASES_SOURCE',
-        'Output error: the report path aliases an explicitly selected source.',
-      );
+  for (const outputKey of outputKeys) {
+    for (const input of selectedFiles) {
+      if (outputKey === (await canonicalFuturePath(input, platform))) {
+        throw new CliError(
+          'OUTPUT_ALIASES_SOURCE',
+          'Output error: a destination aliases an explicitly selected source.',
+        );
+      }
+    }
+    for (const root of options.skillsRoots ?? []) {
+      const rootKey = await canonicalFuturePath(root, platform);
+      if (pathIsWithin(outputKey, rootKey)) {
+        throw new CliError(
+          'OUTPUT_INSIDE_SKILLS_ROOT',
+          'Output error: destinations must be outside every selected skill root.',
+        );
+      }
     }
   }
-  for (const root of options.skillsRoots ?? []) {
-    const rootKey = await canonicalFuturePath(root, platform);
-    if (pathIsWithin(outputKey, rootKey)) {
+  for (const output of outputs) {
+    try {
+      await lstat(output);
       throw new CliError(
-        'OUTPUT_INSIDE_SKILLS_ROOT',
-        'Output error: the report path must be outside every selected skill root.',
+        'OUTPUT_ALREADY_EXISTS',
+        'Output error: refusing to replace an existing filesystem entry.',
       );
-    }
-  }
-  try {
-    await lstat(options.output);
-    throw new CliError(
-      'OUTPUT_ALREADY_EXISTS',
-      'Output error: refusing to replace an existing filesystem entry.',
-    );
-  } catch (error) {
-    if (error instanceof CliError) throw error;
-    if (error?.code !== 'ENOENT') {
-      throw new CliError(
-        'OUTPUT_SCOPE_UNVERIFIED',
-        'Output error: the report destination could not be verified safely.',
-      );
+    } catch (error) {
+      if (error instanceof CliError) throw error;
+      if (error?.code !== 'ENOENT') {
+        throw new CliError(
+          'OUTPUT_SCOPE_UNVERIFIED',
+          'Output error: a destination could not be verified safely.',
+        );
+      }
     }
   }
 }
@@ -2538,7 +3209,31 @@ export async function runObserveCli(argsOrOptions, io = {}) {
   const sources = uniqueSourceResults.map((result) => result.source);
   const normalizedEvents = uniqueSourceResults.flatMap((result) => result.events);
   const activityEvents = uniqueActivityResults.flatMap((result) => result.events);
-  const analysis = analyzeHistory(normalizedEvents, {
+  const hasClosedRepairEvidence = normalizedEvents.some(
+    (event) =>
+      event.role === 'user' &&
+      event.features?.repair === true &&
+      REPAIR_FACETS.includes(event.features?.repairFacet) &&
+      REPAIR_DOMAINS.includes(event.features?.repairDomain),
+  );
+  const hasBehavioralContractEvidence = mergedCapabilities.some(
+    (capability) => capability.contractQualified === true,
+  );
+  const reportVersion =
+    options.reportVersion === '3' ||
+    (
+      (options.reportVersion ?? 'auto') === 'auto' &&
+      (
+        hasClosedRepairEvidence ||
+        hasBehavioralContractEvidence ||
+        options.facetSidecarOutput !== null
+      )
+    )
+      ? '3'
+      : '2';
+  const analysisFunction =
+    reportVersion === '3' ? analyzeHistoryV3 : analyzeHistory;
+  const analysis = analysisFunction(normalizedEvents, {
     sinceMs: options.sinceMs ?? null,
     untilMs: options.untilMs ?? null,
     minSessions: options.minSessions ?? 3,
@@ -2586,8 +3281,48 @@ export async function runObserveCli(argsOrOptions, io = {}) {
     );
   }
 
+  const fingerprintMaterial = {
+    sources: sources.map((source) => source.sourceDigest).sort(),
+    estate: estateResult?.summary.sourceDigest ?? null,
+    catalogs: uniqueCapabilityResults
+      .map((result) => result.summary.sourceDigest)
+      .sort(),
+    localSkills: {
+      capabilities: localCapabilities
+        .map((capability) => ({
+          capabilityId: capability.capabilityId,
+          sourceIds: capability.sourceIds,
+        }))
+        .sort((left, right) =>
+          left.capabilityId.localeCompare(right.capabilityId, 'en')),
+      coverage: skillCatalog.coverage,
+      skippedEntries: skillCatalog.skippedEntries,
+      diagnostics: skillCatalog.diagnostics,
+    },
+    catalogCoverage,
+    activities: uniqueActivityResults
+      .map((result) => result.summary.sourceDigest)
+      .sort(),
+    scope: {
+      since: options.since ?? null,
+      until: options.until ?? null,
+      minSessions: options.minSessions ?? 3,
+      minDays: options.minDays ?? 2,
+    },
+  };
+  if (reportVersion === '3') {
+    fingerprintMaterial.detector = {
+      analyzerVersion: '3',
+      facetTaxonomyVersion: analysis.detector.facetTaxonomyVersion,
+      domainTaxonomyVersion: analysis.detector.domainTaxonomyVersion,
+    };
+  }
+  const analysisFingerprint = `sha256:${sha256(
+    stableStringify(fingerprintMaterial),
+  )}`;
   const report = {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion:
+      reportVersion === '3' ? SCHEMA_VERSION_V3 : SCHEMA_VERSION_V2,
     mode: 'observe',
     status,
     scope: {
@@ -2625,51 +3360,100 @@ export async function runObserveCli(argsOrOptions, io = {}) {
       duplicateActivitySources,
     },
     context: {
-      estateManifest: estateResult?.summary ?? null,
-      capabilityCatalogs: uniqueCapabilityResults.map((result) => result.summary),
+      estateManifest:
+        reportVersion === '2' &&
+        estateResult?.summary.sourceType === 'generic-estate-manifest'
+          ? {
+              ...estateResult.summary,
+              sourceType: 'rapp-monorepo-manifest',
+            }
+          : estateResult?.summary ?? null,
+      capabilityCatalogs: uniqueCapabilityResults.map((result) =>
+        reportVersion === '2' &&
+        result.summary.sourceType === 'behavioral-capabilities'
+          ? {
+              ...result.summary,
+              sourceType: 'normalized-capabilities',
+            }
+          : result.summary),
       repositoryActivitySources: uniqueActivityResults.map((result) => result.summary),
       catalogCoverage,
     },
     replay: {
-      analyzerVersion: '2',
-      analysisFingerprint: `sha256:${sha256(
-        stableStringify({
-          sources: sources.map((source) => source.sourceDigest).sort(),
-          estate: estateResult?.summary.sourceDigest ?? null,
-          catalogs: uniqueCapabilityResults
-            .map((result) => result.summary.sourceDigest)
-            .sort(),
-          localSkills: {
-            capabilities: localCapabilities
-              .map((capability) => ({
-                capabilityId: capability.capabilityId,
-                sourceIds: capability.sourceIds,
-              }))
-              .sort((left, right) =>
-                left.capabilityId.localeCompare(right.capabilityId, 'en')),
-            coverage: skillCatalog.coverage,
-            skippedEntries: skillCatalog.skippedEntries,
-            diagnostics: skillCatalog.diagnostics,
-          },
-          catalogCoverage,
-          activities: uniqueActivityResults
-            .map((result) => result.summary.sourceDigest)
-            .sort(),
-          scope: {
-            since: options.since ?? null,
-            until: options.until ?? null,
-            minSessions: options.minSessions ?? 3,
-            minDays: options.minDays ?? 2,
-          },
-        }),
-      )}`,
+      analyzerVersion: reportVersion,
+      analysisFingerprint,
     },
     diagnostics,
   };
+  if (reportVersion === '3') {
+    report.summary.promotionEligibleCandidateCount =
+      analysis.candidates.filter((candidate) => candidate.promotion.eligible).length;
+    report.context.behavioralCapabilityContracts = {
+      qualifiedCapabilities: mergedCapabilities.filter(
+        (capability) => capability.contractQualified === true,
+      ).length,
+      unqualifiedCapabilities: mergedCapabilities.filter(
+        (capability) => capability.contractQualified !== true,
+      ).length,
+      conflictingCapabilities: mergedCapabilities.filter(
+        (capability) => capability.contractConflict === true,
+      ).length,
+      requirement:
+        'reuse-and-extend-require-versioned-behavioral-contract-v1',
+    };
+    report.detector = analysis.detector;
+  }
   const text = `${stableStringify(report, options.pretty === true)}\n`;
+  let sidecar = null;
+  let sidecarText = null;
+  if (options.facetSidecarOutput) {
+    sidecar = {
+      schemaVersion: REPAIR_SIDECAR_SCHEMA_VERSION,
+      mode: 'repair-assignment-sidecar',
+      detector: analysis.detector,
+      summary: {
+        assignments: analysis.repairAssignments.length,
+        sources: new Set(
+          analysis.repairAssignments.map(({ sourceId }) => sourceId),
+        ).size,
+        sessions: new Set(
+          analysis.repairAssignments.map(
+            ({ sourceId, sessionAlias }) => `${sourceId}:${sessionAlias}`,
+          ),
+        ).size,
+        activeDays: new Set(
+          analysis.repairAssignments.map(({ day }) => day),
+        ).size,
+      },
+      assignments: analysis.repairAssignments,
+      replay: {
+        analyzerVersion: '3',
+        analysisFingerprint,
+        sidecarFingerprint: `sha256:${sha256(
+          stableStringify(analysis.repairAssignments),
+        )}`,
+      },
+    };
+    sidecarText = `${stableStringify(sidecar, options.pretty === true)}\n`;
+  }
+  if (!validateObserveReportShape(report.schemaVersion, report)) {
+    throw new Error('Generated report did not satisfy its closed contract.');
+  }
+  if (sidecar !== null && !validateRepairSidecarShape(sidecar)) {
+    throw new Error('Generated sidecar did not satisfy its closed contract.');
+  }
   writeStdout(text);
   if (options.output) await atomicWrite(options.output, text);
-  return { exitCode: status === 'failed' ? 1 : 0, report, text };
+  if (options.facetSidecarOutput) {
+    await atomicWrite(options.facetSidecarOutput, sidecarText);
+  }
+  return {
+    exitCode: status === 'failed' ? 1 : 0,
+    report,
+    text,
+    sidecar,
+    sidecarText,
+  };
 }
 
 /**

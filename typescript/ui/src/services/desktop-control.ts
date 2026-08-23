@@ -203,11 +203,13 @@ async function navigate(view: unknown): Promise<Record<string, unknown>> {
     | (HTMLElement & {
         navigate(view: string): void;
         updateComplete?: Promise<unknown>;
+        navigationComplete?: Promise<unknown>;
       })
     | null;
   if (!app) throw new Error('OpenRappter app surface is not mounted.');
   app.navigate(view);
   await app.updateComplete;
+  await app.navigationComplete;
   return { view };
 }
 

@@ -171,6 +171,7 @@ export class OpenRappterApp extends LitElement {
   private shell: ShellPreference = 'xpedition';
 
   private xpeditionPreferences: XpeditionPreferences | null = null;
+  navigationComplete: Promise<void> = Promise.resolve();
 
   @state()
   private connected = false;
@@ -247,9 +248,13 @@ export class OpenRappterApp extends LitElement {
     this.currentView = view;
     if (view !== 'chat') this.focusMode = false;
     if (this.shell === 'xpedition') {
-      void this.updateComplete.then(() => {
-        this.xpeditionSurface()?.openView(view);
+      this.navigationComplete = this.updateComplete.then(async () => {
+        const surface = this.xpeditionSurface();
+        surface?.openView(view);
+        await surface?.updateComplete;
       });
+    } else {
+      this.navigationComplete = this.updateComplete.then(() => undefined);
     }
   }
 

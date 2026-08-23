@@ -260,6 +260,7 @@ async function focusWindow(view?: string): Promise<void> {
         if (!app) throw new Error('OpenRappter app surface is not mounted.');
         app.navigate(${JSON.stringify(view)});
         await app.updateComplete;
+        await app.navigationComplete;
       })()
     `);
   }
@@ -1132,6 +1133,7 @@ function createWindow(): BrowserWindow {
           if (smokeScope !== 'boot') {
             appElement.navigate('show-and-tell');
             await appElement.updateComplete;
+            await appElement.navigationComplete;
             recorder = appElement.shadowRoot.querySelector(
               'openrappter-show-and-tell'
             ) || appElement.shadowRoot

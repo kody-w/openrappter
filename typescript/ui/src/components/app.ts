@@ -19,6 +19,12 @@ import {
 } from '../services/xpedition.js';
 import type { OpenRappterXpeditionShell } from './xpedition-shell.js';
 import type { ExternalAction } from '../services/living-company.js';
+import {
+  PendingCopilotAuthAdapter,
+  copilotReadiness,
+  type CopilotAuthAdapter,
+  type CopilotReadinessSnapshot,
+} from '../services/copilot-readiness.js';
 
 type View = OpenRappterView;
 
@@ -188,10 +194,19 @@ export class OpenRappterApp extends LitElement {
 
   @state()
   private focusMode = false;
+  @state()
+  private copilotStatus: CopilotReadinessSnapshot =
+    copilotReadiness.snapshot();
+  private copilotAuthAdapter: CopilotAuthAdapter =
+    new PendingCopilotAuthAdapter();
+  private unsubscribeCopilot?: () => void;
 
   connectedCallback() {
     super.connectedCallback();
     this.xpeditionPreferences = loadXpeditionPreferences(xpeditionStorage());
+    this.unsubscribeCopilot = copilotReadiness.subscribe((snapshot) => {
+      this.copilotStatus = snapshot;
+    });
     this.shell = this.xpeditionPreferences.shell;
     if (window.openrappterDesktop) {
       if (this.shell === 'legacy') this.navigate('chat');
@@ -206,8 +221,61 @@ export class OpenRappterApp extends LitElement {
         this.connectionError = null;
       } else {
         this.connectionError = 'The gateway connection was lost.';
+        copilotReadiness.set({
+          state: 'offline',
+          message: 'Copilot readiness cannot be checked while the gateway is offline.',
+          checkedAt: new Date().toISOString(),
+        });
       }
     };
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubscribeCopilot?.();
+  }
+
+  setCopilotAuthAdapter(adapter: CopilotAuthAdapter): void {
+    this.copilotAuthAdapter = adapter;
+    void this.checkCopilotReadiness();
+  }
+
+  private async checkCopilotReadiness(): Promise<void> {
+    copilotReadiness.set({
+      state: 'checking',
+      message: 'Checking Copilot readiness…',
+    });
+    try {
+      copilotReadiness.set(await this.copilotAuthAdapter.check());
+    } catch (error) {
+      await this.reportCopilotAuthFailure(error);
+    }
+  }
+
+  private async beginCopilotSignIn(): Promise<void> {
+    copilotReadiness.set({
+      state: 'checking',
+      message: 'Starting Copilot sign-in…',
+    });
+    try {
+      copilotReadiness.set(await this.copilotAuthAdapter.beginSignIn());
+    } catch (error) {
+      await this.reportCopilotAuthFailure(error);
+    }
+  }
+
+  private async reportCopilotAuthFailure(error: unknown): Promise<void> {
+    try {
+      copilotReadiness.set(await this.copilotAuthAdapter.reportFailure(error));
+    } catch (adapterError) {
+      copilotReadiness.set({
+        state: 'error',
+        message: adapterError instanceof Error
+          ? adapterError.message
+          : 'Copilot readiness adapter failed.',
+        checkedAt: new Date().toISOString(),
+      });
+    }
   }
 
   private async connectToGateway() {
@@ -216,6 +284,7 @@ export class OpenRappterApp extends LitElement {
     try {
       await gateway.connect();
       this.connected = true;
+      void this.checkCopilotReadiness();
 
       // Subscribe to chat events for streaming
       await gateway.subscribe(['chat', 'agent', 'presence', 'heartbeat']);
@@ -232,6 +301,7 @@ export class OpenRappterApp extends LitElement {
       console.error('Failed to connect to gateway:', error);
       this.connected = false;
       this.connectionError = (error as Error).message;
+      await this.reportCopilotAuthFailure(error);
     } finally {
       this.connecting = false;
     }
@@ -265,6 +335,7 @@ export class OpenRappterApp extends LitElement {
         schema: 'openrappter-xpedition-state/1.0',
         shell: 'xpedition',
         connected: this.connected,
+        copilotReadiness: { ...this.copilotStatus },
         windows: [],
       };
     }
@@ -272,6 +343,7 @@ export class OpenRappterApp extends LitElement {
       schema: 'openrappter-xpedition-state/1.0',
       shell: 'legacy',
       connected: this.connected,
+      copilotReadiness: { ...this.copilotStatus },
       view: this.currentView,
       windows: [],
     };
@@ -411,7 +483,14 @@ export class OpenRappterApp extends LitElement {
         <openrappter-xpedition-shell
           .connected=${this.connected}
           .connectionError=${this.connectionError ?? (this.connecting ? 'Connecting to the local gateway…' : '')}
+          .copilotReadiness=${this.copilotStatus}
           @retry-gateway=${() => void this.connectToGateway()}
+          @check-copilot=${() => void this.checkCopilotReadiness()}
+          @copilot-sign-in=${() => void this.beginCopilotSignIn()}
+          @copilot-auth-failure=${(event: CustomEvent<{ error: unknown }>) => {
+            event.stopPropagation();
+            void this.reportCopilotAuthFailure(event.detail.error);
+          }}
           @switch-shell=${(event: CustomEvent<{ shell: ShellPreference }>) => {
             this.switchShell(event.detail.shell);
           }}

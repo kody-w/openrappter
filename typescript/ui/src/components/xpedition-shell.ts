@@ -38,6 +38,7 @@ import {
 import {
   subscribeXpeditionDescriptors,
 } from '../services/xpedition-extensions.js';
+import type { CopilotReadinessSnapshot } from '../services/copilot-readiness.js';
 
 interface DragState {
   id: string;
@@ -144,6 +145,13 @@ export class OpenRappterXpeditionShell extends LitElement {
 
     .offline-banner button {
       margin-left: 0.6rem;
+    }
+
+    .offline-banner.copilot {
+      top: 4rem;
+      border-color: #8a5a0d;
+      background: #fff8dc;
+      color: #654207;
     }
 
     .shortcuts {
@@ -680,6 +688,10 @@ export class OpenRappterXpeditionShell extends LitElement {
 
   @property({ type: Boolean }) connected = false;
   @property({ type: String }) connectionError = '';
+  @property({ attribute: false }) copilotReadiness: CopilotReadinessSnapshot = {
+    state: 'unknown',
+    message: 'Copilot readiness has not been checked.',
+  };
   @property({ attribute: false }) ringAdapter: ReleaseRingAdapter =
     new FixtureReleaseRingAdapter();
   @property({ attribute: false }) storage: StorageLike = xpeditionStorage();
@@ -741,6 +753,7 @@ export class OpenRappterXpeditionShell extends LitElement {
       schema: 'openrappter-xpedition-state/1.0',
       shell: 'xpedition',
       connected: this.connected,
+      copilotReadiness: { ...this.copilotReadiness },
       onboarding: this.preferences.onboardingCompleted
         ? { completed: true, step: null }
         : { completed: false, step: onboarding?.currentStep ?? 'welcome' },
@@ -1298,6 +1311,32 @@ export class OpenRappterXpeditionShell extends LitElement {
             `
           : nothing}
 
+        ${this.connected &&
+        this.preferences.onboardingCompleted &&
+        this.copilotReadiness.state !== 'ready'
+          ? html`
+              <div class="offline-banner copilot" role="alert" aria-live="assertive">
+                Copilot ${this.copilotReadiness.state}: ${this.copilotReadiness.message}
+                ${this.copilotReadiness.state === 'needs-sign-in'
+                  ? html`
+                      <button
+                        data-desktop-sensitive="copilot-sign-in"
+                        @click=${() => this.dispatchEvent(new CustomEvent(
+                        'copilot-sign-in',
+                        { bubbles: true, composed: true },
+                      ))}
+                      >Sign in</button>
+                    `
+                  : html`
+                      <button @click=${() => this.dispatchEvent(new CustomEvent(
+                        'check-copilot',
+                        { bubbles: true, composed: true },
+                      ))}>Check again</button>
+                    `}
+              </div>
+            `
+          : nothing}
+
         <nav
           class="shortcuts"
           aria-label="Desktop shortcuts"
@@ -1361,6 +1400,13 @@ export class OpenRappterXpeditionShell extends LitElement {
               <span class="connection-symbol ${this.connected ? '' : 'offline'}" aria-hidden="true"></span>
               <span>${this.connected ? 'Gateway connected' : 'Gateway offline'}</span>
             </span>
+            <span class="connection-state" aria-label="Copilot readiness">
+              <span
+                class="connection-symbol ${this.copilotReadiness.state === 'ready' ? '' : 'offline'}"
+                aria-hidden="true"
+              ></span>
+              <span>Copilot ${this.copilotReadiness.state}</span>
+            </span>
             <time class="clock" datetime=${this.now.toISOString()}>
               ${this.now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </time>
@@ -1373,6 +1419,7 @@ export class OpenRappterXpeditionShell extends LitElement {
               <openrappter-xpedition-onboarding
                 .connected=${this.connected}
                 .connectionError=${this.connectionError}
+                .copilotReadiness=${this.copilotReadiness}
                 .ringAdapter=${this.ringAdapter}
                 @retry-gateway=${(event: Event) => {
                   event.stopPropagation();
@@ -1381,6 +1428,20 @@ export class OpenRappterXpeditionShell extends LitElement {
                 @switch-shell=${(event: Event) => {
                   event.stopPropagation();
                   this.switchLegacy();
+                }}
+                @check-copilot=${(event: Event) => {
+                  event.stopPropagation();
+                  this.dispatchEvent(new CustomEvent('check-copilot', {
+                    bubbles: true,
+                    composed: true,
+                  }));
+                }}
+                @copilot-sign-in=${(event: Event) => {
+                  event.stopPropagation();
+                  this.dispatchEvent(new CustomEvent('copilot-sign-in', {
+                    bubbles: true,
+                    composed: true,
+                  }));
                 }}
                 @onboarding-complete=${this.finishOnboarding}
               ></openrappter-xpedition-onboarding>

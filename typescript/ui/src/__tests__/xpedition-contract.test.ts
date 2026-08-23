@@ -26,6 +26,9 @@ describe('Windows XPedition build and accessibility contract', () => {
   const sessionsComponent = read('../components/sessions.ts');
   const extensionApi = read('../services/xpedition-extensions.ts');
   const license = read('../../../../LICENSE');
+  const readiness = read('../services/copilot-readiness.ts');
+  const chat = read('../components/chat.ts');
+  const surgeon = read('../components/surgeon.ts');
 
   it('boots XPedition by default while retaining a reversible legacy route', () => {
     expect(app).toContain("private shell: ShellPreference = 'xpedition'");
@@ -128,5 +131,27 @@ describe('Windows XPedition build and accessibility contract', () => {
     expect(extensionApi).not.toMatch(
       /tenantId|billingAccount|entitlementKey|controlPlaneUrl|from ['\"]rapteros/i,
     );
+  });
+
+  it('consumes Copilot auth only through the typed fail-closed adapter', () => {
+    for (const state of [
+      'unknown',
+      'checking',
+      'ready',
+      'needs-sign-in',
+      'no-entitlement',
+      'offline',
+      'error',
+    ]) {
+      expect(readiness).toContain(`'${state}'`);
+    }
+    expect(readiness).toContain('interface CopilotAuthAdapter');
+    expect(readiness).toContain('class PendingCopilotAuthAdapter');
+    expect(readiness).not.toMatch(
+      /auth\\.login|auth\\.poll|authenticateWithToken|gatewayToken|device code/i,
+    );
+    expect(chat).toContain('clearStaleCopilotContent');
+    expect(surgeon).toContain('Previous Copilot consultation content was cleared as stale.');
+    expect(onboarding).toContain("this.copilotReadiness.state !== 'ready'");
   });
 });

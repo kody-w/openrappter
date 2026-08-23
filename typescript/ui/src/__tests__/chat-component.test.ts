@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../components/chat.js';
 import { gateway } from '../services/gateway.js';
+import { copilotReadiness } from '../services/copilot-readiness.js';
 
 interface TestChatElement extends HTMLElement {
   activeRunId: string | null;
@@ -25,9 +26,20 @@ interface TestChatElement extends HTMLElement {
 }
 
 describe('chat component terminal events', () => {
+  beforeEach(() => {
+    copilotReadiness.set({
+      state: 'ready',
+      message: 'Copilot is ready for this test.',
+    });
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    copilotReadiness.set({
+      state: 'unknown',
+      message: 'Copilot readiness has not been checked.',
+    });
   });
 
   it('clears only the matching stream when aborted remotely or by supersession', () => {

@@ -206,10 +206,12 @@ try {
   }
   if (
     !installedUiJavaScript.includes("OpenRappter Personal") ||
-    !installedUiJavaScript.includes("xpedition-extension-v1.json")
+    !installedUiJavaScript.includes("xpedition-extension-v1.json") ||
+    !installedUiJavaScript.includes("needs-sign-in") ||
+    !installedUiJavaScript.includes("no-entitlement")
   ) {
     throw new Error(
-      "Installed package does not contain the personal branding and XPedition extension API",
+      "Installed package does not contain personal branding, data-only descriptors, and Copilot readiness",
     );
   }
 
@@ -938,7 +940,7 @@ try {
   }
 
   console.log(
-    `Package smoke passed: ${artifact.filename} includes OpenRappter Personal, data-only XPedition descriptors, Living Company Desktop, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
+    `Package smoke passed: ${artifact.filename} includes OpenRappter Personal, Copilot readiness, data-only XPedition descriptors, Living Company Desktop, its original landscape, Flight Recorder, Show-and-Tell, and Clever Girl Observe Mode v2/v3`,
   );
 } finally {
   rmSync(scratch, {

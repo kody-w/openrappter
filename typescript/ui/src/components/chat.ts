@@ -12,6 +12,10 @@ import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import { desktopBridge } from '../services/desktop.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
+import {
+  copilotReadiness,
+  type CopilotReadinessSnapshot,
+} from '../services/copilot-readiness.js';
 
 const AGENT_RUN_OVERALL_TIMEOUT_MS = 30 * 60_000;
 const RUN_ABORT_TIMEOUT_MS = 5_000;
@@ -765,6 +769,19 @@ export class OpenRappterChat extends LitElement {
       padding: 0 0.25rem;
     }
 
+    .copilot-readiness {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--warning);
+      background: color-mix(in srgb, var(--warning) 12%, var(--bg-secondary));
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
     .loading-sessions {
       font-size: 0.8125rem;
       color: var(--text-secondary);
@@ -901,6 +918,8 @@ export class OpenRappterChat extends LitElement {
   @state() private sessionKey: string | null = null;
   @state() private activeRunId: string | null = null;
   @state() private error: string | null = null;
+  @state() private copilotStatus: CopilotReadinessSnapshot =
+    copilotReadiness.snapshot();
   @state() private sessions: ChatSessionSummary[] = [];
   @state() private sessionsLoading = false;
   @state() private sessionTransitioning = false;
@@ -925,6 +944,7 @@ export class OpenRappterChat extends LitElement {
   private resizing = false;
   private runDeadline: ReturnType<typeof setTimeout> | null = null;
   private closedRunIds = new Set<string>();
+  private unsubscribeCopilot?: () => void;
 
   @query('textarea') private textarea!: HTMLTextAreaElement;
   @query('.messages') private messagesContainer!: HTMLDivElement;
@@ -935,6 +955,15 @@ export class OpenRappterChat extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.restoreChatTarget();
+    this.unsubscribeCopilot = copilotReadiness.subscribe((snapshot) => {
+      this.copilotStatus = snapshot;
+      if (
+        this.chatTarget === 'openrappter' &&
+        ['needs-sign-in', 'no-entitlement', 'offline', 'error'].includes(snapshot.state)
+      ) {
+        this.clearStaleCopilotContent(snapshot.message);
+      }
+    });
     this.loadSessions();
 
     // Listen for chat events (streaming deltas + finals)
@@ -1126,6 +1155,7 @@ export class OpenRappterChat extends LitElement {
     }
     this.clearRunDeadline();
     this.voiceStatusCleanup?.();
+    this.unsubscribeCopilot?.();
     this.voiceStatusCleanup = undefined;
     this.activeAudio?.pause();
     this.speechGeneration += 1;
@@ -1427,6 +1457,10 @@ export class OpenRappterChat extends LitElement {
 
   private async handleSend() {
     if (this.sessionTransitioning) return;
+    if (this.copilotBlocked) {
+      this.error = this.copilotStatus.message;
+      return;
+    }
     const content = this.inputValue.trim();
     // Allow queueing if busy
     if (this.sending && content) {
@@ -1523,6 +1557,9 @@ export class OpenRappterChat extends LitElement {
     } catch (err) {
       if (sendGeneration !== this.sendGeneration) return;
       this.error = (err as Error).message;
+      if (this.chatTarget === 'openrappter') {
+        this.dispatchCopilotFailure(err);
+      }
       this.sending = false;
     }
   }
@@ -1557,6 +1594,9 @@ export class OpenRappterChat extends LitElement {
   }
 
   private handleStreamError(runId: string, errorMessage: string) {
+    if (this.chatTarget === 'openrappter') {
+      this.dispatchCopilotFailure(new Error(errorMessage));
+    }
     this.rememberClosedRun(runId);
     const idx = this.messages.findIndex((m) => m.id === runId);
     if (idx >= 0) {
@@ -1773,6 +1813,39 @@ export class OpenRappterChat extends LitElement {
     }
   }
 
+  private get copilotBlocked(): boolean {
+    return (
+      this.chatTarget === 'openrappter' &&
+      this.copilotStatus.state !== 'ready'
+    );
+  }
+
+  private clearStaleCopilotContent(message: string): void {
+    const retained = this.messages.filter((entry) => entry.role === 'user');
+    this.messages = [
+      ...retained,
+      {
+        id: 'copilot-readiness-cleared',
+        role: 'system',
+        content: `Copilot content cleared: ${message}`,
+        timestamp: Date.now(),
+      },
+    ];
+    this.toolCalls = [];
+    this.messageQueue = [];
+    this.sending = false;
+    this.activeRunId = null;
+    this.error = message;
+  }
+
+  private dispatchCopilotFailure(error: unknown): void {
+    this.dispatchEvent(new CustomEvent('copilot-auth-failure', {
+      detail: { error },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   private restoreChatTarget() {
     try {
       const stored = localStorage.getItem(CHAT_TARGET_STORAGE_KEY);
@@ -1942,7 +2015,7 @@ export class OpenRappterChat extends LitElement {
               <select
                 @change=${this.handleSessionChange}
                 .value=${this.sessionKey ?? '__new__'}
-                ?disabled=${this.sessionTransitioning}
+                ?disabled=${this.sessionTransitioning || this.copilotBlocked}
               >
                 <option value="__new__">✨ New Chat</option>
                 ${this.sessions.map(
@@ -1994,6 +2067,27 @@ export class OpenRappterChat extends LitElement {
             ${this.error}
             <button @click=${() => (this.error = null)}>✕</button>
           </div>`
+        : nothing}
+
+      ${this.copilotBlocked
+        ? html`
+            <div class="copilot-readiness" role="alert" aria-live="assertive">
+              <span>
+                Copilot ${this.copilotStatus.state}: ${this.copilotStatus.message}
+              </span>
+              ${this.copilotStatus.state === 'needs-sign-in'
+                ? html`
+                    <button
+                      data-desktop-sensitive="copilot-sign-in"
+                      @click=${() => this.dispatchEvent(new CustomEvent(
+                      'copilot-sign-in',
+                      { bubbles: true, composed: true },
+                    ))}
+                    >Sign in</button>
+                  `
+                : nothing}
+            </div>
+          `
         : nothing}
 
       <!-- Body: messages + tool sidebar -->
@@ -2072,7 +2166,7 @@ export class OpenRappterChat extends LitElement {
                 @dragover=${this.handleDragOver}
                 @dragleave=${this.handleDragLeave}
                 @drop=${this.handleDrop}
-                ?disabled=${this.sessionTransitioning}
+                ?disabled=${this.sessionTransitioning || this.copilotBlocked}
                 rows="1"
               ></textarea>
               ${this.sending && this.activeRunId
@@ -2081,7 +2175,8 @@ export class OpenRappterChat extends LitElement {
               <button
                 class="send-btn"
                 @click=${this.handleSend}
-                ?disabled=${this.sessionTransitioning || (!this.inputValue.trim() && !this.sending)}
+                ?disabled=${this.sessionTransitioning || this.copilotBlocked ||
+                  (!this.inputValue.trim() && !this.sending)}
               >
                 ${this.sending ? 'Queue' : 'Send'}<span class="btn-kbd">↵</span>
               </button>

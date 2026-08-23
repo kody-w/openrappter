@@ -15,6 +15,7 @@ import {
   ActionBoundApprovalGate,
   type CompanyApprovalRequest,
 } from '../services/living-company.js';
+import type { CopilotReadinessSnapshot } from '../services/copilot-readiness.js';
 
 interface HealthResult {
   status: 'ok' | 'degraded' | 'error';
@@ -293,6 +294,10 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
 
   @property({ type: Boolean }) connected = false;
   @property({ type: String }) connectionError = '';
+  @property({ attribute: false }) copilotReadiness: CopilotReadinessSnapshot = {
+    state: 'unknown',
+    message: 'Copilot readiness has not been checked.',
+  };
   @property({ attribute: false }) ringAdapter: ReleaseRingAdapter =
     new FixtureReleaseRingAdapter();
 
@@ -454,12 +459,60 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
   }
 
   private finish(): void {
-    if (this.healthState !== 'success') return;
+    if (
+      this.healthState !== 'success' ||
+      this.copilotReadiness.state !== 'ready'
+    ) {
+      return;
+    }
     this.dispatchEvent(new CustomEvent('onboarding-complete', {
       detail: { releaseRing: this.appliedRing },
       bubbles: true,
       composed: true,
     }));
+  }
+
+  private renderCopilotReadiness() {
+    const ready = this.copilotReadiness.state === 'ready';
+    const error = [
+      'needs-sign-in',
+      'no-entitlement',
+      'offline',
+      'error',
+    ].includes(this.copilotReadiness.state);
+    return html`
+      <div
+        class="status ${ready ? 'ok' : error ? 'error' : 'warning'}"
+        role=${error ? 'alert' : 'status'}
+        aria-live=${error ? 'assertive' : 'polite'}
+      >
+        <div>
+          <strong>Copilot: ${this.copilotReadiness.state}</strong>
+          <p>${this.copilotReadiness.message}</p>
+          ${this.copilotReadiness.state === 'needs-sign-in'
+            ? html`
+                <button
+                  data-desktop-sensitive="copilot-sign-in"
+                  @click=${() => this.dispatchEvent(new CustomEvent(
+                  'copilot-sign-in',
+                  { bubbles: true, composed: true },
+                ))}
+                >Sign in to Copilot</button>
+              `
+            : !ready
+              ? html`
+                  <button
+                    ?disabled=${this.copilotReadiness.state === 'checking'}
+                    @click=${() => this.dispatchEvent(new CustomEvent(
+                      'check-copilot',
+                      { bubbles: true, composed: true },
+                    ))}
+                  >Check Copilot readiness</button>
+                `
+              : nothing}
+        </div>
+      </div>
+    `;
   }
 
   private useLegacy(): void {
@@ -556,6 +609,7 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
           ${this.connected
             ? nothing
             : html`<button @click=${this.requestReconnect}>Retry connection</button>`}
+          ${this.renderCopilotReadiness()}
         `;
       case 'release':
         return html`
@@ -675,6 +729,7 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
           ${this.healthError
             ? html`<div class="status error" role="alert" aria-live="assertive">${this.healthError}</div>`
             : nothing}
+          ${this.renderCopilotReadiness()}
         `;
     }
   }
@@ -723,7 +778,8 @@ export class OpenRappterXpeditionOnboarding extends LitElement {
               ? html`
                   <button
                     class="primary"
-                    ?disabled=${this.healthState !== 'success'}
+                    ?disabled=${this.healthState !== 'success' ||
+                      this.copilotReadiness.state !== 'ready'}
                     @click=${this.finish}
                   >Land on desktop</button>
                 `

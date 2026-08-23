@@ -17,6 +17,10 @@ import type {
   SurgeonProcedure,
   SurgeonTurn,
 } from '../types.js';
+import {
+  copilotReadiness,
+  type CopilotReadinessSnapshot,
+} from '../services/copilot-readiness.js';
 
 @customElement('openrappter-surgeon')
 export class OpenRappterSurgeon extends LitElement {
@@ -988,6 +992,10 @@ export class OpenRappterSurgeon extends LitElement {
   @state() private mode: 'surgeon' | 'patient' = 'surgeon';
   @state() private patientTurns: Array<{ q: string; a: string; model?: string }> = [];
   @state() private patientSession = '';
+  @state() private copilotStatus: CopilotReadinessSnapshot =
+    copilotReadiness.snapshot();
+  @state() private staleCopilotCleared = false;
+  private unsubscribeCopilot?: () => void;
 
   private readonly starterOptions: SurgeonOption[] = [
     {
@@ -1010,17 +1018,44 @@ export class OpenRappterSurgeon extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.unsubscribeCopilot = copilotReadiness.subscribe((snapshot) => {
+      const wasReady = this.copilotStatus.state === 'ready';
+      this.copilotStatus = snapshot;
+      if (snapshot.state !== 'ready') {
+        if (this.patientCase) this.staleCopilotCleared = true;
+        this.patientCase = null;
+        this.confirmation = '';
+      } else if (!wasReady) {
+        void this.hydrate();
+      }
+    });
     void this.hydrate();
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.unsubscribeCopilot?.();
   }
 
   private async hydrate(): Promise<void> {
     try {
       const [patient, cases] = await Promise.all([loadPatient(), loadCases()]);
       this.patient = patient;
-      this.patientCase = cases[0] ?? null;
+      if (this.copilotStatus.state === 'ready') {
+        this.patientCase = cases[0] ?? null;
+        this.staleCopilotCleared = false;
+      } else {
+        this.patientCase = null;
+        this.staleCopilotCleared = cases.length > 0;
+      }
       this.error = null;
     } catch (error) {
       this.error = (error as Error).message;
+      this.dispatchEvent(new CustomEvent('copilot-auth-failure', {
+        detail: { error },
+        bubbles: true,
+        composed: true,
+      }));
     }
   }
 
@@ -1063,17 +1098,37 @@ export class OpenRappterSurgeon extends LitElement {
 
   private async sendTurn(value = this.input): Promise<void> {
     if (this.mode === 'patient') return this.askThePatient(value);
+    if (this.copilotBlocked) {
+      this.error = this.copilotStatus.message;
+      return;
+    }
     const userInput = value.trim();
     if (!userInput || this.busy) return;
     this.busy = true;
     this.error = null;
     this.input = '';
+    let result: Awaited<ReturnType<typeof requestSurgeonTurn>>;
     try {
-      const result = await requestSurgeonTurn(userInput, this.patientCase?.id);
+      result = await requestSurgeonTurn(userInput, this.patientCase?.id);
+    } catch (error) {
+      this.error = (error as Error).message;
+      this.dispatchEvent(new CustomEvent('copilot-auth-failure', {
+        detail: { error },
+        bubbles: true,
+        composed: true,
+      }));
+      this.busy = false;
+      return;
+    }
+    try {
       this.patient = result.patient;
       this.patientCase = result.case;
       this.confirmation = '';
-      this.speak(result.turn.voiceLine);
+      try {
+        this.speak(result.turn.voiceLine);
+      } catch (speechError) {
+        this.error = (speechError as Error).message;
+      }
       await this.updateComplete;
       this.shadowRoot?.querySelector('.transcript')?.scrollTo({
         top: this.shadowRoot.querySelector('.transcript')!.scrollHeight,
@@ -1084,6 +1139,11 @@ export class OpenRappterSurgeon extends LitElement {
     } finally {
       this.busy = false;
     }
+
+  }
+
+  private get copilotBlocked(): boolean {
+    return this.mode === 'surgeon' && this.copilotStatus.state !== 'ready';
   }
 
   private onComposerKeydown(event: KeyboardEvent): void {
@@ -1213,7 +1273,7 @@ export class OpenRappterSurgeon extends LitElement {
               ${turn.options.map(option => html`
                 <button
                   class="portal"
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotBlocked}
                   @click=${() => this.sendTurn(option.value)}
                 >
                   <span>${option.label}</span>
@@ -1271,7 +1331,7 @@ export class OpenRappterSurgeon extends LitElement {
             >Approve exact procedure</button>
             <button
               class="danger"
-              ?disabled=${this.busy}
+              ?disabled=${this.busy || this.copilotBlocked}
               @click=${() => this.reject(current)}
             >Reject</button>
           </div>
@@ -1279,7 +1339,7 @@ export class OpenRappterSurgeon extends LitElement {
           <div class="procedure-actions">
             <button
               class="primary"
-              ?disabled=${this.busy}
+              ?disabled=${this.busy || this.copilotStatus.state !== 'ready'}
               @click=${() => this.startOperation(current)}
             >Start approved operation</button>
           </div>
@@ -1364,7 +1424,7 @@ export class OpenRappterSurgeon extends LitElement {
             ${this.starterOptions.map(option => html`
               <button
                 class="portal"
-                ?disabled=${this.busy}
+                ?disabled=${this.busy || this.copilotBlocked}
                 @click=${() => this.sendTurn(option.value)}
               >
                 <span>${option.label}</span>
@@ -1380,13 +1440,6 @@ export class OpenRappterSurgeon extends LitElement {
       ${turns.map(entry => this.renderTurn(entry.userInput, entry.turn))}
       ${this.renderOutcome()}
     `;
-  }
-
-  private errorNeedsAuthentication(): boolean {
-    const message = this.error?.toLowerCase() ?? '';
-    return message.includes('not authenticated')
-      || message.includes('copilot token')
-      || message.includes('authentication required');
   }
 
   render(): unknown {
@@ -1446,7 +1499,7 @@ export class OpenRappterSurgeon extends LitElement {
                 <button
                   class="tbtn${this.mode === 'surgeon' ? ' on' : ''}"
                   aria-pressed=${this.mode === 'surgeon'}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotStatus.state !== 'ready'}
                   @click=${() => { this.mode = 'surgeon'; this.error = null; }}
                 >⌘ Surgeon</button>
                 <button
@@ -1459,19 +1512,40 @@ export class OpenRappterSurgeon extends LitElement {
               <span class="case-status">
                 ${this.mode === 'patient'
                   ? (this.patientSession ? 'in conversation' : 'ready')
-                  : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
+                  : this.copilotBlocked
+                    ? this.copilotStatus.state
+                    : (this.patientCase?.status.replace('_', ' ') ?? 'ready')}
               </span>
             </header>
 
             <div class="transcript">
+              ${this.mode === 'surgeon' && this.copilotBlocked
+                ? html`
+                    <div class="error-banner" role="alert" aria-live="assertive">
+                      <strong>Copilot ${this.copilotStatus.state}.</strong>
+                      ${this.copilotStatus.message}
+                      ${this.staleCopilotCleared
+                        ? html` Previous Copilot consultation content was cleared as stale.`
+                        : nothing}
+                      ${this.copilotStatus.state === 'needs-sign-in'
+                        ? html`
+                            <button
+                              data-desktop-sensitive="copilot-sign-in"
+                              @click=${() => this.dispatchEvent(
+                              new CustomEvent('copilot-sign-in', {
+                                bubbles: true,
+                                composed: true,
+                              }),
+                            )}
+                            >Sign in to Copilot</button>
+                          `
+                        : nothing}
+                    </div>
+                  `
+                : nothing}
               ${this.error ? html`
                 <div class="error-banner">
                   ${this.error}
-                  ${this.errorNeedsAuthentication() ? html`
-                    <button @click=${() => this.navigate('accounts')}>
-                      Connect GitHub
-                    </button>
-                  ` : nothing}
                 </div>
               ` : nothing}
               ${this.renderTranscript()}
@@ -1491,7 +1565,7 @@ export class OpenRappterSurgeon extends LitElement {
                     ? 'Ask OpenRappter itself…'
                     : 'Describe what OpenRappter needs…'}
                   .value=${this.input}
-                  ?disabled=${this.busy}
+                  ?disabled=${this.busy || this.copilotBlocked}
                   @input=${(event: Event) => {
                     this.input = (event.target as HTMLTextAreaElement).value;
                   }}
@@ -1500,7 +1574,7 @@ export class OpenRappterSurgeon extends LitElement {
                 <button
                   class="send"
                   aria-label=${this.mode === 'patient' ? 'Send to OpenRappter' : 'Send to Copilot surgeon'}
-                  ?disabled=${this.busy || !this.input.trim()}
+                  ?disabled=${this.busy || this.copilotBlocked || !this.input.trim()}
                   @click=${() => this.sendTurn()}
                 >↑</button>
               </div>

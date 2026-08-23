@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-run setup now provides an offline-safe Legacy escape hatch on every
   step plus contained modal focus, inert background, safe Escape behavior, and
   focus restoration.
+- Copilot readiness is now a typed independent adapter seam. HTTP 401 maps to
+  `needs-sign-in`, blocks readiness/onboarding and Copilot-required actions,
+  clears stale consultation output, and exposes inline sign-in without
+  duplicating authentication logic.
 
 - Release preflight now accepts strict SemVer prerelease tags such as
   `v1.14.0-beta.9` when every TypeScript and Python manifest/runtime reports

@@ -82,6 +82,28 @@ focus enters it, background windows/taskbar/shortcuts are inert, Tab and
 Shift-Tab stay contained, Escape keeps setup open and focuses the safe legacy
 action, and focus is restored when the wizard leaves.
 
+### Copilot readiness seam
+
+XPedition consumes an independent `CopilotAuthAdapter`; it does not implement
+authentication or entitlement discovery. The typed fail-closed states are:
+
+```text
+unknown | checking | ready | needs-sign-in | no-entitlement | offline | error
+```
+
+Onboarding cannot complete until both gateway health and Copilot readiness are
+`ready`. A 401 becomes `needs-sign-in`, clears and labels stale Copilot
+consultation content, disables Copilot-required Chat/Surgeon actions, and
+offers the adapter's inline sign-in action. Direct local patient/Brainstem
+surfaces and the offline Legacy escape remain available. Until the independent
+auth service is installed, readiness stays `unknown` and sign-in fails closed.
+
+The independent implementation is tracked in
+[#446](https://github.com/kody-w/openrappter/pull/446). After it merges, the
+XPedition adapter will consume its `CopilotAuthState`, checks, device flow, and
+failure classifier. #442 contains no token refresh, device-code polling,
+profile selection, or entitlement implementation.
+
 ## Release-ring integration seam
 
 The headless `ReleaseRingAdapter` accepts exactly:

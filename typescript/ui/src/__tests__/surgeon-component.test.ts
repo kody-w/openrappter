@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/surgeon.js', () => mocks);
 
 import '../components/surgeon.js';
+import {
+  PendingCopilotAuthAdapter,
+  copilotReadiness,
+} from '../services/copilot-readiness.js';
 
 interface SurgeonElement extends HTMLElement {
   updateComplete: Promise<boolean>;
@@ -96,6 +100,10 @@ async function settle(element: SurgeonElement): Promise<void> {
 
 describe('openrappter-surgeon', () => {
   beforeEach(() => {
+    copilotReadiness.set({
+      state: 'ready',
+      message: 'Copilot is ready for this test.',
+    });
     mocks.loadPatient.mockResolvedValue(patient);
     mocks.loadCases.mockResolvedValue([]);
     mocks.sendTurn.mockResolvedValue(result());
@@ -104,6 +112,10 @@ describe('openrappter-surgeon', () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.clearAllMocks();
+    copilotReadiness.set({
+      state: 'unknown',
+      message: 'Copilot readiness has not been checked.',
+    });
   });
 
   it('uses an AI-generated portal to reshape the next interaction', async () => {
@@ -129,11 +141,17 @@ describe('openrappter-surgeon', () => {
     expect(element.shadowRoot?.textContent).toContain('Inspect memory');
   });
 
-  it('turns missing Copilot auth into an inline account action', async () => {
+  it('turns missing Copilot auth into the independent inline sign-in seam', async () => {
     mocks.sendTurn.mockRejectedValueOnce(new Error('Copilot CLI is not authenticated'));
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
-    const navigate = vi.fn();
-    element.addEventListener('navigate', navigate);
+    const signIn = vi.fn();
+    element.addEventListener('copilot-sign-in', signIn);
+    element.addEventListener('copilot-auth-failure', (event) => {
+      const error = (event as CustomEvent<{ error: unknown }>).detail.error;
+      void new PendingCopilotAuthAdapter().reportFailure(error).then((state) => {
+        copilotReadiness.set(state);
+      });
+    });
     document.body.append(element);
     await settle(element);
 
@@ -142,20 +160,29 @@ describe('openrappter-surgeon', () => {
 
     const connect = Array.from(
       element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.error-banner button') ?? [],
-    ).find(button => button.textContent?.includes('Connect GitHub'));
+    ).find(button => button.textContent?.includes('Sign in to Copilot'));
     expect(connect).toBeTruthy();
     connect!.click();
-    expect(navigate).toHaveBeenCalledOnce();
-    expect((navigate.mock.calls[0][0] as CustomEvent).detail).toEqual({
-      view: 'accounts',
-    });
+    expect(signIn).toHaveBeenCalledOnce();
+    expect(copilotReadiness.snapshot().state).toBe('needs-sign-in');
   });
 });
 
 describe('openrappter-surgeon superseded proposals', () => {
+  beforeEach(() => {
+    copilotReadiness.set({
+      state: 'ready',
+      message: 'Copilot is ready for this test.',
+    });
+  });
+
   afterEach(() => {
     document.body.replaceChildren();
     vi.clearAllMocks();
+    copilotReadiness.set({
+      state: 'unknown',
+      message: 'Copilot readiness has not been checked.',
+    });
   });
 
   it('never offers approval for a proposal the case has moved past', async () => {

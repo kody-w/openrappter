@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '../components/chat.js';
 import { gateway } from '../services/gateway.js';
+import { copilotReadiness } from '../services/copilot-readiness.js';
 
 /**
  * Choosing which brain answers.
@@ -49,11 +50,19 @@ function selectEvent(value: string): Event {
 describe('chat brain selector', () => {
   beforeEach(() => {
     localStorage.clear();
+    copilotReadiness.set({
+      state: 'ready',
+      message: 'Copilot is ready for this test.',
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    copilotReadiness.set({
+      state: 'unknown',
+      message: 'Copilot readiness has not been checked.',
+    });
   });
 
   it('talks to the local runtime unless told otherwise', () => {

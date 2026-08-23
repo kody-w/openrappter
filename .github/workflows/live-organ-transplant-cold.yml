@@ -1,0 +1,97 @@
+name: Live Organ Transplant Cold Path
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-organ-transplant-cold-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cold-transplant:
+    name: Cold transplant (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare empty npm cache (excluded from measured user flow)
+        shell: bash
+        run: |
+          cold_cache="$RUNNER_TEMP/openrappter-transplant-npm-cache"
+          rm -rf "$cold_cache"
+          mkdir -p "$cold_cache"
+          echo "NPM_CONFIG_CACHE=$cold_cache" >> "$GITHUB_ENV"
+
+      - name: Measure exact cold quickstart (prerequisites excluded)
+        id: quickstart
+        timeout-minutes: 6
+        shell: bash
+        run: |
+          started="$(python -c 'import time; print(time.monotonic_ns())')"
+          set +e
+          {
+            ./quickstart.sh --demo live-organ-transplant
+          } 2>&1 | tee "$RUNNER_TEMP/live-organ-transplant-cold.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          finished="$(python -c 'import time; print(time.monotonic_ns())')"
+          elapsed_ms=$(((finished - started) / 1000000))
+          quickstart_status="${pipeline_status[0]:-1}"
+          tee_status="${pipeline_status[1]:-1}"
+          printf '{"schema":"openrappter-transplant-cold-timing/1.0","command":"./quickstart.sh --demo live-organ-transplant","runner":"%s","elapsedMs":%s,"budgetMs":300000,"exitCode":%s,"prerequisitesExcluded":true,"emptyNpmCache":true}\n' \
+            "${{ matrix.os }}" "$elapsed_ms" "$quickstart_status" \
+            > "$RUNNER_TEMP/live-organ-transplant-cold-timing.json"
+          echo "Exact cold quickstart (prerequisites excluded): ${elapsed_ms}ms"
+
+          final_status="$quickstart_status"
+          if ((tee_status != 0)); then
+            echo "::error::cold quickstart log capture failed with exit $tee_status"
+            final_status="$tee_status"
+          fi
+          if ((elapsed_ms > 300000)); then
+            echo "::error::exact cold quickstart took ${elapsed_ms}ms (budget: 300000ms)"
+            final_status=1
+          fi
+          exit "$final_status"
+
+      - name: Run deep accepted gate
+        if: ${{ !cancelled() }}
+        working-directory: typescript
+        run: npm run gate:transplant
+
+      - name: Upload failure or cancellation evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-organ-transplant-cold-failure-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/live-organ-transplant-cold.log
+            .test-scratch/live-organ-transplant
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Upload cold timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-organ-transplant-cold-timing-${{ matrix.os }}
+          path: ${{ runner.temp }}/live-organ-transplant-cold-timing.json
+          if-no-files-found: error
+          retention-days: 30

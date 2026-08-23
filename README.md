@@ -4,11 +4,11 @@
 
 ### AI agents powered by your existing GitHub Copilot subscription
 
-**No extra API keys. No new accounts. No additional monthly bills. Your data stays local.**
+**No extra API keys. No new accounts. No additional monthly bills. Memory and config stay local; prompts and context follow your configured model/provider.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-22c55e.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3b82f6.svg)](https://python.org)
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18+-22c55e.svg)](https://nodejs.org)
+[![Node.js 20.9+](https://img.shields.io/badge/Node.js-20.9+-22c55e.svg)](https://nodejs.org)
 [![RappterHub](https://img.shields.io/badge/RappterHub-Agents-a855f7.svg)](https://github.com/rappterhub/rappterhub)
 
 🌐 **[kody-w.github.io/openrappter](https://kody-w.github.io/openrappter)** — Website & docs
@@ -21,6 +21,61 @@
 ---
 
 </div>
+
+## See a Live Organ Transplant
+
+Upgrade a running agent without restarting its TypeScript host. This terminal
+demo registers a Python-backed `ChecksumAgent`, invokes it, deliberately offers
+a broken replacement, rejects that candidate before commit, and asks the held
+last-known-good capability to answer again. The host PID stays the same and the
+run leaves a verifiable receipt.
+
+```bash
+git clone https://github.com/kody-w/openrappter.git
+cd openrappter
+./quickstart.sh --demo live-organ-transplant
+```
+
+> **Security warning:** Python agents are executable code that run as the logged-in OS user. They have that user's filesystem, network, environment, and subprocess authority. They are not sandboxed. Subprocess crash isolation is not a security boundary. Preservation is file-only and cannot undo external side effects.
+>
+> **Platforms:** The initial demo supports macOS, Linux, and WSL. Native Windows is deferred.
+
+![Live Organ Transplant walkthrough](docs/assets/live-organ-transplant-walkthrough.gif)
+
+**Prerequisites:** Node.js 20.9.0 or newer and Python 3.10 or newer must already
+be installed. No API keys or model authentication are needed.
+
+This is a **lockfile-exact demo with a SHA-256-pinned donor**: flagship mode
+reconstructs dependencies with `npm ci` on every launch, and the pinned donor
+and input produce the verified checksum deterministically. Run-specific ports,
+nonces, trace IDs, paths, and timings still vary. The receipt's runtime timer
+starts after quickstart's prerequisite checks, lockfile install, and build.
+Installing Node or Python is outside that timing.
+
+Expected six-beat transcript excerpt:
+
+```text
+[1/6] DONOR VERIFIED — checksum_agent.py matches its pinned SHA-256 source.
+[2/6] THEATER ONLINE — authenticated loopback GatewayServer listening on 127.0.0.1:<port>.
+[3/6] TRANSPLANT ACCEPTED — ChecksumAgent is live through the production PythonAgent bridge.
+[4/6] FIRST PULSE — sha256("openrappter-live-organ-transplant") = <pinned digest>.
+[5/6] REJECTION TEST — the invalid candidate was refused before commit; the held PythonAgent produced <same digest>.
+[6/6] FLIGHT SEALED — <event count> events persisted under trace <trace-id>.
+```
+
+The authority notice and an `OPENRAPPTER_TRANSPLANT_RESULT=...` record follow
+those beats. Its `scenario.evidenceDirectory` is the authoritative receipt
+location, normally:
+
+```text
+~/.openrappter/demo-runs/live-organ-transplant/<timestamp>-<nonce>/
+```
+
+Inspect `receipt.txt` for the human summary and authority notice,
+`receipt.json` for the canonical result and hashes, and `transcript.txt` for the
+six beats plus the machine record. `flight-recorder.db` and
+`flight-recorder.export.json` hold the persisted causal Flight proof;
+`runtime-pid.json` records the host PID handoff.
 
 ## Install in One Line
 

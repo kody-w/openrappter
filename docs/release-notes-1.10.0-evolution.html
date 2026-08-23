@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OpenRappter 1.10.0 Evolution Release Notes</title>
-  <meta name="description" content="Four autonomous consensus cycles transformed OpenRappter into a safer, observable, cross-runtime agent platform." />
+  <meta name="description" content="Four autonomous consensus cycles added execution gates, observability, and cross-runtime behavior to OpenRappter." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦖</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -65,7 +65,7 @@
     <div class="relative mx-auto max-w-5xl px-4 py-24 text-center">
       <div class="mb-5 font-mono text-sm uppercase tracking-[.3em] text-[#10b981]">Evolution checkpoint · July 2026</div>
       <h1 class="mb-7 text-5xl font-black leading-tight sm:text-7xl">
-        OpenRappter learned how to <span class="gradient-text">evolve safely.</span>
+        OpenRappter learned how to <span class="gradient-text">evolve behind explicit gates.</span>
       </h1>
       <p class="mx-auto max-w-3xl text-lg leading-8 text-[#a1a1aa]">
         Four eight-strategy consensus cycles turned a powerful local agent lab into a durable,
@@ -99,8 +99,8 @@
         <div class="grid gap-5 md:grid-cols-2">
           <article class="card rounded-2xl p-7">
             <div class="mb-3 text-2xl">🛡️</div>
-            <h3 class="mb-2 text-xl font-bold">Execution is gated, not merely labeled safe</h3>
-            <p class="text-[#a1a1aa]">Shell commands, dual-use tools, generated code, ComputerUse, and recorder process boundaries now fail closed with exact, single-use approvals and argv-safe execution.</p>
+            <h3 class="mb-2 text-xl font-bold">Execution gates became explicit</h3>
+            <p class="text-[#a1a1aa]">Shell commands, dual-use tools, generated code, ComputerUse, and recorder actions gained exact, single-use approval and argv-safe paths. Those gates authorize execution; they do not sandbox approved code.</p>
           </article>
           <article class="card rounded-2xl p-7">
             <div class="mb-3 text-2xl">🧠</div>
@@ -140,7 +140,7 @@
         <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">CYCLE 9</div><h3 class="my-3 text-lg font-bold">Trust foundation</h3><p class="text-sm text-[#a1a1aa]">Durable Python storage, gateway authorization, exact execution approvals, and native process-injection hardening.</p></div>
         <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">CYCLE 10</div><h3 class="my-3 text-lg font-bold">Runtime parity</h3><p class="text-sm text-[#a1a1aa]">Python gateway, canonical RPCs, streaming abort semantics, and race-free macOS lifecycle ownership.</p></div>
         <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">CYCLE 11</div><h3 class="my-3 text-lg font-bold">Visibility and gates</h3><p class="text-sm text-[#a1a1aa]">Green dashboard contracts, cross-runtime observability, wheel/socket CI, and live streaming proof.</p></div>
-        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">CYCLE 12</div><h3 class="my-3 text-lg font-bold">Ship the ecosystem</h3><p class="text-sm text-[#a1a1aa]">Real provider-channel flow, deterministic tests, and one trusted release pipeline.</p></div>
+        <div class="card rounded-2xl p-6"><div class="font-mono text-xs text-[#10b981]">CYCLE 12</div><h3 class="my-3 text-lg font-bold">Ship the ecosystem</h3><p class="text-sm text-[#a1a1aa]">Real provider-channel flow, deterministic tests, and one consolidated release pipeline.</p></div>
       </div>
     </section>
 
@@ -159,7 +159,11 @@
           <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">5. Darwin's Agent Colosseum</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Create five radically different agents to solve this problem. Run them in parallel through hidden edge cases, have independent evaluators score correctness, safety, speed, and simplicity, evolve the weakest two, then synthesize a champion that preserves the best strategy from every contender.</code></article>
           <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">6. The Cross-Runtime Mirror Test</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Implement this capability independently in TypeScript and Python. Generate adversarial and property-based inputs, execute both runtimes in parallel, compare outputs, state transitions, errors, and performance, then resolve every semantic divergence without forcing one language into the other's idioms.</code></article>
           <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">7. The Local-First War Room</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Treat this incident description as a live war room. Inspect gateway health, active connections, traces, storage, channels, workers, and recent changes. Build a concise incident dashboard, identify blast radius, propose reversible mitigations, request approval for the safest one, execute it, and verify recovery.</code></article>
-          <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">8. The Skill Forge</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Turn this plain-English capability into a single-file agent. Infer the minimal typed contract, generate deterministic implementation and tests, adversarially review its permissions and dependencies, quarantine it for inspection, request explicit approval, then hot-load it and demonstrate a real end-to-end call.</code></article>
+          <article class="card rounded-2xl p-7">
+            <h3 class="mb-3 text-xl font-bold">8. The Skill Forge</h3>
+            <code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Turn this plain-English capability into a single-file agent. Infer the minimal typed contract, generate deterministic implementation and tests, adversarially review its permissions and dependencies, quarantine it for inspection, request explicit approval, then hot-load it and demonstrate a real end-to-end call.</code>
+            <p class="mt-5 rounded-xl border border-[#f59e0b]/40 bg-[#f59e0b]/10 p-4 text-sm leading-6 text-[#fcd34d]"><strong>Current security annotation (August 2026):</strong> “Quarantine for inspection” is historical workflow language, not a non-executing sandbox. Approval gates a decision; approved shell commands and Python agents still run outside the Electron renderer sandbox with the logged-in OS user's authority. Python compatibility inspection launches Python, imports the file, and constructs each discovered agent class; each invocation launches a fresh Python process. The code can access the filesystem, network, environment, and subprocesses. The process boundary limits crashes and time, not permissions, and restoring prior file bytes cannot undo side effects.</p>
+          </article>
           <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">9. My Personal Operations Command Center</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Using only my local memory, approved files, sessions, and connected channels, design a command center that produces a morning brief, identifies blocked work, drafts follow-ups, schedules recurring checks, and learns which signals I ignore. Never send or mutate externally without approval.</code></article>
           <article class="card rounded-2xl p-7"><h3 class="mb-3 text-xl font-bold">10. The Ship of Theseus Refactor</h3><code class="block whitespace-pre-wrap text-sm leading-7 text-[#d4d4d8]">Modernize this application one subsystem at a time while keeping every observable behavior stable. Build contract tests first, replace internals behind compatibility boundaries, continuously compare old and new paths, visualize migration progress, and delete the legacy path only when parity is proven.</code></article>
         </div>

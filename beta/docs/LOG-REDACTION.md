@@ -1,6 +1,6 @@
 # Frontier log and export redaction
 
-RAPP Brainstem Frontier treats the Grail kernel's stdout and stderr as
+OpenRappter treats the Grail kernel's stdout and stderr as
 untrusted, credential-bearing text. Frontier does not change the kernel. It
 filters both streams before appending them to shared, routed-worker, or twin
 logs.

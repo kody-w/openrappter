@@ -38,7 +38,7 @@ test("renderer models several Copilot chats as tabs + a herd grid", () => {
 test("the shell has the tab strip, herd button, and wrapping herd grid", () => {
   assert.match(ui, /id="surgeon-tabs"/);
   assert.match(ui, /id="surgeon-herd-btn"/);
-  assert.match(ui, /Herd view — chat with several Copilots at once/);
+  assert.match(ui, /title="Herd view"/);
   assert.match(ui, /\.surgeon-session/);
   assert.match(ui, /body\.surgeon-herd-open main/);
   assert.match(
@@ -54,12 +54,12 @@ test("the shell has the tab strip, herd button, and wrapping herd grid", () => {
   assert.match(ui, /\.surgeon-session \{\s*display: flex;/);
 });
 
-test("preload and main key Brain Surgeon by session id", () => {
+test("preload and main key Rappter Surgeon by session id", () => {
   assert.match(preload, /surgeonSend: \(sessionId, prompt\)/);
   assert.match(preload, /surgeonClose:/);
   assert.match(preload, /beta:surgeon-close/);
-  assert.match(main, /const brainSurgeons = new Map\(\)/);
-  assert.match(main, /ensureBrainSurgeon\(sessionId\)\.send\(prompt\)/);
+  assert.match(main, /const rappterSurgeons = new Map\(\)/);
+  assert.match(main, /ensureRappterSurgeon\(sessionId\)\.send\(prompt\)/);
   assert.match(main, /emitSurgeonEvent\(\{ \.\.\.event, sessionId: id \}\)/);
   assert.match(main, /beta:surgeon-close/);
 });
@@ -95,7 +95,7 @@ test("the shared driver bus serializes every caller once per visible frame", asy
   assert.equal(queue.size, 0);
 });
 
-test("Brain Surgeon keeps the accessible typing bubble for explicit hold mode", () => {
+test("Rappter Surgeon keeps the accessible typing bubble for explicit hold mode", () => {
   assert.match(typingDelivery, /function createDelivery/);
   assert.ok(
     ui.indexOf('<script src="typing-delivery.js"></script>')
@@ -113,7 +113,7 @@ test("Brain Surgeon keeps the accessible typing bubble for explicit hold mode", 
   assert.match(renderer, /session\.delivery\?\.finish/);
   assert.match(renderer, /session\.delivery\?\.fail/);
   assert.match(renderer, /aria-live", "polite"/);
-  assert.match(renderer, /Brain Surgeon is typing…/);
+  assert.match(renderer, /Rappter Surgeon is typing…/);
   assert.match(ui, /\.surgeon-message\.assistant\.typing/);
   assert.match(ui, /@media \(prefers-reduced-motion: reduce\)/);
 });

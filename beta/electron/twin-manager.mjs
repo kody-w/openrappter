@@ -351,7 +351,11 @@ export class TwinManager {
 
   // Hatch a rapplication FROM THE STORE into its own long-lived worker.
   async hatch(storeId, { instruction = null } = {}) {
-    const cartridge = await this.store.download(storeId);   // sha256-verified
+    return this.hatchFromStore(this.store, storeId, { instruction });
+  }
+
+  async hatchFromStore(store, storeId, { instruction = null } = {}) {
+    const cartridge = await store.download(storeId);   // sha256-verified
     const filename = cartridge.filename && /_agent\.py$/.test(cartridge.filename)
       ? cartridge.filename
       : `${twinSlug(cartridge.id || storeId)}_agent.py`;
@@ -692,7 +696,7 @@ export class TwinManager {
 
   // The wire: POST /chat to the twin's own worker (loopback). Every exchange is
   // emitted as a twin-message so the tile shows a live MULTIPLAYER transcript —
-  // the Brainstem loop, the Brain Surgeon, and the user all talking to the same
+  // the Brainstem loop, the Rappter Surgeon, and the user all talking to the same
   // rapplication in one room. Default session is shared per twin ("the room").
   async chat(id, prompt, { author = "you", sessionId = null } = {}) {
     const twin = this.get(id);

@@ -103,7 +103,8 @@ class MyAgent(BasicAgent):
 ## Releasing npm and PyPI packages
 
 Package releases use one canonical workflow: `.github/workflows/release.yml`.
-A strict `vX.Y.Z` tag is accepted only when it matches:
+A strict SemVer `vX.Y.Z` or `vX.Y.Z-PRERELEASE` tag is accepted only when it
+matches:
 
 - `typescript/package.json` and both root versions in `typescript/package-lock.json`
 - `typescript/desktop/package.json` and both root versions in
@@ -120,6 +121,14 @@ npm version X.Y.Z --no-git-tag-version --prefix typescript/desktop
 node scripts/release-preflight.mjs --tag vX.Y.Z
 node --test scripts/release-preflight.test.mjs
 ```
+
+Prereleases use the same version string in every manifest and runtime. Because
+the same release is published to npm and PyPI, prerelease identifiers are
+limited to the lossless common forms `alpha.N`, `beta.N`, and `rc.N`; build
+metadata (`+...`) is not supported. Python artifact filenames use the
+corresponding normalized PEP 440 spelling (`aN`, `bN`, or `rcN`). Prereleases
+are published under their explicit npm dist-tag and can never replace
+`latest`.
 
 The local preflight is deterministic and does not require registry access.
 Pushing the tag builds each npm and Python distribution once, reruns the

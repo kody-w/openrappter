@@ -50,11 +50,11 @@ function repoWithTwoCommits(root, name) {
   const dir = path.join(root, name);
   mkdirSync(dir, { recursive: true });
   git(dir, ["init", "-q"]);
-  writeFileSync(path.join(dir, "file.txt"), "one\n");
+  writeFileSync(path.join(dir, "file.txt"), `${name}-one\n`);
   git(dir, ["add", "."]);
   git(dir, ["commit", "-q", "-m", "one"]);
   const first = git(dir, ["rev-parse", "HEAD"]);
-  writeFileSync(path.join(dir, "file.txt"), "two\n");
+  writeFileSync(path.join(dir, "file.txt"), `${name}-two\n`);
   git(dir, ["add", "."]);
   git(dir, ["commit", "-q", "-m", "two"]);
   const second = git(dir, ["rev-parse", "HEAD"]);
@@ -106,13 +106,24 @@ async function runUpdater({
     packageDir: path.join(root, "pkg"),
     parentPid: parent.pid,
     platform: process.platform,
+    releaseTag: "brainstem-beta-v0.1.0-beta.7",
     remoteUrl: "https://github.com/microsoft/aibast-agents-library.git",
     redactionPath,
     requestPath: path.join(root, "request.json"),
     resultPath: path.join(root, "update-result.json"),
+    runtimeVersionUrl:
+      `https://raw.githubusercontent.com/microsoft/aibast-agents-library/${beta.second}/rapp_brainstem/VERSION`,
     runnerPath: path.join(root, "runner-copy.mjs"),
     updateRef: "main",
-    ...(rollback ? { rollbackCommit: beta.first, rollbackInstallerPath } : {}),
+    ...(rollback
+      ? {
+          rollbackCommit: beta.first,
+          rollbackInstallerPath,
+          rollbackReleaseTag: "brainstem-beta-v0.1.0-beta.6",
+          rollbackRuntimeVersionUrl:
+            `https://raw.githubusercontent.com/microsoft/aibast-agents-library/${beta.first}/rapp_brainstem/VERSION`,
+        }
+      : {}),
     ...requestOverrides,
   };
   writeFileSync(request.requestPath, JSON.stringify(request));
@@ -143,7 +154,7 @@ async function runUpdater({
   ]
     .filter((file) => existsSync(file));
   rmSync(root, { recursive: true, force: true });
-  return { run, result, log, markers: markerText, head, beta, leftovers };
+  return { run, result, log, markers: markerText, head, beta, brainstem, leftovers };
 }
 
 const failingForward = ({ beta, markers }) => (
@@ -158,6 +169,7 @@ test("a failed update rolls back to the previous commit and says so", { skip: !p
     forward: failingForward,
     rollback: restoringRollback,
   });
+
   assert.equal(run.status, 0, run.stderr);
   assert.equal(result.success, false);
   assert.match(result.error, /exited with code 7/);
@@ -170,6 +182,33 @@ test("a failed update rolls back to the previous commit and says so", { skip: !p
   assert.match(log, /Rolling back to/);
   assert.match(log, /\[OK\] Rolled back to/);
   assert.deepEqual(leftovers, [], "staged installers and the request are cleaned up");
+});
+
+test("forward and rollback installers receive their exact release context", { skip: !posix }, async () => {
+  const { result, markers, beta, brainstem } = await runUpdater({
+    forward: ({ markers }) => (
+      `echo "forward:$BRAINSTEM_BETA_RELEASE_TAG:$BRAINSTEM_BETA_RUNTIME_VERSION_URL" >> "${markers}"\n`
+      + "exit 7"
+    ),
+    rollback: ({ beta, markers }) => (
+      `git -C "${beta.dir}" checkout -q ${beta.first}\n`
+      + `echo "rollback:$BRAINSTEM_BETA_RELEASE_TAG:$BRAINSTEM_BETA_RUNTIME_VERSION_URL:$BRAINSTEM_BETA_PRESERVE_RUNTIME:$BRAINSTEM_BETA_RUNTIME_COMMIT" >> "${markers}"\n`
+      + "exit 0"
+    ),
+  });
+
+  assert.equal(result.rollback.success, true);
+  assert.match(
+    markers,
+    new RegExp(`forward:brainstem-beta-v0\\.1\\.0-beta\\.7:.*${beta.second}`),
+  );
+  assert.match(
+    markers,
+    new RegExp(
+      `rollback:brainstem-beta-v0\\.1\\.0-beta\\.6:.*${beta.first}.*:1:${brainstem.first}`,
+    ),
+  );
+  assert.notEqual(beta.first, brainstem.first, "runtime rollback identity is independent");
 });
 
 test("a rollback that itself fails is reported as failed, never as restored", { skip: !posix }, async () => {

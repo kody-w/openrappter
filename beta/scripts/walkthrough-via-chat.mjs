@@ -166,10 +166,10 @@ export function evaluateControlHandoff({
 }
 
 const prompt = [
-  "Run the complete RAPP Brainstem Frontier five-minute walkthrough now.",
+  "Run the complete OpenRappter five-minute walkthrough now.",
   "Execute every chapter through tools; do not merely describe the plan.",
   "Keep the teaching narration concise and visible so a first-time user can",
-  "follow what the Explorer, Brainstem, and Brain Surgeon are each proving.",
+  "follow what the Explorer, Brainstem, and Rappter Surgeon are each proving.",
   "",
   "Chapter 1 — orient the learner:",
   "- Use show_rapp_identity.",
@@ -187,7 +187,7 @@ const prompt = [
         "- Do not clear the Brainstem chat. Confirm the visible transcript shows",
         `  ${directBrainstemMarkers[0]} followed by ${directBrainstemMarkers[1]}.`,
         "- Explain that direct human control is now handing the same mounted chat",
-        "  to Brain Surgeon without replacing the iframe or transcript.",
+        "  to Rappter Surgeon without replacing the iframe or transcript.",
       ]
     : [
         "- Clear the Brainstem chat.",
@@ -235,7 +235,7 @@ const prompt = [
         "- Call delegate_to_brainstem with the ephemeral agent below.",
         "- Use filename five_minute_walkthrough_agent.py.",
         "- Tell Brainstem to call FiveMinuteWalkthrough exactly once with",
-        "  lesson='RAPP_READY', explain that Brain Surgeon now controls the same",
+        "  lesson='RAPP_READY', explain that Rappter Surgeon now controls the same",
         "  mounted chat, and end with the exact marker",
         `  ${brainstemMarker}.`,
         "- Confirm all three markers remain visible in chronological order.",
@@ -301,7 +301,7 @@ const prompt = [
   "Chapter 6 — show the production path:",
   "- Use check_beta_updates and report the exact visible status without",
   "  clicking Update and Restart.",
-  "- Explain the path in one sentence: prove locally in Frontier Brainstem, freeze",
+  "- Explain the path in one sentence: prove locally in OpenRappter Brainstem, freeze",
   "  the RAPP/1 runtime for Hippocampus, then promote the proven capability",
   "  into the Microsoft experience that fits.",
   "",
@@ -374,7 +374,7 @@ async function waitForBridge(limitMs = timeoutMs) {
     await sleep(250);
   }
   throw new Error(
-    `RAPP Brainstem Frontier is not ready: ${lastError?.message || "timeout"}`,
+    `OpenRappter is not ready: ${lastError?.message || "timeout"}`,
   );
 }
 
@@ -385,7 +385,7 @@ function launchBeta() {
   );
   if (!existsSync(launcher)) {
     throw new Error(
-      `RAPP Brainstem Frontier is closed and its launcher is missing at ${launcher}.`,
+      `OpenRappter is closed and its launcher is missing at ${launcher}.`,
     );
   }
   const child = process.platform === "win32"
@@ -662,7 +662,7 @@ function writeReportAndGallery(report) {
   writeFileSync(galleryPath, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RAPP Brainstem Frontier · Walkthrough Improvements</title>
+<title>OpenRappter · Walkthrough Improvements</title>
 <style>
 body{margin:0;background:#0d1117;color:#f0f6fc;font:15px/1.5 ui-sans-serif,system-ui,sans-serif}
 main{width:min(1240px,calc(100% - 32px));margin:32px auto 80px}
@@ -678,7 +678,7 @@ video{width:100%;max-height:720px;background:#000;border-radius:10px}
 .frames img{width:100%;border-radius:8px}details{margin-top:12px}summary{cursor:pointer;color:#c9d1d9}
 pre{white-space:pre-wrap;word-break:break-word;background:#0d1117;padding:12px;border-radius:8px;color:#c9d1d9}
 </style></head><body><main>
-<h1>RAPP Brainstem Frontier improvements</h1>
+<h1>OpenRappter improvements</h1>
 <p>Newest first. Every scored run was fully decoded and sampled before the next loop.</p>
 ${reports.map(reportTile).join("")}
 ${historyTiles ? `<h2>Earlier recordings</h2>${historyTiles}` : ""}

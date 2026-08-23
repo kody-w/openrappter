@@ -1,0 +1,13 @@
+{
+  "schema": "openrappter-media-tool-hashes/1.0",
+  "darwin-arm64": {
+    "source": {
+      "ffmpeg": "a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584",
+      "ffprobe": "c846d5db9d3b5bc33f987725e21f3ea14953931221c191575918e907ad6c18ff"
+    },
+    "packaged_unsigned": {
+      "ffmpeg": "f1e92e34b6122d3cd725e58e01a8856f8fa9ef1f88148895d3b77fc8b00e0886",
+      "ffprobe": "e73ed60799a4c68da9c2b22e94ef8686bc783b54475794476eb56ca3e2d19c86"
+    }
+  }
+}

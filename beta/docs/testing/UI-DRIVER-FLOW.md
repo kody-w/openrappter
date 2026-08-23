@@ -1,4 +1,4 @@
-# RAPP Brainstem Frontier — autonomous UI driver: data-flow report
+# OpenRappter — autonomous UI driver: data-flow report
 
 Facts only. Repo: `` (branch
 `feat/frontier-store-self-evolving-rapplications`, HEAD `582c4edd`). All `file:line`
@@ -24,11 +24,11 @@ names does not exist in the tree (commit `f191ee21`).
 
 | Process | What runs there | Key code |
 |---|---|---|
-| Electron **main** | UI-driver HTTP server (in-process), `BrainSurgeon` instances (one per chat tab, max 12), `uiCommand` queue, route manager, twin manager | `beta/electron/ui-driver-server.mjs:1618` (`createServer`), `beta/electron/main.mjs:490-491`, `:865-893`, `:1563-1589` |
+| Electron **main** | UI-driver HTTP server (in-process), `RappterSurgeon` instances (one per chat tab, max 12), `uiCommand` queue, route manager, twin manager | `beta/electron/ui-driver-server.mjs:1618` (`createServer`), `beta/electron/main.mjs:490-491`, `:865-893`, `:1563-1589` |
 | Electron **renderer (shell)** | `beta/ui/index.html` + `renderer.js`; hosts the Brainstem `<iframe id="brainstem">` (`beta/ui/index.html:670-674`) and twin tile iframes | `beta/ui/renderer.js:1271-1311` (Surgeon event rendering) |
 | **Brainstem iframe** (Grail UI) | Unchanged `rapp_brainstem/index.html` served by the routed worker at `http://127.0.0.1:<port>/?beta=1` (live: `:49608`) — this is the default target of every driver command | `ui-driver-server.mjs:61-64` (`brainstemFrame`) |
 | **Brainstem worker** (Python/Flask) | `rapp_brainstem/brainstem.py` in an isolated `AGENTS_PATH`; runs `BrainstemUiDriver.perform()` when the model calls it | `rapp_brainstem/brainstem.py:2180-2228`, `beta/scripts/brainstem_ui_driver_agent.py:181-269` |
-| **Copilot CLI** (child of main, stdio) | The Brain Surgeon model loop via `@github/copilot-sdk` | `beta/electron/brain-surgeon.mjs:838-852` |
+| **Copilot CLI** (child of main, stdio) | The Rappter Surgeon model loop via `@github/copilot-sdk` | `beta/electron/rappter-surgeon.mjs:838-852` |
 | **Copilot API** (remote) | The model behind Brainstem `/chat`; receives tool schemas + tool results | `brainstem.py:2501`, `:2529` |
 
 ### Authentication and transport (same for both loops)
@@ -98,12 +98,12 @@ it. When present, it is reloaded and its schema sent on **every** `/chat` reques
    "▶ agent called BrainstemUiDriver" disclosure containing the full `agent_logs`
    (`:3026`, `:3059` → `appendMsg` `:2453-2545`).
 
-### Loop B — Surgeon-side (GitHub Copilot tools in `brain-surgeon.mjs`)
+### Loop B — Surgeon-side (GitHub Copilot tools in `rappter-surgeon.mjs`)
 
 1. User (or the `surgeon_chat` driver action, `ui-driver-server.mjs:436-502`) types into
    `#surgeon-input` and clicks `#surgeon-send` (`beta/ui/index.html:728`, `:731`).
 2. Renderer → IPC `beta:surgeon-send` (`beta/electron/preload.cjs:20`) → main
-   `BrainSurgeon.send()` → `session.sendAndWait({prompt}, 1 h)` (`brain-surgeon.mjs:889-911`).
+   `RappterSurgeon.send()` → `session.sendAndWait({prompt}, 1 h)` (`rappter-surgeon.mjs:889-911`).
 3. The Copilot CLI model calls driver-backed tools; **11** of them hit the bus:
    `delegate_to_brainstem` (`:203-241` → `:1289-1335`: `set_chat_lease` + `wait #input` +
    `chat`), `inspect_visible_brainstem` (`:243-257`), `capture_visible_brainstem`
@@ -118,14 +118,14 @@ it. When present, it is reloaded and its schema sent on **every** `/chat` reques
    plain objects/strings are passed through for the CLI to serialize (the serializer is not
    in this repo; the "surgeonfmt" column in §2 assumes compact `JSON.stringify`). No
    Frontier-side truncation; `grep -i 'compact|truncat'` over `session.js` finds nothing.
-6. SDK session events → `tool-start` / `tool-complete` (`brain-surgeon.mjs:854-874`) →
+6. SDK session events → `tool-start` / `tool-complete` (`rappter-surgeon.mjs:854-874`) →
    `emitSurgeonEvent` → IPC `beta:surgeon-event` (`main.mjs:531-533`, `:936`) →
    `handleSurgeonEvent`. In default `smooth` mode, `delta` text runs through the shared
    adaptive pacer into one caret-marked bubble; tool boundaries flush earlier text and tool
    rows remain live. Tool **results are never sent to the renderer**; only name +
    running/done/failed.
 7. Session is one persistent CLI session with `infiniteSessions` and `memory` enabled
-   (`brain-surgeon.mjs:841-852`); every tool result stays in it for the life of the tab.
+   (`rappter-surgeon.mjs:841-852`); every tool result stays in it for the life of the tab.
 
 ### Loop B → A hand-off (`delegate_to_brainstem`)
 
@@ -139,7 +139,7 @@ max 1 h) and returns `{requestId, response, agentLogs}` where `agentLogs` =
 `display:none` while collapsed; `innerText` of a non-rendered element returns its
 `textContent`, so the **entire** agent-log string (every tool result of that Brainstem turn)
 comes back into the Surgeon context. `delegateToBrainstem` returns
-`JSON.stringify(result, null, 2)` (`brain-surgeon.mjs:1314`, `:1329`); `withRoute` records
+`JSON.stringify(result, null, 2)` (`rappter-surgeon.mjs:1314`, `:1329`); `withRoute` records
 2,000-char / 1,000-char previews to telemetry only (`route-manager.mjs:2156-2163`).
 
 ---
@@ -163,8 +163,8 @@ A) — i.e. Loop A counts every result **twice** in the response stream (tool me
 | `wait` | `{selector\|null, text}` (`:366-369`) | with a selector, `text` = **full `innerText` of the matched element, no slice** (`:368`) — e.g. `wait selector:#chat` returns the whole transcript | 30 B – unbounded |
 | `announce` | `{announced}` (`:649`) | — | ≈ 40 B |
 | `run` | `{results:[…]}` (`:689-697`) | 1..40 steps (`:1368`); sum of the above | — |
-| `screenshot` | `{captureUrl, dataUrl, path, size, visibleText}` (`:1591-1616`) | `visibleText` ≤12,000 (`:1605`, Brainstem frame only); `dataUrl` = JPEG q72, ≤1,280 px wide (`:1599-1601`, `:1611`) | wire **59,215 B** (dataUrl 57,979 B; window 2560×1656). Loop A: `dataUrl` popped (`brainstem_ui_driver_agent.py:250`), returns dict → `str()` repr ≈ 400 B + visibleText (≤12 KB, 892 B at rest). Loop B `capture_visible_brainstem`: `Visible Brainstem text:\n` + visibleText as text **plus the JPEG as a binary image part** (`brain-surgeon.mjs:1414-1427`) |
-| `stop_recording` | `{recording, screenshot}` (`:1845-1859`) | as screenshot | Loop A: dict repr with visibleText (`brainstem_ui_driver_agent.py:220-248`); Loop B: JSON with `visibleText` (`brain-surgeon.mjs:1454-1463`) |
+| `screenshot` | `{captureUrl, dataUrl, path, size, visibleText}` (`:1591-1616`) | `visibleText` ≤12,000 (`:1605`, Brainstem frame only); `dataUrl` = JPEG q72, ≤1,280 px wide (`:1599-1601`, `:1611`) | wire **59,215 B** (dataUrl 57,979 B; window 2560×1656). Loop A: `dataUrl` popped (`brainstem_ui_driver_agent.py:250`), returns dict → `str()` repr ≈ 400 B + visibleText (≤12 KB, 892 B at rest). Loop B `capture_visible_brainstem`: `Visible Brainstem text:\n` + visibleText as text **plus the JPEG as a binary image part** (`rappter-surgeon.mjs:1414-1427`) |
+| `stop_recording` | `{recording, screenshot}` (`:1845-1859`) | as screenshot | Loop A: dict repr with visibleText (`brainstem_ui_driver_agent.py:220-248`); Loop B: JSON with `visibleText` (`rappter-surgeon.mjs:1454-1463`) |
 | `start_recording` | `{encoder, frameRate, maxDurationMs, startedAt}` (`:1279-1284`) | — | ≈ 100 B |
 | `route_telemetry` | `{sequence, active_route, worker_count, stack_count, stack_tree, …, events, chat_lease_count, navigation_count}` (`:1786-1807`) | `events` grows over the session | **3,345 B (~836 tok)** |
 | `tour` | `{available, running, step, index, total, steps[]}` (`:1497-1504`) | — | 302 B |
@@ -190,7 +190,7 @@ the user message (`drive-via-chat.mjs:14-15`, `:27-31`; same pattern in
 3. **`wait` with a selector** — returns the element's full `innerText` (`:368`).
 4. **`chat` → `agentLogs`** — re-imports every Loop-A tool result into Loop B (`:579`).
 5. **`inspect`** — 4.4 KB at rest, up to ~68 KB; `inspect_visible_brainstem` defaults to 80
-   elements (`brain-surgeon.mjs:253`); the Python schema lets `inspect` be a `run` step too
+   elements (`rappter-surgeon.mjs:253`); the Python schema lets `inspect` be a `run` step too
    (`brainstem_ui_driver_agent.py:52-60`).
 6. **Echo into `agent_logs`** — `brainstem.py:2214` copies every result verbatim into the
    string that the Grail UI renders (§4) and that the `chat` action scrapes.
@@ -198,7 +198,7 @@ the user message (`drive-via-chat.mjs:14-15`, `:27-31`; same pattern in
    (`brainstem.py:2542-2547`), no pruning; cross-turn the Grail UI re-sends only
    user/assistant `content` (`rapp_brainstem/index.html:1334-1337`), so tool text leaves
    the Brainstem context only if the assistant did not echo it into its reply. Loop B keeps
-   everything in the CLI session (`brain-surgeon.mjs:844`).
+   everything in the CLI session (`rappter-surgeon.mjs:844`).
 8. **`route_telemetry.events`** grows for the life of the route manager.
 
 ---
@@ -248,7 +248,7 @@ tile) shifts `nth-of-type` and silently retargets the path.
 | Dynamic lists | `:188-203` | `#chat`, `#surgeon-log`, `#surgeon-tabs`, `#agent-tree`, herd tiles and Show Mode starters are all renderer-generated without ids → nth-of-type paths only |
 | Stale scans | `:611-631` | `inspect` is a one-shot snapshot with no handles/versioning; nothing detects that the DOM changed between `inspect` and `click` |
 | Re-render / reload | `main.mjs:1380-1388`, `renderer.js:64`, `:110` | the `#beta-*` menu and the logo's role/aria-label exist only after the frame bridge is injected over IPC; after `refresh` they exist again only once the renderer re-installs the bridge |
-| Frames | `:1869-1881` | one frame per command; the Surgeon's `drive_visible_brainstem` schema has **no `target` property** (`brain-surgeon.mjs:513-524`), so it can only ever address the Brainstem frame — shell controls (Explorer, Surgeon tabs, `#enter`) are unreachable from that tool; the Python schema has `target` (`brainstem_ui_driver_agent.py:97-101`) |
+| Frames | `:1869-1881` | one frame per command; the Surgeon's `drive_visible_brainstem` schema has **no `target` property** (`rappter-surgeon.mjs:513-524`), so it can only ever address the Brainstem frame — shell controls (Explorer, Surgeon tabs, `#enter`) are unreachable from that tool; the Python schema has `target` (`brainstem_ui_driver_agent.py:97-101`) |
 | Twin frames | `:69-76`, `main.mjs:748-776` | tiles are found by URL prefix (works through the `document.write` injection, `main.mjs:698-709`); a popped-out twin is a separate `BrowserWindow`, not in `mainWindow`'s frame tree → not drivable |
 | Shadow DOM | `:206-224` | not traversed |
 | Visibility ≠ clickability | `:167-176` | `visible()` checks rect/display/visibility/opacity only — not `disabled`, `pointer-events`, or occlusion by `#splash`, the login overlay, `#intro`, or the driver's own overlays; `element.click()` on a disabled button is a silent no-op that still returns `{clicked}` |
@@ -312,7 +312,7 @@ tile) shifts `nth-of-type` and silently retargets the path.
 - Per tool call: one `.surgeon-tool` row `⚙ <toolName> running` → `done`/`failed`
   (`renderer.js`, `addSurgeonTool` / `finishSurgeonTool`), kept live while prior paced text
   flushes. Arguments and
-  results are **never rendered** (they are never sent over IPC — `brain-surgeon.mjs:858-873`).
+  results are **never rendered** (they are never sent over IPC — `rappter-surgeon.mjs:858-873`).
 - In default `smooth`, the first paced piece creates one
   `.surgeon-message.assistant.stream-arriving` bubble and quiet caret; subsequent word-sized
   pieces append at the shared cadence. The panel follows the tail above its measured composer
@@ -324,7 +324,7 @@ tile) shifts `nth-of-type` and silently retargets the path.
   static.
 - `artifact` events render `<img>`/`<video controls>` tiles with a link (`:552-577`) — only
   from `capture_visible_brainstem`, `stop_demo_recording`, and `show_mode_click_through
-  capture` (`brain-surgeon.mjs:1375-1383`, `:1405-1413`, `:1436-1453`).
+  capture` (`rappter-surgeon.mjs:1375-1383`, `:1405-1413`, `:1436-1453`).
 - `lease` events add an assistant bubble "Temporary capability leased." (`:1292-1293`).
 - The user's own message is shown verbatim — for `npm run drive:e2e` that is the 11 KB Python
   source (`drive-via-chat.mjs:22-42`), typed in at 5 ms/char by `surgeon_chat`
@@ -342,7 +342,7 @@ tile) shifts `nth-of-type` and silently retargets the path.
 (`aria-label="Live Brainstem agents Explorer"`), `#explorer-refresh`, `#explorer-close`,
 `#agent-tree` (`role="tree"`), `#agent-viewer`, `#agent-viewer-tab`, `#agent-viewer-empty`,
 `#agent-source`, `#explorer-status`, `#surgeon-tab`, `#surgeon`
-(`aria-label="GitHub Copilot Brain Surgeon"`), `#surgeon-model`, `#surgeon-herd-btn`,
+(`aria-label="GitHub Copilot Rappter Surgeon"`), `#surgeon-model`, `#surgeon-herd-btn`,
 `#surgeon-new` (`aria-label`), `#surgeon-close`, `#surgeon-tabs`, `#surgeon-log`
 (`role="log" aria-live="polite"`), `#surgeon-input`, `#surgeon-mode`, `#surgeon-send`,
 `#intro`, `#intro-title`, `#show-mode-interview-prompt`, `#enter`; plus
@@ -393,7 +393,7 @@ exposing `steps`, `start/next/prev/stop`, `running`, `step`; `window.__brainstem
   detection (`:509-585`).
 - `surgeon_chat`: assistant/error reply-count baselines + `send.disabled` gate (`:458-499`).
 - `wait`: polling primitive with selector+text filter (`:342-376`).
-- `delegate_to_brainstem`: lease acquire/release with tokens (`brain-surgeon.mjs:954-996`),
+- `delegate_to_brainstem`: lease acquire/release with tokens (`rappter-surgeon.mjs:954-996`),
   `waitForVisibleBrainstem` retry loop (`:1267-1287`).
 - Telemetry previews: `route-callback-end` stores 2,000-char `agent_logs_preview` and
   1,000-char `response_preview` (`route-manager.mjs:2156-2163`) — the only place a
@@ -404,7 +404,7 @@ exposing `steps`, `start/next/prev/stop`, `running`, `step`; `window.__brainstem
 | Limit | Value | Where |
 |---|---|---|
 | Command body | 256 KB | `ui-driver-server.mjs:19`, `:43` |
-| `run` steps | 1..40 | `:1368`; Surgeon schemas `maxItems: 40` `brain-surgeon.mjs:498`, `:553` |
+| `run` steps | 1..40 | `:1368`; Surgeon schemas `maxItems: 40` `rappter-surgeon.mjs:498`, `:553` |
 | `inspect.limit` | 1..200, default 80 | `:618`; Surgeon `maximum: 200` `:250` |
 | `inspect` per-element text | 180 | `:622` |
 | `inspect.text` | 4,000 | `:629` |
@@ -432,7 +432,7 @@ exposing `steps`, `start/next/prev/stop`, `running`, `step`; `window.__brainstem
 - Python tool schema: `brainstem_ui_driver_agent.py:114-162` (top-level `action` enum of 13;
   `steps[]` with 7 step actions; 21 step properties incl. snake_case keys mapped by
   `_camelize` `:22-43`; `target` enum `brainstem|shell`).
-- Surgeon: `drive_visible_brainstem` (`brain-surgeon.mjs:487-540`; 6 step actions, camelCase,
+- Surgeon: `drive_visible_brainstem` (`rappter-surgeon.mjs:487-540`; 6 step actions, camelCase,
   no `target`), `drive_twin` (`:542-582`, adds `twin_id`), `inspect_visible_brainstem`
   (`:243-257`), `delegate_to_brainstem` (`:203-241`).
 
@@ -442,7 +442,7 @@ exposing `steps`, `start/next/prev/stop`, `running`, `step`; `window.__brainstem
   `browserDriverCommand`, `validateCommand`, recording functions, `runTourCommand`.
 - `beta/tests/ui-driver-server.test.mjs` (8 tests): all assert against **function source
   text** (`.toString()` + regex, `:57-91`, `:111-138`) or `validateCommand`; no DOM, no
-  `findElement`/`targetText` coverage. `brain-surgeon.test.mjs` has no driving tests
+  `findElement`/`targetText` coverage. `rappter-surgeon.test.mjs` has no driving tests
   (grep for drive/visible/inspect/screenshot/record in test names: none);
   `show-mode-tour.test.mjs:18` and `installer-contract.test.mjs:33` only read the agent file;
   `twin-manager.test.mjs` references `uiCommand`.

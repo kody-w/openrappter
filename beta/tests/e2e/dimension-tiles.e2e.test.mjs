@@ -503,18 +503,12 @@ frontierTest("tile drag semantics hot-load agents, swap safely, and preserve bin
     ));
     assert(outgoingTile);
     const routeBeforeBunch = (await activeHealth(app)).route.composition_hash;
-    await app.driver.run([{
-      action: "press",
-      handle: `@herd.tile[${fixtureId}]`,
-      key: " ",
-      settleMs: 80,
-    }], { target: "shell" });
-    await app.driver.run([{
-      action: "press",
-      handle: `@herd.tile[${outgoingTile.id}]`,
-      key: " ",
-      settleMs: 100,
-    }], { target: "shell" });
+    const bunchResult = await app.driver.command({
+      action: "autopilot",
+      script: `tile.bunch ${fixtureId} ${outgoingTile.id} --speed instant`,
+      target: "shell",
+    });
+    assert.equal(bunchResult.ok, true);
     const bunched = await waitFor(() => {
       const tiles = readTiles(tilesDirectory);
       const first = tiles.find((tile) => tile.id === fixtureId);

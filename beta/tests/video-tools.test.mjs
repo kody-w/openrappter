@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -64,7 +73,32 @@ test("packaged video-tool paths resolve outside app.asar on every platform", () 
   }
 });
 
-test("the factory install never runs package lifecycle scripts", () => {
+test("signed packaged media tools take precedence over ASAR dependencies", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "openrappter-media-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const directory = path.join(root, "media-tools");
+  mkdirSync(directory, { recursive: true });
+  const ffmpeg = path.join(
+    directory,
+    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+  );
+  const ffprobe = path.join(
+    directory,
+    process.platform === "win32" ? "ffprobe.exe" : "ffprobe",
+  );
+  writeFileSync(ffmpeg, "fixture");
+  writeFileSync(ffprobe, "fixture");
+  assert.equal(
+    resolveFfmpegExecutable({}, { resourcesPath: root }),
+    ffmpeg,
+  );
+  assert.equal(
+    resolveFfprobeExecutable({}, { resourcesPath: root }),
+    ffprobe,
+  );
+});
+
+test("the factory install never runs package lifecycle scripts", (t) => {
   // ffmpeg-static's postinstall downloads a native binary from a third-party
   // release with no checksum and no signature, then chmods it 0755 — arbitrary
   // native code executed during the sacred one-liner, in a product that refuses
@@ -85,6 +119,46 @@ test("the factory install never runs package lifecycle scripts", () => {
 
   const npmrc = readFileSync(new URL("../.npmrc", import.meta.url), "utf8");
   assert.match(npmrc, /^ignore-scripts=true$/m, "a dev install must match the shipped posture");
+
+  const packageJson = JSON.parse(readFileSync(
+    new URL("../package.json", import.meta.url),
+    "utf8",
+  ));
+  const prepare = readFileSync(
+    new URL("../scripts/prepare-media-tools.mjs", import.meta.url),
+    "utf8",
+  );
+  const afterPack = readFileSync(
+    new URL("../scripts/after-pack.cjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(packageJson.scripts["dist:mac"], /prepare:media/);
+  assert.equal(packageJson.scripts["dist:win"], undefined);
+  assert.equal(packageJson.scripts["dist:linux"], undefined);
+  assert.equal(packageJson.build.afterPack, "scripts/after-pack.cjs");
+  assert.match(prepare, /media-tool-hashes\.json/);
+  assert.match(prepare, /failed its .* SHA-256 pin/);
+  assert.match(afterPack, /\.release-media-tools/);
+  assert.match(afterPack, /support darwin-arm64 only/);
+  const workflowPath = new URL(
+    "../../.github/workflows/frontier-desktop.yml",
+    import.meta.url,
+  );
+  if (!existsSync(workflowPath)) {
+    t.diagnostic("CI workflow is intentionally absent from the sparse customer checkout");
+    return;
+  }
+  const workflow = readFileSync(workflowPath, "utf8");
+  const selectedScripts = [...workflow.matchAll(/^\s+script:\s*(\S+)/gm)]
+    .map((match) => match[1]);
+  assert.deepEqual(selectedScripts, ["dist:mac"]);
+  for (const script of selectedScripts) {
+    assert.equal(
+      typeof packageJson.scripts[script],
+      "string",
+      `workflow selects missing npm script ${script}`,
+    );
+  }
 });
 
 test("media tooling degrades to the system binary instead of demanding a download", () => {

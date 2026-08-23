@@ -283,7 +283,7 @@ function main() {
     }x${independentProbe?.height || 0}`,
   );
   requirement(
-    "Brain Surgeon completed its guided loop",
+    "Rappter Surgeon completed its guided loop",
     String(report.response || "").includes("FIVE_MINUTE_WALKTHROUGH_COMPLETE"),
   );
   if (report.scenario !== "stack-churn") {
@@ -649,7 +649,7 @@ function main() {
       .map((event) => event.request_id)
       .filter(Number.isInteger);
     requirement(
-      "Brain Surgeon request follows both direct turns",
+      "Rappter Surgeon request follows both direct turns",
       surgeonRequestIds.length >= 1
         && surgeonRequestIds.every((requestId) => requestId > requestIds[1]),
       surgeonRequestIds.join(", "),

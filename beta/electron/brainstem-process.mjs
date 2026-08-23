@@ -125,7 +125,22 @@ function canonicalFilesystemPath(value) {
   } catch {
     resolved = path.resolve(String(value));
   }
+
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+export function healthSourceDirectory(health) {
+  if (typeof health?.brainstem_dir === "string") {
+    return canonicalFilesystemPath(health.brainstem_dir);
+  }
+  if (
+    health?.status === "unauthenticated"
+    && typeof health?.soul === "string"
+    && path.isAbsolute(health.soul)
+  ) {
+    return canonicalFilesystemPath(path.dirname(health.soul));
+  }
+  return null;
 }
 
 export async function probeHealth(url, timeoutMs = 1_500) {
@@ -286,12 +301,12 @@ export class BrainstemProcess {
     const serverFile = path.join(this.config.brainstemDir, "brainstem.py");
     if (!existsSync(serverFile)) {
       throw new Error(
-        `Brainstem source is missing at ${this.config.brainstemDir}. Re-run the Frontier installer.`,
+        `Brainstem source is missing at ${this.config.brainstemDir}. Re-run the OpenRappter installer.`,
       );
     }
     if (!existsSync(this.config.python)) {
       throw new Error(
-        `Brainstem Python environment is missing at ${this.config.python}. Re-run the Frontier installer.`,
+        `Brainstem Python environment is missing at ${this.config.python}. Re-run the OpenRappter installer.`,
       );
     }
 
@@ -334,8 +349,7 @@ export class BrainstemProcess {
       this.config.brainstemDir,
     );
     const ownedHealthMatches = !health || !this.config.ownPort || (
-      typeof health?.brainstem_dir === "string"
-      && canonicalFilesystemPath(health.brainstem_dir) === expectedBrainstemDir
+      healthSourceDirectory(health) === expectedBrainstemDir
     );
     if (
       !health

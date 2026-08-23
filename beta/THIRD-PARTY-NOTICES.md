@@ -1,8 +1,8 @@
 # Third-party notices
 
-RAPP Brainstem Frontier is distributed under this repository's license — see
-`LICENSE` at the repository root, which is the authoritative statement. It uses
-the following principal third-party components:
+OpenRappter is distributed under the Apache License 2.0. The shipped `LICENSE`
+file is the authoritative statement. It uses the following principal third-party
+components:
 
 - GitHub Copilot SDK and the unmodified GitHub Copilot CLI platform package,
   obtained through npm and subject to the license and terms included in those

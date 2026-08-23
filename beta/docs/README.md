@@ -31,6 +31,8 @@ them, they win.
 | | |
 |---|---|
 | [PROTOCOLS.md](PROTOCOLS.md) | Every `rapp-*` protocol, its stage, and how RAPP/1 adopts one without anybody upgrading in step. |
+| [GOOD-AI-NEIGHBOR-PROTOCOL.md](GOOD-AI-NEIGHBOR-PROTOCOL.md) | `openrappter-good-ai-neighbor/1.0` — one dock creature per isolated AI neighborhood, with explicit peaceful collaboration. |
+| [DOGG-SUMMON-PROTOCOL.md](DOGG-SUMMON-PROTOCOL.md) | `openrappter-dogg-summon/1.0` — invoke a resident neighborhood from commit-pinned GitHub raw user data while the local estate retains authority. |
 | [SELF-ASSEMBLE-PROTOCOL.md](SELF-ASSEMBLE-PROTOCOL.md) | `rapp-selfassemble/1.0` — what a runtime does with a dropped tile, and what it must refuse. |
 
 ## What a capability is, and how it travels

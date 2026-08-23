@@ -1,17 +1,41 @@
-# RAPP Brainstem Frontier
+# OpenRappter
 
 See [`GOLDEN_PATH.md`](GOLDEN_PATH.md) for the guiding product path:
 learn AI, teach it back immediately as a working capability, and keep that
 portable skill for life.
 
-**Documentation index: [`docs/README.md`](docs/README.md)** — every Frontier document, grouped by
+**Documentation index: [`docs/README.md`](docs/README.md)** — every OpenRappter document, grouped by
 the question it answers.
 
-This opt-in Frontier experience applies the launcher architecture used by Skill Recorder to
-RAPP Brainstem:
+Brainstem and OpenRappter are uniform twins on the same RAPP/1 `/chat` wire.
+Brainstem is the bare reference twin. OpenRappter is the fully built-out twin:
+application body, Rappter Surgeon, tiles, Pack Sentinel, backups, and its own
+identity, state, worker ports, and lifecycle.
+
+OpenRappter follows the
+[Good AI Neighbor protocol](docs/GOOD-AI-NEIGHBOR-PROTOCOL.md): every Electron
+app is one visible AI estate container and Dock creature. An estate may contain
+multiple neighborhoods—its root companion, worker twins, and specialized
+herds—but every neighborhood belongs to exactly one estate. Separate estates
+collaborate only through attributed `/chat` or verified tile transfer, so
+Brainstem and OpenRappter can live side by side without confusing ownership.
+
+An estate may recursively detach a neighborhood into another full Electron
+estate as new long-lived roles are needed. Each child receives a new
+RAPPID-derived identity, Dock creature, owned estate, venv, herd, parent
+lineage, and lifecycle capability; spawning is bounded to 32 direct children
+and eight generations.
+
+“Same wire” means transparent pass-through, not a second adapter: OpenRappter
+preserves the selected unchanged Grail Brainstem’s request bytes, response
+bytes, status, and refusal behavior. Session and idempotency semantics remain
+owned by that kernel. Pack reports never upgrade an observed legacy envelope
+into a stricter conformance claim; required fields are type-checked against
+`contracts/rapp-chat-v1.json`, and relay explicitly records neighborhood
+protocol as `not-claimed`.
 
 - chat remains the universal control surface for people and other AIs;
-- Frontier composes global and routed single-file agents into an isolated
+- OpenRappter composes global and routed single-file agents into an isolated
   worker `AGENTS_PATH`, then invokes them through the unchanged `/chat`;
 - the included `BrainstemUiDriver` agent can operate the actual visible
   frontend with an animated cursor, clicks, typing, narration, and waits so the
@@ -23,36 +47,39 @@ RAPP Brainstem:
   content-addressed, hardlinked agent compositions;
 - app shutdown disposes the bundled Copilot client and every worker it owns.
 
-Frontier and the regular installer use the same global runtime:
+OpenRappter and standalone Brainstem live side by side:
 
 ```text
 ~/.brainstem/
-|- src/rapp_brainstem/   shared server, agents, soul, auth, and memories
-|- venv/                 shared Python environment
-`- beta-launcher/
+`- ...                   standalone Brainstem; OpenRappter never overwrites it
+
+~/.openrappter/
+|- brainstem/            OpenRappter-owned kernel, agents, soul, auth, memories
+`- desktop/
    |- ambient/           fresh device + ledger context read by ContextMemory
+   |- backups/           content-addressed OpenRappter self tiles
    |- ledger.sqlite      private, queryable turn/agent/tool history (WAL)
    |- ledger.jsonl       grep-friendly mirror of the same redacted events
    |- routing/           RAPPID, stack, egg, object, and composition state
    |- recordings/        captured teaching demos
-   `- src/               Frontier-only Electron, Copilot CLI, and launcher source
+   `- src/               Electron, Copilot SDK, and application source
 ```
 
-The regular installer may keep serving `http://localhost:7071`. Frontier uses
-isolated loopback workers and embeds their unchanged Brainstem UI between a
-live Explorer and GitHub Copilot Brain Surgeon.
+Standalone Brainstem may keep serving `http://localhost:7071`. OpenRappter
+allocates owned loopback ports for its workers, so starting or stopping either
+product never adopts or kills the other.
 
 ## Data sloshing
 
-Frontier keeps a private real-time ledger of completed Brainstem, twin, and
-Brain Surgeon turns, tool calls, installs, hatches, molts, removals, lineage
+OpenRappter keeps a private real-time ledger of completed Brainstem, twin, and
+Rappter Surgeon turns, tool calls, installs, hatches, molts, removals, lineage
 changes, and source locations. It is ordinary SQLite plus a JSONL mirror, so
 people and agents can use `select *` or `grep` with standard SQLite/shell tools.
 Every write uses the same credential-redaction transform as worker logs.
 
 The **My location and ambient context** panel controls a small
 `ambient-context/1.0` device provider. A coordinate-backed user setting wins;
-otherwise Frontier asks `navigator.geolocation`. On macOS, Electron location
+otherwise OpenRappter asks `navigator.geolocation`. On macOS, Electron location
 normally remains `source: "unavailable"` without a platform location-provider
 key. An IP-based city estimate is available only after explicit opt-in, is
 labelled `ip-approximate`, and is off by default. City mode removes precise
@@ -65,15 +92,15 @@ bounded `<device_context>` and `<ledger>` layers through the existing
 `RAPP_MOLT_LINEAGE=0` still composes pure Grail. Run the isolated real-worker
 proof with `node beta/scripts/data-sloshing-proof.mjs`.
 
-## The Frontier boundary
+## The OpenRappter boundary
 
-Everything the Frontier owns lives under `beta/`, and the mainline library never links to it — the
+Everything the OpenRappter owns lives under `beta/`, and the mainline library never links to it — the
 rule, the reasons and how something graduates are in [`FRONTIER-BOUNDARY.md`](FRONTIER-BOUNDARY.md),
 and `tests/frontier-boundary.test.mjs` fails if a link crosses.
 
 ## What it is for
 
-Use Frontier as a builder-operated rapid proof harness for the customer
+Use OpenRappter as a builder-operated rapid proof harness for the customer
 question: **"Can AI do this?"**
 
 It is also the teaching path: learn the AI pattern on real work, have Copilot
@@ -98,14 +125,14 @@ The product direction is to take the user out of repetitive execution without
 taking them out of understanding: the user drives by chatting, the Brainstem
 delegates to agents, and visible UI actions show exactly what is being done.
 
-## Brain Surgeon: GitHub Copilot without requiring VS Code
+## Rappter Surgeon: GitHub Copilot without requiring VS Code
 
-Frontier ports the proven vBrainstem Brain Surgeon pattern into the desktop
+OpenRappter ports the proven vBrainstem Rappter Surgeon pattern into the desktop
 client. Open the **GitHub Copilot** tab on the right edge to reveal the full
 Copilot coding-agent loop side-by-side with the live Brainstem.
 
 This is not a second Brainstem or a simplified chatbot. It is GitHub Copilot
-Agent mode with its normal file, shell, search, edit, and test loop. Frontier
+Agent mode with its normal file, shell, search, edit, and test loop. OpenRappter
 adds RAPP-specific tools so that loop can:
 
 - visibly type into the same Brainstem composer a person uses;
@@ -116,21 +143,21 @@ adds RAPP-specific tools so that loop can:
 - operate the visible interface with an animated cursor;
 - attach screenshots and recorded WebM demonstrations.
 
-The nontechnical golden path is therefore one window: tell the Brain Surgeon
+The nontechnical golden path is therefore one window: tell the Rappter Surgeon
 what outcome you need, watch it build or route the capability, and see the
 Brainstem execute it. VS Code and GitHub CLI remain available for experts, but
 they are no longer prerequisites for using GitHub Copilot as the Brainstem's
 builder.
 
-Chat defaults to the familiar **Messages** look in the Brainstem, Brain Surgeon,
+Chat defaults to the familiar **Messages** look in the Brainstem, Rappter Surgeon,
 and twin tiles: blue/gray grouped bubbles, tails, and pill composers. Choose
-**Chat Look → Business** from the Frontier three-dot or native View menu to
+**Chat Look → Business** from the OpenRappter three-dot or native View menu to
 restore the original styling; the choice is saved in `settings.json`, with
 `RAPP_CHAT_LOOK=messages|business` as an override. The look is theming only and
 does not change reply delivery.
 
 The herd has two presentation modes. **Herd mode** is the default and is
-identical to Frontier without the optional tile presentation. **Agent Arena**
+identical to OpenRappter without the optional tile presentation. **Agent Arena**
 is where parked conversations compete side by side. Select the checkable
 **Agent Arena** item from the native View or three-dot menu, send the exact chat
 control `agent arena`, or set `RAPP_VIEW_MODE=arena`; send `herd` or clear the
@@ -142,21 +169,21 @@ changing the Brainstem kernel; persisted tiles remain local. See
 Delivery independently defaults to `RAPP_CHAT_STREAM=smooth`; use `raw` for the
 untouched kernel stream or `hold` for buffered delivery
 (`RAPP_CHAT_TYPING=1` remains a hold alias).
-Smooth mode holds the kernel's SSE wire until the terminal event while Frontier
+Smooth mode holds the kernel's SSE wire until the terminal event while OpenRappter
 renders the same source in a safely sanitized provisional assistant bubble at an
 adaptive, word-granular frame cadence. It then hands off once to the kernel's
 stable final bubble, avoiding the kernel's unresolved-Markdown render gate while
 keeping the reply tail above the exactly measured composer unless the user
 scrolls away. See [`docs/CHAT-STREAMING.md`](docs/CHAT-STREAMING.md).
 
-If the user gets stuck, another AI can visibly take over the same Brain Surgeon
-or Brainstem chat, perform the next steps in Frontier, show the evidence,
+If the user gets stuck, another AI can visibly take over the same Rappter Surgeon
+or Brainstem chat, perform the next steps in OpenRappter, show the evidence,
 and hand control back without losing context.
 
 External AIs and CLIs can enter the same visible loop:
 
 ```bash
-brainstem-surgeon "Build and test the capability I need"
+openrappter-surgeon "Build and test the capability I need"
 brainstem-walkthrough
 ```
 
@@ -165,14 +192,14 @@ GitHub Copilot, and waits for its answer. The recursive control path is:
 
 ```text
 external AI / CLI
-  -> visible Brain Surgeon chat
+  -> visible Rappter Surgeon chat
   -> full GitHub Copilot coding-agent loop
   -> visible Brainstem chat (/chat)
   -> one-turn routed composition and result
 ```
 
 `brainstem-walkthrough` runs the complete autonomous five-minute teaching path:
-it opens the Explorer, guides Brain Surgeon through identity and stack
+it opens the Explorer, guides Rappter Surgeon through identity and stack
 orientation, records the shell, hotloads a one-turn teaching agent through the
 center Brainstem chat, verifies cleanup, checks GitHub updates, captures the
 evidence, and reports the saved WebM and screenshot. Every run is fully decoded,
@@ -189,18 +216,18 @@ npm run walkthrough:ingest
 ## Show Mode — describe it, or show it
 
 Some customers can describe their process; some would rather show it. **Show
-Mode** (Frontier-tagged) turns a live recording, a video, a set of screenshots,
+Mode** (OpenRappter-tagged) turns a live recording, a video, a set of screenshots,
 or a transcript into a single-file agent you hotload and **test in your own
 Brainstem first**, then promote into Copilot Studio, Scout, Cowork, Foundry, or
 custom Azure code — the tested bytes are the bytes that ship.
 
-Open it from the **Show Mode: click-through preview** pill in the Brain Surgeon,
+Open it from the **Show Mode: click-through preview** pill in the Rappter Surgeon,
 from the first-run intro tile, or as a shareable page at `/beta/show-mode.html`.
 The step-by-step walkthrough with screenshots is in
 [`docs/show-mode/`](docs/show-mode/README.md).
 
 An AI can drive the whole loop for a user through chat and let them watch. Ask
-the Brain Surgeon (or the center Brainstem) to "use AI force mode" to operate the
+the Rappter Surgeon (or the center Brainstem) to "use AI force mode" to operate the
 Brainstem for you, or to `show_mode_click_through` — while it drives, the window
 edges glow and a tag reads *AI force mode · an AI is driving this Brainstem —
 you're watching*, so it is always clear an AI, not a hand, is at the controls.
@@ -218,29 +245,29 @@ and production remain separate.
 Run this in PowerShell:
 
 ```powershell
-irm https://microsoft.github.io/aibast-agents-library/beta/frontier.ps1 | iex
+irm https://kody-w.github.io/openrappter/beta/frontier.ps1 | iex
 ```
 
 ### macOS or Linux
 
 ```bash
-curl -fsSL https://microsoft.github.io/aibast-agents-library/beta/frontier.sh | bash
+curl -fsSL https://kody-w.github.io/openrappter/beta/frontier.sh | bash
 ```
 
 The same one-liner is used every time: first install, update, repair, and launch.
-The bootstrap resolves the latest published Frontier release to its immutable
+The bootstrap resolves the latest published OpenRappter release to its immutable
 40-character commit before running the platform installer.
 
-After the first install, launch **RAPP Brainstem Frontier** from Applications,
+After the first install, launch **OpenRappter** from Applications,
 Launchpad, the Linux app menu, the Windows Desktop/Start Menu, or run:
 
 ```bash
-brainstem-frontier
+openrappter-app
 ```
 
 ## Check for updates
 
-Open the three-dot **RAPP Brainstem Frontier** dropdown in the Brainstem toolbar and
+Open the three-dot **OpenRappter** dropdown in the Brainstem toolbar and
 choose **Check for updates**. The native application menu also exposes
 **Check for Updates...**. The launcher reads the version the configured GitHub
 branch (`main` by default) is on, then resolves that version's **annotated
@@ -250,30 +277,43 @@ the same version but was never released, and a build already sitting on the
 released commit is up to date however far the branch has moved. A version that
 is staged on the branch but not yet tagged shows as "staged, not released".
 
-When an update is available, **Update and Restart** runs the Frontier installer
+When an update is available, **Update and Restart** runs the OpenRappter installer
 pinned to that exact commit. Before anything moves, the updater stages a
 rollback — the installed commit's own installer — and if the update fails after
 it started, it re-installs the previous version and the reopened app says so.
-Tracked local changes in the Frontier checkout block the update instead of being
+Tracked local changes in the OpenRappter checkout block the update instead of being
 discarded.
 
-## Drive Frontier through chat
+## Drive OpenRappter through chat
+
+The two console surfaces are deliberately separate:
+
+```bash
+openrappter-chat "do the work"   # exact POST /chat wire; headless
+openrappter-tile adopt recovery.openrappter.tile  # before first relaunch after identity loss
+openrappter-drive "do the work"  # same wire through the visible UI driver
+```
+
+`openrappter-chat` and standalone Brainstem use the same request/response
+contract, so Pack neighbors can hand work to each other without translation.
+`openrappter-drive` retains visible cursor, typing, screenshot, and recording
+evidence when watching the work matters.
 
 The source checkout includes `scripts/brainstem_ui_driver_agent.py`. The
-`drive:e2e` harness sends that source through the visible GitHub Copilot Brain
-Surgeon chat. Brain Surgeon supplies it to `delegate_to_brainstem` as a one-turn
+`drive:e2e` harness sends that source through the visible GitHub Copilot Rappter
+Surgeon chat. Rappter Surgeon supplies it to `delegate_to_brainstem` as a one-turn
 ephemeral agent, and `BetaRouteManager` materializes it beside the selected
-RAPPID stack without changing the shared Brainstem kernel. The agent does not
+RAPPID stack without changing the Brainstem kernel. The agent does not
 expose arbitrary JavaScript; it uses a token-authenticated loopback bridge with
 bounded actions such as inspect, click, type, press, wait, read, and screenshot.
 
-Run the update-control E2E demonstration while Frontier is open:
+Run the update-control E2E demonstration while OpenRappter is open:
 
 ```bash
 npm run drive:e2e
 ```
 
-The harness visibly asks Brain Surgeon to hot-load the driver, type its
+The harness visibly asks Rappter Surgeon to hot-load the driver, type its
 instruction into the Brainstem chat, send it through `/chat`, and watch the
 agent animate the real dropdown. The temporary routed worker records the
 window, attaches the playable WebM plus a final screenshot to chat, then is
@@ -285,31 +325,32 @@ For any workflow, the agent can use the same three-stage pattern:
 2. `run` the visible clicks, typing, waits, and reads
 3. `stop_recording`
 
-The recording is saved under `~/.brainstem/beta-launcher/recordings/` and shown
+The recording is saved under `~/.openrappter/desktop/recordings/` and shown
 with playback controls in the agent activity attached to the chat response.
 
 ## Download boundary
 
-The global runtime clone uses a shallow partial sparse checkout restricted to
-`rapp_brainstem/`. Frontier uses a second shallow partial sparse checkout
-restricted to `beta/` plus the small `tools/rapp1` conformance fixture needed
-by its release tests. Neither checkout downloads `solutions/`.
+OpenRappter keeps two shallow partial sparse checkouts inside its own home: the
+Brainstem kernel restricted to `rapp_brainstem/`, and the application restricted
+to `beta/` plus the small `tools/rapp1` conformance fixture. Neither checkout
+downloads `solutions/`.
 
-Both installers default to:
+The application source defaults to:
 
 ```text
-https://github.com/microsoft/aibast-agents-library.git
+https://github.com/kody-w/openrappter.git
 ```
 
-The `BRAINSTEM_BETA_REPO_URL` and `BRAINSTEM_BETA_REF` environment variables
-exist only for fork staging and release-candidate verification.
+Its unchanged kernel currently comes from
+`https://github.com/microsoft/aibast-agents-library.git`. Both sources are
+independently configurable for fork staging and release verification.
 
 Release procedure and source-only publication rules are documented in
 [`RELEASING.md`](RELEASING.md).
 
-## Frontier limitations
+## OpenRappter limitations
 
-- This is an unsigned source-built Frontier preview, not an officially supported Microsoft
+- This is an unsigned source-built OpenRappter preview, not an officially supported Microsoft
   desktop application. Managed-device controls may block Electron or downloaded
   source.
 - Initial source installation still needs network access and may open a console
@@ -320,17 +361,20 @@ Release procedure and source-only publication rules are documented in
 
 ## Uninstall the launcher
 
-Removing Frontier does not remove the shared Brainstem or user data.
+Removing OpenRappter does not remove standalone Brainstem in `~/.brainstem`.
+Export or back up the OpenRappter self tile first if you want to keep its state.
 
 ```bash
-rm -rf ~/.brainstem/beta-launcher
-rm -f ~/.local/bin/brainstem-frontier ~/.local/bin/brainstem-beta
-rm -rf "$HOME/Applications/RAPP Brainstem Frontier.app"
-rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/rapp-brainstem-frontier.desktop"
+rm -rf ~/.openrappter
+rm -f ~/.local/bin/openrappter-app ~/.local/bin/openrappter-chat
+rm -f ~/.local/bin/openrappter-surgeon ~/.local/bin/openrappter-tile
+rm -f ~/.local/bin/openrappter-walkthrough
+rm -rf "$HOME/Applications/OpenRappter.app"
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/openrappter.desktop"
 ```
 
-On Windows, remove the two **RAPP Brainstem Frontier** shortcuts and delete:
+On Windows, remove the two **OpenRappter** shortcuts and delete:
 
 ```text
-%USERPROFILE%\.brainstem\beta-launcher
+%USERPROFILE%\.openrappter
 ```

@@ -365,7 +365,7 @@ commit id of the distribution they are built on.
 FIRST IMPLEMENTATION
 --------------------
 
-Molt Lineage in the RAPP Brainstem Frontier is the first use case and reference
+Molt Lineage in the OpenRappter is the first use case and reference
 implementation; see `MOLT-LINEAGE-PROTOCOL.md` in this repository for its
 conformance profile.
 

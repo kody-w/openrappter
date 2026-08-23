@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Prove git-molt can evolve a live copied Brainstem without killing it.
+# shellcheck disable=SC2034,SC2317,SC2329
 
 set -u
 

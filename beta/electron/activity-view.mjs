@@ -53,7 +53,7 @@ export function installActivityView(window, document) {
       media.controls = true;
       media.preload = "metadata";
     } else {
-      media.alt = String(artifact.alt || "Frontier capture");
+      media.alt = String(artifact.alt || "OpenRappter capture");
     }
     const link = document.createElement("a");
     link.href = String(artifact.url);

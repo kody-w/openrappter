@@ -127,6 +127,57 @@ assert_not_empty "$gum_arch" "gum_detect_arch returns a value"
 
 assert_eq "$GUM_VERSION" "0.17.0" "GUM_VERSION defaults to 0.17.0"
 
+# A device node can be readable/writable without the process owning a
+# controlling terminal. That must not turn an unattended install into an
+# infinite prompt loop.
+((TESTS_RUN++)) || true
+if INSTALL_SCRIPT="$INSTALL_SCRIPT" python3 <<'PY'
+import os
+import subprocess
+import sys
+
+script = os.environ["INSTALL_SCRIPT"]
+env = os.environ.copy()
+env.update({
+    "OPENRAPPTER_INSTALL_SH_NO_RUN": "1",
+    "TERM": "xterm-256color",
+})
+command = r'''
+source "$1"
+GUM=/usr/bin/true
+if has_controlling_tty; then
+    exit 10
+fi
+if gum_is_tty; then
+    exit 11
+fi
+ui_choose "Pick one:" "One" "Two"
+'''
+
+try:
+    result = subprocess.run(
+        ["bash", "-c", command, "bash", script],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        preexec_fn=os.setsid,
+        timeout=3,
+        check=False,
+    )
+except subprocess.TimeoutExpired:
+    sys.exit(1)
+
+if result.returncode != 1:
+    sys.stderr.buffer.write(result.stderr[-4096:])
+    sys.exit(1)
+PY
+then
+  pass "unattended menu exits instead of looping without a controlling TTY"
+else
+  fail "unattended menu loops or mistakes /dev/tty permissions for a terminal"
+fi
+
 # ── Node.js Version ──
 printf "\n\033[1m▸ Node.js version check\033[0m\n"
 

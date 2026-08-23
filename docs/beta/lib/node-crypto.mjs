@@ -7,8 +7,8 @@
 //
 // This is the ONLY thing the page reimplements. Everything above it — the frame
 // spec, the drill, the fold — is the code that ships, loaded unmodified. A
-// browser copy of the logic would drift from the product; a browser copy of a
-// hash function cannot, because SHA-256 is fixed forever.
+// browser copy of the logic would drift from the product. This small exception
+// is pinned to standard vectors and padding boundaries by the parity suite.
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -26,7 +26,7 @@ function sha256(bytes) {
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ]);
   const length = bytes.length;
-  const withPad = new Uint8Array((((length + 9) >> 6) + 1) << 6);
+  const withPad = new Uint8Array((((length + 8) >> 6) + 1) << 6);
   withPad.set(bytes);
   withPad[length] = 0x80;
   const view = new DataView(withPad.buffer);

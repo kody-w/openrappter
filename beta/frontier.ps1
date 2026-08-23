@@ -17,15 +17,23 @@ $headers = @{ Accept = "application/vnd.github+json" }
 $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } else { $null }
 if ($token) { $headers["Authorization"] = "Bearer $token" }
 
+function Get-NaturalTagKey([string]$value) {
+    return [regex]::Replace(
+        $value.ToLowerInvariant(),
+        "\d+",
+        { param($match) $match.Value.PadLeft(20, "0") }
+    )
+}
+
 $tag = $null
 try {
     $releases = Invoke-RestMethod -Headers $headers -Uri "$api/releases?per_page=30"
-    $release = @(
+    $tag = @(
         $releases | Where-Object {
             -not $_.draft -and $_.tag_name.StartsWith("brainstem-beta-v")
-        }
-    )[0]
-    if ($release) { $tag = $release.tag_name }
+        } | ForEach-Object { $_.tag_name } |
+            Sort-Object { Get-NaturalTagKey $_ }
+    )[-1]
 } catch {
     Write-Warning "GitHub API did not answer (rate limit or network); resolving the release tag with git..."
 }
@@ -33,11 +41,11 @@ if (-not $tag) {
     $tag = @(
         & git ls-remote --tags --refs $gitUrl "brainstem-beta-v*" 2>$null |
             ForEach-Object { ($_ -split "\s+")[1] -replace "^refs/tags/", "" } |
-            Sort-Object { [version](($_ -replace "^brainstem-beta-v", "") -replace "-.*$", "") }, { $_ }
+            Sort-Object { Get-NaturalTagKey $_ }
     )[-1]
 }
 if (-not $tag) {
-    throw "No published RAPP Brainstem Frontier release was found in $repo. If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry."
+    throw "No published OpenRappter release was found in $repo. If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry."
 }
 
 $commit = $null
@@ -67,8 +75,6 @@ $env:BRAINSTEM_BETA_RELEASE_TAG = $tag
 $env:BRAINSTEM_BETA_RUNTIME_VERSION_URL =
     "https://raw.githubusercontent.com/$repo/$commit/rapp_brainstem/VERSION"
 $env:BRAINSTEM_BETA_COMMIT = $commit
-$env:BRAINSTEM_BETA_BOOTSTRAP_URL =
-    "https://raw.githubusercontent.com/$repo/$commit/install.ps1"
 $installer = Join-Path $env:TEMP "rapp-frontier-$commit.cmd"
 try {
     Invoke-WebRequest `

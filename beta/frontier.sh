@@ -35,14 +35,15 @@ tags_via_git() {
 tag=$(
     api_get "$api/releases?per_page=30" 2>/dev/null \
         | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\(brainstem-beta-v[^"]*\)".*/\1/p' \
-        | head -n 1 || true
+        | sort -V \
+        | tail -n 1 || true
 )
 if [ -z "$tag" ]; then
     echo "GitHub API did not answer (rate limit or network); resolving the release tag with git..." >&2
     tag=$(tags_via_git)
 fi
 [ -n "$tag" ] || {
-    echo "No published RAPP Brainstem Frontier release was found in $repo." >&2
+    echo "No published OpenRappter release was found in $repo." >&2
     echo "If you are behind a shared network, set GITHUB_TOKEN to a read-only token and retry." >&2
     exit 3
 }

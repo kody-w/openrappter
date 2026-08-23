@@ -57,7 +57,7 @@ byte-identical replay, and a single handoff/removal.
 
 | Build | Observation | Status |
 |---|---|---|
-| Messages look | Messages is the default across Brainstem, Brain Surgeon, and twin chats; Business remains a theming-only toggle. | Captured |
+| Messages look | Messages is the default across Brainstem, Rappter Surgeon, and twin chats; Business remains a theming-only toggle. | Captured |
 
 ## Unverified
 

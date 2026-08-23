@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import {
-  checkpoints, createStore, fold, journal, readLine, restore, scan, status,
+  createStore, fold, journal, restore, scan, status,
 } from "../electron/drill-app.mjs";
 
 const bold = (t) => `\x1b[1m${t}\x1b[0m`;
@@ -25,6 +25,7 @@ const dim = (t) => `\x1b[2m${t}\x1b[0m`;
 const green = (t) => `\x1b[32m${t}\x1b[0m`;
 const red = (t) => `\x1b[31m${t}\x1b[0m`;
 const short = (h) => (h ? String(h).slice(0, 8) : "—");
+const COMMANDS = new Set(["status", "scan", "fold", "restore", "log"]);
 
 function usage() {
   process.stdout.write(`${bold("rapp-drill")} — find work another machine already did
@@ -60,6 +61,11 @@ async function main() {
     usage();
     return 0;
   }
+  if (!COMMANDS.has(command)) {
+    process.stderr.write(`${red("unknown command")} ${command}\n`);
+    usage();
+    return 1;
+  }
   const store = createStore(root);
 
   if (command === "status") {
@@ -81,8 +87,11 @@ restores    ${s.restores}
       return 0;
     }
     for (const entry of entries) {
+      const merged = Array.isArray(entry.detail?.merged) ? entry.detail.merged.length : 0;
+      const refused = Array.isArray(entry.detail?.refused) ? entry.detail.refused.length : 0;
+      const rejected = Array.isArray(entry.detail?.rejected) ? entry.detail.rejected.length : 0;
       const detail = entry.event === "fold"
-        ? `${entry.detail.merged.length} merged, ${entry.detail.refused.length} refused ${dim(entry.detail.source)}`
+        ? `${merged} merged, ${refused} refused, ${rejected} rejected ${dim(entry.detail.source)}`
         : entry.event === "restore"
           ? `to ${entry.detail.restoredTo}`
           : "";
@@ -97,9 +106,12 @@ restores    ${s.restores}
       process.stderr.write(`${red("cannot restore")} — ${result.reason}\n`);
       return 1;
     }
+    const superseded = result.superseded
+      ? dim(`what you stepped away from is kept as superseded/${result.superseded}`)
+      : dim("the previous live line was empty");
     process.stdout.write(`${green("restored")} to ${result.restoredTo}
 head     ${short(result.head)}
-${dim(`what you stepped away from is kept as superseded/${result.superseded}`)}
+${superseded}
 `);
     return 0;
   }
@@ -131,8 +143,11 @@ fixed    ${found.fixedPoints.length} ${dim("(identical bytes, different ancestry
 
   if (command === "fold") {
     const result = await fold(store, source);
+    const checkpoint = result.checkpoint
+      ? dim(`checkpoint ${result.checkpoint} taken before anything was written`)
+      : dim("no checkpoint needed — nothing was written");
     process.stdout.write(`${bold("folded")} ${result.source}
-${dim(`checkpoint ${result.checkpoint} taken before anything was written`)}
+${checkpoint}
 `);
     for (const frame of result.merged) {
       process.stdout.write(`  ${green("merged  ")} ${short(frame.frame_hash)} ${JSON.stringify(frame.payload?.asserts ?? {})}\n`);
@@ -150,9 +165,7 @@ ${dim(`checkpoint ${result.checkpoint} taken before anything was written`)}
     return 0;
   }
 
-  process.stderr.write(`${red("unknown command")} ${command}\n`);
-  usage();
-  return 1;
+  throw new Error(`command ${command} was accepted but not handled`);
 }
 
 main()

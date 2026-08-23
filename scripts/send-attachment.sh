@@ -64,7 +64,9 @@ mkdir -p "$STAGE_DIR"
 STAGED="$STAGE_DIR/$(date +%s)-$$-$(basename "$SOURCE")"
 
 # Invoked by the trap below, which shellcheck does not trace.
-# shellcheck disable=SC2317,SC2329
+# shellcheck disable=SC2317
+# Invoked indirectly by the EXIT trap below.
+# shellcheck disable=SC2329
 cleanup() { rm -f "$STAGED"; }
 trap cleanup EXIT
 

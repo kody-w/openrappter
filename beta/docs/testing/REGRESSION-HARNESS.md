@@ -59,7 +59,7 @@ harness pre-seeds that cache with a fake token, a far-future expiry, and
   tool X available, call X with these args, then answer Y" — for concurrency scenarios where
   the exact wording does not matter but the tool sequence does.
 
-The Surgeon is GitHub Copilot CLI over the SDK, not the kernel. `brain-surgeon.test.mjs`
+The Surgeon is GitHub Copilot CLI over the SDK, not the kernel. `rappter-surgeon.test.mjs`
 already injects a fake `runtime.createSession`; the harness promotes that into
 `BRAINSTEM_BETA_SURGEON_RUNTIME=fake`, honored by `copilot-runtime.mjs`, which loads
 `surgeon-fake.mjs` scripts (the same scripted shape as above). With both fakes, "two Surgeon

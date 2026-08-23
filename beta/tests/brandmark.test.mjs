@@ -10,22 +10,21 @@ const read = (r) => (
 );
 const bytes = (r) => statSync(path.join(root, r)).size;
 
-// The canonical Brainstem brain glyph (the "swoosh") — the EXACT vector the
-// Grail app serves as its favicon. Never redraw it; every treatment embeds this.
-const GRAIL_PATH_PREFIX = "M184 0c-30.9 0-56.5 22.7-61.1 52.3";
+const OPENRAPPTER_DINO_PREFIX = "M238 614c40-182 157-302 320-302";
 
-test("the app icon embeds the EXACT Grail brain glyph on the brand tile", () => {
+test("the app icon is the OpenRappter dinosaur, not the Brainstem glyph", () => {
   const svg = read("build/icon.svg");
-  assert.ok(svg.includes(GRAIL_PATH_PREFIX), "icon.svg must embed the exact Grail favicon path, not a lookalike");
-  assert.match(svg, /rx="224"/);                 // rounded blue tile
-  assert.match(svg, /#ffffff/i);                 // white glyph
+  assert.ok(svg.includes(OPENRAPPTER_DINO_PREFIX), "icon.svg must carry the OpenRappter dinosaur");
+  assert.match(svg, /id="dino"/);
+  assert.match(svg, /rx="224"/);
+  assert.match(svg, /#58f5d2/i);
+  assert.doesNotMatch(svg, /M184 0c-30\.9 0-56\.5 22\.7-61\.1 52\.3/);
 });
 
-test("the renderer favicon is the exact Grail brandmark + carries theme-color", () => {
+test("the renderer uses the packaged OpenRappter icon and theme color", () => {
   const html = read("ui/index.html");
-  assert.ok(html.includes("M184 0c-30.9 0-56.5 22.7-61.1 52.3"), "favicon must be the exact Grail glyph");
-  assert.match(html, /rel="icon"/);
-  assert.match(html, /name="theme-color"/);
+  assert.match(html, /<link rel="icon" href="\.\.\/build\/icon\.svg">/);
+  assert.match(html, /name="theme-color" content="#07111f"/);
 });
 
 test("every packaged icon artifact exists and is non-empty", () => {
@@ -47,7 +46,9 @@ test("the multi-size icon set covers desktop + mobile (iOS/Android/PWA) sizes", 
 test("the web manifest is valid JSON and every icon it lists exists", () => {
   const m = JSON.parse(read("build/manifest.webmanifest"));
   assert.ok(Array.isArray(m.icons) && m.icons.length >= 6);
-  assert.equal(m.theme_color, "#2563eb");
+  assert.equal(m.name, "OpenRappter");
+  assert.equal(m.short_name, "OpenRappter");
+  assert.equal(m.theme_color, "#07111f");
   for (const icon of m.icons) {
     assert.ok(existsSync(path.join(root, "build", icon.src)), `manifest icon ${icon.src} missing`);
   }

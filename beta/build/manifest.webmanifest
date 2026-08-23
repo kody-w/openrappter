@@ -1,9 +1,9 @@
 {
-  "name": "RAPP Brainstem Frontier",
-  "short_name": "Brainstem",
-  "description": "Local RAPP Brainstem — a GitHub Copilot Brain Surgeon that teaches AI by doing.",
-  "theme_color": "#2563eb",
-  "background_color": "#0d1117",
+  "name": "OpenRappter",
+  "short_name": "OpenRappter",
+  "description": "The full local-first OpenRappter application with Rappter Surgeon and its Brainstem runtime.",
+  "theme_color": "#07111f",
+  "background_color": "#07111f",
   "display": "standalone",
   "icons": [
     { "src": "icons/48x48.png",   "sizes": "48x48",   "type": "image/png" },

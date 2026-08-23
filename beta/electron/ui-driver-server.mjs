@@ -489,7 +489,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
       document.body.appendChild(banner);
     }
     if (state.chatLeaseLocked) {
-      banner.textContent = `Brain Surgeon is using this chat (${
+      banner.textContent = `Rappter Surgeon is using this chat (${
         state.chatLeaseTokens.size
       }) · type or press Send to take it back`;
     } else if (handedOff) {
@@ -1045,7 +1045,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
     if (action === "surgeon_chat") {
       const panel = document.getElementById("surgeon");
       const tab = document.getElementById("surgeon-tab");
-      if (!panel) throw new Error("The Brain Surgeon panel is unavailable.");
+      if (!panel) throw new Error("The Rappter Surgeon panel is unavailable.");
       if (!visible(panel)) {
         if (visible(tab)) {
           await clickElement(tab, {
@@ -1062,7 +1062,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
       const input = document.getElementById("surgeon-input");
       const send = document.getElementById("surgeon-send");
       if (!visible(input) || !visible(send)) {
-        throw new Error("The visible Brain Surgeon composer is unavailable.");
+        throw new Error("The visible Rappter Surgeon composer is unavailable.");
       }
       const baseline = document.querySelectorAll(
         "#surgeon-log .surgeon-message.assistant",
@@ -1073,7 +1073,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
       await typeInto(input, {
         action: "type",
         value: String(step.value || step.text || ""),
-        label: step.label || "Directing the Brain Surgeon",
+        label: step.label || "Directing the Rappter Surgeon",
         typingDelayMs: step.typingDelayMs ?? 5,
       });
       await clickElement(send, {
@@ -1109,7 +1109,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
         }
         await sleep(150);
       }
-      throw new Error("Timed out waiting for the visible Brain Surgeon reply.");
+      throw new Error("Timed out waiting for the visible Rappter Surgeon reply.");
     }
     if (action === "chat") {
       const input = document.getElementById("input");
@@ -1217,7 +1217,7 @@ async function browserDriverCommand(command, createHelpers, commandId = null, li
       const ownBubble = ownSlot?.previousElementSibling;
       if (ownBubble?.dataset) {
         ownBubble.dataset.rappActor = "ai";
-        ownBubble.title = "Sent by the Brain Surgeon";
+        ownBubble.title = "Sent by the Rappter Surgeon";
       }
       state.driverComposerValue = null;
 
@@ -1434,7 +1434,7 @@ async function startWindowRecording(browserWindow, command, uploadUrl) {
         window.__brainstemBetaRecording
         && window.__brainstemBetaRecording.recorder.state !== "inactive"
       ) {
-        throw new Error("The RAPP Brainstem Frontier window is already recording.");
+        throw new Error("The OpenRappter window is already recording.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
@@ -1627,7 +1627,7 @@ function walkthroughRecapChapters(mode = "baseline") {
     return [
       "1 · Direct control — a person sends the first visible Brainstem turn",
       "2 · Repeat — a second direct turn stays in the same transcript",
-      "3 · Handoff — Brain Surgeon takes control without replacing the iframe",
+      "3 · Handoff — Rappter Surgeon takes control without replacing the iframe",
       "4 · Proof — all three request IDs and markers remain ordered",
       "5 · Cleanup — the delegated temporary tool disappears and the lease clears",
       "6 · Outcome — one chat surface, whichever intelligence is driving it",
@@ -1639,7 +1639,7 @@ function walkthroughRecapChapters(mode = "baseline") {
     "3 · Hotload — a single-file agent became a real tool for one turn",
     "4 · Evidence — the center Brainstem returned a testable result",
     "5 · Cleanup — the ephemeral worker disappeared automatically",
-    "6 · Promotion — Frontier Brainstem → Hippocampus → Microsoft stack",
+    "6 · Promotion — OpenRappter Brainstem → Hippocampus → Microsoft stack",
   ];
 }
 
@@ -1703,7 +1703,7 @@ async function stopWindowRecording(browserWindow, command = {}) {
       delete window.__brainstemBetaLastRecording;
       return last;
     }
-    throw new Error("The RAPP Brainstem Frontier window is not recording.");
+    throw new Error("The OpenRappter window is not recording.");
   }.toString()})(${JSON.stringify({
     chapters: walkthroughRecapChapters(command.recapMode),
     minimumDurationMs,
@@ -1835,7 +1835,7 @@ async function startCapturedWindowRecording(
 ) {
   const existing = capturedRecordings.get(browserWindow);
   if (existing && !existing.stopping) {
-    throw new Error("The RAPP Brainstem Frontier window is already recording.");
+    throw new Error("The OpenRappter window is already recording.");
   }
   const maxDurationMs = Math.max(
     1000,
@@ -2024,7 +2024,7 @@ async function stopCapturedWindowRecording(browserWindow, command = {}) {
       lastCapturedRecordings.delete(browserWindow);
       return last;
     }
-    throw new Error("The RAPP Brainstem Frontier window is not recording.");
+    throw new Error("The OpenRappter window is not recording.");
   }
   const minimumDurationMs = Math.max(
     0,
@@ -2838,7 +2838,7 @@ export async function startUiDriverServer({
           { timeoutMs: 5000, window },
         ).catch(() => ({ caption: "", fullText: "" }))
       : { caption: "", fullText: "" };
-    const caption = String(text?.caption || "RAPP Brainstem Frontier capture").slice(0, 300);
+    const caption = String(text?.caption || "OpenRappter capture").slice(0, 300);
     const includeText = command.includeText === true || command.include_text === true;
     return {
       caption,

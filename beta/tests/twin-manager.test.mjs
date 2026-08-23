@@ -192,7 +192,7 @@ test("a twin is driven only over /chat — never a new route (canon)", () => {
 test("main wires twins + store IPC and the Surgeon hatch tools", () => {
   const main = read("electron/main.mjs");
   const preload = read("electron/preload.cjs");
-  const surgeon = read("electron/brain-surgeon.mjs");
+  const surgeon = read("electron/rappter-surgeon.mjs");
   assert.match(main, /new TwinManager\(/);
   assert.match(main, /beta:twin-hatch/);
   assert.match(main, /beta:store-list/);
@@ -216,7 +216,7 @@ test("the herd renders a chat/work-log tile per twin", () => {
 
 test("the Copilot Studio deploy twin is composed from the bundled Factory + Deploy agents (P2)", () => {
   const main = read("electron/main.mjs");
-  const surgeon = read("electron/brain-surgeon.mjs");
+  const surgeon = read("electron/rappter-surgeon.mjs");
   const src = read("electron/twin-manager.mjs");
   // hatchLocal composes a twin from local agent sources (not a store pull)
   assert.match(src, /async hatchLocal\(/);
@@ -267,7 +267,7 @@ test("the Brainstem loops with a twin autonomously — a genuine two-brain loop"
   const tm = read("electron/twin-manager.mjs");
   const main = read("electron/main.mjs");
   const preload = read("electron/preload.cjs");
-  const surgeon = read("electron/brain-surgeon.mjs");
+  const surgeon = read("electron/rappter-surgeon.mjs");
   const renderer = read("ui/renderer.js");
   const ui = read("ui/index.html");
   // The loop plans over the visible Brainstem's /chat AND executes over the twin's /chat.
@@ -290,7 +290,7 @@ test("the Brainstem loops with a twin autonomously — a genuine two-brain loop"
 
 test("the AI can drive a twin's own UI in-tile (P3c)", () => {
   const server = read("electron/ui-driver-server.mjs");
-  const surgeon = read("electron/brain-surgeon.mjs");
+  const surgeon = read("electron/rappter-surgeon.mjs");
   const main = read("electron/main.mjs");
   assert.match(server, /function twinFrame/);
   assert.match(server, /resolveTwinUrls/);
@@ -301,7 +301,7 @@ test("the AI can drive a twin's own UI in-tile (P3c)", () => {
 
 test("away-auth: notification + browser pop-out, never capturing credentials (P3d)", () => {
   const main = read("electron/main.mjs");
-  const surgeon = read("electron/brain-surgeon.mjs");
+  const surgeon = read("electron/rappter-surgeon.mjs");
   const preload = read("electron/preload.cjs");
   assert.match(main, /new Notification\(/);
   assert.match(main, /notifyTwinNeedsAuth/);

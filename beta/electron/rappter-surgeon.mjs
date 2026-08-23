@@ -10,7 +10,7 @@ import {
 import path from "node:path";
 
 const SURGEON_SYSTEM_MESSAGE = `
-You are the Brain Surgeon inside RAPP Brainstem Frontier.
+You are the Rappter Surgeon inside OpenRappter.
 
 You are the real GitHub Copilot coding-agent loop, embedded side-by-side with a
 running Brainstem. You have the normal Copilot CLI powers for files, shell,
@@ -73,7 +73,10 @@ port that loops on the job autonomously and shows as its own tile in the herd,
 with its own steerable chat. You build on the Brainstem; twins deploy. Twins are
 driven only over /chat (never a new route); they are Draft-only for Copilot
 Studio and surface exactly one user-owned auth step (PAC device login) when
-needed. Hand off and let it run. You can also operate a twin's own UI in its
+needed. For a DOGG summons_full from public GitHub raw user data, call
+summon_dogg_neighborhood. Public bytes remain candidates: the local estate
+verifies every pin and decides whether to hatch them.
+Hand off and let it run. You can also operate a twin's own UI in its
 herd tile with drive_twin (click/type just like the user) so the user can be
 fully hands-off — they chat with you and you drive whatever is needed.
 
@@ -195,7 +198,7 @@ function compactDriverSummary(value) {
   return null;
 }
 
-export class BrainSurgeon {
+export class RappterSurgeon {
   constructor({
     runtime,
     brainstemUrl,
@@ -383,7 +386,7 @@ export class BrainSurgeon {
       {
         name: "show_copilot_studio_agent_link",
         description: "Attach a clickable Copilot Studio UI link for an exact "
-          + "environment ID and AgentId to the Brain Surgeon transcript.",
+          + "environment ID and AgentId to the Rappter Surgeon transcript.",
         defer: "never",
         skipPermission: true,
         parameters: {
@@ -684,6 +687,39 @@ export class BrainSurgeon {
         handler: (args) => this.showModeClickThrough(args),
       },
       {
+        name: "summon_dogg_neighborhood",
+        description: "Resolve a DOGG summons_full from an immutable commit-pinned raw.githubusercontent.com RAPP catalog, verify its pinned public user-data payloads, and hatch the selected entry as a resident neighborhood. Global data is only a candidate; the local estate decides.",
+        defer: "never",
+        skipPermission: true,
+        parameters: {
+          type: "object",
+          properties: {
+            summons_full: { type: "string", description: "Commit-pinned raw.githubusercontent.com catalog URL." },
+            store_id: { type: "string", description: "Entry id in that public catalog." },
+            instruction: { type: "string", description: "Optional first instruction for the resident neighborhood." },
+          },
+          required: ["summons_full", "store_id"],
+        },
+        handler: async ({
+          summons_full: summonsFull,
+          store_id: storeId,
+          instruction = null,
+        }) => {
+          if (!this.twins?.summon_dogg) {
+            throw new Error("DOGG summon is unavailable.");
+          }
+          return JSON.stringify(
+            await this.twins.summon_dogg(
+              summonsFull,
+              storeId,
+              instruction,
+            ),
+            null,
+            2,
+          );
+        },
+      },
+      {
         name: "list_rapplications",
         description: "List rapplications available in the RAPP Store (specialized twins you can hatch to offload deploy/other long-running jobs). Returns id, name, summary, category, license, gated.",
         defer: "never",
@@ -855,7 +891,7 @@ export class BrainSurgeon {
       },
       {
         name: "start_demo_recording",
-        description: "Start recording the RAPP Brainstem Frontier window for a replayable demo.",
+        description: "Start recording the OpenRappter window for a replayable demo.",
         defer: "never",
         skipPermission: true,
         parameters: {
@@ -874,7 +910,7 @@ export class BrainSurgeon {
       },
       {
         name: "stop_demo_recording",
-        description: "Stop the Frontier-window recording and attach the WebM plus "
+        description: "Stop the OpenRappter-window recording and attach the WebM plus "
           + "final screenshot. A minimum duration keeps a full walkthrough "
           + "watchable with visible recap tiles instead of dead air.",
         defer: "never",
@@ -912,7 +948,7 @@ export class BrainSurgeon {
     if (this.startPromise) return this.startPromise;
     this.startPromise = (async () => {
       const session = await this.runtime.createSession({
-        clientName: "RAPP Brainstem Frontier Brain Surgeon",
+        clientName: "OpenRappter Rappter Surgeon",
         enableConfigDiscovery: true,
         infiniteSessions: { enabled: true },
         memory: { enabled: true },
@@ -948,7 +984,7 @@ export class BrainSurgeon {
       });
       this.emit({
         type: "ready",
-        message: "Brain Surgeon is ready. Describe the outcome you want.",
+        message: "Rappter Surgeon is ready. Describe the outcome you want.",
       });
       return session;
     })();
@@ -962,9 +998,9 @@ export class BrainSurgeon {
 
   async send(prompt) {
     const text = String(prompt || "").trim();
-    if (!text) throw new Error("A Brain Surgeon message is required.");
+    if (!text) throw new Error("A Rappter Surgeon message is required.");
     if (this.sendPromise) {
-      throw new Error("The Brain Surgeon is already working on a request.");
+      throw new Error("The Rappter Surgeon is already working on a request.");
     }
     this.sendPromise = (async () => {
       const session = await this.start();
@@ -1018,7 +1054,7 @@ export class BrainSurgeon {
   requireRouteManager() {
     if (!this.routeManager) {
       throw new Error(
-        "Frontier identity and stack routing is not ready. "
+        "OpenRappter identity and stack routing is not ready. "
         + "The legacy Brainstem kernel was not modified.",
       );
     }
@@ -1512,7 +1548,7 @@ export class BrainSurgeon {
             type: "image",
             data: base64,
             mimeType: "image/jpeg",
-            description: "The visible RAPP Brainstem Frontier window",
+            description: "The visible OpenRappter window",
           }]
         : undefined,
       resultType: "success",
@@ -1532,7 +1568,7 @@ export class BrainSurgeon {
         kind: "video",
         url: result.recording?.url,
         path: result.recording?.path,
-        alt: "Brain Surgeon autopilot demo",
+        alt: "Rappter Surgeon autopilot demo",
       },
     });
     this.emit({
@@ -1557,7 +1593,7 @@ export class BrainSurgeon {
   }
 }
 
-export const brainSurgeonInternals = {
+export const rappterSurgeonInternals = {
   cleanFilename,
   compactDriverSummary,
   deploymentAgentSourceMatches,

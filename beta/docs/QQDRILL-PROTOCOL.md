@@ -197,16 +197,16 @@ Two properties make that safe to lean on:
 So the honest thing to show a person is a search that keeps going and keeps handing back results,
 with the choice to stop being theirs at every moment.
 
-### The digest is the global lookup handle
+### The digest is globally addressable; the Drill lookup is local
 
 A frame's bytes give it a handle that **anyone can compute and nobody has to assign**. Two machines
 that have never met derive the same digest for the same frame, so the digest works as a global index
 key without a registry, an account, or a namespace to reserve.
 
-That is what makes the commons dialable. Publish frames under their digest — a static JSON index, a
-raw file path, a gist ([`SUMMON-PROTOCOL.md`](SUMMON-PROTOCOL.md)) — and a drill on any
-internet-connected device can look one up by computing the handle locally and asking for it by name.
-No search, no crawl, no service in the middle.
+That is what makes the commons dialable. Publish frames under their digest — a static JSON index or
+commit-pinned raw file ([`SUMMON-PROTOCOL.md`](SUMMON-PROTOCOL.md)) — and the summon line can resolve,
+verify, and save them locally. **The Drill never performs that network operation.** It accepts only
+already-saved local summon bytes and uses the digest as an immediate local index key.
 
 **The digest is not the only lookup, and it should not be.** Any component of the key that both
 sides compute the same way can carry an index: the frame rappid for "every frame of this
@@ -220,8 +220,8 @@ Two rules keep that open-ended set safe:
 1. **An index is a convenience; the key is the key.** A lookup narrows the candidates. It never
    decides the merge — the compatibility rule above does, identically, no matter which index found
    the pair.
-2. **A handle addresses a declared data object, never something executed on arrival.** Pulling a
-   frame by digest fetches data that is checked, diffed and refusable before anything runs. The
+2. **A handle addresses a declared data object, never something executed on arrival.** Summoning a
+   frame by digest saves data that is checked, diffed and refusable before the local Drill sees it. The
    handle being globally computable is exactly why that matters: a global address that could execute
    on arrival would be a global attack surface.
 
@@ -288,13 +288,13 @@ Several keys can hit, so a frame can join along several paths. Each join is anot
 same ordering, so **multi-dimension paths are ordinary**: a frame joined three ways is one frame with
 three ancestries, not three frames to choose between.
 
-### Local first: the drill does not need the network
+### Local only: the drill has no network path
 
-A drill for pairs runs against whatever frames this machine already has — imported tiles, the
-binder, an `.egg` carried in on a stick, an earlier summon's cache. Instant transmission over a
-public address is one source of pairs, not the definition of one. A machine that has been offline
-for a week can still drill its own frames, find a pair among things it already holds, and assimilate
-them into a joined frame that neither of them was.
+A drill for pairs runs only against frames this machine already saved — imported tiles, the binder,
+an `.egg` carried in on a stick, or an earlier summon's verified cache. A URL, open response stream,
+or memory-only candidate is refused. A machine that has been offline for a week can still drill its
+own frames, find a pair among things it already holds, and assimilate them into a joined frame that
+neither of them was.
 
 That makes the offline path a real path rather than a degraded one, and it is what
 [`CARTRIDGE-PWA.md`](CARTRIDGE-PWA.md) exchanges: frames, addressable by key, mergeable on arrival.
@@ -313,15 +313,15 @@ ancestry is the one thing here that only ever grows.
 A machine that pops a seal and finds nothing is unchanged and can drill again. A machine that pops a
 seal and hits has a different history, permanently.
 
-### The same drill runs against global tiles
+### Globally published tiles become drillable after local save
 
 Everything above is written about frames, and **a tile is a frame**
 ([`RAPPID-TILE-PROTOCOL.md`](RAPPID-TILE-PROTOCOL.md), [`CRYSTALS.md`](CRYSTALS.md)). That identity
 is literal, not a metaphor, so the entire mechanism applies one level up with nothing added:
 
-- **The commons of published tiles is a drillable space.** Every tile anyone publishes is a
-  potential pair for someone else's tile.
-- **A global tile pairs by the same key** — same rappid, same clock, same tick, or an identical
+- **The locally saved projection of the commons is a drillable space.** Every verified tile a person
+  summons and saves is a potential pair for another saved tile.
+- **A globally sourced, locally saved tile pairs by the same key** — same rappid, same clock, same tick, or an identical
   payload — and is refused by the same compatibility rule if it contradicts anything downstream of
   the local tile.
 - **Assimilating it joins the tiles**: both lineages, both wear, both payloads, one tile. The local
@@ -493,13 +493,10 @@ someone who never met them. Because the handle is computable rather than assigne
 just putting bytes at an address anyone can derive — `raw.githubusercontent.com` is enough, with no
 registry, no service in the middle, and no account needed to reserve a namespace.
 
-**The global lookup is the summon, not a second door.** A drill reaching outward performs exactly
-the resolution described in [`SUMMON-PROTOCOL.md`](SUMMON-PROTOCOL.md) — the same deterministic
-address, the same public transport, the same offline-capable cache. There is no separate drill
-network, no drill index service, and no second thing to secure or operate. A drill is a caller of
-the summon that happens to be asking on its own initiative rather than a person's, so everything
-that already holds about summoning holds here: the resolution is deterministic, what comes back is
-declared data that is checked before it is used, and the single door outward stays single.
+**The global lookup is the summon, not part of the Drill.** The resolution described in
+[`SUMMON-PROTOCOL.md`](SUMMON-PROTOCOL.md) owns the deterministic public transport and verified local
+save. There is no drill network or drill index service. Once the summon receipt exists, the Drill
+performs the easy local lookup; before that receipt exists, there is nothing worth drilling.
 
 **The probe policy gets better.** A drill that records which of its probes resolved has, for free, a
 labelled dataset of what is worth looking for — no annotation, no supervision, just its own catch.
@@ -742,7 +739,8 @@ worktree-isolated worker pattern used by twins.
 Also unbuilt, and named here because these documents describe them confidently enough to read as
 though they exist:
 
-- **Fetching a real commons over the network.** Everything runs against local data.
+- **Fetching a real commons inside the Drill.** This is deliberately absent; summon/save is the
+  separate network boundary and everything here runs against local data.
 - **Any user interface.** Both halves are headless.
 - **Sentinels that drill on a schedule.** The sentinel system exists and drills are not wired into it.
 - **A probe policy of any kind.** Which coordinates to try first is left open on purpose, and nothing

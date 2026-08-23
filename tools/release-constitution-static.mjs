@@ -20,7 +20,6 @@ export function auditWorkflows(workflowDir) {
   let privilegedCount = 0;
   for (const name of fs.readdirSync(workflowDir).filter(file => file.endsWith('.yml'))) {
     const text = fs.readFileSync(path.join(workflowDir, name), 'utf8');
-    if (name.startsWith('release-constitution')) continue;
     const lines = text.split('\n');
     const jobStarts = lines
       .map((line, index) => (/^  [A-Za-z0-9_-]+:\s*$/.test(line) ? index : -1))

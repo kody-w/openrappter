@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: kody-w/openrappter-release-train
-          ref: 98ace213a7fcf858d917e5474dd79cb271b49cf6
+          ref: d8bb50f04e3b5d9b29564202abcab6383077977d
           path: authority
       - if: inputs.artifact_name != ''
         uses: actions/download-artifact@v4

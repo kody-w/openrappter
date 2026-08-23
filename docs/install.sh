@@ -1039,14 +1039,14 @@ NODE
     manifest_promotion_id="$(printf '%s' "$_rpid" | base64 --decode)"
     [[ "$manifest_promotion_id" == "$promotion_id" ]] ||
         { ui_error "Authority head promotion id differs from immutable manifest"; return 1; }
-    if ! node - "$manifest" "$receipt" "$ring" "$repo" "$receipt_sha" "$manifest_sha" "$promotion_id" "$target_commit" <<'NODE'
+    if ! node - "$manifest" "$receipt" "$ring" "$repo" "$receipt_sha" "$manifest_sha" "$promotion_id" "$target_commit" "$sequence" <<'NODE'
 const fs=require('node:fs'),crypto=require('node:crypto');
-const [mf,rf,ring,repo,receiptSha,manifestSha,promotionId,targetCommit]=process.argv.slice(2);
+const [mf,rf,ring,repo,receiptSha,manifestSha,promotionId,targetCommit,sequence]=process.argv.slice(2);
 const [m,r]=[mf,rf].map(f=>JSON.parse(fs.readFileSync(f)));
 const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
 const digest=v=>crypto.createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
 if(digest(r)!==receiptSha||digest(m)!==manifestSha||r.target_manifest_sha256!==manifestSha)throw Error('authority digest mismatch');
-if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==promotionId||m.promotion_id!==promotionId||r.target_manifest_commit!==targetCommit)throw Error('authority target mismatch');
+if(r.schema!=='openrappter-promotion-receipt/v1'||r.target_repository!==repo||r.target_ring!==ring||r.promotion_id!==promotionId||m.promotion_id!==promotionId||r.target_manifest_commit!==targetCommit||(r.sequence!==undefined&&r.sequence!==Number(sequence)))throw Error('authority target mismatch');
 const a=m.artifact,s=m.source;
 if(r.source_repository!==s.repository||r.source_commit!==s.commit||r.source_tag!==s.tag||r.version!==m.version||r.artifact_url!==a.url||r.install_url!==a.install_url||r.artifact_sha256!==a.sha256||r.artifact_provenance!==a.provenance)throw Error('authority identity mismatch');
 NODE

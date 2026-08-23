@@ -36,4 +36,5 @@ test('mutable installer bytes are refused before Pages deploy', () => {
   );
   assert.match(configure, /repos\/kody-w\/openrappter\/pages/);
   assert.match(configure, /"build_type":"workflow"/);
+  assert.doesNotMatch(configure, /--method DELETE|gh api .*\/pages\/builds/);
 });

@@ -641,8 +641,7 @@ test('registry publication reconciles exact artifacts and selects an explicit np
   const publishCommand = workflow.slice(publishStart, publishEnd);
   assert.match(publishCommand, /--tag "\$NPM_PUBLISH_TAG"/);
   assert.equal((workflow.match(/^\s+npm publish \\\s*$/gm) || []).length, 1);
-  assert.match(workflow, /"build==1\.5\.1"[\s\S]*"hatchling==1\.31\.0"/);
-  assert.match(workflow, /python -m build --no-isolation/);
+  assert.doesNotMatch(workflow, /python -m build/);
   assert.match(workflow, /overwrite: true/);
   assert.match(workflow, /overwrite_files: false/);
   assert.match(
@@ -657,7 +656,9 @@ test('registry publication reconciles exact artifacts and selects an explicit np
     workflow,
     /needs: \[preflight, publish-registries, build-electron-artifacts, release-constitution\]/,
   );
-  assert.match(workflow, /node scripts\/pack-locked\.mjs/);
+  assert.doesNotMatch(workflow, /node scripts\/pack-locked\.mjs/);
+  assert.match(workflow, /Materialize finalized candidate bytes without rebuild/);
+  assert.match(workflow, /tar -xzf candidate\.tar\.gz -C release-dist/);
   const desktopJob = workflow.slice(
     workflow.indexOf('  build-electron-artifacts:'),
     workflow.indexOf('  build-artifacts:'),

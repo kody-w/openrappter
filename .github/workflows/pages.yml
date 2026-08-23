@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: d8bb50f04e3b5d9b29564202abcab6383077977d
+          path: authority
       - env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           set -euo pipefail
@@ -23,18 +28,19 @@ jobs:
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authority/$path" \
             -o receipt.json
-          python - <<'PY'
-          import json
-          r=json.load(open("receipt.json")); h=json.load(open("head.json"))
-          assert r["receipt_kind"]=="promotion"
-          assert r["promotion_id"]==h["promotion_id"]
-          assert r["artifact_provenance"]=="github-candidate-bundle-sha256"
-          PY
+          target_commit="$(python -c 'import json; print(json.load(open("head.json"))["target_manifest_commit"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" \
+            -o stable-manifest.json
           url="$(python -c 'import json; print(json.load(open("receipt.json"))["artifact_url"])')"
           sha="$(python -c 'import json; print(json.load(open("receipt.json"))["artifact_sha256"])')"
           curl -fsSL --proto '=https' "$url" -o candidate.tar.gz
           echo "$sha  candidate.tar.gz" | sha256sum -c -
-          node scripts/verify-pages-installer.mjs candidate.tar.gz docs
+          python authority/scripts/release_gate.py \
+            --policy authority/contracts/release-constitution-v1.json \
+            --pages-head head.json --pages-receipt receipt.json \
+            --pages-manifest stable-manifest.json --pages-bundle candidate.tar.gz \
+            --pages-docs docs
       - uses: actions/upload-pages-artifact@v3
         with: { path: docs }
   deploy:

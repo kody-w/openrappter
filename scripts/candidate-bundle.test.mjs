@@ -11,11 +11,11 @@ function fixture() {
   for (const name of ['openrappter-2.0.0.tgz', 'openrappter-2.0.0-py3-none-any.whl', 'openrappter-2.0.0.tar.gz', 'install.sh', 'install.ps1']) {
     fs.writeFileSync(path.join(root, name), name);
   }
-  return buildProvenance(root, 'a'.repeat(40), '2.0.0');
+  return buildProvenance(root, 'a'.repeat(40), '2.0.0', 'v2.0.0', 'release', 1234567890);
 }
 test('candidate provenance is deterministic and complete', () => {
   const first = fixture();
-  const second = buildProvenance(root, 'a'.repeat(40), '2.0.0');
+  const second = buildProvenance(root, 'a'.repeat(40), '2.0.0', 'v2.0.0', 'release', 1234567890);
   assert.deepEqual(first, second);
   verifyProvenance(root, first);
   fs.rmSync(root, { recursive: true, force: true });

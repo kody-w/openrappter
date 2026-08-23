@@ -405,6 +405,7 @@ function Resolve-RingManifest {
         $receipt.promotion_id -ne $head.promotion_id -or $m.promotion_id -ne $head.promotion_id -or
         $receipt.target_manifest_commit -ne $head.target_manifest_commit -or
         $receipt.target_manifest_sha256 -ne $head.target_manifest_sha256 -or
+        ($null -ne $receipt.sequence -and [int]$receipt.sequence -ne [int]$head.sequence) -or
         $receipt.source_repository -ne $m.source.repository -or
         $receipt.source_commit -ne $m.source.commit -or
         $receipt.source_tag -ne $m.source.tag -or $receipt.version -ne $m.version -or

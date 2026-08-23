@@ -6,6 +6,18 @@ on:
         description: Exact canonical main commit (blank = current main)
         required: false
         type: string
+      version:
+        description: Exact intended package version, for example 0.1.0-beta.11
+        required: true
+        type: string
+      release_tag:
+        description: Intended immutable tag, for example v0.1.0-beta.11
+        required: false
+        type: string
+      candidate_kind:
+        required: true
+        type: choice
+        options: [release, snapshot]
 permissions:
   contents: write
 concurrency:
@@ -37,6 +49,8 @@ jobs:
             assert latest["status"]=="completed" and latest["conclusion"]=="success", f"non-green {name}"
           PY
           echo "SOURCE_COMMIT=$head" >> "$GITHUB_ENV"
+          epoch="$(gh api repos/kody-w/openrappter/commits/$head --jq '.commit.committer.date' | xargs -I{} date -d {} +%s)"
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
           echo "head=$head" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
@@ -47,23 +61,37 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: Build exact candidate bytes once
+        env:
+          CANDIDATE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CANDIDATE_KIND: ${{ inputs.candidate_kind }}
         run: |
           set -euo pipefail
+          ts_version="$(node -p 'require("./typescript/package.json").version')"
+          py_version="$(python -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml","rb"))["project"]["version"])')"
+          runtime_version="$(PYTHONPATH=python python -c 'from openrappter import __version__; print(__version__)')"
+          test "$ts_version" = "$CANDIDATE_VERSION"
+          test "$py_version" = "$CANDIDATE_VERSION"
+          test "$runtime_version" = "$CANDIDATE_VERSION"
+          if [ "$CANDIDATE_KIND" = release ]; then
+            test "$RELEASE_TAG" = "v$CANDIDATE_VERSION"
+          else
+            test -z "$RELEASE_TAG"
+          fi
           mkdir candidate
-          (cd typescript && npm ci && npm run build && npm pack --pack-destination ../candidate)
-          python -m pip install --disable-pip-version-check build
-          (cd python && python -m build --outdir ../candidate)
+          (cd typescript && npm ci && npm run build && node scripts/pack-locked.mjs --pack-destination ../candidate)
+          python -m pip install --disable-pip-version-check "build==1.5.1" "hatchling==1.31.0"
+          (cd python && python -m build --no-isolation --outdir ../candidate)
           cp install.sh install.ps1 candidate/
-          version="$(node -p 'require("./typescript/package.json").version')"
-          node --input-type=module - "$SOURCE_COMMIT" "$version" <<'NODE'
+          node --input-type=module - "$SOURCE_COMMIT" "$CANDIDATE_VERSION" "$RELEASE_TAG" "$CANDIDATE_KIND" "$SOURCE_DATE_EPOCH" <<'NODE'
           import fs from 'node:fs';
           import { buildProvenance, verifyProvenance } from './scripts/candidate-bundle.mjs';
-          const value=buildProvenance('candidate',process.argv[2],process.argv[3]);
+          const value=buildProvenance('candidate',process.argv[2],process.argv[3],process.argv[4]||null,process.argv[5],Number(process.argv[6]));
           verifyProvenance('candidate',value);
           fs.writeFileSync('candidate/provenance.json',JSON.stringify(value,null,2)+'\n');
           NODE
           (cd candidate && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort) > SHA256SUMS)
-          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -czf candidate.tar.gz -C candidate .
           bundle_sha="$(sha256sum candidate.tar.gz | cut -d' ' -f1)"
           echo "BUNDLE_SHA=$bundle_sha" >> "$GITHUB_ENV"
       - name: Commit immutable public candidate bundle

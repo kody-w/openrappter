@@ -181,10 +181,16 @@ export function validateRingManifest(
         `^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${value.source.commit}/${value.artifact.sha256}\\.tar\\.gz$`,
       ).test(String(value.artifact.url));
     if (!npm && !release && !candidate) throw new Error('published artifact is not bound to canonical package/version');
-  } else if (
-    value.artifact.url !== `https://github.com/kody-w/openrappter/archive/${value.source.commit}.tar.gz`
-    || value.artifact.install_url !== null
-  ) throw new Error('nonpublished artifact is not exact canonical source');
+  } else {
+    const archive = value.artifact.url === `https://github.com/kody-w/openrappter/archive/${value.source.commit}.tar.gz`;
+    const candidate = value.artifact.provenance === 'github-candidate-bundle-sha256'
+      && new RegExp(
+        `^https://raw\\.githubusercontent\\.com/kody-w/openrappter/[0-9a-f]{40}/candidates/${value.source.commit}/${value.artifact.sha256}\\.tar\\.gz$`,
+      ).test(String(value.artifact.url));
+    if ((!archive && !candidate) || value.artifact.install_url !== null) {
+      throw new Error('nonpublished artifact is not exact canonical source');
+    }
+  }
   return value as unknown as RingManifest;
 }
 
@@ -304,6 +310,7 @@ export async function fetchRingManifest(
   if (
     canonicalDigest(manifest) !== head.target_manifest_sha256
     || receipt.promotion_id !== head.promotion_id
+    || (receipt.sequence !== undefined && receipt.sequence !== head.sequence)
     || receipt.target_repository !== repository
     || receipt.target_ring !== ring
     || receipt.target_manifest_commit !== head.target_manifest_commit

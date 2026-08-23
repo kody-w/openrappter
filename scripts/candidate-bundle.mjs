@@ -6,7 +6,7 @@ export function sha256(file) {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-export function buildProvenance(root, sourceCommit, version) {
+export function buildProvenance(root, sourceCommit, version, releaseTag, candidateKind, sourceDateEpoch) {
   const files = fs.readdirSync(root)
     .filter(name => name !== 'provenance.json')
     .sort()
@@ -15,15 +15,18 @@ export function buildProvenance(root, sourceCommit, version) {
     schema: 'openrappter-candidate-provenance/v1',
     channel: 'candidate',
     stable: false,
+    candidate_kind: candidateKind,
+    release_tag: releaseTag,
     source_repository: 'kody-w/openrappter',
     source_commit: sourceCommit,
+    source_date_epoch: sourceDateEpoch,
     version,
     files,
   };
 }
 
 export function verifyProvenance(root, provenance) {
-  const expected = buildProvenance(root, provenance.source_commit, provenance.version);
+  const expected = buildProvenance(root, provenance.source_commit, provenance.version, provenance.release_tag, provenance.candidate_kind, provenance.source_date_epoch);
   if (JSON.stringify(expected) !== JSON.stringify(provenance)) {
     throw new Error('candidate provenance or inner bytes changed');
   }

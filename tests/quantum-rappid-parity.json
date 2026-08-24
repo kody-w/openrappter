@@ -1,0 +1,560 @@
+{
+  "$comment": [
+    "One organism, two runtimes, identical bytes.",
+    "",
+    "The MIDI-autocomplete provider is deterministic by construction: a SHA-256",
+    "counter stream instead of a language RNG, and integer scoring instead of",
+    "floats. That claim is only worth anything if both implementations are held",
+    "to the same numbers, so both suites read this file.",
+    "",
+    "Regenerate deliberately, never to make a red test green: a changed value",
+    "here means every organism's proposed song changed."
+  ],
+  "input": {
+    "tail": "quantum-rappid-parity-tail",
+    "rappid": "rappid:@openrappter/parity-organism:cb048a438d73bf247a4c8f5f9691c214e47fac814917c11d7763a56df226f556",
+    "traits": {
+      "autonomy": 0.88,
+      "continuity": 0.97,
+      "curiosity": 0.84,
+      "dimensionality": 0.92,
+      "evidence_bound": 0.98,
+      "local_first": 1,
+      "playfulness": 0.72,
+      "resilience": 0.94,
+      "warmth": 0.76
+    },
+    "engramCursor": "0002",
+    "candidateCount": 12,
+    "continuationLength": 48
+  },
+  "expect": {
+    "rappidHex": "cb048a438d73bf247a4c8f5f9691c214e47fac814917c11d7763a56df226f556",
+    "traitsMilli": {
+      "autonomy": 880,
+      "continuity": 970,
+      "curiosity": 840,
+      "dimensionality": 920,
+      "evidence_bound": 980,
+      "local_first": 1000,
+      "playfulness": 720,
+      "resilience": 940,
+      "warmth": 760
+    },
+    "musical": {
+      "rootPitch": 64,
+      "rootPitchClass": 4,
+      "mode": "major-pentatonic",
+      "scale": [
+        0,
+        2,
+        4,
+        7,
+        9
+      ],
+      "bpm": 108,
+      "program": 81
+    },
+    "prompt": [
+      {
+        "pitch": 76,
+        "delta_onset": 0,
+        "duration": 360,
+        "velocity": 85
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 87
+      },
+      {
+        "pitch": 85,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 92
+      },
+      {
+        "pitch": 78,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 93
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 82
+      },
+      {
+        "pitch": 85,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 86
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 72
+      },
+      {
+        "pitch": 78,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 75
+      },
+      {
+        "pitch": 78,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 92
+      },
+      {
+        "pitch": 95,
+        "delta_onset": 360,
+        "duration": 240,
+        "velocity": 83
+      },
+      {
+        "pitch": 85,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 90
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 78
+      },
+      {
+        "pitch": 78,
+        "delta_onset": 480,
+        "duration": 360,
+        "velocity": 86
+      },
+      {
+        "pitch": 97,
+        "delta_onset": 360,
+        "duration": 480,
+        "velocity": 79
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 75
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 103
+      }
+    ],
+    "promptMidi": {
+      "bytes": 203,
+      "sha256": "db8574d892fe5c9c83c5cb41ec6556ce253cf5906684433f5b8d009c26d531e4"
+    },
+    "continuationSeed": "72092f020a733e940a71d66688992f1280a1b0df02a5d4c8974feab1438e8c79",
+    "stream": {
+      "uint32": [
+        2498471825,
+        3996201352,
+        1824681901,
+        2694308592,
+        2089752594,
+        1956727362
+      ],
+      "below1000": [
+        349,
+        857,
+        104,
+        815,
+        846,
+        995
+      ],
+      "weightedIndex136": [
+        2,
+        2,
+        1,
+        0,
+        2,
+        1
+      ]
+    },
+    "canonical": {
+      "value": {
+        "b": [
+          1,
+          2.5,
+          null,
+          true
+        ],
+        "a": "café",
+        "n": 10
+      },
+      "text": "{\"a\":\"caf\\u00e9\",\"b\":[1,2.5,null,true],\"n\":10}",
+      "digest": "4c6610d3bf770f41d269a6fdad45d0e8ea1001fba21d1f82a65518f1818c5478"
+    },
+    "canonicalNumbers": {
+      "value": [
+        1.0,
+        0.0,
+        0.00001,
+        1e-7,
+        -0.0,
+        2.5
+      ],
+      "text": "[1,0,0.00001,1e-7,0,2.5]",
+      "digest": "97fa302fa89913eac67f6ac951dc6ad25371f92607c20f5766c045d2d79367f4",
+      "unsafeInteger": 10000000000000000
+    },
+    "selectedCandidate": 8,
+    "scoresMicro": {
+      "continuation": 917847,
+      "soundsGood": 624166,
+      "traitFit": 786949,
+      "pitchRange": 17,
+      "repeatedNoteRatio": 0,
+      "pitchClassDiversity": 333333
+    },
+    "continuation": [
+      {
+        "pitch": 80,
+        "delta_onset": 360,
+        "duration": 720,
+        "velocity": 90
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 120,
+        "duration": 240,
+        "velocity": 97
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 480,
+        "duration": 240,
+        "velocity": 92
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 93
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 360,
+        "duration": 360,
+        "velocity": 91
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 84
+      },
+      {
+        "pitch": 71,
+        "delta_onset": 360,
+        "duration": 240,
+        "velocity": 88
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 97
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 360,
+        "duration": 360,
+        "velocity": 94
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 89
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 480,
+        "velocity": 81
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 85
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 120,
+        "duration": 360,
+        "velocity": 97
+      },
+      {
+        "pitch": 68,
+        "delta_onset": 480,
+        "duration": 240,
+        "velocity": 89
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 360,
+        "duration": 720,
+        "velocity": 97
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 84
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 480,
+        "velocity": 97
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 360,
+        "duration": 720,
+        "velocity": 97
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 360,
+        "duration": 240,
+        "velocity": 94
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 360,
+        "duration": 360,
+        "velocity": 84
+      },
+      {
+        "pitch": 71,
+        "delta_onset": 360,
+        "duration": 240,
+        "velocity": 92
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 720,
+        "velocity": 82
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 360,
+        "velocity": 92
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 87
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 480,
+        "duration": 720,
+        "velocity": 103
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 93
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 87
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 360,
+        "duration": 240,
+        "velocity": 86
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 720,
+        "velocity": 88
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 94
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 480,
+        "velocity": 93
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 87
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 99
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 240,
+        "duration": 720,
+        "velocity": 90
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 240,
+        "duration": 480,
+        "velocity": 86
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 480,
+        "duration": 720,
+        "velocity": 95
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 81
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 480,
+        "velocity": 89
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 88
+      },
+      {
+        "pitch": 85,
+        "delta_onset": 240,
+        "duration": 240,
+        "velocity": 87
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 480,
+        "duration": 240,
+        "velocity": 98
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 360,
+        "duration": 480,
+        "velocity": 84
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 360,
+        "velocity": 88
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 240,
+        "duration": 360,
+        "velocity": 82
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 120,
+        "duration": 720,
+        "velocity": 90
+      },
+      {
+        "pitch": 83,
+        "delta_onset": 120,
+        "duration": 240,
+        "velocity": 87
+      },
+      {
+        "pitch": 80,
+        "delta_onset": 480,
+        "duration": 480,
+        "velocity": 81
+      },
+      {
+        "pitch": 76,
+        "delta_onset": 480,
+        "duration": 480,
+        "velocity": 94
+      }
+    ],
+    "continuationMidi": {
+      "bytes": 631,
+      "sha256": "fb590a7b620da93201e6f42911390791411573d1a38fb7c50e97c54ccb75d399"
+    },
+    "bodyFrame": {
+      "spec": "rapp/1",
+      "kind": "body.dimension",
+      "stream_id": "rappid:@openrappter/parity-organism:cb048a438d73bf247a4c8f5f9691c214e47fac814917c11d7763a56df226f556",
+      "seq": 0,
+      "utc": "2026-08-20T00:00:00.000Z",
+      "payload": {
+        "rappid": "rappid:@openrappter/parity-organism:cb048a438d73bf247a4c8f5f9691c214e47fac814917c11d7763a56df226f556",
+        "dimension": "sonic",
+        "version": 1,
+        "stage": {
+          "name": "baby",
+          "ordinal": 0
+        },
+        "traits": {
+          "autonomy": 880,
+          "continuity": 970,
+          "curiosity": 840,
+          "dimensionality": 920,
+          "evidence_bound": 980,
+          "local_first": 1000,
+          "playfulness": 720,
+          "resilience": 940,
+          "warmth": 760
+        },
+        "traits_hash": "abee9ae98840acfca787183fae1603d3f420cb665531f4df18560d595267425e",
+        "media": {
+          "autocomplete": {
+            "space": "rapp/1:egg",
+            "hash": "b7ea2a039640d597511b7d088c6861ecfab941150ac0a70b2ca44de4cdf6f4e8",
+            "media_type": "application/x-midi",
+            "bytes": 631
+          }
+        },
+        "sources": []
+      },
+      "payload_hash": "ad95647f40afad85b963cb9c1d7491d3e2e00e08c25d36187a805ac418965f7f",
+      "frame_hash": "cd1273e8bf534267e1780a273d215ba6e510e3a7d965495933d6637757b8236c",
+      "prev": null,
+      "prev_wave": null,
+      "sig": null
+    }
+  }
+}

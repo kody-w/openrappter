@@ -104,6 +104,26 @@ summary in a native dialog, compiles `*_agent.ts` to the factory-based
 
 ## Local narration and voice
 
+### Evidence-driven estate buddies
+
+The Chat **Create AI** panel accepts walkthrough video/audio and transcript
+documents. Electron processes raw files locally:
+
+- video/audio: bounded to 100 MB and 20 minutes, converted with `ffmpeg`, then
+  transcribed by the pinned local Whisper model
+- documents: bounded to 20 MB; TXT, Markdown, CSV, JSON, SRT, VTT, PDF, and
+  DOCX text are extracted locally
+
+Raw files never enter the gateway. Only the bounded extracted text and source
+metadata are sent to the configured Copilot backend to draft the buddy
+definition. Creation still goes through RAPP-Herdr's identity, health, and
+`READY` handshake. Desktop packages LGPL FFmpeg and FFprobe executables and can
+also discover Homebrew or standard-system installations; custom installations can set
+`OPENRAPPTER_FFMPEG_PATH` and `OPENRAPPTER_FFPROBE_PATH`.
+Sensitive values are masked before provider analysis. PDF and DOCX parsing runs
+in a killable, memory-limited child process, while startup and shutdown sweep
+or remove private evidence scratch directories.
+
 ### Whisper “tell”
 
 - model: `Xenova/whisper-small`

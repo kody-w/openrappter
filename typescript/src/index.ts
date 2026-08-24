@@ -29,6 +29,7 @@ import { registerDoctorCommand } from './cli/doctor.js';
 import { registerRappterCommand } from './cli/rappters.js';
 import { registerFlightRecorderCommand } from './cli/flight-recorder.js';
 import { registerShowAndTellCommand } from './cli/show-and-tell.js';
+import { registerCleverGirlCommand } from './cli/clever-girl.js';
 import { registerSkillsCommand } from './cli/skills.js';
 import { registerAgentsCommand } from './cli/agents.js';
 import { registerModelsCommand } from './cli/models.js';
@@ -540,6 +541,23 @@ async function startGatewayInProcess(opts?: {
       finishReason: 'stop' as const,
     };
   });
+
+  if (backend.provider) {
+    const { analyzeEstateBuddyEvidence } = await import(
+      './gateway/estate-buddy-analyzer.js'
+    );
+    const estateProvider = backend.kind === 'copilot-cli'
+      ? new (await import(
+        './providers/copilot-cli-direct.js'
+      )).CopilotCliDirectProvider({
+        model: backend.model,
+        exposeAgents: false,
+      })
+      : backend.provider;
+    server.setEstateBuddyAnalyzer(
+      (input) => analyzeEstateBuddyEvidence(estateProvider, input),
+    );
+  }
 
   const [
     { SurgeonService },
@@ -2589,6 +2607,7 @@ registerDoctorCommand(program);
 registerRappterCommand(program);
 registerFlightRecorderCommand(program);
 registerShowAndTellCommand(program);
+registerCleverGirlCommand(program);
 // Same silence as cron, five more times. `skills`, `agents`, `models` and
 // `update` were implemented, exported from `cli/index.ts`, and never
 // registered, so `openrappter skills list` was not a command — it was a chat

@@ -29,6 +29,7 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 #: Largest POST body the optional HTTP gateway will read, matching the limit
 #: the brainstem and the TypeScript gateway both use.
@@ -181,7 +182,11 @@ class Gateway:
 
 
 def serve(gateway: Gateway, port: int = 9999) -> None:
-    """Optional HTTP server. GET = status, POST = notify or JSON-RPC."""
+    """Optional loopback HTTP server.
+
+    GET status is cross-origin readable. POST notify/JSON-RPC requires JSON and
+    either a non-browser client or an exact loopback same-origin browser.
+    """
     from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
     class H(BaseHTTPRequestHandler):
@@ -195,6 +200,36 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(gateway.status(), indent=2).encode())
+
+        def _write_origin(self) -> str | None:
+            """Exact loopback same-origin browser authority, or no browser origin."""
+            origin = self.headers.get("Origin")
+            if origin is None:
+                return None
+            try:
+                parsed_origin = urlsplit(origin)
+                parsed_host = urlsplit(f"http://{self.headers.get('Host', '')}")
+                origin_host = (parsed_origin.hostname or "").lower()
+                request_host = (parsed_host.hostname or "").lower()
+                loopback_hosts = {"127.0.0.1", "::1", "localhost"}
+                origin_port = parsed_origin.port or 80
+                request_port = parsed_host.port or 80
+            except ValueError:
+                return None
+            if (
+                parsed_origin.scheme != "http"
+                or parsed_origin.username is not None
+                or parsed_origin.password is not None
+                or parsed_origin.path not in ("", "/")
+                or parsed_origin.query
+                or parsed_origin.fragment
+                or origin_host not in loopback_hosts
+                or request_host not in loopback_hosts
+                or origin_host != request_host
+                or origin_port != request_port
+            ):
+                return None
+            return origin
 
         def _content_length(self) -> int:
             """Declared body size, or -1 if the header cannot be trusted.
@@ -212,12 +247,21 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
                 return -1
             return length if length >= 0 else -1
 
-        def _refuse(self, status: int, message: str) -> None:
+        def _is_json_request(self) -> bool:
+            content_type = self.headers.get("Content-Type", "")
+            media_type = content_type.split(";", 1)[0].strip().lower()
+            return media_type == "application/json"
+
+        def _refuse(
+            self, status: int, message: str, allowed_origin: str | None = None
+        ) -> None:
             payload = json.dumps({"error": message}).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            if allowed_origin is not None:
+                self.send_header("Access-Control-Allow-Origin", allowed_origin)
+                self.send_header("Vary", "Origin")
             self.end_headers()
             self.wfile.write(payload)
 
@@ -236,9 +280,14 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
                 remaining -= len(chunk)
 
         def do_POST(self):
+            request_origin = self.headers.get("Origin")
+            allowed_origin = self._write_origin()
+            if request_origin is not None and allowed_origin is None:
+                self._refuse(403, "cross-origin agent invocation refused")
+                return
             length = self._content_length()
             if length < 0:
-                self._refuse(400, "invalid Content-Length")
+                self._refuse(400, "invalid Content-Length", allowed_origin)
                 return
             if length > MAX_BODY_BYTES:
                 # Only a body that is about to arrive anyway is worth draining,
@@ -248,15 +297,22 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
                 # about it just hands it the time instead of the memory.
                 if length <= MAX_BODY_BYTES * 8:
                     self._discard_body(length)
-                self._refuse(413, f"request body too large (limit {MAX_BODY_BYTES} bytes)")
+                self._refuse(
+                    413,
+                    f"request body too large (limit {MAX_BODY_BYTES} bytes)",
+                    allowed_origin,
+                )
+                return
+            if not self._is_json_request():
+                self._refuse(415, "Content-Type must be application/json", allowed_origin)
                 return
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
             except (json.JSONDecodeError, UnicodeDecodeError):
-                self._refuse(400, "invalid JSON body")
+                self._refuse(400, "invalid JSON body", allowed_origin)
                 return
             if not isinstance(body, dict):
-                self._refuse(400, "body must be a JSON object")
+                self._refuse(400, "body must be a JSON object", allowed_origin)
                 return
             if body.get("jsonrpc"):
                 result = gateway.handle_jsonrpc(body)
@@ -266,15 +322,31 @@ def serve(gateway: Gateway, port: int = 9999) -> None:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
-            self.send_header("Access-Control-Allow-Origin", "*")
+            if allowed_origin is not None:
+                self.send_header("Access-Control-Allow-Origin", allowed_origin)
+                self.send_header("Vary", "Origin")
             self.end_headers()
             self.wfile.write(payload)
 
         def do_OPTIONS(self):
+            requested_method = self.headers.get(
+                "Access-Control-Request-Method", ""
+            ).upper()
+            if requested_method == "POST":
+                allowed_origin = self._write_origin()
+                if allowed_origin is None:
+                    self._refuse(403, "cross-origin agent invocation refused")
+                    return
+                self.send_response(204)
+                self.send_header("Access-Control-Allow-Origin", allowed_origin)
+                self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Vary", "Origin")
+                self.end_headers()
+                return
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
             self.end_headers()
 
         def log_message(self, *a): pass

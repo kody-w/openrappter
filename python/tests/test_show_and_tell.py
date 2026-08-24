@@ -16,6 +16,7 @@ from openrappter.show_and_tell import (
     build_deterministic_analysis,
     is_private_context,
     safe_computer_action_data,
+    privacy_reduced_path,
     privacy_reduced_url,
     revise_analysis,
     run_collector,
@@ -682,6 +683,62 @@ def test_privacy_reduced_url_rejects_local_schemes_and_opaque_tokens():
     assert is_private_context("Google Chrome", "New Incognito Tab")
     assert is_private_context("Microsoft Edge", "InPrivate browsing")
     assert is_private_context("Safari", "Private Browsing")
+
+
+def test_privacy_reduced_path_publishes_the_choice_and_not_the_machine():
+    home = str(Path.home())
+
+    # Home is the same instruction on every machine, so it survives as `~`.
+    assert privacy_reduced_path(home) == "~"
+    assert privacy_reduced_path(f"{home}/Documents/receipts") == "~/Documents/receipts"
+    assert privacy_reduced_path("~/Documents/receipts") == "~/Documents/receipts"
+
+    # Anywhere else, only the last segment is kept: a reader needs to know it
+    # was "receipts", never whose account or which directory tree held it.
+    assert privacy_reduced_path("/Users/demo/Documents/receipts") == "<absolute>/receipts"
+    assert privacy_reduced_path("/Users/demo/Documents/receipts/") == "<absolute>/receipts"
+    assert privacy_reduced_path("C:\\Users\\demo\\Documents") == "<absolute>/Documents"
+    assert privacy_reduced_path("/") == "<absolute>/path"
+
+    # A relative path is dropped rather than guessed at: nothing here knows
+    # what it was relative to.
+    assert privacy_reduced_path("relative/path") == ""
+    assert privacy_reduced_path("") == ""
+    assert privacy_reduced_path("   ") == ""
+    assert privacy_reduced_path(None) == ""
+
+
+def test_privacy_reduced_path_never_leaks_the_account_name_it_was_given():
+    home = str(Path.home())
+    account = Path(home).name
+
+    for raw in (home, f"{home}/Documents/receipts", f"/Users/{account}/elsewhere"):
+        reduced = privacy_reduced_path(raw)
+        assert reduced, "a real absolute path must still produce an example"
+        assert account not in reduced
+
+
+def test_privacy_reduced_path_drops_a_path_it_cannot_publish_safely():
+    # Assembled at runtime on purpose: a token written out in full is still
+    # a token in the repository, whatever the file around it is for.
+    header = "eyJ" + "hbGciOiJIUzI1NiJ9"
+    token = ".".join(
+        [header, "eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0", "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"]
+    )
+
+    # The sanitizer runs first. When it redacts the whole path there is no
+    # example left to publish, and an empty string is the honest answer.
+    assert privacy_reduced_path(f"/var/folders/session/{token}") == ""
+
+
+def test_privacy_reduced_path_keeps_only_the_basename_of_an_absolute_path():
+    reduced = privacy_reduced_path("/private/var/folders/T/session-4821/receipts")
+
+    # Whatever the tree above it was, none of it is published: the basename
+    # is the only part that tells a reader what was chosen.
+    assert reduced == "<absolute>/receipts"
+    for segment in ("private", "var", "folders", "session-4821"):
+        assert segment not in reduced
 
 
 def test_deterministic_analysis_uses_semantic_events_not_frame_pixels():

@@ -23,15 +23,20 @@ interface TestChatElement extends HTMLElement {
   sessionKey: string | null;
   inputValue: string;
   sending: boolean;
+  error: string | null;
   selectedEstateBuddyId: string;
   estateCreateDevice: string;
   estateCreateName: string;
   estateCreateRole: string;
   estateCreateUi: 'auto' | 'chat' | 'rapplication';
   estateCreateStatus: string;
+  estateEvidenceFiles: File[];
+  estateEvidenceSteering: string;
   messages: Array<{ role: string; content: string }>;
   handleSend(): Promise<void>;
   handleCreateEstateBuddy(event: Event): Promise<void>;
+  loadEstateBuddies(): Promise<void>;
+  handleAnalyzeEstateEvidence(): Promise<void>;
   handleTargetChange(event: Event): void;
   restoreChatTarget(): void;
 }
@@ -88,6 +93,7 @@ describe('chat brain selector', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    delete window.openrappterDesktop;
   });
 
   it('talks to the local runtime unless told otherwise', () => {
@@ -251,6 +257,137 @@ describe('chat brain selector', () => {
     await chat.handleCreateEstateBuddy(new Event('submit'));
 
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('waits for an active roster load and refreshes again after creation', async () => {
+    const chat = makeChat();
+    chat.chatTarget = 'estate';
+    chat.estateCreateDevice = 'rappter-two';
+    chat.estateCreateName = 'Queued Creator';
+    chat.estateCreateRole = 'Build a workflow.';
+    let finishFirstLoad!: (value: unknown) => void;
+    const firstLoad = new Promise((resolve) => {
+      finishFirstLoad = resolve;
+    });
+    let listCalls = 0;
+    const request = vi.spyOn(gateway, 'request').mockImplementation(
+      async (method: string) => {
+        if (method === 'estate.buddies.list' && ++listCalls === 1) {
+          return firstLoad as never;
+        }
+        if (method === 'estate.buddies.create') {
+          return {
+            ok: true,
+            device: 'rappter-two',
+            presence: 'online',
+            created: {
+              name: 'Queued Creator',
+              rappid: 'rappid:@test/queued:' + 'c'.repeat(64),
+              ui: 'chat',
+            },
+            handshake: { ready: true, response: 'READY' },
+          } as never;
+        }
+        return {
+          ok: true,
+          estate: 'Test Estate',
+          devices: ['rappter-two'],
+          buddies: [{
+            id: 'queued',
+            name: 'Queued Creator',
+            device: 'rappter-two',
+            rappid: 'rappid:@test/queued:' + 'c'.repeat(64),
+            presence: 'online',
+            status: 'ready',
+            transport: 'ssh-posix',
+            via_probe: false,
+          }],
+        } as never;
+      },
+    );
+
+    const loading = chat.loadEstateBuddies();
+    const creating = chat.handleCreateEstateBuddy(new Event('submit'));
+    await Promise.resolve();
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      'estate.buddies.list',
+    ]);
+
+    finishFirstLoad({
+      ok: true,
+      estate: 'Test Estate',
+      devices: ['rappter-two'],
+      buddies: [],
+    });
+    await loading;
+    await creating;
+
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      'estate.buddies.list',
+      'estate.buddies.create',
+      'estate.buddies.list',
+    ]);
+    expect(chat.selectedEstateBuddyId).toBe('queued');
+  });
+
+  it('drafts the buddy name and role from locally extracted evidence', async () => {
+    const chat = makeChat();
+    chat.estateEvidenceFiles = [
+      new File(['video-bytes'], 'invoice-walkthrough.mp4', {
+        type: 'video/mp4',
+      }),
+    ];
+    chat.estateEvidenceSteering = 'Keep final submission human-approved.';
+    Object.defineProperty(window, 'openrappterDesktop', {
+      configurable: true,
+      value: {
+        buddyEvidence: vi.fn().mockResolvedValue({
+          schema: 'openrappter-buddy-evidence/1.0',
+          filename: 'invoice-walkthrough.mp4',
+          mimeType: 'video/mp4',
+          kind: 'video',
+          text: '[0s-5s] Open the invoice. [5s-10s] Verify and ask approval.',
+          summary: 'Locally transcribed video walkthrough.',
+          truncated: false,
+        }),
+      },
+    });
+    const request = vi.spyOn(gateway, 'request').mockResolvedValue({
+      ok: true,
+      schema: 'openrappter-estate-buddy-draft/1.0',
+      name: 'Invoice Guide',
+      role: 'Follow the demonstrated invoice steps and require approval.',
+      ui: 'rapplication',
+      evidenceSummary: 'An invoice workflow with an approval gate.',
+      confidence: 'high',
+      sourceFiles: [{
+        filename: 'invoice-walkthrough.mp4',
+        mimeType: 'video/mp4',
+        kind: 'video',
+      }],
+    } as never);
+
+    await chat.handleAnalyzeEstateEvidence();
+
+    expect(request).toHaveBeenCalledWith(
+      'estate.buddies.analyze',
+      expect.objectContaining({
+        evidenceText: expect.stringContaining('Open the invoice'),
+        steering: 'Keep final submission human-approved.',
+      }),
+      { timeoutMs: 10 * 60_000 },
+    );
+    expect(chat.estateCreateName).toBe('Invoice Guide');
+    expect(chat.estateCreateRole).toContain('require approval');
+    expect(chat.estateCreateUi).toBe('rapplication');
+    expect(chat.estateCreateStatus).toContain('high confidence');
+
+    request.mockClear();
+    chat.estateCreateDevice = 'local-mac';
+    chat.estateEvidenceSteering = 'Changed after analysis.';
+    await chat.handleCreateEstateBuddy(new Event('submit'));
+    expect(request).not.toHaveBeenCalled();
+    expect(chat.error).toContain('Analyze the current evidence');
   });
 
   it('remembers the choice across a reload', () => {

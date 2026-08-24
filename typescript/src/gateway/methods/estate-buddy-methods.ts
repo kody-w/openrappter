@@ -3,6 +3,10 @@ import {
   type EstateBuddyChatInput,
   type EstateBuddyCreateInput,
 } from "../estate-buddy-client.js";
+import type {
+  EstateBuddyEvidenceDraft,
+  EstateBuddyEvidenceInput,
+} from "../estate-buddy-evidence-types.js";
 
 interface MethodRegistrar {
   registerMethod<P = unknown, R = unknown>(
@@ -14,6 +18,9 @@ interface MethodRegistrar {
 
 interface EstateBuddyMethodsOptions {
   client?: EstateBuddyClient;
+  analyzer?: (
+    input: EstateBuddyEvidenceInput,
+  ) => Promise<EstateBuddyEvidenceDraft>;
 }
 
 export function registerEstateBuddyMethods(
@@ -21,6 +28,7 @@ export function registerEstateBuddyMethods(
   options: EstateBuddyMethodsOptions = {},
 ): void {
   const client = options.client ?? new EstateBuddyClient();
+  const analyzer = options.analyzer;
 
   server.registerMethod("estate.buddies.list", async () => client.list(), {
     requiresAuth: true,
@@ -37,4 +45,14 @@ export function registerEstateBuddyMethods(
   >("estate.buddies.create", async (params) => client.create(params), {
     requiresAuth: true,
   });
+  server.registerMethod<EstateBuddyEvidenceInput, EstateBuddyEvidenceDraft>(
+    "estate.buddies.analyze",
+    async (params) => {
+      if (!analyzer) {
+        throw new Error("Estate buddy evidence analysis is not configured");
+      }
+      return analyzer(params);
+    },
+    { requiresAuth: true },
+  );
 }

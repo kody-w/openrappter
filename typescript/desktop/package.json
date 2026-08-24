@@ -8,6 +8,8 @@
   "main": "dist/main.js",
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
+    "mammoth": "1.12.1",
+    "pdf-parse": "2.4.5",
     "typescript": "^5.4.0"
   },
   "overrides": {

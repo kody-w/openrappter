@@ -296,6 +296,14 @@ after its identity, health, and chat handshake succeeds. The gateway reads
 `~/.config/rapp-herdr/estate.json` and `~/.local/bin/rapp-herdr` by default;
 override those paths with `RAPP_HERDR_ESTATE` and `RAPP_HERDR_BIN`.
 
+**Create AI** can derive the Twin from evidence instead of a manually written
+role. Attach up to three walkthrough videos, audio recordings, PDFs, DOCX files,
+or text transcripts. OpenRappter Desktop extracts documents and transcribes
+media locally with its pinned Whisper model, then sends only the bounded
+extracted text to the configured Copilot backend for a reviewable name, role,
+interface, evidence summary, and confidence. The operator can edit that draft
+before RAPP-Herdr creates and verifies the Twin.
+
 ```bash
 # Install and go
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash

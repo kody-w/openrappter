@@ -541,6 +541,16 @@ async function startGatewayInProcess(opts?: {
     };
   });
 
+  if (backend.provider) {
+    const { analyzeEstateBuddyEvidence } = await import(
+      './gateway/estate-buddy-analyzer.js'
+    );
+    const estateProvider = backend.provider;
+    server.setEstateBuddyAnalyzer(
+      (input) => analyzeEstateBuddyEvidence(estateProvider, input),
+    );
+  }
+
   const [
     { SurgeonService },
     { buildPatientSnapshot },

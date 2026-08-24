@@ -46,6 +46,23 @@ export interface EstateBuddyCreation {
   };
 }
 
+export interface EstateBuddyEvidenceSource {
+  filename: string;
+  mimeType: string;
+  kind: "video" | "audio" | "document";
+}
+
+export interface EstateBuddyDraft {
+  ok: true;
+  schema: "openrappter-estate-buddy-draft/1.0";
+  name: string;
+  role: string;
+  ui: "auto" | "chat" | "rapplication";
+  evidenceSummary: string;
+  confidence: "high" | "medium" | "low";
+  sourceFiles: EstateBuddyEvidenceSource[];
+}
+
 export async function listEstateBuddies(): Promise<EstateBuddyList> {
   return gateway.request<EstateBuddyList>(
     "estate.buddies.list",
@@ -71,6 +88,16 @@ export async function createEstateBuddy(input: {
   ui: "auto" | "chat" | "rapplication";
 }): Promise<EstateBuddyCreation> {
   return gateway.request<EstateBuddyCreation>("estate.buddies.create", input, {
+    timeoutMs: ESTATE_OPERATION_TIMEOUT_MS,
+  });
+}
+
+export async function analyzeEstateBuddyEvidence(input: {
+  evidenceText: string;
+  sourceFiles: EstateBuddyEvidenceSource[];
+  steering?: string;
+}): Promise<EstateBuddyDraft> {
+  return gateway.request<EstateBuddyDraft>("estate.buddies.analyze", input, {
     timeoutMs: ESTATE_OPERATION_TIMEOUT_MS,
   });
 }

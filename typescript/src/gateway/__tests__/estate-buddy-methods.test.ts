@@ -7,7 +7,7 @@ import type { EstateBuddyClient } from "../estate-buddy-client.js";
 import { GatewayServer } from "../server.js";
 
 describe("estate buddy gateway methods", () => {
-  it("registers authenticated list, chat, and create methods", async () => {
+  it("registers authenticated list, chat, create, and analyze methods", async () => {
     const registered = new Map<
       string,
       {
@@ -35,13 +35,24 @@ describe("estate buddy gateway methods", () => {
       chat: vi.fn().mockResolvedValue({ ok: true, response: "READY" }),
       create: vi.fn().mockResolvedValue({ ok: true, presence: "online" }),
     } as unknown as EstateBuddyClient;
+    const analyzer = vi.fn().mockResolvedValue({
+      ok: true,
+      schema: "openrappter-estate-buddy-draft/1.0",
+      name: "Map Maker",
+      role: "Build a map from the demonstrated workflow.",
+      ui: "rapplication",
+      evidenceSummary: "A map workflow.",
+      confidence: "high",
+      sourceFiles: [],
+    });
 
-    registerEstateBuddyMethods(server, { client });
+    registerEstateBuddyMethods(server, { client, analyzer });
 
     expect([...registered.keys()]).toEqual([
       "estate.buddies.list",
       "estate.buddies.chat",
       "estate.buddies.create",
+      "estate.buddies.analyze",
     ]);
     expect([...registered.values()].every((entry) => entry.requiresAuth)).toBe(
       true,
@@ -54,9 +65,20 @@ describe("estate buddy gateway methods", () => {
       buddyId: "barry",
       message: "hello",
     });
+    await registered.get("estate.buddies.analyze")!.handler({
+      evidenceText: "A sufficiently long transcript of the workflow.",
+      sourceFiles: [
+        {
+          filename: "workflow.txt",
+          mimeType: "text/plain",
+          kind: "document",
+        },
+      ],
+    });
+    expect(analyzer).toHaveBeenCalledOnce();
   });
 
-  it("registers all three methods on the production GatewayServer path", async () => {
+  it("registers all four methods on the production GatewayServer path", async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "estate-gateway-"));
     const server = new GatewayServer({ port: 0, dataDir });
     try {
@@ -70,6 +92,7 @@ describe("estate buddy gateway methods", () => {
         "estate.buddies.list",
         "estate.buddies.chat",
         "estate.buddies.create",
+        "estate.buddies.analyze",
       ]) {
         expect(methods.get(name)?.requiresAuth).toBe(true);
       }

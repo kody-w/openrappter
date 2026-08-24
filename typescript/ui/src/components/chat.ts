@@ -12,6 +12,7 @@ import { renderMarkdown } from '../services/markdown.js';
 import { createLocalSpeech, spokenLineFrom } from '../../../src/voice/local-speech.js';
 import { desktopBridge } from '../services/desktop.js';
 import type { ChatSessionSummary, Attachment } from '../types.js';
+import { askBrainstem, probeBrainstemTransport } from '../services/patient.js';
 import {
   analyzeEstateBuddyEvidence,
   chatWithEstateBuddy,
@@ -1086,7 +1087,7 @@ export class OpenRappterChat extends LitElement {
    * so both replies render through this one component instead of needing a
    * second chat window open beside it.
    */
-  @state() private chatTarget: 'openrappter' | 'brainstem' | 'estate' = 'openrappter';
+  @state() private chatTarget: 'brainstem' | 'estate' = 'brainstem';
   @state() private estateBuddies: EstateBuddy[] = [];
   @state() private estateDeviceIds: string[] = [];
   @state() private estateLoading = false;
@@ -1713,6 +1714,13 @@ export class OpenRappterChat extends LitElement {
       await this.sendEstateBuddyMessage(content, sendGeneration);
       return;
     }
+    if (this.attachments.length > 0) {
+      this.error = 'Brainstem POST /chat currently accepts text only.';
+      this.sending = false;
+      return;
+    }
+    await this.sendBrainstemMessage(content, sendGeneration);
+    return;
 
     try {
       const sessionKey = this.sessionKey ?? `session_${Date.now()}`;
@@ -1728,6 +1736,7 @@ export class OpenRappterChat extends LitElement {
           filename: a.filename,
         });
       }
+
       if (
         sendGeneration !== this.sendGeneration ||
         this.sessionKey !== visibleSessionKey
@@ -1784,6 +1793,42 @@ export class OpenRappterChat extends LitElement {
       if (sendGeneration !== this.sendGeneration) return;
       this.error = (err as Error).message;
       this.sending = false;
+    }
+  }
+
+  private async sendBrainstemMessage(
+    content: string,
+    sendGeneration: number,
+  ): Promise<void> {
+    try {
+      const readiness = await probeBrainstemTransport();
+      if (readiness.status !== 'ready') throw new Error(readiness.message);
+      const result = await askBrainstem(content, this.sessionKey ?? undefined);
+      if (sendGeneration !== this.sendGeneration) return;
+      this.sessionKey = result.session_id || this.sessionKey;
+      this.attachments = [];
+      this.messages = [
+        ...this.messages,
+        {
+          id: `brainstem_${Date.now()}`,
+          role: 'assistant',
+          content: result.response,
+          timestamp: Date.now(),
+          streaming: false,
+          commitState: 'committed',
+        },
+      ];
+      this.scrollToBottom();
+    } catch (err) {
+      if (sendGeneration !== this.sendGeneration) return;
+      this.error = (err as Error).message;
+    } finally {
+      if (sendGeneration === this.sendGeneration) {
+        this.sending = false;
+        if (this.messageQueue.length > 0) {
+          setTimeout(() => this.flushQueue(), 100);
+        }
+      }
     }
   }
 
@@ -2087,8 +2132,7 @@ export class OpenRappterChat extends LitElement {
     if (this.sending || this.creatingEstateBuddy || this.estateAnalyzing) return;
     const value = (e.target as HTMLSelectElement).value;
     if (
-      value !== 'openrappter'
-      && value !== 'brainstem'
+      value !== 'brainstem'
       && value !== 'estate'
     ) return;
     this.chatTarget = value;
@@ -2104,10 +2148,10 @@ export class OpenRappterChat extends LitElement {
     try {
       const stored = localStorage.getItem(CHAT_TARGET_STORAGE_KEY);
       if (
-        stored === 'openrappter'
-        || stored === 'brainstem'
+        stored === 'brainstem'
         || stored === 'estate'
       ) this.chatTarget = stored;
+      else if (stored === 'openrappter') this.chatTarget = 'brainstem';
     } catch {
       // Unreadable storage just means the default.
     }
@@ -2940,30 +2984,16 @@ export class OpenRappterChat extends LitElement {
                   || this.creatingEstateBuddy
                   || this.estateAnalyzing}
               >
-                <option value="openrappter">🦖 OpenRappter</option>
                 <option value="brainstem">🧠 Brainstem</option>
                 <option value="estate">💬 RAPP Estate</option>
               </select>
-              ${this.chatTarget !== 'estate'
-                ? html`<button
-                    class="attach-btn"
-                    @click=${this.handleAttachClick}
-                    title="Attach files"
-                  >📎</button>`
-                : nothing}
-              <input
-                class="hidden-input"
-                type="file"
-                multiple
-                @change=${this.handleFileSelect}
-              />
               <textarea
                 class="${this.draggingOver ? 'drag-over' : ''}"
                 placeholder=${this.sending
                   ? 'Type to queue a message...'
                   : this.chatTarget === 'estate'
                     ? 'Message this estate Twin (↩ to send)'
-                    : 'Message (↩ to send, Shift+↩ for line breaks, paste images)'}
+                    : 'Message Brainstem over POST /chat (↩ to send)'}
                 .value=${this.inputValue}
                 @input=${this.handleInput}
                 @keydown=${this.handleKeyDown}

@@ -1266,16 +1266,14 @@ export class OpenRappterSurgeon extends LitElement {
 
   private async hydrate(): Promise<void> {
     try {
-      const [patient, cases, copilotAuth, patientTransport] = await Promise.all([
+      const [patient, cases, copilotAuth] = await Promise.all([
         loadPatient(),
         loadCases(),
         loadCopilotAuthState(),
-        probePatientTransport(),
       ]);
       this.patient = patient;
       this.patientCase = cases[0] ?? null;
       this.copilotAuth = copilotAuth;
-      this.patientTransport = patientTransport;
       this.error = null;
     } catch (error) {
       this.error = (error as Error).message;
@@ -1963,12 +1961,16 @@ export class OpenRappterSurgeon extends LitElement {
               class="quiet-button"
               @click=${() => this.navigate('presence')}
             >⌁ Open anatomy</button>
+            <button
+              class="quiet-button"
+              @click=${() => this.navigate('chat')}
+            >🧠 Open Brainstem Chat</button>
           </div>
         </header>
 
         <main class="operating-room">
           <section class="patient-wing">
-            <span class="eyebrow">Living local system</span>
+            <span class="eyebrow">Legacy patient interface · status only</span>
             <h1>OpenRappter is the patient.</h1>
             <p class="premise">
               <strong>Copilot is the surgeon.</strong>
@@ -1988,40 +1990,6 @@ export class OpenRappterSurgeon extends LitElement {
                   ? 'agent chat through the configured AI backend · POST /chat'
                   : 'Brain surgeon · adaptive agent mode'}</span>
               </div>
-              <div
-                class="toolbar mode-switcher"
-                role="radiogroup"
-                aria-label="Conversation mode"
-                aria-describedby="copilot-mode-status"
-                @keydown=${this.onModeKeydown}
-              >
-                <button
-                  class="tbtn"
-                  role="radio"
-                  data-mode="surgeon"
-                  data-state=${this.modeState('surgeon')}
-                  aria-checked=${this.mode === 'surgeon'}
-                  aria-describedby="copilot-mode-status"
-                  tabindex=${this.actionsReady() && this.mode === 'surgeon' ? 0 : -1}
-                  ?disabled=${this.busy || !this.actionsReady()}
-                  title=${this.modeUnavailableReason('surgeon')
-                    || 'Talk to the Copilot surgeon'}
-                  @click=${() => this.selectMode('surgeon')}
-                ><span class="mode-icon" aria-hidden="true">⌘</span>Surgeon</button>
-                <button
-                  class="tbtn"
-                  role="radio"
-                  data-mode="patient"
-                  data-state=${this.modeState('patient')}
-                  aria-checked=${this.mode === 'patient'}
-                  aria-describedby="copilot-mode-status"
-                  tabindex=${this.patientModeReady() && this.mode === 'patient' ? 0 : -1}
-                  ?disabled=${this.busy || !this.patientModeReady()}
-                  title=${this.modeUnavailableReason('patient')
-                    || 'Talk to the configured agent backend'}
-                  @click=${() => this.selectMode('patient')}
-                ><span class="mode-icon" aria-hidden="true">🦖</span>Patient</button>
-              </div>
               <span
                 class="case-status mode-status"
                 id="copilot-mode-status"
@@ -2034,7 +2002,6 @@ export class OpenRappterSurgeon extends LitElement {
 
             <div class="transcript">
               ${this.renderCopilotAuth()}
-              ${this.renderPatientTransport()}
               ${this.error ? html`
                 <div class="error-banner">
                   ${this.error}

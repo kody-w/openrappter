@@ -142,17 +142,17 @@ describe('OpenRappter surgeon resilience', () => {
       expect(surgeon).toContain('color: GrayText');
     });
 
-    it('uses one described radio group and a visible observing status', () => {
+    it('removes Patient direct chat and links to canonical Brainstem chat', () => {
       const surgeon = read('components/surgeon.ts');
+      const chat = read('components/chat.ts');
 
-      expect(surgeon).toContain('role="radiogroup"');
-      expect(surgeon).toContain('role="radio"');
-      expect(surgeon).toContain('aria-checked');
-      expect(surgeon).toContain('aria-describedby="copilot-mode-status"');
-      expect(surgeon).toContain('Observing: ${selected}');
-      expect(surgeon).toContain("event.key === 'ArrowRight'");
-      expect(surgeon).toContain("event.key === 'Enter'");
-      expect(surgeon).toContain("event.key === ' '");
+      expect(surgeon).not.toContain('data-mode="patient"');
+      expect(surgeon).toContain('Legacy patient interface · status only');
+      expect(surgeon).toContain('Open Brainstem Chat');
+      expect(surgeon).toContain("this.navigate('chat')");
+      expect(chat).toContain("chatTarget: 'brainstem' | 'estate' = 'brainstem'");
+      expect(chat).toContain('askBrainstem(content');
+      expect(chat).not.toContain('<option value="openrappter">');
     });
   });
 

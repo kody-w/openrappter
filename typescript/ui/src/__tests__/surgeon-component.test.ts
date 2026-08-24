@@ -186,146 +186,25 @@ describe('openrappter-surgeon', () => {
     expect(element.shadowRoot?.textContent).toContain('Inspect memory');
   });
 
-  it('uses readable radio semantics with roving keyboard mode selection', async () => {
+  it('ships no separate Patient direct-chat mode and links to Brainstem chat', async () => {
     const element = document.createElement('openrappter-surgeon') as SurgeonElement;
+    const navigate = vi.fn();
+    element.addEventListener('navigate', navigate);
     document.body.append(element);
     await settle(element);
-    const surgeon = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '[data-mode="surgeon"]',
-    )!;
-    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '[data-mode="patient"]',
-    )!;
-    const group = element.shadowRoot?.querySelector('.mode-switcher');
 
-    expect(group?.getAttribute('role')).toBe('radiogroup');
-    expect(surgeon.getAttribute('role')).toBe('radio');
-    expect(surgeon.getAttribute('aria-checked')).toBe('true');
-    expect(surgeon.dataset.state).toBe('selected');
-    expect(surgeon.tabIndex).toBe(0);
-    expect(patientMode.dataset.state).toBe('unselected');
-    expect(patientMode.tabIndex).toBe(-1);
-
-    surgeon.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'ArrowRight',
-      bubbles: true,
-    }));
-    await settle(element);
-    expect(patientMode.getAttribute('aria-checked')).toBe('true');
-    expect(patientMode.dataset.state).toBe('selected');
-    expect(element.shadowRoot?.activeElement).toBe(patientMode);
-    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
-      .toContain('Observing: Patient mode');
-
-    surgeon.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Enter',
-      bubbles: true,
-    }));
-    await settle(element);
-    expect(surgeon.getAttribute('aria-checked')).toBe('true');
-    expect(element.shadowRoot?.activeElement).toBe(surgeon);
-  });
-
-  it('does not claim Patient READY when the exact public chat probe is unreachable', async () => {
-    mocks.probePatientTransport
-      .mockResolvedValueOnce({
-        status: 'offline',
-        message: 'The public patient chat endpoint is offline or unreachable.',
-        retryable: true,
-      })
-      .mockResolvedValueOnce({
-        status: 'ready',
-        message: 'Public patient chat is ready.',
-        retryable: false,
-      });
-    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
-    document.body.append(element);
-    await settle(element);
-    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '[data-mode="patient"]',
-    )!;
-
-    expect(patientMode.disabled).toBe(true);
-    expect(patientMode.dataset.state).toBe('transport-unavailable');
-    expect(patientMode.title).toContain('offline or unreachable');
-    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
-      .not.toContain('Patient mode — public chat ready');
-    expect(element.shadowRoot?.textContent).toContain('Patient chat unavailable');
-    expect(mocks.askPatient).not.toHaveBeenCalled();
-
-    const retry = Array.from(
-      element.shadowRoot?.querySelectorAll<HTMLButtonElement>(
-        '.patient-transport-banner button',
-      ) ?? [],
-    ).find((button) => button.textContent?.includes('Retry public chat'));
-    retry!.click();
-    await settle(element);
-    expect(patientMode.disabled).toBe(false);
-  });
-
-  it('persists no patient turn when the public chat request fails', async () => {
-    mocks.askPatient.mockRejectedValueOnce(new Error(
-      'The public patient chat endpoint is offline or unreachable.',
-    ));
-    mocks.getPatientTransportState.mockReturnValue({
-      status: 'offline',
-      message: 'The public patient chat endpoint is offline or unreachable.',
-      retryable: true,
-    });
-    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
-    document.body.append(element);
-    await settle(element);
-    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '[data-mode="patient"]',
-    )!;
-    patientMode.click();
-    await settle(element);
-    const portal = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '.starter-portals .portal',
-    )!;
-    portal.click();
-    await settle(element);
-
-    expect(mocks.askPatient).toHaveBeenCalledOnce();
-    expect(element.shadowRoot?.textContent).not.toContain('must not reach');
-    expect(element.shadowRoot?.querySelectorAll('.turn')).toHaveLength(0);
+    expect(element.shadowRoot?.querySelector('[data-mode="patient"]')).toBeNull();
     expect(element.shadowRoot?.textContent).toContain(
-      'The public patient chat endpoint is offline or unreachable.',
+      'Legacy patient interface · status only',
     );
-  });
-
-  it('regression: health-ready Patient mode downgrades immediately after chat fetch failure', async () => {
-    mocks.askPatient.mockRejectedValueOnce(new Error(
-      'The public patient chat endpoint is offline or unreachable.',
-    ));
-    mocks.getPatientTransportState.mockReturnValue({
-      status: 'offline',
-      message: 'The public patient chat endpoint is offline or unreachable.',
-      retryable: true,
+    const brainstem = Array.from(
+      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.top-actions button') ?? [],
+    ).find((button) => button.textContent?.includes('Open Brainstem Chat'));
+    brainstem!.click();
+    expect((navigate.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      view: 'chat',
     });
-    const element = document.createElement('openrappter-surgeon') as SurgeonElement;
-    document.body.append(element);
-    await settle(element);
-    const patientMode = element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '[data-mode="patient"]',
-    )!;
-    patientMode.click();
-    await settle(element);
-    element.shadowRoot?.querySelector<HTMLButtonElement>(
-      '.starter-portals .portal',
-    )!.click();
-    await settle(element);
-
-    expect(patientMode.disabled).toBe(true);
-    expect(patientMode.dataset.state).toBe('transport-unavailable');
-    expect(element.shadowRoot?.querySelector('.mode-status')?.textContent)
-      .not.toContain('public chat ready');
-    expect(element.shadowRoot?.querySelectorAll('.turn')).toHaveLength(0);
-
-    await (element as unknown as {
-      askThePatient(value: string): Promise<void>;
-    }).askThePatient('adjacent retry bypass');
-    expect(mocks.askPatient).toHaveBeenCalledOnce();
+    expect(mocks.askPatient).not.toHaveBeenCalled();
   });
 
   it('turns the production HTTP 401 into inline reauthentication without a fake answer', async () => {
@@ -411,15 +290,6 @@ describe('openrappter-surgeon', () => {
       view: 'presence',
     });
 
-    const patientMode = Array.from(
-      element.shadowRoot?.querySelectorAll<HTMLButtonElement>('.tbtn') ?? [],
-    ).find(button => button.textContent?.includes('Patient'));
-    expect(patientMode?.disabled).toBe(true);
-    patientMode!.click();
-    await settle(element);
-    await (element as unknown as {
-      askThePatient(value: string): Promise<void>;
-    }).askThePatient('must not reach the stale provider');
     expect(element.shadowRoot?.querySelector<HTMLTextAreaElement>('textarea')?.disabled)
       .toBe(true);
     expect(mocks.askPatient).not.toHaveBeenCalled();

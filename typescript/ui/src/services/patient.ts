@@ -85,6 +85,7 @@ export function askPatient(
     if (readiness.status !== 'ready') {
       throw new Error(readiness.message);
     }
+
     activeController = new AbortController();
     const result = await executeTransport({
       action: 'send',
@@ -119,6 +120,12 @@ export function askPatient(
   });
   return activeTurn;
 }
+
+/** Canonical Grail/Brainstem names. Patient aliases remain for Legacy UI only. */
+export const probeBrainstemTransport = probePatientTransport;
+export const getBrainstemTransportState = getPatientTransportState;
+export const cancelBrainstemRequest = cancelPatientRequest;
+export const askBrainstem = askPatient;
 
 async function executeTransport(
   request:
